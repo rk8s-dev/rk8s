@@ -46,6 +46,8 @@ chown -R $USER_UID:$USER_GID /home/$USERNAME/.oh-my-zsh /home/$USERNAME/.zshrc
 ## Install Buck2
 wget https://github.com/facebook/buck2/releases/download/2025-02-01/buck2-x86_64-unknown-linux-musl.zst /home/$USERNAME/buck2-x86_64-unknown-linux-musl.zst
 zstd -d /home/$USERNAME/buck2-x86_64-unknown-linux-musl.zst
-mv /home/$USERNAME/buck2-x86_64-unknown-linux-musl /home/$USERNAME/buck2
-chomod +x /home/$USERNAME/buck2
-mv /home/$USERNAME/buck2 /usr/local/bin
+mkdir -p /home/$USERNAME/.buck/bin
+mv /home/$USERNAME/buck2-x86_64-unknown-linux-musl /home/$USERNAME/.buck/bin/buck2
+chmod +x /home/$USERNAME/.buck/bin/buck2
+chown -R $USER_UID:$USER_GID /home/$USERNAME/.buck
+export PATH="/home/$USERNAME/.buck2/bin:$PATH"
