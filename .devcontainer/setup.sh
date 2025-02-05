@@ -7,23 +7,16 @@ apt-get install -y \
   jq \
   sudo \
   zsh \
-  vim \
   build-essential \
   openssl \
   libssl-dev \
   fuse3 \
   libfuse3-dev \
   pkg-config \
-  postgresql \
   cmake \
   clang \
-  nodejs \
-  npm \
   wget \
   file \
-  libgtk-3-dev \
-  libayatana-appindicator3-dev \
-  librsvg2-dev \
   ca-certificates \
   zstd
 
@@ -39,7 +32,8 @@ cargo install cargo-edit
 ## Install Buck2
 wget https://github.com/facebook/buck2/releases/download/2025-02-01/buck2-x86_64-unknown-linux-musl.zst
 pwd
-zstd -d buck2-x86_64-unknown-linux-musl.zst
-mv /root/buck2-x86_64-unknown-linux-musl buck2
-chmod +x buck2
-mv buck2 /usr/local/bin/buck2
+ls
+zstd -d /home/buck2-x86_64-unknown-linux-musl.zst
+mv /home/buck2-x86_64-unknown-linux-musl /home/buck2
+chmod +x /home/buck2
+mv /home/buck2 /usr/local/bin/buck2
