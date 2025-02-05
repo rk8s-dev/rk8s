@@ -37,8 +37,9 @@ cargo install cargo-expand
 cargo install cargo-edit
 
 ## Install Buck2
-wget https://github.com/facebook/buck2/releases/download/2025-02-01/buck2-x86_64-unknown-linux-musl.zst /root/buck2-x86_64-unknown-linux-musl.zst
-zstd -d /root/buck2-x86_64-unknown-linux-musl.zst
-mv /root/buck2-x86_64-unknown-linux-musl /root/buck2
-chmod +x /root/buck2
-mv /root/buck2 /usr/local/bin/buck2
+wget https://github.com/facebook/buck2/releases/download/2025-02-01/buck2-x86_64-unknown-linux-musl.zst
+pwd
+zstd -d buck2-x86_64-unknown-linux-musl.zst
+mv /root/buck2-x86_64-unknown-linux-musl buck2
+chmod +x buck2
+mv buck2 /usr/local/bin/buck2
