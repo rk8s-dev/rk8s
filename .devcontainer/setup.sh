@@ -24,7 +24,8 @@ apt-get install -y \
   libgtk-3-dev \
   libayatana-appindicator3-dev \
   librsvg2-dev \
-  ca-certificates
+  ca-certificates \
+  zstd
 
 ## Install rustup and common components
 curl https://sh.rustup.rs -sSf | sh -s -- -y
@@ -41,3 +42,10 @@ cp -R /root/.oh-my-zsh /home/$USERNAME
 cp /root/.zshrc /home/$USERNAME
 sed -i -e "s/\/root\/.oh-my-zsh/\/home\/$USERNAME\/.oh-my-zsh/g" /home/$USERNAME/.zshrc
 chown -R $USER_UID:$USER_GID /home/$USERNAME/.oh-my-zsh /home/$USERNAME/.zshrc
+
+## Install Buck2
+wget https://github.com/facebook/buck2/releases/download/2025-02-01/buck2-x86_64-unknown-linux-musl.zst /home/$USERNAME/buck2-x86_64-unknown-linux-musl.zst
+zstd -d /home/$USERNAME/buck2-x86_64-unknown-linux-musl.zst
+mv /home/$USERNAME/buck2-x86_64-unknown-linux-musl /home/$USERNAME/buck2
+chomod +x /home/$USERNAME/buck2
+mv /home/$USERNAME/buck2 /usr/local/bin
