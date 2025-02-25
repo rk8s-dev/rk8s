@@ -1,0 +1,45 @@
+[package]
+name = "libcgroups"
+version = "0.5.1" # MARK: Version
+description = "Library for cgroup"
+license = "Apache-2.0"
+repository = "https://github.com/containers/youki"
+homepage = "https://youki-dev.github.io/youki/"
+readme = "README.md"
+authors = ["youki team"]
+edition = "2021"
+rust-version = "1.58.1"
+autoexamples = true
+keywords = ["youki", "container", "cgroups"]
+
+[features]
+default = ["v1", "v2", "systemd"]
+v1 = []
+v2 = []
+systemd = ["v2", "nix/socket", "nix/uio"]
+cgroupsv2_devices = ["rbpf", "libbpf-sys", "errno", "libc", "nix/dir"]
+
+[dependencies]
+nix = { version = "0.28.0", features = ["signal", "user", "fs"] }
+procfs = "0.17.0"
+oci-spec = { version = "~0.7.1", features = ["runtime"] }
+fixedbitset = "0.5.7"
+serde = { version = "1.0", features = ["derive"] }
+rbpf = { version = "0.3.0", optional = true }
+libbpf-sys = { version = "1.5.0", optional = true }
+errno = { version = "0.3.10", optional = true }
+libc = { version = "0.2.170", optional = true }
+thiserror = "2.0.11"
+tracing = { version = "0.1.41", features = ["attributes"] }
+
+[dev-dependencies]
+anyhow = "1.0"
+oci-spec = { version = "~0.7.1", features = ["proptests", "runtime"] }
+quickcheck = "1"
+mockall = { version = "0.13.1", features = [] }
+clap = "4.1.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+env_logger = "0.11"
+serial_test = "3.1.1"
+tempfile = "3"
