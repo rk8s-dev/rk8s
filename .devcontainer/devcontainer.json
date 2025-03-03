@@ -6,9 +6,8 @@
       "extensions": [
         "rust-lang.rust-analyzer",
         "vadimcn.vscode-lldb",
-        "serayuzgur.crates",
         "tamasfe.even-better-toml",
-        "ms-vscode.cpptools"      
+        "ms-vscode.cpptools"
       ],
       "settings": {
         "editor.formatOnSave": true,
@@ -18,7 +17,7 @@
           "**/LICENSE": true
         }
       }
-    } 
+    }
   },
   "hostRequirements": {
     "cpus": 16,
