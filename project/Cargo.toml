@@ -3,7 +3,7 @@ members = [
     "distribution",
     "libcgroups", 
     "libcni",
-    "libcontainer",
+    "libcontainer", "rkb",
     "rklet"
 ]
 
