@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "distribution",
+    "libcgroups", 
+    "libcni",
+    "libcontainer",
+    "rklet"
+]
+
+default-members = ["distribution", "rklet"]
+resolver = "1"
+
+[workspace.dependencies]
+distribution = { path = "distribution" }
+libcgroups = { path = "libcgroups" }
+libcni = { path = "libcni" }
+libcontainer = { path = "libcontainer" }
