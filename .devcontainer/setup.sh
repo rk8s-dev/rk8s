@@ -24,7 +24,7 @@ curl https://sh.rustup.rs -sSf | sh -s -- -y
 source /root/.cargo/env
 
 ## Install Buck2
-wget https://github.com/facebook/buck2/releases/download/2025-03-01/buck2-aarch64-apple-darwin.zst
+wget https://github.com/facebook/buck2/releases/download/2025-03-01/buck2-x86_64-unknown-linux-musl.zst
 zstd -d /home/buck2-x86_64-unknown-linux-musl.zst
 mv /home/buck2-x86_64-unknown-linux-musl /home/buck2
 chmod +x /home/buck2
