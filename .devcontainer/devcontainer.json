@@ -3,7 +3,13 @@
   "dockerFile": "Dockerfile",
   "customizations": {
     "vscode": {
-      "extensions": [],
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "serayuzgur.crates",
+        "tamasfe.even-better-toml",
+        "ms-vscode.cpptools"      
+      ],
       "settings": {
         "editor.formatOnSave": true,
         "terminal.integrated.shell.linux": "/usr/bin/bash",
