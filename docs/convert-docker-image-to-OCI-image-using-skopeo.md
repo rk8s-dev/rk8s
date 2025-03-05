@@ -6,28 +6,44 @@
 
 参考 [OCI Image Specification](https://github.com/opencontainers/image-spec/blob/main/media-types.md#compatibility-matrix)，Docker 镜像和 OCI 镜像的主要差异如下：
 
+#### Configuration properties 差异
+
 | 差异点 | Docker | OCI  | 说明 |
-|--------|--------|------|------|
+|--------|--------|------|-----------------|
 |**index.json**| | | |
-|`.mediaType`|`application/vnd.docker.distribution.manifest.list.v2+json`|`application/vnd.oci.image.index.v1+json`| MIME 类型|
-|`.annotations`|无|有|string-string map: index 的额外元数据，如创建时间、作者等|
-|`.[]manifests.annotations`|无|有|string-string map: manifest [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的额外元数据|
-|`.[]manifests.urls`|无|有|array of strings: manifest [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的下载地址|
+|`.annotations`|❌|✅|string-string map<br>index 的额外元数据，如创建时间、作者等|
+|`.[]manifests.annotations`|❌|✅|string-string map<br>manifest [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的额外元数据|
+|`.[]manifests.urls`|❌|✅|array of strings<br>manifest [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的下载地址|
 |**manifest.json**| | | |
-|`.mediaType`|`application/vnd.docker.distribution.manifest.v2+json`|`application/vnd.oci.image.manifest.v1+json`|MIME 类型|
-|`.annotations`|无|有|string-string map: manifest 的额外元数据|
-|`.config.annotations`|无|有|string-string map: config [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的额外元数据|
-|`.config.urls`|无|有|array of strings: config [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的下载地址|
-|`.[]layers.annotations`|无|有|string-string map: layer [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的额外元数据|
+|`.annotations`|❌|✅|string-string map<br>manifest 的额外元数据|
+|`.config.annotations`|❌|✅|string-string map<br>config [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的额外元数据|
+|`.config.urls`|❌|✅|array of strings<br>config [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的下载地址|
+|`.[]layers.annotations`|❌|✅|string-string map<br>layer [descriptor](https://github.com/opencontainers/image-spec/blob/main/descriptor.md) 的额外元数据|
 |**config.json**| | | |
+|`.config.Memory`|✅|保留，未使用|integer<br>创建容器时的最大内存限制（按字节计算）|
+|`.config.MemorySwap`|✅|保留，未使用|integer<br>总内存使用量（内存+Swap）|
+|`.config.CpuShares`|✅|保留，未使用|integer<br>CPU 资源分配的相对权重|
+|`.config.Healthcheck`|✅|保留，未使用|struct<br>配置检查容器是否健康的任务|
+|`.config.ArgsEscaped`|✅|已弃用|boolean，Windows Docker 专用<br>新版本 Docker 也不再使用|
+
+#### MIME types 差异
+
+| 差异点 | Docker | OCI  |
+|--------|--------|------|
+|**index.json**| | |
+|`.mediaType`|`application/vnd.docker.distribution.manifest.list.v2+json`|`application/vnd.oci.image.index.v1+json`| MIME 类型|
+|**manifest.json**| | |
+|`.mediaType`|`application/vnd.docker.distribution.manifest.v2+json`|`application/vnd.oci.image.manifest.v1+json`|MIME 类型|
+|**config.json**| | | 
 |`.mediaType`|`application/vnd.docker.container.image.v1+json`|`application/vnd.oci.image.config.v1+json`|MIME 类型|
-|`.config.Memory`|有|保留，未使用|integer，创建容器时的最大内存限制（按字节计算）|
-|`.config.MemorySwap`|有|保留，未使用|integer，总内存使用量（内存+Swap）|
-|`.config.CpuShares`|有|保留，未使用|integer，CPU 资源分配的相对权重|
-|`.config.Healthcheck`|有|保留，未使用|struct，配置检查容器是否健康的任务|
-|`.config.ArgsEscaped`|有|已弃用|boolean，Windows Docker 专用，新版本 Docker 也不再使用|
 |**Image layout**|无特殊要求|Layers 文件和 `manifest.json` 必须保存在 `blobs/<alg>` 目录中|[OCI Specification](https://github.com/opencontainers/image-spec/blob/main/image-layout.md#content) 中对 Image layout 有做规定|
-|**Layer 打包类型**|`application/vnd.docker.image.rootfs.diff.tar.gzip`|`application/vnd.oci.image.layer.v1.tar+gzip`|仅支持这两个 MIME 类型之间的互相转换|
+|**Layer 类型**|`application/vnd.docker.image.rootfs.diff.tar.gzip`|`application/vnd.oci.image.layer.v1.tar+gzip`|仅支持这两个 MIME 类型之间的互相转换|
+
+#### Image layout 差异
+
+| 差异点 | Docker | OCI  |
+|--------|--------|------|
+|**Image layout**|无特殊要求|Layers 文件和 `manifest.json` 必须保存在 `blobs/<alg>` 目录中|[OCI Specification](https://github.com/opencontainers/image-spec/blob/main/image-layout.md#content) 中对 Image layout 有做规定|
 
 ### 使用 skopeo 的转换流程
 [skopeo](https://github.com/containers/skopeo) 是一个可用于操作容器镜像的命令行工具，支持多种格式的镜像，包括 Docker 和 OCI 镜像，它提供的 `copy` 命令可以用于将 DockerHub 上的镜像复制为一个 OCI 标准镜像。借助这个功能可以完成转换。
