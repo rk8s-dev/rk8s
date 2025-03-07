@@ -38,4 +38,4 @@ git rm -rf --ignore-unmatch crates
 git commit -m "Remove crates directory" || echo "No changes to commit for cleanup"
 git push || echo "No changes to push for cleanup"
 
-echo "Sync complete."
+echo "Sync youki complete."
