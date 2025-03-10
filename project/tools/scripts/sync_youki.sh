@@ -1,41 +1,71 @@
 #!/bin/bash
 set -e
 
-# Set Git user configuration
-echo "Setting up Git configuration..."
-git config --global user.name "GitHub Actions"
-git config --global user.email "actions@github.com"
+cd "$(dirname "$0")/../../../"
 
-# Add and fetch the latest youki repository
+echo "Setting up Git configuration..."
+git config --local user.name "GitHub Actions"
+git config --local user.email "actions@github.com"
+
 echo "Fetching the latest youki repository..."
 if ! git remote | grep -q "youki"; then
     git remote add youki https://github.com/youki-dev/youki.git
 fi
-git fetch youki
+git fetch youki || { echo "Failed to fetch youki repository."; exit 1; }
 
-# Sync libcontainer module
-echo "Syncing libcontainer from youki..."
-git checkout youki/main -- crates/libcontainer
-rsync -a --delete crates/libcontainer/ project/libcontainer/
-rm -rf crates/libcontainer
-git add project/libcontainer
-git commit -m "Sync libcontainer from youki" || echo "No changes to commit for libcontainer"
-git push || echo "No changes to push for libcontainer"
+check_diff() {
+    local module=$1
+ 
+    mkdir -p "$module"
+    echo "Checking differences for $module..."
+    
+    echo "Git diff for $module:"
+    git diff --stat youki/main -- "crates/$module" "project/$module" 
+  
+}
 
-# Sync libcgroups module
-echo "Syncing libcgroups from youki..."
-git checkout youki/main -- crates/libcgroups
-rsync -a --delete crates/libcgroups/ project/libcgroups/
-rm -rf crates/libcgroups
-git add project/libcgroups
-git commit -m "Sync libcgroups from youki" || echo "No changes to commit for libcgroups"
-git push || echo "No changes to push for libcgroups"
+check_diff "libcontainer"
+check_diff "libcgroups"
 
-# Clean up crates directory
-echo "Cleaning up crates directory..."
-rm -rf crates || true
-git rm -rf --ignore-unmatch crates
-git commit -m "Remove crates directory" || echo "No changes to commit for cleanup"
-git push || echo "No changes to push for cleanup"
+echo -n "Do you want to proceed with the sync? (y/n): "
+read CONFIRMATION
+
+if [[ "$CONFIRMATION" != "y" ]]; then
+    echo "Sync canceled."
+    exit 0
+fi
+
+sync_module() {
+    local module=$1
+    local source_path="crates/$module"
+    local target_path="project/$module"
+
+    echo "Syncing $module from youki..."
+
+    temp_dir=$(mktemp -d)
+
+    git worktree add "$temp_dir" youki/main || {
+        echo "Failed to checkout youki/main into temporary worktree"
+        return 1
+    }
+
+    rsync -a --delete "$temp_dir/$source_path/" "$target_path/"
+
+    git worktree remove "$temp_dir"
+
+    git add "$target_path"
+}
+
+sync_module "libcontainer"
+sync_module "libcgroups"
+
+echo "Applying patch to comment out code in container_init_process.rs..."
+patch -p1 < "./project/tools/scripts/container_init_process.patch" || {
+    echo "Failed to apply patch"
+    exit 1
+}
+
+git commit -m "Sync $module from youki"
+echo "Changes committed for $module."
 
 echo "Sync youki complete."
