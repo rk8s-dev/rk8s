@@ -97,4 +97,47 @@ sudo ./youki create -b <PATH TO bundle/> busybox
 
 ### Docker Image 和 OCI Image 的兼容性
 
-在 Docker 25.0 版本新增了一个[特性](https://github.com/moby/moby/pull/44598)：`docker image save` 导出的镜像是 OCI 兼容的，可以直接将 Docker 镜像导出的 tar 包作为一个 OCI 镜像，通过 umoci 创建 bundle 并交给 youki 创建容器
+在 Docker 25.0 版本新增了一个[特性](https://github.com/moby/moby/pull/44598)：`docker image save` 导出的镜像是 OCI 兼容的，可以直接将 Docker 镜像导出的 tar 包作为一个 OCI 镜像，解压后可以作为 bundle 交给 youki 创建容器
+
+以 busybox 为例，使用 `docker export` 导出镜像
+
+```sh
+mkdir -p example && cd example && docker export -o busybox.tar $(docker create busybox)
+```
+
+将 tar 包解压并保存到 `rootfs/` 文件夹中
+
+```sh
+mkdir -p rootfs && tar -xvf busybox.tar -C rootfs
+```
+
+得到的文件结构如下
+
+```
+rootfs
+├── bin
+├── dev
+├── etc
+├── home
+├── lib
+├── lib64 -> lib
+├── proc
+├── root
+├── sys
+├── tmp
+├── usr
+└── var
+```
+
+在 `example/` 中创建 youki 所需的 config 文件
+
+```sh
+<path to youki executable file> spec
+```
+
+通过 youki 创建容器
+
+```sh
+sudo <path to youki executable file> create -b . busybox
+```
+
