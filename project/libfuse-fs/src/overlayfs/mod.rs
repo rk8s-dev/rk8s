@@ -13,17 +13,17 @@ mod layer;
 mod tempfile;
 use core::panic;
 use std::collections::HashMap;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::future::Future;
 use std::io::{Error, ErrorKind, Result};
 
 use std::sync::{Arc, Weak};
 use config::Config;
 use fuse3::raw::reply::{DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyEntry, ReplyOpen, ReplyStatFs};
-use fuse3::raw::{Filesystem, Request};
+use fuse3::raw::{Filesystem, Request, Session};
 
 
-use fuse3::{mode_from_kind_and_perm, Errno, FileType};
+use fuse3::{mode_from_kind_and_perm, Errno, FileType, MountOptions};
 const SLASH_ASCII: char = '/';
 use futures::future::join_all;
 use futures::stream::iter;
@@ -33,7 +33,8 @@ use inode_store::InodeStore;
 use layer::Layer;
 
 use tokio::sync::{Mutex, RwLock};
-use crate::passthrough::PassthroughFs;
+use crate::passthrough::newlogfs::LoggingFileSystem;
+use crate::passthrough::{new_passthroughfs_layer, PassthroughFs};
 use crate::util::atomic::*;
 
 pub type Inode = u64;
@@ -2210,3 +2211,71 @@ impl OverlayFs {
 }
 
 
+
+/// Mounts the filesystem using the given parameters and returns the mount handle.
+/// 
+/// # Parameters
+/// - `mountpoint`: Path to the mount point.
+/// - `upperdir`: Path to the upper directory.
+/// - `lowerdir`: Paths to the lower directories.
+/// - `not_unprivileged`: If true, use privileged mount; otherwise, unprivileged mount.
+/// 
+/// # Returns
+/// A mount handle on success.
+pub async fn mount_fs(
+    mountpoint: String,
+    upperdir: String,
+    lowerdir: Vec<String>,
+    not_unprivileged: bool,
+) -> fuse3::raw::MountHandle {
+    // Create lower layers
+    let mut lower_layers = Vec::new();
+    for lower in &lowerdir {
+        let layer = new_passthroughfs_layer(lower)
+            .await
+            .expect("Failed to create lower filesystem layer");
+        lower_layers.push(Arc::new(layer));
+    }
+    // Create upper layer
+    let upper_layer = Arc::new(
+        new_passthroughfs_layer(&upperdir)
+            .await
+            .expect("Failed to create upper filesystem layer"),
+    );
+
+    // Configure overlay filesystem
+    let config = Config {
+        mountpoint: mountpoint.clone(),
+        do_import: true,
+        ..Default::default()
+    };
+    let overlayfs = OverlayFs::new(Some(upper_layer), lower_layers, config, 1)
+        .expect("Failed to initialize OverlayFs");
+    let logfs = LoggingFileSystem::new(overlayfs);
+
+    let mount_path: OsString = OsString::from(mountpoint);
+
+    // Obtain the current user's uid and gid
+    let uid = unsafe { libc::getuid() };
+    let gid = unsafe { libc::getgid() };
+
+    let mut mount_options = MountOptions::default();
+    mount_options
+        .force_readdir_plus(true)
+        .uid(uid)
+        .gid(gid);
+
+    // Mount filesystem based on privilege flag and return the mount handle
+    if !not_unprivileged {
+        Session::new(mount_options)
+            .mount_with_unprivileged(logfs, mount_path)
+            .await
+            .expect("Unprivileged mount failed")
+    } else {
+        Session::new(mount_options)
+            .mount(logfs, mount_path)
+            .await
+            .expect("Privileged mount failed")
+    }
+
+}

@@ -872,7 +872,6 @@ mod tests{
         let  mountpoint= "/home/luxian/megatest/true_temp".to_string();
         let  lowerdir= vec!["/home/luxian/megadir/store/5f70f0f460d92d73eac0ea09ef2edb3840bfc68f/lower".to_string()];
         let  upperdir= "/home/luxian/megadir/store/5f70f0f460d92d73eac0ea09ef2edb3840bfc68f/upper".to_string();
-        let  workdir= "/home/luxian/megatest/workerdir".to_string();
 
         // Create lower layers
         let mut lower_layers = Vec::new();
@@ -884,7 +883,6 @@ mod tests{
         let upper_layer = Arc::new(new_passthroughfs_layer(&upperdir).await.unwrap());
         // Create overlayfs
         let  config = Config { 
-            work: workdir.clone(), 
             mountpoint: mountpoint.clone(), 
             do_import: true, 
             ..Default::default() };

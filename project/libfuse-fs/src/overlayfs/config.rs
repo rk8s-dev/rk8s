@@ -8,10 +8,8 @@ use std::fmt;
 
 #[derive(Default, Clone, Debug)]
 pub struct Config {
-    #[allow(unused)]
+ 
     pub mountpoint: String,
-    #[allow(unused)]
-    pub work: String,
     pub do_import: bool,
     // Filesystem options.
     pub writeback: bool,

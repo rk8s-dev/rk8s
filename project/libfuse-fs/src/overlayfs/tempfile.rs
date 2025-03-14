@@ -70,7 +70,7 @@ impl TempFile {
         // it is a pointer to a nul-terminated sequence of characters.
         let fd = unsafe { libc::mkstemp(raw_fname) };
         if fd == -1 {
-            return Err(Error::from_raw_os_error(libc::EINVAL));//TODO : (hxy) not this error 
+            return Err(Error::last_os_error());
         }
 
         // SAFETY: raw_fname originates from a call to CString::into_raw. The length

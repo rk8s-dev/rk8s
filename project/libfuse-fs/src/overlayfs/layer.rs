@@ -21,7 +21,7 @@ pub trait Layer: Filesystem {
     async fn create_whiteout(&self, ctx: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {
         // Use temp value to avoid moved 'parent'.
         let ino: u64 = parent;
-        match self.lookup(ctx, ino, name).await {//FXIME: errir
+        match self.lookup(ctx, ino, name).await {
             Ok(v) => {
                 // Find whiteout char dev.
                 if is_whiteout(&v.attr) {
