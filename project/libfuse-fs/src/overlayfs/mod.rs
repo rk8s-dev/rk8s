@@ -866,6 +866,18 @@ impl OverlayFs {
         self.inodes.write().await.alloc_inode(path)
     }
 
+    /// Add a file layer and stack and merge the previous file layers.
+    pub async fn push_layer(&mut self, layer: Arc<BoxedLayer>) -> Result<()> {
+        let upper = self.upper_layer.take();
+        if let Some(upper) = upper {
+            self.lower_layers.push(upper);
+        }
+        self.upper_layer = Some(layer);
+        // TODO: merge previous file layers. need optimization
+        self.import().await?;
+        Ok(())
+    }
+
     pub async fn import(&self) -> Result<()> {
         let mut root = OverlayInode::new();
         root.inode = self.root_inode();
@@ -1072,7 +1084,7 @@ impl OverlayFs {
         v.lookups.store(lookups).await;
 
         // TODO: use compare_exchange.
-        //v.lookups.compare_exchange(old, new, Ordering::Acquire, Ordering::Relaxed);
+        //v.lookups.compare_exchange(old, new);
 
         if lookups == 0 {
             debug!("inode is forgotten: {}, name {}", inode, v.name);
