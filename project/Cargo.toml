@@ -3,7 +3,9 @@ members = [
     "distribution",
     "libcgroups", 
     "libcni",
-    "libcontainer", "libfuse-fs", "rkb",
+    "libcontainer", 
+    "libfuse-fs", 
+    "rkb",
     "rkl",
 ]
 
