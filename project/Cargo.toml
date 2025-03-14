@@ -3,8 +3,10 @@ members = [
     "distribution",
     "libcgroups", 
     "libcni",
-    "libcontainer", "rkb",
-    "rkl"
+    "libcontainer", 
+    "libfuse-fs", 
+    "rkb",
+    "rkl",
 ]
 
 default-members = ["distribution", "rkl"]
