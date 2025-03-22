@@ -20,9 +20,9 @@ pub struct FilesystemStorage {
 }
 
 impl FilesystemStorage {
-    pub fn new() -> Self {
+    pub fn new(root: &String) -> Self {
         FilesystemStorage {
-            path_manager: PathManager::new(),
+            path_manager: PathManager::new(root),
         }
     }
 }

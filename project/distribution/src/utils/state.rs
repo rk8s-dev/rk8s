@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
 use crate::storage::{driver::filesystem::FilesystemStorage, Storage};
@@ -16,11 +16,10 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new() -> Self {
-        let storage_type = env::var("OCI_REGISTRY_STORAGE").unwrap_or_else(|_| "FILESYSTEM".to_string());
+    pub fn new(storage_type: &String, root: &String) -> Self {
         let storage_backend: Arc<dyn Storage + Send + Sync> = match storage_type.as_str() {
-            "FILESYSTEM" => Arc::new(FilesystemStorage::new()),
-            _ => Arc::new(FilesystemStorage::new()),
+            "FILESYSTEM" => Arc::new(FilesystemStorage::new(root)),
+            _ => Arc::new(FilesystemStorage::new(root)),
         };
         AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),

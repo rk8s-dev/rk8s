@@ -7,7 +7,7 @@ rust_binary(
     deps = [
         "//third-party:async-trait",
         "//third-party:axum",
-        "//third-party:dotenv",
+        "//third-party:clap",
         "//third-party:futures",
         "//third-party:hex",
         "//third-party:oci-spec",
@@ -19,4 +19,13 @@ rust_binary(
         "//third-party:tokio-util",
         "//third-party:uuid",
     ],
+    env = {
+        "CARGO_PKG_DESCRIPTION": "A lite implement of OCI Distribution SPEC in rust",
+        "CARGO_PKG_NAME": "distribution",
+        "CARGO_PKG_REPOSITORY": "https://github.com/r2cn-dev/rk8s",
+        "CARGO_PKG_VERSION": "0.1.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "0",
+    },
 )

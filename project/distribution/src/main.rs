@@ -1,8 +1,8 @@
-use dotenv::dotenv;
-use std::env;
+use clap::Parser;
 use std::sync::Arc;
 use tokio::signal;
 use utils::state::AppState;
+use utils::cli::Args;
 
 mod api;
 mod service;
@@ -11,16 +11,13 @@ mod utils;
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    let args = Args::parse();
 
-    let state = Arc::new(AppState::new());
+    let state = Arc::new(AppState::new(&args.storage, &args.root));
 
     let app = api::create_router().with_state(state);
 
-    let url = env::var("OCI_REGISTRY_URL").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port = env::var("OCI_REGISTRY_PORT").unwrap_or_else(|_| "8968".to_string());
-
-    let listener = tokio::net::TcpListener::bind(format!("{}:{}", url, port))
+    let listener = tokio::net::TcpListener::bind(format!("{}:{}", args.host, args.port))
         .await
         .unwrap();
     println!("listening on {}", listener.local_addr().unwrap());

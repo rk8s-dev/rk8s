@@ -25,7 +25,6 @@
 
 
 use oci_spec::image::Digest;
-use std::env;
 
 #[derive(Clone)]
 pub struct PathManager {
@@ -33,10 +32,9 @@ pub struct PathManager {
 }
 
 impl PathManager {
-    pub fn new() -> Self {
+    pub fn new(root: &String) -> Self {
         PathManager {
-            root_path: env::var("OCI_REGISTRY_ROOTDIR")
-                .unwrap_or_else(|_| "/var/lib/registry".to_string()),
+            root_path: root.clone(),
         }
     }
 

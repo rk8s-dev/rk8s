@@ -17,7 +17,7 @@ path = "top/main.rs"
 [dependencies]
 async-trait = "0.1.86"
 axum = "0.8.1"
-dotenv = "0.15.0"
+clap = { version = "4.5.32", features = ["derive"] }
 futures = "0.3.31"
 hex = "0.4.3"
 oci-spec = "0.7.1"
