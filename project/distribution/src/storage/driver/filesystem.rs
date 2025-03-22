@@ -1,17 +1,19 @@
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
-use super::super::paths::PathManager;
-use super::super::Storage;
+use crate::storage::Storage;
+use crate::storage::paths::PathManager;
 
 use axum::body::BodyDataStream;
 use futures::TryStreamExt;
 use oci_spec::image::Digest;
 use tokio::{
-    fs::{File, OpenOptions},
+    fs::{
+        File, OpenOptions, create_dir_all, read_dir, remove_dir_all, remove_file, rename,
+        symlink_metadata,
+    },
     io::{self, BufWriter},
 };
 use tokio_util::io::StreamReader;
-
 
 pub struct FilesystemStorage {
     path_manager: PathManager,
@@ -122,14 +124,14 @@ impl Storage for FilesystemStorage {
         let blob_data_path = self
             .crate_path(&self.path_manager.clone().blob_data_path(digest))
             .await?;
-        fs::rename(upload_data_path, blob_data_path)?;
+        rename(upload_data_path, blob_data_path).await?;
         Ok(())
     }
 
     async fn crate_path(&self, path: &String) -> io::Result<PathBuf> {
         let file_path = std::path::Path::new(&path);
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent)?;
+            create_dir_all(parent).await?;
         }
         Ok(file_path.to_path_buf())
     }
@@ -143,9 +145,9 @@ impl Storage for FilesystemStorage {
             .await?;
 
         // Remove the existing symlink if it exists
-        if let Ok(metadata) = fs::symlink_metadata(&tag_path) {
+        if let Ok(metadata) = symlink_metadata(&tag_path).await {
             if metadata.file_type().is_symlink() {
-                fs::remove_file(&tag_path)?;
+                remove_file(&tag_path).await?;
             }
         }
 
@@ -160,10 +162,14 @@ impl Storage for FilesystemStorage {
     async fn walk_repo_dir(&self, name: &str) -> io::Result<Vec<String>> {
         let mut entries = vec![];
         let path = self.path_manager.clone().manifest_tags_path(name);
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
+        let mut read_dir = read_dir(path).await?;
+        while let Some(entry) = read_dir.next_entry().await? {
             let path = entry.path();
-            entries.push(path.file_name().unwrap().to_str().unwrap().to_string());
+            if let Some(file_name) = path.file_name() {
+                if let Some(file_name_str) = file_name.to_str() {
+                    entries.push(file_name_str.to_string());
+                }
+            }
         }
         entries.sort();
         Ok(entries)
@@ -171,13 +177,13 @@ impl Storage for FilesystemStorage {
 
     async fn delete_by_tag(&self, name: &str, tag: &str) -> io::Result<()> {
         let tag_path = self.path_manager.clone().manifest_tag_path(name, tag);
-        fs::remove_dir_all(tag_path)?;
+        remove_dir_all(tag_path).await?;
         Ok(())
     }
 
     async fn delete_by_digest(&self, digest: &Digest) -> io::Result<()> {
         let blob_path = self.path_manager.clone().blob_path(digest);
-        fs::remove_dir_all(blob_path)?;
+        remove_dir_all(blob_path).await?;
         Ok(())
     }
 }
