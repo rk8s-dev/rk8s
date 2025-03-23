@@ -35,8 +35,8 @@ pub struct ObjectMeta {
     pub namespace: String,
     #[serde(default)]
     pub labels: std::collections::HashMap<String, String>,
-    #[serde(default)] // 如果 annotations 未指定，默认为空 HashMap
-    pub annotations: std::collections::HashMap<String, String>, // 添加 annotations 字段
+    #[serde(default)] 
+    pub annotations: std::collections::HashMap<String, String>, 
 }
 
 pub fn default_namespace() -> String {
@@ -506,7 +506,7 @@ impl TaskRunner {
                     for container_id in &created_containers {
                         let delete_args = Delete {
                             container_id: container_id.clone(),
-                            force: true, // 强制删除，即使容器正在运行
+                            force: true, 
                         };
                         let root_path = rootpath::determine(None)?;
                         if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {

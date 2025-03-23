@@ -7,7 +7,7 @@ metadata:
     bundle: /root/test        
 spec:
   containers:
-    - name: main-container     
+    - name: main-container1     
       image: /root/test1  # bundle path
       args:                            
         - "sleep"                   
