@@ -8,16 +8,16 @@ metadata:
 spec:
   containers:
     - name: main-container     
-      image: /root/test1  # 将 image 设置为 bundle 路径
-      args:                              # 添加 args 参数
-        - "sleep"                    # 示例参数，可以根据需要修改
-        - "10000"            # 示例参数，可以根据需要修改
+      image: /root/test1  # bundle path
+      args:                            
+        - "sleep"                   
+        - "10000"            
       ports:
         - containerPort: 80
     - name: main-container2     
-      image: /root/test2  # 将 image 设置为 bundle 路径
-      args:                              # 添加 args 参数
-        - "sleep"                    # 示例参数，可以根据需要修改
-        - "10000"            # 示例参数，可以根据需要修改
+      image: /root/test2  # bundle path
+      args:                            
+        - "sleep"                    
+        - "10000"           
       ports:
         - containerPort: 80

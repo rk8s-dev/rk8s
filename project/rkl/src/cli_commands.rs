@@ -1,7 +1,6 @@
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path,PathBuf};
 use anyhow::{Result, anyhow};
 use liboci_cli::{Create, Start,State, Kill, Delete};
 use crate::commands::{create, start, state,kill,delete,load_container};
@@ -17,8 +16,8 @@ pub struct PodInfo {
 
 impl PodInfo {
     pub fn load(root_path: &Path, pod_name: &str) -> Result<Self> {
-        // 使用 Path::join 构造路径
-        let pod_info_path = root_path.join("pods").join(format!("{}.txt", pod_name));
+        // get path like pods/podname
+        let pod_info_path = root_path.join("pods").join(format!("{}", pod_name));
         let mut file = File::open(&pod_info_path)
             .map_err(|_| anyhow!("Pod {} not found", pod_name))?;
         let mut contents = String::new();
@@ -43,11 +42,9 @@ impl PodInfo {
     }
 
     pub fn save(&self, root_path: &Path, pod_name: &str) -> Result<()> {
-        // 使用 Path::join 构造路径
         let pods_dir = root_path.join("pods");
-        let pod_info_path = pods_dir.join(format!("{}.txt", pod_name));
+        let pod_info_path = pods_dir.join(format!("{}", pod_name));
 
-        // 检查 pods 目录是否存在
         if pods_dir.exists() {
             if !pods_dir.is_dir() {
                 return Err(anyhow!("{} exists but is not a directory", pods_dir.display()));
@@ -56,7 +53,6 @@ impl PodInfo {
             fs::create_dir_all(&pods_dir)?;
         }
 
-        // 检查 pod_info_path 是否已存在
         if pod_info_path.exists() {
             return Err(anyhow!("Pod {} already exists at {}", pod_name, pod_info_path.display()));
         }
@@ -71,8 +67,7 @@ impl PodInfo {
     }
 
     pub fn delete(root_path: &Path, pod_name: &str) -> Result<()> {
-        // 使用 Path::join 构造路径
-        let pod_info_path = root_path.join("pods").join(format!("{}.txt", pod_name));
+        let pod_info_path = root_path.join("pods").join(format!("{}", pod_name));
         fs::remove_file(&pod_info_path)?;
         Ok(())
     }
@@ -161,11 +156,11 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None)?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
 
-    // 先删除所有容器
+    // delete all container
     for container_name in &pod_info.container_names {
         let delete_args = Delete {
             container_id: container_name.clone(),
-            force: true, // 强制删除，即使容器正在运行
+            force: true, 
         };
         let root_path = rootpath::determine(None)?;
         if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
@@ -175,10 +170,10 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
         }
     }
 
-    // 删除 PodSandbox
+    // delete pause container
     let delete_args = Delete {
         container_id: pod_info.pod_sandbox_id.clone(),
-        force: true, // 强制删除，即使 PodSandbox 正在运行
+        force: true, 
     };
     let root_path = rootpath::determine(None)?;
     if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
@@ -187,7 +182,7 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
         println!("PodSandbox deleted: {}", pod_info.pod_sandbox_id);
     }
 
-    // 删除 Pod 信息文件
+    // delete pod file 
     PodInfo::delete(&root_path, pod_name)?;
     println!("Pod {} deleted successfully", pod_name);
     Ok(())
@@ -197,15 +192,11 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None)?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
 
-    // 打印 Pod 基本信息
     println!("Pod: {}", pod_name);
 
-    // 查询 PodSandbox 状态
     println!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
     state::state(State { container_id: pod_info.pod_sandbox_id.clone() }, root_path.clone());
     
-
-    // 查询容器状态
     println!("Containers:");
     for container_name in &pod_info.container_names {
         let container_state = state::state(State { container_id: container_name.clone() }, root_path.clone());

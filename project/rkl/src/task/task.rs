@@ -1,31 +1,25 @@
-use libcontainer::oci_spec::runtime::ProcessBuilder;
-use serde::{Deserialize, Serialize};
-use std::fs;
-use std::fs::File;
-use std::io::Read;
 use crate::cri::cri::{
     PodSandboxConfig, PodSandboxMetadata, PortMapping, Protocol,
     RunPodSandboxRequest, RunPodSandboxResponse,
     CreateContainerRequest, CreateContainerResponse,
     ContainerConfig, ContainerMetadata, ImageSpec, KeyValue, Mount,
-    LinuxContainerConfig, LinuxContainerResources,
     StartContainerRequest, StopPodSandboxRequest, RemovePodSandboxRequest,
-    PodSandboxStatusRequest, ContainerStatusRequest,StartContainerResponse,
-    StopPodSandboxResponse,RemovePodSandboxResponse
+    StartContainerResponse, StopPodSandboxResponse,RemovePodSandboxResponse
 };
 use libcontainer::oci_spec::runtime::{
-    LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, Spec,
+    LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, Spec,ProcessBuilder
 };
-use serde_json::json;
-use std::path::PathBuf;
-use std::io::BufWriter;
-use std::io::Write;
-use anyhow::{Result, anyhow};
 use liboci_cli::{Create,Start,State,Kill,Delete};
 use crate::commands::{create, start, state,kill,delete,load_container};
 use crate::rootpath;
-use std::path::Path;
-// 模拟 Kubernetes Pod 的元数据
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::fs::File;
+use std::io::{Read,BufWriter,Write};
+use serde_json::json;
+use std::path::{PathBuf,Path};
+use anyhow::{Result, anyhow};
+// simulate Kubernetes Pod 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TypeMeta {
     #[serde(rename = "apiVersion")]
@@ -49,7 +43,7 @@ pub fn default_namespace() -> String {
     "default".to_string()
 }
 
-// 模拟 Kubernetes PodSpec
+// simulate Kubernetes PodSpec
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PodSpec {
     #[serde(default)]
@@ -84,13 +78,13 @@ fn default_protocol() -> String {
     "TCP".to_string()
 }
 
-// 任务运行器，基于 Kubernetes Pod 模型
 pub struct TaskRunner {
     pub task: PodTask,
-    pub pause_pid: Option<i32>, // 记录 Pause 容器的 PID
+    pub pause_pid: Option<i32>, // pid of pause container
     pub sandbox_config: Option<PodSandboxConfig>,
 }
 
+//some information from file.yaml
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PodTask {
     #[serde(rename = "apiVersion")]
@@ -102,6 +96,7 @@ pub struct PodTask {
 }
 
 impl TaskRunner {
+    //get information from a file  record in Podtask 
     pub fn from_file(path: &str) -> Result<Self> {
         let mut file = File::open(path)?;
         let mut contents = String::new();
@@ -111,8 +106,9 @@ impl TaskRunner {
         Ok(TaskRunner { task, pause_pid: None,sandbox_config:None })
     }
 
+    //get PodSandboxConfig
     pub fn create_pod_sandbox_config(&self, uid: &str, attempt: u32) -> Result<PodSandboxConfig, anyhow::Error> {
-        // 构造 PodSandboxMetadata
+        // create PodSandboxMetadata
         let metadata = PodSandboxMetadata {
             name: self.task.metadata.name.clone(),
             namespace: self.task.metadata.namespace.clone(),
@@ -120,7 +116,7 @@ impl TaskRunner {
             attempt,
         };
     
-        // 端口映射，仅处理 containers
+
         let port_mappings = self.task.spec.containers
             .iter()
             .flat_map(|c| c.ports.iter().map(|p| PortMapping {
@@ -135,7 +131,8 @@ impl TaskRunner {
             }))
             .collect();
     
-        // 构造 PodSandboxConfig
+        // create PodSandboxConfig
+        //now some data isn't used
         Ok(PodSandboxConfig {
             metadata: Some(metadata),
             hostname: self.task.metadata.name.clone(),
@@ -149,15 +146,17 @@ impl TaskRunner {
         })
     }
 
+    //get RunPodSandboxRequest 
     pub fn build_run_pod_sandbox_request(&self) -> RunPodSandboxRequest {
         let uid = uuid::Uuid::new_v4().to_string();
-        let attempt = 0; // 可动态传入
+        let attempt = 0; 
         RunPodSandboxRequest {
             config: Some(self.create_pod_sandbox_config(&uid, attempt).unwrap_or_default()), 
-            runtime_handler: "pause".to_string(), // 表示启动 Pause 容器
+            runtime_handler: "pause".to_string(), // just mean that pause container is started
         }
     }
 
+    //create pause container and start it
     pub fn run_pod_sandbox(
         &mut self,
         request: RunPodSandboxRequest,
@@ -165,7 +164,7 @@ impl TaskRunner {
         let config = request.config.unwrap_or_default();
         let sandbox_id = format!("{}", config.metadata.unwrap_or_default().name);
 
-        // 从 labels 中读取 Pause 容器的 bundle 路径
+        // get bundle path of pause container from labels
         let bundle_path = self.task.metadata.labels
                 .get("bundle")
                 .cloned()
@@ -191,15 +190,11 @@ impl TaskRunner {
         create::create(create_args, root_path.clone(), false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
-        //thread::sleep(Duration::from_secs(5));
-
         let start_args = Start {
             container_id: sandbox_id.clone(),
         };
         start::start(start_args, root_path.clone())
             .map_err(|e| anyhow!("Failed to start container: {}", e))?;
-
-        //thread::sleep(Duration::from_secs(5));
 
         let container = load_container(root_path.clone(), &sandbox_id)
             .map_err(|e| anyhow!("Failed to load container {}: {}", sandbox_id, e))?;
@@ -221,19 +216,21 @@ impl TaskRunner {
         container: &ContainerSpec,
     ) -> Result<CreateContainerRequest, anyhow::Error> {
         let config = ContainerConfig {
+            //just create accronding to the format of ContainerConfig
+            //now some data isn't used 
             metadata: Some(ContainerMetadata {
                 name: container.name.clone(),
-                attempt: 0, // 默认尝试次数为 0
+                attempt: 0, 
             }),
             image: Some(ImageSpec {
                 image: container.image.clone(),
                 annotations: std::collections::HashMap::new(),
                 user_specified_image: container.image.clone(),
                 runtime_handler: "".to_string(),
-            }),//暂时仅占位
-            command: vec!["/bin/sh".to_string()],//容器启动的主进程
-            args: container.args.clone(),// command 与 args 配合使用
-            working_dir: "/".to_string(),//主进程会在working_dir下执行
+            }),
+            command: vec!["/bin/sh".to_string()],
+            args: container.args.clone(),
+            working_dir: "/".to_string(),
             envs: vec![KeyValue {
                 key: "PATH".to_string(),
                 value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
@@ -244,7 +241,7 @@ impl TaskRunner {
                     host_path: "proc".to_string(),
                     readonly: false,
                     selinux_relabel: false,
-                    propagation: 0, // 默认 propagation 模式
+                    propagation: 0, 
                     uid_mappings: vec![],
                     gid_mappings: vec![],
                     recursive_read_only: false,
@@ -261,7 +258,7 @@ impl TaskRunner {
                     recursive_read_only: false,
                     image: None,
                 },
-            ],//暂时仅占位
+            ],
             devices: vec![],
             labels: std::collections::HashMap::new(),
             annotations: std::collections::HashMap::new(),
@@ -281,6 +278,7 @@ impl TaskRunner {
         })
     }
    
+   //create work container
     pub fn create_container(
         &self,
         request: CreateContainerRequest,
@@ -291,12 +289,12 @@ impl TaskRunner {
         .map(|m| m.name.clone())
         .ok_or_else(|| anyhow!("Container metadata is required"))?;
     
-        // 验证 sandbox_config
+        // check sandbox_config
         if self.sandbox_config.is_none() {
             return Err(anyhow!("PodSandboxConfig is not set"));
         }
         let pause_pid = self.pause_pid.ok_or_else(|| anyhow!("Pause container PID is not set"))?;
-        // 构造 OCI Spec
+        // create  OCI Spec
         let mut spec = Spec::default();
         let namespaces = vec![
         LinuxNamespaceBuilder::default()
@@ -346,7 +344,7 @@ impl TaskRunner {
         if !bundle_dir.exists() {
             return Err(anyhow!("Bundle directory does not exist"));
         }
-        // 写入 config.json
+        // write into config.json
         let config_path = format!("{}/config.json", bundle_path);
         if Path::new(&config_path).exists() {
             fs::remove_file(&config_path)
@@ -357,7 +355,6 @@ impl TaskRunner {
         serde_json::to_writer_pretty(&mut writer, &spec)?;
         writer.flush()?;
     
-        // 构造 Create 参数
         let create_args = Create {
             bundle: bundle_path.clone().into(),
             console_socket: None,
@@ -368,11 +365,10 @@ impl TaskRunner {
             container_id: container_id.clone(),
         };
     
-        // 获得 root path
+        // get root_path
         let root_path = rootpath::determine(None)
             .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
     
-        // 创建容器
         create::create(create_args, root_path.clone(), false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
         
@@ -397,6 +393,7 @@ impl TaskRunner {
         Ok(StartContainerResponse {})
     }
     
+    //stop pause container
     pub fn stop_pod_sandbox(
         &self,
         request: StopPodSandboxRequest,
@@ -412,7 +409,7 @@ impl TaskRunner {
         .map_err(|e| anyhow!("Failed to stop PodSandbox {}: {}", pod_sandbox_id, e))?;
         Ok(StopPodSandboxResponse {})
     }
-
+    //delete pause container
     pub fn remove_pod_sandbox(
         &self,
         request: RemovePodSandboxRequest,
@@ -430,7 +427,7 @@ impl TaskRunner {
     }
 
     pub fn run(&mut self) -> Result<String, anyhow::Error> {
-        // 启动 PodSandbox（Pause 容器）
+        // run PodSandbox（Pause container）
         let pod_request = self.build_run_pod_sandbox_request();
         let config = pod_request.config.as_ref().ok_or_else(|| anyhow!("PodSandbox config is required"))?;
         self.sandbox_config = Some(config.clone());
@@ -441,10 +438,11 @@ impl TaskRunner {
             .ok_or_else(|| anyhow!("Pause container PID not found for PodSandbox ID: {}", pod_sandbox_id))?;
         println!("PodSandbox (Pause) started: {}, pid: {}\n", pod_sandbox_id, pause_pid);
     
-        // 记录创建成功的容器 ID，以便在失败时清理
+        //record the container ID if succeed 
+        // if fail clear all containers created
         let mut created_containers = Vec::new();
     
-        // 创建阶段：尝试创建所有容器
+        // create all container
         for container in &self.task.spec.containers {
             let create_request = self.build_create_container_request(&pod_sandbox_id, container)?;
             match self.create_container(create_request) {
@@ -453,14 +451,13 @@ impl TaskRunner {
                     println!("Container created: {} (ID: {})", container.name, create_response.container_id);
                 }
                 Err(e) => {
-                    // 创建失败，回滚已创建的容器和 PodSandbox
                     eprintln!("Failed to create container {}: {}", container.name, e);
     
-                    // 删除已创建的容器
+                    // delete container created
                     for container_id in &created_containers {
                         let delete_args = Delete {
                             container_id: container_id.clone(),
-                            force: true, // 强制删除，即使容器正在运行
+                            force: true, 
                         };
                         let root_path = rootpath::determine(None)?;
                         if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
@@ -470,7 +467,7 @@ impl TaskRunner {
                         }
                     }
     
-                    // 停止 PodSandbox
+                    // stop pause
                     let stop_request = StopPodSandboxRequest {
                         pod_sandbox_id: pod_sandbox_id.clone(),
                     };
@@ -480,7 +477,7 @@ impl TaskRunner {
                         println!("PodSandbox stopped during rollback: {}", pod_sandbox_id);
                     }
     
-                    // 删除 PodSandbox
+                    // delete pause
                     let remove_request = RemovePodSandboxRequest {
                         pod_sandbox_id: pod_sandbox_id.clone(),
                     };
@@ -495,7 +492,7 @@ impl TaskRunner {
             }
         }
     
-        // 启动阶段：启动所有容器
+        // start all container
         for container_id in &created_containers {
             let start_request = StartContainerRequest {
                 container_id: container_id.clone(),
@@ -505,10 +502,7 @@ impl TaskRunner {
                     println!("Container started: {}", container_id);
                 }
                 Err(e) => {
-                    // 启动失败，回滚已创建的容器和 PodSandbox
                     eprintln!("Failed to start container {}: {}", container_id, e);
-    
-                    // 删除已创建的容器
                     for container_id in &created_containers {
                         let delete_args = Delete {
                             container_id: container_id.clone(),
@@ -522,7 +516,6 @@ impl TaskRunner {
                         }
                     }
     
-                    // 停止 PodSandbox
                     let stop_request = StopPodSandboxRequest {
                         pod_sandbox_id: pod_sandbox_id.clone(),
                     };
@@ -532,7 +525,6 @@ impl TaskRunner {
                         println!("PodSandbox stopped during rollback: {}", pod_sandbox_id);
                     }
     
-                    // 删除 PodSandbox
                     let remove_request = RemovePodSandboxRequest {
                         pod_sandbox_id: pod_sandbox_id.clone(),
                     };

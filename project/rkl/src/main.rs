@@ -43,6 +43,11 @@ fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
 
     match cli.command {
+        //./rkl run xxx.yaml
+        //./rkl create xxx.yaml
+        //./rkl start podname
+        //./rkl delete podname
+        //./rkl state podname
 
         Commands::Run { pod_yaml } => cli_commands::run_pod(&pod_yaml),
         Commands::Create { pod_yaml } => cli_commands::create_pod(&pod_yaml),
