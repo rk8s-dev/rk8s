@@ -1,13 +1,19 @@
-[package]
-name = "libfuse-fs"
-version = "0.1.0"
-edition = "2024"
-description = "FUSE Filesystem Library"
-homepage = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
-repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
-documentation = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
-license = "MIT OR Apache-2.0"
+[workspace]
 
+[package]
+# Pseudo-package whose dependencies are imported and buckified
+name = "rust-third-party"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Dummy target to keep Cargo happy
+[[bin]]
+name = "top"
+path = "top/main.rs"
+
+# List of packages to be imported, with version constraints, features
+# and all options Cargo supports.
 [dependencies]
 uuid = { version = "1.15.1", features = ["v4"] }
 clap = { version = "4.5.32", features = ["derive"] }
@@ -26,3 +32,7 @@ futures-util = "0.3.31"
 log = "0.4.26"
 env_logger = "0.11.7"
 vmm-sys-util = "0.12.1"
+openssl = { version = "0.10.71", features = ["vendored"] }
+
+# Local patches - typically git references
+[patch.crates-io]

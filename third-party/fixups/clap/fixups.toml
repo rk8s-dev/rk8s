@@ -1,0 +1,4 @@
+extra_srcs = [
+    "examples/demo.rs",
+    "examples/demo.md"
+]
