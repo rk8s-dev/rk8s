@@ -1,0 +1,3 @@
+features = ["idea", "seed", "camellia"]
+cargo_env = true
+extra_srcs = ["openssl/**/*"]
