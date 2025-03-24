@@ -1,0 +1,31 @@
+rust_binary(
+    name = "distribution",
+    srcs = glob(
+        ["src/**/*.rs"],
+    ),
+    crate_root = "src/main.rs",
+    deps = [
+        "//third-party:async-trait",
+        "//third-party:axum",
+        "//third-party:clap",
+        "//third-party:futures",
+        "//third-party:hex",
+        "//third-party:oci-spec",
+        "//third-party:regex",
+        "//third-party:serde",
+        "//third-party:serde_json",
+        "//third-party:sha2",
+        "//third-party:tokio",
+        "//third-party:tokio-util",
+        "//third-party:uuid",
+    ],
+    env = {
+        "CARGO_PKG_DESCRIPTION": "A lite implement of OCI Distribution SPEC in rust",
+        "CARGO_PKG_NAME": "distribution",
+        "CARGO_PKG_REPOSITORY": "https://github.com/r2cn-dev/rk8s",
+        "CARGO_PKG_VERSION": "0.1.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "0",
+    },
+)
