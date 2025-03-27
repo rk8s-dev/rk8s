@@ -69,7 +69,7 @@ pub trait Layer: Filesystem {
 
                 // Find whiteout so we can safely delete it.
                 if is_whiteout(&v.attr) {
-                    return self.unlink(ctx, v.attr.ino, name).await;
+                    return self.unlink(ctx, ino, name).await;
                 }
                 //  Non-negative entry with inode larger than 0 indicates file exists.
                 if v.attr.ino != 0 {
@@ -196,4 +196,34 @@ pub(crate) fn is_whiteout(st: &FileAttr) -> bool {
     let major = libc::major(st.rdev.into()) ;
     let minor = libc::minor(st.rdev.into()) ;
     is_chardev(st) && major == 0 && minor == 0
+}
+
+#[cfg(test)]
+mod test {
+    use std::{ffi::OsStr, path::PathBuf};
+
+
+    use fuse3::raw::{Filesystem as _, Request};
+
+    use crate::{overlayfs::layer::Layer, passthrough::new_passthroughfs_layer};
+
+
+    #[tokio::test]
+    async fn test_whiteout_create_delete() {
+        let temp_dir = "/tmp/test_whiteout/t2";
+        let rootdir = PathBuf::from(temp_dir);
+        std::fs::create_dir_all(&rootdir).unwrap();
+        let fs = new_passthroughfs_layer(rootdir.to_str().unwrap()).await.unwrap();
+        let _ =  fs.init(Request::default()).await;
+        let white_name = OsStr::new(&"test");
+        let res = fs.create_whiteout(Request::default(), 1, white_name).await.unwrap();
+
+        print!("{:?}",res);
+        let res = fs.delete_whiteout(Request::default(), 1, white_name).await;
+        if res.is_err() {
+            panic!("{:?}",res);
+        }
+        let _ = fs.destroy(Request::default()).await;
+        // Add your test assertions and logic here.
+    }
 }

@@ -861,7 +861,7 @@ mod tests{
     use fuse3::{raw::Session, MountOptions};
     use tokio::signal;
 
-    use crate::{overlayfs::{config::Config, OverlayFs}, passthrough::{logfs::LoggingFileSystem, new_passthroughfs_layer}};
+    use crate::{overlayfs::{config::Config, OverlayFs}, passthrough::{newlogfs::LoggingFileSystem, new_passthroughfs_layer}};
 
     #[tokio::test]
     async fn test_a_ovlfs(){
@@ -870,8 +870,8 @@ mod tests{
 
         // Set up test environment
         let  mountpoint= "/home/luxian/megatest/true_temp".to_string();
-        let  lowerdir= vec!["/home/luxian/megadir/store/5f70f0f460d92d73eac0ea09ef2edb3840bfc68f/lower".to_string()];
-        let  upperdir= "/home/luxian/megadir/store/5f70f0f460d92d73eac0ea09ef2edb3840bfc68f/upper".to_string();
+        let  lowerdir= vec!["/home/luxian/megadir/store/2bd95906a56f443e84acb10dfaf86717ceb481a0/lower".to_string()];
+        let  upperdir= "/home/luxian/megadir/store/2bd95906a56f443e84acb10dfaf86717ceb481a0/upper".to_string();
 
         // Create lower layers
         let mut lower_layers = Vec::new();
