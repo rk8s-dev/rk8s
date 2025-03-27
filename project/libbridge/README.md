@@ -1,3 +1,83 @@
+# CNI 插件桥接网络配置
+
+本项目提供了一个CNI插件，用于在容器化环境中配置和管理桥接网络接口。包含VLAN管理、错误处理功能，并支持桥接的自定义网络配置。
+
+## 功能特性
+
+- **错误处理**: 使用自定义错误类型 (`AppError` and `VlanError`) 进行详细结构化错误报告，可转换为CNI错误响应；
+- **桥接网络配置**: `BridgeNetConf` 结构体提供全面的桥接网络配置模型，支持VLAN、MAC地址过滤等多种网络接口选项；
+- **VLAN汇聚**: 支持定义VLAN汇聚范围(`VlanTrunk`)和桥接配置中的VLAN过滤；
+- **序列化**: 使用Serde进行配置的序列化和反序列化，确保网络配置文件处理的灵活性；
+- **桥接管理**: `Bridge` 结构体抽象了网络桥接，包含设置MTU大小和启用VLAN过滤等方法。
+
+## 核心组件
+
+### 错误处理
+
+定义了两类主要错误类型：
+
+- **AppError**: 涵盖通用错误，包括CNI、VLAN、网络命名空间等相关问题；
+- **VlanError**: 专门处理VLAN配置错误，包括无效的trunk ID、缺失参数和ID范围错误；
+
+两种错误类型均可转换为CNI兼容的错误响应。
+
+
+### 桥接网络配置
+
+ `BridgeNetConf` 结构体扩展自 `NetworkConfig` 包含以下配置选项：
+
+- 桥接名称和网关设置；
+- MAC地址欺骗和DAD(重复地址检测)；
+- VLAN配置，包括trunk和过滤。
+
+同时支持MTU大小、端口隔离等附加配置。
+
+### 桥接结构体
+
+`Bridge` 结构体表示虚拟网络桥接，包含设置MTU大小和启用VLAN过滤的方法。该结构体可转换为 `LinkMessageBuilder` 用于网络设置。
+
+### 配置示例 
+
+- **配置文件**: my-bridge.conf
+```json
+{
+  "cniVersion": "0.3.1",
+  "name": "my-bridge",
+  "type": "bridge",
+  "bridge": "br0",
+  "isGateway": true,
+  "mtu": 1500,
+  "vlan": 100,
+  "vlanTrunk": [
+    { "minID": 10, "maxID": 20 },
+    { "id": 30 }
+  ]
+}
+```
+- **命令行操作**
+```shell
+#set up network namespace
+sudo ip netns add test
+
+# add bridge
+> sudo \
+  env CNI_PATH=/opt/cni/bin:$PWD/target/debug \
+  cnitool add my-bridge /var/run/netns/test
+
+# del bridge
+> sudo \
+  env CNI_PATH=/opt/cni/bin:$PWD/target/debug \
+  cnitool del my-bridge /var/run/netns/test
+```
+
+### 主要依赖项
+
+- **CNI-plugin**: 处理CNI特定错误和响应的主插件；
+- **Serde**: 用于配置数据的序列化和反序列化
+- **Rtnetlink**: 用于与Linux网络接口交互(如设置桥接和VLAN)
+
+
+---
 # CNI Plugin Bridge Network Configuration
 
 This project provides a CNI plugin for configuring and managing bridge network interfaces in containerized environments. It includes functionality for managing VLANs, handling errors, and supporting custom network configurations for bridges.
