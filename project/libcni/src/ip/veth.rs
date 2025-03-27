@@ -207,7 +207,6 @@ async fn make_veth(
                     "Attempt {}/10: Failed to create veth pair - {:?}. Peer: {}, Container: {}",
                     attempt, e, peer_name, container_veth_name
                 );
-                println!("error:{:?}",e);
             }
         }
     }
@@ -248,7 +247,7 @@ async fn make_veth_pair(
     // Initialize the veth pair
     let veth = Veth::new(container_veth_name,host_veth_name,container_ns.clone(),host_ns.clone()).set_mac_address(container_veth_mac.clone());
 
-    // Build veth pair configurationr
+    // Build veth pair configuration
     let builder = veth.clone().into_builder().mtu(mtu).up().address(container_mac.clone());
     
     link::add_link(builder.build()).await.map_err(|e| anyhow!("Failed to add link: {}", e))?;

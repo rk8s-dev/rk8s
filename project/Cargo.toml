@@ -6,7 +6,7 @@ members = [
     "libcni",
     "libcontainer", 
     "libflannel",
-    "libfuse-fs", 
+    "libfuse-fs", "libipam", 
     "rkb",
     "rkl",
 ]
