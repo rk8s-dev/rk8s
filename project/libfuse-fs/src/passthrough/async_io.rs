@@ -15,7 +15,7 @@ use std::vec::IntoIter;
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn open_inode(&self, inode: Inode, flags: i32) -> io::Result<File> {
         let data = self.inode_map.get(inode).await?;
-        data.refcount.fetch_add(1).await;
+       // data.refcount.fetch_add(1).await;
         if !is_safe_inode(data.mode) {
             Err(ebadf())
         } else {
@@ -346,6 +346,11 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     }
 
     async fn do_unlink(&self, parent: Inode, name: &CStr, flags: libc::c_int) -> io::Result<()> {
+        println!(
+            "do_unlink: parent = {}, name = {}",
+            parent,
+            name.to_str().unwrap_or("<invalid UTF-8>")
+        );
         let data = self.inode_map.get(parent).await?;
         let file = data.get_file()?;
         // Safe because this doesn't modify any memory and we check the return value.
@@ -1334,7 +1339,7 @@ impl Filesystem for PassthroughFs {
             //let (_uid, _gid) = set_creds(req.uid, req.gid)?;
 
             let flags = self.get_writeback_open_flags(flags as i32).await;
-            Self::create_file_excl(&dir_file, name, flags, mode & 0o777)?
+            Self::create_file_excl(&dir_file, name, flags, mode)?
         };
 
         let entry = self.do_lookup(parent, name).await?;
