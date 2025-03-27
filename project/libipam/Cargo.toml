@@ -1,0 +1,7 @@
+[package]
+name = "libipam"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cni-plugin = "0.2.1"

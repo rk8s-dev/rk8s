@@ -1,15 +1,18 @@
 [workspace]
 members = [
-    "distribution",
+    "distribution", 
+    "libbridge",
     "libcgroups", 
     "libcni",
     "libcontainer", 
+    "libflannel",
     "libfuse-fs", 
+    "libipam", 
     "rkb",
     "rkl",
 ]
 
-default-members = ["distribution", "rkl"]
+default-members = ["distribution", "rkl", "libbridge"]
 resolver = "1"
 
 [workspace.dependencies]
