@@ -1,0 +1,28 @@
+rust_library(
+    name = "libcgroups",
+    srcs = glob(
+        ["src/**/*.rs"],
+    ),
+    crate_root = "src/lib.rs",
+    deps = [
+        "//third-party:nix",
+        "//third-party:procfs",
+        "//third-party:oci-spec",
+        "//third-party:fixedbitset",
+        "//third-party:serde",
+        "//third-party:serde",
+        "//third-party:thiserror",
+        "//third-party:tracing",
+    ],
+    env = {
+        "CARGO_PKG_AUTHORS": "youki team",
+        "CARGO_PKG_DESCRIPTION": "Library for cgroup",
+        "CARGO_PKG_NAME": "libcgroups",
+        "CARGO_PKG_REPOSITORY": "https://github.com/containers/youki",
+        "CARGO_PKG_VERSION": "0.5.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "5",
+        "CARGO_PKG_VERSION_PATCH": "1",
+    },
+    features = ["default"],
+)
