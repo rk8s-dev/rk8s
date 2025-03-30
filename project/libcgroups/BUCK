@@ -4,6 +4,7 @@ rust_library(
         ["src/**/*.rs"],
     ),
     crate_root = "src/lib.rs",
+    edition = "2021",
     deps = [
         "//third-party:nix",
         "//third-party:procfs",
@@ -19,10 +20,11 @@ rust_library(
         "CARGO_PKG_DESCRIPTION": "Library for cgroup",
         "CARGO_PKG_NAME": "libcgroups",
         "CARGO_PKG_REPOSITORY": "https://github.com/containers/youki",
-        "CARGO_PKG_VERSION": "0.5.1",
+        "CARGO_PKG_VERSION": "0.5.3",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "5",
-        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PATCH": "3",
     },
-    features = ["default"],
+    visibility = ["PUBLIC"],
+    features = ["v1", "v2", "systemd"],
 )
