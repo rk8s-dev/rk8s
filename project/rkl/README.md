@@ -5,7 +5,7 @@
 
   
 
-> 该项目基于Youki(https://github.com/youki-dev/youki)实现CRI接口的相应功能，目前可以创建Pod，启动Pod，删除Pod，查看容器状态。
+> 该项目基于Youki(https://github.com/youki-dev/youki) 实现CRI接口的相应功能，目前可以创建Pod，启动Pod，删除Pod，查看容器状态。
 
   
 
@@ -147,7 +147,7 @@ containers:
 
 - name: main-container1
 
-image: /home/ich/rk8s/project/rkl/test/bundle-file/busybox1 # bundle path
+image: /home/ich/rk8s/project/rkl/test/bundle-file/busybox # bundle path
 
 args:				#the arguments of config.json file
 
@@ -259,7 +259,7 @@ Containers:
 
 "pid": 32411,
 
-"bundle": "/home/ich/rk8s/project/rkl/test/bundle-file/busybox1",
+"bundle": "/home/ich/rk8s/project/rkl/test/bundle-file/busybox",
 
 "annotations": {},
 
@@ -451,7 +451,7 @@ containers:
 
 - name: main-container1
 
-image: /home/ich/rk8s/project/rkl/test/bundle-file/busybox1 # bundle path
+image: /home/ich/rk8s/project/rkl/test/bundle-file/busybox # bundle path
 
 args:			#the arguments of config.json file
 
@@ -563,7 +563,7 @@ Containers:
 
 "pid": 32411,
 
-"bundle": "/home/ich/rk8s/project/rkl/test/bundle-file/busybox1",
+"bundle": "/home/ich/rk8s/project/rkl/test/bundle-file/busybox",
 
 "annotations": {},
 
