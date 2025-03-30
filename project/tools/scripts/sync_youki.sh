@@ -4,8 +4,6 @@ set -e
 cd "$(dirname "$0")/../../../"
 
 echo "Setting up Git configuration..."
-git config --local user.name "GitHub Actions"
-git config --local user.email "actions@github.com"
 
 echo "Fetching the latest youki repository..."
 if ! git remote | grep -q "youki"; then
@@ -65,7 +63,7 @@ patch -p1 < "./project/tools/scripts/container_init_process.patch" || {
     exit 1
 }
 
-git commit -m "Sync $module from youki"
+git commit -m "Sync $module from youki" -s -S
 echo "Changes committed for $module."
 
 echo "Sync youki complete."
