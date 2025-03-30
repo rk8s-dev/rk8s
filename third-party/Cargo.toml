@@ -17,37 +17,69 @@ path = "top/main.rs"
 [dependencies]
 async-trait = "0.1.86"
 axum = "0.8.1"
+bytes = "1.10.1"
+caps = "0.5.5"
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "serde",
+] }
+clap = { version = "4.5.32", features = ["derive"] }
+env_logger = "0.11.7"
+errno = { version = "0.3.10", optional = true }
+fastrand = "^2.3.0"
+fixedbitset = "0.5.7"
+fuse3 = { version = "0.8.1", features = ["tokio-runtime", "unprivileged"] }
+fuse-backend-rs = "0.12.1"
 futures = "0.3.31"
+futures-util = "0.3.31"
 hex = "0.4.3"
-regex = "1.11.1"
+libbpf-sys = { version = "1.5.0", optional = true }
+libc = "0.2.171"
+libseccomp = "0.3.0"
+log = "0.4.26"
+nc = "0.9.5"
+nix = { version = "0.29.0", features = [
+    "signal",
+    "user",
+    "fs",
+    "socket",
+    "sched",
+    "mount",
+    "mman",
+    "resource",
+    "dir",
+    "term",
+    "hostname",
+] }
+oci-spec = { version = "~0.7.1", features = ["runtime"] }
+once_cell = "1.21.2"
+openssl = { version = "0.10.71", features = ["vendored"] }
+prctl = "1.0.0"
+procfs = "0.17.0"
+protobuf = "=3.2.0"
+radix_trie = "0.2.1"
+rbpf = { version = "0.3.0", optional = true }
+regex = { version = "1.10.6", default-features = false, features = [
+    "std",
+    "unicode-perl",
+] }
+reqwest = { version = "0.12.7", features = ["json", "blocking"] }
+rust-criu = "0.4.0"
+safe-path = "0.1.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.138"
 sha2 = "0.10.8"
+thiserror = "2.0.12"
 tokio = { version = "1.44.0", features = ["full"] }
 tokio-util = { version = "0.7.13", features = ["io"] }
-uuid = { version = "1.15.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
-clap = { version = "4.5.32", features = ["derive"] }
-fuse3 = { version = "0.8.1", features = ["tokio-runtime", "unprivileged"] }
-reqwest = { version = "0.12.7", features = ["json", "blocking"] }
-radix_trie = "0.2.1"
-libc = "0.2.171"
-vm-memory = "0.16.1"
-fuse-backend-rs = "0.12.1"
-bytes = "1.10.1"
-futures-util = "0.3.31"
-log = "0.4.26"
-env_logger = "0.11.7"
-vmm-sys-util = "0.12.1"
-openssl = { version = "0.10.71", features = ["vendored"] }
-nix = { version = "0.28.0", features = ["signal", "user", "fs"] }
-procfs = "0.17.0"
-oci-spec = { version = "~0.7.1", features = ["runtime"] }
-fixedbitset = "0.5.7"
-serde = { version = "1.0", features = ["derive"] }
-rbpf = { version = "0.3.0", optional = true }
-libbpf-sys = { version = "1.5.0", optional = true }
-errno = { version = "0.3.10", optional = true }
-thiserror = "2.0.11"
 tracing = { version = "0.1.41", features = ["attributes"] }
+uuid = { version = "1.15.1", features = [
+    "v4",
+    "fast-rng",
+    "macro-diagnostics",
+] }
+vm-memory = "0.16.1"
+vmm-sys-util = "0.12.1"
 
 # Local patches - typically git references
 [patch.crates-io]
