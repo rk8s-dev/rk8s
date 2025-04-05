@@ -28,9 +28,9 @@ rust_library(
         "CARGO_PKG_DESCRIPTION": "FUSE Filesystem Library",
         "CARGO_PKG_NAME": "libfuse-fs",
         "CARGO_PKG_REPOSITORY": "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs",
-        "CARGO_PKG_VERSION": "0.1.0",
+        "CARGO_PKG_VERSION": "0.1.1",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PATCH": "1",
     },
 )
