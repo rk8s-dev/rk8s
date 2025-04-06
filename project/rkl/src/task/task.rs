@@ -101,9 +101,17 @@ impl TaskRunner {
         let mut file = File::open(path)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
-
-        let task: PodTask = serde_yaml::from_str(&contents)?;
-        Ok(TaskRunner { task, pause_pid: None,sandbox_config:None })
+    
+        let mut task: PodTask = serde_yaml::from_str(&contents)?;
+        
+        let pod_name = task.metadata.name.clone();
+    
+        for container in &mut task.spec.containers {
+            let original_name = container.name.clone();
+            container.name = format!("{}-{}", pod_name, original_name);
+        }
+    
+        Ok(TaskRunner { task, pause_pid: None, sandbox_config: None })
     }
 
     //get PodSandboxConfig
@@ -246,6 +254,7 @@ impl TaskRunner {
                     gid_mappings: vec![],
                     recursive_read_only: false,
                     image: None,
+                    image_sub_path:"".to_string(),
                 },
                 Mount {
                     container_path: "/dev".to_string(),
@@ -257,6 +266,7 @@ impl TaskRunner {
                     gid_mappings: vec![],
                     recursive_read_only: false,
                     image: None,
+                    image_sub_path:"".to_string(),
                 },
             ],
             devices: vec![],
@@ -269,6 +279,7 @@ impl TaskRunner {
             linux: None,
             windows: None,
             cdi_devices: vec![],
+            stop_signal:0,
         };
     
         Ok(CreateContainerRequest {
