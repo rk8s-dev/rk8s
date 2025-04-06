@@ -1494,6 +1494,7 @@ cargo.rust_library(
     crate_root = "vendor/clap-4.5.32/src/lib.rs",
     edition = "2021",
     features = [
+        "cargo",
         "color",
         "default",
         "derive",
@@ -1575,6 +1576,7 @@ cargo.rust_library(
     crate_root = "vendor/clap_builder-4.5.32/src/lib.rs",
     edition = "2021",
     features = [
+        "cargo",
         "color",
         "error-context",
         "help",
@@ -2230,6 +2232,7 @@ cargo.rust_library(
     features = [
         "default",
         "std",
+        "use_std",
     ],
     visibility = [],
 )
@@ -3738,6 +3741,42 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "http-0.2.12",
+    srcs = [
+        "vendor/http-0.2.12/src/byte_str.rs",
+        "vendor/http-0.2.12/src/convert.rs",
+        "vendor/http-0.2.12/src/error.rs",
+        "vendor/http-0.2.12/src/extensions.rs",
+        "vendor/http-0.2.12/src/header/map.rs",
+        "vendor/http-0.2.12/src/header/mod.rs",
+        "vendor/http-0.2.12/src/header/name.rs",
+        "vendor/http-0.2.12/src/header/value.rs",
+        "vendor/http-0.2.12/src/lib.rs",
+        "vendor/http-0.2.12/src/method.rs",
+        "vendor/http-0.2.12/src/request.rs",
+        "vendor/http-0.2.12/src/response.rs",
+        "vendor/http-0.2.12/src/status.rs",
+        "vendor/http-0.2.12/src/uri/authority.rs",
+        "vendor/http-0.2.12/src/uri/builder.rs",
+        "vendor/http-0.2.12/src/uri/mod.rs",
+        "vendor/http-0.2.12/src/uri/path.rs",
+        "vendor/http-0.2.12/src/uri/port.rs",
+        "vendor/http-0.2.12/src/uri/scheme.rs",
+        "vendor/http-0.2.12/src/uri/tests.rs",
+        "vendor/http-0.2.12/src/version.rs",
+    ],
+    crate = "http",
+    crate_root = "vendor/http-0.2.12/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+    deps = [
+        ":bytes-1.10.1",
+        ":fnv-1.0.7",
+        ":itoa-1.0.15",
+    ],
+)
+
+cargo.rust_library(
     name = "http-1.2.0",
     srcs = [
         "vendor/http-1.2.0/src/byte_str.rs",
@@ -3774,6 +3813,38 @@ cargo.rust_library(
         ":bytes-1.10.1",
         ":fnv-1.0.7",
         ":itoa-1.0.15",
+    ],
+)
+
+alias(
+    name = "http-body",
+    actual = ":http-body-0.4.6",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "http-body-0.4.6",
+    srcs = [
+        "vendor/http-body-0.4.6/src/collect.rs",
+        "vendor/http-body-0.4.6/src/combinators/box_body.rs",
+        "vendor/http-body-0.4.6/src/combinators/map_data.rs",
+        "vendor/http-body-0.4.6/src/combinators/map_err.rs",
+        "vendor/http-body-0.4.6/src/combinators/mod.rs",
+        "vendor/http-body-0.4.6/src/empty.rs",
+        "vendor/http-body-0.4.6/src/full.rs",
+        "vendor/http-body-0.4.6/src/lib.rs",
+        "vendor/http-body-0.4.6/src/limited.rs",
+        "vendor/http-body-0.4.6/src/next.rs",
+        "vendor/http-body-0.4.6/src/size_hint.rs",
+    ],
+    crate = "http_body",
+    crate_root = "vendor/http-body-0.4.6/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+    deps = [
+        ":bytes-1.10.1",
+        ":http-0.2.12",
+        ":pin-project-lite-0.2.16",
     ],
 )
 
@@ -3897,6 +3968,110 @@ cargo.rust_library(
     crate_root = "vendor/httpdate-1.0.3/src/lib.rs",
     edition = "2021",
     visibility = [],
+)
+
+alias(
+    name = "hyper",
+    actual = ":hyper-0.14.32",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "hyper-0.14.32",
+    srcs = [
+        "vendor/hyper-0.14.32/src/body/aggregate.rs",
+        "vendor/hyper-0.14.32/src/body/body.rs",
+        "vendor/hyper-0.14.32/src/body/length.rs",
+        "vendor/hyper-0.14.32/src/body/mod.rs",
+        "vendor/hyper-0.14.32/src/body/to_bytes.rs",
+        "vendor/hyper-0.14.32/src/cfg.rs",
+        "vendor/hyper-0.14.32/src/client/client.rs",
+        "vendor/hyper-0.14.32/src/client/conn.rs",
+        "vendor/hyper-0.14.32/src/client/conn/http1.rs",
+        "vendor/hyper-0.14.32/src/client/conn/http2.rs",
+        "vendor/hyper-0.14.32/src/client/connect/dns.rs",
+        "vendor/hyper-0.14.32/src/client/connect/http.rs",
+        "vendor/hyper-0.14.32/src/client/connect/mod.rs",
+        "vendor/hyper-0.14.32/src/client/dispatch.rs",
+        "vendor/hyper-0.14.32/src/client/mod.rs",
+        "vendor/hyper-0.14.32/src/client/pool.rs",
+        "vendor/hyper-0.14.32/src/client/service.rs",
+        "vendor/hyper-0.14.32/src/client/tests.rs",
+        "vendor/hyper-0.14.32/src/common/buf.rs",
+        "vendor/hyper-0.14.32/src/common/date.rs",
+        "vendor/hyper-0.14.32/src/common/drain.rs",
+        "vendor/hyper-0.14.32/src/common/exec.rs",
+        "vendor/hyper-0.14.32/src/common/io/mod.rs",
+        "vendor/hyper-0.14.32/src/common/io/rewind.rs",
+        "vendor/hyper-0.14.32/src/common/lazy.rs",
+        "vendor/hyper-0.14.32/src/common/mod.rs",
+        "vendor/hyper-0.14.32/src/common/sync_wrapper.rs",
+        "vendor/hyper-0.14.32/src/common/task.rs",
+        "vendor/hyper-0.14.32/src/common/watch.rs",
+        "vendor/hyper-0.14.32/src/error.rs",
+        "vendor/hyper-0.14.32/src/ext.rs",
+        "vendor/hyper-0.14.32/src/ext/h1_reason_phrase.rs",
+        "vendor/hyper-0.14.32/src/ffi/body.rs",
+        "vendor/hyper-0.14.32/src/ffi/client.rs",
+        "vendor/hyper-0.14.32/src/ffi/error.rs",
+        "vendor/hyper-0.14.32/src/ffi/http_types.rs",
+        "vendor/hyper-0.14.32/src/ffi/io.rs",
+        "vendor/hyper-0.14.32/src/ffi/macros.rs",
+        "vendor/hyper-0.14.32/src/ffi/mod.rs",
+        "vendor/hyper-0.14.32/src/ffi/task.rs",
+        "vendor/hyper-0.14.32/src/headers.rs",
+        "vendor/hyper-0.14.32/src/lib.rs",
+        "vendor/hyper-0.14.32/src/mock.rs",
+        "vendor/hyper-0.14.32/src/proto/h1/conn.rs",
+        "vendor/hyper-0.14.32/src/proto/h1/decode.rs",
+        "vendor/hyper-0.14.32/src/proto/h1/dispatch.rs",
+        "vendor/hyper-0.14.32/src/proto/h1/encode.rs",
+        "vendor/hyper-0.14.32/src/proto/h1/io.rs",
+        "vendor/hyper-0.14.32/src/proto/h1/mod.rs",
+        "vendor/hyper-0.14.32/src/proto/h1/role.rs",
+        "vendor/hyper-0.14.32/src/proto/h2/client.rs",
+        "vendor/hyper-0.14.32/src/proto/h2/mod.rs",
+        "vendor/hyper-0.14.32/src/proto/h2/ping.rs",
+        "vendor/hyper-0.14.32/src/proto/h2/server.rs",
+        "vendor/hyper-0.14.32/src/proto/mod.rs",
+        "vendor/hyper-0.14.32/src/rt.rs",
+        "vendor/hyper-0.14.32/src/server/accept.rs",
+        "vendor/hyper-0.14.32/src/server/conn.rs",
+        "vendor/hyper-0.14.32/src/server/conn/http1.rs",
+        "vendor/hyper-0.14.32/src/server/conn/http2.rs",
+        "vendor/hyper-0.14.32/src/server/mod.rs",
+        "vendor/hyper-0.14.32/src/server/server.rs",
+        "vendor/hyper-0.14.32/src/server/server_stub.rs",
+        "vendor/hyper-0.14.32/src/server/shutdown.rs",
+        "vendor/hyper-0.14.32/src/server/tcp.rs",
+        "vendor/hyper-0.14.32/src/service/http.rs",
+        "vendor/hyper-0.14.32/src/service/make.rs",
+        "vendor/hyper-0.14.32/src/service/mod.rs",
+        "vendor/hyper-0.14.32/src/service/oneshot.rs",
+        "vendor/hyper-0.14.32/src/service/util.rs",
+        "vendor/hyper-0.14.32/src/upgrade.rs",
+    ],
+    crate = "hyper",
+    crate_root = "vendor/hyper-0.14.32/src/lib.rs",
+    edition = "2018",
+    features = ["default"],
+    visibility = [],
+    deps = [
+        ":bytes-1.10.1",
+        ":futures-channel-0.3.31",
+        ":futures-core-0.3.31",
+        ":futures-util-0.3.31",
+        ":http-0.2.12",
+        ":http-body-0.4.6",
+        ":httparse-1.10.1",
+        ":httpdate-1.0.3",
+        ":itoa-1.0.15",
+        ":pin-project-lite-0.2.16",
+        ":tokio-1.44.0",
+        ":tower-service-0.3.3",
+        ":tracing-0.1.41",
+        ":want-0.3.1",
+    ],
 )
 
 cargo.rust_library(
@@ -4025,6 +4200,25 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "hyper-timeout-0.5.2",
+    srcs = [
+        "vendor/hyper-timeout-0.5.2/src/lib.rs",
+        "vendor/hyper-timeout-0.5.2/src/stream.rs",
+    ],
+    crate = "hyper_timeout",
+    crate_root = "vendor/hyper-timeout-0.5.2/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+    deps = [
+        ":hyper-1.6.0",
+        ":hyper-util-0.1.10",
+        ":pin-project-lite-0.2.16",
+        ":tokio-1.44.0",
+        ":tower-service-0.3.3",
+    ],
+)
+
+cargo.rust_library(
     name = "hyper-tls-0.6.0",
     srcs = [
         "vendor/hyper-tls-0.6.0/src/client.rs",
@@ -4089,6 +4283,7 @@ cargo.rust_library(
         "http1",
         "http2",
         "server",
+        "server-auto",
         "service",
         "tokio",
     ],
@@ -4974,6 +5169,70 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "itertools-0.12.1",
+    srcs = [
+        "vendor/itertools-0.12.1/src/adaptors/coalesce.rs",
+        "vendor/itertools-0.12.1/src/adaptors/map.rs",
+        "vendor/itertools-0.12.1/src/adaptors/mod.rs",
+        "vendor/itertools-0.12.1/src/adaptors/multi_product.rs",
+        "vendor/itertools-0.12.1/src/combinations.rs",
+        "vendor/itertools-0.12.1/src/combinations_with_replacement.rs",
+        "vendor/itertools-0.12.1/src/concat_impl.rs",
+        "vendor/itertools-0.12.1/src/cons_tuples_impl.rs",
+        "vendor/itertools-0.12.1/src/diff.rs",
+        "vendor/itertools-0.12.1/src/duplicates_impl.rs",
+        "vendor/itertools-0.12.1/src/either_or_both.rs",
+        "vendor/itertools-0.12.1/src/exactly_one_err.rs",
+        "vendor/itertools-0.12.1/src/extrema_set.rs",
+        "vendor/itertools-0.12.1/src/flatten_ok.rs",
+        "vendor/itertools-0.12.1/src/format.rs",
+        "vendor/itertools-0.12.1/src/free.rs",
+        "vendor/itertools-0.12.1/src/group_map.rs",
+        "vendor/itertools-0.12.1/src/groupbylazy.rs",
+        "vendor/itertools-0.12.1/src/grouping_map.rs",
+        "vendor/itertools-0.12.1/src/impl_macros.rs",
+        "vendor/itertools-0.12.1/src/intersperse.rs",
+        "vendor/itertools-0.12.1/src/k_smallest.rs",
+        "vendor/itertools-0.12.1/src/kmerge_impl.rs",
+        "vendor/itertools-0.12.1/src/lazy_buffer.rs",
+        "vendor/itertools-0.12.1/src/lib.rs",
+        "vendor/itertools-0.12.1/src/merge_join.rs",
+        "vendor/itertools-0.12.1/src/minmax.rs",
+        "vendor/itertools-0.12.1/src/multipeek_impl.rs",
+        "vendor/itertools-0.12.1/src/pad_tail.rs",
+        "vendor/itertools-0.12.1/src/peek_nth.rs",
+        "vendor/itertools-0.12.1/src/peeking_take_while.rs",
+        "vendor/itertools-0.12.1/src/permutations.rs",
+        "vendor/itertools-0.12.1/src/powerset.rs",
+        "vendor/itertools-0.12.1/src/process_results_impl.rs",
+        "vendor/itertools-0.12.1/src/put_back_n_impl.rs",
+        "vendor/itertools-0.12.1/src/rciter_impl.rs",
+        "vendor/itertools-0.12.1/src/repeatn.rs",
+        "vendor/itertools-0.12.1/src/size_hint.rs",
+        "vendor/itertools-0.12.1/src/sources.rs",
+        "vendor/itertools-0.12.1/src/take_while_inclusive.rs",
+        "vendor/itertools-0.12.1/src/tee.rs",
+        "vendor/itertools-0.12.1/src/tuple_impl.rs",
+        "vendor/itertools-0.12.1/src/unique_impl.rs",
+        "vendor/itertools-0.12.1/src/unziptuple.rs",
+        "vendor/itertools-0.12.1/src/with_position.rs",
+        "vendor/itertools-0.12.1/src/zip_eq_impl.rs",
+        "vendor/itertools-0.12.1/src/zip_longest.rs",
+        "vendor/itertools-0.12.1/src/ziptuple.rs",
+    ],
+    crate = "itertools",
+    crate_root = "vendor/itertools-0.12.1/src/lib.rs",
+    edition = "2018",
+    features = [
+        "default",
+        "use_alloc",
+        "use_std",
+    ],
+    visibility = [],
+    deps = [":either-1.15.0"],
+)
+
+cargo.rust_library(
     name = "itoa-1.0.15",
     srcs = [
         "vendor/itoa-1.0.15/src/lib.rs",
@@ -5523,6 +5782,41 @@ buildscript_run(
         "std",
     ],
     version = "0.2.171",
+)
+
+alias(
+    name = "liboci-cli",
+    actual = ":liboci-cli-0.5.3",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "liboci-cli-0.5.3",
+    srcs = [
+        "vendor/liboci-cli-0.5.3/src/checkpoint.rs",
+        "vendor/liboci-cli-0.5.3/src/create.rs",
+        "vendor/liboci-cli-0.5.3/src/delete.rs",
+        "vendor/liboci-cli-0.5.3/src/events.rs",
+        "vendor/liboci-cli-0.5.3/src/exec.rs",
+        "vendor/liboci-cli-0.5.3/src/features.rs",
+        "vendor/liboci-cli-0.5.3/src/info.rs",
+        "vendor/liboci-cli-0.5.3/src/kill.rs",
+        "vendor/liboci-cli-0.5.3/src/lib.rs",
+        "vendor/liboci-cli-0.5.3/src/list.rs",
+        "vendor/liboci-cli-0.5.3/src/pause.rs",
+        "vendor/liboci-cli-0.5.3/src/ps.rs",
+        "vendor/liboci-cli-0.5.3/src/resume.rs",
+        "vendor/liboci-cli-0.5.3/src/run.rs",
+        "vendor/liboci-cli-0.5.3/src/spec.rs",
+        "vendor/liboci-cli-0.5.3/src/start.rs",
+        "vendor/liboci-cli-0.5.3/src/state.rs",
+        "vendor/liboci-cli-0.5.3/src/update.rs",
+    ],
+    crate = "liboci_cli",
+    crate_root = "vendor/liboci-cli-0.5.3/src/lib.rs",
+    edition = "2021",
+    visibility = [],
+    deps = [":clap-4.5.32"],
 )
 
 alias(
@@ -6518,6 +6812,16 @@ cargo.rust_library(
         "std",
     ],
     visibility = [],
+)
+
+cargo.rust_library(
+    name = "matchers-0.1.0",
+    srcs = ["vendor/matchers-0.1.0/src/lib.rs"],
+    crate = "matchers",
+    crate_root = "vendor/matchers-0.1.0/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+    deps = [":regex-automata-0.1.10"],
 )
 
 cargo.rust_library(
@@ -10226,6 +10530,36 @@ buildscript_run(
         "user",
     ],
     version = "0.29.0",
+)
+
+cargo.rust_library(
+    name = "nu-ansi-term-0.46.0",
+    srcs = [
+        "vendor/nu-ansi-term-0.46.0/src/ansi.rs",
+        "vendor/nu-ansi-term-0.46.0/src/debug.rs",
+        "vendor/nu-ansi-term-0.46.0/src/difference.rs",
+        "vendor/nu-ansi-term-0.46.0/src/display.rs",
+        "vendor/nu-ansi-term-0.46.0/src/gradient.rs",
+        "vendor/nu-ansi-term-0.46.0/src/lib.rs",
+        "vendor/nu-ansi-term-0.46.0/src/rgb.rs",
+        "vendor/nu-ansi-term-0.46.0/src/style.rs",
+        "vendor/nu-ansi-term-0.46.0/src/util.rs",
+        "vendor/nu-ansi-term-0.46.0/src/windows.rs",
+        "vendor/nu-ansi-term-0.46.0/src/write.rs",
+    ],
+    crate = "nu_ansi_term",
+    crate_root = "vendor/nu-ansi-term-0.46.0/src/lib.rs",
+    edition = "2018",
+    platform = {
+        "windows-gnu": dict(
+            deps = [":winapi-0.3.9"],
+        ),
+        "windows-msvc": dict(
+            deps = [":winapi-0.3.9"],
+        ),
+    },
+    visibility = [],
+    deps = [":overload-0.1.1"],
 )
 
 cargo.rust_library(
@@ -14271,6 +14605,20 @@ buildscript_run(
 )
 
 cargo.rust_library(
+    name = "overload-0.1.1",
+    srcs = [
+        "vendor/overload-0.1.1/src/assignment.rs",
+        "vendor/overload-0.1.1/src/binary.rs",
+        "vendor/overload-0.1.1/src/lib.rs",
+        "vendor/overload-0.1.1/src/unary.rs",
+    ],
+    crate = "overload",
+    crate_root = "vendor/overload-0.1.1/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+)
+
+cargo.rust_library(
     name = "parking-2.2.1",
     srcs = ["vendor/parking-2.2.1/src/lib.rs"],
     crate = "parking",
@@ -14504,6 +14852,40 @@ cargo.rust_library(
         ":memchr-2.7.4",
         ":thiserror-2.0.12",
         ":ucd-trie-0.1.7",
+    ],
+)
+
+cargo.rust_library(
+    name = "pin-project-1.1.10",
+    srcs = ["vendor/pin-project-1.1.10/src/lib.rs"],
+    crate = "pin_project",
+    crate_root = "vendor/pin-project-1.1.10/src/lib.rs",
+    edition = "2021",
+    visibility = [],
+    deps = [":pin-project-internal-1.1.10"],
+)
+
+cargo.rust_library(
+    name = "pin-project-internal-1.1.10",
+    srcs = [
+        "vendor/pin-project-internal-1.1.10/src/error.rs",
+        "vendor/pin-project-internal-1.1.10/src/lib.rs",
+        "vendor/pin-project-internal-1.1.10/src/pin_project/args.rs",
+        "vendor/pin-project-internal-1.1.10/src/pin_project/attribute.rs",
+        "vendor/pin-project-internal-1.1.10/src/pin_project/derive.rs",
+        "vendor/pin-project-internal-1.1.10/src/pin_project/mod.rs",
+        "vendor/pin-project-internal-1.1.10/src/pinned_drop.rs",
+        "vendor/pin-project-internal-1.1.10/src/utils.rs",
+    ],
+    crate = "pin_project_internal",
+    crate_root = "vendor/pin-project-internal-1.1.10/src/lib.rs",
+    edition = "2021",
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":proc-macro2-1.0.94",
+        ":quote-1.0.39",
+        ":syn-2.0.99",
     ],
 )
 
@@ -14931,6 +15313,146 @@ cargo.rust_library(
         ":chrono-0.4.40",
         ":hex-0.4.3",
     ],
+)
+
+cargo.rust_library(
+    name = "prost-0.12.6",
+    srcs = [
+        "vendor/prost-0.12.6/README.md",
+        "vendor/prost-0.12.6/src/encoding.rs",
+        "vendor/prost-0.12.6/src/error.rs",
+        "vendor/prost-0.12.6/src/lib.rs",
+        "vendor/prost-0.12.6/src/message.rs",
+        "vendor/prost-0.12.6/src/name.rs",
+        "vendor/prost-0.12.6/src/types.rs",
+    ],
+    crate = "prost",
+    crate_root = "vendor/prost-0.12.6/src/lib.rs",
+    edition = "2021",
+    features = [
+        "derive",
+        "prost-derive",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":bytes-1.10.1",
+        ":prost-derive-0.12.6",
+    ],
+)
+
+alias(
+    name = "prost",
+    actual = ":prost-0.13.5",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "prost-0.13.5",
+    srcs = [
+        "vendor/prost-0.13.5/README.md",
+        "vendor/prost-0.13.5/src/encoding.rs",
+        "vendor/prost-0.13.5/src/encoding/length_delimiter.rs",
+        "vendor/prost-0.13.5/src/encoding/varint.rs",
+        "vendor/prost-0.13.5/src/encoding/wire_type.rs",
+        "vendor/prost-0.13.5/src/error.rs",
+        "vendor/prost-0.13.5/src/lib.rs",
+        "vendor/prost-0.13.5/src/message.rs",
+        "vendor/prost-0.13.5/src/name.rs",
+        "vendor/prost-0.13.5/src/types.rs",
+    ],
+    crate = "prost",
+    crate_root = "vendor/prost-0.13.5/src/lib.rs",
+    edition = "2021",
+    features = [
+        "default",
+        "derive",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":bytes-1.10.1",
+        ":prost-derive-0.13.5",
+    ],
+)
+
+cargo.rust_library(
+    name = "prost-derive-0.12.6",
+    srcs = [
+        "vendor/prost-derive-0.12.6/src/field/group.rs",
+        "vendor/prost-derive-0.12.6/src/field/map.rs",
+        "vendor/prost-derive-0.12.6/src/field/message.rs",
+        "vendor/prost-derive-0.12.6/src/field/mod.rs",
+        "vendor/prost-derive-0.12.6/src/field/oneof.rs",
+        "vendor/prost-derive-0.12.6/src/field/scalar.rs",
+        "vendor/prost-derive-0.12.6/src/lib.rs",
+    ],
+    crate = "prost_derive",
+    crate_root = "vendor/prost-derive-0.12.6/src/lib.rs",
+    edition = "2021",
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":anyhow-1.0.97",
+        ":itertools-0.12.1",
+        ":proc-macro2-1.0.94",
+        ":quote-1.0.39",
+        ":syn-2.0.99",
+    ],
+)
+
+cargo.rust_library(
+    name = "prost-derive-0.13.5",
+    srcs = [
+        "vendor/prost-derive-0.13.5/src/field/group.rs",
+        "vendor/prost-derive-0.13.5/src/field/map.rs",
+        "vendor/prost-derive-0.13.5/src/field/message.rs",
+        "vendor/prost-derive-0.13.5/src/field/mod.rs",
+        "vendor/prost-derive-0.13.5/src/field/oneof.rs",
+        "vendor/prost-derive-0.13.5/src/field/scalar.rs",
+        "vendor/prost-derive-0.13.5/src/lib.rs",
+    ],
+    crate = "prost_derive",
+    crate_root = "vendor/prost-derive-0.13.5/src/lib.rs",
+    edition = "2021",
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":anyhow-1.0.97",
+        ":itertools-0.12.1",
+        ":proc-macro2-1.0.94",
+        ":quote-1.0.39",
+        ":syn-2.0.99",
+    ],
+)
+
+alias(
+    name = "prost-types",
+    actual = ":prost-types-0.12.6",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "prost-types-0.12.6",
+    srcs = [
+        "vendor/prost-types-0.12.6/src/any.rs",
+        "vendor/prost-types-0.12.6/src/compiler.rs",
+        "vendor/prost-types-0.12.6/src/datetime.rs",
+        "vendor/prost-types-0.12.6/src/duration.rs",
+        "vendor/prost-types-0.12.6/src/lib.rs",
+        "vendor/prost-types-0.12.6/src/protobuf.rs",
+        "vendor/prost-types-0.12.6/src/timestamp.rs",
+        "vendor/prost-types-0.12.6/src/type_url.rs",
+    ],
+    crate = "prost_types",
+    crate_root = "vendor/prost-types-0.12.6/src/lib.rs",
+    edition = "2021",
+    features = [
+        "default",
+        "std",
+    ],
+    visibility = [],
+    deps = [":prost-0.12.6"],
 )
 
 alias(
@@ -15593,6 +16115,40 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "regex-automata-0.1.10",
+    srcs = [
+        "vendor/regex-automata-0.1.10/src/byteorder.rs",
+        "vendor/regex-automata-0.1.10/src/classes.rs",
+        "vendor/regex-automata-0.1.10/src/codegen.rs",
+        "vendor/regex-automata-0.1.10/src/dense.rs",
+        "vendor/regex-automata-0.1.10/src/determinize.rs",
+        "vendor/regex-automata-0.1.10/src/dfa.rs",
+        "vendor/regex-automata-0.1.10/src/error.rs",
+        "vendor/regex-automata-0.1.10/src/lib.rs",
+        "vendor/regex-automata-0.1.10/src/minimize.rs",
+        "vendor/regex-automata-0.1.10/src/nfa/compiler.rs",
+        "vendor/regex-automata-0.1.10/src/nfa/map.rs",
+        "vendor/regex-automata-0.1.10/src/nfa/mod.rs",
+        "vendor/regex-automata-0.1.10/src/nfa/range_trie.rs",
+        "vendor/regex-automata-0.1.10/src/regex.rs",
+        "vendor/regex-automata-0.1.10/src/sparse.rs",
+        "vendor/regex-automata-0.1.10/src/sparse_set.rs",
+        "vendor/regex-automata-0.1.10/src/state_id.rs",
+        "vendor/regex-automata-0.1.10/src/transducer.rs",
+    ],
+    crate = "regex_automata",
+    crate_root = "vendor/regex-automata-0.1.10/src/lib.rs",
+    edition = "2015",
+    features = [
+        "default",
+        "regex-syntax",
+        "std",
+    ],
+    visibility = [],
+    deps = [":regex-syntax-0.6.29"],
+)
+
+cargo.rust_library(
     name = "regex-automata-0.4.9",
     srcs = [
         "vendor/regex-automata-0.4.9/src/dfa/accel.rs",
@@ -15699,6 +16255,58 @@ cargo.rust_library(
         ":memchr-2.7.4",
         ":regex-syntax-0.8.5",
     ],
+)
+
+cargo.rust_library(
+    name = "regex-syntax-0.6.29",
+    srcs = [
+        "vendor/regex-syntax-0.6.29/src/ast/mod.rs",
+        "vendor/regex-syntax-0.6.29/src/ast/parse.rs",
+        "vendor/regex-syntax-0.6.29/src/ast/print.rs",
+        "vendor/regex-syntax-0.6.29/src/ast/visitor.rs",
+        "vendor/regex-syntax-0.6.29/src/either.rs",
+        "vendor/regex-syntax-0.6.29/src/error.rs",
+        "vendor/regex-syntax-0.6.29/src/hir/interval.rs",
+        "vendor/regex-syntax-0.6.29/src/hir/literal/mod.rs",
+        "vendor/regex-syntax-0.6.29/src/hir/mod.rs",
+        "vendor/regex-syntax-0.6.29/src/hir/print.rs",
+        "vendor/regex-syntax-0.6.29/src/hir/translate.rs",
+        "vendor/regex-syntax-0.6.29/src/hir/visitor.rs",
+        "vendor/regex-syntax-0.6.29/src/lib.rs",
+        "vendor/regex-syntax-0.6.29/src/parser.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/age.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/case_folding_simple.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/general_category.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/grapheme_cluster_break.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/mod.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/perl_decimal.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/perl_space.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/perl_word.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/property_bool.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/property_names.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/property_values.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/script.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/script_extension.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/sentence_break.rs",
+        "vendor/regex-syntax-0.6.29/src/unicode_tables/word_break.rs",
+        "vendor/regex-syntax-0.6.29/src/utf8.rs",
+    ],
+    crate = "regex_syntax",
+    crate_root = "vendor/regex-syntax-0.6.29/src/lib.rs",
+    edition = "2018",
+    features = [
+        "default",
+        "unicode",
+        "unicode-age",
+        "unicode-bool",
+        "unicode-case",
+        "unicode-gencat",
+        "unicode-perl",
+        "unicode-script",
+        "unicode-segment",
+    ],
+    visibility = [],
 )
 
 cargo.rust_library(
@@ -19014,6 +19622,53 @@ cargo.rust_library(
 )
 
 alias(
+    name = "serde_yaml",
+    actual = ":serde_yaml-0.9.34+deprecated",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "serde_yaml-0.9.34+deprecated",
+    srcs = [
+        "vendor/serde_yaml-0.9.34+deprecated/src/de.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/error.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/lib.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/libyaml/cstr.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/libyaml/emitter.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/libyaml/error.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/libyaml/mod.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/libyaml/parser.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/libyaml/tag.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/libyaml/util.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/loader.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/mapping.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/number.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/path.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/ser.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/value/de.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/value/debug.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/value/from.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/value/index.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/value/mod.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/value/partial_eq.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/value/ser.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/value/tagged.rs",
+        "vendor/serde_yaml-0.9.34+deprecated/src/with.rs",
+    ],
+    crate = "serde_yaml",
+    crate_root = "vendor/serde_yaml-0.9.34+deprecated/src/lib.rs",
+    edition = "2021",
+    visibility = [],
+    deps = [
+        ":indexmap-2.8.0",
+        ":itoa-1.0.15",
+        ":ryu-1.0.20",
+        ":serde-1.0.218",
+        ":unsafe-libyaml-0.2.11",
+    ],
+)
+
+alias(
     name = "sha2",
     actual = ":sha2-0.10.8",
     visibility = ["PUBLIC"],
@@ -19068,6 +19723,35 @@ cargo.rust_library(
         ":cfg-if-1.0.0",
         ":digest-0.10.7",
     ],
+)
+
+cargo.rust_library(
+    name = "sharded-slab-0.1.7",
+    srcs = [
+        "vendor/sharded-slab-0.1.7/src/cfg.rs",
+        "vendor/sharded-slab-0.1.7/src/clear.rs",
+        "vendor/sharded-slab-0.1.7/src/implementation.rs",
+        "vendor/sharded-slab-0.1.7/src/iter.rs",
+        "vendor/sharded-slab-0.1.7/src/lib.rs",
+        "vendor/sharded-slab-0.1.7/src/macros.rs",
+        "vendor/sharded-slab-0.1.7/src/page/mod.rs",
+        "vendor/sharded-slab-0.1.7/src/page/slot.rs",
+        "vendor/sharded-slab-0.1.7/src/page/stack.rs",
+        "vendor/sharded-slab-0.1.7/src/pool.rs",
+        "vendor/sharded-slab-0.1.7/src/shard.rs",
+        "vendor/sharded-slab-0.1.7/src/sync.rs",
+        "vendor/sharded-slab-0.1.7/src/tests/custom_config.rs",
+        "vendor/sharded-slab-0.1.7/src/tests/loom_pool.rs",
+        "vendor/sharded-slab-0.1.7/src/tests/loom_slab.rs",
+        "vendor/sharded-slab-0.1.7/src/tests/mod.rs",
+        "vendor/sharded-slab-0.1.7/src/tests/properties.rs",
+        "vendor/sharded-slab-0.1.7/src/tid.rs",
+    ],
+    crate = "sharded_slab",
+    crate_root = "vendor/sharded-slab-0.1.7/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+    deps = [":lazy_static-1.5.0"],
 )
 
 cargo.rust_library(
@@ -19835,6 +20519,24 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "thread_local-1.1.8",
+    srcs = [
+        "vendor/thread_local-1.1.8/src/cached.rs",
+        "vendor/thread_local-1.1.8/src/lib.rs",
+        "vendor/thread_local-1.1.8/src/thread_id.rs",
+        "vendor/thread_local-1.1.8/src/unreachable.rs",
+    ],
+    crate = "thread_local",
+    crate_root = "vendor/thread_local-1.1.8/src/lib.rs",
+    edition = "2021",
+    visibility = [],
+    deps = [
+        ":cfg-if-1.0.0",
+        ":once_cell-1.21.3",
+    ],
+)
+
+cargo.rust_library(
     name = "tinystr-0.7.6",
     srcs = [
         "vendor/tinystr-0.7.6/src/ascii.rs",
@@ -20368,6 +21070,67 @@ cargo.rust_library(
     ],
 )
 
+cargo.rust_library(
+    name = "tokio-stream-0.1.17",
+    srcs = [
+        "vendor/tokio-stream-0.1.17/src/empty.rs",
+        "vendor/tokio-stream-0.1.17/src/iter.rs",
+        "vendor/tokio-stream-0.1.17/src/lib.rs",
+        "vendor/tokio-stream-0.1.17/src/macros.rs",
+        "vendor/tokio-stream-0.1.17/src/once.rs",
+        "vendor/tokio-stream-0.1.17/src/pending.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_close.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/all.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/any.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/chain.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/chunks_timeout.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/collect.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/filter.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/filter_map.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/fold.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/fuse.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/map.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/map_while.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/merge.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/next.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/peekable.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/skip.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/skip_while.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/take.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/take_while.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/then.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/throttle.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/timeout.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/timeout_repeating.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_ext/try_next.rs",
+        "vendor/tokio-stream-0.1.17/src/stream_map.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/broadcast.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/interval.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/lines.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/mpsc_bounded.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/mpsc_unbounded.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/read_dir.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/signal_unix.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/signal_windows.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/split.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/tcp_listener.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/unix_listener.rs",
+        "vendor/tokio-stream-0.1.17/src/wrappers/watch.rs",
+    ],
+    crate = "tokio_stream",
+    crate_root = "vendor/tokio-stream-0.1.17/src/lib.rs",
+    edition = "2021",
+    features = ["net"],
+    visibility = [],
+    deps = [
+        ":futures-core-0.3.31",
+        ":pin-project-lite-0.2.16",
+        ":tokio-1.44.0",
+    ],
+)
+
 alias(
     name = "tokio-util",
     actual = ":tokio-util-0.7.13",
@@ -20445,6 +21208,125 @@ cargo.rust_library(
         ":futures-sink-0.3.31",
         ":pin-project-lite-0.2.16",
         ":tokio-1.44.0",
+    ],
+)
+
+alias(
+    name = "tonic",
+    actual = ":tonic-0.13.0",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "tonic-0.13.0",
+    srcs = [
+        "vendor/tonic-0.13.0/src/body.rs",
+        "vendor/tonic-0.13.0/src/client/grpc.rs",
+        "vendor/tonic-0.13.0/src/client/mod.rs",
+        "vendor/tonic-0.13.0/src/client/service.rs",
+        "vendor/tonic-0.13.0/src/codec/buffer.rs",
+        "vendor/tonic-0.13.0/src/codec/compression.rs",
+        "vendor/tonic-0.13.0/src/codec/decode.rs",
+        "vendor/tonic-0.13.0/src/codec/encode.rs",
+        "vendor/tonic-0.13.0/src/codec/mod.rs",
+        "vendor/tonic-0.13.0/src/codec/prost.rs",
+        "vendor/tonic-0.13.0/src/codegen.rs",
+        "vendor/tonic-0.13.0/src/extensions.rs",
+        "vendor/tonic-0.13.0/src/lib.rs",
+        "vendor/tonic-0.13.0/src/macros.rs",
+        "vendor/tonic-0.13.0/src/metadata/encoding.rs",
+        "vendor/tonic-0.13.0/src/metadata/key.rs",
+        "vendor/tonic-0.13.0/src/metadata/map.rs",
+        "vendor/tonic-0.13.0/src/metadata/mod.rs",
+        "vendor/tonic-0.13.0/src/metadata/value.rs",
+        "vendor/tonic-0.13.0/src/request.rs",
+        "vendor/tonic-0.13.0/src/response.rs",
+        "vendor/tonic-0.13.0/src/server/grpc.rs",
+        "vendor/tonic-0.13.0/src/server/mod.rs",
+        "vendor/tonic-0.13.0/src/server/service.rs",
+        "vendor/tonic-0.13.0/src/service/interceptor.rs",
+        "vendor/tonic-0.13.0/src/service/layered.rs",
+        "vendor/tonic-0.13.0/src/service/mod.rs",
+        "vendor/tonic-0.13.0/src/service/recover_error.rs",
+        "vendor/tonic-0.13.0/src/service/router.rs",
+        "vendor/tonic-0.13.0/src/status.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/endpoint.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/mod.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/add_origin.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/connection.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/connector.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/discover.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/executor.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/io.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/mod.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/reconnect.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/tls.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/service/user_agent.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/tls.rs",
+        "vendor/tonic-0.13.0/src/transport/channel/uds_connector.rs",
+        "vendor/tonic-0.13.0/src/transport/error.rs",
+        "vendor/tonic-0.13.0/src/transport/mod.rs",
+        "vendor/tonic-0.13.0/src/transport/server/conn.rs",
+        "vendor/tonic-0.13.0/src/transport/server/incoming.rs",
+        "vendor/tonic-0.13.0/src/transport/server/io_stream.rs",
+        "vendor/tonic-0.13.0/src/transport/server/mod.rs",
+        "vendor/tonic-0.13.0/src/transport/server/service/io.rs",
+        "vendor/tonic-0.13.0/src/transport/server/service/mod.rs",
+        "vendor/tonic-0.13.0/src/transport/server/service/tls.rs",
+        "vendor/tonic-0.13.0/src/transport/server/tls.rs",
+        "vendor/tonic-0.13.0/src/transport/server/unix.rs",
+        "vendor/tonic-0.13.0/src/transport/service/grpc_timeout.rs",
+        "vendor/tonic-0.13.0/src/transport/service/mod.rs",
+        "vendor/tonic-0.13.0/src/transport/service/tls.rs",
+        "vendor/tonic-0.13.0/src/transport/tls.rs",
+        "vendor/tonic-0.13.0/src/util.rs",
+    ],
+    crate = "tonic",
+    crate_root = "vendor/tonic-0.13.0/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_MANIFEST_DIR": "vendor/tonic-0.13.0",
+        "CARGO_PKG_AUTHORS": "Lucio Franco <luciofranco14@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "A gRPC over HTTP/2 implementation focused on high performance, interoperability, and flexibility.\n",
+        "CARGO_PKG_NAME": "tonic",
+        "CARGO_PKG_REPOSITORY": "https://github.com/hyperium/tonic",
+        "CARGO_PKG_VERSION": "0.13.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "13",
+        "CARGO_PKG_VERSION_PATCH": "0",
+    },
+    features = [
+        "channel",
+        "codegen",
+        "default",
+        "prost",
+        "router",
+        "server",
+        "transport",
+    ],
+    visibility = [],
+    deps = [
+        ":async-trait-0.1.87",
+        ":axum-0.8.1",
+        ":base64-0.22.1",
+        ":bytes-1.10.1",
+        ":h2-0.4.8",
+        ":http-1.2.0",
+        ":http-body-1.0.1",
+        ":http-body-util-0.1.2",
+        ":hyper-1.6.0",
+        ":hyper-timeout-0.5.2",
+        ":hyper-util-0.1.10",
+        ":percent-encoding-2.3.1",
+        ":pin-project-1.1.10",
+        ":prost-0.13.5",
+        ":socket2-0.5.8",
+        ":tokio-1.44.0",
+        ":tokio-stream-0.1.17",
+        ":tower-0.5.2",
+        ":tower-layer-0.3.3",
+        ":tower-service-0.3.3",
+        ":tracing-0.1.41",
     ],
 )
 
@@ -20558,14 +21440,23 @@ cargo.rust_library(
     edition = "2018",
     features = [
         "__common",
+        "balance",
+        "buffer",
+        "discover",
         "futures-core",
         "futures-util",
+        "indexmap",
+        "limit",
+        "load",
         "log",
         "make",
         "pin-project-lite",
+        "ready-cache",
+        "slab",
         "sync_wrapper",
         "timeout",
         "tokio",
+        "tokio-util",
         "tracing",
         "util",
     ],
@@ -20573,9 +21464,12 @@ cargo.rust_library(
     deps = [
         ":futures-core-0.3.31",
         ":futures-util-0.3.31",
+        ":indexmap-2.8.0",
         ":pin-project-lite-0.2.16",
+        ":slab-0.4.9",
         ":sync_wrapper-1.0.2",
         ":tokio-1.44.0",
+        ":tokio-util-0.7.13",
         ":tower-layer-0.3.3",
         ":tower-service-0.3.3",
         ":tracing-0.1.41",
@@ -20685,11 +21579,166 @@ cargo.rust_library(
     crate_root = "vendor/tracing-core-0.1.33/src/lib.rs",
     edition = "2018",
     features = [
+        "default",
         "once_cell",
         "std",
     ],
     visibility = [],
     deps = [":once_cell-1.21.3"],
+)
+
+alias(
+    name = "tracing-journald",
+    actual = ":tracing-journald-0.3.1",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "tracing-journald-0.3.1",
+    srcs = [
+        "vendor/tracing-journald-0.3.1/src/lib.rs",
+        "vendor/tracing-journald-0.3.1/src/memfd.rs",
+        "vendor/tracing-journald-0.3.1/src/socket.rs",
+    ],
+    crate = "tracing_journald",
+    crate_root = "vendor/tracing-journald-0.3.1/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+    deps = [
+        ":libc-0.2.171",
+        ":tracing-core-0.1.33",
+        ":tracing-subscriber-0.3.19",
+    ],
+)
+
+cargo.rust_library(
+    name = "tracing-log-0.2.0",
+    srcs = [
+        "vendor/tracing-log-0.2.0/src/interest_cache.rs",
+        "vendor/tracing-log-0.2.0/src/lib.rs",
+        "vendor/tracing-log-0.2.0/src/log_tracer.rs",
+    ],
+    crate = "tracing_log",
+    crate_root = "vendor/tracing-log-0.2.0/src/lib.rs",
+    edition = "2018",
+    features = [
+        "log-tracer",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":log-0.4.26",
+        ":once_cell-1.21.3",
+        ":tracing-core-0.1.33",
+    ],
+)
+
+cargo.rust_library(
+    name = "tracing-serde-0.2.0",
+    srcs = [
+        "vendor/tracing-serde-0.2.0/src/fields.rs",
+        "vendor/tracing-serde-0.2.0/src/lib.rs",
+    ],
+    crate = "tracing_serde",
+    crate_root = "vendor/tracing-serde-0.2.0/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+    deps = [
+        ":serde-1.0.218",
+        ":tracing-core-0.1.33",
+    ],
+)
+
+alias(
+    name = "tracing-subscriber",
+    actual = ":tracing-subscriber-0.3.19",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "tracing-subscriber-0.3.19",
+    srcs = [
+        "vendor/tracing-subscriber-0.3.19/src/field/debug.rs",
+        "vendor/tracing-subscriber-0.3.19/src/field/delimited.rs",
+        "vendor/tracing-subscriber-0.3.19/src/field/display.rs",
+        "vendor/tracing-subscriber-0.3.19/src/field/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/directive.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/env/builder.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/env/directive.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/env/field.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/env/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/filter_fn.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/layer_filters/combinator.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/layer_filters/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/level.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/filter/targets.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/fmt_layer.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/format/json.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/format/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/format/pretty.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/time/chrono_crate.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/time/datetime.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/time/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/time/time_crate.rs",
+        "vendor/tracing-subscriber-0.3.19/src/fmt/writer.rs",
+        "vendor/tracing-subscriber-0.3.19/src/layer/context.rs",
+        "vendor/tracing-subscriber-0.3.19/src/layer/layered.rs",
+        "vendor/tracing-subscriber-0.3.19/src/layer/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/layer/tests.rs",
+        "vendor/tracing-subscriber-0.3.19/src/lib.rs",
+        "vendor/tracing-subscriber-0.3.19/src/macros.rs",
+        "vendor/tracing-subscriber-0.3.19/src/prelude.rs",
+        "vendor/tracing-subscriber-0.3.19/src/registry/extensions.rs",
+        "vendor/tracing-subscriber-0.3.19/src/registry/mod.rs",
+        "vendor/tracing-subscriber-0.3.19/src/registry/sharded.rs",
+        "vendor/tracing-subscriber-0.3.19/src/registry/stack.rs",
+        "vendor/tracing-subscriber-0.3.19/src/reload.rs",
+        "vendor/tracing-subscriber-0.3.19/src/sync.rs",
+        "vendor/tracing-subscriber-0.3.19/src/util.rs",
+    ],
+    crate = "tracing_subscriber",
+    crate_root = "vendor/tracing-subscriber-0.3.19/src/lib.rs",
+    edition = "2018",
+    features = [
+        "alloc",
+        "ansi",
+        "default",
+        "env-filter",
+        "fmt",
+        "json",
+        "matchers",
+        "nu-ansi-term",
+        "once_cell",
+        "regex",
+        "registry",
+        "serde",
+        "serde_json",
+        "sharded-slab",
+        "smallvec",
+        "std",
+        "thread_local",
+        "tracing",
+        "tracing-log",
+        "tracing-serde",
+    ],
+    visibility = [],
+    deps = [
+        ":matchers-0.1.0",
+        ":nu-ansi-term-0.46.0",
+        ":once_cell-1.21.3",
+        ":regex-1.11.1",
+        ":serde-1.0.218",
+        ":serde_json-1.0.140",
+        ":sharded-slab-0.1.7",
+        ":smallvec-1.14.0",
+        ":thread_local-1.1.8",
+        ":tracing-0.1.41",
+        ":tracing-core-0.1.33",
+        ":tracing-log-0.2.0",
+        ":tracing-serde-0.2.0",
+    ],
 )
 
 cargo.rust_library(
@@ -20804,6 +21853,32 @@ cargo.rust_library(
     crate = "unicode_ident",
     crate_root = "vendor/unicode-ident-1.0.18/src/lib.rs",
     edition = "2018",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "unsafe-libyaml-0.2.11",
+    srcs = [
+        "vendor/unsafe-libyaml-0.2.11/src/api.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/bin/cstr/mod.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/bin/run-emitter-test-suite.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/bin/run-parser-test-suite.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/dumper.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/emitter.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/lib.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/loader.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/macros.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/ops.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/parser.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/reader.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/scanner.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/success.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/writer.rs",
+        "vendor/unsafe-libyaml-0.2.11/src/yaml.rs",
+    ],
+    crate = "unsafe_libyaml",
+    crate_root = "vendor/unsafe-libyaml-0.2.11/src/lib.rs",
+    edition = "2021",
     visibility = [],
 )
 
@@ -21703,7 +22778,11 @@ cargo.rust_library(
     crate_root = "vendor/winapi-0.3.9/src/lib.rs",
     edition = "2015",
     features = [
+        "consoleapi",
         "errhandlingapi",
+        "fileapi",
+        "handleapi",
+        "processenv",
         "sysinfoapi",
     ],
     platform = {
@@ -22131,7 +23210,11 @@ cargo.rust_binary(
     crate_root = "vendor/winapi-0.3.9/build.rs",
     edition = "2015",
     features = [
+        "consoleapi",
         "errhandlingapi",
+        "fileapi",
+        "handleapi",
+        "processenv",
         "sysinfoapi",
     ],
     visibility = [],
@@ -22142,7 +23225,11 @@ buildscript_run(
     package_name = "winapi",
     buildscript_rule = ":winapi-0.3.9-build-script-build",
     features = [
+        "consoleapi",
         "errhandlingapi",
+        "fileapi",
+        "handleapi",
+        "processenv",
         "sysinfoapi",
     ],
     version = "0.3.9",
