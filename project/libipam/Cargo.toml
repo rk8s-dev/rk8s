@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+tokio = { version = "1", features = ["full"] }
+nix = { version = "0.29.0", features = ["fs"] }
 cni-plugin = "0.2.1"
 ipnetwork = "0.17.0"
 anyhow = "1.0.97"
@@ -14,5 +16,3 @@ log = "0.4.26"
 async-std = "1.12"
 semver = "0.11.0"
 thiserror = "2.0.12"
-tokio = { version = "1", features = ["full"] }
-nix = { version = "0.29.0", features = ["fs"] }

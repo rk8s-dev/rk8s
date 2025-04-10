@@ -5,7 +5,7 @@ use crate::types::{BridgeNetConf, VlanTrunk, Bridge, GatewayInfo};
 use crate::error::{AppError, VlanError};
 
 use cni_plugin::{
-	config::NetworkConfig, delegation::delegate, error::CniError, logger, macaddr::MacAddr, reply::{reply, Interface, IpamSuccessReply, Route, SuccessReply}, Cni, Command, Inputs
+	config::NetworkConfig, delegation::delegate, error::CniError, macaddr::MacAddr, reply::{reply, Interface, IpamSuccessReply, Route, SuccessReply}, Cni, Command, Inputs
 };
 use ipnetwork::{IpNetwork, Ipv4Network};
 use log::{debug, error, info};
