@@ -1,9 +1,12 @@
-use cni_plugin::macaddr::MacAddr;
+use std::net::IpAddr;
+
+use cni_plugin::{macaddr::MacAddr, reply::Route};
 use futures::TryStreamExt;
+use log::debug;
 use macaddr::MacAddr6;
-use rtnetlink::{new_connection, Handle};
+use rtnetlink::{new_connection, Handle, RouteMessageBuilder};
 use netlink_packet_route::link::{InfoBridgePort, InfoPortData, LinkAttribute, LinkFlags, LinkInfo, LinkMessage};
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 
 /// Establishes an rtnetlink connection and returns a handle.
 /// Returns `Ok(Some(Handle))` if successful, or an error otherwise.
@@ -215,4 +218,35 @@ pub fn get_mac_address(attributes: &[LinkAttribute]) -> Option<MacAddr> {
         ))),
         _ => None,
     })
+}
+
+pub async fn route_add(route: Route) -> anyhow::Result<()>{
+    if route.gw.is_none(){
+        bail!("gw can not be all none");
+    }
+    let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
+    let route_handle = handle.route();
+
+    let mut builder = RouteMessageBuilder::<IpAddr>::new();
+    builder = builder.destination_prefix(route.dst.ip(), route.dst.prefix())?
+    .gateway(route.gw.unwrap())?;
+    debug!("route_builder:{:?}",builder);
+    route_handle.add(builder.build()).execute().await?;
+    
+    Ok(())
+}
+
+pub async fn route_del(route: Route) -> anyhow::Result<()>{
+    if route.gw.is_none(){
+        bail!("gw can not be all none");
+    }
+    let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
+    let route_handle = handle.route();
+
+    let mut builder = RouteMessageBuilder::<IpAddr>::new();
+    builder = builder.destination_prefix(route.dst.ip(), route.dst.prefix())?.gateway(route.gw.unwrap())?;
+    
+    route_handle.del(builder.build()).execute().await?;
+    
+    Ok(())
 }

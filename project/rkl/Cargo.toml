@@ -10,7 +10,7 @@ libcgroups = { path = "../libcgroups", version = "0.5.1" } # MARK: Version
 libcontainer = { path = "../libcontainer", version = "0.5.1" } # MARK: Version
 liboci-cli = "0.5.1"
 clap = { version = "4.5", features = ["derive"] }
-nix = "0.28.0"
+nix = { version = "0.29.0", features = ["fs"] }
 tracing = { version = "0.1.41", features = ["attributes"] }
 tracing-subscriber = { version = "0.3.19", features = ["json", "env-filter"] }
 tracing-journald = "0.3.1"

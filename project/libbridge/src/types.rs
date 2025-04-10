@@ -1,3 +1,5 @@
+use ipnetwork::IpNetwork;
+use netlink_packet_route::AddressFamily;
 use serde::{Deserialize, Serialize};
 use cni_plugin::config::NetworkConfig;
 use rtnetlink::LinkMessageBuilder;
@@ -108,4 +110,11 @@ impl Bridge {
             .mtu(self.mtu);    
         builder
     }
+}
+
+#[derive(Debug, Default)]
+pub struct GatewayInfo {
+    pub gws: Vec<IpNetwork>,
+    pub family: AddressFamily,
+    pub default_route_found: bool,
 }
