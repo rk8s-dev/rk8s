@@ -264,6 +264,13 @@ impl Filesystem for OverlayFs{
      _new_parent: Inode,
      _new_name: &OsStr,
  ) -> Result<()> {
+    // let inode = self.lookup_node(req, parent, name.to_str().unwrap()).await?;
+    // if inode.in_upper_layer().await {
+    //     todo!();
+    // }
+    
+
+    // self.get_active_inode(inode).await;
       // complex, implement it later
     Err(Error::from_raw_os_error(libc::EXDEV).into())
  }

@@ -16,7 +16,6 @@ rust_library(
         "//third-party:libc",
         "//third-party:serde_json",
         "//third-party:vm-memory",
-        "//third-party:fuse-backend-rs",
         "//third-party:bytes",
         "//third-party:futures-util",
         "//third-party:log",
