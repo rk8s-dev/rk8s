@@ -91,12 +91,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // changes the kernel offset while we are using it.
         let (guard, dir) = data.get_file_mut().await;
 
-        // Safe because this doesn't modify any memory and we check the return value.
-        let res =
-            unsafe { libc::lseek64(dir.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET) };
-        if res < 0 {
-            return Err(io::Error::last_os_error());
-        }
 
 
         // alloc buff ,pay attention to alian.
@@ -104,10 +98,11 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         // Safe because this doesn't modify any memory and we check the return value.
         let res =
-            unsafe { libc::lseek64(dir.as_raw_fd(), 0 as libc::off64_t, libc::SEEK_SET) };
+            unsafe { libc::lseek64(dir.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET) };
         if res < 0 {
-            return Err(std::io::Error::last_os_error());
+            return Err(io::Error::last_os_error());
         }
+
         loop {
             
             // call getdents64 system call
@@ -206,12 +201,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // changes the kernel offset while we are using it.
         let (guard, dir) = data.get_file_mut().await;
 
-        // Safe because this doesn't modify any memory and we check the return value.
-        let res =
-            unsafe { libc::lseek64(dir.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET) };
-        if res < 0 {
-            return Err(io::Error::last_os_error());
-        }
+
 
 
         // alloc buff ,pay attention to alian.
@@ -219,9 +209,9 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         // Safe because this doesn't modify any memory and we check the return value.
         let res =
-            unsafe { libc::lseek64(dir.as_raw_fd(), 0 as libc::off64_t, libc::SEEK_SET) };
+            unsafe { libc::lseek64(dir.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET) };
         if res < 0 {
-            return Err(std::io::Error::last_os_error());
+            return Err(io::Error::last_os_error());
         }
         loop {
             
@@ -786,19 +776,15 @@ impl Filesystem for PassthroughFs {
         let old_file = old_inode.get_file()?;
         let new_file = new_inode.get_file()?;
 
-        // Safe because this doesn't modify any memory and we check the return value.
-        // TODO: Switch to libc::renameat2 once https://github.com/rust-lang/libc/pull/1508 lands
-        // and we have glibc 2.28.
-        let res = unsafe {
-            libc::syscall(
-                libc::SYS_renameat2,
-                old_file.as_raw_fd(),
-                oldname.as_ptr(),
-                new_file.as_raw_fd(),
-                newname.as_ptr(),
-                0,
-            )
-        };
+
+        //TODO: Switch to libc::renameat2 -> libc::renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
+        let res = unsafe { libc::renameat2(
+            old_file.as_raw_fd(), 
+            oldname.as_ptr(), 
+            new_file.as_raw_fd(), 
+            newname.as_ptr(), 
+            0) };
+
         if res == 0 {
             Ok(())
         } else {
