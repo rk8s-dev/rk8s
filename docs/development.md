@@ -65,7 +65,26 @@ buck2 targets //...
 
 ## Dependency Management
 
-For detailed information on managing third-party dependencies, refer to the [third-party/README](../third-party/README.md) file.
+For detailed information on managing third-party dependencies, refer to the `third-party/README.md` file.
+
+## Code Style and Clippy Checks
+
+The rk8s project uses `rustfmt` to enforce a consistent code style. Before submitting your changes, please format your code by running the following command:
+
+```bash
+cd project
+cargo fmt --package <PACKAGE_NAME>
+```
+
+You can find the `<PACKAGE_NAME>` in the `[workspace]` section of the `project/Cargo.toml` file. Note that you only need to run the above command for the packages you have modified.
+
+Additionally, you must run Clippy to check for potential issues in the code:
+
+```
+cargo clippy --workspace --exclude libcgroups --exclude libcontainer -- -D warnings
+```
+
+Please ensure that you run the above commands before submitting your code and resolve any warnings or errors that are reported.
 
 ## Contributing
 
