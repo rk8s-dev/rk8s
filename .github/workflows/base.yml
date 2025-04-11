@@ -1,0 +1,135 @@
+on:
+  push:
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - 'project/libcgroups/**'
+      - 'project/libcontainer/**'
+  pull_request:
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - 'project/libcgroups/**'
+      - 'project/libcontainer/**'
+
+name: Base GitHub Action for Check, Test and Lints
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    strategy:
+      fail-fast: false
+
+    name: Setup and cache
+    runs-on: ubuntu-latest
+
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust Toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy rustfmt
+
+      - name: Install Buck2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd curl
+          curl https://github.com/facebook/buck2/releases/download/latest/buck2-x86_64-unknown-linux-gnu.zst --output "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst" --location --silent --show-error --fail --retry 5
+          zstd -d /tmp/buck2-x86_64-unknown-linux-gnu.zst -o $HOME/.cargo/bin/buck2
+          chmod +x $HOME/.cargo/bin/buck2
+          rm -f /tmp/buck2-x86_64-unknown-linux-gnu.zst
+        shell: bash
+
+      - name: Install Reindeer
+        run: cargo install --locked --git https://github.com/facebookincubator/reindeer reindeer
+
+  format:
+    name: Rustfmt Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: |
+          cd project
+          cargo fmt --package distribution libbridge libcni libflannel libfuse-fs libipam rkb rkl --check
+
+  clippy:
+    name: Clippy Check
+    strategy:
+      fail-fast: true
+
+    runs-on: ubuntu-latest
+    needs: setup
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        uses: ./.github/install-sys-deps
+
+      - name: Run cargo clippy
+        run: |
+          cd project
+          cargo clippy --workspace --exclude libcgroups --exclude libcontainer -- -D warnings
+
+  build:
+    name: Buck2 Build
+
+    runs-on: ubuntu-latest
+    needs: setup
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        uses: ./.github/install-sys-deps
+
+      - name: Build with Buck2
+        run: |
+          reindeer --third-party-dir third-party vendor
+          reindeer --third-party-dir third-party buckify
+          buck2 build //project/...
+
+      - name: Cache buck-out
+        uses: actions/cache/save@v4
+        with:
+          path: ./buck-out
+          key: buck2-cache-${{ github.run_id }}-${{ github.run_attempt }}
+
+  test:
+    name: Buck2 Test
+
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        uses: ./.github/install-sys-deps
+
+      - name: Run tests with Buck2
+        run: echo "Running tests with Buck2 ..."
