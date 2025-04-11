@@ -872,41 +872,20 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
 #[cfg(test)]
 mod tests{
-    use std::{env, ffi::OsString};
+    use std::ffi::OsString;
 
     use fuse3::{raw::Session, MountOptions};
     use tokio::signal;
 
     use crate::passthrough::{config::Config, logfs::LoggingFileSystem, PassthroughFs};
-use log::{LevelFilter, Log, Metadata, Record, SetLoggerError};
 
 
     
     #[tokio::test]
     async fn test_passthrough(){
-        struct SimpleLogger;
-
-        impl Log for SimpleLogger {
-            fn enabled(&self, _: &Metadata) -> bool {
-                true
-            }
-
-            fn log(&self, record: &Record) {
-                println!("{}: {}", record.level(), record.args());
-            }
-
-            fn flush(&self) {}
-        }
-
-        fn init_logging() -> Result<(), SetLoggerError> {
-            log::set_logger(&SimpleLogger)?;
-            log::set_max_level(LevelFilter::Warn);
-            Ok(())
-        }
-
-        init_logging().unwrap();
+       
         let cfg =Config { 
-            xattr: true, 
+            xattr: false, 
             do_import: true, 
             root_dir: String::from("/home/luxian/code/leetcode"), 
             ..Default::default() 
@@ -920,7 +899,7 @@ use log::{LevelFilter, Log, Metadata, Record, SetLoggerError};
             let uid = unsafe { libc::getuid() };
             let gid = unsafe { libc::getgid() };
         
-            let not_unprivileged = env::var("NOT_UNPRIVILEGED").ok().as_deref() == Some("1");
+            let not_unprivileged = false;
         
             let mut mount_options = MountOptions::default();
             // .allow_other(true)

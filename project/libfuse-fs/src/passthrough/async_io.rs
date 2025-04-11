@@ -1,7 +1,7 @@
 use std::{ffi::{CStr, CString, OsStr, OsString}, fs::File, io::{self, Read, Seek, SeekFrom, Write},  mem::{self, ManuallyDrop, MaybeUninit}, num::NonZeroU32, os::{fd::{ AsRawFd, FromRawFd, RawFd}, unix::ffi::OsStringExt}, sync::Arc, time::Duration};
 use bytes::Bytes;
 use fuse3::{raw::prelude::*, Errno, Inode, Result};
-use fuse_backend_rs::{abi::fuse_abi::OpenOptions, bytes_to_cstr};
+use bitflags::bitflags;
 use futures::stream;
 use futures_util::stream::Iter;
 
@@ -11,6 +11,38 @@ use crate::{passthrough::{CURRENT_DIR_CSTR, EMPTY_CSTR, PARENT_DIR_CSTR}, util::
 
 use super::{config::CachePolicy, os_compat::LinuxDirent64, util::*, Handle, HandleData, PassthroughFs};
 use std::vec::IntoIter;
+// Flags use by the OPEN request/reply.
+/// Bypass page cache for this open file.
+const FOPEN_DIRECT_IO: u32 = 1;
+
+/// Don't invalidate the data cache on open.
+const FOPEN_KEEP_CACHE: u32 = 2;
+
+/// The file is not seekable.
+const FOPEN_NONSEEKABLE: u32 = 4;
+
+/// allow caching this directory
+const FOPEN_CACHE_DIR: u32 = 8;
+
+/// the file is stream-like (no file position at all)
+const FOPEN_STREAM: u32 = 16;
+
+bitflags! {
+    /// Options controlling the behavior of files opened by the server in response
+    /// to an open or create request.
+    pub struct OpenOptions: u32 {
+        /// Bypass page cache for this open file.
+        const DIRECT_IO = FOPEN_DIRECT_IO;
+        /// Don't invalidate the data cache on open.
+        const KEEP_CACHE = FOPEN_KEEP_CACHE;
+        /// The file is not seekable.
+        const NONSEEKABLE = FOPEN_NONSEEKABLE;
+        /// allow caching this directory
+        const CACHE_DIR = FOPEN_CACHE_DIR;
+        /// the file is stream-like (no file position at all)
+        const STREAM = FOPEN_STREAM;
+    }
+}
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn open_inode(&self, inode: Inode, flags: i32) -> io::Result<File> {
@@ -59,12 +91,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // changes the kernel offset while we are using it.
         let (guard, dir) = data.get_file_mut().await;
 
-        // Safe because this doesn't modify any memory and we check the return value.
-        let res =
-            unsafe { libc::lseek64(dir.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET) };
-        if res < 0 {
-            return Err(io::Error::last_os_error());
-        }
 
 
         // alloc buff ,pay attention to alian.
@@ -72,10 +98,11 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         // Safe because this doesn't modify any memory and we check the return value.
         let res =
-            unsafe { libc::lseek64(dir.as_raw_fd(), 0 as libc::off64_t, libc::SEEK_SET) };
+            unsafe { libc::lseek64(dir.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET) };
         if res < 0 {
-            return Err(std::io::Error::last_os_error());
+            return Err(io::Error::last_os_error());
         }
+
         loop {
             
             // call getdents64 system call
@@ -174,12 +201,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // changes the kernel offset while we are using it.
         let (guard, dir) = data.get_file_mut().await;
 
-        // Safe because this doesn't modify any memory and we check the return value.
-        let res =
-            unsafe { libc::lseek64(dir.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET) };
-        if res < 0 {
-            return Err(io::Error::last_os_error());
-        }
+
 
 
         // alloc buff ,pay attention to alian.
@@ -187,9 +209,9 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         // Safe because this doesn't modify any memory and we check the return value.
         let res =
-            unsafe { libc::lseek64(dir.as_raw_fd(), 0 as libc::off64_t, libc::SEEK_SET) };
+            unsafe { libc::lseek64(dir.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET) };
         if res < 0 {
-            return Err(std::io::Error::last_os_error());
+            return Err(io::Error::last_os_error());
         }
         loop {
             
@@ -754,19 +776,15 @@ impl Filesystem for PassthroughFs {
         let old_file = old_inode.get_file()?;
         let new_file = new_inode.get_file()?;
 
-        // Safe because this doesn't modify any memory and we check the return value.
-        // TODO: Switch to libc::renameat2 once https://github.com/rust-lang/libc/pull/1508 lands
-        // and we have glibc 2.28.
-        let res = unsafe {
-            libc::syscall(
-                libc::SYS_renameat2,
-                old_file.as_raw_fd(),
-                oldname.as_ptr(),
-                new_file.as_raw_fd(),
-                newname.as_ptr(),
-                0,
-            )
-        };
+
+        //TODO: Switch to libc::renameat2 -> libc::renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
+        let res = unsafe { libc::renameat2(
+            old_file.as_raw_fd(), 
+            oldname.as_ptr(), 
+            new_file.as_raw_fd(), 
+            newname.as_ptr(), 
+            0) };
+
         if res == 0 {
             Ok(())
         } else {
@@ -1506,4 +1524,18 @@ impl Filesystem for PassthroughFs {
      }
 
      
+}
+
+/// trim all trailing nul terminators.
+pub fn bytes_to_cstr(buf: &[u8]) -> Result<&CStr> {
+    // There might be multiple 0s at the end of buf, find & use the first one and trim other zeros.
+    match buf.iter().position(|x| *x == 0) {
+        // Convert to a `CStr` so that we can drop the '\0' byte at the end and make sure
+        // there are no interior '\0' bytes.
+        Some(pos) => CStr::from_bytes_with_nul(&buf[0..=pos]).map_err(|_| Errno::from(5)),
+        None => {
+            // Invalid input, just call CStr::from_bytes_with_nul() for suitable error code
+            CStr::from_bytes_with_nul(buf).map_err(|_| Errno::from(5))
+        }
+    }
 }
