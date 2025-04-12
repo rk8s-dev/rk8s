@@ -4,14 +4,13 @@ metadata:
   name: simple-container-task  
   labels:
     app: my-app 
-    bundle: /home/ich/rk8s/project/rkl/test/bundles/pause   # bundle path of pause container
+    bundle: /home/tcy/project/rk8s/project/rkl/test/bundles/pause   # bundle path of pause container
 spec:
   containers:
-    - name: main-container1     
-      image: /home/ich/rk8s/project/rkl/test/bundles/busybox   # bundle path
+    - name: main-container1    
+      image: /home/tcy/project/rk8s/project/rkl/test/bundles/busybox   # bundle path
       args:               #the arguments of config.json file             
         - "sleep"                   
         - "10000"            
       ports:
         - containerPort: 80
-    

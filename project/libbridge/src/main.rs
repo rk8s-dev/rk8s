@@ -12,6 +12,7 @@ use log::{debug, error, info};
 use netlink_packet_route::{link::{InfoBridge, InfoData, LinkAttribute, LinkInfo}, AddressFamily};
 use rtnetlink::{packet_core::{NLM_F_ACK, NLM_F_REQUEST}, LinkBridge};
 use libcni::{ip::{veth::{self, Veth}, link, ipam, addr}, ns::ns::{self, Netns}};
+use anyhow::anyhow;
 
 mod error;
 mod types;
@@ -61,7 +62,7 @@ fn main() {
     let res: Result<SuccessReply, AppError> = rt.block_on(async move {
         match inputs.command {
             Command::Add => cmd_add(bridge_conf, inputs).await,
-            Command::Del => cmd_del(bridge_conf).await,
+            Command::Del => cmd_del(bridge_conf, inputs).await,
             Command::Check => todo!(),
             Command::Version => unreachable!(),
         }
@@ -570,15 +571,62 @@ fn calc_gateway(result: &mut SuccessReply, net_conf: &BridgeNetConf) -> Result<V
 /// 
 /// # Returns
 /// * `Result<SuccessReply, AppError>` - The success response or an error if deletion fails.
-async fn cmd_del(config: BridgeNetConf) -> Result<SuccessReply,AppError>{
-	Ok(SuccessReply {
-		cni_version: config.net_conf.cni_version,
+async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply,AppError>{
+	let is_layer3 = config.net_conf.ipam.as_ref().map_or(false, |ipam| !ipam.r#plugin.is_empty());
+	
+	let result = SuccessReply {
+		cni_version: config.net_conf.cni_version.clone(),
 		interfaces: Default::default(),
 		ips: Default::default(),
 		routes: Default::default(),
 		dns: Default::default(),
 		specific: Default::default(),
-	})
+	};
+
+	let ipam_del = || async move {
+        if is_layer3 {
+			let ipam_plugin = config.net_conf.ipam.clone().unwrap().plugin;
+            match delegate(
+                &ipam_plugin,
+                Command::Del,
+                &config.net_conf.clone()
+            ).await {
+                Ok(reply) => {
+                    // 处理成功结果
+                    let _: IpamSuccessReply = reply;
+                }
+                Err(e) => return Err(AppError::IpamError(e.to_string())),
+            }
+        }
+        Ok(())
+    };
+	
+	if inputs.netns.is_none() {
+		ipam_del().await?;
+        return Ok(result);
+    }
+
+	let netns = if let Some(ref netns_path) = inputs.netns {
+        Netns::get_from_path(netns_path)
+            .map_err(|e| AppError::NetnsError(format!("failed to open netns {:?}: {}", netns_path, e)))?
+    } else {
+        return Err(AppError::NetnsError("netns path is None".to_string()));
+    };
+    let current_ns = Netns::get()
+        .map_err(|e| AppError::NetnsError(format!("failed to open current netns: {}", e)))?;
+	ns::exec_netns(&current_ns, &netns.unwrap(), async {
+		match link::del_link_by_name(&inputs.ifname).await {
+			Ok(_) => Ok(()),
+			Err(e) if e.to_string().contains("link not found") => Ok(()),
+			Err(e) => {
+				// 将错误转换为 anyhow::Error
+				Err(anyhow!(e)) // 或 e.into()
+			}
+		}
+	}).await?;
+
+	ipam_del().await?;
+	Ok(result)
 }
 
 #[cfg(test)]
