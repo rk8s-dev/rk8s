@@ -79,7 +79,7 @@ pub fn exec_copy_in_subprocess<P: AsRef<Path>, Q: AsRef<Path>>(
             //     .with_context(|| format!("Failed to copy file {} to {}", s.as_ref().display(), dest.as_ref().display()))?;
 
             let status = Command::new("cp")
-                .args(&[
+                .args([
                     s.as_ref().to_str().unwrap(),
                     dest.as_ref().to_str().unwrap(),
                 ])

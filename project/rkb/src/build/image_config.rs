@@ -36,11 +36,11 @@ impl ImageConfig {
     pub fn get_oci_image_config(&self) -> Result<Config> {
         let mut config = ConfigBuilder::default();
 
-        if self.labels.len() > 0 {
+        if !self.labels.is_empty() {
             config = config.labels(self.labels.clone());
         }
 
-        if self.envp.len() > 0 {
+        if !self.envp.is_empty() {
             config = config.env(
                 self.envp
                     .iter()

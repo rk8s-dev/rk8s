@@ -87,7 +87,7 @@ impl OCIBuilder {
         self.oci_image_manifest = self
             .oci_image_manifest
             .config(image_config_sha256sum, image_config_metadata.len())
-            .with_context(|| format!("Failed to set config in image manifest"))?;
+            .with_context(|| "Failed to set config in image manifest")?;
         let image_manifest = self.oci_image_manifest.build()?;
         let image_manifest_path = layer_dir.join("manifest.json");
         image_manifest
@@ -127,7 +127,7 @@ impl OCIBuilder {
                 image_manifest_metadata.len(),
                 image_manifest_sha256sum,
             )])
-            .with_context(|| format!("Failed to set manifests in image index"))?;
+            .with_context(|| "Failed to set manifests in image index")?;
         let image_index = self.oci_image_index.build()?;
         let image_index_path = self.image_dir.join("index.json");
         image_index
@@ -143,7 +143,7 @@ impl OCIBuilder {
         let oci_layout = OciLayoutBuilder::default()
             .image_layout_version("1.0.0".to_string())
             .build()
-            .with_context(|| format!("Failed to build OCI layout"))?;
+            .with_context(|| "Failed to build OCI layout")?;
         let oci_layout_path = self.image_dir.join("oci-layout");
         oci_layout
             .to_file_pretty(&oci_layout_path)

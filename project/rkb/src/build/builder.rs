@@ -50,11 +50,7 @@ impl Builder {
         let mut global_args = HashMap::new();
         for global_arg in self.dockerfile.global_args.iter() {
             let key = global_arg.name.content.clone();
-            let value = if let Some(value) = &global_arg.value {
-                Some(value.content.clone())
-            } else {
-                None
-            };
+            let value = global_arg.value.as_ref().map(|value| value.content.clone());
             global_args.insert(key, value);
         }
         global_args
@@ -73,7 +69,7 @@ impl Builder {
         let config = executor
             .image_config
             .get_oci_image_config()
-            .with_context(|| format!("Failed to get OCI image config"))?;
+            .with_context(|| "Failed to get OCI image config")?;
         let image_config = OciImageConfig::default()
             .config(config)
             .and_then(|config| {
@@ -103,7 +99,7 @@ impl Builder {
 
         oci_builder
             .build()
-            .with_context(|| format!("Failed to build OCI metadata"))?;
+            .with_context(|| "Failed to build OCI metadata")?;
 
         Ok(())
     }
