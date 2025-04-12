@@ -21,6 +21,7 @@ rust_library(
         "//third-party:log",
         "//third-party:env_logger",
         "//third-party:vmm-sys-util",
+        "//third-party:bitflags",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

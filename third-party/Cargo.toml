@@ -19,6 +19,7 @@ anyhow = "1.0.97"
 async-std = "1.12"
 async-trait = "0.1.86"
 axum = "0.8.1"
+bitflags = "2.9.0"
 bytes = "1.10.1"
 caps = "0.5.5"
 chrono = { version = "0.4", default-features = false, features = [
@@ -32,7 +33,6 @@ errno = { version = "0.3.10", optional = true }
 fastrand = "^2.3.0"
 fixedbitset = "0.5.7"
 fuse3 = { version = "0.8.1", features = ["tokio-runtime", "unprivileged"] }
-fuse-backend-rs = "0.12.1"
 futures = "0.3.31"
 futures-util = "0.3.31"
 hex = "0.4.3"
