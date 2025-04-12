@@ -2,15 +2,15 @@
 // found in the LICENSE-BSD-3-Clause file.
 // Copyright (C) 2023 Alibaba Cloud. All rights reserved.
 
-use std::collections::{btree_map, BTreeMap};
+use std::collections::{BTreeMap, btree_map};
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::File;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use fuse3::raw::reply::FileAttr;
 use fuse3::{FileType, Timestamp};
@@ -18,8 +18,6 @@ use libc::stat64;
 
 use super::inode_store::InodeId;
 use super::{CURRENT_DIR_CSTR, EMPTY_CSTR, MAX_HOST_INO, PARENT_DIR_CSTR};
-
-
 
 /// the 56th bit used to set the inode to 1 indicates virtual inode
 const VIRTUAL_INODE_FLAG: u64 = 1 << 55;
@@ -234,7 +232,7 @@ pub fn eperm() -> io::Error {
 #[allow(unused)]
 pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
     FileAttr {
-        ino: stat.st_ino ,
+        ino: stat.st_ino,
         size: stat.st_size as u64,
         blocks: stat.st_blocks as u64,
         atime: Timestamp::new(stat.st_atime, stat.st_atime_nsec.try_into().unwrap()),
@@ -245,8 +243,8 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
         kind: filetype_from_mode(stat.st_mode),
         perm: stat.st_mode as u16 & 0o7777,
         nlink: stat.st_nlink as u32,
-        uid: stat.st_uid ,
-        gid: stat.st_gid ,
+        uid: stat.st_uid,
+        gid: stat.st_gid,
         rdev: stat.st_rdev as u32,
         #[cfg(target_os = "macos")]
         flags: 0, // Set flags to 0 for non-macOS platforms
@@ -265,9 +263,9 @@ pub fn filetype_from_mode(st_mode: u32) -> FileType {
         libc::S_IFLNK => FileType::Symlink,
         libc::S_IFSOCK => FileType::Socket,
         _ => {
-            error!("wrong st mode : {}",st_mode);
+            error!("wrong st mode : {}", st_mode);
             unreachable!();
-        },
+        }
     }
 }
 
@@ -298,13 +296,11 @@ fn is_dot_or_dotdot(name: &CStr) -> bool {
     bytes.starts_with(CURRENT_DIR_CSTR) || bytes.starts_with(PARENT_DIR_CSTR)
 }
 
-
 pub fn osstr_to_cstr(os_str: &OsStr) -> Result<CString, std::ffi::NulError> {
     let bytes = os_str.as_bytes();
     let c_string = CString::new(bytes)?;
     Ok(c_string)
 }
-
 
 //TODO: There is a software permission issue here. But it doesn't matter at the moment
 // macro_rules! scoped_cred {
@@ -369,7 +365,6 @@ pub fn osstr_to_cstr(os_str: &OsStr) -> Result<CString, std::ffi::NulError> {
 //     // lose the capability to change the gid.  However changing back can happen in any order.
 //     ScopedGid::new(gid).and_then(|gid| Ok((ScopedUid::new(uid)?, gid)))
 // }
-
 
 #[cfg(test)]
 mod tests {

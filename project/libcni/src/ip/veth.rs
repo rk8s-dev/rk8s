@@ -1,19 +1,19 @@
-use crate::ns::ns::{self, Netns};
 use crate::ip::link;
+use crate::ns::ns::{self, Netns};
+use anyhow::{Error, Result, anyhow};
+use cni_plugin::{macaddr::MacAddr, reply};
+use log::info;
 use macaddr::MacAddr6;
 use netlink_packet_route::link::{InfoData, InfoKind, InfoVeth};
-use rtnetlink::{LinkMessageBuilder, LinkVeth, LinkUnspec};
-use cni_plugin::{macaddr::MacAddr, reply};
-use anyhow::{anyhow, Error, Result};
-use log::info;
 use rand::random;
+use rtnetlink::{LinkMessageBuilder, LinkUnspec, LinkVeth};
 
 /// Represents a network interface with a name, optional MAC address, and namespace.
 #[derive(Debug, Clone)]
 pub struct Interface {
-    pub name: String,        // Interface name
+    pub name: String,         // Interface name
     pub mac: Option<MacAddr>, // Optional MAC address
-    pub ns: Netns,          // Network namespace
+    pub ns: Netns,            // Network namespace
 }
 
 /// Represents a Veth pair with two interfaces.
@@ -53,13 +53,16 @@ impl Veth {
     ///
     /// # Returns
     /// A new `Veth` instance.
-    pub fn new(inf_name: &str, peer_name: &str, ns1: Netns , ns2: Netns) -> Self {
+    pub fn new(inf_name: &str, peer_name: &str, ns1: Netns, ns2: Netns) -> Self {
         let interface = Interface::new(inf_name, None, ns1);
         let peer_inf = Interface::new(peer_name, None, ns2);
-        
-        Self { interface, peer_inf }
+
+        Self {
+            interface,
+            peer_inf,
+        }
     }
-     /// Sets the MAC address for the veth interface.
+    /// Sets the MAC address for the veth interface.
     ///
     /// # Arguments
     /// * `mac` - The MAC address to be assigned.
@@ -88,9 +91,10 @@ impl Veth {
     /// # Returns
     /// A configured `LinkMessageBuilder` for veth setup.
     pub fn into_builder(self) -> LinkMessageBuilder<LinkVeth> {
-        let build =LinkMessageBuilder::<LinkVeth>::new_with_info_kind(InfoKind::Veth)
+        let build = LinkMessageBuilder::<LinkVeth>::new_with_info_kind(InfoKind::Veth)
             .name(self.interface.name.to_string())
-            .setns_by_fd(self.interface.ns.clone().into_fd()).up();
+            .setns_by_fd(self.interface.ns.clone().into_fd())
+            .up();
 
         let peer_msg = LinkMessageBuilder::<LinkUnspec>::new()
             .name(self.peer_inf.name.to_string())
@@ -104,18 +108,18 @@ impl Veth {
     ///
     /// # Returns
     /// A tuple containing container and host interfaces.
-    pub fn to_interface(self) -> anyhow::Result<(reply::Interface,reply::Interface)>{
-        let container_inf = reply::Interface{
+    pub fn to_interface(self) -> anyhow::Result<(reply::Interface, reply::Interface)> {
+        let container_inf = reply::Interface {
             name: self.interface.name,
             mac: self.interface.mac,
             sandbox: self.interface.ns.path().unwrap_or(Default::default()),
         };
-        let host_inf = reply::Interface{
+        let host_inf = reply::Interface {
             name: self.peer_inf.name,
             mac: self.peer_inf.mac,
             sandbox: self.peer_inf.ns.path().unwrap_or(Default::default()),
         };
-        Ok((container_inf,host_inf))
+        Ok((container_inf, host_inf))
     }
 }
 
@@ -139,8 +143,7 @@ pub async fn setup_veth(
     container_veth_mac: &MacAddr,
     host_ns: &Netns,
     container_ns: &Netns,
-) -> anyhow::Result<Veth, Error> {  
-
+) -> anyhow::Result<Veth, Error> {
     let current_ns = Netns::get()?;
     anyhow::ensure!(&current_ns == container_ns, "Network namespace mismatch");
 
@@ -151,14 +154,17 @@ pub async fn setup_veth(
         container_veth_mac,
         host_ns,
         container_ns,
-    ).await?;
+    )
+    .await?;
 
-    ns::exec_netns(&current_ns, host_ns, async{
-        let link = link::link_by_name(&host_inf_name).await
-        .map_err(|e| anyhow!("{}", e))?;
-        
+    ns::exec_netns(&current_ns, host_ns, async {
+        let link = link::link_by_name(&host_inf_name)
+            .await
+            .map_err(|e| anyhow!("{}", e))?;
+
         link::link_set_up(&link).await
-    }).await?;
+    })
+    .await?;
 
     Ok(veth)
 }
@@ -185,7 +191,10 @@ async fn make_veth(
     container_ns: &Netns,
 ) -> Result<(String, Veth)> {
     let cur_ns = Netns::get()?;
-    anyhow::ensure!(&cur_ns == container_ns, "Current network namespace does not match the target container namespace");
+    anyhow::ensure!(
+        &cur_ns == container_ns,
+        "Current network namespace does not match the target container namespace"
+    );
 
     let mut peer_name = host_veth_name.to_string();
     for attempt in 1..=10 {
@@ -199,13 +208,17 @@ async fn make_veth(
             container_veth_mac,
             host_ns,
             container_ns,
-        ).await;
+        )
+        .await;
         match res {
             Ok(veth) => return Ok((peer_name, veth)),
             Err(e) => {
                 log::error!(
                     "Attempt {}/10: Failed to create veth pair - {:?}. Peer: {}, Container: {}",
-                    attempt, e, peer_name, container_veth_name
+                    attempt,
+                    e,
+                    peer_name,
+                    container_veth_name
                 );
             }
         }
@@ -234,24 +247,42 @@ async fn make_veth_pair(
     host_ns: &Netns,
     container_ns: &Netns,
 ) -> Result<Veth, Error> {
-     // Verify that we are in the correct namespace
+    // Verify that we are in the correct namespace
     let current_ns = Netns::get()?;
-    anyhow::ensure!(&current_ns == container_ns, "Current namespace does not match the target container namespace");
+    anyhow::ensure!(
+        &current_ns == container_ns,
+        "Current namespace does not match the target container namespace"
+    );
     info!(
         "Creating veth pair: container_veth_name={}, host_veth_name={}",
         container_veth_name, host_veth_name
     );
     // Convert MAC address to a format required by the builder
-    let container_mac = MacAddr6::from(container_veth_mac.clone()).into_array().to_vec();
+    let container_mac = MacAddr6::from(container_veth_mac.clone())
+        .into_array()
+        .to_vec();
 
     // Initialize the veth pair
-    let veth = Veth::new(container_veth_name,host_veth_name,container_ns.clone(),host_ns.clone()).set_mac_address(container_veth_mac.clone());
+    let veth = Veth::new(
+        container_veth_name,
+        host_veth_name,
+        container_ns.clone(),
+        host_ns.clone(),
+    )
+    .set_mac_address(container_veth_mac.clone());
 
     // Build veth pair configuration
-    let builder = veth.clone().into_builder().mtu(mtu).up().address(container_mac.clone());
-    
-    link::add_link(builder.build()).await.map_err(|e| anyhow!("Failed to add link: {}", e))?;
-    
+    let builder = veth
+        .clone()
+        .into_builder()
+        .mtu(mtu)
+        .up()
+        .address(container_mac.clone());
+
+    link::add_link(builder.build())
+        .await
+        .map_err(|e| anyhow!("Failed to add link: {}", e))?;
+
     Ok(veth)
 }
 

@@ -2,8 +2,6 @@ use clap::Parser;
 use libfuse_fs::overlayfs::mount_fs;
 use tokio::signal;
 
-
-
 #[derive(Parser)]
 #[command(author, version, about)]
 struct Args {
@@ -27,9 +25,9 @@ async fn main() {
         args.upperdir,
         args.lowerdir,
         args.not_unprivileged,
-    ).await;
+    )
+    .await;
     let handle = &mut mount_handle;
-
 
     tokio::select! {
         res = handle => res.unwrap(),

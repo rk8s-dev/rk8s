@@ -1,8 +1,8 @@
 use clap::Parser;
 use std::sync::Arc;
 use tokio::signal;
-use utils::state::AppState;
 use utils::cli::Args;
+use utils::state::AppState;
 
 mod api;
 mod service;

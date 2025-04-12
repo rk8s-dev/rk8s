@@ -1,12 +1,9 @@
 // Copyright (C) 2023 Ant Group. All rights reserved.
-// 2024 From [fuse_backend_rs](https://github.com/cloud-hypervisor/fuse-backend-rs) 
+// 2024 From [fuse_backend_rs](https://github.com/cloud-hypervisor/fuse-backend-rs)
 // SPDX-License-Identifier: Apache-2.0
 
 use std::io::{Error, ErrorKind, Result};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::passthrough::VFS_MAX_INO;
 
@@ -27,7 +24,6 @@ pub struct InodeStore {
 }
 #[allow(unused)]
 impl InodeStore {
-
     pub(crate) fn new() -> Self {
         Self {
             inodes: HashMap::new(),
@@ -51,10 +47,10 @@ impl InodeStore {
             }
             ino += 1;
         }
-        error!("reached maximum inode number: {}", self.inode_limit );
+        error!("reached maximum inode number: {}", self.inode_limit);
         Err(Error::new(
             ErrorKind::Other,
-            format!("maximum inode number {} reached", self.inode_limit ),
+            format!("maximum inode number {} reached", self.inode_limit),
         ))
     }
 
@@ -126,14 +122,13 @@ impl InodeStore {
         let mut all_inodes_f = self
             .inodes
             .iter()
-            .map(
-                |(inode, ovi)| {
-                    let path = ovi.path.clone();
-                    async move {
-                        (inode, path, ovi.lookups.load().await) // Read the Inode State.
-                    }
+            .map(|(inode, ovi)| {
+                let path = ovi.path.clone();
+                async move {
+                    (inode, path, ovi.lookups.load().await) // Read the Inode State.
                 }
-        ).collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
         let mut all_inodes = join_all(all_inodes_f).await;
         all_inodes.sort_by(|a, b| a.0.cmp(b.0));
         trace!("all active inodes: {:?}", all_inodes);
@@ -141,18 +136,14 @@ impl InodeStore {
         let mut to_delete = self
             .deleted
             .iter()
-            .map(|(inode, ovi)| {
-                async move{
-                    (inode, ovi.path.clone(), ovi.lookups.load().await)
-                }
-            })
+            .map(|(inode, ovi)| async move { (inode, ovi.path.clone(), ovi.lookups.load().await) })
             .collect::<Vec<_>>();
         let mut delete_to = join_all(to_delete).await;
         delete_to.sort_by(|a, b| a.0.cmp(b.0));
         trace!("all deleted inodes: {:?}", delete_to);
     }
 
-    pub fn extend_inode_number(&mut self,next_inode:u64, limit_inode:u64){
+    pub fn extend_inode_number(&mut self, next_inode: u64, limit_inode: u64) {
         self.next_inode = next_inode;
         self.inode_limit = limit_inode;
     }
@@ -207,6 +198,4 @@ mod test {
         let inode = store.alloc_inode("/notexist").unwrap();
         assert_eq!(inode, 3);
     }
-
- 
 }

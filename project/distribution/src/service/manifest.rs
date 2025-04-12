@@ -7,7 +7,7 @@ use crate::utils::{
 use axum::{
     body::Body,
     extract::{Path, Query, Request, State},
-    http::{header, Response, StatusCode},
+    http::{Response, StatusCode, header},
     response::IntoResponse,
 };
 use futures::StreamExt;
@@ -361,9 +361,10 @@ pub async fn get_tag_list_handler(
                     tag_list.tags().last().unwrap()
                 );
                 let link_header = format!(r#"<{}>; rel="next""#, next_link);
-                response
-                    .headers_mut()
-                    .insert(header::LINK, header::HeaderValue::from_str(&link_header).unwrap());
+                response.headers_mut().insert(
+                    header::LINK,
+                    header::HeaderValue::from_str(&link_header).unwrap(),
+                );
             }
             return response;
         }

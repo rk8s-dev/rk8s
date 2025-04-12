@@ -50,7 +50,10 @@ impl Netns {
     pub fn new_named(name: &str) -> anyhow::Result<Self> {
         let bind_mount_path: &Path = Path::new(BIND_MOUNT_PATH);
         if !bind_mount_path.exists() {
-            DirBuilder::new().mode(0o755).recursive(true).create(bind_mount_path)?;
+            DirBuilder::new()
+                .mode(0o755)
+                .recursive(true)
+                .create(bind_mount_path)?;
         }
 
         let named_path = bind_mount_path.join(name);
@@ -62,7 +65,11 @@ impl Netns {
             .open(&named_path)?;
 
         let new_ns = Self::new()?;
-        let ns_path = format!("/proc/{}/task/{}/ns/net", std::process::id(), nix::unistd::gettid());
+        let ns_path = format!(
+            "/proc/{}/task/{}/ns/net",
+            std::process::id(),
+            nix::unistd::gettid()
+        );
         nix::mount::mount(
             Some(Path::new(&ns_path)),
             &named_path,
@@ -88,7 +95,7 @@ impl Netns {
         if named_path.exists() {
             nix::mount::umount2(&named_path, nix::mount::MntFlags::MNT_DETACH)?;
             std::fs::remove_file(named_path)?;
-        } 
+        }
         Ok(())
     }
 
@@ -101,12 +108,13 @@ impl Netns {
     /// An `Option` containing the `Netns` instance if the namespace exists.
     pub fn get_from_path(path: &Path) -> anyhow::Result<Option<Self>> {
         let file = OpenOptions::new().read(true).open(&path).ok();
-        
+
         match file {
             None => Ok(None),
-            Some(file) => {
-                Ok(Some(Self { f: file, path: Some(path.to_path_buf()) }))
-            },
+            Some(file) => Ok(Some(Self {
+                f: file,
+                path: Some(path.to_path_buf()),
+            })),
         }
     }
 
@@ -129,9 +137,16 @@ impl Netns {
     /// # Errors
     /// This function returns an error if the current network namespace cannot be retrieved.
     pub fn get() -> anyhow::Result<Self> {
-        let ns_path = format!("/proc/{}/task/{}/ns/net", std::process::id(), nix::unistd::gettid());
+        let ns_path = format!(
+            "/proc/{}/task/{}/ns/net",
+            std::process::id(),
+            nix::unistd::gettid()
+        );
         let file = OpenOptions::new().read(true).open(Path::new(&ns_path))?;
-        Ok(Self { f: file, path: Some(PathBuf::from(ns_path)) })
+        Ok(Self {
+            f: file,
+            path: Some(PathBuf::from(ns_path)),
+        })
     }
 
     /// Sets the current process's network namespace to this one.
@@ -141,7 +156,7 @@ impl Netns {
     pub fn set(&self) -> anyhow::Result<()> {
         nix::sched::setns(self.f.as_fd(), CloneFlags::CLONE_NEWNET).map_err(anyhow::Error::from)
     }
-             
+
     /// Returns a unique identifier for the network namespace.
     ///
     /// The identifier is based on the device and inode of the namespace file.
@@ -150,9 +165,7 @@ impl Netns {
     /// A string representing the unique identifier for the network namespace.
     pub fn unique_id(&self) -> String {
         match self.f.metadata() {
-            Err(_) => {
-                "NS(unknown)".into()
-            }
+            Err(_) => "NS(unknown)".into(),
             Ok(metadata) => {
                 format!("NS({}:{})", metadata.dev(), metadata.ino())
             }
@@ -192,12 +205,16 @@ impl Netns {
 ///
 /// # Returns
 /// A result containing the output of the executed function.
-pub async fn exec_netns<T,F>(cur_ns: &Netns, target_ns: &Netns, exec: F) -> Result<T,anyhow::Error>
+pub async fn exec_netns<T, F>(
+    cur_ns: &Netns,
+    target_ns: &Netns,
+    exec: F,
+) -> Result<T, anyhow::Error>
 where
-    F: std::future::Future<Output = Result<T,anyhow::Error>>,
+    F: std::future::Future<Output = Result<T, anyhow::Error>>,
 {
-    target_ns.set()?;  
-    let result = exec.await;  
+    target_ns.set()?;
+    let result = exec.await;
     cur_ns.set()?;
     result
 }
@@ -225,7 +242,13 @@ impl Display for Netns {
                 write!(f, "NS({}: unknown)", self.f.as_raw_fd())
             }
             Ok(metadata) => {
-                write!(f, "NS({}: {}, {})", self.f.as_raw_fd(), metadata.dev(), metadata.ino())
+                write!(
+                    f,
+                    "NS({}: {}, {})",
+                    self.f.as_raw_fd(),
+                    metadata.dev(),
+                    metadata.ino()
+                )
             }
         }
     }
