@@ -59,7 +59,7 @@ impl Executor {
             self.mount_config = MountConfig::default();
 
             self.execute_stage(stage)
-                .with_context(|| format!("Failed to execute stages"))?;
+                .with_context(|| "Failed to execute stages")?;
 
             // check if `image_output_dir/blobs/sha256` exists
             let layer_dir = self.image_output_dir.join("blobs/sha256");

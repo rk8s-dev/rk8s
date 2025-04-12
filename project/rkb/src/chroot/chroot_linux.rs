@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 
 pub fn chroot_linux(mountpoint: &Path) -> Result<()> {
     chroot(mountpoint).with_context(|| format!("Failed to chroot to {}", mountpoint.display()))?;
-    chdir("/").with_context(|| format!("Failed to chdir"))?;
+    chdir("/").with_context(|| "Failed to chdir")?;
     setuid(getuid())?;
     Ok(())
 }

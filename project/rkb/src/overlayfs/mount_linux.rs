@@ -29,7 +29,7 @@ pub fn mount_linux(config: &MountConfig) -> Result<MountManager> {
         }
     }
 
-    let mut mount_manager = MountManager::new();
+    let mut mount_manager = MountManager::default();
 
     // create new mount namespace
     unshare(CloneFlags::CLONE_NEWNS).context("Failed to call unshare")?;
@@ -158,17 +158,12 @@ pub fn mount_linux(config: &MountConfig) -> Result<MountManager> {
 /// Manages the mountpoints created by the mount_linux function.
 ///
 /// When the MountManager is dropped, it will unmount all mountpoints.
+#[derive(Default)]
 pub struct MountManager {
     mountpoints: Vec<PathBuf>,
 }
 
 impl MountManager {
-    pub fn new() -> Self {
-        Self {
-            mountpoints: Vec::new(),
-        }
-    }
-
     pub fn add_mountpoint(&mut self, mountpoint: PathBuf) {
         self.mountpoints.push(mountpoint);
     }
