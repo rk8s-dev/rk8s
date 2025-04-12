@@ -56,7 +56,7 @@ impl<'m> StageExecutor<'m> {
         }
     }
 
-    pub fn execute<'a>(&mut self, stage: &Stage<'a>, config: &StageExecutorConfig) -> Result<()> {
+    pub fn execute(&mut self, stage: &Stage<'_>, config: &StageExecutorConfig) -> Result<()> {
         for instruction in stage.instructions.iter() {
             self.execute_instruction(instruction, config)
                 .with_context(|| format!("Failed to execute instruction {:?}", instruction))?;
@@ -140,11 +140,10 @@ impl<'m> StageExecutor<'m> {
     }
 
     fn execute_arg_instruction(&mut self, arg_instruction: &ArgInstruction) -> Result<()> {
-        let val = if let Some(val) = &arg_instruction.value {
-            Some(val.content.clone())
-        } else {
-            None
-        };
+        let val = arg_instruction
+            .value
+            .as_ref()
+            .map(|val| val.content.clone());
         self.args.insert(arg_instruction.name.content.clone(), val);
         Ok(())
     }
@@ -284,7 +283,7 @@ impl<'m> StageExecutor<'m> {
             .map(|s| current_dir.join(&s.content))
             .collect();
 
-        exec_copy_in_subprocess(&self.mount_config, &src, dest)?;
+        exec_copy_in_subprocess(self.mount_config, &src, dest)?;
         self.mount_config.finish()?;
 
         Ok(())

@@ -51,7 +51,7 @@ fn create_tar(source_path: &Path, tar_path: &Path) -> Result<()> {
     let file = File::create(tar_path)?;
     let mut tar_builder = Builder::new(file);
 
-    for entry_result in WalkDir::new(&source_path)
+    for entry_result in WalkDir::new(source_path)
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| !should_skip_path(e.path()))
@@ -74,7 +74,7 @@ fn create_tar(source_path: &Path, tar_path: &Path) -> Result<()> {
         };
 
         // relative path used in tar file
-        let relative_path = match path.strip_prefix(&source_path) {
+        let relative_path = match path.strip_prefix(source_path) {
             Ok(rel_path) => rel_path.to_string_lossy(),
             Err(_) => {
                 continue;
@@ -164,7 +164,7 @@ fn append_symlink(builder: &mut Builder<File>, path: &Path, name: &str) -> Resul
     let metadata = fs::symlink_metadata(path)?;
     header.set_metadata(&metadata);
     header.set_path(name)?;
-    header.set_link_name(&target_str.as_ref())?;
+    header.set_link_name(target_str.as_ref())?;
     header.set_entry_type(tar::EntryType::Symlink);
     header.set_size(0);
     header.set_cksum();
@@ -258,7 +258,7 @@ pub fn compress(compression_config: &LayerCompressionConfig) -> Result<LayerComp
         .output_dir
         .join(format!("{}.tar.gz", &random_string));
 
-    create_tar(&source_dir, &tar_path)?;
+    create_tar(source_dir, &tar_path)?;
 
     let tar_file = Path::new(&tar_path);
     let tar_sha256sum = try_digest(tar_file)

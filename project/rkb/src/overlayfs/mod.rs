@@ -8,7 +8,7 @@ pub mod mount_linux;
 
 pub fn copy_dir<P: AsRef<Path>, Q: AsRef<Path>>(source: P, dest: Q) -> Result<()> {
     let status = Command::new("cp")
-        .args(&[
+        .args([
             "-a",
             source.as_ref().to_str().unwrap(),
             dest.as_ref().to_str().unwrap(),
