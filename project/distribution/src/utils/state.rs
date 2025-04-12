@@ -16,8 +16,8 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(storage_type: &String, root: &String) -> Self {
-        let storage_backend: Arc<dyn Storage + Send + Sync> = match storage_type.as_str() {
+    pub fn new(storage_type: &str, root: &str) -> Self {
+        let storage_backend: Arc<dyn Storage + Send + Sync> = match storage_type {
             "FILESYSTEM" => Arc::new(FilesystemStorage::new(root)),
             _ => Arc::new(FilesystemStorage::new(root)),
         };

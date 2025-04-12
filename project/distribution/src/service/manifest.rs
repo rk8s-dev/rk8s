@@ -67,11 +67,11 @@ pub(crate) async fn get_manifest_handler(
                 let image_manifest =
                     ImageManifest::from_reader(file.try_into_std().unwrap()).unwrap();
                 let response = image_manifest.to_string().unwrap();
-                return Response::builder()
+                Response::builder()
                     .status(StatusCode::OK)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(response))
-                    .unwrap();
+                    .unwrap()
             }
             Err(_) => {
                 let error_info = ErrorInfoBuilder::default()
@@ -84,10 +84,10 @@ pub(crate) async fn get_manifest_handler(
                     .errors(vec![error_info])
                     .build()
                     .unwrap();
-                return Response::builder()
+                Response::builder()
                     .status(StatusCode::NOT_FOUND)
                     .body(Body::from(serde_json::to_string(&error_response).unwrap()))
-                    .unwrap();
+                    .unwrap()
             }
         }
     } else {
@@ -97,11 +97,11 @@ pub(crate) async fn get_manifest_handler(
                 let image_manifest =
                     ImageManifest::from_reader(file.try_into_std().unwrap()).unwrap();
                 let response = image_manifest.to_string().unwrap();
-                return Response::builder()
+                Response::builder()
                     .status(StatusCode::OK)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(response))
-                    .unwrap();
+                    .unwrap()
             }
             Err(_) => {
                 let error_info = ErrorInfoBuilder::default()
@@ -114,10 +114,10 @@ pub(crate) async fn get_manifest_handler(
                     .errors(vec![error_info])
                     .build()
                     .unwrap();
-                return Response::builder()
+                Response::builder()
                     .status(StatusCode::NOT_FOUND)
                     .body(Body::from(serde_json::to_string(&error_response).unwrap()))
-                    .unwrap();
+                    .unwrap()
             }
         }
     }
@@ -246,10 +246,11 @@ pub async fn put_manifest_handler(
 
     // Save the manifest to the storage
     let uuid = uuid::Uuid::new_v4().to_string();
-    if let Err(_) = state
+    if (state
         .storage
         .write_by_uuid(&uuid, request.into_body().into_data_stream(), false)
-        .await
+        .await)
+        .is_err()
     {
         return Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -282,29 +283,27 @@ pub async fn put_manifest_handler(
 
     let digest = oci_digest::from_str(&digest_str).unwrap();
 
-    if let Err(_) = state.storage.move_to_digest(&uuid, &digest).await {
+    if (state.storage.move_to_digest(&uuid, &digest).await).is_err() {
         return Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(axum::body::Body::empty())
             .unwrap();
     }
 
-    if is_tag {
-        if let Err(_) = state.storage.link_to_tag(&name, &reference, &digest).await {
-            return Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(axum::body::Body::empty())
-                .unwrap();
-        }
+    if is_tag && (state.storage.link_to_tag(&name, &reference, &digest).await).is_err() {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(axum::body::Body::empty())
+            .unwrap();
     }
 
     let location = format!("/v2/{}/manifests/{}", name.replace("/", "%2F"), digest);
 
-    return Response::builder()
+    Response::builder()
         .status(StatusCode::CREATED)
         .header(header::LOCATION, location)
         .body(Body::empty())
-        .unwrap();
+        .unwrap()
 }
 
 pub async fn get_tag_list_handler(
@@ -318,7 +317,7 @@ pub async fn get_tag_list_handler(
                 .get("n")
                 .and_then(|value| value.parse::<usize>().ok())
                 .is_some();
-            let has_param_last = params.get("last").is_some();
+            let has_param_last = params.contains_key("last");
             let mut need_link = false;
             let mut n_value = 0;
             if has_param_n {
@@ -366,14 +365,12 @@ pub async fn get_tag_list_handler(
                     header::HeaderValue::from_str(&link_header).unwrap(),
                 );
             }
-            return response;
+            response
         }
-        Err(_) => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap();
-        }
+        Err(_) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap(),
     }
 }
 
@@ -396,33 +393,25 @@ pub async fn delete_manifest_handler(
     if is_valid_digest(&reference) {
         let digest = oci_digest::from_str(&reference).unwrap();
         match state.storage.delete_by_digest(&digest).await {
-            Ok(_) => {
-                return Response::builder()
-                    .status(StatusCode::ACCEPTED)
-                    .body(Body::empty())
-                    .unwrap();
-            }
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Body::empty())
-                    .unwrap();
-            }
+            Ok(_) => Response::builder()
+                .status(StatusCode::ACCEPTED)
+                .body(Body::empty())
+                .unwrap(),
+            Err(_) => Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::empty())
+                .unwrap(),
         }
     } else {
         match state.storage.delete_by_tag(&name, &reference).await {
-            Ok(_) => {
-                return Response::builder()
-                    .status(StatusCode::ACCEPTED)
-                    .body(Body::empty())
-                    .unwrap();
-            }
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Body::empty())
-                    .unwrap();
-            }
+            Ok(_) => Response::builder()
+                .status(StatusCode::ACCEPTED)
+                .body(Body::empty())
+                .unwrap(),
+            Err(_) => Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::empty())
+                .unwrap(),
         }
     }
 }
