@@ -4,14 +4,22 @@ use anyhow::{Context, Result};
 
 use dockerfile_parser::Stage;
 
-use crate::{compression::{compress_layer::compress, layer_compression_config::LayerCompressionConfig, layer_compression_result::LayerCompressionResult}, overlayfs::mount_config::MountConfig};
+use crate::{
+    compression::{
+        compress_layer::compress, layer_compression_config::LayerCompressionConfig,
+        layer_compression_result::LayerCompressionResult,
+    },
+    overlayfs::mount_config::MountConfig,
+};
 
-use super::{build_config::BuildConfig, image_config::ImageConfig, stage_executor::StageExecutor, stage_executor_config::StageExecutorConfig};
-
+use super::{
+    build_config::BuildConfig, image_config::ImageConfig, stage_executor::StageExecutor,
+    stage_executor_config::StageExecutorConfig,
+};
 
 /// Executor coordinates the entire build by using one or more
 /// StageExecutors to handle each stage of the build.
-/// 
+///
 /// [Reference](https://github.com/containers/buildah/blob/main/imagebuildah/executor.go)
 pub struct Executor {
     pub mount_config: MountConfig,
@@ -34,7 +42,11 @@ impl Executor {
         }
     }
 
-    pub fn stage_executor_config(mut self, build_config: BuildConfig, global_args: &HashMap<String, Option<String>>) -> Self {
+    pub fn stage_executor_config(
+        mut self,
+        build_config: BuildConfig,
+        global_args: &HashMap<String, Option<String>>,
+    ) -> Self {
         self.stage_executor_config = StageExecutorConfig::default()
             .build_config(build_config)
             .global_args(global_args);
@@ -52,15 +64,15 @@ impl Executor {
             // check if `image_output_dir/blobs/sha256` exists
             let layer_dir = self.image_output_dir.join("blobs/sha256");
             if fs::metadata(&layer_dir).is_err() {
-                fs::create_dir_all(&layer_dir)
-                    .with_context(|| format!("Failed to create directory {}", layer_dir.display()))?;
+                fs::create_dir_all(&layer_dir).with_context(|| {
+                    format!("Failed to create directory {}", layer_dir.display())
+                })?;
             }
 
             // compress layers
             for layer in self.mount_config.lower_dir.iter() {
-                let compression_config = LayerCompressionConfig::new(
-                    layer.clone(), 
-                    layer_dir.clone());
+                let compression_config =
+                    LayerCompressionConfig::new(layer.clone(), layer_dir.clone());
                 let compression_result = compress(&compression_config)
                     .with_context(|| format!("Failed to compress layer {}", layer.display()))?;
                 self.image_layers.push(compression_result);
@@ -71,11 +83,13 @@ impl Executor {
 
     pub fn execute_stage(&mut self, stage: &Stage<'_>) -> Result<()> {
         let mut stage_executor = StageExecutor::new(
-            &mut self.mount_config, 
-            &mut self.image_config, 
-            &mut self.image_aliases);
+            &mut self.mount_config,
+            &mut self.image_config,
+            &mut self.image_aliases,
+        );
 
-        stage_executor.execute(stage, &self.stage_executor_config)
+        stage_executor
+            .execute(stage, &self.stage_executor_config)
             .with_context(|| format!("Failed to execute stage {:?}", stage))?;
         Ok(())
     }

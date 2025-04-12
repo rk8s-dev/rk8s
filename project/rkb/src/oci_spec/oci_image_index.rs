@@ -1,7 +1,9 @@
 use std::{collections::HashMap, str::FromStr};
 
 use anyhow::{Context, Result};
-use oci_spec::image::{DescriptorBuilder, ImageIndex, ImageIndexBuilder, MediaType, Sha256Digest, SCHEMA_VERSION};
+use oci_spec::image::{
+    DescriptorBuilder, ImageIndex, ImageIndexBuilder, MediaType, SCHEMA_VERSION, Sha256Digest,
+};
 
 pub struct OciImageIndex {
     pub image_index_builder: ImageIndexBuilder,
@@ -15,13 +17,15 @@ impl OciImageIndex {
             let descriptor = DescriptorBuilder::default()
                 .media_type(MediaType::ImageManifest)
                 .size(*size)
-                .digest(Sha256Digest::from_str(digest_str.as_str()).with_context(|| {
-                    format!("Invalid digest format: {}", digest_str)
-                })?)
+                .digest(
+                    Sha256Digest::from_str(digest_str.as_str())
+                        .with_context(|| format!("Invalid digest format: {}", digest_str))?,
+                )
                 .annotations(
-                    vec![
-                        (String::from("org.opencontainers.image.ref.name"), String::from("latest")),
-                    ]
+                    vec![(
+                        String::from("org.opencontainers.image.ref.name"),
+                        String::from("latest"),
+                    )]
                     .into_iter()
                     .collect::<HashMap<_, _>>(),
                 )
@@ -31,8 +35,7 @@ impl OciImageIndex {
             descriptors.push(descriptor);
         }
 
-        self.image_index_builder = self.image_index_builder
-            .manifests(descriptors);
+        self.image_index_builder = self.image_index_builder.manifests(descriptors);
 
         Ok(self)
     }

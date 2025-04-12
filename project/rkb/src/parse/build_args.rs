@@ -1,9 +1,12 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use dockerfile_parser::Dockerfile;
-use rand::{distr::Alphanumeric, Rng};
+use rand::{Rng, distr::Alphanumeric};
 
 use crate::build::{build_config::BuildConfig, builder::Builder};
 
@@ -47,29 +50,36 @@ pub fn execute(build_args: &BuildArgs) -> Result<()> {
     if let Some(dockerfile_path) = build_args.file.as_ref() {
         let dockerfile = parse_dockerfile(dockerfile_path)?;
 
-        let output_dir = build_args.output_dir
+        let output_dir = build_args
+            .output_dir
             .as_ref()
             .map(|dir| dir.trim_end_matches('/').to_string())
             .unwrap_or_else(|| ".".to_string());
 
-        let tag = build_args.tag
-            .clone()
-            .unwrap_or_else(|| {
-                let rng = rand::rng();
-                rng.sample_iter(&Alphanumeric)
-                    .take(10)
-                    .map(char::from)
-                    .collect::<String>()
-            });
-        
+        let tag = build_args.tag.clone().unwrap_or_else(|| {
+            let rng = rand::rng();
+            rng.sample_iter(&Alphanumeric)
+                .take(10)
+                .map(char::from)
+                .collect::<String>()
+        });
+
         let image_output_dir = PathBuf::from(format!("{}/{}", output_dir, tag));
 
         if fs::metadata(&image_output_dir).is_ok() {
-            fs::remove_dir_all(&image_output_dir)
-                .with_context(|| format!("Failed to remove existing directory: {}", image_output_dir.display()))?;
+            fs::remove_dir_all(&image_output_dir).with_context(|| {
+                format!(
+                    "Failed to remove existing directory: {}",
+                    image_output_dir.display()
+                )
+            })?;
         }
-        fs::create_dir_all(&image_output_dir)
-            .with_context(|| format!("Failed to create output directory: {}", image_output_dir.display()))?;
+        fs::create_dir_all(&image_output_dir).with_context(|| {
+            format!(
+                "Failed to create output directory: {}",
+                image_output_dir.display()
+            )
+        })?;
 
         let imgae_builder = Builder::new(dockerfile)
             .config(build_config)
@@ -86,7 +96,7 @@ mod tests {
 
     use clap::Parser;
     use dockerfile_parser::{BreakableStringComponent, Instruction, ShellOrExecExpr};
-    use rand::{distr::Alphanumeric, Rng};
+    use rand::{Rng, distr::Alphanumeric};
 
     use crate::parse::build_args::parse_dockerfile;
 
@@ -94,13 +104,8 @@ mod tests {
 
     #[test]
     fn test_dockerfile() {
-        let build_args = BuildArgs::parse_from(vec![
-            "rkb",
-            "-f",
-            "example-Dockerfile",
-            "-t",
-            "image1",
-        ]);
+        let build_args =
+            BuildArgs::parse_from(vec!["rkb", "-f", "example-Dockerfile", "-t", "image1"]);
 
         assert_eq!(build_args.file, Some(PathBuf::from("example-Dockerfile")));
         let dockerfile = parse_dockerfile(PathBuf::from("example-Dockerfile")).unwrap();
@@ -119,46 +124,40 @@ mod tests {
             "output_dir",
         ]);
 
-        let output_dir = build_args.output_dir
-        .as_ref()
-        .map(|dir| dir.trim_end_matches('/').to_string())
-        .unwrap_or_else(|| ".".to_string());
+        let output_dir = build_args
+            .output_dir
+            .as_ref()
+            .map(|dir| dir.trim_end_matches('/').to_string())
+            .unwrap_or_else(|| ".".to_string());
 
-        let tag = build_args.tag
-            .clone()
-            .unwrap_or_else(|| {
-                let rng = rand::rng();
-                rng.sample_iter(&Alphanumeric)
-                    .take(10)
-                    .map(char::from)
-                    .collect::<String>()
-            });
-        
+        let tag = build_args.tag.clone().unwrap_or_else(|| {
+            let rng = rand::rng();
+            rng.sample_iter(&Alphanumeric)
+                .take(10)
+                .map(char::from)
+                .collect::<String>()
+        });
+
         let image_output_dir = PathBuf::from(&format!("{}/{}", output_dir, tag));
 
         assert_eq!("output_dir/image1", image_output_dir.to_str().unwrap());
 
-        let build_args = BuildArgs::parse_from(vec![
-            "rkb",
-            "-f",
-            "example-Dockerfile",
-        ]);
+        let build_args = BuildArgs::parse_from(vec!["rkb", "-f", "example-Dockerfile"]);
 
-        let output_dir = build_args.output_dir
-        .as_ref()
-        .map(|dir| dir.trim_end_matches('/').to_string())
-        .unwrap_or_else(|| ".".to_string());
+        let output_dir = build_args
+            .output_dir
+            .as_ref()
+            .map(|dir| dir.trim_end_matches('/').to_string())
+            .unwrap_or_else(|| ".".to_string());
 
-        let tag = build_args.tag
-            .clone()
-            .unwrap_or_else(|| {
-                let rng = rand::rng();
-                rng.sample_iter(&Alphanumeric)
-                    .take(10)
-                    .map(char::from)
-                    .collect::<String>()
-            });
-        
+        let tag = build_args.tag.clone().unwrap_or_else(|| {
+            let rng = rand::rng();
+            rng.sample_iter(&Alphanumeric)
+                .take(10)
+                .map(char::from)
+                .collect::<String>()
+        });
+
         let image_output_dir = PathBuf::from(&format!("{}/{}", output_dir, tag));
 
         assert!(image_output_dir.to_str().unwrap().starts_with("./"));
@@ -167,13 +166,8 @@ mod tests {
 
     #[test]
     fn test_run_instruction() {
-        let build_args = BuildArgs::parse_from(vec![
-            "rkb",
-            "-f",
-            "example-Dockerfile",
-            "-t",
-            "image1",
-        ]);
+        let build_args =
+            BuildArgs::parse_from(vec!["rkb", "-f", "example-Dockerfile", "-t", "image1"]);
 
         assert_eq!(build_args.file, Some(PathBuf::from("example-Dockerfile")));
         let dockerfile = parse_dockerfile(PathBuf::from("example-Dockerfile")).unwrap();
@@ -182,20 +176,20 @@ mod tests {
                 match &run_instruction.expr {
                     ShellOrExecExpr::Exec(exec) => {
                         assert_eq!(exec.as_str_vec().len(), 5);
-                    },
+                    }
                     ShellOrExecExpr::Shell(shell_expr) => {
                         let mut commands = vec![];
                         commands.extend(vec!["/bin/sh", "-c"]);
                         for component in shell_expr.components.iter() {
                             match component {
-                                BreakableStringComponent::Comment(_) => {},
+                                BreakableStringComponent::Comment(_) => {}
                                 BreakableStringComponent::String(spanned_string) => {
                                     commands.push(spanned_string.content.as_str());
                                 }
                             }
                         }
                         println!("commands: {:?}", commands);
-                    },
+                    }
                 }
             }
         }

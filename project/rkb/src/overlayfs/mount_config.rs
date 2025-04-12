@@ -1,18 +1,18 @@
 use std::{fs, path::PathBuf};
 
-use anyhow::{Context, Result};
 use super::copy_dir;
+use anyhow::{Context, Result};
 
 #[derive(Debug, Clone)]
 pub struct MountConfig {
     pub lower_dir: Vec<PathBuf>,
-    pub upper_dir:PathBuf,
-    pub mountpoint:PathBuf,
-    pub work_dir:PathBuf,
+    pub upper_dir: PathBuf,
+    pub mountpoint: PathBuf,
+    pub work_dir: PathBuf,
     /// All above directories are created inside this directory.
-    /// 
+    ///
     /// When the struct is being dropped, remove this directory.
-    pub overlay:PathBuf,
+    pub overlay: PathBuf,
     upper_cnt: i32,
 }
 
@@ -29,8 +29,12 @@ impl MountConfig {
     }
 
     pub fn init(&mut self) -> Result<()> {
-        fs::create_dir_all(&self.overlay)
-            .with_context(|| format!("Failed to create overlay directory {}", self.overlay.display()))?;
+        fs::create_dir_all(&self.overlay).with_context(|| {
+            format!(
+                "Failed to create overlay directory {}",
+                self.overlay.display()
+            )
+        })?;
         let lower_dir = self.overlay.join("lower");
         fs::create_dir_all(&lower_dir)
             .with_context(|| format!("Failed to create lower directory {}", lower_dir.display()))?;
@@ -43,27 +47,45 @@ impl MountConfig {
     /// Clean up the overlay directory for the next mount.
     pub fn prepare(&mut self) -> Result<()> {
         if fs::metadata(&self.upper_dir).is_ok() {
-            fs::remove_dir_all(&self.upper_dir)
-                .with_context(|| format!("Failed to remove upper directory {}", self.upper_dir.display()))?;
+            fs::remove_dir_all(&self.upper_dir).with_context(|| {
+                format!(
+                    "Failed to remove upper directory {}",
+                    self.upper_dir.display()
+                )
+            })?;
         }
         self.upper_cnt += 1;
         self.upper_dir = self.overlay.join(format!("diff{}", self.upper_cnt));
 
         if fs::metadata(&self.mountpoint).is_ok() {
-            fs::remove_dir_all(&self.mountpoint)
-                .with_context(|| format!("Failed to remove mountpoint {}", self.mountpoint.display()))?;
+            fs::remove_dir_all(&self.mountpoint).with_context(|| {
+                format!("Failed to remove mountpoint {}", self.mountpoint.display())
+            })?;
         }
         if fs::metadata(&self.work_dir).is_ok() {
-            fs::remove_dir_all(&self.work_dir)
-                .with_context(|| format!("Failed to remove work directory {}", self.work_dir.display()))?;
+            fs::remove_dir_all(&self.work_dir).with_context(|| {
+                format!(
+                    "Failed to remove work directory {}",
+                    self.work_dir.display()
+                )
+            })?;
         }
 
-        fs::create_dir_all(&self.upper_dir)
-            .with_context(|| format!("Failed to create upper directory {}", self.upper_dir.display()))?;
-        fs::create_dir_all(&self.mountpoint)
-            .with_context(|| format!("Failed to create mountpoint {}", self.mountpoint.display()))?;
-        fs::create_dir_all(&self.work_dir)
-            .with_context(|| format!("Failed to create work directory {}", self.work_dir.display()))?;
+        fs::create_dir_all(&self.upper_dir).with_context(|| {
+            format!(
+                "Failed to create upper directory {}",
+                self.upper_dir.display()
+            )
+        })?;
+        fs::create_dir_all(&self.mountpoint).with_context(|| {
+            format!("Failed to create mountpoint {}", self.mountpoint.display())
+        })?;
+        fs::create_dir_all(&self.work_dir).with_context(|| {
+            format!(
+                "Failed to create work directory {}",
+                self.work_dir.display()
+            )
+        })?;
 
         Ok(())
     }
@@ -72,7 +94,8 @@ impl MountConfig {
     pub fn finish(&mut self) -> Result<()> {
         let lower_dir = self.overlay.join("lower");
         copy_dir(&self.upper_dir, &lower_dir)?;
-        self.lower_dir.push(self.overlay.join(format!("lower/diff{}", self.upper_cnt)));
+        self.lower_dir
+            .push(self.overlay.join(format!("lower/diff{}", self.upper_cnt)));
         Ok(())
     }
 }
@@ -95,7 +118,13 @@ impl Drop for MountConfig {
     fn drop(&mut self) {
         if fs::metadata(&self.overlay).is_ok() {
             fs::remove_dir_all(&self.overlay)
-                .with_context(|| format!("Failed to remove overlay directory {}", self.overlay.display())).ok();
+                .with_context(|| {
+                    format!(
+                        "Failed to remove overlay directory {}",
+                        self.overlay.display()
+                    )
+                })
+                .ok();
         }
     }
 }
@@ -128,6 +157,11 @@ mod tests {
         assert_eq!(mount_config.mountpoint.exists(), true);
         assert_eq!(mount_config.work_dir.exists(), true);
 
-        assert!(mount_config.lower_dir[0].to_str().unwrap().ends_with("lower/lower0"));
+        assert!(
+            mount_config.lower_dir[0]
+                .to_str()
+                .unwrap()
+                .ends_with("lower/lower0")
+        );
     }
 }

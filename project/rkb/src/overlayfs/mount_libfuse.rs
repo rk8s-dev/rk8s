@@ -6,6 +6,4 @@
 
 use super::mount_config::MountConfig;
 
-pub async fn mount_libfuse(_config: &MountConfig) {
-
-}
+pub async fn mount_libfuse(_config: &MountConfig) {}

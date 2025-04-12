@@ -4,7 +4,13 @@ use anyhow::{Context, Result};
 
 use dockerfile_parser::Dockerfile;
 
-use crate::{oci_spec::{oci_builder::OCIBuilder, oci_image_config::OciImageConfig, oci_image_index::OciImageIndex, oci_image_manifest::OciImageManifest}, overlayfs::mount_config::MountConfig};
+use crate::{
+    oci_spec::{
+        oci_builder::OCIBuilder, oci_image_config::OciImageConfig, oci_image_index::OciImageIndex,
+        oci_image_manifest::OciImageManifest,
+    },
+    overlayfs::mount_config::MountConfig,
+};
 
 use super::{build_config::BuildConfig, executor::Executor};
 
@@ -64,7 +70,9 @@ impl Builder {
         // construct the image metadata
 
         // TODO: add `executor.image_config` to OciImageConfig
-        let config = executor.image_config.get_oci_image_config()
+        let config = executor
+            .image_config
+            .get_oci_image_config()
             .with_context(|| format!("Failed to get OCI image config"))?;
         let image_config = OciImageConfig::default()
             .config(config)
@@ -77,12 +85,13 @@ impl Builder {
                 config.rootfs(layer_ids)
             })?;
 
-        let image_manifest = OciImageManifest::default()
-            .layers(executor.image_layers
+        let image_manifest = OciImageManifest::default().layers(
+            executor
+                .image_layers
                 .iter()
                 .map(|l| (l.gz_size, l.gz_sha256sum.clone()))
-                .collect::<Vec<(u64, String)>>()
-            )?;
+                .collect::<Vec<(u64, String)>>(),
+        )?;
 
         let image_index = OciImageIndex::default();
 
@@ -92,7 +101,8 @@ impl Builder {
             .oci_image_manifest(image_manifest)
             .oci_image_index(image_index);
 
-        oci_builder.build()
+        oci_builder
+            .build()
             .with_context(|| format!("Failed to build OCI metadata"))?;
 
         Ok(())

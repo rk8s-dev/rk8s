@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
-use oci_spec::image::{Arch, Config, ConfigBuilder, ImageConfiguration, ImageConfigurationBuilder, Os, RootFsBuilder};
+use oci_spec::image::{
+    Arch, Config, ConfigBuilder, ImageConfiguration, ImageConfigurationBuilder, Os, RootFsBuilder,
+};
 
 #[derive(Default)]
 pub struct OciImageConfig {
@@ -10,11 +12,14 @@ impl OciImageConfig {
     pub fn default_config(mut self) -> Result<Self> {
         let config = ConfigBuilder::default()
             .cmd(vec!["sh".to_string()])
-            .env(vec!["/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()])
+            .env(vec![
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
+            ])
             .build()
             .with_context(|| "Failed to build default config")?;
 
-        self.image_config_builder = self.image_config_builder
+        self.image_config_builder = self
+            .image_config_builder
             .config(config)
             .architecture(Arch::Amd64)
             .os(Os::Linux)
@@ -24,7 +29,8 @@ impl OciImageConfig {
     }
 
     pub fn config(mut self, config: Config) -> Result<Self> {
-        self.image_config_builder = self.image_config_builder
+        self.image_config_builder = self
+            .image_config_builder
             .config(config)
             .architecture(Arch::Amd64)
             .os(Os::Linux)
@@ -36,7 +42,12 @@ impl OciImageConfig {
     pub fn rootfs(mut self, rootfs: Vec<String>) -> Result<Self> {
         let rootfs = RootFsBuilder::default()
             .typ("layers".to_string())
-            .diff_ids(rootfs.iter().map(|s| format!("sha256:{}", s)).collect::<Vec<String>>())
+            .diff_ids(
+                rootfs
+                    .iter()
+                    .map(|s| format!("sha256:{}", s))
+                    .collect::<Vec<String>>(),
+            )
             .build()
             .with_context(|| "Failed to build rootfs")?;
 

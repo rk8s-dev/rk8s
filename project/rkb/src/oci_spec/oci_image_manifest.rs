@@ -1,7 +1,9 @@
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
-use oci_spec::image::{DescriptorBuilder, ImageManifest, ImageManifestBuilder, MediaType, Sha256Digest, SCHEMA_VERSION};
+use oci_spec::image::{
+    DescriptorBuilder, ImageManifest, ImageManifestBuilder, MediaType, SCHEMA_VERSION, Sha256Digest,
+};
 
 pub struct OciImageManifest {
     pub image_manifest_builder: ImageManifestBuilder,
@@ -9,40 +11,39 @@ pub struct OciImageManifest {
 
 impl OciImageManifest {
     pub fn config(mut self, config_sha256sum: String, config_size: u64) -> Result<Self> {
-       let config = DescriptorBuilder::default()
+        let config = DescriptorBuilder::default()
             .media_type(MediaType::ImageConfig)
             .size(config_size)
-            .digest(Sha256Digest::from_str(config_sha256sum.as_str()).with_context(|| {
-                format!("Invalid digest format: {}", config_sha256sum)
-            })?)
+            .digest(
+                Sha256Digest::from_str(config_sha256sum.as_str())
+                    .with_context(|| format!("Invalid digest format: {}", config_sha256sum))?,
+            )
             .build()
             .with_context(|| "Failed to build config descriptor")?;
 
-        self.image_manifest_builder = self.image_manifest_builder
-            .config(config);
+        self.image_manifest_builder = self.image_manifest_builder.config(config);
 
         Ok(self)
     }
 
     pub fn layers(mut self, layers: Vec<(u64, String)>) -> Result<Self> {
         let mut descriptors = Vec::new();
-    
+
         for (size, digest_str) in layers.iter() {
             let digest = Sha256Digest::from_str(digest_str)
                 .with_context(|| format!("Invalid digest format: {}", digest_str))?;
-                
+
             let descriptor = DescriptorBuilder::default()
                 .media_type(MediaType::ImageLayerGzip)
                 .size(*size)
                 .digest(digest)
                 .build()
                 .with_context(|| format!("Failed to build layer descriptor {}", digest_str))?;
-                
+
             descriptors.push(descriptor);
         }
 
-        self.image_manifest_builder = self.image_manifest_builder
-            .layers(descriptors);
+        self.image_manifest_builder = self.image_manifest_builder.layers(descriptors);
 
         Ok(self)
     }

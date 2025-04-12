@@ -4,9 +4,9 @@ use anyhow::{Context, Result};
 use oci_spec::image::{Config, ConfigBuilder};
 
 /// Image config is used in config.json.
-/// 
+///
 /// Currently not exhaustive, only some simple fields.
-/// 
+///
 /// Struct fields should be used to construct OciImageConfig.
 #[derive(Debug, Clone, Default)]
 pub struct ImageConfig {
@@ -41,10 +41,12 @@ impl ImageConfig {
         }
 
         if self.envp.len() > 0 {
-            config = config.env(self.envp
-                .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect::<Vec<String>>());
+            config = config.env(
+                self.envp
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<String>>(),
+            );
         }
 
         if let Some(entrypoint) = &self.entrypoint {
@@ -55,7 +57,8 @@ impl ImageConfig {
             config = config.cmd(cmd.clone());
         }
 
-        config.build()
+        config
+            .build()
             .with_context(|| "Failed to build OCI image config")
     }
 }
