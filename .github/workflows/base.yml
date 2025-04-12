@@ -47,9 +47,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-      - run: |
+      
+      - name: Run rustfmt
+        run: |
           cd project
-          cargo fmt --package distribution libbridge libcni libflannel libfuse-fs libipam rkb rkl --check
+          cargo fmt --all --check
 
   clippy:
     name: Clippy Check
@@ -73,7 +75,7 @@ jobs:
       - name: Run cargo clippy
         run: |
           cd project
-          cargo clippy --workspace --exclude libcgroups --exclude libcontainer -- -D warnings
+          cargo clippy --workspace -- -D warnings
 
   build:
     name: Buck2 Build
