@@ -1,4 +1,7 @@
 debug/
 target/
 **/*.rs.bk
-
+overlay/
+output/
+src/bin/*
+src/bin
