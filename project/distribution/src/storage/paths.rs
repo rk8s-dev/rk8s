@@ -31,9 +31,9 @@ pub struct PathManager {
 }
 
 impl PathManager {
-    pub fn new(root: &String) -> Self {
+    pub fn new(root: &str) -> Self {
         PathManager {
-            root_path: root.clone(),
+            root_path: root.to_owned(),
         }
     }
 
@@ -98,7 +98,7 @@ impl PathManager {
             "{}/{}/{}/{}",
             self.blobs_path(),
             digest.algorithm(),
-            digest.digest()[..2].to_string(),
+            &digest.digest()[..2],
             digest.digest()
         )
     }

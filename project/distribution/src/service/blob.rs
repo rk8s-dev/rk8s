@@ -42,7 +42,7 @@ pub(crate) async fn get_blob_handler(
     }
 
     let _digest = oci_digest::from_str(&digest);
-    if !_digest.is_ok() {
+    if _digest.is_err() {
         let error_info = ErrorInfoBuilder::default()
             .code(ErrorCode::DigestInvalid)
             .message("Invalid digest")
@@ -107,7 +107,7 @@ pub(crate) async fn head_blob_handler(
     }
 
     let _digest = oci_digest::from_str(&digest);
-    if !_digest.is_ok() {
+    if _digest.is_err() {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header(header::CONTENT_TYPE, "application/json")
@@ -194,7 +194,7 @@ pub async fn post_blob_handler(
         }
 
         let _digest = oci_digest::from_str(&digest);
-        if !_digest.is_ok() {
+        if _digest.is_err() {
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .body(axum::body::Body::empty())
@@ -243,7 +243,7 @@ pub async fn put_blob_handler(
     }
 
     let _digest = oci_digest::from_str(&digest);
-    if !_digest.is_ok() {
+    if _digest.is_err() {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(axum::body::Body::empty())
@@ -256,25 +256,25 @@ pub async fn put_blob_handler(
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
 
-    if let Some(_) = state.get_session(&session_id).await {
+    if (state.get_session(&session_id).await).is_some() {
         state.update_session(&session_id, content_length).await;
         let location = format!("/v2/{}/blobs/{}", name.replace("/", "%2F"), digest.digest());
 
         // Save the final chunk
-        if content_length != 0 {
-            if let Err(_) = state
+        if content_length != 0
+            && (state
                 .storage
                 .write_by_uuid(&session_id, request.into_body().into_data_stream(), false)
-                .await
-            {
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(axum::body::Body::empty())
-                    .unwrap();
-            }
+                .await)
+                .is_err()
+        {
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(axum::body::Body::empty())
+                .unwrap();
         }
 
-        if let Err(_) = state.storage.move_to_digest(&session_id, &digest).await {
+        if (state.storage.move_to_digest(&session_id, &digest).await).is_err() {
             return Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .body(axum::body::Body::empty())
@@ -283,17 +283,17 @@ pub async fn put_blob_handler(
 
         state.close_session(&session_id).await;
 
-        return Response::builder()
+        Response::builder()
             .status(StatusCode::CREATED)
             .header(header::LOCATION, location)
             .body(axum::body::Body::empty())
-            .unwrap();
+            .unwrap()
     } else {
         // Session not found
-        return Response::builder()
+        Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(axum::body::Body::empty())
-            .unwrap();
+            .unwrap()
     }
 }
 
@@ -352,27 +352,23 @@ pub async fn patch_blob_handler(
             .write_by_uuid(&session_id, request.into_body().into_data_stream(), true)
             .await
         {
-            Ok(_) => {
-                return Response::builder()
-                    .status(StatusCode::ACCEPTED)
-                    .header(LOCATION, location)
-                    .header(RANGE, format!("0-{}", end_of_range))
-                    .body(axum::body::Body::empty())
-                    .unwrap();
-            }
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(axum::body::Body::empty())
-                    .unwrap();
-            }
+            Ok(_) => Response::builder()
+                .status(StatusCode::ACCEPTED)
+                .header(LOCATION, location)
+                .header(RANGE, format!("0-{}", end_of_range))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+            Err(_) => Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(axum::body::Body::empty())
+                .unwrap(),
         }
     } else {
         // Session not found
-        return Response::builder()
+        Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(axum::body::Body::empty())
-            .unwrap();
+            .unwrap()
     }
 }
 
@@ -409,7 +405,7 @@ pub async fn delete_blob_handler(
     Path((_name, digest)): Path<(String, String)>,
 ) -> impl IntoResponse {
     let _digest = oci_digest::from_str(&digest);
-    if !_digest.is_ok() {
+    if _digest.is_err() {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(axum::body::Body::empty())
