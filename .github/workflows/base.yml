@@ -1,10 +1,4 @@
 on:
-  push:
-    paths-ignore:
-      - '.github/**'
-      - 'docs/**'
-      - 'project/libcgroups/**'
-      - 'project/libcontainer/**'
   pull_request:
     paths-ignore:
       - '.github/**'
@@ -12,7 +6,7 @@ on:
       - 'project/libcgroups/**'
       - 'project/libcontainer/**'
 
-name: Base GitHub Action for Check, Test and Lints
+name: Base Workflow for Check, Build and Tests
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -40,22 +34,14 @@ jobs:
         with:
           components: clippy rustfmt
 
-      - name: Install Buck2
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zstd curl
-          curl https://github.com/facebook/buck2/releases/download/latest/buck2-x86_64-unknown-linux-gnu.zst --output "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst" --location --silent --show-error --fail --retry 5
-          zstd -d "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst" -o $HOME/.cargo/bin/buck2
-          chmod +x $HOME/.cargo/bin/buck2
-          rm -f "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst"
-        shell: bash
-
-      - name: Install Reindeer
-        run: cargo install --locked --git https://github.com/facebookincubator/reindeer reindeer
-
   format:
     name: Rustfmt Check
     runs-on: ubuntu-latest
+    needs: setup
+
+    env:
+      CARGO_TERM_COLOR: always
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
