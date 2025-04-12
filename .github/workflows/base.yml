@@ -5,6 +5,7 @@ on:
       - 'docs/**'
       - 'project/libcgroups/**'
       - 'project/libcontainer/**'
+      - 'project/tools/**'
 
 name: Base Workflow for Check, Build and Tests
 
