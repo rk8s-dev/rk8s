@@ -45,9 +45,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd curl
           curl https://github.com/facebook/buck2/releases/download/latest/buck2-x86_64-unknown-linux-gnu.zst --output "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst" --location --silent --show-error --fail --retry 5
-          zstd -d /tmp/buck2-x86_64-unknown-linux-gnu.zst -o $HOME/.cargo/bin/buck2
+          zstd -d "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst" -o $HOME/.cargo/bin/buck2
           chmod +x $HOME/.cargo/bin/buck2
-          rm -f /tmp/buck2-x86_64-unknown-linux-gnu.zst
+          rm -f "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst"
         shell: bash
 
       - name: Install Reindeer
