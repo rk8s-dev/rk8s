@@ -1,6 +1,6 @@
 use crate::commands::{create, delete, kill, load_container, start, state};
 use crate::rootpath;
-use crate::task::task::TaskRunner;
+use crate::task::task::{self, TaskRunner};
 use anyhow::{Result, anyhow};
 use liboci_cli::{Create, Delete, Kill, Start, State};
 use std::fs::{self, File};
@@ -177,7 +177,13 @@ pub fn start_pod(pod_name: &str) -> Result<(), anyhow::Error> {
 pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None)?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
-
+    let container = load_container(root_path.clone(), &pod_name)
+        .map_err(|e| anyhow!("Failed to load container {}: {}", pod_name, e))?;
+    let pid_i32 = container
+        .state
+        .pid
+        .ok_or_else(|| anyhow!("PID not found for container {}", pod_name))?;
+    remove_pod_network(pid_i32)?;
     // delete all container
     for container_name in &pod_info.container_names {
         let delete_args = Delete {
@@ -213,6 +219,18 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     // delete pod file
     PodInfo::delete(&root_path, pod_name)?;
     println!("Pod {} deleted successfully", pod_name);
+    Ok(())
+}
+
+pub fn remove_pod_network(pid: i32) -> Result<(), anyhow::Error> {
+    let mut cni = task::get_cni()?;
+    cni.load_default_conf();
+
+    let netns_path = format!("/proc/{}/ns/net", pid);
+    let id = pid.to_string();
+    cni.remove(id, netns_path.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to remove CNI network: {}", e))?;
+
     Ok(())
 }
 

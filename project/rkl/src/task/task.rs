@@ -11,12 +11,13 @@ use libcontainer::oci_spec::runtime::{
     LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, ProcessBuilder, Spec,
 };
 use liboci_cli::{Create, Delete, Kill, Start, State};
+use rust_cni::cni::Libcni;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 // simulate Kubernetes Pod
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TypeMeta {
@@ -230,6 +231,7 @@ impl TaskRunner {
             .pid
             .ok_or_else(|| anyhow!("PID not found for container {}", sandbox_id))?;
 
+        Self::setup_pod_network(pid_i32.clone())?;
         self.pause_pid = Some(pid_i32);
 
         let response = RunPodSandboxResponse {
@@ -237,6 +239,19 @@ impl TaskRunner {
         };
 
         Ok(response)
+    }
+
+    pub fn setup_pod_network(pid: i32) -> Result<(), anyhow::Error> {
+        let mut cni = get_cni()?;
+        cni.load_default_conf();
+
+        let netns_path = format!("/proc/{}/ns/net", pid);
+        let id = pid.to_string();
+
+        cni.setup(id.clone(), netns_path.clone())
+            .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))?;
+
+        Ok(())
     }
 
     pub fn build_create_container_request(
@@ -618,4 +633,21 @@ impl TaskRunner {
 
         Ok(pod_sandbox_id)
     }
+}
+
+pub fn get_cni() -> Result<Libcni, anyhow::Error> {
+    let current_dir = env::current_dir().expect("Failed to get current directory");
+    let plugin_dirs = vec![current_dir.to_string_lossy().into_owned()];
+    let mut plugin_conf_dir = current_dir.clone();
+    for _ in 0..2 {
+        plugin_conf_dir.pop();
+    }
+    plugin_conf_dir.push("rkl/test");
+
+    let mut cni = Libcni::new(
+        Some(plugin_dirs),
+        Some(plugin_conf_dir.to_string_lossy().to_string()),
+        None,
+    );
+    Ok(cni)
 }

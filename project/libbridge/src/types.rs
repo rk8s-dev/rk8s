@@ -1,4 +1,6 @@
 use cni_plugin::config::NetworkConfig;
+use ipnetwork::IpNetwork;
+use netlink_packet_route::AddressFamily;
 use rtnetlink::LinkMessageBuilder;
 use serde::{Deserialize, Serialize};
 
@@ -136,7 +138,13 @@ impl Bridge {
 
     /// Converts the Bridge instance into a LinkMessageBuilder.
     pub fn into_builder(self) -> LinkMessageBuilder<rtnetlink::LinkBridge> {
-        let builder = LinkMessageBuilder::<rtnetlink::LinkBridge>::new(&self.name).mtu(self.mtu);
-        builder
+        LinkMessageBuilder::<rtnetlink::LinkBridge>::new(&self.name).mtu(self.mtu)
     }
+}
+
+#[derive(Debug, Default)]
+pub struct GatewayInfo {
+    pub gws: Vec<IpNetwork>,
+    pub family: AddressFamily,
+    pub default_route_found: bool,
 }

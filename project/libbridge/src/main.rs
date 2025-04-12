@@ -1,26 +1,35 @@
-use std::collections::HashSet;
+use std::str::FromStr;
+use std::{collections::HashSet, net::Ipv4Addr};
 
-use async_std::task::block_on;
+use crate::error::{AppError, VlanError};
+use crate::types::{Bridge, BridgeNetConf, GatewayInfo, VlanTrunk};
+
+use anyhow::anyhow;
 use cni_plugin::{
     Cni, Command, Inputs,
     config::NetworkConfig,
+    delegation::delegate,
     error::CniError,
-    logger,
     macaddr::MacAddr,
-    reply::{Interface, SuccessReply, reply},
+    reply::{Interface, IpamSuccessReply, Route, SuccessReply, reply},
+};
+use ipnetwork::{IpNetwork, Ipv4Network};
+use libcni::{
+    ip::{
+        addr, ipam, link,
+        veth::{self, Veth},
+    },
+    ns::netns::{self, Netns},
 };
 use log::{debug, error, info};
-use netlink_packet_route::link::{InfoBridge, InfoData, LinkAttribute, LinkInfo};
+use netlink_packet_route::{
+    AddressFamily,
+    link::{InfoBridge, InfoData, LinkAttribute, LinkInfo},
+};
 use rtnetlink::{
     LinkBridge,
     packet_core::{NLM_F_ACK, NLM_F_REQUEST},
 };
-
-use crate::error::{AppError, VlanError};
-use crate::types::{Bridge, BridgeNetConf, VlanTrunk};
-use libcni::ip::link;
-use libcni::ip::veth::{self, Veth};
-use libcni::ns::ns::{self, Netns};
 
 mod error;
 mod types;
@@ -28,10 +37,7 @@ const BRIDGE_DEFAULT_NAME: &str = "cni0";
 
 /// Entry point of the CNI bridge plugin.
 fn main() {
-    let mut logconfig = logger::default_config();
-    logconfig.add_filter_ignore_str("netlink_proto");
-    logger::with_config(env!("CARGO_PKG_NAME"), logconfig.build());
-
+    cni_plugin::logger::install("libbridge.log");
     debug!(
         "{} (CNI bridge plugin) version {}",
         env!("CARGO_PKG_NAME"),
@@ -61,10 +67,15 @@ fn main() {
         bridge_conf
     );
 
-    let res: Result<SuccessReply, AppError> = block_on(async move {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let res: Result<SuccessReply, AppError> = rt.block_on(async move {
         match inputs.command {
             Command::Add => cmd_add(bridge_conf, inputs).await,
-            Command::Del => cmd_del(bridge_conf).await,
+            Command::Del => cmd_del(bridge_conf, inputs).await,
             Command::Check => todo!(),
             Command::Version => unreachable!(),
         }
@@ -92,10 +103,10 @@ fn main() {
 pub fn load_bri_netconf(config: NetworkConfig) -> Result<BridgeNetConf, AppError> {
     let mut json_value = serde_json::to_value(&config).map_err(CniError::from)?;
 
-    if !json_value.get("bridge").is_some() {
+    if json_value.get("bridge").is_none() {
         json_value["bridge"] = serde_json::json!(BRIDGE_DEFAULT_NAME);
     }
-    if !json_value.get("preserveDefaultVlan").is_some() {
+    if json_value.get("preserveDefaultVlan").is_none() {
         json_value["preserveDefaultVlan"] = serde_json::json!(true);
     }
 
@@ -212,7 +223,7 @@ async fn bridge_by_name(name: &str) -> Result<Bridge, AppError> {
             });
         }
         if let LinkAttribute::Mtu(m) = attr {
-            mtu = m.clone();
+            mtu = *m;
         }
     });
 
@@ -273,7 +284,7 @@ pub async fn ensure_bridge(
     msg.header.index = br_link.header.index;
 
     let handle =
-        link::get_handle()?.ok_or_else(|| AppError::LinkError(format!("Cannot get handle")))?;
+        link::get_handle()?.ok_or_else(|| AppError::LinkError("Cannot get handle".to_string()))?;
 
     handle
         .link()
@@ -335,6 +346,7 @@ pub async fn setup_bridge(n: &BridgeNetConf) -> Result<(Bridge, Interface), AppE
 ///
 /// # Returns
 /// * `Result<Veth, AppError>` - The created veth pair or an error if the operation fails.
+#[allow(clippy::too_many_arguments)]
 pub async fn setup_veth(
     host_ns: &Netns,
     netns: &Netns,
@@ -345,17 +357,17 @@ pub async fn setup_veth(
     _vlan_id: i32,
     _vlans: Vec<i32>,
     _preserve_default_vlan: bool,
-    mac: &MacAddr,
+    mac: Option<MacAddr>,
     _port_isolation: bool,
 ) -> Result<Veth, AppError> {
     info!("netns: {:?}", netns.unique_id());
     info!("host_ns: {:?}", host_ns.unique_id());
 
     // Execute in the container's network namespace
-    let mut veth = ns::exec_netns(host_ns, netns, async {
+    let mut veth = netns::exec_netns(host_ns, netns, async {
         let cur_ns = Netns::get()?;
         anyhow::ensure!(&cur_ns == netns, "netns not match in main");
-        let res = veth::setup_veth(if_name, "", mtu, mac, &host_ns, &netns).await?;
+        let res = veth::setup_veth(if_name, "", mtu, mac, host_ns, netns).await?;
         Ok(res)
     })
     .await?;
@@ -396,7 +408,7 @@ async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
         .net_conf
         .ipam
         .as_ref()
-        .map_or(false, |ipam| !ipam.r#plugin.is_empty());
+        .is_some_and(|ipam| !ipam.r#plugin.is_empty());
 
     if is_layer3 && config.disable_container_interface.unwrap_or(false) {
         return Err(AppError::InvalidConfig(
@@ -417,26 +429,31 @@ async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
     let (bridge, br_interface) = setup_bridge(&config).await?;
 
     let netns = if let Some(ref netns_path) = inputs.netns {
-        Netns::get_from_path(netns_path).map_err(|e| {
-            AppError::NetnsError(format!("failed to open netns {:?}: {}", netns_path, e))
-        })?
+        Netns::get_from_path(netns_path)
+            .map_err(|e| {
+                AppError::NetnsError(format!("failed to access netns {:?}: {}", netns_path, e))
+            })?
+            .ok_or_else(|| {
+                AppError::NetnsError(format!("netns not found at path {:?}", netns_path))
+            })?
     } else {
         return Err(AppError::NetnsError("netns path is None".to_string()));
     };
     let current_ns = Netns::get()
         .map_err(|e| AppError::NetnsError(format!("failed to open current netns : {}", e)))?;
 
+    let mac: Option<MacAddr> = config.mac.as_ref().and_then(|s| MacAddr::from_str(s).ok());
     let veth = setup_veth(
         &current_ns,
-        &netns.unwrap(),
+        &netns.clone(),
         &bridge,
         &inputs.ifname,
         config.mtu.unwrap_or(1500),
         config.hairpin_mode.unwrap_or(false),
         config.vlan.unwrap_or(0),
-        config.vlans.unwrap_or(vec![]),
+        config.vlans.clone().unwrap_or_default(),
         config.preserve_default_vlan.unwrap_or(false),
-        &Default::default(),
+        mac,
         config.port_isolation.unwrap_or(false),
     )
     .await
@@ -448,17 +465,166 @@ async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
         .to_interface()
         .map_err(|e| AppError::VethError(format!("veth can not to interface : {}", e)))?;
 
-    let bridge_result = SuccessReply {
-        cni_version: config.net_conf.cni_version,
-        interfaces: vec![container_interface, host_interface, br_interface],
+    let mut bridge_result = SuccessReply {
+        cni_version: config.net_conf.cni_version.clone(),
+        interfaces: vec![br_interface, host_interface, container_interface],
         ips: Default::default(),
         routes: Default::default(),
         dns: Default::default(),
         specific: Default::default(),
     };
+
+    if is_layer3 {
+        let ipam_plugin = config.net_conf.ipam.clone().unwrap().plugin;
+        let ipam_result: IpamSuccessReply =
+            match delegate(&ipam_plugin, Command::Add, &config.net_conf.clone()).await {
+                Ok(reply) => reply,
+                Err(err) => {
+                    return Err(AppError::IpamError(err.to_string()));
+                }
+            };
+        debug!("ipam_result:{:?}", ipam_result);
+        bridge_result.ips = ipam_result.ips.clone();
+        bridge_result.routes = ipam_result.routes.clone();
+        bridge_result.dns = ipam_result.dns.clone();
+        debug!("bridge_result:{:?}", bridge_result);
+
+        let gateway_infos = calc_gateway(&mut bridge_result, &config)?;
+        info!("gateway_infos: {:?}", gateway_infos);
+
+        info!("bridge_result: {:?}", bridge_result);
+
+        netns::exec_netns(&current_ns, &netns, async {
+            ipam::config_interface(&inputs.ifname, &bridge_result).await?;
+            Ok(())
+        })
+        .await?;
+
+        if config.is_gw.unwrap_or(false) {
+            for gw_info in &gateway_infos {
+                for gw in &gw_info.gws {
+                    // set gateway ip to bridge
+                    ensure_addr(bridge.clone(), gw, config.force_address.unwrap_or_default())
+                        .await?;
+                }
+
+                if !gw_info.gws.is_empty() {
+                    enable_ip_forward(gw_info.family)?;
+                }
+            }
+        }
+    }
     Ok(bridge_result)
 }
 
+async fn ensure_addr(br: Bridge, ip: &IpNetwork, force_address: bool) -> Result<(), AppError> {
+    let family = match ip {
+        IpNetwork::V4(_) => AddressFamily::Inet,
+        IpNetwork::V6(_) => AddressFamily::Inet6,
+    };
+    let link = link::link_by_name(&br.name)
+        .await
+        .map_err(|e| AppError::LinkError(format!("{}", e)))?;
+    let addrs = addr::addr_list(link.header.index, family).await?;
+    for addr_item in addrs {
+        if addr_item.ipnet.ip() == ip.ip() {
+            return Ok(());
+        }
+        // Multiple IPv6 addresses are allowed on the bridge if the
+        // corresponding subnets do not overlap. For IPv4 or for
+        // overlapping IPv6 subnets, reconfigure the IP address if
+        // forceAddress is true, otherwise throw an error.
+        if family == AddressFamily::Inet
+            || addr_item.ipnet.contains(ip.ip())
+            || ip.contains(addr_item.ipnet.ip())
+        {
+            if !force_address {
+                return Err(AppError::IpamError(format!(
+                    "{} already has an IP address different from {}",
+                    br.name, ip
+                )));
+            }
+            addr::addr_del(link.header.index, ip.ip()).await?;
+        }
+    }
+    let addr = addr::Addr {
+        ipnet: *ip,
+        ..Default::default()
+    };
+    info!("add addr to br, addr: {:?}", addr);
+    addr::addr_add(link.header.index, addr.ipnet.ip(), addr.ipnet.prefix()).await?;
+    // todo set bridge mac addr
+
+    Ok(())
+}
+
+fn enable_ip_forward(family: AddressFamily) -> Result<(), CniError> {
+    match family {
+        AddressFamily::Inet => {
+            ipam::enable_ipv4_forward().map_err(|e| CniError::Generic(e.to_string()))
+        }
+        AddressFamily::Inet6 => {
+            ipam::enable_ipv6_forward().map_err(|e| CniError::Generic(e.to_string()))
+        }
+        _ => Err(CniError::Generic("not support family".to_string())),
+    }
+}
+
+fn calc_gateway(
+    result: &mut SuccessReply,
+    net_conf: &BridgeNetConf,
+) -> Result<Vec<GatewayInfo>, AppError> {
+    let ips = &mut result.ips;
+    if ips.is_empty() {
+        return Err(AppError::from(CniError::Generic(
+            "IPAM plugin returned missing IP config".to_string(),
+        )));
+    }
+
+    let mut gws = Vec::new();
+    let is_default_gw = net_conf.is_default_gw.unwrap_or(false);
+    let is_gw = net_conf.is_gw.unwrap_or(false);
+    for ip in ips.iter_mut() {
+        // index 1 is lo, index2 is eth0
+        ip.interface = Some(2);
+        if ip.gateway.is_none() && is_gw {
+            ip.gateway = ipam::next_ip(&ip.address.ip());
+        }
+        let mut gw_info = GatewayInfo::default();
+        if ip.address.is_ipv4() {
+            gw_info.family = AddressFamily::Inet;
+        } else if ip.address.is_ipv6() {
+            gw_info.family = AddressFamily::Inet6;
+        }
+
+        // Add a default route for this family using the current
+        // gateway address if necessary.
+
+        if is_default_gw {
+            let routes = &result.routes;
+            for route in routes {
+                if route.gw.is_some() && route.dst.ip().is_unspecified() {
+                    gw_info.default_route_found = true;
+                    break;
+                }
+            }
+            if !gw_info.default_route_found {
+                let route = Route {
+                    dst: IpNetwork::V4(Ipv4Network::new(Ipv4Addr::UNSPECIFIED, 0).unwrap()),
+                    gw: ip.gateway,
+                };
+                result.routes.push(route);
+            }
+        }
+        if is_gw {
+            let gw = IpNetwork::with_netmask(ip.gateway.unwrap(), ip.address.mask())
+                .map_err(|e| AppError::from(CniError::Generic(e.to_string())))?;
+            gw_info.gws.push(gw);
+            gws.push(gw_info);
+        }
+    }
+    Ok(gws)
+}
 /// Deletes a container network interface from the bridge.
 ///
 /// # Arguments
@@ -466,15 +632,68 @@ async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
 ///
 /// # Returns
 /// * `Result<SuccessReply, AppError>` - The success response or an error if deletion fails.
-async fn cmd_del(config: BridgeNetConf) -> Result<SuccessReply, AppError> {
-    Ok(SuccessReply {
-        cni_version: config.net_conf.cni_version,
+async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, AppError> {
+    let is_layer3 = config
+        .net_conf
+        .ipam
+        .as_ref()
+        .is_some_and(|ipam| !ipam.r#plugin.is_empty());
+
+    let result = SuccessReply {
+        cni_version: config.net_conf.cni_version.clone(),
         interfaces: Default::default(),
         ips: Default::default(),
         routes: Default::default(),
         dns: Default::default(),
         specific: Default::default(),
+    };
+
+    let ipam_del = || async move {
+        if is_layer3 {
+            let ipam_plugin = config.net_conf.ipam.clone().unwrap().plugin;
+            match delegate(&ipam_plugin, Command::Del, &config.net_conf.clone()).await {
+                Ok(reply) => {
+                    // 处理成功结果
+                    let _: IpamSuccessReply = reply;
+                }
+                Err(e) => return Err(AppError::IpamError(e.to_string())),
+            }
+        }
+        Ok(())
+    };
+
+    if inputs.netns.is_none() {
+        ipam_del().await?;
+        return Ok(result);
+    }
+
+    let netns = if let Some(ref netns_path) = inputs.netns {
+        Netns::get_from_path(netns_path)
+            .map_err(|e| {
+                AppError::NetnsError(format!("failed to access netns {:?}: {}", netns_path, e))
+            })?
+            .ok_or_else(|| {
+                AppError::NetnsError(format!("netns not found at path {:?}", netns_path))
+            })?
+    } else {
+        return Err(AppError::NetnsError("netns path is None".to_string()));
+    };
+    let current_ns = Netns::get()
+        .map_err(|e| AppError::NetnsError(format!("failed to open current netns: {}", e)))?;
+    netns::exec_netns(&current_ns, &netns, async {
+        match link::del_link_by_name(&inputs.ifname).await {
+            Ok(_) => Ok(()),
+            Err(e) if e.to_string().contains("link not found") => Ok(()),
+            Err(e) => {
+                // 将错误转换为 anyhow::Error
+                Err(anyhow!(e)) // 或 e.into()
+            }
+        }
     })
+    .await?;
+
+    ipam_del().await?;
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -542,17 +761,19 @@ mod tests {
     #[tokio::test]
     async fn test_setup_veth() {
         let host_ns = Netns::get().unwrap();
-        let netns: Netns = Netns::get_from_name("test")
+        let netns: Netns = Netns::get_from_name("testing")
             .unwrap()
             .expect("can not get netns");
-        let br = Bridge::new("test0");
+        let br = Bridge::new("mynet0");
         let if_name = "veth0";
         let mtu = 1500;
         let hairpin_mode = true;
         let vlan_id = 0;
         let vlans = vec![];
         let preserve_default_vlan = false;
-        let mac = &MacAddr::from(MacAddr6::new(0x00, 0x11, 0x22, 0x33, 0x44, 0x55));
+        let mac = Some(MacAddr::from(MacAddr6::new(
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+        )));
         let port_isolation = false;
 
         let result = setup_veth(
@@ -575,6 +796,24 @@ mod tests {
                 println!("Veth:{:?}", veth);
                 assert_eq!(veth.interface.name, "veth0");
             }
+            Err(e) => {
+                panic!("Expected Ok result, but got an error: {:?}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ensure_addr() {
+        let bridge = Bridge {
+            name: "test0".to_string(),
+            mtu: 1500,
+            vlan_filtering: false,
+        };
+        let ip = IpNetwork::V4("192.168.1.1/24".parse().unwrap());
+        let result = ensure_addr(bridge, &ip, false).await;
+
+        match result {
+            Ok(_) => {}
             Err(e) => {
                 panic!("Expected Ok result, but got an error: {:?}", e);
             }

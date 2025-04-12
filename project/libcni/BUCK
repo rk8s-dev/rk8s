@@ -16,6 +16,7 @@ rust_library(
         "//third-party:nix",
         "//third-party:rand",
         "//third-party:tokio",
+        "//third-party:ipnetwork",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

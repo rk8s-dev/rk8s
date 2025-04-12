@@ -25,6 +25,9 @@ pub enum AppError {
     #[error("LinkError: {0}")]
     LinkError(String),
 
+    #[error("IpamError: {0}")]
+    IpamError(String),
+
     #[error(transparent)]
     AnyhowError(#[from] anyhow::Error),
 }
@@ -64,9 +67,15 @@ impl AppError {
                 msg: "LinkError",
                 details: msg,
             },
-            AppError::AnyhowError(err) => ErrorReply {
+            AppError::IpamError(msg) => ErrorReply {
                 cni_version,
                 code: 121,
+                msg: "IpamError",
+                details: msg,
+            },
+            AppError::AnyhowError(err) => ErrorReply {
+                cni_version,
+                code: 122,
                 msg: "Unknown error",
                 details: err.to_string(),
             },

@@ -24,6 +24,7 @@ rust_binary(
         "//third-party:serde",
         "//third-party:serde_yaml",
         "//third-party:uuid",
+        "//third-party:rust-cni",
         "//project/libcgroups:libcgroups",
         "//project/libcontainer:libcontainer",
     ],

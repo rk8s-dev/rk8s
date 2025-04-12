@@ -140,19 +140,19 @@
     "namespaces": [
       {
         "type": "pid",
-        "path": "/proc/41740/ns/pid"
+        "path": "/proc/84833/ns/pid"
       },
       {
         "type": "network",
-        "path": "/proc/41740/ns/net"
+        "path": "/proc/84833/ns/net"
       },
       {
         "type": "ipc",
-        "path": "/proc/41740/ns/ipc"
+        "path": "/proc/84833/ns/ipc"
       },
       {
         "type": "uts",
-        "path": "/proc/41740/ns/uts"
+        "path": "/proc/84833/ns/uts"
       },
       {
         "type": "mount"

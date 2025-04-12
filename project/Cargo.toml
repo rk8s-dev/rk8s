@@ -12,7 +12,7 @@ members = [
     "rkl",
 ]
 
-default-members = ["distribution", "rkl", "libbridge", "rkb"]
+default-members = ["distribution", "rkl", "libbridge", "libipam", "rkb"]
 resolver = "1"
 
 [workspace.dependencies]

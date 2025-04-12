@@ -1,11 +1,17 @@
-use anyhow::anyhow;
-use cni_plugin::macaddr::MacAddr;
+use std::net::IpAddr;
+
+use super::addr::{self, Addr};
+
+use anyhow::{anyhow, bail};
+use cni_plugin::{macaddr::MacAddr, reply::Route};
 use futures::TryStreamExt;
+use log::debug;
 use macaddr::MacAddr6;
-use netlink_packet_route::link::{
-    InfoBridgePort, InfoPortData, LinkAttribute, LinkFlags, LinkInfo, LinkMessage,
+use netlink_packet_route::{
+    AddressFamily,
+    link::{InfoBridgePort, InfoPortData, LinkAttribute, LinkFlags, LinkInfo, LinkMessage},
 };
-use rtnetlink::{Handle, new_connection};
+use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
 
 /// Establishes an rtnetlink connection and returns a handle.
 /// Returns `Ok(Some(Handle))` if successful, or an error otherwise.
@@ -92,6 +98,21 @@ pub async fn set_link(msg: LinkMessage) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Delete a network link configuration.
+///
+/// # Arguments
+/// * `msg` - The link message containing the updated configuration.
+///
+/// # Returns
+/// * `Ok(())` on success.
+/// * `Err(anyhow::Error)` on failure.
+pub async fn del_link(msg: LinkMessage) -> anyhow::Result<()> {
+    let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
+
+    handle.link().del(msg.header.index).execute().await?;
+
+    Ok(())
+}
 /// Sets a port link configuration.
 ///
 /// # Arguments
@@ -221,4 +242,70 @@ pub fn get_mac_address(attributes: &[LinkAttribute]) -> Option<MacAddr> {
         }
         _ => None,
     })
+}
+
+pub async fn route_add(route: Route) -> anyhow::Result<()> {
+    if route.gw.is_none() {
+        bail!("Gateway must be specified");
+    }
+    let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
+    let route_handle = handle.route();
+
+    let mut builder = RouteMessageBuilder::<IpAddr>::new();
+    builder = builder
+        .destination_prefix(route.dst.ip(), route.dst.prefix())?
+        .gateway(route.gw.unwrap())?;
+    debug!("route_builder:{:?}", builder);
+    route_handle.add(builder.build()).execute().await?;
+
+    Ok(())
+}
+
+pub async fn route_del(route: Route) -> anyhow::Result<()> {
+    if route.gw.is_none() {
+        bail!("gw can not be all none");
+    }
+    let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
+    let route_handle = handle.route();
+
+    let mut builder = RouteMessageBuilder::<IpAddr>::new();
+    builder = builder
+        .destination_prefix(route.dst.ip(), route.dst.prefix())?
+        .gateway(route.gw.unwrap())?;
+
+    route_handle.del(builder.build()).execute().await?;
+
+    Ok(())
+}
+
+// DelLinkByName removes an interface link.
+pub async fn del_link_by_name(if_name: &str) -> anyhow::Result<()> {
+    let link = link_by_name(if_name).await.map_err(|e| anyhow!("{}", e))?;
+    del_link(link).await?;
+    Ok(())
+}
+
+// DelLinkByNameAddr remove an interface and returns its addresses
+pub async fn del_link_by_name_addr(if_name: &str) -> anyhow::Result<Vec<Addr>> {
+    let link = link_by_name(if_name).await.map_err(|e| anyhow!("{}", e))?;
+
+    let addr = addr::addr_list(link.header.index, AddressFamily::Inet).await?;
+
+    del_link(link).await?;
+
+    Ok(addr)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_del_link() {
+        let name = "mynet0";
+        let result = del_link_by_name(name).await;
+        println!("Result: {:?}", result);
+        assert!(result.is_ok(), "del_link failed with error: {:?}", result);
+    }
 }

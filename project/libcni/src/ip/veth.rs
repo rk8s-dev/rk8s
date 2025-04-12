@@ -1,5 +1,6 @@
 use crate::ip::link;
-use crate::ns::ns::{self, Netns};
+use crate::ns::netns::{self, Netns};
+
 use anyhow::{Error, Result, anyhow};
 use cni_plugin::{macaddr::MacAddr, reply};
 use log::info;
@@ -112,12 +113,12 @@ impl Veth {
         let container_inf = reply::Interface {
             name: self.interface.name,
             mac: self.interface.mac,
-            sandbox: self.interface.ns.path().unwrap_or(Default::default()),
+            sandbox: self.interface.ns.path().unwrap_or_default(),
         };
         let host_inf = reply::Interface {
             name: self.peer_inf.name,
             mac: self.peer_inf.mac,
-            sandbox: self.peer_inf.ns.path().unwrap_or(Default::default()),
+            sandbox: self.peer_inf.ns.path().unwrap_or_default(),
         };
         Ok((container_inf, host_inf))
     }
@@ -140,7 +141,7 @@ pub async fn setup_veth(
     container_veth_name: &str,
     host_veth_name: &str,
     mtu: u32,
-    container_veth_mac: &MacAddr,
+    container_veth_mac: Option<MacAddr>,
     host_ns: &Netns,
     container_ns: &Netns,
 ) -> anyhow::Result<Veth, Error> {
@@ -157,7 +158,7 @@ pub async fn setup_veth(
     )
     .await?;
 
-    ns::exec_netns(&current_ns, host_ns, async {
+    netns::exec_netns(&current_ns, host_ns, async {
         let link = link::link_by_name(&host_inf_name)
             .await
             .map_err(|e| anyhow!("{}", e))?;
@@ -186,7 +187,7 @@ async fn make_veth(
     container_veth_name: &str,
     host_veth_name: &str,
     mtu: u32,
-    container_veth_mac: &MacAddr,
+    container_veth_mac: Option<MacAddr>,
     host_ns: &Netns,
     container_ns: &Netns,
 ) -> Result<(String, Veth)> {
@@ -243,7 +244,7 @@ async fn make_veth_pair(
     container_veth_name: &str,
     host_veth_name: &str,
     mtu: u32,
-    container_veth_mac: &MacAddr,
+    container_veth_mac: Option<MacAddr>,
     host_ns: &Netns,
     container_ns: &Netns,
 ) -> Result<Veth, Error> {
@@ -257,28 +258,23 @@ async fn make_veth_pair(
         "Creating veth pair: container_veth_name={}, host_veth_name={}",
         container_veth_name, host_veth_name
     );
-    // Convert MAC address to a format required by the builder
-    let container_mac = MacAddr6::from(container_veth_mac.clone())
-        .into_array()
-        .to_vec();
 
     // Initialize the veth pair
-    let veth = Veth::new(
+    let mut veth = Veth::new(
         container_veth_name,
         host_veth_name,
         container_ns.clone(),
         host_ns.clone(),
-    )
-    .set_mac_address(container_veth_mac.clone());
+    );
 
     // Build veth pair configuration
-    let builder = veth
-        .clone()
-        .into_builder()
-        .mtu(mtu)
-        .up()
-        .address(container_mac.clone());
+    let mut builder = veth.clone().into_builder().mtu(mtu).up();
 
+    if let Some(mac) = container_veth_mac {
+        let container_mac = MacAddr6::from(mac).into_array().to_vec();
+        builder = builder.address(container_mac.clone());
+        veth = veth.set_mac_address(mac);
+    }
     link::add_link(builder.build())
         .await
         .map_err(|e| anyhow!("Failed to add link: {}", e))?;

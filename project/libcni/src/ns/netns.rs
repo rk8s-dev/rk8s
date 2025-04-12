@@ -107,7 +107,7 @@ impl Netns {
     /// # Returns
     /// An `Option` containing the `Netns` instance if the namespace exists.
     pub fn get_from_path(path: &Path) -> anyhow::Result<Option<Self>> {
-        let file = OpenOptions::new().read(true).open(&path).ok();
+        let file = OpenOptions::new().read(true).open(path).ok();
 
         match file {
             None => Ok(None),
@@ -231,7 +231,7 @@ impl PartialEq<Self> for Netns {
         }
         let self_meta = self_meta.unwrap();
         let other_meta = other_meta.unwrap();
-        return self_meta.dev() == other_meta.dev() && self_meta.ino() == other_meta.ino();
+        self_meta.dev() == other_meta.dev() && self_meta.ino() == other_meta.ino()
     }
 }
 
