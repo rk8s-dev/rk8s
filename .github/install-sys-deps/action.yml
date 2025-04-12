@@ -1,0 +1,16 @@
+name: 'Install System Tools and Dependencies'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Update APT Cache
+      run: sudo apt-get update
+      shell: bash
+
+    - name: Install System Tools
+      run: sudo apt-get install build-essential clang lld pkg-config
+      shell: bash
+
+    - name: Install System Libraries
+      run: sudo apt-get install seccomp libseccomp-dev
+      shell: bash
