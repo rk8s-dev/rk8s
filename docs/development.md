@@ -81,7 +81,7 @@ You can find the `<PACKAGE_NAME>` in the `[workspace]` section of the `project/C
 Additionally, you must run Clippy to check for potential issues in the code:
 
 ```
-cargo clippy --workspace --exclude libcgroups --exclude libcontainer -- -D warnings
+cargo clippy --workspace -- -D warnings
 ```
 
 Please ensure that you run the above commands before submitting your code and resolve any warnings or errors that are reported.
