@@ -20,7 +20,7 @@ pub struct FilesystemStorage {
 }
 
 impl FilesystemStorage {
-    pub fn new(root: &String) -> Self {
+    pub fn new(root: &str) -> Self {
         FilesystemStorage {
             path_manager: PathManager::new(root),
         }
@@ -94,7 +94,7 @@ impl Storage for FilesystemStorage {
 
             // Create the file. `File` implements `AsyncWrite`.
             let file_path = self
-                .crate_path(&self.path_manager.clone().upload_data_path(&uuid))
+                .crate_path(&self.path_manager.clone().upload_data_path(uuid))
                 .await?;
             let mut file_writer = if append {
                 let file = OpenOptions::new()
@@ -119,7 +119,7 @@ impl Storage for FilesystemStorage {
 
     async fn move_to_digest(&self, session_id: &str, digest: &Digest) -> io::Result<()> {
         let upload_data_path = self
-            .crate_path(&self.path_manager.clone().upload_data_path(&session_id))
+            .crate_path(&self.path_manager.clone().upload_data_path(session_id))
             .await?;
         let blob_data_path = self
             .crate_path(&self.path_manager.clone().blob_data_path(digest))
@@ -128,7 +128,7 @@ impl Storage for FilesystemStorage {
         Ok(())
     }
 
-    async fn crate_path(&self, path: &String) -> io::Result<PathBuf> {
+    async fn crate_path(&self, path: &str) -> io::Result<PathBuf> {
         let file_path = std::path::Path::new(&path);
         if let Some(parent) = file_path.parent() {
             create_dir_all(parent).await?;
