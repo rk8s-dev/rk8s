@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 //! Control groups provide a way of controlling groups of processes.
 //! Examples: controlling resource limits, execution priority, measuring resource usage,
 //! freezing, checkpointing and restarting groups of processes.

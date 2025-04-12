@@ -63,6 +63,12 @@ patch -p1 < "./project/tools/scripts/container_init_process.patch" || {
     exit 1
 }
 
+echo "Applying patch to allow all clippy lints in libcgroups and libcontainer..."
+patch -p1 < "./project/tools/scripts/clippy_allow_all.patch" || {
+    echo "Failed to apply patch"
+    exit 1
+}
+
 git commit -m "Sync $module from youki" -s -S
 echo "Changes committed for $module."
 
