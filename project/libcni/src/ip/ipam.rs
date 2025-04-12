@@ -61,7 +61,7 @@ pub fn next_ip(ip: &IpAddr) -> Option<IpAddr> {
             Some(IpAddr::V4(Ipv4Addr::from(ip_num.to_be_bytes())))
         }
         IpAddr::V6(_ipv6) => {
-            todo!()
+            None
         }
     }
 }
