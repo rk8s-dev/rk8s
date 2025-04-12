@@ -1,11 +1,11 @@
+use crate::commands::{create, delete, kill, load_container, start, state};
+use crate::rootpath;
+use crate::task::task::TaskRunner;
+use anyhow::{Result, anyhow};
+use liboci_cli::{Create, Delete, Kill, Start, State};
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path,PathBuf};
-use anyhow::{Result, anyhow};
-use liboci_cli::{Create, Start,State, Kill, Delete};
-use crate::commands::{create, start, state,kill,delete,load_container};
-use crate::task::task::TaskRunner;
-use crate::rootpath;
+use std::path::{Path, PathBuf};
 
 // store infomation of pod
 #[derive(Debug)]
@@ -18,8 +18,8 @@ impl PodInfo {
     pub fn load(root_path: &Path, pod_name: &str) -> Result<Self> {
         // get path like pods/podname
         let pod_info_path = root_path.join("pods").join(format!("{}", pod_name));
-        let mut file = File::open(&pod_info_path)
-            .map_err(|_| anyhow!("Pod {} not found", pod_name))?;
+        let mut file =
+            File::open(&pod_info_path).map_err(|_| anyhow!("Pod {} not found", pod_name))?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
 
@@ -34,7 +34,8 @@ impl PodInfo {
             }
         }
 
-        let pod_sandbox_id = pod_sandbox_id.ok_or_else(|| anyhow!("PodSandbox ID not found for Pod {}", pod_name))?;
+        let pod_sandbox_id = pod_sandbox_id
+            .ok_or_else(|| anyhow!("PodSandbox ID not found for Pod {}", pod_name))?;
         Ok(PodInfo {
             pod_sandbox_id,
             container_names,
@@ -47,14 +48,21 @@ impl PodInfo {
 
         if pods_dir.exists() {
             if !pods_dir.is_dir() {
-                return Err(anyhow!("{} exists but is not a directory", pods_dir.display()));
+                return Err(anyhow!(
+                    "{} exists but is not a directory",
+                    pods_dir.display()
+                ));
             }
         } else {
             fs::create_dir_all(&pods_dir)?;
         }
 
         if pod_info_path.exists() {
-            return Err(anyhow!("Pod {} already exists at {}", pod_name, pod_info_path.display()));
+            return Err(anyhow!(
+                "Pod {} already exists at {}",
+                pod_name,
+                pod_info_path.display()
+            ));
         }
 
         let mut file = File::create(&pod_info_path)?;
@@ -79,7 +87,10 @@ pub fn run_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
     let pod_sandbox_id = task_runner.run()?;
     println!("PodSandbox ID: {}", pod_sandbox_id);
 
-    let container_names: Vec<String> = task_runner.task.spec.containers
+    let container_names: Vec<String> = task_runner
+        .task
+        .spec
+        .containers
         .iter()
         .map(|c| c.name.clone())
         .collect();
@@ -100,24 +111,35 @@ pub fn create_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
     let pod_name = task_runner.task.metadata.name.clone();
 
     let pod_request = task_runner.build_run_pod_sandbox_request();
-    let config = pod_request.config.as_ref().ok_or_else(|| anyhow!("PodSandbox config is required"))?;
+    let config = pod_request
+        .config
+        .as_ref()
+        .ok_or_else(|| anyhow!("PodSandbox config is required"))?;
     task_runner.sandbox_config = Some(config.clone());
     let pod_response = task_runner.run_pod_sandbox(pod_request)?;
     let pod_sandbox_id = pod_response.pod_sandbox_id;
 
-    let pause_pid = task_runner.pause_pid
-        .ok_or_else(|| anyhow!("Pause container PID not found for PodSandbox ID: {}", pod_sandbox_id))?;
-    println!("PodSandbox (Pause) created: {}, pid: {}\n", pod_sandbox_id, pause_pid);
+    let pause_pid = task_runner.pause_pid.ok_or_else(|| {
+        anyhow!(
+            "Pause container PID not found for PodSandbox ID: {}",
+            pod_sandbox_id
+        )
+    })?;
+    println!(
+        "PodSandbox (Pause) created: {}, pid: {}\n",
+        pod_sandbox_id, pause_pid
+    );
 
     let mut container_ids = Vec::new();
     for container in &task_runner.task.spec.containers {
-        let create_request = task_runner.build_create_container_request(
-            &pod_sandbox_id,
-            container,
-        )?;
+        let create_request =
+            task_runner.build_create_container_request(&pod_sandbox_id, container)?;
         let create_response = task_runner.create_container(create_request)?;
         container_ids.push(create_response.container_id.clone());
-        println!("Container created: {} (ID: {})", container.name, create_response.container_id);
+        println!(
+            "Container created: {} (ID: {})",
+            container.name, create_response.container_id
+        );
     }
 
     let root_path = rootpath::determine(None)?;
@@ -160,11 +182,14 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     for container_name in &pod_info.container_names {
         let delete_args = Delete {
             container_id: container_name.clone(),
-            force: true, 
+            force: true,
         };
         let root_path = rootpath::determine(None)?;
         if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
-            eprintln!("Failed to delete container {}: {}", container_name, delete_err);
+            eprintln!(
+                "Failed to delete container {}: {}",
+                container_name, delete_err
+            );
         } else {
             println!("Container deleted: {}", container_name);
         }
@@ -173,16 +198,19 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     // delete pause container
     let delete_args = Delete {
         container_id: pod_info.pod_sandbox_id.clone(),
-        force: true, 
+        force: true,
     };
     let root_path = rootpath::determine(None)?;
     if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
-        eprintln!("Failed to delete PodSandbox {}: {}", pod_info.pod_sandbox_id, delete_err);
+        eprintln!(
+            "Failed to delete PodSandbox {}: {}",
+            pod_info.pod_sandbox_id, delete_err
+        );
     } else {
         println!("PodSandbox deleted: {}", pod_info.pod_sandbox_id);
     }
 
-    // delete pod file 
+    // delete pod file
     PodInfo::delete(&root_path, pod_name)?;
     println!("Pod {} deleted successfully", pod_name);
     Ok(())
@@ -195,11 +223,21 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     println!("Pod: {}", pod_name);
 
     println!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
-    state::state(State { container_id: pod_info.pod_sandbox_id.clone() }, root_path.clone());
-    
+    state::state(
+        State {
+            container_id: pod_info.pod_sandbox_id.clone(),
+        },
+        root_path.clone(),
+    );
+
     println!("Containers:");
     for container_name in &pod_info.container_names {
-        let container_state = state::state(State { container_id: container_name.clone() }, root_path.clone());
+        let container_state = state::state(
+            State {
+                container_id: container_name.clone(),
+            },
+            root_path.clone(),
+        );
     }
 
     Ok(())

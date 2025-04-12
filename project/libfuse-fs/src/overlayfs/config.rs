@@ -1,14 +1,12 @@
 // Copyright (C) 2023 Ant Group. All rights reserved.
-//  2024 From [fuse_backend_rs](https://github.com/cloud-hypervisor/fuse-backend-rs) 
+//  2024 From [fuse_backend_rs](https://github.com/cloud-hypervisor/fuse-backend-rs)
 // SPDX-License-Identifier: Apache-2.0
 
 use self::super::CachePolicy;
 use std::fmt;
 
-
 #[derive(Default, Clone, Debug)]
 pub struct Config {
- 
     pub mountpoint: String,
     pub do_import: bool,
     // Filesystem options.

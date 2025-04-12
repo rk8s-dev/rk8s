@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
-use crate::storage::{driver::filesystem::FilesystemStorage, Storage};
+use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
 
 #[derive(Clone, Debug)]
 pub struct UploadSession {
@@ -35,10 +35,13 @@ impl AppState {
     pub async fn create_session(&self) -> Result<String, String> {
         let mut sessions = self.sessions.write().await;
         let session_id = uuid::Uuid::new_v4().to_string();
-        sessions.insert(session_id.clone(), UploadSession {
-            length: 0,
-            uploaded: 0,
-        });
+        sessions.insert(
+            session_id.clone(),
+            UploadSession {
+                length: 0,
+                uploaded: 0,
+            },
+        );
         Ok(session_id)
     }
 
@@ -53,8 +56,7 @@ impl AppState {
             session.length += length;
             if session.uploaded == 0 {
                 session.uploaded += length - 1;
-            }
-            else {
+            } else {
                 session.uploaded += length;
             }
         }

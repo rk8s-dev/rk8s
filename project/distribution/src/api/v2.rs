@@ -9,10 +9,10 @@ use crate::service::manifest::{
     put_manifest_handler,
 };
 use crate::utils::state::AppState;
+use axum::Router;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, head, patch, post, put};
-use axum::Router;
 
 pub fn create_v2_router() -> Router<Arc<AppState>> {
     // NOTE: if the `name` contains a `/`, it should be encoded as `%2F` in requests and responses.

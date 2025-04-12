@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 use libcontainer::container::builder::ContainerBuilder;
 use libcontainer::syscall::syscall::SyscallType;
-use liboci_cli::Create;
 use libcontainer::workload::{Executor, ExecutorError, ExecutorValidationError};
+use liboci_cli::Create;
 
 // One thing to note is that in the end, container is just another process in Linux
 // it has specific/different control group, namespace, using which program executing in it
@@ -14,7 +14,7 @@ use libcontainer::workload::{Executor, ExecutorError, ExecutorValidationError};
 // associated with it like any other process.
 pub fn create(args: Create, root_path: PathBuf, systemd_cgroup: bool) -> Result<()> {
     ContainerBuilder::new(args.container_id.clone(), SyscallType::default())
-        .with_executor(libcontainer::workload::default::DefaultExecutor{})
+        .with_executor(libcontainer::workload::default::DefaultExecutor {})
         .with_pid_file(args.pid_file.as_ref())?
         .with_console_socket(args.console_socket.as_ref())
         .with_root_path(root_path)?

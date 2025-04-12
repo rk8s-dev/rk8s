@@ -1,5 +1,5 @@
 // Copyright 2017 The Chromium OS Authors. All rights reserved.
-//  2024 From [fuse_backend_rs](https://github.com/cloud-hypervisor/fuse-backend-rs) 
+//  2024 From [fuse_backend_rs](https://github.com/cloud-hypervisor/fuse-backend-rs)
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 //
@@ -31,10 +31,8 @@ use std::env::temp_dir;
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
+use std::io::{Error, Result};
 use std::path::{Path, PathBuf};
-use std::io::{Result,Error};
-
-
 
 /// Wrapper for working with temporary files.
 ///

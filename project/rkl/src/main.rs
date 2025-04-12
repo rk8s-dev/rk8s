@@ -1,11 +1,11 @@
-mod task; 
+mod cli_commands;
+mod commands;
 mod cri;
 mod rootpath;
-mod commands;
-mod cli_commands;
-use task::task::TaskRunner; 
-use std::error::Error;
+mod task;
 use clap::{Parser, Subcommand};
+use std::error::Error;
+use task::task::TaskRunner;
 
 #[derive(Parser)]
 #[command(name = "rkl")]
@@ -48,7 +48,6 @@ fn main() -> Result<(), anyhow::Error> {
         //./rkl start podname
         //./rkl delete podname
         //./rkl state podname
-
         Commands::Run { pod_yaml } => cli_commands::run_pod(&pod_yaml),
         Commands::Create { pod_yaml } => cli_commands::create_pod(&pod_yaml),
         Commands::Start { pod_name } => cli_commands::start_pod(&pod_name),

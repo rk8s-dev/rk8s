@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::{Query, Request, State};
 use axum::http::header::{HeaderMap, LOCATION, RANGE};
-use axum::http::{header, Response};
+use axum::http::{Response, header};
 use axum::response::IntoResponse;
 use axum::{extract::Path, http::StatusCode};
 use futures::StreamExt;
@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use tokio_util::io::ReaderStream;
 
 use crate::utils::state::AppState;
-use crate::utils::validation::{ is_valid_name, is_valid_range};
+use crate::utils::validation::{is_valid_name, is_valid_range};
 
 pub(crate) async fn get_blob_handler(
     State(state): State<Arc<AppState>>,
@@ -62,7 +62,7 @@ pub(crate) async fn get_blob_handler(
     }
     let digest = _digest.unwrap();
 
-    match state.storage.read_by_digest( &digest).await {
+    match state.storage.read_by_digest(&digest).await {
         Ok(file) => {
             let file_stream = ReaderStream::new(file);
             let responese = Body::from_stream(file_stream);
@@ -204,11 +204,7 @@ pub async fn post_blob_handler(
 
         match state
             .storage
-            .write_by_digest(
-                &digest,
-                request.into_body().into_data_stream(),
-                false,
-            )
+            .write_by_digest(&digest, request.into_body().into_data_stream(), false)
             .await
         {
             Ok(_) => {
@@ -268,11 +264,7 @@ pub async fn put_blob_handler(
         if content_length != 0 {
             if let Err(_) = state
                 .storage
-                .write_by_uuid(
-                    &session_id,
-                    request.into_body().into_data_stream(),
-                    false,
-                )
+                .write_by_uuid(&session_id, request.into_body().into_data_stream(), false)
                 .await
             {
                 return Response::builder()

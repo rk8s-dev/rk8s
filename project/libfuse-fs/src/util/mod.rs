@@ -1,39 +1,36 @@
 use std::{fmt::Display, path::PathBuf};
 
-use fuse3::{raw::reply::FileAttr, FileType, Timestamp};
+use fuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use libc::stat64;
 use serde::{Deserialize, Serialize};
 pub mod atomic;
 
-#[derive(Debug,Deserialize, Serialize,Clone,Default)]
-pub struct GPath{
-   pub path:Vec<String>
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct GPath {
+    pub path: Vec<String>,
 }
 
-
-impl GPath{
-    pub fn new() -> GPath{
-        GPath{
-            path:Vec::new()        
-        }
+impl GPath {
+    pub fn new() -> GPath {
+        GPath { path: Vec::new() }
     }
-    pub fn push(&mut self, path:String){
+    pub fn push(&mut self, path: String) {
         self.path.push(path);
     }
-    pub fn pop(&mut self)->Option<String>  {
+    pub fn pop(&mut self) -> Option<String> {
         self.path.pop()
     }
-    pub fn name(&self) -> String{
+    pub fn name(&self) -> String {
         self.path.last().unwrap().clone()
     }
-    pub fn part(&self,i:usize,j :usize) ->String{
+    pub fn part(&self, i: usize, j: usize) -> String {
         self.path[i..j].join("/")
     }
 }
 
-impl From<String> for GPath{
+impl From<String> for GPath {
     fn from(mut s: String) -> GPath {
-        if s.starts_with('/'){
+        if s.starts_with('/') {
             s.remove(0);
         }
         GPath {
@@ -42,13 +39,13 @@ impl From<String> for GPath{
     }
 }
 
-impl  From<GPath> for PathBuf {
+impl From<GPath> for PathBuf {
     fn from(val: GPath) -> Self {
         let path_str = val.path.join("/");
         PathBuf::from(path_str)
     }
 }
-impl Display for GPath{
+impl Display for GPath {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.path.join("/"))
     }
@@ -67,7 +64,7 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
         kind: filetype_from_mode(stat.st_mode),
         perm: stat.st_mode as u16 & 0o7777,
         nlink: stat.st_nlink as u32,
-        uid: stat.st_uid ,
+        uid: stat.st_uid,
         gid: stat.st_gid,
         rdev: stat.st_rdev as u32,
         #[cfg(target_os = "macos")]
@@ -75,9 +72,6 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
         blksize: stat.st_blksize as u32,
     }
 }
-
-
-
 
 pub fn filetype_from_mode(st_mode: u32) -> FileType {
     let st_mode = st_mode & 0xfff000;
@@ -90,19 +84,19 @@ pub fn filetype_from_mode(st_mode: u32) -> FileType {
         libc::S_IFLNK => FileType::Symlink,
         libc::S_IFSOCK => FileType::Socket,
         _ => {
-            error!("wrong st mode : {}",st_mode);
+            error!("wrong st mode : {}", st_mode);
             unreachable!();
-        },
+        }
     }
 }
 #[cfg(test)]
-mod tests{
+mod tests {
     use super::GPath;
 
     #[test]
-    fn test_from_string(){
-        let path  = String::from("/release");
-        let gapth  = GPath::from(path);
-        assert_eq!(gapth.to_string(),String::from("release"))
+    fn test_from_string() {
+        let path = String::from("/release");
+        let gapth = GPath::from(path);
+        assert_eq!(gapth.to_string(), String::from("release"))
     }
 }

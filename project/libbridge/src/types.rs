@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 use cni_plugin::config::NetworkConfig;
 use rtnetlink::LinkMessageBuilder;
+use serde::{Deserialize, Serialize};
 
 /// Bridge network configuration structure, extending `NetworkConfig`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -14,15 +14,31 @@ pub struct BridgeNetConf {
     pub br_name: Option<String>,
     #[serde(rename = "isGateway", default, skip_serializing_if = "Option::is_none")]
     pub is_gw: Option<bool>,
-    #[serde(rename = "isDefaultGateway", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "isDefaultGateway",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub is_default_gw: Option<bool>,
-    #[serde(rename = "forceAddress", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "forceAddress",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub force_address: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mtu: Option<u32>,
-    #[serde(rename = "hairpinMode", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "hairpinMode",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub hairpin_mode: Option<bool>,
-    #[serde(rename = "promiscMode", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "promiscMode",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub promisc_mode: Option<bool>,
 
     // VLAN-related configuration
@@ -30,19 +46,35 @@ pub struct BridgeNetConf {
     pub vlan: Option<i32>,
     #[serde(rename = "vlanTrunk", default, skip_serializing_if = "Option::is_none")]
     pub vlan_trunk: Option<Vec<VlanTrunk>>,
-    #[serde(rename = "preserveDefaultVlan", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "preserveDefaultVlan",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub preserve_default_vlan: Option<bool>,
 
     // MAC-related configuration
-    #[serde(rename = "macspoofchk", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "macspoofchk",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub mac_spoof_chk: Option<bool>,
     #[serde(rename = "enabledad", default, skip_serializing_if = "Option::is_none")]
     pub enable_dad: Option<bool>,
 
     // Additional fields
-    #[serde(rename = "disableContainerInterface", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "disableContainerInterface",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub disable_container_interface: Option<bool>,
-    #[serde(rename = "portIsolation", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "portIsolation",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub port_isolation: Option<bool>,
 
     // Arguments for bridge configuration
@@ -75,8 +107,8 @@ pub struct BridgeArgs {
 /// Bridge structure representing a virtual network bridge.
 #[derive(Debug, Clone)]
 pub struct Bridge {
-    pub name: String,       // Bridge name
-    pub mtu: u32,          // Bridge MTU size
+    pub name: String,         // Bridge name
+    pub mtu: u32,             // Bridge MTU size
     pub vlan_filtering: bool, // VLAN filtering enabled/disabled
 }
 
@@ -85,7 +117,7 @@ impl Bridge {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            mtu: 1500, // Default MTU
+            mtu: 1500,             // Default MTU
             vlan_filtering: false, // Default VLAN filtering setting
         }
     }
@@ -104,8 +136,7 @@ impl Bridge {
 
     /// Converts the Bridge instance into a LinkMessageBuilder.
     pub fn into_builder(self) -> LinkMessageBuilder<rtnetlink::LinkBridge> {
-        let builder = LinkMessageBuilder::<rtnetlink::LinkBridge>::new(&self.name)
-            .mtu(self.mtu);    
+        let builder = LinkMessageBuilder::<rtnetlink::LinkBridge>::new(&self.name).mtu(self.mtu);
         builder
     }
 }

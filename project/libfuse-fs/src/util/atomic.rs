@@ -1,5 +1,5 @@
-use tokio::sync::Mutex;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Default)]
 pub struct AtomicBool(Arc<Mutex<bool>>);
@@ -28,10 +28,10 @@ impl AtomicBool {
         let mut lock = self.0.lock().await;
         if *lock == current {
             let old_value = *lock; // Read the current value
-            *lock = new;           // Update to the new value
-            Ok(old_value)          // Return the old value
+            *lock = new; // Update to the new value
+            Ok(old_value) // Return the old value
         } else {
-            Err(*lock)             // Return the current value
+            Err(*lock) // Return the current value
         }
     }
 }
@@ -61,9 +61,9 @@ impl AtomicU32 {
     #[allow(unused)]
     pub async fn fetch_add(&self, value: u32) -> u32 {
         let mut lock = self.0.lock().await;
-        let old_value = *lock;  // Read the current value
-        *lock += value;         // Add the specified value
-        old_value               // Return the old value
+        let old_value = *lock; // Read the current value
+        *lock += value; // Add the specified value
+        old_value // Return the old value
     }
 
     // Asynchronously compare and exchange
@@ -72,31 +72,30 @@ impl AtomicU32 {
         let mut lock = self.0.lock().await;
         if *lock == current {
             let old_value = *lock; // Read the current value
-            *lock = new;          // Update to the new value
-            Ok(old_value)         // Return the old value
+            *lock = new; // Update to the new value
+            Ok(old_value) // Return the old value
         } else {
-            Err(*lock)            // Return the current value
+            Err(*lock) // Return the current value
         }
     }
 }
-#[derive(Debug,Default,Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct AtomicU64(Arc<Mutex<u64>>);
 impl AtomicU64 {
-    
     pub fn new(value: u64) -> Self {
         AtomicU64(Arc::new(Mutex::new(value)))
     }
 
-    // async atom add 
+    // async atom add
     pub async fn fetch_add(&self, value: u64) -> u64 {
-        let mut lock = self.0.lock().await;             
-        *lock += value;                      
-        *lock                           
+        let mut lock = self.0.lock().await;
+        *lock += value;
+        *lock
     }
-    pub async fn fetch_sub(&self, value: u64)-> u64 {
-        let mut lock = self.0.lock().await; 
-        *lock -= value;                      
-        *lock     
+    pub async fn fetch_sub(&self, value: u64) -> u64 {
+        let mut lock = self.0.lock().await;
+        *lock -= value;
+        *lock
     }
     pub async fn load(&self) -> u64 {
         let lock = self.0.lock().await;
@@ -104,16 +103,16 @@ impl AtomicU64 {
     }
 
     pub async fn compare_exchange(&self, current: u64, new: u64) -> std::result::Result<u64, u64> {
-        let mut lock = self.0.lock().await; 
+        let mut lock = self.0.lock().await;
         if *lock == current {
-            let old_value = *lock;          
-            *lock = new;                   
-            Ok(old_value)                 
+            let old_value = *lock;
+            *lock = new;
+            Ok(old_value)
         } else {
             Err(*lock)
         }
     }
-    pub async fn store(&self,new: u64)-> u64{
+    pub async fn store(&self, new: u64) -> u64 {
         *self.0.lock().await = new;
         new
     }

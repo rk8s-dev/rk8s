@@ -1,15 +1,32 @@
-use std::{ffi::{CStr, CString, OsStr, OsString}, fs::File, io::{self, Read, Seek, SeekFrom, Write},  mem::{self, ManuallyDrop, MaybeUninit}, num::NonZeroU32, os::{fd::{ AsRawFd, FromRawFd, RawFd}, unix::ffi::OsStringExt}, sync::Arc, time::Duration};
-use bytes::Bytes;
-use fuse3::{raw::prelude::*, Errno, Inode, Result};
 use bitflags::bitflags;
+use bytes::Bytes;
+use fuse3::{Errno, Inode, Result, raw::prelude::*};
 use futures::stream;
 use futures_util::stream::Iter;
+use std::{
+    ffi::{CStr, CString, OsStr, OsString},
+    fs::File,
+    io::{self, Read, Seek, SeekFrom, Write},
+    mem::{self, ManuallyDrop, MaybeUninit},
+    num::NonZeroU32,
+    os::{
+        fd::{AsRawFd, FromRawFd, RawFd},
+        unix::ffi::OsStringExt,
+    },
+    sync::Arc,
+    time::Duration,
+};
 
-use vm_memory::{bitmap::BitmapSlice, ByteValued};
+use vm_memory::{ByteValued, bitmap::BitmapSlice};
 
-use crate::{passthrough::{CURRENT_DIR_CSTR, EMPTY_CSTR, PARENT_DIR_CSTR}, util::{convert_stat64_to_file_attr, filetype_from_mode}};
+use crate::{
+    passthrough::{CURRENT_DIR_CSTR, EMPTY_CSTR, PARENT_DIR_CSTR},
+    util::{convert_stat64_to_file_attr, filetype_from_mode},
+};
 
-use super::{config::CachePolicy, os_compat::LinuxDirent64, util::*, Handle, HandleData, PassthroughFs};
+use super::{
+    Handle, HandleData, PassthroughFs, config::CachePolicy, os_compat::LinuxDirent64, util::*,
+};
 use std::vec::IntoIter;
 // Flags use by the OPEN request/reply.
 /// Bypass page cache for this open file.
@@ -47,7 +64,7 @@ bitflags! {
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn open_inode(&self, inode: Inode, flags: i32) -> io::Result<File> {
         let data = self.inode_map.get(inode).await?;
-       // data.refcount.fetch_add(1).await;
+        // data.refcount.fetch_add(1).await;
         if !is_safe_inode(data.mode) {
             Err(ebadf())
         } else {
@@ -78,20 +95,16 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         inode: Inode,
         handle: Handle,
         offset: u64,
-        entry_list: & mut Vec<std::result::Result<DirectoryEntry, Errno>> ,
+        entry_list: &mut Vec<std::result::Result<DirectoryEntry, Errno>>,
     ) -> io::Result<()> {
-        const BUFFER_SIZE: usize = 8192 ;
-        
-        
+        const BUFFER_SIZE: usize = 8192;
+
         let data = self.get_dirdata(handle, inode, libc::O_RDONLY).await?;
 
-        
         // Since we are going to work with the kernel offset, we have to acquire the file lock
         // for both the `lseek64` and `getdents64` syscalls to ensure that no other thread
         // changes the kernel offset while we are using it.
         let (guard, dir) = data.get_file_mut().await;
-
-
 
         // alloc buff ,pay attention to alian.
         let mut buffer = vec![0u8; BUFFER_SIZE];
@@ -104,7 +117,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         }
 
         loop {
-            
             // call getdents64 system call
             let result = unsafe {
                 libc::syscall(
@@ -129,56 +141,53 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             while offset < bytes_read {
                 //let (front, back) = buffer.split_at(size_of::<LinuxDirent64>());
                 //size_of::<LinuxDirent64>()
-                let front = &buffer[offset..offset+size_of::<LinuxDirent64>()];
-                let back =&buffer[offset+size_of::<LinuxDirent64>()..];
+                let front = &buffer[offset..offset + size_of::<LinuxDirent64>()];
+                let back = &buffer[offset + size_of::<LinuxDirent64>()..];
 
                 let dirent64 = LinuxDirent64::from_slice(front)
                     .expect("fuse: unable to get LinuxDirent64 from slice");
-        
+
                 let namelen = dirent64.d_reclen as usize - size_of::<LinuxDirent64>();
                 debug_assert!(
                     namelen <= back.len(),
                     "fuse: back is smaller than `namelen`"
                 );
-                
+
                 let name = &back[..namelen];
                 if name.eq(CURRENT_DIR_CSTR) || name.eq(PARENT_DIR_CSTR) {
-                    
                     offset += dirent64.d_reclen as usize;
                     continue;
                 }
                 let name = bytes_to_cstr(name)
-                .map_err(|e| {
-                    error!("fuse: do_readdir: {:?}", e);
-                    einval()
-                })?
-                .to_bytes();
+                    .map_err(|e| {
+                        error!("fuse: do_readdir: {:?}", e);
+                        einval()
+                    })?
+                    .to_bytes();
 
-                let mut  entry = DirectoryEntry{
-                    inode:dirent64.d_ino,
+                let mut entry = DirectoryEntry {
+                    inode: dirent64.d_ino,
                     kind: filetype_from_mode((dirent64.d_ty as u16 * 0x1000u16).into()),
                     name: OsString::from_vec(name.to_vec()),
-                    offset: dirent64.d_off ,
+                    offset: dirent64.d_off,
                 };
                 // Safe because do_readdir() has ensured dir_entry.name is a
                 // valid [u8] generated by CStr::to_bytes().
                 let name = osstr_to_cstr(&entry.name)?;
-                debug!("readdir:{}",name.to_str().unwrap());
+                debug!("readdir:{}", name.to_str().unwrap());
                 let _entry = self.do_lookup(inode, &name).await?;
                 let mut inodes = self.inode_map.inodes.write().await;
                 self.forget_one(&mut inodes, _entry.attr.ino, 1).await;
-                entry.inode =  _entry.attr.ino;
+                entry.inode = _entry.attr.ino;
                 entry_list.push(Ok(entry));
 
                 // move to next entry
                 offset += dirent64.d_reclen as usize;
             }
         }
-        
 
         // Explicitly drop the lock so that it's not held while we fill in the fuse buffer.
         mem::drop(guard);
-        
 
         Ok(())
     }
@@ -188,21 +197,16 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         inode: Inode,
         handle: Handle,
         offset: u64,
-        entry_list: & mut Vec<std::result::Result<DirectoryEntryPlus, Errno>> ,
+        entry_list: &mut Vec<std::result::Result<DirectoryEntryPlus, Errno>>,
     ) -> io::Result<()> {
-        const BUFFER_SIZE: usize = 8192 ;
-        
-        
+        const BUFFER_SIZE: usize = 8192;
+
         let data = self.get_dirdata(handle, inode, libc::O_RDONLY).await?;
 
-        
         // Since we are going to work with the kernel offset, we have to acquire the file lock
         // for both the `lseek64` and `getdents64` syscalls to ensure that no other thread
         // changes the kernel offset while we are using it.
         let (guard, dir) = data.get_file_mut().await;
-
-
-
 
         // alloc buff ,pay attention to alian.
         let mut buffer = vec![0u8; BUFFER_SIZE];
@@ -214,7 +218,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             return Err(io::Error::last_os_error());
         }
         loop {
-            
             // call getdents64 system call
             let result = unsafe {
                 libc::syscall(
@@ -231,83 +234,74 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             let bytes_read = result as usize;
             if bytes_read == 0 {
-                break; 
+                break;
             }
 
-            
             let mut offset = 0;
             while offset < bytes_read {
                 //size_of::<LinuxDirent64>()
-                let front = &buffer[offset..offset+size_of::<LinuxDirent64>()];
-                let back =&buffer[offset+size_of::<LinuxDirent64>()..];
+                let front = &buffer[offset..offset + size_of::<LinuxDirent64>()];
+                let back = &buffer[offset + size_of::<LinuxDirent64>()..];
                 //let (front, back) = buffer.split_at(size_of::<LinuxDirent64>());
 
                 let dirent64 = LinuxDirent64::from_slice(front)
                     .expect("fuse: unable to get LinuxDirent64 from slice");
-        
+
                 let namelen = dirent64.d_reclen as usize - size_of::<LinuxDirent64>();
                 debug_assert!(
                     namelen <= back.len(),
                     "fuse: back is smaller than `namelen`"
                 );
-                
+
                 let name = &back[..namelen];
                 // if name.starts_with(CURRENT_DIR_CSTR) || name.starts_with(PARENT_DIR_CSTR) {
-                    
+
                 //     offset += dirent64.d_reclen as usize;
                 //     continue;
                 // }
                 let name = bytes_to_cstr(name)
-                .map_err(|e| {
-                    error!("fuse: do_readdir: {:?}", e);
-                    einval()
-                })?
-                .to_bytes();
+                    .map_err(|e| {
+                        error!("fuse: do_readdir: {:?}", e);
+                        einval()
+                    })?
+                    .to_bytes();
 
-                let mut  entry = DirectoryEntry{
-                    inode:dirent64.d_ino,
+                let mut entry = DirectoryEntry {
+                    inode: dirent64.d_ino,
                     kind: filetype_from_mode((dirent64.d_ty as u16 * 0x1000u16).into()),
                     name: OsString::from_vec(name.to_vec()),
-                    offset: dirent64.d_off ,
+                    offset: dirent64.d_off,
                 };
                 // Safe because do_readdir() has ensured dir_entry.name is a
                 // valid [u8] generated by CStr::to_bytes().
                 let name = osstr_to_cstr(&entry.name)?;
-                debug!("readdir:{}",name.to_str().unwrap());
+                debug!("readdir:{}", name.to_str().unwrap());
                 let _entry = self.do_lookup(inode, &name).await?;
                 let mut inodes = self.inode_map.inodes.write().await;
                 self.forget_one(&mut inodes, _entry.attr.ino, 1).await;
-                entry.inode =  _entry.attr.ino;
+                entry.inode = _entry.attr.ino;
 
-                entry_list.push(Ok(
-                    DirectoryEntryPlus{
-                        inode: entry.inode,
-                        generation: _entry.generation,
-                        kind: entry.kind,
-                        name: entry.name,
-                        offset: entry.offset,
-                        attr: _entry.attr,
-                        entry_ttl: _entry.ttl,
-                        attr_ttl: _entry.ttl,
-                    }
-                ));
+                entry_list.push(Ok(DirectoryEntryPlus {
+                    inode: entry.inode,
+                    generation: _entry.generation,
+                    kind: entry.kind,
+                    name: entry.name,
+                    offset: entry.offset,
+                    attr: _entry.attr,
+                    entry_ttl: _entry.ttl,
+                    attr_ttl: _entry.ttl,
+                }));
                 // add the offset.
                 offset += dirent64.d_reclen as usize;
-
             }
         }
         drop(guard);
         Ok(())
     }
 
-    async  fn do_open(
-        &self,
-        inode: Inode,
-        flags: u32,
-    ) -> io::Result<(Option<Handle>, OpenOptions)> {
-
+    async fn do_open(&self, inode: Inode, flags: u32) -> io::Result<(Option<Handle>, OpenOptions)> {
         let file = self.open_inode(inode, flags as i32).await?;
-        
+
         let data = HandleData::new(inode, file, flags);
         let handle = self.next_handle.fetch_add(1).await;
         self.handle_map.insert(handle, data).await;
@@ -415,20 +409,19 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     }
 }
 impl Filesystem for PassthroughFs {
-     /// dir entry stream given by [`readdir`][Filesystem::readdir].
-     type DirEntryStream<'a>
-        =Iter<IntoIter<Result<DirectoryEntry>>>
-     where
-         Self: 'a;
+    /// dir entry stream given by [`readdir`][Filesystem::readdir].
+    type DirEntryStream<'a>
+        = Iter<IntoIter<Result<DirectoryEntry>>>
+    where
+        Self: 'a;
     /// dir entry stream given by [`readdir`][Filesystem::readdir].
     type DirEntryPlusStream<'a>
         = Iter<IntoIter<Result<DirectoryEntryPlus>>>
     where
         Self: 'a;
 
-
-     /// initialize filesystem. Called before any other filesystem method.
-     async fn init(&self, _req: Request) -> Result<ReplyInit>{
+    /// initialize filesystem. Called before any other filesystem method.
+    async fn init(&self, _req: Request) -> Result<ReplyInit> {
         if self.cfg.do_import {
             self.import().await?;
         }
@@ -436,69 +429,69 @@ impl Filesystem for PassthroughFs {
         Ok(ReplyInit {
             max_write: NonZeroU32::new(128 * 1024).unwrap(),
         })
-     }
+    }
 
-     /// clean up filesystem. Called on filesystem exit which is fuseblk, in normal fuse filesystem,
-     /// kernel may call forget for root. There is some discuss for this
-     /// <https://github.com/bazil/fuse/issues/82#issuecomment-88126886>,
-     /// <https://sourceforge.net/p/fuse/mailman/message/31995737/>
-     async fn destroy(&self, _req: Request){
+    /// clean up filesystem. Called on filesystem exit which is fuseblk, in normal fuse filesystem,
+    /// kernel may call forget for root. There is some discuss for this
+    /// <https://github.com/bazil/fuse/issues/82#issuecomment-88126886>,
+    /// <https://sourceforge.net/p/fuse/mailman/message/31995737/>
+    async fn destroy(&self, _req: Request) {
         self.handle_map.clear().await;
         self.inode_map.clear().await;
 
         if let Err(e) = self.import().await {
             error!("fuse: failed to destroy instance, {:?}", e);
         };
-     }
- 
-     /// look up a directory entry by name and get its attributes.
-     async fn lookup(&self, _req: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {
+    }
+
+    /// look up a directory entry by name and get its attributes.
+    async fn lookup(&self, _req: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {
         // Don't use is_safe_path_component(), allow "." and ".." for NFS export support
         if name.to_string_lossy().as_bytes().contains(&SLASH_ASCII) {
             return Err(einval().into());
         }
         let name = osstr_to_cstr(name).unwrap();
         self.do_lookup(parent, name.as_ref()).await
-     }
- 
-     /// forget an inode. The nlookup parameter indicates the number of lookups previously
-     /// performed on this inode. If the filesystem implements inode lifetimes, it is recommended
-     /// that inodes acquire a single reference on each lookup, and lose nlookup references on each
-     /// forget. The filesystem may ignore forget calls, if the inodes don't need to have a limited
-     /// lifetime. On unmount it is not guaranteed, that all referenced inodes will receive a forget
-     /// message. When filesystem is normal(not fuseblk) and unmounting, kernel may send forget
-     /// request for root and this library will stop session after call forget. There is some
-     /// discussion for this <https://github.com/bazil/fuse/issues/82#issuecomment-88126886>,
-     /// <https://sourceforge.net/p/fuse/mailman/message/31995737/>
-     async fn forget(&self, _req: Request, inode: Inode, nlookup: u64) {
+    }
+
+    /// forget an inode. The nlookup parameter indicates the number of lookups previously
+    /// performed on this inode. If the filesystem implements inode lifetimes, it is recommended
+    /// that inodes acquire a single reference on each lookup, and lose nlookup references on each
+    /// forget. The filesystem may ignore forget calls, if the inodes don't need to have a limited
+    /// lifetime. On unmount it is not guaranteed, that all referenced inodes will receive a forget
+    /// message. When filesystem is normal(not fuseblk) and unmounting, kernel may send forget
+    /// request for root and this library will stop session after call forget. There is some
+    /// discussion for this <https://github.com/bazil/fuse/issues/82#issuecomment-88126886>,
+    /// <https://sourceforge.net/p/fuse/mailman/message/31995737/>
+    async fn forget(&self, _req: Request, inode: Inode, nlookup: u64) {
         let mut inodes = self.inode_map.inodes.write().await;
 
         self.forget_one(&mut inodes, inode, nlookup).await
-     }
- 
-     /// get file attributes. If `fh` is None, means `fh` is not set.
-     async fn getattr(
-         &self,
-         _req: Request,
-         inode: Inode,
-         fh: Option<u64>,
-         _flags: u32,
-     ) -> Result<ReplyAttr> {
+    }
+
+    /// get file attributes. If `fh` is None, means `fh` is not set.
+    async fn getattr(
+        &self,
+        _req: Request,
+        inode: Inode,
+        fh: Option<u64>,
+        _flags: u32,
+    ) -> Result<ReplyAttr> {
         let re = self.do_getattr(inode, fh).await?;
-        Ok(ReplyAttr{
+        Ok(ReplyAttr {
             ttl: re.1,
-            attr:convert_stat64_to_file_attr(re.0),
+            attr: convert_stat64_to_file_attr(re.0),
         })
-     }
- 
-     /// set file attributes. If `fh` is None, means `fh` is not set.
-     async fn setattr(
-         &self,
-         req: Request,
-         inode: Inode,
-         fh: Option<u64>,
-         set_attr: SetAttr,
-     ) -> Result<ReplyAttr> {
+    }
+
+    /// set file attributes. If `fh` is None, means `fh` is not set.
+    async fn setattr(
+        &self,
+        req: Request,
+        inode: Inode,
+        fh: Option<u64>,
+        set_attr: SetAttr,
+    ) -> Result<ReplyAttr> {
         let inode_data = self.inode_map.get(inode).await?;
 
         enum Data {
@@ -531,10 +524,15 @@ impl Filesystem for PassthroughFs {
             // Safe because this doesn't modify any memory and we check the return value.
             let res = unsafe {
                 match data {
-                    Data::Handle(ref h) => libc::fchmod(h.borrow_fd().as_raw_fd(), set_attr.mode.unwrap()),
-                    Data::ProcPath(ref p) => {
-                        libc::fchmodat(self.proc_self_fd.as_raw_fd(), p.as_ptr(), set_attr.mode.unwrap(), 0)
+                    Data::Handle(ref h) => {
+                        libc::fchmod(h.borrow_fd().as_raw_fd(), set_attr.mode.unwrap())
                     }
+                    Data::ProcPath(ref p) => libc::fchmodat(
+                        self.proc_self_fd.as_raw_fd(),
+                        p.as_ptr(),
+                        set_attr.mode.unwrap(),
+                        0,
+                    ),
                 }
             };
             if res < 0 {
@@ -542,8 +540,9 @@ impl Filesystem for PassthroughFs {
             }
         }
 
-        if set_attr.uid.is_some() && set_attr.gid.is_some() {//valid.intersects(SetattrValid::UID | SetattrValid::GID)
-            let uid =  set_attr.uid.unwrap();
+        if set_attr.uid.is_some() && set_attr.gid.is_some() {
+            //valid.intersects(SetattrValid::UID | SetattrValid::GID)
+            let uid = set_attr.uid.unwrap();
             let gid = set_attr.gid.unwrap();
 
             // Safe because this is a constant value and a valid C string.
@@ -573,7 +572,9 @@ impl Filesystem for PassthroughFs {
                 },
                 _ => {
                     // There is no `ftruncateat` so we need to get a new fd and truncate it.
-                    let f = self.open_inode(inode, libc::O_NONBLOCK | libc::O_RDWR).await?;
+                    let f = self
+                        .open_inode(inode, libc::O_NONBLOCK | libc::O_RDWR)
+                        .await?;
                     unsafe { libc::ftruncate(f.as_raw_fd(), size.try_into().unwrap()) }
                 }
             };
@@ -581,7 +582,7 @@ impl Filesystem for PassthroughFs {
                 return Err(io::Error::last_os_error().into());
             }
         }
-        
+
         if set_attr.atime.is_some() && set_attr.mtime.is_some() {
             let mut tvs: [libc::timespec; 2] = [
                 libc::timespec {
@@ -611,11 +612,11 @@ impl Filesystem for PassthroughFs {
         }
 
         self.getattr(req, inode, fh, 0).await
-     }
- 
-     /// read symbolic link.
-     async fn readlink(&self, _req: Request, inode: Inode) -> Result<ReplyData> {
-         // Safe because this is a constant value and a valid C string.
+    }
+
+    /// read symbolic link.
+    async fn readlink(&self, _req: Request, inode: Inode) -> Result<ReplyData> {
+        // Safe because this is a constant value and a valid C string.
         let empty = unsafe { CStr::from_bytes_with_nul_unchecked(EMPTY_CSTR) };
         let mut buf = Vec::<u8>::with_capacity(libc::PATH_MAX as usize);
         let data = self.inode_map.get(inode).await?;
@@ -638,17 +639,19 @@ impl Filesystem for PassthroughFs {
         // Safe because we trust the value returned by kernel.
         unsafe { buf.set_len(res as usize) };
 
-        Ok(ReplyData { data:  Bytes::from(buf) })
-     }
- 
-     /// create a symbolic link.
-     async fn symlink(
-         &self,
-         _req: Request,
-         parent: Inode,
-         name: &OsStr,
-         link: &OsStr,
-     ) -> Result<ReplyEntry> {
+        Ok(ReplyData {
+            data: Bytes::from(buf),
+        })
+    }
+
+    /// create a symbolic link.
+    async fn symlink(
+        &self,
+        _req: Request,
+        parent: Inode,
+        name: &OsStr,
+        link: &OsStr,
+    ) -> Result<ReplyEntry> {
         let name = osstr_to_cstr(name).unwrap();
         let name = name.as_ref();
         let link = osstr_to_cstr(link).unwrap();
@@ -669,19 +672,19 @@ impl Filesystem for PassthroughFs {
         } else {
             Err(io::Error::last_os_error().into())
         }
-     }
- 
-     /// create file node. Create a regular file, character device, block device, fifo or socket
-     /// node. When creating file, most cases user only need to implement
-     /// [`create`][Filesystem::create].
-     async fn mknod(
-         &self,
-         _req: Request,
-         parent: Inode,
-         name: &OsStr,
-         mode: u32,
-         rdev: u32,
-     ) -> Result<ReplyEntry> {
+    }
+
+    /// create file node. Create a regular file, character device, block device, fifo or socket
+    /// node. When creating file, most cases user only need to implement
+    /// [`create`][Filesystem::create].
+    async fn mknod(
+        &self,
+        _req: Request,
+        parent: Inode,
+        name: &OsStr,
+        mode: u32,
+        rdev: u32,
+    ) -> Result<ReplyEntry> {
         let name = osstr_to_cstr(name).unwrap();
         let name = name.as_ref();
         self.validate_path_component(name)?;
@@ -697,7 +700,7 @@ impl Filesystem for PassthroughFs {
                 libc::mknodat(
                     file.as_raw_fd(),
                     name.as_ptr(),
-                    (mode ) as libc::mode_t,
+                    (mode) as libc::mode_t,
                     u64::from(rdev),
                 )
             }
@@ -707,17 +710,17 @@ impl Filesystem for PassthroughFs {
         } else {
             self.do_lookup(parent, name).await
         }
-     }
- 
-     /// create a directory.
-     async fn mkdir(
-         &self,
-         _req: Request,
-         parent: Inode,
-         name: &OsStr,
-         mode: u32,
-         umask: u32,
-     ) -> Result<ReplyEntry> {
+    }
+
+    /// create a directory.
+    async fn mkdir(
+        &self,
+        _req: Request,
+        parent: Inode,
+        name: &OsStr,
+        mode: u32,
+        umask: u32,
+    ) -> Result<ReplyEntry> {
         let name = osstr_to_cstr(name).unwrap();
         let name = name.as_ref();
         self.validate_path_component(name)?;
@@ -735,39 +738,40 @@ impl Filesystem for PassthroughFs {
             return Err(io::Error::last_os_error().into());
         }
 
-        self.do_lookup(parent,name).await
-     }
- 
-     /// remove a file.
-     async fn unlink(&self, _req: Request, parent: Inode, name: &OsStr) -> Result<()> {
+        self.do_lookup(parent, name).await
+    }
+
+    /// remove a file.
+    async fn unlink(&self, _req: Request, parent: Inode, name: &OsStr) -> Result<()> {
         let name = osstr_to_cstr(name).unwrap();
         let name = name.as_ref();
         self.validate_path_component(name)?;
         self.do_unlink(parent, name, 0).await.map_err(|e| e.into())
-     }
- 
-     /// remove a directory.
-     async fn rmdir(&self, _req: Request, parent: Inode, name: &OsStr) -> Result<()> {
+    }
+
+    /// remove a directory.
+    async fn rmdir(&self, _req: Request, parent: Inode, name: &OsStr) -> Result<()> {
         let name = osstr_to_cstr(name).unwrap();
         let name = name.as_ref();
         self.validate_path_component(name)?;
-        self.do_unlink(parent, name, libc::AT_REMOVEDIR).await.map_err(|e| e.into())
-        
-     }
- 
-     /// rename a file or directory.
-     async fn rename(
-         &self,
-         _req: Request,
-         parent: Inode,
-         name: &OsStr,
-         new_parent: Inode,
-         new_name: &OsStr,
-     ) -> Result<()> {
+        self.do_unlink(parent, name, libc::AT_REMOVEDIR)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// rename a file or directory.
+    async fn rename(
+        &self,
+        _req: Request,
+        parent: Inode,
+        name: &OsStr,
+        new_parent: Inode,
+        new_name: &OsStr,
+    ) -> Result<()> {
         let oldname = osstr_to_cstr(name).unwrap();
         let oldname = oldname.as_ref();
-        let newname =  osstr_to_cstr(new_name).unwrap();
-        let newname =  newname.as_ref();
+        let newname = osstr_to_cstr(new_name).unwrap();
+        let newname = newname.as_ref();
         self.validate_path_component(oldname)?;
         self.validate_path_component(newname)?;
 
@@ -776,30 +780,32 @@ impl Filesystem for PassthroughFs {
         let old_file = old_inode.get_file()?;
         let new_file = new_inode.get_file()?;
 
-
         //TODO: Switch to libc::renameat2 -> libc::renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
-        let res = unsafe { libc::renameat2(
-            old_file.as_raw_fd(), 
-            oldname.as_ptr(), 
-            new_file.as_raw_fd(), 
-            newname.as_ptr(), 
-            0) };
+        let res = unsafe {
+            libc::renameat2(
+                old_file.as_raw_fd(),
+                oldname.as_ptr(),
+                new_file.as_raw_fd(),
+                newname.as_ptr(),
+                0,
+            )
+        };
 
         if res == 0 {
             Ok(())
         } else {
             Err(io::Error::last_os_error().into())
         }
-     }
- 
-     /// create a hard link.
-     async fn link(
-         &self,
-         _req: Request,
-         inode: Inode,
-         new_parent: Inode,
-         new_name: &OsStr,
-     ) -> Result<ReplyEntry> {
+    }
+
+    /// create a hard link.
+    async fn link(
+        &self,
+        _req: Request,
+        inode: Inode,
+        new_parent: Inode,
+        new_name: &OsStr,
+    ) -> Result<ReplyEntry> {
         let newname = osstr_to_cstr(new_name).unwrap();
         let newname = newname.as_ref();
         self.validate_path_component(newname)?;
@@ -827,49 +833,49 @@ impl Filesystem for PassthroughFs {
         } else {
             Err(io::Error::last_os_error().into())
         }
-     }
- 
-     /// open a file. Open flags (with the exception of `O_CREAT`, `O_EXCL` and `O_NOCTTY`) are
-     /// available in flags. Filesystem may store an arbitrary file handle (pointer, index, etc) in
-     /// fh, and use this in other all other file operations (read, write, flush, release, fsync).
-     /// Filesystem may also implement stateless file I/O and not store anything in fh. There are
-     /// also some flags (`direct_io`, `keep_cache`) which the filesystem may set, to change the way
-     /// the file is opened. A filesystem need not implement this method if it
-     /// sets [`MountOptions::no_open_support`][crate::MountOptions::no_open_support] and if the
-     /// kernel supports `FUSE_NO_OPEN_SUPPORT`.
-     ///
-     /// # Notes:
-     ///
-     /// See `fuse_file_info` structure in
-     /// [fuse_common.h](https://libfuse.github.io/doxygen/include_2fuse__common_8h_source.html) for
-     /// more details.
-     async fn open(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
+    }
+
+    /// open a file. Open flags (with the exception of `O_CREAT`, `O_EXCL` and `O_NOCTTY`) are
+    /// available in flags. Filesystem may store an arbitrary file handle (pointer, index, etc) in
+    /// fh, and use this in other all other file operations (read, write, flush, release, fsync).
+    /// Filesystem may also implement stateless file I/O and not store anything in fh. There are
+    /// also some flags (`direct_io`, `keep_cache`) which the filesystem may set, to change the way
+    /// the file is opened. A filesystem need not implement this method if it
+    /// sets [`MountOptions::no_open_support`][crate::MountOptions::no_open_support] and if the
+    /// kernel supports `FUSE_NO_OPEN_SUPPORT`.
+    ///
+    /// # Notes:
+    ///
+    /// See `fuse_file_info` structure in
+    /// [fuse_common.h](https://libfuse.github.io/doxygen/include_2fuse__common_8h_source.html) for
+    /// more details.
+    async fn open(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
         if self.no_open.load().await {
             info!("fuse: open is not supported.");
             Err(enosys().into())
         } else {
             let re = self.do_open(inode, flags).await?;
-            println!("open handle:{}",re.0.unwrap());
-            Ok(ReplyOpen{
+            println!("open handle:{}", re.0.unwrap());
+            Ok(ReplyOpen {
                 fh: re.0.unwrap(),
                 flags: re.1.bits(),
             })
         }
-     }
- 
-     /// read data. Read should send exactly the number of bytes requested except on EOF or error,
-     /// otherwise the rest of the data will be substituted with zeroes. An exception to this is
-     /// when the file has been opened in `direct_io` mode, in which case the return value of the
-     /// read system call will reflect the return value of this operation. `fh` will contain the
-     /// value set by the open method, or will be undefined if the open method didn't set any value.
-     async fn read(
-         &self,
-         _req: Request,
-         inode: Inode,
-         fh: u64,
-         offset: u64,
-         size: u32,
-     ) -> Result<ReplyData> {
+    }
+
+    /// read data. Read should send exactly the number of bytes requested except on EOF or error,
+    /// otherwise the rest of the data will be substituted with zeroes. An exception to this is
+    /// when the file has been opened in `direct_io` mode, in which case the return value of the
+    /// read system call will reflect the return value of this operation. `fh` will contain the
+    /// value set by the open method, or will be undefined if the open method didn't set any value.
+    async fn read(
+        &self,
+        _req: Request,
+        inode: Inode,
+        fh: u64,
+        offset: u64,
+        size: u32,
+    ) -> Result<ReplyData> {
         let data = self.get_data(fh, inode, libc::O_RDONLY).await?;
         let f = unsafe { File::from_raw_fd(data.borrow_fd().as_raw_fd()) };
         let mut f = ManuallyDrop::new(f);
@@ -880,50 +886,51 @@ impl Filesystem for PassthroughFs {
                 if bytes_read < size as usize {
                     buf.truncate(bytes_read); // Adjust the buffer size
                 }
-            },
+            }
             Err(err) => {
                 error!("read error: {}", err);
                 return Err(err.into());
-            },
+            }
         };
-    
-        Ok(ReplyData { data: Bytes::from(buf) })
+
+        Ok(ReplyData {
+            data: Bytes::from(buf),
+        })
         //w.wr(&mut *f, size as usize, offset)
-     }
- 
-     /// write data. Write should return exactly the number of bytes requested except on error. An
-     /// exception to this is when the file has been opened in `direct_io` mode, in which case the
-     /// return value of the write system call will reflect the return value of this operation. `fh`
-     /// will contain the value set by the open method, or will be undefined if the open method
-     /// didn't set any value. When `write_flags` contains
-     /// [`FUSE_WRITE_CACHE`](crate::raw::flags::FUSE_WRITE_CACHE), means the write operation is a
-     /// delay write.
-     #[allow(clippy::too_many_arguments)]
-     async fn write(
-         &self,
-         _req: Request,
-         inode: Inode,
-         fh: u64,
-         offset: u64,
-         data: &[u8],
-         _write_flags: u32,
-         flags: u32,
-     ) -> Result<ReplyWrite> {
+    }
+
+    /// write data. Write should return exactly the number of bytes requested except on error. An
+    /// exception to this is when the file has been opened in `direct_io` mode, in which case the
+    /// return value of the write system call will reflect the return value of this operation. `fh`
+    /// will contain the value set by the open method, or will be undefined if the open method
+    /// didn't set any value. When `write_flags` contains
+    /// [`FUSE_WRITE_CACHE`](crate::raw::flags::FUSE_WRITE_CACHE), means the write operation is a
+    /// delay write.
+    #[allow(clippy::too_many_arguments)]
+    async fn write(
+        &self,
+        _req: Request,
+        inode: Inode,
+        fh: u64,
+        offset: u64,
+        data: &[u8],
+        _write_flags: u32,
+        flags: u32,
+    ) -> Result<ReplyWrite> {
         let handle_data = self.get_data(fh, inode, libc::O_RDWR).await?;
 
         // Manually implement File::try_clone() by borrowing fd of data.file instead of dup().
         // It's safe because the `data` variable's lifetime spans the whole function,
         // so data.file won't be closed.
-        let  f = unsafe { File::from_raw_fd(handle_data.borrow_fd().as_raw_fd()) };
+        let f = unsafe { File::from_raw_fd(handle_data.borrow_fd().as_raw_fd()) };
         let mut f = ManuallyDrop::new(f);
-        self.check_fd_flags(handle_data.clone(), f.as_raw_fd(), flags).await?; //TODO: deal with this flags. 
+        self.check_fd_flags(handle_data.clone(), f.as_raw_fd(), flags)
+            .await?; //TODO: deal with this flags. 
 
         // if self.seal_size.load().await {
         //     let st = stat_fd(&f, None)?;
         //     self.seal_size_check(Opcode::Write, st.st_size as u64, offset, size as u64, 0)?;
         // }
-
-    
 
         // Cap restored when _killpriv is dropped
         // let _killpriv =
@@ -934,25 +941,28 @@ impl Filesystem for PassthroughFs {
         //     };
         f.seek(SeekFrom::Start(offset))?;
         let res = f.write(data)?;
-       
-        Ok(ReplyWrite { written: res as u32 })
-       
-     }
- 
-     /// get filesystem statistics.
-     async fn statfs(&self, _req: Request, inode: Inode) -> Result<ReplyStatFs> {
+
+        Ok(ReplyWrite {
+            written: res as u32,
+        })
+    }
+
+    /// get filesystem statistics.
+    async fn statfs(&self, _req: Request, inode: Inode) -> Result<ReplyStatFs> {
         let mut out = MaybeUninit::<libc::statvfs64>::zeroed();
         let data = self.inode_map.get(inode).await?;
         let file = data.get_file()?;
 
         // Safe because this will only modify `out` and we check the return value.
-        let statfs : libc::statvfs64 = match unsafe { libc::fstatvfs64(file.as_raw_fd(), out.as_mut_ptr()) } {
-            // Safe because the kernel guarantees that `out` has been initialized.
-            0 => unsafe { out.assume_init() },
-            _ => return Err(io::Error::last_os_error().into()),
-        };
+        let statfs: libc::statvfs64 =
+            match unsafe { libc::fstatvfs64(file.as_raw_fd(), out.as_mut_ptr()) } {
+                // Safe because the kernel guarantees that `out` has been initialized.
+                0 => unsafe { out.assume_init() },
+                _ => return Err(io::Error::last_os_error().into()),
+            };
 
-        Ok(        // Populate the ReplyStatFs structure with the necessary information
+        Ok(
+            // Populate the ReplyStatFs structure with the necessary information
             ReplyStatFs {
                 blocks: statfs.f_blocks,
                 bfree: statfs.f_bfree,
@@ -962,36 +972,36 @@ impl Filesystem for PassthroughFs {
                 bsize: statfs.f_bsize as u32,
                 namelen: statfs.f_namemax as u32,
                 frsize: statfs.f_frsize as u32,
-            }
+            },
         )
-     }
- 
-     /// release an open file. Release is called when there are no more references to an open file:
-     /// all file descriptors are closed and all memory mappings are unmapped. For every open call
-     /// there will be exactly one release call. The filesystem may reply with an error, but error
-     /// values are not returned to `close()` or `munmap()` which triggered the release. `fh` will
-     /// contain the value set by the open method, or will be undefined if the open method didn't
-     /// set any value. `flags` will contain the same flags as for open. `flush` means flush the
-     /// data or not when closing file.
-     async fn release(
-         &self,
-         _req: Request,
-         inode: Inode,
-         fh: u64,
-         _flags: u32,
-         _lock_owner: u64,
-         _flush: bool,
-     ) -> Result<()> {
+    }
+
+    /// release an open file. Release is called when there are no more references to an open file:
+    /// all file descriptors are closed and all memory mappings are unmapped. For every open call
+    /// there will be exactly one release call. The filesystem may reply with an error, but error
+    /// values are not returned to `close()` or `munmap()` which triggered the release. `fh` will
+    /// contain the value set by the open method, or will be undefined if the open method didn't
+    /// set any value. `flags` will contain the same flags as for open. `flush` means flush the
+    /// data or not when closing file.
+    async fn release(
+        &self,
+        _req: Request,
+        inode: Inode,
+        fh: u64,
+        _flags: u32,
+        _lock_owner: u64,
+        _flush: bool,
+    ) -> Result<()> {
         if self.no_open.load().await {
             Err(enosys().into())
         } else {
             self.do_release(inode, fh).await.map_err(|e| e.into())
         }
-     }
- 
-     /// synchronize file contents. If the `datasync` is true, then only the user data should be
-     /// flushed, not the metadata.
-     async fn fsync(&self, _req: Request, inode: Inode, fh: u64, datasync: bool) -> Result<()> {
+    }
+
+    /// synchronize file contents. If the `datasync` is true, then only the user data should be
+    /// flushed, not the metadata.
+    async fn fsync(&self, _req: Request, inode: Inode, fh: u64, datasync: bool) -> Result<()> {
         let data = self.get_data(fh, inode, libc::O_RDONLY).await?;
         let fd = data.borrow_fd();
 
@@ -1008,19 +1018,18 @@ impl Filesystem for PassthroughFs {
         } else {
             Err(io::Error::last_os_error().into())
         }
-     }
- 
-     /// set an extended attribute.
-     async fn setxattr(
-         &self,
-         _req: Request,
-         inode: Inode,
-         name: &OsStr,
-         value: &[u8],
-         flags: u32,
-         _position: u32,
-     ) -> Result<()> {
+    }
 
+    /// set an extended attribute.
+    async fn setxattr(
+        &self,
+        _req: Request,
+        inode: Inode,
+        name: &OsStr,
+        value: &[u8],
+        flags: u32,
+        _position: u32,
+    ) -> Result<()> {
         if !self.cfg.xattr {
             return Err(enosys().into());
         }
@@ -1048,22 +1057,23 @@ impl Filesystem for PassthroughFs {
         } else {
             Err(io::Error::last_os_error().into())
         }
-     }
- 
-     /// Get an extended attribute. If `size` is too small, return `Err<ERANGE>`.
-     /// Otherwise, use [`ReplyXAttr::Data`] to send the attribute data, or
-     /// return an error.
-     async fn getxattr(
-         &self,
-         _req: Request,
-         inode: Inode,
-         name: &OsStr,
-         size: u32,
-     ) -> Result<ReplyXAttr> {
+    }
+
+    /// Get an extended attribute. If `size` is too small, return `Err<ERANGE>`.
+    /// Otherwise, use [`ReplyXAttr::Data`] to send the attribute data, or
+    /// return an error.
+    async fn getxattr(
+        &self,
+        _req: Request,
+        inode: Inode,
+        name: &OsStr,
+        size: u32,
+    ) -> Result<ReplyXAttr> {
         if !self.cfg.xattr {
             return Err(enosys().into());
         }
-        let name = osstr_to_cstr(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let name =
+            osstr_to_cstr(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let name = name.as_ref();
         let data = self.inode_map.get(inode).await?;
         let file = data.get_file()?;
@@ -1088,19 +1098,18 @@ impl Filesystem for PassthroughFs {
 
         if size == 0 {
             Ok(ReplyXAttr::Size(res as u32))
-
         } else {
             // Safe because we trust the value returned by kernel.
             unsafe { buf.set_len(res as usize) };
             Ok(ReplyXAttr::Data(Bytes::from(buf)))
         }
-     }
- 
-     /// List extended attribute names.
-     ///
-     /// If `size` is too small, return `Err<ERANGE>`.  Otherwise, use
-     /// [`ReplyXAttr::Data`] to send the attribute list, or return an error.
-     async fn listxattr(&self, _req: Request, inode: Inode, size: u32) -> Result<ReplyXAttr> {
+    }
+
+    /// List extended attribute names.
+    ///
+    /// If `size` is too small, return `Err<ERANGE>`.  Otherwise, use
+    /// [`ReplyXAttr::Data`] to send the attribute list, or return an error.
+    async fn listxattr(&self, _req: Request, inode: Inode, size: u32) -> Result<ReplyXAttr> {
         if !self.cfg.xattr {
             return Err(enosys().into());
         }
@@ -1132,10 +1141,10 @@ impl Filesystem for PassthroughFs {
             unsafe { buf.set_len(res as usize) };
             Ok(ReplyXAttr::Data(Bytes::from(buf)))
         }
-     }
- 
-     /// remove an extended attribute.
-     async fn removexattr(&self, _req: Request, inode: Inode, name: &OsStr) -> Result<()> {
+    }
+
+    /// remove an extended attribute.
+    async fn removexattr(&self, _req: Request, inode: Inode, name: &OsStr) -> Result<()> {
         if !self.cfg.xattr {
             return Err(enosys().into());
         }
@@ -1155,21 +1164,21 @@ impl Filesystem for PassthroughFs {
         } else {
             Err(io::Error::last_os_error().into())
         }
-     }
- 
-     /// flush method. This is called on each `close()` of the opened file. Since file descriptors
-     /// can be duplicated (`dup`, `dup2`, `fork`), for one open call there may be many flush calls.
-     /// Filesystems shouldn't assume that flush will always be called after some writes, or that if
-     /// will be called at all. `fh` will contain the value set by the open method, or will be
-     /// undefined if the open method didn't set any value.
-     ///
-     /// # Notes:
-     ///
-     /// the name of the method is misleading, since (unlike fsync) the filesystem is not forced to
-     /// flush pending writes. One reason to flush data, is if the filesystem wants to return write
-     /// errors. If the filesystem supports file locking operations ([`setlk`][Filesystem::setlk],
-     /// [`getlk`][Filesystem::getlk]) it should remove all locks belonging to `lock_owner`.
-     async fn flush(&self, _req: Request, inode: Inode, fh: u64, _lock_owner: u64) -> Result<()> {
+    }
+
+    /// flush method. This is called on each `close()` of the opened file. Since file descriptors
+    /// can be duplicated (`dup`, `dup2`, `fork`), for one open call there may be many flush calls.
+    /// Filesystems shouldn't assume that flush will always be called after some writes, or that if
+    /// will be called at all. `fh` will contain the value set by the open method, or will be
+    /// undefined if the open method didn't set any value.
+    ///
+    /// # Notes:
+    ///
+    /// the name of the method is misleading, since (unlike fsync) the filesystem is not forced to
+    /// flush pending writes. One reason to flush data, is if the filesystem wants to return write
+    /// errors. If the filesystem supports file locking operations ([`setlk`][Filesystem::setlk],
+    /// [`getlk`][Filesystem::getlk]) it should remove all locks belonging to `lock_owner`.
+    async fn flush(&self, _req: Request, inode: Inode, fh: u64, _lock_owner: u64) -> Result<()> {
         if self.no_open.load().await {
             return Err(enosys().into());
         }
@@ -1191,55 +1200,55 @@ impl Filesystem for PassthroughFs {
                 Ok(())
             }
         }
-     }
- 
-     /// open a directory. Filesystem may store an arbitrary file handle (pointer, index, etc) in
-     /// `fh`, and use this in other all other directory stream operations
-     /// ([`readdir`][Filesystem::readdir], [`releasedir`][Filesystem::releasedir],
-     /// [`fsyncdir`][Filesystem::fsyncdir]). Filesystem may also implement stateless directory
-     /// I/O and not store anything in `fh`.  A file system need not implement this method if it
-     /// sets [`MountOptions::no_open_dir_support`][crate::MountOptions::no_open_dir_support] and
-     /// if the kernel supports `FUSE_NO_OPENDIR_SUPPORT`.
-     async fn opendir(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
+    }
+
+    /// open a directory. Filesystem may store an arbitrary file handle (pointer, index, etc) in
+    /// `fh`, and use this in other all other directory stream operations
+    /// ([`readdir`][Filesystem::readdir], [`releasedir`][Filesystem::releasedir],
+    /// [`fsyncdir`][Filesystem::fsyncdir]). Filesystem may also implement stateless directory
+    /// I/O and not store anything in `fh`.  A file system need not implement this method if it
+    /// sets [`MountOptions::no_open_dir_support`][crate::MountOptions::no_open_dir_support] and
+    /// if the kernel supports `FUSE_NO_OPENDIR_SUPPORT`.
+    async fn opendir(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
         if self.no_opendir.load().await {
             info!("fuse: opendir is not supported.");
             Err(enosys().into())
         } else {
-            let t = self.do_open(inode, flags | (libc::O_DIRECTORY as u32)).await?;
-            let fd =t.0.unwrap();
-            Ok(ReplyOpen{
+            let t = self
+                .do_open(inode, flags | (libc::O_DIRECTORY as u32))
+                .await?;
+            let fd = t.0.unwrap();
+            Ok(ReplyOpen {
                 fh: fd,
-                flags:t.1.bits(),
+                flags: t.1.bits(),
             })
-               
         }
-     }
- 
+    }
 
- 
-     /// read directory. `offset` is used to track the offset of the directory entries. `fh` will
-     /// contain the value set by the [`opendir`][Filesystem::opendir] method, or will be
-     /// undefined if the [`opendir`][Filesystem::opendir] method didn't set any value.
-     async fn readdir(
-         &self,
-         _req: Request,
-         parent: Inode,
-         fh: u64,
-         offset: i64,
-     ) -> Result<ReplyDirectory<Self::DirEntryStream<'_>>> {
+    /// read directory. `offset` is used to track the offset of the directory entries. `fh` will
+    /// contain the value set by the [`opendir`][Filesystem::opendir] method, or will be
+    /// undefined if the [`opendir`][Filesystem::opendir] method didn't set any value.
+    async fn readdir(
+        &self,
+        _req: Request,
+        parent: Inode,
+        fh: u64,
+        offset: i64,
+    ) -> Result<ReplyDirectory<Self::DirEntryStream<'_>>> {
         if self.no_readdir.load().await {
             return Err(enosys().into());
         }
-        let mut entry_list  = Vec::new();
-        self.do_readdir(parent, fh, offset as u64, &mut entry_list).await?;
+        let mut entry_list = Vec::new();
+        self.do_readdir(parent, fh, offset as u64, &mut entry_list)
+            .await?;
         Ok(ReplyDirectory {
             entries: stream::iter(entry_list),
         })
-     }
-  
-     /// read directory entries, but with their attribute, like [`readdir`][Filesystem::readdir]
-     /// + [`lookup`][Filesystem::lookup] at the same time.
-     async fn readdirplus(
+    }
+
+    /// read directory entries, but with their attribute, like [`readdir`][Filesystem::readdir]
+    /// + [`lookup`][Filesystem::lookup] at the same time.
+    async fn readdirplus(
         &self,
         _req: Request,
         parent: Inode,
@@ -1250,37 +1259,38 @@ impl Filesystem for PassthroughFs {
         if self.no_readdir.load().await {
             return Err(enosys().into());
         }
-        let mut entry_list  = Vec::new();
-        self.do_readdirplus(parent, fh, offset, &mut entry_list).await?;
+        let mut entry_list = Vec::new();
+        self.do_readdirplus(parent, fh, offset, &mut entry_list)
+            .await?;
         Ok(ReplyDirectoryPlus {
             entries: stream::iter(entry_list),
         })
     }
-     /// release an open directory. For every [`opendir`][Filesystem::opendir] call there will
-     /// be exactly one `releasedir` call. `fh` will contain the value set by the
-     /// [`opendir`][Filesystem::opendir] method, or will be undefined if the
-     /// [`opendir`][Filesystem::opendir] method didn't set any value.
-     async fn releasedir(&self, _req: Request, inode: Inode, fh: u64, _flags: u32) -> Result<()> {
+    /// release an open directory. For every [`opendir`][Filesystem::opendir] call there will
+    /// be exactly one `releasedir` call. `fh` will contain the value set by the
+    /// [`opendir`][Filesystem::opendir] method, or will be undefined if the
+    /// [`opendir`][Filesystem::opendir] method didn't set any value.
+    async fn releasedir(&self, _req: Request, inode: Inode, fh: u64, _flags: u32) -> Result<()> {
         if self.no_opendir.load().await {
             info!("fuse: releasedir is not supported.");
             Err(io::Error::from_raw_os_error(libc::ENOSYS).into())
         } else {
             self.do_release(inode, fh).await.map_err(|e| e.into())
         }
-     }
- 
-     /// synchronize directory contents. If the `datasync` is true, then only the directory contents
-     /// should be flushed, not the metadata. `fh` will contain the value set by the
-     /// [`opendir`][Filesystem::opendir] method, or will be undefined if the
-     /// [`opendir`][Filesystem::opendir] method didn't set any value.
-     async fn fsyncdir(&self, req: Request, inode: Inode, fh: u64, datasync: bool) -> Result<()> {
-        self.fsync(req, inode, fh,datasync).await
-     }
+    }
 
-     /// check file access permissions. This will be called for the `access()` system call. If the
-     /// `default_permissions` mount option is given, this method is not be called. This method is
-     /// not called under Linux kernel versions 2.4.x.
-     async fn access(&self, req: Request, inode: Inode, mask: u32) -> Result<()> {
+    /// synchronize directory contents. If the `datasync` is true, then only the directory contents
+    /// should be flushed, not the metadata. `fh` will contain the value set by the
+    /// [`opendir`][Filesystem::opendir] method, or will be undefined if the
+    /// [`opendir`][Filesystem::opendir] method didn't set any value.
+    async fn fsyncdir(&self, req: Request, inode: Inode, fh: u64, datasync: bool) -> Result<()> {
+        self.fsync(req, inode, fh, datasync).await
+    }
+
+    /// check file access permissions. This will be called for the `access()` system call. If the
+    /// `default_permissions` mount option is given, this method is not be called. This method is
+    /// not called under Linux kernel versions 2.4.x.
+    async fn access(&self, req: Request, inode: Inode, mask: u32) -> Result<()> {
         let data = self.inode_map.get(inode).await?;
         let st = stat_fd(&data.get_file()?, None)?;
         let mode = mask as i32 & (libc::R_OK | libc::W_OK | libc::X_OK);
@@ -1320,32 +1330,32 @@ impl Filesystem for PassthroughFs {
         }
 
         Ok(())
-     }
- 
-     /// create and open a file. If the file does not exist, first create it with the specified
-     /// mode, and then open it. Open flags (with the exception of `O_NOCTTY`) are available in
-     /// flags. Filesystem may store an arbitrary file handle (pointer, index, etc) in `fh`, and use
-     /// this in other all other file operations ([`read`][Filesystem::read],
-     /// [`write`][Filesystem::write], [`flush`][Filesystem::flush],
-     /// [`release`][Filesystem::release], [`fsync`][Filesystem::fsync]). There are also some flags
-     /// (`direct_io`, `keep_cache`) which the filesystem may set, to change the way the file is
-     /// opened. If this method is not implemented or under Linux kernel versions earlier than
-     /// 2.6.15, the [`mknod`][Filesystem::mknod] and [`open`][Filesystem::open] methods will be
-     /// called instead.
-     ///
-     /// # Notes:
-     ///
-     /// See `fuse_file_info` structure in
-     /// [fuse_common.h](https://libfuse.github.io/doxygen/include_2fuse__common_8h_source.html) for
-     /// more details.
-     async fn create(
-         &self,
-         _req: Request,
-         parent: Inode,
-         name: &OsStr,
-         mode: u32,
-         flags: u32,
-     ) -> Result<ReplyCreated> {
+    }
+
+    /// create and open a file. If the file does not exist, first create it with the specified
+    /// mode, and then open it. Open flags (with the exception of `O_NOCTTY`) are available in
+    /// flags. Filesystem may store an arbitrary file handle (pointer, index, etc) in `fh`, and use
+    /// this in other all other file operations ([`read`][Filesystem::read],
+    /// [`write`][Filesystem::write], [`flush`][Filesystem::flush],
+    /// [`release`][Filesystem::release], [`fsync`][Filesystem::fsync]). There are also some flags
+    /// (`direct_io`, `keep_cache`) which the filesystem may set, to change the way the file is
+    /// opened. If this method is not implemented or under Linux kernel versions earlier than
+    /// 2.6.15, the [`mknod`][Filesystem::mknod] and [`open`][Filesystem::open] methods will be
+    /// called instead.
+    ///
+    /// # Notes:
+    ///
+    /// See `fuse_file_info` structure in
+    /// [fuse_common.h](https://libfuse.github.io/doxygen/include_2fuse__common_8h_source.html) for
+    /// more details.
+    async fn create(
+        &self,
+        _req: Request,
+        parent: Inode,
+        name: &OsStr,
+        mode: u32,
+        flags: u32,
+    ) -> Result<ReplyCreated> {
         let name = osstr_to_cstr(name).unwrap();
         let name = name.as_ref();
         self.validate_path_component(name)?;
@@ -1397,54 +1407,49 @@ impl Filesystem for PassthroughFs {
             CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
             _ => {}
         };
-        Ok(
-            ReplyCreated{
-                ttl: entry.ttl,
-                attr: entry.attr,
-                generation: entry.generation,
-                fh: ret_handle,
-                flags:opts.bits()   ,
-            }
-        )
-       
-     }
- 
-     /// handle interrupt. When a operation is interrupted, an interrupt request will send to fuse
-     /// server with the unique id of the operation.
-     async fn interrupt(&self, _req: Request, _unique: u64) -> Result<()> {
+        Ok(ReplyCreated {
+            ttl: entry.ttl,
+            attr: entry.attr,
+            generation: entry.generation,
+            fh: ret_handle,
+            flags: opts.bits(),
+        })
+    }
+
+    /// handle interrupt. When a operation is interrupted, an interrupt request will send to fuse
+    /// server with the unique id of the operation.
+    async fn interrupt(&self, _req: Request, _unique: u64) -> Result<()> {
         Ok(())
-     }
+    }
 
-
- 
-     /// forget more than one inode. This is a batch version [`forget`][Filesystem::forget]
-     async fn batch_forget(&self, _req: Request, inodes: &[Inode]) {
+    /// forget more than one inode. This is a batch version [`forget`][Filesystem::forget]
+    async fn batch_forget(&self, _req: Request, inodes: &[Inode]) {
         let mut inodes_w = self.inode_map.inodes.write().await;
 
         for i in inodes {
             self.forget_one(&mut inodes_w, *i, 1).await;
         }
-     }
- 
-     /// allocate space for an open file. This function ensures that required space is allocated for
-     /// specified file.
-     ///
-     /// # Notes:
-     ///
-     /// more information about `fallocate`, please see **`man 2 fallocate`**
-     async fn fallocate(
-         &self,
-         _req: Request,
-         inode: Inode,
-         fh: u64,
-         offset: u64,
-         length: u64,
-         mode: u32,
-     ) -> Result<()> {
-         // Let the Arc<HandleData> in scope, otherwise fd may get invalid.
-         let data = self.get_data(fh, inode, libc::O_RDWR).await?;
-         let fd = data.borrow_fd();
- 
+    }
+
+    /// allocate space for an open file. This function ensures that required space is allocated for
+    /// specified file.
+    ///
+    /// # Notes:
+    ///
+    /// more information about `fallocate`, please see **`man 2 fallocate`**
+    async fn fallocate(
+        &self,
+        _req: Request,
+        inode: Inode,
+        fh: u64,
+        offset: u64,
+        length: u64,
+        mode: u32,
+    ) -> Result<()> {
+        // Let the Arc<HandleData> in scope, otherwise fd may get invalid.
+        let data = self.get_data(fh, inode, libc::O_RDWR).await?;
+        let fd = data.borrow_fd();
+
         //  if self.seal_size.load().await {
         //      let st = stat_fd(&fd, None)?;
         //      self.seal_size_check(
@@ -1455,49 +1460,46 @@ impl Filesystem for PassthroughFs {
         //          mode as i32,
         //      )?;
         //  }
- 
-         // Safe because this doesn't modify any memory and we check the return value.
-         let res = unsafe {
-             libc::fallocate64(
-                 fd.as_raw_fd(),
-                 mode as libc::c_int,
-                 offset as libc::off64_t,
-                 length as libc::off64_t,
-             )
-         };
-         if res == 0 {
-             Ok(())
-         } else {
-             Err(io::Error::last_os_error().into())
-         }
-     }
- 
 
+        // Safe because this doesn't modify any memory and we check the return value.
+        let res = unsafe {
+            libc::fallocate64(
+                fd.as_raw_fd(),
+                mode as libc::c_int,
+                offset as libc::off64_t,
+                length as libc::off64_t,
+            )
+        };
+        if res == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error().into())
+        }
+    }
 
- 
-     /// rename a file or directory with flags.
-     async fn rename2(
-         &self,
-         req: Request,
-         parent: Inode,
-         name: &OsStr,
-         new_parent: Inode,
-         new_name: &OsStr,
-         _flags: u32,
-     ) -> Result<()> {
-         self.rename(req, parent, name, new_parent, new_name).await
-     }
- 
-     /// find next data or hole after the specified offset.
-     async fn lseek(
-         &self,
-         _req: Request,
-         inode: Inode,
-         fh: u64,
-         offset: u64,
-         whence: u32,
-     ) -> Result<ReplyLSeek> {
-         // Let the Arc<HandleData> in scope, otherwise fd may get invalid.
+    /// rename a file or directory with flags.
+    async fn rename2(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        new_parent: Inode,
+        new_name: &OsStr,
+        _flags: u32,
+    ) -> Result<()> {
+        self.rename(req, parent, name, new_parent, new_name).await
+    }
+
+    /// find next data or hole after the specified offset.
+    async fn lseek(
+        &self,
+        _req: Request,
+        inode: Inode,
+        fh: u64,
+        offset: u64,
+        whence: u32,
+    ) -> Result<ReplyLSeek> {
+        // Let the Arc<HandleData> in scope, otherwise fd may get invalid.
         let data = self.handle_map.get(fh, inode).await?;
 
         // Acquire the lock to get exclusive access, otherwise it may break do_readdir().
@@ -1513,17 +1515,10 @@ impl Filesystem for PassthroughFs {
         };
         if res < 0 {
             Err(io::Error::last_os_error().into())
-        } else{
-            Ok(
-                ReplyLSeek{
-                    offset:res as u64,
-                }
-                
-            )
-        } 
-     }
-
-     
+        } else {
+            Ok(ReplyLSeek { offset: res as u64 })
+        }
+    }
 }
 
 /// trim all trailing nul terminators.
