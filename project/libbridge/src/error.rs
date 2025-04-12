@@ -4,13 +4,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-	#[error(transparent)]
-	Cni(#[from] CniError),
+    #[error(transparent)]
+    Cni(#[from] CniError),
 
-	#[error(transparent)]
-	Vlan(#[from] VlanError),
+    #[error(transparent)]
+    Vlan(#[from] VlanError),
 
-	#[error("Invalid configuration: {0}")]
+    #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
     #[error("NetlinkError: {0}")]
@@ -28,60 +28,59 @@ pub enum AppError {
     #[error("IpamError: {0}")]
     IpamError(String),
 
-
     #[error(transparent)]
-    AnyhowError(#[from] anyhow::Error), 
+    AnyhowError(#[from] anyhow::Error),
 }
 
 impl AppError {
-	pub fn into_reply(self, cni_version: Version) -> ErrorReply<'static> {
-		match self {
-			Self::Cni(e) => e.into_reply(cni_version),
-			Self::Vlan(e) => e.into_reply(cni_version),
-			AppError::InvalidConfig(msg) => ErrorReply {
+    pub fn into_reply(self, cni_version: Version) -> ErrorReply<'static> {
+        match self {
+            Self::Cni(e) => e.into_reply(cni_version),
+            Self::Vlan(e) => e.into_reply(cni_version),
+            AppError::InvalidConfig(msg) => ErrorReply {
                 cni_version,
-                code: 116, 
+                code: 116,
                 msg: "Invalid configuration",
                 details: msg,
             },
-            AppError::NetlinkError(msg) => ErrorReply{
+            AppError::NetlinkError(msg) => ErrorReply {
                 cni_version,
-                code: 117, 
+                code: 117,
                 msg: "NetlinkError",
                 details: msg,
             },
-            AppError::NetnsError(msg) => ErrorReply{
+            AppError::NetnsError(msg) => ErrorReply {
                 cni_version,
-                code: 118, 
+                code: 118,
                 msg: "NetnsError",
                 details: msg,
             },
-            AppError::VethError(msg) => ErrorReply{
+            AppError::VethError(msg) => ErrorReply {
                 cni_version,
-                code: 119, 
+                code: 119,
                 msg: "VethError",
                 details: msg,
             },
-            AppError::LinkError(msg) => ErrorReply{
+            AppError::LinkError(msg) => ErrorReply {
                 cni_version,
-                code: 120, 
+                code: 120,
                 msg: "LinkError",
                 details: msg,
             },
-            AppError::IpamError(msg) => ErrorReply{
+            AppError::IpamError(msg) => ErrorReply {
                 cni_version,
-                code: 121, 
+                code: 121,
                 msg: "IpamError",
                 details: msg,
             },
-            AppError::AnyhowError(err) => ErrorReply { 
-                cni_version, 
-                code: 122, 
+            AppError::AnyhowError(err) => ErrorReply {
+                cni_version,
+                code: 122,
                 msg: "Unknown error",
                 details: err.to_string(),
             },
-		}
-	}
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -109,7 +108,7 @@ impl VlanError {
     pub fn into_reply(self, cni_version: Version) -> ErrorReply<'static> {
         ErrorReply {
             cni_version,
-            code: 115, 
+            code: 115,
             msg: "VLAN configuration error",
             details: self.to_string(),
         }

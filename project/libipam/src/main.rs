@@ -3,52 +3,55 @@ use std::sync::Arc;
 use allocator::IpAllocator;
 use anyhow::bail;
 use cni_plugin::{
-	config::NetworkConfig, error::CniError, reply::{reply, IpamSuccessReply}, Cni, Command, Inputs
+    Cni, Command, Inputs,
+    config::NetworkConfig,
+    error::CniError,
+    reply::{IpamSuccessReply, reply},
 };
 use config::{IPAMConfig, Net};
 use disk::Store;
 use log::{debug, error, info};
 use range_set::RangeSetExt;
 
-mod range;
-mod range_set;
-mod disk;
 mod allocator;
 mod config;
+mod disk;
+mod range;
+mod range_set;
 
 fn main() {
     //cni_plugin::logger::install(env!("CARGO_PKG_NAME"));
-	debug!(
-		"{} (CNI IPAM plugin) version {}",
-		env!("CARGO_PKG_NAME"),
-		env!("CARGO_PKG_VERSION")
-	);
+    debug!(
+        "{} (CNI IPAM plugin) version {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
 
-	let inputs: Inputs = Cni::load().into_inputs().unwrap();
-    let cni_version = inputs.config.cni_version.clone(); 
+    let inputs: Inputs = Cni::load().into_inputs().unwrap();
+    let cni_version = inputs.config.cni_version.clone();
 
-	info!(
-		"{} serving spec v{} for command={:?}",
-		env!("CARGO_PKG_NAME"),
-		cni_version,
-		inputs.command
-	);
+    info!(
+        "{} serving spec v{} for command={:?}",
+        env!("CARGO_PKG_NAME"),
+        cni_version,
+        inputs.command
+    );
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all() // 开启 IO、定时器等必要功能
         .build()
         .unwrap();
 
-	let res:Result<IpamSuccessReply,CniError> = rt.block_on(async move {
-		match inputs.command {
-			Command::Add => cmd_add( inputs).await,
-			Command::Del => cmd_del( inputs).await,
-			Command::Check => todo!(),
-			Command::Version => unreachable!(),
-		}
-	});
-    
-	match res {
+    let res: Result<IpamSuccessReply, CniError> = rt.block_on(async move {
+        match inputs.command {
+            Command::Add => cmd_add(inputs).await,
+            Command::Del => cmd_del(inputs).await,
+            Command::Check => todo!(),
+            Command::Version => unreachable!(),
+        }
+    });
+
+    match res {
         Ok(res) => {
             debug!("success! {:#?}", res);
             reply(res)
@@ -60,23 +63,24 @@ fn main() {
     }
 }
 
-async fn cmd_add(inputs:Inputs) -> Result<IpamSuccessReply,CniError>{
-	let config = match load_ipam_netconf(&inputs.config) {
+async fn cmd_add(inputs: Inputs) -> Result<IpamSuccessReply, CniError> {
+    let config = match load_ipam_netconf(&inputs.config) {
         Ok(conf) => conf,
         Err(err) => {
             return Err(CniError::Generic(err.to_string()));
         }
     };
-    
-    let store = Arc::new(Store::new(config.data_dir).map_err(|e| CniError::Generic(e.to_string()))?);
+
+    let store =
+        Arc::new(Store::new(config.data_dir).map_err(|e| CniError::Generic(e.to_string()))?);
     let mut allocators: Vec<IpAllocator> = vec![];
     let mut exec_result = IpamSuccessReply {
-		cni_version: inputs.config.cni_version,
-		ips: Default::default(),
-		routes: Default::default(),
-		dns: Default::default(),
-		specific: Default::default(),
-	};
+        cni_version: inputs.config.cni_version,
+        ips: Default::default(),
+        routes: Default::default(),
+        dns: Default::default(),
+        specific: Default::default(),
+    };
 
     let mut ips = vec![];
     for (idx, rangeset) in config.ranges.into_iter().enumerate() {
@@ -101,28 +105,29 @@ async fn cmd_add(inputs:Inputs) -> Result<IpamSuccessReply,CniError>{
     Ok(exec_result)
 }
 
-async fn cmd_del(inputs:Inputs) -> Result<IpamSuccessReply,CniError>{
-	let config = match load_ipam_netconf(&inputs.config) {
+async fn cmd_del(inputs: Inputs) -> Result<IpamSuccessReply, CniError> {
+    let config = match load_ipam_netconf(&inputs.config) {
         Ok(conf) => conf,
         Err(err) => {
             return Err(CniError::Generic(err.to_string()));
         }
     };
-    
-    let store = Arc::new(Store::new(config.data_dir).map_err(|e| CniError::Generic(e.to_string()))?);
-    
+
+    let store =
+        Arc::new(Store::new(config.data_dir).map_err(|e| CniError::Generic(e.to_string()))?);
+
     let exec_result = IpamSuccessReply {
-		cni_version: inputs.config.cni_version,
-		ips: Default::default(),
-		routes: Default::default(),
-		dns: Default::default(),
-		specific: Default::default(),
-	};
+        cni_version: inputs.config.cni_version,
+        ips: Default::default(),
+        routes: Default::default(),
+        dns: Default::default(),
+        specific: Default::default(),
+    };
 
     let mut errors = Vec::new();
     for (idx, rangeset) in config.ranges.into_iter().enumerate() {
         let allocator = IpAllocator::new(rangeset, store.clone(), idx);
-        if let Err(e) =  allocator.release(&inputs.container_id, &inputs.ifname){
+        if let Err(e) = allocator.release(&inputs.container_id, &inputs.ifname) {
             errors.push(e.to_string());
         }
     }
@@ -130,18 +135,17 @@ async fn cmd_del(inputs:Inputs) -> Result<IpamSuccessReply,CniError>{
     if !errors.is_empty() {
         // 合并所有错误信息，用分号分隔
         let combined_error = errors.join("; ");
-        return Err(CniError::Generic(combined_error)); 
+        return Err(CniError::Generic(combined_error));
     }
 
     Ok(exec_result)
 }
 
-pub fn load_ipam_netconf(net_conf:&NetworkConfig) -> anyhow::Result<IPAMConfig>{
-
-    let json_value = serde_json::to_value(&net_conf)?;
+pub fn load_ipam_netconf(net_conf: &NetworkConfig) -> anyhow::Result<IPAMConfig> {
+    let json_value = serde_json::to_value(net_conf)?;
     let mut net: Net = serde_json::from_value(json_value)?;
 
-    if net.ipam.ranges.is_empty(){
+    if net.ipam.ranges.is_empty() {
         bail!("no IP ranges specified")
     }
 

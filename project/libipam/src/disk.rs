@@ -4,14 +4,14 @@ use std::net::IpAddr;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::PathBuf;
 
-use nix::fcntl::{Flock, FlockArg};
 use anyhow::Context;
+use nix::fcntl::{Flock, FlockArg};
 
 const LINE_BREAK: &str = "\r\n";
 const LAST_IPFILE_PREFIX: &str = "last_reserved_ip_";
 
 pub struct Store {
-    path: PathBuf, 
+    path: PathBuf,
 }
 
 impl Store {
@@ -39,19 +39,21 @@ impl Store {
             if !entry.metadata()?.is_file() {
                 continue;
             }
-            if path.file_name()
+            if path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .map(|n| n.starts_with(LAST_IPFILE_PREFIX))
                 .unwrap_or(false)
             {
-                continue;  // 跳过 last_reserved_ip_ 文件
+                continue; // 跳过 last_reserved_ip_ 文件
             }
 
             // 读取文件内容并匹配
             let data = std::fs::read_to_string(&path)
                 .with_context(|| format!("Failed to read {}", path.display()))?;
             if data.trim() == text_match {
-                let ip_str = path.file_name()
+                let ip_str = path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
                 let ip = ip_str.parse::<IpAddr>()?;
@@ -69,24 +71,26 @@ impl Store {
         ip: IpAddr,
         range_id: &str,
     ) -> anyhow::Result<bool> {
-        let _lock = self.new_lock()?;  // 加锁确保原子性
+        let _lock = self.new_lock()?; // 加锁确保原子性
 
         let file_path = self.path.join(ip.to_string());
         if file_path.exists() {
-            return Ok(false);  // IP 已被占用
+            return Ok(false); // IP 已被占用
         }
 
         // 创建 IP 文件并写入内容
         let mut f = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o600)  // 设置文件权限为 rw-------
+            .mode(0o600) // 设置文件权限为 rw-------
             .open(&file_path)?;
         let content = format!("{}{}{}", id, LINE_BREAK, ifname);
         f.write_all(content.as_bytes())?;
 
         // 更新 last_reserved_ip 记录
-        let last_ip_file = self.path.join(format!("{}{}", LAST_IPFILE_PREFIX, range_id));
+        let last_ip_file = self
+            .path
+            .join(format!("{}{}", LAST_IPFILE_PREFIX, range_id));
         std::fs::write(last_ip_file, ip.to_string())?;
 
         Ok(true)
@@ -94,7 +98,9 @@ impl Store {
 
     // 获取指定范围最后分配的 IP
     pub fn last_reserved_ip(&self, range_id: &str) -> Option<IpAddr> {
-        let last_ip_file = self.path.join(format!("{}{}", LAST_IPFILE_PREFIX, range_id));
+        let last_ip_file = self
+            .path
+            .join(format!("{}{}", LAST_IPFILE_PREFIX, range_id));
         std::fs::read_to_string(last_ip_file)
             .ok()
             .and_then(|s| s.parse().ok())
@@ -102,7 +108,7 @@ impl Store {
 
     // 根据容器 ID 和接口名释放 IP
     pub fn release_by_id(&self, id: &str, ifname: &str) -> anyhow::Result<bool> {
-        let _lock = self.new_lock()?;  // 加锁确保原子性
+        let _lock = self.new_lock()?; // 加锁确保原子性
         let text_match = format!("{}{}{}", id, LINE_BREAK, ifname);
         let mut found = false;
 
@@ -115,7 +121,8 @@ impl Store {
             }
 
             // 跳过 last_reserved_ip_ 文件
-            if path.file_name()
+            if path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .map(|n| n.starts_with(LAST_IPFILE_PREFIX))
                 .unwrap_or(false)
@@ -143,13 +150,14 @@ pub trait FileLockExt {
 
 impl FileLockExt for Store {
     fn new_lock(&self) -> anyhow::Result<Flock<File>> {
-        let lock_file = self.path.join("ipam.lock");  // 使用专用锁文件
+        let lock_file = self.path.join("ipam.lock"); // 使用专用锁文件
 
         // 打开（或创建）锁文件
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .mode(0o600)
             .open(lock_file)?;
 
@@ -192,7 +200,7 @@ mod tests {
 
         // 分配 IP
         assert!(store.reserve("container1", "eth0", ip, "range1")?);
-        assert!(!store.reserve("container2", "eth0", ip, "range1")?);  // 已被占用
+        assert!(!store.reserve("container2", "eth0", ip, "range1")?); // 已被占用
 
         // 验证分配
         let ips = store.get_by_id("container1", "eth0")?;
@@ -200,7 +208,7 @@ mod tests {
 
         // 释放 IP
         assert!(store.release_by_id("container1", "eth0")?);
-        assert!(!store.release_by_id("container1", "eth0")?);  // 已释放
+        assert!(!store.release_by_id("container1", "eth0")?); // 已释放
 
         Ok(())
     }

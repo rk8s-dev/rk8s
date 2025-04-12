@@ -1,5 +1,5 @@
-use std::net::IpAddr;
 use crate::range::IpRangeExt;
+use std::net::IpAddr;
 
 use anyhow::bail;
 use cni_plugin::ip_range::IpRange;
@@ -57,5 +57,3 @@ impl RangeSetExt for RangeSet {
             .join(",")
     }
 }
-
-

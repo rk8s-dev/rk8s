@@ -2,15 +2,14 @@ use std::net::IpAddr;
 
 use crate::range_set::RangeSet;
 
+use cni_plugin::{config::RuntimeConfig, reply::Route};
 use serde::{Deserialize, Serialize};
-use cni_plugin::{reply::Route, config::RuntimeConfig};
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct IPAMConfig {
     #[serde(rename = "type")]
     pub type_field: String,
-    
+
     pub name: Option<String>,
 
     #[serde(rename = "routes")]

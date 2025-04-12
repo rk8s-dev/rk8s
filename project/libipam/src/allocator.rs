@@ -5,9 +5,9 @@ use crate::disk::{FileLockExt, Store};
 use crate::range::IpRangeExt;
 use crate::range_set::{RangeSet, RangeSetExt};
 
+use ::cni_plugin::reply::Ip;
 use anyhow::{anyhow, bail};
 use ipnetwork::IpNetwork;
-use::cni_plugin::reply::Ip;
 
 pub struct IpAllocator {
     range_set: RangeSet,
@@ -27,8 +27,8 @@ impl IpAllocator {
     }
     pub fn get(&self, id: &str, if_name: &str, request_ip: Option<IpAddr>) -> anyhow::Result<Ip> {
         let _ = self.store.new_lock()?;
-        let mut reserved_ip: Option<IpNetwork> = None;
-        let mut gw: Option<IpAddr> = None;
+        let mut reserved_ip: Option<IpNetwork>;
+        let mut gw: Option<IpAddr>;
 
         if let Some(request_ip) = request_ip {
             let r = self
@@ -46,7 +46,7 @@ impl IpAllocator {
 
             let reserved = self
                 .store
-                .reserve(id, &if_name, request_ip, &self.range_id)?;
+                .reserve(id, if_name, request_ip, &self.range_id)?;
             if !reserved {
                 bail!(
                     "requested IP address {} is not available in range set {}",
@@ -58,7 +58,7 @@ impl IpAllocator {
             reserved_ip = Some(IpNetwork::with_netmask(request_ip, r.subnet.mask()).unwrap());
             gw = Some(r.gateway.unwrap());
         } else {
-            let allocated_ips = self.store.get_by_id(id, &if_name)?;
+            let allocated_ips = self.store.get_by_id(id, if_name)?;
             for ip in allocated_ips {
                 if self.range_set.contains_ip(ip) {
                     bail!(
@@ -85,7 +85,7 @@ impl IpAllocator {
                         let reserved_ip = reserved_ip.unwrap();
                         let reserved =
                             self.store
-                                .reserve(id, &if_name, reserved_ip.ip(), &self.range_id)?;
+                                .reserve(id, if_name, reserved_ip.ip(), &self.range_id)?;
                         if reserved {
                             break;
                         }
@@ -671,7 +671,10 @@ mod tests {
         assert_eq!(ip.address.ip(), "192.168.1.5".parse::<IpAddr>().unwrap());
         let result = alloc.get("ID", "eth0".into(), Some("192.168.1.5".parse().unwrap()));
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "requested IP address 192.168.1.5 is not available in range set 192.168.1.1-192.168.1.6");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "requested IP address 192.168.1.5 is not available in range set 192.168.1.1-192.168.1.6"
+        );
     }
 
     #[test]

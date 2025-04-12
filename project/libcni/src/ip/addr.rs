@@ -6,8 +6,10 @@ use anyhow::anyhow;
 use futures::TryStreamExt;
 use ipnetwork::{IpNetwork, Ipv4Network};
 use log::debug;
-use netlink_packet_route::{address::{AddressAttribute, AddressFlags, AddressMessage, AddressScope, CacheInfo}, AddressFamily};
-
+use netlink_packet_route::{
+    AddressFamily,
+    address::{AddressAttribute, AddressFlags, AddressMessage, AddressScope, CacheInfo},
+};
 
 #[derive(Debug)]
 pub struct Addr {
@@ -38,7 +40,7 @@ impl Default for Addr {
             scope: AddressScope::default(),
             peer: None,
             broadcast: None,
-            cache_info:CacheInfo::default(),
+            cache_info: CacheInfo::default(),
             link_index: 0,
         }
     }
@@ -51,38 +53,40 @@ pub enum ReqType {
     Change,
 }
 
-pub async fn addr_add(index: u32, address: IpAddr, prefix_len: u8) -> anyhow::Result<()>{
+pub async fn addr_add(index: u32, address: IpAddr, prefix_len: u8) -> anyhow::Result<()> {
     let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
     let address_handle = handle.address();
-    debug!("container ip add :{}",address);
-    address_handle.add(index, address, prefix_len).execute().await?;
+    debug!("container ip add :{}", address);
+    address_handle
+        .add(index, address, prefix_len)
+        .execute()
+        .await?;
     debug!("container ip add success");
     Ok(())
 }
 
-pub async fn addr_del(index: u32, address: IpAddr) -> anyhow::Result<()>{
+pub async fn addr_del(index: u32, address: IpAddr) -> anyhow::Result<()> {
     let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
     let address_handle = handle.address();
 
     let mut req = address_handle.get().set_address_filter(address);
     let msg = req.message_mut();
-    msg.header.index=index;
+    msg.header.index = index;
     //let mut address_message = AddressMessage::default();
-    //address_message.header.index = index;    
+    //address_message.header.index = index;
     //address_handle.del(address_message).execute().await?;
     address_handle.del(msg.clone()).execute().await?;
     Ok(())
 }
 
-pub async fn addr_list(index: u32, family: AddressFamily) -> anyhow::Result<Vec<Addr>>{
-    let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?.address();
+pub async fn addr_list(index: u32, family: AddressFamily) -> anyhow::Result<Vec<Addr>> {
+    let handle = get_handle()?
+        .ok_or_else(|| anyhow!("Cannot get handle"))?
+        .address();
 
     let mut addresses = Vec::new();
 
-    let mut stream  = handle
-    .get()
-    .set_link_index_filter(index)
-    .execute();
+    let mut stream = handle.get().set_link_index_filter(index).execute();
 
     while let Some(msg) = stream.try_next().await? {
         if msg.header.family != family {
@@ -99,8 +103,10 @@ impl TryFrom<&AddressMessage> for Addr {
     type Error = anyhow::Error;
 
     fn try_from(msg: &AddressMessage) -> Result<Self, Self::Error> {
-        let mut addr = Addr::default();
-        addr.link_index = msg.header.index;
+        let mut addr = Addr {
+            link_index: msg.header.index,
+            ..Default::default()
+        };
         let mut dst = None;
         let mut local = None;
 
@@ -108,12 +114,12 @@ impl TryFrom<&AddressMessage> for Addr {
         for attr in &msg.attributes {
             match attr {
                 AddressAttribute::Address(ip) => {
-                    let ip = ip.clone();
+                    let ip = *ip;
                     let prefix = msg.header.prefix_len;
                     dst = Some(IpNetwork::new(ip, prefix)?);
                 }
                 AddressAttribute::Local(ip) => {
-                    let ip = ip.clone();
+                    let ip = *ip;
                     let prefix = msg.header.prefix_len;
                     local = Some(IpNetwork::new(ip, prefix)?);
                 }
@@ -124,7 +130,7 @@ impl TryFrom<&AddressMessage> for Addr {
                     addr.broadcast = Some(IpAddr::V4(*bcast));
                 }
                 AddressAttribute::CacheInfo(info) => {
-                    addr.cache_info = info.clone();
+                    addr.cache_info = *info;
                 }
                 AddressAttribute::Multicast(_) => {}
                 AddressAttribute::Flags(flags) => {
@@ -141,10 +147,8 @@ impl TryFrom<&AddressMessage> for Addr {
                 addr.ipnet = local;
                 addr.peer = dst;
             }
-        } else {
-            if let Some(dst) = dst {
-                addr.ipnet = dst;
-            }
+        } else if let Some(dst) = dst{
+            addr.ipnet = dst;          
         }
         addr.scope = msg.header.scope;
 
@@ -154,9 +158,9 @@ impl TryFrom<&AddressMessage> for Addr {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
-    use log::info;
     use crate::ip::link;
+    use log::info;
+    use std::net::Ipv4Addr;
 
     use super::*;
 
@@ -165,9 +169,10 @@ mod tests {
         let link = link::link_by_name("vethhost").await.unwrap();
         let result = addr_add(
             link.header.index,
-            IpAddr::V4(Ipv4Addr::new(198, 19, 249, 211)),  
-            16  // prefix_len
-        ).await;
+            IpAddr::V4(Ipv4Addr::new(198, 19, 249, 211)),
+            16, // prefix_len
+        )
+        .await;
         println!("Result: {:?}", result);
         assert!(result.is_ok(), "addr_add failed with error: {:?}", result);
     }
@@ -178,9 +183,10 @@ mod tests {
         //let res = addr_del(link.header.index).await;
         let res = addr_add(
             link.header.index,
-            IpAddr::V4(Ipv4Addr::new(198, 19, 249, 211)),  
-            16  // prefix_len
-        ).await;
+            IpAddr::V4(Ipv4Addr::new(198, 19, 249, 211)),
+            16, // prefix_len
+        )
+        .await;
         println!("res: {:?}", res);
     }
 

@@ -1,16 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use libcgroups::common::AnyCgroupManager;
 use libcontainer::container::Container;
 
 pub mod create;
-pub mod start;
 pub mod delete;
-pub mod state;
 pub mod kill;
-
+pub mod start;
+pub mod state;
 
 fn construct_container_root<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<PathBuf> {
     // resolves relative paths, symbolic links etc. and get complete path

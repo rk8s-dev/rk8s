@@ -1,10 +1,10 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use libcontainer::utils::{create_dir_all_with_mode, rootless_required};
 use nix::libc;
 use nix::sys::stat::Mode;
 use nix::unistd::getuid;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub fn determine(root_path: Option<PathBuf>) -> Result<PathBuf> {
     let uid = getuid().as_raw();
@@ -73,4 +73,3 @@ fn get_default_rootless_path(uid: libc::uid_t) -> PathBuf {
 fn get_default_rootless_path(uid: libc::uid_t) -> PathBuf {
     std::env::temp_dir().join(format!("default_rootless_youki_path_{uid}").as_str())
 }
-

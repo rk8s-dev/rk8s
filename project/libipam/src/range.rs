@@ -1,15 +1,16 @@
-use std::net::IpAddr;
 use crate::allocator::{last_ip, next_ip};
+use std::net::IpAddr;
 
+use anyhow::bail;
 use cni_plugin::ip_range::IpRange;
 use ipnetwork::IpNetwork;
-use anyhow::bail;
 
 pub trait IpRangeExt {
     fn canonicalize(&mut self) -> anyhow::Result<()>;
     fn contains(&self, addr: IpAddr) -> bool;
     fn overlap(&self, other: &Self) -> bool;
-    fn format(&self) -> String; 
+    fn format(&self) -> String;
+    #[allow(dead_code)]
     fn default_range() -> Self;
 }
 
@@ -90,14 +91,18 @@ impl IpRangeExt for IpRange {
     }
 
     fn format(&self) -> String {
-        let start_str = self.range_start.as_ref()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "<nil>".to_string());
-    
-        let end_str = self.range_end.as_ref()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "<nil>".to_string());
-    
+        let start_str = self
+            .range_start
+            .as_ref()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "<nil>".to_string());
+
+        let end_str = self
+            .range_end
+            .as_ref()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "<nil>".to_string());
+
         format!("{}-{}", start_str, end_str)
     }
 

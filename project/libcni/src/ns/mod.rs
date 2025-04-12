@@ -1,1 +1,1 @@
-pub mod ns;
+pub mod netns;
