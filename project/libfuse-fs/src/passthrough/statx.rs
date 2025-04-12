@@ -7,9 +7,11 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::io::AsRawFd;
 
-use super::{os_compat::{statx_st, STATX_BASIC_STATS, STATX_MNT_ID}, EMPTY_CSTR};
+use super::{
+    EMPTY_CSTR,
+    os_compat::{STATX_BASIC_STATS, STATX_MNT_ID, statx_st},
+};
 use crate::passthrough::file_handle::FileHandle;
-
 
 pub type MountId = u64;
 
@@ -102,7 +104,8 @@ fn do_statx(
     mask: libc::c_uint,
     statxbuf: *mut statx_st,
 ) -> libc::c_int {
-    (unsafe { libc::syscall(libc::SYS_statx, dirfd, pathname, flags, mask, statxbuf) }) as libc::c_int
+    (unsafe { libc::syscall(libc::SYS_statx, dirfd, pathname, flags, mask, statxbuf) })
+        as libc::c_int
 }
 
 /// Execute `statx()` to get extended status with mount id.
@@ -115,12 +118,12 @@ pub fn statx(dir: &impl AsRawFd, path: Option<&CStr>) -> io::Result<StatExt> {
     // Safe because the kernel will only write data in `stx_ui` and we
     // check the return value.
     let res = do_statx(
-            dir.as_raw_fd(),
-            path.as_ptr(),
-            libc::AT_EMPTY_PATH | libc::AT_SYMLINK_NOFOLLOW,
-            STATX_BASIC_STATS | STATX_MNT_ID,
-            stx_ui.as_mut_ptr(),
-        );
+        dir.as_raw_fd(),
+        path.as_ptr(),
+        libc::AT_EMPTY_PATH | libc::AT_SYMLINK_NOFOLLOW,
+        STATX_BASIC_STATS | STATX_MNT_ID,
+        stx_ui.as_mut_ptr(),
+    );
     if res >= 0 {
         // Safe because we are only going to use the SafeStatXAccess
         // trait methods

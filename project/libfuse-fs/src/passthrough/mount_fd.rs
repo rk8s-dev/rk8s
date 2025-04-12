@@ -9,11 +9,9 @@ use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
+use super::MOUNT_INFO_FILE;
 use super::statx::statx;
 use super::util::{einval, is_safe_inode};
-use super::MOUNT_INFO_FILE;
-
-
 
 /// Type alias for mount id.
 pub type MountId = u64;

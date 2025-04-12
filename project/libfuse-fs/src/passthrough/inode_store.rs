@@ -48,7 +48,6 @@ impl InodeStore {
         self.data.insert(data.inode, data);
     }
 
-    
     /// Remove an inode from the manager, keeping the (key, ino) mapping if `remove_data_only` is true.
     #[allow(unused)]
     pub fn remove(&mut self, inode: &Inode, remove_data_only: bool) -> Option<Arc<InodeData>> {
@@ -130,7 +129,7 @@ mod test {
 
     fn stat_fd(fd: &impl AsRawFd) -> std::io::Result<libc::stat64> {
         let mut st = MaybeUninit::<libc::stat64>::zeroed();
-        let null_path =  c"";
+        let null_path = c"";
 
         // Safe because the kernel will only write data in `st` and we check the return value.
         let res = unsafe {
@@ -183,22 +182,19 @@ mod test {
         assert!(m.get_by_id(&InodeId::default()).is_none());
         assert!(m.get_by_handle(&FileHandle::default()).is_none());
 
-
         // insert another value, and check again
         m.insert(data2.clone());
         assert!(m.get(&1).is_none());
         assert!(m.get_by_id(&InodeId::default()).is_none());
         assert!(m.get_by_handle(&FileHandle::default()).is_none());
-  
 
         // remove non-present key
         assert!(m.remove(&1, false).is_none());
 
         // remove present key, return its value
-        
+
         assert!(m.get(&inode1).is_none());
         assert!(m.get_by_id(&id1).is_none());
-   
 
         // clear the map
         m.clear();

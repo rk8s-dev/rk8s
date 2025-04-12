@@ -1,8 +1,10 @@
+use fuse3::raw::reply::{FileAttr, ReplyXAttr};
+use fuse3::{
+    Inode, Result,
+    raw::{Filesystem, Request, reply::ReplyEntry},
+};
 use std::ffi::OsStr;
 use std::io::Error;
-use fuse3::raw::reply::{ FileAttr, ReplyXAttr};
-use fuse3::{raw::{reply::ReplyEntry, Filesystem, Request}, Inode,Result};
-
 
 use crate::passthrough::PassthroughFs;
 pub const OPAQUE_XATTR_LEN: u32 = 16;
@@ -18,7 +20,12 @@ pub trait Layer: Filesystem {
     ///
     /// If this call is successful then the lookup count of the `Inode` associated with the returned
     /// `Entry` must be increased by 1.
-    async fn create_whiteout(&self, ctx: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {
+    async fn create_whiteout(
+        &self,
+        ctx: Request,
+        parent: Inode,
+        name: &OsStr,
+    ) -> Result<ReplyEntry> {
         // Use temp value to avoid moved 'parent'.
         let ino: u64 = parent;
         match self.lookup(ctx, ino, name).await {
@@ -30,14 +37,14 @@ pub trait Layer: Filesystem {
                 // Non-negative entry with inode larger than 0 indicates file exists.
                 if v.attr.ino != 0 {
                     // Decrease the refcount.
-                    self.forget(ctx, v.attr.ino , 1).await;
+                    self.forget(ctx, v.attr.ino, 1).await;
                     // File exists with same name, create whiteout file is not allowed.
                     return Err(Error::from_raw_os_error(libc::EEXIST).into());
                 }
             }
-            Err(e) =>  {
-                let e:std::io::Error = e.into();
-                match e.raw_os_error(){
+            Err(e) => {
+                let e: std::io::Error = e.into();
+                match e.raw_os_error() {
                     Some(raw_error) => {
                         // We expect ENOENT error.
                         if raw_error != libc::ENOENT {
@@ -46,8 +53,7 @@ pub trait Layer: Filesystem {
                     }
                     None => return Err(e.into()),
                 }
-
-            },
+            }
         }
 
         // Try to create whiteout char device with 0/0 device number.
@@ -57,7 +63,7 @@ pub trait Layer: Filesystem {
     }
 
     /// Delete whiteout file with name <name>.
-    async fn delete_whiteout(&self, ctx: Request, parent: Inode, name:&OsStr) -> Result<()> {
+    async fn delete_whiteout(&self, ctx: Request, parent: Inode, name: &OsStr) -> Result<()> {
         // Use temp value to avoid moved 'parent'.
         let ino: u64 = parent;
         match self.lookup(ctx, ino, name).await {
@@ -77,16 +83,14 @@ pub trait Layer: Filesystem {
                     return Err(Error::from_raw_os_error(libc::EINVAL).into());
                 }
             }
-            Err(e) => {
-                return Err(e)
-            },
+            Err(e) => return Err(e),
         }
         Ok(())
     }
 
     /// Check if the Inode is a whiteout file
     async fn is_whiteout(&self, ctx: Request, inode: Inode) -> Result<bool> {
-        let rep = self.getattr(ctx, inode, None,0).await?;
+        let rep = self.getattr(ctx, inode, None, 0).await?;
 
         // Check attributes of the inode to see if it's a whiteout char device.
         Ok(is_whiteout(&rep.attr))
@@ -98,21 +102,15 @@ pub trait Layer: Filesystem {
         let ino: u64 = inode;
 
         // Get attributes and check if it's directory.
-        let rep = self.getattr(ctx, ino, None,0).await?;
+        let rep = self.getattr(ctx, ino, None, 0).await?;
         if !is_dir(&rep.attr) {
             // Only directory can be set to opaque.
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
         // A directory is made opaque by setting the xattr "trusted.overlay.opaque" to "y".
         // See ref: https://docs.kernel.org/filesystems/overlayfs.html#whiteouts-and-opaque-directories
-        self.setxattr(
-            ctx,
-            ino,
-            OsStr::new(OPAQUE_XATTR),
-            b"y",
-            0,
-            0
-        ).await
+        self.setxattr(ctx, ino, OsStr::new(OPAQUE_XATTR), b"y", 0, 0)
+            .await
     }
 
     /// Check if the directory is opaque.
@@ -121,11 +119,10 @@ pub trait Layer: Filesystem {
         let ino: u64 = inode;
 
         // Get attributes of the directory.
-        let attr: fuse3::raw::prelude::ReplyAttr  = self.getattr(ctx, ino, None,0).await?;
+        let attr: fuse3::raw::prelude::ReplyAttr = self.getattr(ctx, ino, None, 0).await?;
         if !is_dir(&attr.attr) {
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
-
 
         // Return Result<is_opaque>.
         let check_attr = |inode: Inode, attr_name: &'static str, attr_size: u32| async move {
@@ -133,7 +130,7 @@ pub trait Layer: Filesystem {
             match self.getxattr(ctx, inode, cname, attr_size).await {
                 Ok(v) => {
                     // xattr name exists and we get value.
-                    if let ReplyXAttr::Data(bufs)  = v {
+                    if let ReplyXAttr::Data(bufs) = v {
                         if bufs.len() == 1 && bufs[0].eq_ignore_ascii_case(&b'y') {
                             return Ok(true);
                         }
@@ -142,7 +139,7 @@ pub trait Layer: Filesystem {
                     Ok(false)
                 }
                 Err(e) => {
-                    let ioerror:std::io::Error = e.into();
+                    let ioerror: std::io::Error = e.into();
                     if let Some(raw_error) = ioerror.raw_os_error() {
                         if raw_error == libc::ENODATA {
                             return Ok(false);
@@ -177,7 +174,7 @@ pub trait Layer: Filesystem {
         Ok(false)
     }
 }
-impl Layer for PassthroughFs{
+impl Layer for PassthroughFs {
     fn root_inode(&self) -> Inode {
         1
     }
@@ -193,8 +190,8 @@ pub(crate) fn is_chardev(st: &FileAttr) -> bool {
 pub(crate) fn is_whiteout(st: &FileAttr) -> bool {
     // A whiteout is created as a character device with 0/0 device number.
     // See ref: https://docs.kernel.org/filesystems/overlayfs.html#whiteouts-and-opaque-directories
-    let major = libc::major(st.rdev.into()) ;
-    let minor = libc::minor(st.rdev.into()) ;
+    let major = libc::major(st.rdev.into());
+    let minor = libc::minor(st.rdev.into());
     is_chardev(st) && major == 0 && minor == 0
 }
 
@@ -202,26 +199,29 @@ pub(crate) fn is_whiteout(st: &FileAttr) -> bool {
 mod test {
     use std::{ffi::OsStr, path::PathBuf};
 
-
     use fuse3::raw::{Filesystem as _, Request};
 
     use crate::{overlayfs::layer::Layer, passthrough::new_passthroughfs_layer};
-
 
     #[tokio::test]
     async fn test_whiteout_create_delete() {
         let temp_dir = "/tmp/test_whiteout/t2";
         let rootdir = PathBuf::from(temp_dir);
         std::fs::create_dir_all(&rootdir).unwrap();
-        let fs = new_passthroughfs_layer(rootdir.to_str().unwrap()).await.unwrap();
-        let _ =  fs.init(Request::default()).await;
+        let fs = new_passthroughfs_layer(rootdir.to_str().unwrap())
+            .await
+            .unwrap();
+        let _ = fs.init(Request::default()).await;
         let white_name = OsStr::new(&"test");
-        let res = fs.create_whiteout(Request::default(), 1, white_name).await.unwrap();
+        let res = fs
+            .create_whiteout(Request::default(), 1, white_name)
+            .await
+            .unwrap();
 
-        print!("{:?}",res);
+        print!("{:?}", res);
         let res = fs.delete_whiteout(Request::default(), 1, white_name).await;
         if res.is_err() {
-            panic!("{:?}",res);
+            panic!("{:?}", res);
         }
         let _ = fs.destroy(Request::default()).await;
         // Add your test assertions and logic here.

@@ -147,8 +147,8 @@ impl TryFrom<&AddressMessage> for Addr {
                 addr.ipnet = local;
                 addr.peer = dst;
             }
-        } else if let Some(dst) = dst{
-            addr.ipnet = dst;          
+        } else if let Some(dst) = dst {
+            addr.ipnet = dst;
         }
         addr.scope = msg.header.scope;
 

@@ -4,3 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+libfuse-fs = { path = "../libfuse-fs" }
+clap = { version = "4.5.31", features = ["derive"] }
+nix = { version = "0.29.0", features = ["fs", "process", "user", "sched", "mount"] }
+tokio = { version = "1.44.0", features = ["full"] }
+fuse3 = { version = "0.8.1", features = ["tokio-runtime","unprivileged"]}
+libc = "0.2.171"
+dockerfile-parser = "0.9.0"
+anyhow = "1.0.97"
+tar = "0.4.44"
+flate2 = "1.1.1"
+walkdir = "2.3"
+sha256 = "1.6.0"
+oci-spec = "0.7.1"
+rand = "0.9.0"
+chrono = "0.4.40"
+tempfile = "3.19.1"

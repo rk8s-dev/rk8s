@@ -14,9 +14,8 @@ use std::sync::Arc;
 
 use vmm_sys_util::fam::{FamStruct, FamStructWrapper};
 
-use super::mount_fd::{MPRResult, MountFd, MountFds, MountId};
 use super::EMPTY_CSTR;
-
+use super::mount_fd::{MPRResult, MountFd, MountFds, MountId};
 
 /// An arbitrary maximum size for CFileHandle::f_handle.
 ///
@@ -34,7 +33,7 @@ impl<T> __IncompleteArrayField<T> {
         self as *const __IncompleteArrayField<T> as *const T
     }
     #[inline]
-    pub  fn as_mut_ptr(&mut self) -> *mut T {
+    pub fn as_mut_ptr(&mut self) -> *mut T {
         self as *mut __IncompleteArrayField<T> as *mut T
     }
     #[inline]
@@ -103,14 +102,13 @@ impl Ord for CFileHandle {
         if s_fh.handle_type != o_fh.handle_type {
             return s_fh.handle_type.cmp(&o_fh.handle_type);
         }
-        
+
         if s_fh.f_handle.as_ptr() != o_fh.f_handle.as_ptr() {
             return s_fh
                 .f_handle
                 .as_slice(length)
                 .cmp(o_fh.f_handle.as_slice(length));
         }
-        
 
         Ordering::Equal
     }
@@ -331,11 +329,10 @@ mod tests {
         let mut wrapper = CFileHandle::new(handle_bytes);
         let fh = unsafe { wrapper.wrapper.as_mut_fam_struct() };
         fh.handle_type = handle_type;
-        
+
         fh.f_handle
             .as_mut_slice(handle_bytes)
             .copy_from_slice(buf.as_slice());
-    
 
         wrapper
     }
@@ -406,10 +403,7 @@ mod tests {
 
         assert_eq!(fh.handle_bytes as usize, MAX_HANDLE_SIZE);
         assert_eq!(fh.handle_type, 3);
-        assert_eq!(
-            fh.f_handle.as_slice(MAX_HANDLE_SIZE),
-            buf.as_slice(),
-        );
+        assert_eq!(fh.f_handle.as_slice(MAX_HANDLE_SIZE), buf.as_slice(),);
     }
 
     #[test]

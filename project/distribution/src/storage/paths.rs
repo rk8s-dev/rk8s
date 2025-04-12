@@ -23,7 +23,6 @@
 // content. Access to the blob store is controlled through links from the
 // repository to blobstore.
 
-
 use oci_spec::image::Digest;
 
 #[derive(Clone)]

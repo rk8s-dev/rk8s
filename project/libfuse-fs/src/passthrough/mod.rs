@@ -1,28 +1,43 @@
 use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
-use fuse3::{raw::reply::ReplyEntry, Errno};
+use fuse3::{Errno, raw::reply::ReplyEntry};
 use inode_store::{InodeId, InodeStore};
 
-
+use crate::util::convert_stat64_to_file_attr;
 use mount_fd::MountFds;
 use statx::StatExt;
-use util::{ebadf, is_dir, openat, reopen_fd_through_proc, stat_fd, validate_path_component, UniqueInodeGenerator};
-use vm_memory::bitmap::BitmapSlice;
-use std::{collections::{btree_map, BTreeMap}, ffi::{CStr, CString, OsString}, fs::File, io::{self, Error}, marker::PhantomData, os::{fd::{AsFd, AsRawFd, BorrowedFd, RawFd}, unix::ffi::OsStringExt}, path::PathBuf, sync::Arc, time::Duration};
 use std::io::Result;
-use crate::util::convert_stat64_to_file_attr;
+use std::{
+    collections::{BTreeMap, btree_map},
+    ffi::{CStr, CString, OsString},
+    fs::File,
+    io::{self, Error},
+    marker::PhantomData,
+    os::{
+        fd::{AsFd, AsRawFd, BorrowedFd, RawFd},
+        unix::ffi::OsStringExt,
+    },
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
+use util::{
+    UniqueInodeGenerator, ebadf, is_dir, openat, reopen_fd_through_proc, stat_fd,
+    validate_path_component,
+};
+use vm_memory::bitmap::BitmapSlice;
 
-mod inode_store;
-mod file_handle;
-mod mount_fd;
-mod statx;
-mod os_compat;
-mod util;
-mod config;
 mod async_io;
-pub mod newlogfs;
+mod config;
+mod file_handle;
+mod inode_store;
 pub mod logfs;
+mod mount_fd;
+pub mod newlogfs;
+mod os_compat;
+mod statx;
+mod util;
 use crate::util::atomic::*;
 
 /// Current directory
@@ -38,15 +53,16 @@ use tokio::sync::{Mutex, MutexGuard, RwLock};
 
 #[allow(unused)]
 pub async fn new_passthroughfs_layer(rootdir: &str) -> Result<PassthroughFs> {
-    let config = Config { 
-        root_dir: String::from(rootdir), 
+    let config = Config {
+        root_dir: String::from(rootdir),
         // enable xattr`
-        xattr: true, 
-        do_import: true, 
-        ..Default::default() };
+        xattr: true,
+        do_import: true,
+        ..Default::default()
+    };
 
-    let fs =PassthroughFs::<()>::new(config)?;
-    
+    let fs = PassthroughFs::<()>::new(config)?;
+
     fs.import().await?;
     Ok(fs)
 }
@@ -232,7 +248,6 @@ impl InodeMap {
             .cloned()
     }
 
-
     async fn insert(&self, data: Arc<InodeData>) {
         let mut inodes = self.inodes.write().await;
 
@@ -330,7 +345,6 @@ impl HandleMap {
             .ok_or_else(ebadf)
     }
 }
-
 
 /// A file system that simply "passes through" all requests it receives to the underlying file
 /// system.
@@ -477,13 +491,15 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         unsafe { libc::umask(0o000) };
 
         // Not sure why the root inode gets a refcount of 2 but that's what libfuse does.
-        self.inode_map.insert(Arc::new(InodeData::new(
-            ROOT_ID,
-            handle,
-            2,
-            id,
-            st.st.st_mode,
-        ))).await;
+        self.inode_map
+            .insert(Arc::new(InodeData::new(
+                ROOT_ID,
+                handle,
+                2,
+                id,
+                st.st.st_mode,
+            )))
+            .await;
 
         Ok(())
     }
@@ -612,11 +628,9 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         if !self.cfg.use_host_ino {
             // If the inode has already been assigned before, the new inode is not reassigned,
             // ensuring that the same file is always the same inode
-            match InodeMap::get_inode_locked(inodes, id, handle_opt){
+            match InodeMap::get_inode_locked(inodes, id, handle_opt) {
                 Some(a) => Ok(a),
-                None => Ok({
-                    self.next_inode.fetch_add(1).await
-                }),
+                None => Ok({ self.next_inode.fetch_add(1).await }),
             }
         } else {
             let inode = if id.ino > MAX_HOST_INO {
@@ -632,15 +646,18 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             Ok(inode)
         }
     }
-    
-    async fn do_lookup(&self, parent: Inode, name: &CStr) ->std::result::Result<ReplyEntry, Errno> {
-        let name =
-            if parent == ROOT_ID && name.to_bytes_with_nul().starts_with(PARENT_DIR_CSTR) {
-                // Safe as this is a constant value and a valid C string.
-                CStr::from_bytes_with_nul(CURRENT_DIR_CSTR).unwrap()
-            } else {
-                name
-            };
+
+    async fn do_lookup(
+        &self,
+        parent: Inode,
+        name: &CStr,
+    ) -> std::result::Result<ReplyEntry, Errno> {
+        let name = if parent == ROOT_ID && name.to_bytes_with_nul().starts_with(PARENT_DIR_CSTR) {
+            // Safe as this is a constant value and a valid C string.
+            CStr::from_bytes_with_nul(CURRENT_DIR_CSTR).unwrap()
+        } else {
+            name
+        };
 
         let dir = self.inode_map.get(parent).await?;
         let dir_file = dir.get_file()?;
@@ -649,7 +666,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let mut found = None;
         'search: loop {
-            match self.inode_map.get_alt(&id, handle_opt.as_ref()).await{
+            match self.inode_map.get_alt(&id, handle_opt.as_ref()).await {
                 // No existing entry found
                 None => break 'search,
                 Some(data) => {
@@ -663,11 +680,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                     let new = curr.saturating_add(1);
 
                     // Synchronizes with the forgot_one()
-                    if data
-                        .refcount
-                        .compare_exchange(curr, new).await
-                        .is_ok()
-                    {
+                    if data.refcount.compare_exchange(curr, new).await.is_ok() {
                         found = Some(data.inode);
                         break;
                     }
@@ -699,18 +712,31 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                     data.inode
                 }
                 None => {
-                    let inode = self.allocate_inode(&inodes, &id, handle_opt.as_ref()).await?;
+                    let inode = self
+                        .allocate_inode(&inodes, &id, handle_opt.as_ref())
+                        .await?;
 
                     if inode > VFS_MAX_INO {
                         error!("fuse: max inode number reached: {}", VFS_MAX_INO);
                         return Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!("max inode number reached: {VFS_MAX_INO}"),
-                        ).into());
+                        )
+                        .into());
                     }
                     drop(inodes);
-                    self.inode_map.inodes.write().await.insert(Arc::new(InodeData::new(inode, handle, 2, id, st.st.st_mode)));
-        
+                    self.inode_map
+                        .inodes
+                        .write()
+                        .await
+                        .insert(Arc::new(InodeData::new(
+                            inode,
+                            handle,
+                            2,
+                            id,
+                            st.st.st_mode,
+                        )));
+
                     inode
                 }
             }
@@ -733,8 +759,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         //         attr_flags |= FUSE_ATTR_DAX;
         //     }
         // }
-       let mut attr_temp = convert_stat64_to_file_attr(st.st);
-       attr_temp.ino = inode;
+        let mut attr_temp = convert_stat64_to_file_attr(st.st);
+        attr_temp.ino = inode;
         Ok(ReplyEntry {
             ttl: entry_timeout,
             attr: attr_temp,
@@ -761,11 +787,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 let new = curr.saturating_sub(count);
 
                 // Synchronizes with the acquire load in `do_lookup`.
-                if data
-                    .refcount
-                    .compare_exchange(curr, new).await
-                    .is_ok()
-                {
+                if data.refcount.compare_exchange(curr, new).await.is_ok() {
                     if new == 0 {
                         // We just removed the last refcount for this inode.
                         // The allocated inode number should be kept in the map when use_host_ino
@@ -871,87 +893,56 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 }
 
 #[cfg(test)]
-mod tests{
-    use std::{env, ffi::OsString};
+mod tests {
+    use std::ffi::OsString;
 
-    use fuse3::{raw::Session, MountOptions};
+    use fuse3::{MountOptions, raw::Session};
     use tokio::signal;
 
-    use crate::passthrough::{config::Config, logfs::LoggingFileSystem, PassthroughFs};
-use log::{LevelFilter, Log, Metadata, Record, SetLoggerError};
+    use crate::passthrough::{PassthroughFs, config::Config, logfs::LoggingFileSystem};
 
-
-    
     #[tokio::test]
-    async fn test_passthrough(){
-        struct SimpleLogger;
-
-        impl Log for SimpleLogger {
-            fn enabled(&self, _: &Metadata) -> bool {
-                true
-            }
-
-            fn log(&self, record: &Record) {
-                println!("{}: {}", record.level(), record.args());
-            }
-
-            fn flush(&self) {}
-        }
-
-        fn init_logging() -> Result<(), SetLoggerError> {
-            log::set_logger(&SimpleLogger)?;
-            log::set_max_level(LevelFilter::Warn);
-            Ok(())
-        }
-
-        init_logging().unwrap();
-        let cfg =Config { 
-            xattr: true, 
-            do_import: true, 
-            root_dir: String::from("/home/luxian/code/leetcode"), 
-            ..Default::default() 
+    async fn test_passthrough() {
+        let cfg = Config {
+            xattr: false,
+            do_import: true,
+            root_dir: String::from("/home/luxian/code/leetcode"),
+            ..Default::default()
         };
-    
-            let fs = PassthroughFs::<()>::new(cfg).unwrap();
-            let logfs = LoggingFileSystem::new(fs);
-        
-            let mount_path = OsString::from("/home/luxian/pass");
-        
-            let uid = unsafe { libc::getuid() };
-            let gid = unsafe { libc::getgid() };
-        
-            let not_unprivileged = env::var("NOT_UNPRIVILEGED").ok().as_deref() == Some("1");
-        
-            let mut mount_options = MountOptions::default();
-            // .allow_other(true)
-            mount_options
-                .force_readdir_plus(true)
-                .uid(uid)
-                .gid(gid);
-        
-            
-        
-            let mut mount_handle: fuse3::raw::MountHandle = if !not_unprivileged {
-                Session::new(mount_options)
-                    .mount_with_unprivileged(logfs, mount_path)
-                    .await
-                    .unwrap()
-            } else {
-                Session::new(mount_options)
-                    .mount(logfs, mount_path)
-                    .await
-                    .unwrap()
-            };
-        
-            let handle = &mut mount_handle;
-        
-            tokio::select! {
-                res = handle => res.unwrap(),
-                _ = signal::ctrl_c() => {
-                    mount_handle.unmount().await.unwrap()
-                }
+
+        let fs = PassthroughFs::<()>::new(cfg).unwrap();
+        let logfs = LoggingFileSystem::new(fs);
+
+        let mount_path = OsString::from("/home/luxian/pass");
+
+        let uid = unsafe { libc::getuid() };
+        let gid = unsafe { libc::getgid() };
+
+        let not_unprivileged = false;
+
+        let mut mount_options = MountOptions::default();
+        // .allow_other(true)
+        mount_options.force_readdir_plus(true).uid(uid).gid(gid);
+
+        let mut mount_handle: fuse3::raw::MountHandle = if !not_unprivileged {
+            Session::new(mount_options)
+                .mount_with_unprivileged(logfs, mount_path)
+                .await
+                .unwrap()
+        } else {
+            Session::new(mount_options)
+                .mount(logfs, mount_path)
+                .await
+                .unwrap()
+        };
+
+        let handle = &mut mount_handle;
+
+        tokio::select! {
+            res = handle => res.unwrap(),
+            _ = signal::ctrl_c() => {
+                mount_handle.unmount().await.unwrap()
             }
-        
-        
+        }
     }
 }

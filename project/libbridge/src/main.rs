@@ -37,9 +37,6 @@ const BRIDGE_DEFAULT_NAME: &str = "cni0";
 
 /// Entry point of the CNI bridge plugin.
 fn main() {
-    // let mut logconfig = logger::default_config();
-    // logconfig.add_filter_ignore_str("netlink_proto");
-    // logger::with_config(env!("CARGO_PKG_NAME"), logconfig.build());
     cni_plugin::logger::install("libbridge.log");
     debug!(
         "{} (CNI bridge plugin) version {}",
@@ -71,11 +68,10 @@ fn main() {
     );
 
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all() // 开启 IO、定时器等必要功能
+        .enable_all()
         .build()
         .unwrap();
 
-    // 使用创建的运行时运行异步代码
     let res: Result<SuccessReply, AppError> = rt.block_on(async move {
         match inputs.command {
             Command::Add => cmd_add(bridge_conf, inputs).await,
@@ -409,10 +405,10 @@ pub async fn setup_veth(
 /// * `Result<SuccessReply, AppError>` - The success response with network details, or an error if failed.
 async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, AppError> {
     let is_layer3 = config
-    	.net_conf
-    	.ipam
-    	.as_ref()
-    	.is_some_and(|ipam| !ipam.r#plugin.is_empty());
+        .net_conf
+        .ipam
+        .as_ref()
+        .is_some_and(|ipam| !ipam.r#plugin.is_empty());
 
     if is_layer3 && config.disable_container_interface.unwrap_or(false) {
         return Err(AppError::InvalidConfig(
@@ -638,10 +634,10 @@ fn calc_gateway(
 /// * `Result<SuccessReply, AppError>` - The success response or an error if deletion fails.
 async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, AppError> {
     let is_layer3 = config
-    	.net_conf
-    	.ipam
-    	.as_ref()
-    	.is_some_and(|ipam| !ipam.r#plugin.is_empty());
+        .net_conf
+        .ipam
+        .as_ref()
+        .is_some_and(|ipam| !ipam.r#plugin.is_empty());
 
     let result = SuccessReply {
         cni_version: config.net_conf.cni_version.clone(),
