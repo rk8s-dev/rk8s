@@ -2,7 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use libcgroups::common::AnyCgroupManager;
 use libcontainer::container::Container;
 
 pub mod create;
@@ -37,18 +36,4 @@ pub fn load_container<P: AsRef<Path>>(root_path: P, container_id: &str) -> Resul
 fn container_exists<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<bool> {
     let container_root = construct_container_root(root_path, container_id)?;
     Ok(container_root.exists())
-}
-
-fn create_cgroup_manager<P: AsRef<Path>>(
-    root_path: P,
-    container_id: &str,
-) -> Result<AnyCgroupManager> {
-    let container = load_container(root_path, container_id)?;
-    Ok(libcgroups::common::create_cgroup_manager(
-        libcgroups::common::CgroupConfig {
-            cgroup_path: container.spec()?.cgroup_path,
-            systemd_cgroup: container.systemd(),
-            container_name: container.id().to_string(),
-        },
-    )?)
 }

@@ -1,5 +1,5 @@
-use crate::commands::{create, delete, kill, load_container, start, state};
-use crate::cri::cri::{
+use crate::commands::{create, delete, kill, load_container, start};
+use crate::cri::cri_api::{
     ContainerConfig, ContainerMetadata, CreateContainerRequest, CreateContainerResponse, ImageSpec,
     KeyValue, Mount, PodSandboxConfig, PodSandboxMetadata, PortMapping, Protocol,
     RemovePodSandboxRequest, RemovePodSandboxResponse, RunPodSandboxRequest, RunPodSandboxResponse,
@@ -10,10 +10,9 @@ use anyhow::{Result, anyhow};
 use libcontainer::oci_spec::runtime::{
     LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, ProcessBuilder, Spec,
 };
-use liboci_cli::{Create, Delete, Kill, Start, State};
+use liboci_cli::{Create, Delete, Kill, Start};
 use rust_cni::cni::Libcni;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -187,7 +186,7 @@ impl TaskRunner {
         request: RunPodSandboxRequest,
     ) -> Result<RunPodSandboxResponse, anyhow::Error> {
         let config = request.config.unwrap_or_default();
-        let sandbox_id = format!("{}", config.metadata.unwrap_or_default().name);
+        let sandbox_id = config.metadata.unwrap_or_default().name.to_string();
 
         // get bundle path of pause container from labels
         let bundle_path = self
@@ -231,7 +230,7 @@ impl TaskRunner {
             .pid
             .ok_or_else(|| anyhow!("PID not found for container {}", sandbox_id))?;
 
-        Self::setup_pod_network(pid_i32.clone())?;
+        Self::setup_pod_network(pid_i32)?;
         self.pause_pid = Some(pid_i32);
 
         let response = RunPodSandboxResponse {
@@ -330,7 +329,7 @@ impl TaskRunner {
         &self,
         request: CreateContainerRequest,
     ) -> Result<CreateContainerResponse, anyhow::Error> {
-        let pod_sandbox_id = request.pod_sandbox_id.clone();
+        let _pod_sandbox_id = request.pod_sandbox_id.clone();
         let config = request
             .config
             .as_ref()
@@ -385,7 +384,7 @@ impl TaskRunner {
             .iter()
             .find(|c| c.name == container_id)
             .ok_or_else(|| anyhow!("Container spec not found for ID: {}", container_id))?;
-        let mut process = ProcessBuilder::default()
+        let process = ProcessBuilder::default()
             .args(container_spec.args.clone())
             .build()?;
 
@@ -644,7 +643,7 @@ pub fn get_cni() -> Result<Libcni, anyhow::Error> {
     }
     plugin_conf_dir.push("rkl/test");
 
-    let mut cni = Libcni::new(
+    let cni = Libcni::new(
         Some(plugin_dirs),
         Some(plugin_conf_dir.to_string_lossy().to_string()),
         None,

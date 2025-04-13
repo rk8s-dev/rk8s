@@ -4,8 +4,6 @@ mod cri;
 mod rootpath;
 mod task;
 use clap::{Parser, Subcommand};
-use std::error::Error;
-use task::task::TaskRunner;
 
 #[derive(Parser)]
 #[command(name = "rkl")]

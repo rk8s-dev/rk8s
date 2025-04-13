@@ -1,11 +1,11 @@
-use crate::commands::{create, delete, kill, load_container, start, state};
+use crate::commands::{delete, load_container, start, state};
 use crate::rootpath;
-use crate::task::task::{self, TaskRunner};
+use crate::task::{self, TaskRunner};
 use anyhow::{Result, anyhow};
-use liboci_cli::{Create, Delete, Kill, Start, State};
+use liboci_cli::{Delete, Start, State};
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // store infomation of pod
 #[derive(Debug)]
@@ -17,7 +17,7 @@ pub struct PodInfo {
 impl PodInfo {
     pub fn load(root_path: &Path, pod_name: &str) -> Result<Self> {
         // get path like pods/podname
-        let pod_info_path = root_path.join("pods").join(format!("{}", pod_name));
+        let pod_info_path = root_path.join("pods").join(pod_name);
         let mut file =
             File::open(&pod_info_path).map_err(|_| anyhow!("Pod {} not found", pod_name))?;
         let mut contents = String::new();
@@ -44,7 +44,7 @@ impl PodInfo {
 
     pub fn save(&self, root_path: &Path, pod_name: &str) -> Result<()> {
         let pods_dir = root_path.join("pods");
-        let pod_info_path = pods_dir.join(format!("{}", pod_name));
+        let pod_info_path = pods_dir.join(pod_name);
 
         if pods_dir.exists() {
             if !pods_dir.is_dir() {
@@ -75,7 +75,7 @@ impl PodInfo {
     }
 
     pub fn delete(root_path: &Path, pod_name: &str) -> Result<()> {
-        let pod_info_path = root_path.join("pods").join(format!("{}", pod_name));
+        let pod_info_path = root_path.join("pods").join(pod_name);
         fs::remove_file(&pod_info_path)?;
         Ok(())
     }
@@ -177,7 +177,7 @@ pub fn start_pod(pod_name: &str) -> Result<(), anyhow::Error> {
 pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None)?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
-    let container = load_container(root_path.clone(), &pod_name)
+    let container = load_container(root_path.clone(), pod_name)
         .map_err(|e| anyhow!("Failed to load container {}: {}", pod_name, e))?;
     let pid_i32 = container
         .state
@@ -241,7 +241,7 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     println!("Pod: {}", pod_name);
 
     println!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
-    state::state(
+    let _ = state::state(
         State {
             container_id: pod_info.pod_sandbox_id.clone(),
         },
@@ -250,7 +250,7 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
 
     println!("Containers:");
     for container_name in &pod_info.container_names {
-        let container_state = state::state(
+        let _container_state = state::state(
             State {
                 container_id: container_name.clone(),
             },

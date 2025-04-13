@@ -50,7 +50,7 @@ pub struct PortMapping {
     /// * Valid host port range is 1-65535.
     /// * The value 0 has explicit semantic meaning: it indicates NO host port should be allocated.
     /// * The value 0 does NOT indicate dynamic port allocation. Future implementations
-    ///    of dynamic allocation will use different values/semantics.
+    ///   of dynamic allocation will use different values/semantics.
     /// * Implementations MUST handle the case where this field is explicitly set to 0,
     ///    This field SHOULD be omitted when no port is required.
     ///
@@ -187,7 +187,7 @@ pub struct Int64Value {
 /// applied to a sandbox. Note that:
 /// 1) It does not apply to containers in the pods.
 /// 2) It may not be applicable to a PodSandbox which does not contain any running
-///     process.
+///    process.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LinuxSandboxSecurityContext {
     /// Configurations for the sandbox's namespaces.
@@ -234,8 +234,8 @@ pub struct LinuxSandboxSecurityContext {
     /// * runtime/default: the default profile for the container runtime
     /// * unconfined: unconfined profile, ie, no seccomp sandboxing
     /// * localhost/<full-path-to-profile>: the profile installed on the node.
-    ///    <full-path-to-profile> is the full path of the profile.
-    /// Default: "", which is identical with unconfined.
+    ///   <full-path-to-profile> is the full path of the profile.
+    ///   Default: "", which is identical with unconfined.
     #[deprecated]
     #[prost(string, tag = "7")]
     pub seccomp_profile_path: ::prost::alloc::string::String,
@@ -980,8 +980,8 @@ pub struct LinuxContainerSecurityContext {
     /// * runtime/default: equivalent to not specifying a profile.
     /// * unconfined: no profiles are loaded
     /// * localhost/<profile_name>: profile loaded on the node
-    ///     (localhost) by name. The possible profile names are detailed at
-    ///     <https://gitlab.com/apparmor/apparmor/-/wikis/AppArmor_Core_Policy_Reference>
+    ///   (localhost) by name. The possible profile names are detailed at
+    ///   <https://gitlab.com/apparmor/apparmor/-/wikis/AppArmor_Core_Policy_Reference>
     #[deprecated]
     #[prost(string, tag = "9")]
     pub apparmor_profile: ::prost::alloc::string::String,
@@ -989,8 +989,8 @@ pub struct LinuxContainerSecurityContext {
     /// * runtime/default: the default profile for the container runtime
     /// * unconfined: unconfined profile, ie, no seccomp sandboxing
     /// * localhost/<full-path-to-profile>: the profile installed on the node.
-    ///    <full-path-to-profile> is the full path of the profile.
-    /// Default: "", which is identical with unconfined.
+    ///   <full-path-to-profile> is the full path of the profile.
+    ///   Default: "", which is identical with unconfined.
     #[deprecated]
     #[prost(string, tag = "10")]
     pub seccomp_profile_path: ::prost::alloc::string::String,
@@ -1758,16 +1758,16 @@ pub struct UpdateRuntimeConfigResponse {}
 /// RuntimeCondition contains condition information for the runtime.
 /// There are 2 kinds of runtime conditions:
 /// 1. Required conditions: Conditions are required for kubelet to work
-/// properly. If any required condition is unmet, the node will be not ready.
-/// The required conditions include:
+///    properly. If any required condition is unmet, the node will be not ready.
+///    The required conditions include:
 ///    * RuntimeReady: RuntimeReady means the runtime is up and ready to accept
-///    basic containers e.g. container only needs host network.
+///      basic containers e.g. container only needs host network.
 ///    * NetworkReady: NetworkReady means the runtime network is up and ready to
-///    accept containers which require container network.
+///      accept containers which require container network.
 /// 2. Optional conditions: Conditions are informative to the user, but kubelet
-/// will not rely on. Since condition type is an arbitrary string, all conditions
-/// not required are optional. These conditions will be exposed to users to help
-/// them understand the status of the system.
+///    will not rely on. Since condition type is an arbitrary string, all conditions
+///    not required are optional. These conditions will be exposed to users to help
+///    them understand the status of the system.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RuntimeCondition {
     /// Type of runtime condition.
@@ -2314,6 +2314,7 @@ impl Protocol {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
+#[allow(clippy::enum_variant_names)]
 pub enum MountPropagation {
     /// No mount propagation ("rprivate" in Linux terminology).
     PropagationPrivate = 0,
@@ -2676,6 +2677,7 @@ impl Signal {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
+#[allow(clippy::enum_variant_names)]
 pub enum ContainerState {
     ContainerCreated = 0,
     ContainerRunning = 1,
@@ -2708,6 +2710,7 @@ impl ContainerState {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
+#[allow(clippy::enum_variant_names)]
 pub enum ContainerEventType {
     /// Container created
     ContainerCreatedEvent = 0,
