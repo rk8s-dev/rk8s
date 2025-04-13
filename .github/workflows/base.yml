@@ -25,6 +25,15 @@ jobs:
       CARGO_TERM_COLOR: always
 
     steps:
+      - name: Restore cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /home/runner/.cargo/bin/buck2
+            /home/runner/.cargo/bin/reindeer
+          key: buck2-binary
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -34,6 +43,33 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy rustfmt
+          cache-workspaces: |
+            ./project
+          cache-directories: |
+            ./project/target
+
+      - name: Install Buck2
+        if: ${{ steps.cache-restore.outputs.cache-hit != 'true' }}
+        run: |
+          curl https://github.com/facebook/buck2/releases/download/latest/buck2-x86_64-unknown-linux-gnu.zst --output "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst" --location --silent --show-error --fail --retry 5
+          zstd -d "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst" -o $HOME/.cargo/bin/buck2
+          chmod +x $HOME/.cargo/bin/buck2
+          rm -f "${{runner.temp}}/buck2-x86_64-unknown-linux-gnu.zst"
+        shell: bash
+      
+      - name: Install Reindeer
+        if: ${{ steps.cache-restore.outputs.cache-hit != 'true' }}
+        run: cargo install --locked --git https://github.com/facebookincubator/reindeer reindeer
+        shell: bash
+
+      - name: Save cache
+        if: ${{ steps.cache-restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /home/runner/.cargo/bin/buck2
+            /home/runner/.cargo/bin/reindeer
+          key: buck2-binary
 
   format:
     name: Rustfmt Check
@@ -99,17 +135,11 @@ jobs:
           reindeer --third-party-dir third-party buckify
           buck2 build //project/...
 
-      - name: Cache buck-out
-        uses: actions/cache/save@v4
-        with:
-          path: ./buck-out
-          key: buck2-cache-${{ github.run_id }}-${{ github.run_attempt }}
-
   test:
     name: Buck2 Test
 
     runs-on: ubuntu-latest
-    needs: build
+    needs: setup
 
     steps:
       - name: Checkout repository
