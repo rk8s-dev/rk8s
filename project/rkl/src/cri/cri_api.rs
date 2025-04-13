@@ -52,7 +52,7 @@ pub struct PortMapping {
     /// * The value 0 does NOT indicate dynamic port allocation. Future implementations
     ///   of dynamic allocation will use different values/semantics.
     /// * Implementations MUST handle the case where this field is explicitly set to 0,
-    ///    This field SHOULD be omitted when no port is required.
+    ///   This field SHOULD be omitted when no port is required.
     ///
     /// Default: If omitted, container port will not be exposed on the host.
     #[prost(int32, tag = "3")]
