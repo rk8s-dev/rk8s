@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use anyhow::Result;
 use libcontainer::container::builder::ContainerBuilder;
 use libcontainer::syscall::syscall::SyscallType;
-use libcontainer::workload::{Executor, ExecutorError, ExecutorValidationError};
 use liboci_cli::Create;
 
 // One thing to note is that in the end, container is just another process in Linux
