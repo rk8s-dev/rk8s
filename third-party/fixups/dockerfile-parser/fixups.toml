@@ -1,0 +1,3 @@
+extra_srcs = ["src/dockerfile_parser.pest"]
+
+cargo_env = true
