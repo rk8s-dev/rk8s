@@ -6,8 +6,8 @@ pub mod overlayfs;
 pub mod parse;
 pub mod registry;
 
-use parse::build_args::BuildArgs;
 use clap::Parser;
+use parse::build_args::BuildArgs;
 
 fn main() {
     let build_args = BuildArgs::parse();
