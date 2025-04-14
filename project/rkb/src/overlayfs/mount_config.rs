@@ -152,9 +152,9 @@ mod tests {
 
         mount_config.finish().unwrap();
         assert_eq!(mount_config.lower_dir.len(), 1);
-        assert_eq!(mount_config.lower_dir[0].exists(), true);
-        assert_eq!(mount_config.upper_dir.exists(), true);
-        assert_eq!(mount_config.mountpoint.exists(), true);
-        assert_eq!(mount_config.work_dir.exists(), true);
+        assert!(mount_config.lower_dir[0].exists());
+        assert!(mount_config.upper_dir.exists());
+        assert!(mount_config.mountpoint.exists());
+        assert!(mount_config.work_dir.exists());
     }
 }

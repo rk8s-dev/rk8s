@@ -33,4 +33,5 @@ rust_library(
         "CARGO_PKG_VERSION_MINOR": "1",
         "CARGO_PKG_VERSION_PATCH": "1",
     },
+    visibility = ["PUBLIC"],
 )
