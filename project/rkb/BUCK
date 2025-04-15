@@ -33,4 +33,5 @@ rust_binary(
         "CARGO_PKG_VERSION_MINOR": "1",
         "CARGO_PKG_VERSION_PATCH": "0",
     },
+    visibility = ["PUBLIC"],
 )
