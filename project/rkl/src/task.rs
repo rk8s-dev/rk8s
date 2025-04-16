@@ -1,14 +1,16 @@
 use crate::commands::{create, delete, kill, load_container, start};
 use crate::cri::cri_api::{
     ContainerConfig, ContainerMetadata, CreateContainerRequest, CreateContainerResponse, ImageSpec,
-    KeyValue, Mount, PodSandboxConfig, PodSandboxMetadata, PortMapping, Protocol,
-    RemovePodSandboxRequest, RemovePodSandboxResponse, RunPodSandboxRequest, RunPodSandboxResponse,
-    StartContainerRequest, StartContainerResponse, StopPodSandboxRequest, StopPodSandboxResponse,
+    KeyValue, LinuxContainerConfig, LinuxContainerResources, Mount, PodSandboxConfig,
+    PodSandboxMetadata, PortMapping, Protocol, RemovePodSandboxRequest, RemovePodSandboxResponse,
+    RunPodSandboxRequest, RunPodSandboxResponse, StartContainerRequest, StartContainerResponse,
+    StopPodSandboxRequest, StopPodSandboxResponse,
 };
 use crate::rootpath;
 use anyhow::{Result, anyhow};
 use libcontainer::oci_spec::runtime::{
-    LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, ProcessBuilder, Spec,
+    LinuxBuilder, LinuxCpuBuilder, LinuxMemoryBuilder, LinuxNamespaceBuilder, LinuxNamespaceType,
+    LinuxResources, LinuxResourcesBuilder, ProcessBuilder, Spec,
 };
 use liboci_cli::{Create, Delete, Kill, Start};
 use rust_cni::cni::Libcni;
@@ -50,6 +52,24 @@ pub struct PodSpec {
     pub init_containers: Vec<ContainerSpec>,
 }
 
+/// Resouces request and limit to one container.
+///
+/// Only support limit now.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ContainerRes {
+    pub limits: Option<Resource>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Resource {
+    /// cpu resource request/limit in one of the two format
+    /// -  `1` represents to one cpu core.
+    /// - `200m` represents 200 milli-cores (0.2 CPU cores).
+    pub cpu: Option<String>,
+    /// memory request/limit in `1Ki`, `1Mi` or `1Gi` format
+    pub memory: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ContainerSpec {
     pub name: String,
@@ -58,6 +78,7 @@ pub struct ContainerSpec {
     pub ports: Vec<Port>,
     #[serde(default)]
     pub args: Vec<String>,
+    pub resources: Option<ContainerRes>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -311,7 +332,7 @@ impl TaskRunner {
             stdin: false,
             stdin_once: false,
             tty: false,
-            linux: None,
+            linux: get_linux_container_config(container.resources.clone())?,
             windows: None,
             cdi_devices: vec![],
             stop_signal: 0,
@@ -374,7 +395,13 @@ impl TaskRunner {
                 .build()?,
         ];
 
-        let linux = LinuxBuilder::default().namespaces(namespaces).build()?;
+        let mut linux = LinuxBuilder::default().namespaces(namespaces);
+        if let Some(x) = &config.linux {
+            if let Some(r) = &x.resources {
+                linux = linux.resources(r);
+            }
+        }
+        let linux = linux.build()?;
         spec.set_linux(Some(linux));
 
         let container_spec = self
@@ -634,6 +661,93 @@ impl TaskRunner {
     }
 }
 
+// only support limit config now.
+fn get_linux_container_config(
+    res: Option<ContainerRes>,
+) -> Result<Option<LinuxContainerConfig>, anyhow::Error> {
+    if res.is_none() {
+        return Ok(None);
+    }
+    if res.as_ref().unwrap().limits.is_none() {
+        return Ok(None);
+    }
+    let res = res.unwrap().limits.unwrap();
+    Ok(Some(LinuxContainerConfig {
+        resources: Some(parse_resource(res.cpu, res.memory)?),
+        ..Default::default()
+    }))
+}
+
+/// Convert CPU resource descriptions in the form of `1` or `1000m`,
+/// and memory resource descriptions in the form of `1Mi`, `1Ki`, or `1Gi` to LinuxContainerResource.
+fn parse_resource(
+    cpu: Option<String>,
+    memory: Option<String>,
+) -> Result<LinuxContainerResources, anyhow::Error> {
+    let mut res = LinuxContainerResources::default();
+
+    if let Some(c) = cpu {
+        let period: i64 = 1_000_000;
+        let portion: i64 = if c.ends_with("m") {
+            c[..c.len() - 1]
+                .parse::<i64>()
+                .map_err(|e| anyhow!("Failed to parse cpu resource config: {}", e))?
+                * period
+                / 1000
+        } else {
+            (c.parse::<f64>()
+                .map_err(|e| anyhow!("Failed to parse cpu resource config: {}", e))?
+                * period as f64) as i64
+        };
+        res.cpu_period = period;
+        res.cpu_quota = portion;
+    }
+
+    if let Some(m) = memory {
+        let mem_result: Result<i64, _> = if m.ends_with("Gi") {
+            m[..m.len() - 2]
+                .parse()
+                .map(|x: i64| x * 1024 * 1024 * 1024)
+        } else if m.ends_with("Mi") {
+            m[..m.len() - 2].parse().map(|x: i64| x * 1024 * 1024)
+        } else if m.ends_with("Ki") {
+            m[..m.len() - 2].parse().map(|x: i64| x * 1024)
+        } else {
+            return Err(anyhow!("Failed to parse memory resource config: {}", m));
+        };
+        let mem =
+            mem_result.map_err(|e| anyhow!("Failed to parse memory resource config: {}", e))?;
+        res.memory_limit_in_bytes = mem;
+    }
+
+    Ok(res)
+}
+
+/// Convert type used to describe container config to oci_spec config.
+impl From<&LinuxContainerResources> for LinuxResources {
+    fn from(value: &LinuxContainerResources) -> Self {
+        let mut res = LinuxResourcesBuilder::default();
+        if value.cpu_period != 0 {
+            res = res.cpu(
+                LinuxCpuBuilder::default()
+                    .period(value.cpu_period as u64)
+                    .quota(value.cpu_quota)
+                    .build()
+                    .unwrap(),
+            );
+        }
+        if value.memory_limit_in_bytes != 0 {
+            res = res.memory(
+                LinuxMemoryBuilder::default()
+                    .limit(value.memory_limit_in_bytes)
+                    .build()
+                    .unwrap(),
+            );
+        }
+        res.build().unwrap()
+    }
+}
+
 pub fn get_cni() -> Result<Libcni, anyhow::Error> {
     let current_dir = env::current_dir().expect("Failed to get current directory");
     let plugin_dirs = vec![current_dir.to_string_lossy().into_owned()];
@@ -649,4 +763,24 @@ pub fn get_cni() -> Result<Libcni, anyhow::Error> {
         None,
     );
     Ok(cni)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_parse_resource() {
+        parse_resource(None, None).unwrap();
+        let res = parse_resource(Some("100m".to_string()), None);
+        assert_eq!(res.unwrap().cpu_quota, 100000);
+        let res = parse_resource(Some("0.2".to_string()), None);
+        assert_eq!(res.unwrap().cpu_quota, 200000);
+        let res = parse_resource(None, Some("1Gi".to_string())).unwrap();
+        assert_eq!(res.memory_limit_in_bytes, 1024_i64 * 1024_i64 * 1024_i64);
+        let res = parse_resource(None, Some("200Ki".to_string())).unwrap();
+        assert_eq!(res.memory_limit_in_bytes, 200 * 1024);
+        let res = parse_resource(None, Some("30Mi".to_string())).unwrap();
+        assert_eq!(res.memory_limit_in_bytes, 30 * 1024 * 1024);
+    }
 }
