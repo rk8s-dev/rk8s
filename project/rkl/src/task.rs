@@ -665,17 +665,14 @@ impl TaskRunner {
 fn get_linux_container_config(
     res: Option<ContainerRes>,
 ) -> Result<Option<LinuxContainerConfig>, anyhow::Error> {
-    if res.is_none() {
-        return Ok(None);
+    if let Some(limits) = res.and_then(|r| r.limits) {
+        Ok(Some(LinuxContainerConfig {
+            resources: Some(parse_resource(limits.cpu, limits.memory)?),
+            ..Default::default()
+        }))
+    } else {
+        Ok(None)
     }
-    if res.as_ref().unwrap().limits.is_none() {
-        return Ok(None);
-    }
-    let res = res.unwrap().limits.unwrap();
-    Ok(Some(LinuxContainerConfig {
-        resources: Some(parse_resource(res.cpu, res.memory)?),
-        ..Default::default()
-    }))
 }
 
 /// Convert CPU resource descriptions in the form of `1` or `1000m`,
