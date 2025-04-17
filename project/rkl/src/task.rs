@@ -52,7 +52,7 @@ pub struct PodSpec {
     pub init_containers: Vec<ContainerSpec>,
 }
 
-/// Resouces request and limit to one container.
+/// Resources request and limit to one container.
 ///
 /// Only support limit now.
 #[derive(Debug, Serialize, Deserialize, Clone)]
