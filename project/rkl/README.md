@@ -126,38 +126,31 @@ docker export $(docker create busybox) | tar -C rootfs -xvf -
 
 支持扩充业务容器的数量
 
+支持对容器 cpu 和内存资源限制
+
 ```yaml
 apiVersion: v1
-
 kind: Pod
-
 metadata:
-
-name: simple-container-task
-
-labels:
-
-app: my-app
-
-bundle: /home/ich/rk8s/project/rkl/test/bundle-file/pause # bundle path of pause container
-
+  name: simple-container-task  
+  labels:
+    app: my-app 
+    bundle: /home/Qiaoqia/Projects/rk8s/project/rkl/test/bundles/pause   # bundle path of pause container
 spec:
+  containers:
+    - name: main-container1    
+      image: /home/Qiaoqia/Projects/rk8s/project/rkl/test/bundles/busybox   # bundle path
+      args:               #the arguments of config.json file             
+        - "dd"                   
+        - "if=/dev/zero"  
+        - "of=/dev/null"          
+      ports:
+        - containerPort: 80
+      resources: # resource limit
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
 
-containers:
-
-- name: main-container1
-
-image: /home/ich/rk8s/project/rkl/test/bundle-file/busybox # bundle path
-
-args:				#the arguments of config.json file
-
-- "sleep"
-
-- "10000"
-
-ports:
-
-- containerPort: 80
 
 ```
 
@@ -429,39 +422,32 @@ Currently, only the following YAML format is supported.
 
 The number of business containers can be increased as needed.
 
+Supports CPU and memory resource limitations for containers.
+
 ```yaml
 
 apiVersion: v1
-
 kind: Pod
-
 metadata:
-
-name: simple-container-task
-
-labels:
-
-app: my-app
-
-bundle: /home/ich/rk8s/project/rkl/test/bundle-file/pause # bundle path of pause container
-
+  name: simple-container-task  
+  labels:
+    app: my-app 
+    bundle: /home/Qiaoqia/Projects/rk8s/project/rkl/test/bundles/pause   # bundle path of pause container
 spec:
+  containers:
+    - name: main-container1    
+      image: /home/Qiaoqia/Projects/rk8s/project/rkl/test/bundles/busybox   # bundle path
+      args:               #the arguments of config.json file             
+        - "dd"                   
+        - "if=/dev/zero"  
+        - "of=/dev/null"          
+      ports:
+        - containerPort: 80
+      resources: # resource limit
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
 
-containers:
-
-- name: main-container1
-
-image: /home/ich/rk8s/project/rkl/test/bundle-file/busybox # bundle path
-
-args:			#the arguments of config.json file
-
-- "sleep"
-
-- "10000"
-
-ports:
-
-- containerPort: 80
 
 ```
 
