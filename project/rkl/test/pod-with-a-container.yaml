@@ -13,6 +13,8 @@ spec:
         - "dd"                   
         - "if=/dev/zero"  
         - "of=/dev/null"          
+        - "sleep"                  
+        - "infinity"           
       ports:
         - containerPort: 80
       resources:
