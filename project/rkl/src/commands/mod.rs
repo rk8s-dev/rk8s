@@ -6,6 +6,8 @@ use libcontainer::container::Container;
 
 pub mod create;
 pub mod delete;
+pub mod exec;
+pub mod exec_cli;
 pub mod kill;
 pub mod start;
 pub mod state;
