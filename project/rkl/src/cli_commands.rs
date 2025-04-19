@@ -267,7 +267,6 @@ pub fn exec_pod(args: exec_cli::Exec) -> Result<i32> {
     if !pod_info_path.exists() {
         return Err(anyhow::anyhow!("Pod {} not found", args.pod_name));
     }
-    // 调用 exec 函数
     let exit_code = exec::exec(args, root_path)?;
     Ok(exit_code)
 }
