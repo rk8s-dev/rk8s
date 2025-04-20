@@ -97,29 +97,29 @@
     "cwd": "/",
     "capabilities": {
       "bounding": [
-        "CAP_KILL",
+        "CAP_NET_BIND_SERVICE",
         "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_KILL"
       ],
       "effective": [
-        "CAP_KILL",
+        "CAP_NET_BIND_SERVICE",
         "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_KILL"
       ],
       "inheritable": [
-        "CAP_KILL",
+        "CAP_NET_BIND_SERVICE",
         "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_KILL"
       ],
       "permitted": [
-        "CAP_KILL",
+        "CAP_NET_BIND_SERVICE",
         "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_KILL"
       ],
       "ambient": [
-        "CAP_KILL",
+        "CAP_NET_BIND_SERVICE",
         "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_KILL"
       ]
     },
     "rlimits": [
@@ -140,19 +140,19 @@
     "namespaces": [
       {
         "type": "pid",
-        "path": "/proc/11591/ns/pid"
+        "path": "/proc/14583/ns/pid"
       },
       {
         "type": "network",
-        "path": "/proc/11591/ns/net"
+        "path": "/proc/14583/ns/net"
       },
       {
         "type": "ipc",
-        "path": "/proc/11591/ns/ipc"
+        "path": "/proc/14583/ns/ipc"
       },
       {
         "type": "uts",
-        "path": "/proc/11591/ns/uts"
+        "path": "/proc/14583/ns/uts"
       },
       {
         "type": "mount"
