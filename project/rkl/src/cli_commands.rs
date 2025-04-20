@@ -1,4 +1,4 @@
-use crate::commands::{delete, load_container, start, state};
+use crate::commands::{delete, exec, exec_cli, load_container, start, state};
 use crate::rootpath;
 use crate::task::{self, TaskRunner};
 use anyhow::{Result, anyhow};
@@ -259,4 +259,14 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+pub fn exec_pod(args: exec_cli::Exec) -> Result<i32> {
+    let root_path = rootpath::determine(None)?;
+    let pod_info_path = root_path.join("pods").join(&args.pod_name);
+    if !pod_info_path.exists() {
+        return Err(anyhow::anyhow!("Pod {} not found", args.pod_name));
+    }
+    let exit_code = exec::exec(args, root_path)?;
+    Ok(exit_code)
 }
