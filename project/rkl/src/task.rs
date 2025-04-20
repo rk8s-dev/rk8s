@@ -752,7 +752,7 @@ pub fn get_cni() -> Result<Libcni, anyhow::Error> {
     for _ in 0..2 {
         plugin_conf_dir.pop();
     }
-    plugin_conf_dir.push("rkl/test");
+    plugin_conf_dir.push("test");
 
     let cni = Libcni::new(
         Some(plugin_dirs),

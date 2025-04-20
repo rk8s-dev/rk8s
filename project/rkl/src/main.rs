@@ -1,9 +1,5 @@
-mod cli_commands;
-mod commands;
-mod cri;
-mod rootpath;
-mod task;
 use clap::{Parser, Subcommand};
+use rkl::cli_commands;
 
 #[derive(Parser)]
 #[command(name = "rkl")]
@@ -41,7 +37,7 @@ enum Commands {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
     },
-    Exec(Box<commands::exec_cli::Exec>),
+    Exec(Box<rkl::commands::exec_cli::Exec>),
 }
 
 fn main() -> Result<(), anyhow::Error> {
