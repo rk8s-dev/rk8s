@@ -5,7 +5,7 @@
 
   
 
-> 该项目基于Youki(https://github.com/youki-dev/youki) 实现CRI接口的相应功能，目前可以创建Pod，启动Pod，删除Pod，查看容器状态。
+> 该项目基于Youki(https://github.com/youki-dev/youki)实现CRI接口的相应功能，目前可以创建Pod，启动Pod，删除Pod，查看容器状态。
 
   
 
@@ -91,6 +91,15 @@ example: ./rkl run task.yaml
 example: ./rkl delete pod1
 
 ```
+✅进入Pod中的容器
+
+./rkl exec [OPTIONS] <POD_NAME> <CONTAINER_ID> [COMMAND]...
+
+```
+
+example: ./rkl exec pod1 container1 -e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/sh
+
+```
 
   
 
@@ -126,31 +135,38 @@ docker export $(docker create busybox) | tar -C rootfs -xvf -
 
 支持扩充业务容器的数量
 
-支持对容器 cpu 和内存资源限制
-
 ```yaml
 apiVersion: v1
-kind: Pod
-metadata:
-  name: simple-container-task  
-  labels:
-    app: my-app 
-    bundle: /home/Qiaoqia/Projects/rk8s/project/rkl/test/bundles/pause   # bundle path of pause container
-spec:
-  containers:
-    - name: main-container1    
-      image: /home/Qiaoqia/Projects/rk8s/project/rkl/test/bundles/busybox   # bundle path
-      args:               #the arguments of config.json file             
-        - "dd"                   
-        - "if=/dev/zero"  
-        - "of=/dev/null"          
-      ports:
-        - containerPort: 80
-      resources: # resource limit
-        limits:
-          cpu: "500m"
-          memory: "512Mi"
 
+kind: Pod
+
+metadata:
+
+name: simple-container-task
+
+labels:
+
+app: my-app
+
+bundle: /home/ich/rk8s/project/rkl/test/bundle-file/pause # bundle path of pause container
+
+spec:
+
+containers:
+
+- name: main-container1
+
+image: /home/ich/rk8s/project/rkl/test/bundle-file/busybox # bundle path
+
+args:				#the arguments of config.json file
+
+- "sleep"
+
+- "10000"
+
+ports:
+
+- containerPort: 80
 
 ```
 
@@ -304,6 +320,15 @@ PodSandbox ID: simple-container-task
 Pod simple-container-task created and started successfully
 
 ```
+exec:
+```
+
+./rkl exec simple-container-task simple-container-task-main-container1 -e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/sh
+
+/ # ls
+bin    dev    etc    home   lib    lib64  proc   root   sys    tmp    usr    var
+```
+
 
   
 
@@ -388,7 +413,15 @@ Pod simple-container-task created and started successfully
 
 `example: ./rkl delete pod1`
 
-  
+✅ execute Pod
+
+./rkl exec [OPTIONS] <POD_NAME> <CONTAINER_ID> [COMMAND]...
+
+```
+
+example: ./rkl exec pod1 container1 -e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/sh
+
+```
 
 ----------
 
@@ -422,32 +455,39 @@ Currently, only the following YAML format is supported.
 
 The number of business containers can be increased as needed.
 
-Supports CPU and memory resource limitations for containers.
-
 ```yaml
 
 apiVersion: v1
-kind: Pod
-metadata:
-  name: simple-container-task  
-  labels:
-    app: my-app 
-    bundle: /home/Qiaoqia/Projects/rk8s/project/rkl/test/bundles/pause   # bundle path of pause container
-spec:
-  containers:
-    - name: main-container1    
-      image: /home/Qiaoqia/Projects/rk8s/project/rkl/test/bundles/busybox   # bundle path
-      args:               #the arguments of config.json file             
-        - "dd"                   
-        - "if=/dev/zero"  
-        - "of=/dev/null"          
-      ports:
-        - containerPort: 80
-      resources: # resource limit
-        limits:
-          cpu: "500m"
-          memory: "512Mi"
 
+kind: Pod
+
+metadata:
+
+name: simple-container-task
+
+labels:
+
+app: my-app
+
+bundle: /home/ich/rk8s/project/rkl/test/bundle-file/pause # bundle path of pause container
+
+spec:
+
+containers:
+
+- name: main-container1
+
+image: /home/ich/rk8s/project/rkl/test/bundle-file/busybox # bundle path
+
+args:			#the arguments of config.json file
+
+- "sleep"
+
+- "10000"
+
+ports:
+
+- containerPort: 80
 
 ```
 
@@ -599,4 +639,13 @@ PodSandbox ID: simple-container-task
 
 Pod simple-container-task created and started successfully
 
+```
+
+exec:
+```
+
+./rkl exec simple-container-task simple-container-task-main-container1 -e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/sh
+
+/ # ls
+bin    dev    etc    home   lib    lib64  proc   root   sys    tmp    usr    var
 ```
