@@ -185,18 +185,24 @@ fn test_run_pod() {
 #[serial]
 fn test_cpu_and_memory_limit() {
     let mut config = get_pod_config(vec!["sleep".to_string(), "100".to_string()]);
-    config.spec.containers[0].resources = Some(ContainerRes{
+    config.spec.containers[0].resources = Some(ContainerRes {
         limits: Some(Resource {
             cpu: Some("500m".to_string()),
             memory: Some("233Mi".to_string()),
-        })
+        }),
     });
     try_create(config, true);
-    
-    let cpu_max = std::fs::read_to_string("/sys/fs/cgroup/:youki:simple-container-task-main-container1/cpu.max").unwrap();
+
+    let cpu_max = std::fs::read_to_string(
+        "/sys/fs/cgroup/:youki:simple-container-task-main-container1/cpu.max",
+    )
+    .unwrap();
     assert_eq!(cpu_max.trim(), "500000 1000000");
 
-    let memory_max = std::fs::read_to_string("/sys/fs/cgroup/:youki:simple-container-task-main-container1/memory.max").unwrap();
+    let memory_max = std::fs::read_to_string(
+        "/sys/fs/cgroup/:youki:simple-container-task-main-container1/memory.max",
+    )
+    .unwrap();
     assert_eq!(memory_max.trim(), format!("{}", 233 * 1024 * 1024));
 
     delete("simple-container-task");

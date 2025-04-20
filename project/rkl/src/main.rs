@@ -1,5 +1,5 @@
-use rkl::cli_commands;
 use clap::{Parser, Subcommand};
+use rkl::cli_commands;
 
 #[derive(Parser)]
 #[command(name = "rkl")]
