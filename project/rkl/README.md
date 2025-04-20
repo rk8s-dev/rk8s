@@ -100,7 +100,7 @@ example: ./rkl delete pod1
 
 ### **项目构建与测试（需在Root下进行）**
 
-  
+可以直接运行 `cargo test --package rkl --test test_cli_commands` 进行测试，同样需要 root 权限并参考 `libbridge/README.md` 添加好 `netns`。运行测试前需要先构建 dev 版本的 libbridge 和 libipam。
 
 1. **提供Bundle文件**：
 

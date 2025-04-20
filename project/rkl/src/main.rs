@@ -1,8 +1,4 @@
-mod cli_commands;
-mod commands;
-mod cri;
-mod rootpath;
-mod task;
+use rkl::cli_commands;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]

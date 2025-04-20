@@ -28,7 +28,7 @@ pub struct TypeMeta {
     pub kind: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ObjectMeta {
     pub name: String,
     #[serde(default = "default_namespace")]
@@ -44,7 +44,7 @@ pub fn default_namespace() -> String {
 }
 
 // simulate Kubernetes PodSpec
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct PodSpec {
     #[serde(default)]
     pub containers: Vec<ContainerSpec>,
@@ -70,7 +70,7 @@ pub struct Resource {
     pub memory: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ContainerSpec {
     pub name: String,
     pub image: String,
@@ -81,7 +81,7 @@ pub struct ContainerSpec {
     pub resources: Option<ContainerRes>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Port {
     #[serde(rename = "containerPort")]
     pub container_port: i32,

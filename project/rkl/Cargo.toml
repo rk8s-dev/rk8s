@@ -3,6 +3,14 @@ name = "rkl"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "rkl"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rkl"
+path = "src/main.rs"
+
 [dependencies]
 libcgroups = { path = "../libcgroups", version = "0.5.1" } 
 libcontainer = { path = "../libcontainer", version = "0.5.1" } 
@@ -25,6 +33,7 @@ prost-types = "0.12.6"
 http-body = "0.4.5"
 hyper = "0.14.27"
 rust-cni = "0.1.2"
+serial_test = "3.2.0"
 
 [dev-dependencies]
 tempfile = "3"
