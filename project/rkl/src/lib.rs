@@ -1,5 +1,5 @@
 pub mod cli_commands;
-mod commands;
+pub mod commands;
 mod cri;
 mod rootpath;
 pub mod task;

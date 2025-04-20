@@ -13,6 +13,6 @@ rust_binary(
         "root//project/libfuse-fs:libfuse-fs",
         "root//project/libipam:libipam",
         "root//project/rkb:rkb",
-        "root//project/rkl:rkl",
+        "root//project/rkl:rkl_bin",
     ],
 )

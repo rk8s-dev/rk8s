@@ -11,6 +11,8 @@ use serial_test::serial;
 fn bundles_path(name: &str) -> String {
     let root_dir = env::current_dir().unwrap();
     root_dir
+        .parent()
+        .unwrap()
         .join("test/bundles/")
         .join(name)
         .to_str()
@@ -28,7 +30,8 @@ fn get_pod_config(args: Vec<String>) -> PodTask {
                 ("app".to_string(), "my-app".to_string()),
                 ("bundle".to_string(), bundles_path("pause")),
             ]),
-            ..Default::default()
+            namespace: String::new(),
+            annotations: std::collections::HashMap::new(),
         },
         spec: PodSpec {
             containers: vec![ContainerSpec {
@@ -37,11 +40,13 @@ fn get_pod_config(args: Vec<String>) -> PodTask {
                 args,
                 ports: vec![Port {
                     container_port: 80,
-                    ..Default::default()
+                    protocol: String::new(),
+                    host_ip: String::new(),
+                    host_port: 0,
                 }],
-                ..Default::default()
+                resources: None,
             }],
-            ..Default::default()
+            init_containers: vec![],
         },
     }
 }
@@ -51,23 +56,25 @@ fn get_pod_config(args: Vec<String>) -> PodTask {
 fn test_from_file() {
     let config = get_pod_config(vec!["echo".to_string()]);
     let file_content = serde_yaml::to_string(&config).unwrap();
-    let mut file = File::create("test/test.yaml").unwrap();
+    let config_path = env::current_dir().unwrap().parent().unwrap().join("test/test.yaml");
+    let mut file = File::create(&config_path).unwrap();
     file.write_all(file_content.as_bytes()).unwrap();
-    let runner = TaskRunner::from_file("test/test.yaml").unwrap();
+    let runner = TaskRunner::from_file(config_path.as_os_str().to_str().unwrap()).unwrap();
     assert_eq!(
         runner.task.spec.containers[0].name,
         "simple-container-task-main-container1"
     );
-    std::fs::remove_file("test/test.yaml").unwrap();
+    std::fs::remove_file(config_path).unwrap();
 }
 
 fn create(config: PodTask, run: bool) -> Result<(), anyhow::Error> {
     let file_content = serde_yaml::to_string(&config)?;
-
-    if Path::new("test/test-pod.yaml").exists() {
-        std::fs::remove_file("test/test-pod.yaml")?;
+    let root = env::current_dir()?;
+    let config_path = root.parent().unwrap().join("test/test-pod.yaml");
+    if Path::new(&config_path).exists() {
+        std::fs::remove_file(&config_path)?;
     }
-    let mut file = File::create("test/test-pod.yaml").map_err(|_| anyhow!("create failed"))?;
+    let mut file = File::create(&config_path).map_err(|e| anyhow!("create failed: {e}"))?;
     file.write_all(file_content.as_bytes())?;
 
     // remove the container if for some reason, tests terminated before clean them.
@@ -84,17 +91,15 @@ fn create(config: PodTask, run: bool) -> Result<(), anyhow::Error> {
         std::fs::remove_dir_all(container_dir)?;
     }
 
-    let root = env::current_dir()?;
     env::set_current_dir(root.parent().unwrap().join("target/debug"))
         .map_err(|_| anyhow!("Failed to set current dir"))?;
-    let config_path = root.join("test/test-pod.yaml");
     if !run {
         cli_commands::create_pod(config_path.to_str().unwrap())?;
     } else {
         cli_commands::run_pod(config_path.to_str().unwrap())?;
     }
     env::set_current_dir(root).map_err(|_| anyhow!("Failed to set back current dir"))?;
-    std::fs::remove_file("test/test-pod.yaml")?;
+    std::fs::remove_file(config_path)?;
     Ok(())
 }
 
@@ -103,11 +108,10 @@ fn try_create(config: PodTask, run: bool) {
     if res.is_err() {
         println!(
             "\
-            Failed to create pod. This may be not a test failed, but caused by wrong config.\
+            Failed to create pod. This may be not a test failed, but caused by wrong config.\n\
             tips:\n\
-                1. You should create test netns before test. Try to run `sudo ip netns add test`.\n\
-                2. Run `sudo cargo test` instead of `cargo test`.\n\
-                3. Please build libipam and libbridge before running test.\n\
+                1. Please build libipam and libbridge before running test.\n\
+                2. You need run tests under root.\n\
         "
         );
         panic!("{}", res.unwrap_err());
