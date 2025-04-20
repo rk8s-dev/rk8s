@@ -56,7 +56,11 @@ fn get_pod_config(args: Vec<String>) -> PodTask {
 fn test_from_file() {
     let config = get_pod_config(vec!["echo".to_string()]);
     let file_content = serde_yaml::to_string(&config).unwrap();
-    let config_path = env::current_dir().unwrap().parent().unwrap().join("test/test.yaml");
+    let config_path = env::current_dir()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("test/test.yaml");
     let mut file = File::create(&config_path).unwrap();
     file.write_all(file_content.as_bytes()).unwrap();
     let runner = TaskRunner::from_file(config_path.as_os_str().to_str().unwrap()).unwrap();
