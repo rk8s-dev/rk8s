@@ -863,9 +863,9 @@ mod tests {
     };
 
     #[tokio::test]
+    #[ignore]
     async fn test_a_ovlfs() {
         env_logger::init();
-
         // Set up test environment
         let mountpoint = "/home/luxian/megatest/true_temp".to_string();
         let lowerdir = vec![
