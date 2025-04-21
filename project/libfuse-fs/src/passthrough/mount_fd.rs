@@ -443,22 +443,22 @@ mod tests {
 
     #[test]
     fn test_mount_fd_get() {
-        let topdir = env!("CARGO_MANIFEST_DIR");
-        let dir = File::open(topdir).unwrap();
-        let filename = CString::new("build.rs").unwrap();
+        let topdir = std::env::current_dir().unwrap();
+        let dir = File::open(&topdir).unwrap();
+        let filename = CString::new("Cargo.toml").unwrap();
         let mount_fds = MountFds::new(None).unwrap();
         let handle = FileHandle::from_name_at(&dir, &filename).unwrap().unwrap();
 
         // Ensure that `MountFds::get()` works for new entry.
         let fd1 = mount_fds
-            .get(handle.mnt_id, |_fd, _flags, _mode| File::open(topdir))
+            .get(handle.mnt_id, |_fd, _flags, _mode| File::open(&topdir))
             .unwrap();
         assert_eq!(Arc::strong_count(&fd1), 1);
         assert_eq!(mount_fds.map.read().unwrap().len(), 1);
 
         // Ensure that `MountFds::get()` works for existing entry.
         let fd2 = mount_fds
-            .get(handle.mnt_id, |_fd, _flags, _mode| File::open(topdir))
+            .get(handle.mnt_id, |_fd, _flags, _mode| File::open(&topdir))
             .unwrap();
         assert_eq!(Arc::strong_count(&fd2), 2);
         assert_eq!(mount_fds.map.read().unwrap().len(), 1);

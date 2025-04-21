@@ -474,7 +474,7 @@ mod tests {
             // 56 bit = 1
             // 55~48 bit = 0000 0001
             // 47~1 bit  = 2 virtual inode start from 2~MAX_HOST_INO
-            assert_eq!(unique_inode, 0x80800000000002);
+            assert_eq!(unique_inode, 0x80800000000001);
 
             let inode_alt_key = InodeId {
                 ino: MAX_HOST_INO + 2,
@@ -484,8 +484,8 @@ mod tests {
             let unique_inode = generator.get_unique_inode(&inode_alt_key).unwrap();
             // 56 bit = 1
             // 55~48 bit = 0000 0001
-            // 47~1 bit  = 3
-            assert_eq!(unique_inode, 0x80800000000003);
+            // 47~1 bit  = 2
+            assert_eq!(unique_inode, 0x80800000000002);
 
             let inode_alt_key = InodeId {
                 ino: MAX_HOST_INO + 3,
@@ -495,8 +495,8 @@ mod tests {
             let unique_inode = generator.get_unique_inode(&inode_alt_key).unwrap();
             // 56 bit = 1
             // 55~48 bit = 0000 0010
-            // 47~1 bit  = 4
-            assert_eq!(unique_inode, 0x81000000000004);
+            // 47~1 bit  = 3
+            assert_eq!(unique_inode, 0x81000000000003);
 
             let inode_alt_key = InodeId {
                 ino: u64::MAX,
@@ -506,16 +506,16 @@ mod tests {
             let unique_inode = generator.get_unique_inode(&inode_alt_key).unwrap();
             // 56 bit = 1
             // 55~48 bit = 0000 0001
-            // 47~1 bit  = 5
-            assert_eq!(unique_inode, 0x80800000000005);
+            // 47~1 bit  = 4
+            assert_eq!(unique_inode, 0x80800000000004);
         }
     }
 
     #[test]
     fn test_stat_fd() {
-        let topdir = env!("CARGO_MANIFEST_DIR");
-        let dir = File::open(topdir).unwrap();
-        let filename = CString::new("build.rs").unwrap();
+        let topdir = std::env::current_dir().unwrap();
+        let dir = File::open(&topdir).unwrap();
+        let filename = CString::new("Cargo.toml").unwrap();
 
         let st1 = stat_fd(&dir, None).unwrap();
         let st2 = stat_fd(&dir, Some(&filename)).unwrap();

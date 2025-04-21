@@ -153,9 +153,9 @@ mod tests {
 
     #[test]
     fn test_statx() {
-        let topdir = env!("CARGO_MANIFEST_DIR");
-        let dir = File::open(topdir).unwrap();
-        let filename = CString::new("build.rs").unwrap();
+        let topdir = std::env::current_dir().unwrap();
+        let dir = File::open(&topdir).unwrap();
+        let filename = CString::new("Cargo.toml").unwrap();
 
         let st1 = statx(&dir, None).unwrap();
         let st2 = statx(&dir, Some(&filename)).unwrap();

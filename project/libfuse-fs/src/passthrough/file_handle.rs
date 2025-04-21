@@ -320,6 +320,7 @@ impl OpenableFileHandle {
 mod tests {
     use super::*;
     use std::ffi::CString;
+    use std::fs::OpenOptions;
 
     fn generate_c_file_handle(
         handle_bytes: usize,
@@ -408,8 +409,17 @@ mod tests {
 
     #[test]
     fn test_file_handle_from_name_at() {
-        let topdir = env!("CARGO_MANIFEST_DIR");
-        let dir = File::open(topdir).unwrap();
+        // Create a temporary file in /tmp
+        let tmp_dir = "/tmp";
+        let tmp_file_path = format!("{}/build.rs", tmp_dir);
+        let _tmp_file = OpenOptions::new()
+            .truncate(true)
+            .create(true)
+            .write(true)
+            .open(&tmp_file_path)
+            .unwrap();
+
+        let dir = File::open(tmp_dir).unwrap();
         let filename = CString::new("build.rs").unwrap();
 
         let dir_handle = FileHandle::from_name_at(&dir, &CString::new("").unwrap())
@@ -426,5 +436,8 @@ mod tests {
             file_handle.handle.wrapper.as_fam_struct_ref().handle_bytes,
             0
         );
+
+        // Clean up the temporary file
+        std::fs::remove_file(tmp_file_path).unwrap();
     }
 }
