@@ -410,8 +410,8 @@ mod tests {
     #[test]
     fn test_file_handle_from_name_at() {
         // Create a temporary file in /tmp
-        let tmp_dir = "/tmp";
-        let tmp_file_path = format!("{}/build.rs", tmp_dir);
+        let tmp_dir = std::env::temp_dir();
+        let tmp_file_path = tmp_dir.join("build.rs");
         let _tmp_file = OpenOptions::new()
             .truncate(true)
             .create(true)
