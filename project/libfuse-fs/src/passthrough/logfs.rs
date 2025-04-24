@@ -9,12 +9,11 @@ use fuse3::{Result, SetAttr};
 use super::Inode;
 use std::any::type_name_of_val;
 // LoggingFileSystem . provide log info for a filesystem trait.
-#[allow(unused)]
 pub struct LoggingFileSystem<FS: Filesystem> {
     inner: FS,
     fsname: String,
 }
-#[allow(unused)]
+
 impl<FS: Filesystem> LoggingFileSystem<FS> {
     pub fn new(fs: FS) -> Self {
         let fsname = type_name_of_val(&fs);
