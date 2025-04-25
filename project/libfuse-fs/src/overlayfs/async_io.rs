@@ -243,20 +243,15 @@ impl Filesystem for OverlayFs {
     /// rename a file or directory.
     async fn rename(
         &self,
-        _req: Request,
-        _parent: Inode,
-        _name: &OsStr,
-        _new_parent: Inode,
-        _new_name: &OsStr,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        new_parent: Inode,
+        new_name: &OsStr,
     ) -> Result<()> {
-        // let inode = self.lookup_node(req, parent, name.to_str().unwrap()).await?;
-        // if inode.in_upper_layer().await {
-        //     todo!();
-        // }
-
-        // self.get_active_inode(inode).await;
-        // complex, implement it later
-        Err(Error::from_raw_os_error(libc::EXDEV).into())
+        self.do_rename(req, parent, name, new_parent, new_name)
+            .await
+            .map_err(|e| e.into())
     }
 
     /// create a hard link.
@@ -650,7 +645,7 @@ impl Filesystem for OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
         let entries = self
-            .do_readdir(req, parent, fh, offset.try_into().unwrap(), false)
+            .do_readdir(req, parent, fh, offset.try_into().unwrap())
             .await?;
         Ok(ReplyDirectory { entries })
     }
@@ -669,7 +664,7 @@ impl Filesystem for OverlayFs {
             info!("fuse: readdir is not supported.");
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
-        let entries = self.do_readdirplus(req, parent, fh, offset, false).await?;
+        let entries = self.do_readdirplus(req, parent, fh, offset).await?;
         Ok(ReplyDirectoryPlus { entries })
     }
     /// release an open directory. For every [`opendir`][Filesystem::opendir] call there will
