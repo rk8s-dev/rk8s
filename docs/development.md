@@ -18,7 +18,7 @@ If you prefer to set up your own development environment, follow these steps:
 
   ```bash
   export ARCH=$(uname -m) 
-  curl https://github.com/facebook/buck2/releases/download/latest/buck2-${ARCH}-unknown-linux-gnu.zst --output /tmp/buck2-${ARCH}-unknown-linux-gnu.zst --location
+  curl "https://github.com/facebook/buck2/releases/download/latest/buck2-${ARCH}-unknown-linux-gnu.zst" --output /tmp/buck2-${ARCH}-unknown-linux-gnu.zst --location
   zstd -d /tmp/buck2-${ARCH}-unknown-linux-gnu.zst -o $HOME/.cargo/bin/buck2
   chmod +x $HOME/.cargo/bin/buck2
   ```
