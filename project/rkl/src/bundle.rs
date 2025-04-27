@@ -30,9 +30,9 @@ use tokio::fs;
 /// ├── index.json
 /// └── <other files>
 /// ```
-/// 
+///
 /// The bundle directory will be created with the following layout:
-/// 
+///
 /// ```sh
 /// bundle_path
 /// └── rootfs
