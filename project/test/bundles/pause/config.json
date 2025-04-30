@@ -98,27 +98,32 @@
         "bounding": [
           "CAP_AUDIT_WRITE",
           "CAP_KILL",
-          "CAP_NET_BIND_SERVICE"
+          "CAP_NET_BIND_SERVICE",
+          "CAP_NET_RAW"
         ],
         "effective": [
           "CAP_AUDIT_WRITE",
           "CAP_KILL",
-          "CAP_NET_BIND_SERVICE"
+          "CAP_NET_BIND_SERVICE",
+          "CAP_NET_RAW"
         ],
         "inheritable": [
           "CAP_AUDIT_WRITE",
           "CAP_KILL",
-          "CAP_NET_BIND_SERVICE"
+          "CAP_NET_BIND_SERVICE",
+          "CAP_NET_RAW"
         ],
         "permitted": [
           "CAP_AUDIT_WRITE",
           "CAP_KILL",
-          "CAP_NET_BIND_SERVICE"
+          "CAP_NET_BIND_SERVICE",
+          "CAP_NET_RAW"
         ],
         "ambient": [
           "CAP_AUDIT_WRITE",
           "CAP_KILL",
-          "CAP_NET_BIND_SERVICE"
+          "CAP_NET_BIND_SERVICE",
+          "CAP_NET_RAW"
         ]
       },
       "rlimits": [

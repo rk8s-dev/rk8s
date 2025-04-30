@@ -38,7 +38,7 @@ fn main() {
     );
 
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all() // 开启 IO、定时器等必要功能
+        .enable_all()
         .build()
         .unwrap();
 
@@ -133,7 +133,6 @@ async fn cmd_del(inputs: Inputs) -> Result<IpamSuccessReply, CniError> {
     }
 
     if !errors.is_empty() {
-        // 合并所有错误信息，用分号分隔
         let combined_error = errors.join("; ");
         return Err(CniError::Generic(combined_error));
     }

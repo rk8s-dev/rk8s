@@ -9,8 +9,9 @@ use crate::cri::cri_api::{
 use crate::rootpath;
 use anyhow::{Result, anyhow};
 use libcontainer::oci_spec::runtime::{
-    LinuxBuilder, LinuxCpuBuilder, LinuxMemoryBuilder, LinuxNamespaceBuilder, LinuxNamespaceType,
-    LinuxResources, LinuxResourcesBuilder, ProcessBuilder, Spec,
+    Capability, LinuxBuilder, LinuxCapabilities, LinuxCpuBuilder, LinuxMemoryBuilder,
+    LinuxNamespaceBuilder, LinuxNamespaceType, LinuxResources, LinuxResourcesBuilder,
+    ProcessBuilder, Spec,
 };
 use liboci_cli::{Create, Delete, Kill, Start};
 use rust_cni::cni::Libcni;
@@ -411,12 +412,15 @@ impl TaskRunner {
             .iter()
             .find(|c| c.name == container_id)
             .ok_or_else(|| anyhow!("Container spec not found for ID: {}", container_id))?;
-        let process = ProcessBuilder::default()
+        let mut process = ProcessBuilder::default()
             .args(container_spec.args.clone())
             .build()?;
 
-        spec.set_process(Some(process));
+        let mut capabilities = process.capabilities().clone().unwrap();
+        add_cap_net_raw(&mut capabilities);
+        process.set_capabilities(Some(capabilities));
 
+        spec.set_process(Some(process));
         let bundle_path = container_spec.image.clone();
         if bundle_path.is_empty() {
             return Err(anyhow!(
@@ -760,6 +764,28 @@ pub fn get_cni() -> Result<Libcni, anyhow::Error> {
         None,
     );
     Ok(cni)
+}
+
+fn add_cap_net_raw(capabilities: &mut LinuxCapabilities) {
+    let mut bounding = capabilities.bounding().clone().unwrap();
+    bounding.insert(Capability::NetRaw);
+    capabilities.set_bounding(Some(bounding));
+
+    let mut effective = capabilities.effective().clone().unwrap();
+    effective.insert(Capability::NetRaw);
+    capabilities.set_effective(Some(effective));
+
+    let mut inheritable = capabilities.inheritable().clone().unwrap();
+    inheritable.insert(Capability::NetRaw);
+    capabilities.set_inheritable(Some(inheritable));
+
+    let mut permitted = capabilities.permitted().clone().unwrap();
+    permitted.insert(Capability::NetRaw);
+    capabilities.set_permitted(Some(permitted));
+
+    let mut ambient = capabilities.ambient().clone().unwrap();
+    ambient.insert(Capability::NetRaw);
+    capabilities.set_ambient(Some(ambient));
 }
 
 #[cfg(test)]
