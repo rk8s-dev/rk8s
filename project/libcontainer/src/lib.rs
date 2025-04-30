@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 pub mod apparmor;
 pub mod capabilities;
 pub mod channel;
