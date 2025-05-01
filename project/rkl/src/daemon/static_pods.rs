@@ -11,7 +11,7 @@ use tokio::time::sleep;
 use crate::task::TaskRunner;
 use crate::{cli_commands, task::PodTask};
 
-use super::sync_loop::{Event, State, WithEvent};
+use crate::daemon::sync_loop::{Event, State, WithEvent};
 
 /// Check and ensure that the pod status is consistent with the requirements every five seconds.
 pub struct CheckStaticPodsPeriodically;

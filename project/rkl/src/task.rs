@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::{env, fs};
+use std::fs;
 // simulate Kubernetes Pod
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TypeMeta {
@@ -752,13 +752,8 @@ impl From<&LinuxContainerResources> for LinuxResources {
 }
 
 pub fn get_cni() -> Result<Libcni, anyhow::Error> {
-    let current_dir = env::current_dir().expect("Failed to get current directory");
-    let plugin_dirs = vec![current_dir.to_string_lossy().into_owned()];
-    let mut plugin_conf_dir = current_dir.clone();
-    for _ in 0..2 {
-        plugin_conf_dir.pop();
-    }
-    plugin_conf_dir.push("test");
+    let plugin_dirs = vec!["/opt/cni/bin".to_string()];
+    let plugin_conf_dir = Path::new("/etc/cni/net.d");
 
     let cni = Libcni::new(
         Some(plugin_dirs),

@@ -1,5 +1,9 @@
+use std::fs::File;
+
 use clap::{Parser, Subcommand};
+use daemonize::Daemonize;
 use rkl::{cli_commands, daemon};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
 #[command(name = "rkl")]
@@ -57,6 +61,17 @@ fn main() -> Result<(), anyhow::Error> {
             let exit_code = cli_commands::exec_pod(*exec)?;
             std::process::exit(exit_code);
         }
-        Commands::Daemon => daemon::main(),
+        Commands::Daemon => {
+            let time_stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let out = File::create(format!("/etc/rk8s/log_{}.out", time_stamp)).unwrap();
+            let err = File::create(format!("/etc/rk8s/log_{}.err", time_stamp)).unwrap();
+            let pid = format!("/tmp/rkl_{}.pid", time_stamp);
+            let daemonize = Daemonize::new().pid_file(&pid).stdout(out).stderr(err);
+            daemonize.start()?;
+            daemon::main()
+        }
     }
 }
