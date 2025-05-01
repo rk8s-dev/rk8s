@@ -51,7 +51,6 @@ pub const PROC_SELF_FD_CSTR: &[u8] = b"/proc/self/fd\0";
 pub const ROOT_ID: u64 = 1;
 use tokio::sync::{Mutex, MutexGuard, RwLock};
 
-#[allow(unused)]
 pub async fn new_passthroughfs_layer(rootdir: &str) -> Result<PassthroughFs> {
     let config = Config {
         root_dir: String::from(rootdir),
@@ -353,7 +352,6 @@ impl HandleMap {
 /// that wish to serve only a specific directory should set up the environment so that that
 /// directory ends up as the root of the file system process. One way to accomplish this is via a
 /// combination of mount namespaces and the pivot_root system call.
-#[allow(unused)]
 pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
     // File descriptors for various points in the file system tree. These fds are always opened with
     // the `O_PATH` option so they cannot be used for reading or writing any data. See the
@@ -389,7 +387,7 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
     no_opendir: AtomicBool,
 
     // Whether kill_priv_v2 is enabled.
-    killpriv_v2: AtomicBool,
+    //killpriv_v2: AtomicBool,
 
     // Whether no_readdir is enabled.
     no_readdir: AtomicBool,
@@ -399,8 +397,7 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     // Whether per-file DAX feature is enabled.
     // Init from guest kernel Init cmd of fuse fs.
-    perfile_dax: AtomicBool,
-
+    //perfile_dax: AtomicBool,
     dir_entry_timeout: Duration,
     dir_attr_timeout: Duration,
 
@@ -409,7 +406,6 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
     phantom: PhantomData<S>,
 }
 
-#[allow(unused)]
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     /// Create a Passthrough file system instance.
     pub fn new(mut cfg: Config) -> Result<PassthroughFs<S>> {
@@ -457,10 +453,10 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             writeback: AtomicBool::new(false),
             no_open: AtomicBool::new(false),
             no_opendir: AtomicBool::new(false),
-            killpriv_v2: AtomicBool::new(false),
+            //killpriv_v2: AtomicBool::new(false),
             no_readdir: AtomicBool::new(cfg.no_readdir),
             seal_size: AtomicBool::new(cfg.seal_size),
-            perfile_dax: AtomicBool::new(false),
+            //perfile_dax: AtomicBool::new(false),
             dir_entry_timeout,
             dir_attr_timeout,
             cfg,
@@ -630,7 +626,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             // ensuring that the same file is always the same inode
             match InodeMap::get_inode_locked(inodes, id, handle_opt) {
                 Some(a) => Ok(a),
-                None => Ok({ self.next_inode.fetch_add(1).await }),
+                None => Ok(self.next_inode.fetch_add(1).await),
             }
         } else {
             let inode = if id.ino > MAX_HOST_INO {
@@ -698,7 +694,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             };
 
             // Write guard get_alt_locked() and insert_lock() to avoid race conditions.
-            let mut inodes = self.inode_map.inodes.read().await;
+            let inodes = self.inode_map.inodes.read().await;
 
             // Lookup inode_map again after acquiring the inode_map lock, as there might be another
             // racing thread already added an inode with the same id while we're not holding
@@ -742,7 +738,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             }
         };
 
-        let (entry_timeout, attr_timeout) = if is_dir(st.st.st_mode) {
+        let (entry_timeout, _) = if is_dir(st.st.st_mode) {
             (self.dir_entry_timeout, self.dir_attr_timeout)
         } else {
             (self.cfg.entry_timeout, self.cfg.attr_timeout)

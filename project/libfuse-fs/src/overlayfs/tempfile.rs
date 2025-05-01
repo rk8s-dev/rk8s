@@ -42,7 +42,7 @@ pub struct TempFile {
     path: PathBuf,
     file: Option<File>,
 }
-#[allow(unused)]
+
 impl TempFile {
     /// Creates the TempFile using a prefix.
     ///
@@ -162,13 +162,11 @@ impl TempFile {
     /// path does not point at an existing entity anymore).
     /// Calling `as_path()` after `remove()` is useful, for example, when you need a
     /// random path string, but don't want an actual resource at that path.
-    #[allow(unused)]
     pub fn as_path(&self) -> &Path {
         &self.path
     }
 
     /// Returns a reference to the File.
-    #[allow(unused)]
     pub fn as_file(&self) -> &File {
         // It's safe to unwrap because `file` can be `None` only after calling `into_file`
         // which consumes this object.

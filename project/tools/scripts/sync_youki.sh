@@ -57,12 +57,6 @@ sync_module() {
 sync_module "libcontainer"
 sync_module "libcgroups"
 
-echo "Applying patch to comment out code in container_init_process.rs..."
-patch -p1 < "./project/tools/scripts/container_init_process.patch" || {
-    echo "Failed to apply patch"
-    exit 1
-}
-
 echo "Applying patch to allow all clippy lints in libcgroups and libcontainer..."
 patch -p1 < "./project/tools/scripts/clippy_allow_all.patch" || {
     echo "Failed to apply patch"

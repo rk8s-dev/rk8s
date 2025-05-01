@@ -9,7 +9,7 @@ mod inode_store;
 mod layer;
 mod utils;
 
-mod tempfile;
+//mod tempfile;
 use core::panic;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
@@ -21,6 +21,7 @@ use fuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyEntry, ReplyOpen, ReplyStatFs,
 };
 use fuse3::raw::{Filesystem, Request, Session};
+use futures::StreamExt as _;
 use std::sync::{Arc, Weak};
 
 use fuse3::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
@@ -28,7 +29,6 @@ const SLASH_ASCII: char = '/';
 use futures::future::join_all;
 use futures::stream::iter;
 
-use futures::StreamExt;
 use inode_store::InodeStore;
 use layer::Layer;
 
@@ -78,7 +78,6 @@ pub(crate) struct OverlayInode {
 }
 
 #[derive(Default)]
-#[allow(unused)]
 pub enum CachePolicy {
     Never,
     #[default]
@@ -822,6 +821,31 @@ impl OverlayInode {
         self.childrens.lock().await.insert(name.to_string(), node);
     }
 
+    /// Handles operations on the upper layer inode of an `OverlayInode` in a thread-safe manner.
+    ///
+    /// This function locks the `real_inodes` field of the `OverlayInode` and retrieves the first
+    /// real inode (if any). If the first inode exists and belongs to the upper layer (`in_upper_layer` is true),
+    /// the provided callback `f` is invoked with the inode wrapped in `Some`. Otherwise, `f` is invoked with `None`.
+    ///
+    /// # Arguments
+    /// * `f`: A closure that takes an `Option<RealInode>` and returns a future. The future resolves to a `Result<bool>`.
+    ///
+    /// # Returns
+    /// * `Ok(bool)`: The result of invoking the callback `f`.
+    /// * `Err(Erron)`: An error is returned if:
+    ///   - There are no backend inodes (`real_inodes` is empty), indicating a dangling `OverlayInode`.
+    ///   - The callback `f` itself returns an error.
+    ///
+    /// # Behavior
+    /// 1. Locks the `real_inodes` field to ensure thread safety.
+    /// 2. Checks if the first inode exists:
+    ///    - If it exists and is in the upper layer, invokes `f(Some(inode))`.
+    ///    - If it exists but is not in the upper layer, invokes `f(None)`.
+    /// 3. If no inodes exist, returns an error indicating a dangling `OverlayInode`.
+    ///
+    /// # Example Use Case
+    /// This function is typically used to perform operations on the upper layer inode of an `OverlayInode`,
+    /// such as creating, modifying, or deleting files/directories in the overlay filesystem's upper layer.
     pub async fn handle_upper_inode_locked<F, Fut>(&self, mut f: F) -> Result<bool>
     where
         F: FnMut(Option<RealInode>) -> Fut,
@@ -860,7 +884,6 @@ fn entry_type_from_mode(mode: libc::mode_t) -> u8 {
         _ => libc::DT_UNKNOWN,
     }
 }
-#[allow(unused)]
 impl OverlayFs {
     pub fn new(
         upper: Option<Arc<BoxedLayer>>,
@@ -1035,12 +1058,6 @@ impl OverlayFs {
         }
     }
 
-    // As a debug function, print all inode numbers in hash table.
-    #[allow(dead_code)]
-    async fn debug_print_all_inodes(&self) {
-        self.inodes.read().await.debug_print_all_inodes();
-    }
-
     async fn lookup_node_ignore_enoent(
         &self,
         ctx: Request,
@@ -1183,7 +1200,6 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-        is_readdirplus: bool,
     ) -> Result<<OverlayFs as fuse3::raw::Filesystem>::DirEntryStream<'a>> {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
@@ -1200,7 +1216,7 @@ impl OverlayFs {
                 node.clone()
             }
         };
-
+        self.load_directory(ctx, &ovl_inode).await?;
         let mut childrens = Vec::new();
         //add myself as "."
         childrens.push((".".to_string(), ovl_inode.clone()));
@@ -1217,10 +1233,12 @@ impl OverlayFs {
             if child.whiteout.load().await {
                 continue;
             }
+            // if child.is_opaque.load().await {
+            //     continue;
+            // }
             childrens.push((child.name.clone(), child.clone()));
         }
 
-        let mut len: usize = 0;
         if offset >= childrens.len() as u64 {
             return Ok(iter(vec![].into_iter()));
         }
@@ -1258,7 +1276,6 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-        is_readdirplus: bool,
     ) -> Result<<OverlayFs as fuse3::raw::Filesystem>::DirEntryPlusStream<'a>> {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
@@ -1275,6 +1292,7 @@ impl OverlayFs {
                 node.clone()
             }
         };
+        self.load_directory(ctx, &ovl_inode).await?;
 
         let mut childrens = Vec::new();
         //add myself as "."
@@ -1295,7 +1313,6 @@ impl OverlayFs {
             childrens.push((child.name.clone(), child.clone()));
         }
 
-        let mut len: usize = 0;
         if offset >= childrens.len() as u64 {
             return Ok(iter(vec![].into_iter()));
         }
@@ -1470,7 +1487,7 @@ impl OverlayFs {
             None => {
                 // Copy parent node up if necessary.
                 let pnode = self.copy_node_up(ctx, Arc::clone(parent_node)).await?;
-                let mut new_node = Arc::new(Mutex::new(None));
+                let new_node = Arc::new(Mutex::new(None));
                 let path = format!("{}/{}", pnode.path, name);
                 pnode
                     .handle_upper_inode_locked(&mut |parent_real_inode: Option<RealInode>| async {
@@ -1526,8 +1543,8 @@ impl OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOENT));
         }
 
-        let mut handle: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
-        let mut real_ino: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
+        let handle: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
+        let real_ino: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
         let new_ovi = match self
             .lookup_node_ignore_enoent(ctx, parent_node.inode, name_str)
             .await?
@@ -1572,7 +1589,7 @@ impl OverlayFs {
             None => {
                 // Copy parent node up if necessary.
                 let pnode = self.copy_node_up(ctx, Arc::clone(parent_node)).await?;
-                let mut new_node = Arc::new(Mutex::new(None));
+                let new_node = Arc::new(Mutex::new(None));
                 let path = format!("{}/{}", pnode.path, name_str);
                 pnode
                     .handle_upper_inode_locked(&mut |parent_real_inode: Option<RealInode>| async {
@@ -1637,6 +1654,87 @@ impl OverlayFs {
             None => None,
         };
         Ok(final_handle)
+    }
+
+    async fn do_rename(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        new_parent: Inode,
+        new_name: &OsStr,
+    ) -> Result<()> {
+        let name_str = name.to_str().unwrap();
+        let new_name_str = new_name.to_str().unwrap();
+
+        // Ensure parent exists
+        let parent_node = match self.get_all_inode(parent).await {
+            Some(node) => node,
+            None => return Err(Error::from_raw_os_error(libc::ENOENT)),
+        };
+
+        //  Ensure name exists
+        let src_node = self.lookup_node(req, parent, name_str).await?;
+        let src_node_attr = src_node.stat64(req).await?;
+        let src_node_type = src_node_attr.attr.kind;
+
+        // Ensure new_parent is a directory
+        let new_parent_node = match self.get_all_inode(new_parent).await {
+            Some(node) => node,
+            None => return Err(Error::from_raw_os_error(libc::ENOENT)),
+        };
+
+        let new_parent_type = new_parent_node.stat64(req).await?.attr.kind;
+        if !utils::is_dir(&new_parent_type) {
+            return Err(Error::from_raw_os_error(libc::ENOTDIR));
+        }
+
+        // Ensure new_name does not exist in new_parent
+        // Check if new_name exists in new_parent
+        if let Some(existing_node) = self
+            .lookup_node_ignore_enoent(req, new_parent, new_name_str)
+            .await?
+        {
+            // If the node exists and is not whiteout, return EEXIST
+            if !existing_node.whiteout.load().await {
+                return Err(Error::from_raw_os_error(libc::EEXIST));
+            }
+            // If it's a whiteout, allow rename to proceed (overwrite whiteout)
+        }
+
+        if src_node_type == FileType::Directory {
+            // Directory can't be renamed.
+            self.copy_directory_up(req, src_node.clone()).await?;
+        } else {
+            self.copy_node_up(req, src_node.clone()).await?;
+        }
+
+        // copy new_parent up if necessary.
+        self.copy_node_up(req, new_parent_node.clone()).await?;
+        let (src_lay, src_t, src_true_inode) = parent_node.first_layer_inode().await;
+        let (dst_lay, dst_t, dst_true_inode) = new_parent_node.first_layer_inode().await;
+
+        // Assert that both layers are the same.
+        assert!(Arc::ptr_eq(&src_lay, &dst_lay));
+        assert!(src_t);
+        assert!(dst_t);
+
+        // try to delete whiteout if exist.
+        let _ = src_lay.delete_whiteout(req, dst_true_inode, new_name).await;
+        // rename in PassthroughFS.
+        src_lay
+            .rename(req, src_true_inode, name, dst_true_inode, new_name)
+            .await?;
+
+        // create whiteout or set_opaque for befor inode.
+        // TODO: After renaming, check if lower layers have an entry with the same name.
+        // If so, create whiteout (for files) or set opaque (for directories) in the destination.
+        let _ = src_lay.create_whiteout(req, src_true_inode, name).await;
+
+        // Mark parent node as dirty.
+        parent_node.loaded.store(false).await;
+        new_parent_node.loaded.store(false).await;
+        Ok(())
     }
 
     async fn do_link(
@@ -1705,7 +1803,7 @@ impl OverlayFs {
             }
             None => {
                 // Copy parent node up if necessary.
-                let mut new_node: Arc<Mutex<Option<OverlayInode>>> = Arc::new(Mutex::new(None));
+                let new_node: Arc<Mutex<Option<OverlayInode>>> = Arc::new(Mutex::new(None));
                 new_parent
                     .handle_upper_inode_locked(&mut |parent_real_inode: Option<RealInode>| async {
                         let parent_real_inode = match parent_real_inode {
@@ -1795,7 +1893,7 @@ impl OverlayFs {
             None => {
                 // Copy parent node up if necessary.
                 let pnode = self.copy_node_up(ctx, Arc::clone(parent_node)).await?;
-                let mut new_node: Arc<Mutex<Option<OverlayInode>>> = Arc::new(Mutex::new(None));
+                let new_node: Arc<Mutex<Option<OverlayInode>>> = Arc::new(Mutex::new(None));
                 let path = format!("{}/{}", pnode.path, name);
                 pnode
                     .handle_upper_inode_locked(&mut |parent_real_inode: Option<RealInode>| async {
@@ -1856,7 +1954,7 @@ impl OverlayFs {
         let path = std::str::from_utf8(&reply_data.data)
             .map_err(|_| Error::from_raw_os_error(libc::EINVAL))?;
 
-        let mut new_upper_real: Arc<Mutex<Option<RealInode>>> = Arc::new(Mutex::new(None));
+        let new_upper_real: Arc<Mutex<Option<RealInode>>> = Arc::new(Mutex::new(None));
         parent_node
             .handle_upper_inode_locked(&mut |parent_upper_inode: Option<RealInode>| async {
                 // We already create upper dir for parent_node above.
@@ -1908,8 +2006,8 @@ impl OverlayFs {
         let flags = libc::O_WRONLY;
         let mode = mode_from_kind_and_perm(st.attr.kind, st.attr.perm);
 
-        let mut upper_handle = Arc::new(Mutex::new(0));
-        let mut upper_real_inode = Arc::new(Mutex::new(None));
+        let upper_handle = Arc::new(Mutex::new(0));
+        let upper_real_inode = Arc::new(Mutex::new(None));
         parent_node
             .handle_upper_inode_locked(&mut |parent_upper_inode: Option<RealInode>| async {
                 // We already create upper dir for parent_node.
@@ -1938,33 +2036,34 @@ impl OverlayFs {
         // FIXME: this need a lot of work here, ntimes, xattr, etc.
 
         // Copy from lower real inode to upper real inode.
+        // TODO: use sendfile here.
 
-        let mut offset: usize = 0;
+        let mut _offset: usize = 0;
         let size = 4 * 1024 * 1024;
 
         let ret = lower_layer
-            .read(ctx, lower_inode, lower_handle, offset as u64, size)
+            .read(ctx, lower_inode, lower_handle, _offset as u64, size)
             .await?;
 
-        offset += ret.data.len();
+        _offset += ret.data.len();
 
         // close handles
         lower_layer
             .release(ctx, lower_inode, lower_handle, 0, 0, true)
             .await?;
 
-        offset = 0;
+        _offset = 0;
         let u_handle = *upper_handle.lock().await;
         while let Some(ref ri) = upper_real_inode.lock().await.take() {
             let ret = ri
                 .layer
-                .write(ctx, ri.inode, u_handle, offset as u64, &ret.data, 0, 0)
+                .write(ctx, ri.inode, u_handle, _offset as u64, &ret.data, 0, 0)
                 .await?;
             if ret.written == 0 {
                 break;
             }
 
-            offset += ret.written as usize;
+            _offset += ret.written as usize;
         }
 
         if let Some(ri) = upper_real_inode.lock().await.take() {
@@ -1983,6 +2082,19 @@ impl OverlayFs {
         Ok(Arc::clone(&node))
     }
 
+    /// Copies the specified node to the upper layer of the filesystem
+    ///
+    /// Performs different operations based on the node type:
+    /// - **Directory**: Creates a corresponding directory in the upper layer
+    /// - **Symbolic link**: Recursively copies to the upper layer
+    /// - **Regular file**: Copies file content to the upper layer
+    ///
+    /// # Parameters
+    /// * `ctx`: FUSE request context
+    /// * `node`: Reference to the node to be copied
+    ///
+    /// # Returns
+    /// Returns a reference to the upper-layer node on success, or an error on failure
     async fn copy_node_up(
         &self,
         ctx: Request,
@@ -1993,19 +2105,72 @@ impl OverlayFs {
         }
 
         let st = node.stat64(ctx).await?;
-        // For directory
-        if utils::is_dir(&st.attr.kind) {
-            node.create_upper_dir(ctx, None).await?;
-            return Ok(Arc::clone(&node));
+        match st.attr.kind {
+            FileType::Directory => {
+                node.create_upper_dir(ctx, None).await?;
+                Ok(node)
+            }
+            FileType::Symlink => {
+                // For symlink.
+                self.copy_symlink_up(ctx, node).await
+            }
+            FileType::RegularFile => {
+                // For regular file.
+                self.copy_regfile_up(ctx, node).await
+            }
+            _ => {
+                // For other file types. return error.
+                Err(Error::from_raw_os_error(libc::EINVAL))
+            }
+        }
+    }
+
+    /// recursively copy directory and all its contents to upper layer
+    async fn copy_directory_up(
+        &self,
+        ctx: Request,
+        node: Arc<OverlayInode>,
+    ) -> Result<Arc<OverlayInode>> {
+        // Ensure the directory itself is copied up first
+        self.copy_node_up(ctx, node.clone()).await?;
+
+        // load directory to cache
+        self.load_directory(ctx, &node).await?;
+
+        // go through all children
+        let children = node.childrens.lock().await.clone();
+        for (_name, child) in children.iter() {
+            println!("{}", _name);
+            if child.name == "." || child.name == ".." {
+                continue;
+            }
+            // jump over whiteout
+            if child.whiteout.load().await {
+                continue;
+            }
+            let st = child.stat64(ctx).await?;
+            if !child.in_upper_layer().await {
+                match st.attr.kind {
+                    FileType::Directory => {
+                        // recursively copy subdirectory
+                        Box::pin(self.copy_directory_up(ctx, child.clone())).await?;
+                    }
+                    FileType::Symlink | FileType::RegularFile => {
+                        // copy node up symlink or regular file
+                        Box::pin(self.copy_node_up(ctx, child.clone())).await?;
+                    }
+                    _ => {
+                        // other file types are ignored
+                    }
+                }
+            } else if utils::is_dir(&st.attr.kind) {
+                // If it is already in the upper layer, but the directory is not loaded,
+                // ensure that its contents are also copied up recursively.
+                Box::pin(self.copy_directory_up(ctx, child.clone())).await?;
+            }
         }
 
-        // For symlink.
-        if st.attr.kind == FileType::Symlink {
-            return self.copy_symlink_up(ctx, Arc::clone(&node)).await;
-        }
-
-        // For regular file.
-        self.copy_regfile_up(ctx, Arc::clone(&node)).await
+        Ok(node)
     }
 
     async fn do_rm(&self, ctx: Request, parent: u64, name: &OsStr, dir: bool) -> Result<()> {
@@ -2042,7 +2207,7 @@ impl OverlayFs {
             trace!("whiteouts deleted!\n");
         }
 
-        let mut need_whiteout = Arc::new(Mutex::new(true));
+        let need_whiteout = Arc::new(Mutex::new(true));
         let pnode = self.copy_node_up(ctx, Arc::clone(&pnode)).await?;
 
         if node.upper_layer_only().await {

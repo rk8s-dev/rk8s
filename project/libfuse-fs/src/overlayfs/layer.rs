@@ -224,6 +224,71 @@ mod test {
             panic!("{:?}", res);
         }
         let _ = fs.destroy(Request::default()).await;
-        // Add your test assertions and logic here.
+    }
+
+    #[tokio::test]
+    async fn test_is_opaque_on_non_directory() {
+        let temp_dir = "/tmp/test_opaque_non_dir/t2";
+        let rootdir = PathBuf::from(temp_dir);
+        std::fs::create_dir_all(&rootdir).unwrap();
+        let fs = new_passthroughfs_layer(rootdir.to_str().unwrap())
+            .await
+            .unwrap();
+        let _ = fs.init(Request::default()).await;
+
+        // Create a file
+        let file_name = OsStr::new("not_a_dir");
+        let _ = fs
+            .create(Request::default(), 1, file_name, 0o644, 0)
+            .await
+            .unwrap();
+
+        // Lookup to get the inode of the file
+        let entry = fs.lookup(Request::default(), 1, file_name).await.unwrap();
+        let file_inode = entry.attr.ino;
+
+        // is_opaque should return ENOTDIR error
+        let res = fs.is_opaque(Request::default(), file_inode).await;
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        let ioerr: std::io::Error = err.into();
+        assert_eq!(ioerr.raw_os_error(), Some(libc::ENOTDIR));
+
+        // Clean up
+        let _ = fs.unlink(Request::default(), 1, file_name).await;
+        let _ = fs.destroy(Request::default()).await;
+    }
+
+    #[tokio::test]
+    async fn test_set_opaque_on_non_directory() {
+        let temp_dir = "/tmp/test_set_opaque_non_dir/t2";
+        let rootdir = PathBuf::from(temp_dir);
+        std::fs::create_dir_all(&rootdir).unwrap();
+        let fs = new_passthroughfs_layer(rootdir.to_str().unwrap())
+            .await
+            .unwrap();
+        let _ = fs.init(Request::default()).await;
+
+        // Create a file
+        let file_name = OsStr::new("not_a_dir2");
+        let _ = fs
+            .create(Request::default(), 1, file_name, 0o644, 0)
+            .await
+            .unwrap();
+
+        // Lookup to get the inode of the file
+        let entry = fs.lookup(Request::default(), 1, file_name).await.unwrap();
+        let file_inode = entry.attr.ino;
+
+        // set_opaque should return ENOTDIR error
+        let res = fs.set_opaque(Request::default(), file_inode).await;
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        let ioerr: std::io::Error = err.into();
+        assert_eq!(ioerr.raw_os_error(), Some(libc::ENOTDIR));
+
+        // Clean up
+        let _ = fs.unlink(Request::default(), 1, file_name).await;
+        let _ = fs.destroy(Request::default()).await;
     }
 }

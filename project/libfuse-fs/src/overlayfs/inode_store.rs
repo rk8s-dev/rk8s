@@ -22,7 +22,7 @@ pub struct InodeStore {
     next_inode: u64,
     inode_limit: u64,
 }
-#[allow(unused)]
+
 impl InodeStore {
     pub(crate) fn new() -> Self {
         Self {
@@ -119,7 +119,7 @@ impl InodeStore {
     #[allow(dead_code)]
     pub(crate) async fn debug_print_all_inodes(&self) {
         // Convert the HashMap to Vector<(inode, pathname)>
-        let mut all_inodes_f = self
+        let all_inodes_f = self
             .inodes
             .iter()
             .map(|(inode, ovi)| {
@@ -133,7 +133,7 @@ impl InodeStore {
         all_inodes.sort_by(|a, b| a.0.cmp(b.0));
         trace!("all active inodes: {:?}", all_inodes);
 
-        let mut to_delete = self
+        let to_delete = self
             .deleted
             .iter()
             .map(|(inode, ovi)| async move { (inode, ovi.path.clone(), ovi.lookups.load().await) })
