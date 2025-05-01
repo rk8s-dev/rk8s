@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::{collections::HashSet, path::Path, sync::Arc, time::Duration};
-use tokio::fs::File;
+use tokio::fs::{File, read_dir};
 use tokio::io::AsyncReadExt;
 use tracing::{error, warn};
 
@@ -116,13 +116,16 @@ async fn stop_removed_pods(state: Arc<State>, pods: &Vec<PodTask>) -> Result<(),
 
 /// Get pods from static pods config directory.
 async fn read_pods_from_dir<P: AsRef<Path>>(path: P) -> Result<Vec<PodTask>, anyhow::Error> {
-    let entries = std::fs::read_dir(path)
+    let mut entries = read_dir(path)
+        .await
         .map_err(|e| anyhow!("Failed to read default static pods dir: {e}"))?;
     let mut res = Vec::new();
-    for entry in entries {
-        let file_path = entry
-            .map_err(|e| anyhow!("Failed to read default static pods dir entries: {e}"))?
-            .path();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| anyhow!("Failed to read default static pods dir entries: {e}"))?
+    {
+        let file_path = entry.path();
         let mut content = String::new();
         let mut file = File::open(&file_path)
             .await
