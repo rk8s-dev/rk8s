@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use rkl::cli_commands;
+use rkl::{cli_commands, daemon};
 
 #[derive(Parser)]
 #[command(name = "rkl")]
@@ -38,9 +38,13 @@ enum Commands {
         pod_name: String,
     },
     Exec(Box<rkl::commands::exec_cli::Exec>),
+    // Run as a daemon process.
+    // For convenient, I won't remove cli part now.
+    Daemon,
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
     match cli.command {
@@ -53,5 +57,6 @@ fn main() -> Result<(), anyhow::Error> {
             let exit_code = cli_commands::exec_pod(*exec)?;
             std::process::exit(exit_code);
         }
+        Commands::Daemon => daemon::main(),
     }
 }

@@ -28,7 +28,7 @@ pub struct TypeMeta {
     pub kind: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ObjectMeta {
     pub name: String,
     #[serde(default = "default_namespace")]
@@ -44,7 +44,7 @@ pub fn default_namespace() -> String {
 }
 
 // simulate Kubernetes PodSpec
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PodSpec {
     #[serde(default)]
     pub containers: Vec<ContainerSpec>,
@@ -70,7 +70,7 @@ pub struct Resource {
     pub memory: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ContainerSpec {
     pub name: String,
     pub image: String,
@@ -81,7 +81,7 @@ pub struct ContainerSpec {
     pub resources: Option<ContainerRes>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Port {
     #[serde(rename = "containerPort")]
     pub container_port: i32,
@@ -104,7 +104,7 @@ pub struct TaskRunner {
 }
 
 //some information from file.yaml
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PodTask {
     #[serde(rename = "apiVersion")]
     pub api_version: String,
@@ -115,14 +115,7 @@ pub struct PodTask {
 }
 
 impl TaskRunner {
-    //get information from a file  record in Podtask
-    pub fn from_file(path: &str) -> Result<Self> {
-        let mut file = File::open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        let mut task: PodTask = serde_yaml::from_str(&contents)?;
-
+    pub fn from_task(mut task: PodTask) -> Result<Self> {
         let pod_name = task.metadata.name.clone();
 
         for container in &mut task.spec.containers {
@@ -135,6 +128,15 @@ impl TaskRunner {
             pause_pid: None,
             sandbox_config: None,
         })
+    }
+
+    //get information from a file  record in Podtask
+    pub fn from_file(path: &str) -> Result<Self> {
+        let mut file = File::open(path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        let task: PodTask = serde_yaml::from_str(&contents)?;
+        Self::from_task(task)
     }
 
     //get PodSandboxConfig

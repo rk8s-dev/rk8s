@@ -34,6 +34,7 @@ http-body = "0.4.5"
 hyper = "0.14.27"
 rust-cni = "0.1.2"
 serial_test = "3.2.0"
+futures = "0.3.31"
 
 [dev-dependencies]
 tempfile = "3"

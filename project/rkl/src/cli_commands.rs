@@ -81,8 +81,7 @@ impl PodInfo {
     }
 }
 
-pub fn run_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
-    let mut task_runner = TaskRunner::from_file(pod_yaml)?;
+pub fn run_pod_from_taskrunner(mut task_runner: TaskRunner) -> Result<(), anyhow::Error> {
     let pod_name = task_runner.task.metadata.name.clone();
     let pod_sandbox_id = task_runner.run()?;
     println!("PodSandbox ID: {}", pod_sandbox_id);
@@ -104,6 +103,11 @@ pub fn run_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
 
     println!("Pod {} created and started successfully", pod_name);
     Ok(())
+}
+
+pub fn run_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
+    let task_runner = TaskRunner::from_file(pod_yaml)?;
+    run_pod_from_taskrunner(task_runner)
 }
 
 pub fn create_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
