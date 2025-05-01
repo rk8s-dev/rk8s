@@ -71,7 +71,7 @@ impl SyncLoop {
     /// - The `handler` should have the following function signature:
     ///     `async fn nothing_handler(_state: Arc<State>, _data: Box<()>, _: WithEvent<SomeEvent>);`
     ///     , where `WithEvent<SomeEvent>` is used to mark the event corresponding to the handler.
-    /// - The corresponding event must implement `Event<T>`, 
+    /// - The corresponding event must implement `Event<T>`,
     ///     where `T` is the type of data to be passed to the Event Handler when the event occurs.
     ///
     /// # Example
