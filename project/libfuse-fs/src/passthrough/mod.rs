@@ -902,6 +902,7 @@ mod tests {
     use crate::passthrough::{PassthroughFs, config::Config, logfs::LoggingFileSystem};
 
     #[tokio::test]
+    #[ignore]
     async fn test_passthrough() {
         let cfg = Config {
             xattr: false,

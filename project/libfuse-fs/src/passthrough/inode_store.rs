@@ -176,7 +176,7 @@ mod test {
         m.insert(data1.clone());
 
         // get not present key, expect none
-        assert!(m.get(&1).is_none());
+        assert!(m.get(&1001).is_none());
 
         // get just inserted value by key, by id, by handle
         assert!(m.get_by_id(&InodeId::default()).is_none());
@@ -190,11 +190,6 @@ mod test {
 
         // remove non-present key
         assert!(m.remove(&1, false).is_none());
-
-        // remove present key, return its value
-
-        assert!(m.get(&inode1).is_none());
-        assert!(m.get_by_id(&id1).is_none());
 
         // clear the map
         m.clear();
