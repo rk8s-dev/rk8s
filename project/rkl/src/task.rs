@@ -16,10 +16,10 @@ use libcontainer::oci_spec::runtime::{
 use liboci_cli::{Create, Delete, Kill, Start};
 use rust_cni::cni::Libcni;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::fs;
 // simulate Kubernetes Pod
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TypeMeta {
