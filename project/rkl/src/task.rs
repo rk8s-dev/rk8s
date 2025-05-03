@@ -255,7 +255,21 @@ impl TaskRunner {
             .pid
             .ok_or_else(|| anyhow!("PID not found for container {}", sandbox_id))?;
 
-        Self::setup_pod_network(pid_i32)?;
+        Self::setup_pod_network(pid_i32).map_err(|e| {
+            let rollback_res = delete::delete(
+                Delete {
+                    container_id: sandbox_id.clone(),
+                    force: true,
+                },
+                root_path.clone(),
+            );
+            if let Err(err_rollback) = rollback_res {
+                anyhow!("{e}; and failed to rollback: {err_rollback}")
+            } else {
+                e
+            }
+        })?;
+
         self.pause_pid = Some(pid_i32);
 
         let response = RunPodSandboxResponse {
