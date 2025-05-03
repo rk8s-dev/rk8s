@@ -33,7 +33,6 @@ pub async fn handler(
     _data: Box<()>,
     _event: WithEvent<CheckStaticPodsPeriodically>,
 ) {
-    println!("checking...");
     // now, it only moniter the default directory.
     let static_pods = read_pods_from_dir("/etc/rk8s/manifests").await;
     if let Err(e) = static_pods {

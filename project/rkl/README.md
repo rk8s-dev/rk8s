@@ -104,7 +104,7 @@ example: ./rkl exec pod1 container1 -e PATH=/usr/local/sbin:/usr/local/bin:/usr/
 
 进入守护模式后，程序会作为一个守护进程运行，监测 `/etc/rk8s/manifests` 下面的 yaml pod 配置文件，采取措施尝试让 pod 状态与其描述的一致。
 
-日志输出在 `/etc/rk8s/log_{timestamp}.out`
+日志输出在 `/var/log/rk8s/log_{timestamp}.out`
 
 ```
 ./rkl daemon
