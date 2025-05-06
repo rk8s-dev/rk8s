@@ -27,7 +27,7 @@ type Handler = Arc<
         + Sync,
 >;
 /// A function generate a future for a event to wait in sync loop.
-type Listener = Box<dyn Fn() -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>>;
+type Listener = Box<dyn Fn() -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>> + Send>;
 /// Generated future of a event, listening in the sync loop.
 type ListeningFuture = Pin<Box<dyn Future<Output = (TypeId, Box<dyn Any + Send>)> + Send>>;
 

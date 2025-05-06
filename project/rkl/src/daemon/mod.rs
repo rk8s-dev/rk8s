@@ -1,6 +1,6 @@
-mod sync_loop;
+pub mod sync_loop;
 use sync_loop::SyncLoop;
-mod static_pods;
+pub mod static_pods;
 
 #[tokio::main]
 pub async fn main() -> Result<(), anyhow::Error> {
