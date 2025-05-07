@@ -4,7 +4,7 @@ pub mod static_pods;
 
 #[tokio::main]
 pub async fn main() -> Result<(), anyhow::Error> {
-    let sync_loop = SyncLoop::new().register_event(static_pods::handler);
+    let sync_loop = SyncLoop::default().register_event(static_pods::handler);
     sync_loop.run().await;
     Ok(())
 }

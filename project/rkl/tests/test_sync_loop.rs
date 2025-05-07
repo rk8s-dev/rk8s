@@ -1,6 +1,11 @@
-use std::{fs::File, io::Write, path::{Path, PathBuf}, time::Duration};
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-use rkl::daemon::{sync_loop::SyncLoop, static_pods};
+use rkl::daemon::{static_pods, sync_loop::SyncLoop};
 mod common;
 use common::*;
 use serial_test::serial;
@@ -8,17 +13,21 @@ use serial_test::serial;
 #[tokio::test]
 #[serial]
 async fn test_static_pod() {
-    let sync_loop = SyncLoop::new().register_event(static_pods::handler);
+    let sync_loop = SyncLoop::default().register_event(static_pods::handler);
     let handle = tokio::spawn(sync_loop.run());
-    let yes_pod = get_pod_config(vec!["yes", ">", "/dev/null"], "yes-pod");
+    let yes_pod = get_pod_config(vec!["sh", "-c", "yes > /dev/null"], "yes-pod");
     let zero_null_pod = get_pod_config(vec!["dd", "if=/dev/zero", "of=/dev/null"], "zero-null-pod");
     let manifest_path = PathBuf::from("/etc/rk8s/manifests");
     assert!(manifest_path.exists());
 
     let mut pod_file = File::create(manifest_path.join("yes_pod.yaml")).unwrap();
-    pod_file.write_all(serde_yaml::to_string(&yes_pod).unwrap().as_bytes()).unwrap();
+    pod_file
+        .write_all(serde_yaml::to_string(&yes_pod).unwrap().as_bytes())
+        .unwrap();
     let mut pod_file = File::create(manifest_path.join("zero-null-pod.yaml")).unwrap();
-    pod_file.write_all(serde_yaml::to_string(&zero_null_pod).unwrap().as_bytes()).unwrap();
+    pod_file
+        .write_all(serde_yaml::to_string(&zero_null_pod).unwrap().as_bytes())
+        .unwrap();
 
     tokio::time::sleep(Duration::from_secs(8)).await;
 
@@ -47,14 +56,16 @@ async fn test_static_pod() {
 #[tokio::test]
 #[serial]
 async fn test_skip_invalid_pod() {
-    let sync_loop = SyncLoop::new().register_event(static_pods::handler);
+    let sync_loop = SyncLoop::default().register_event(static_pods::handler);
     let handle = tokio::spawn(sync_loop.run());
-    let yes_pod = get_pod_config(vec!["yes", ">", "/dev/null"], "yes-pod");
+    let yes_pod = get_pod_config(vec!["sh", "-c", "yes > /dev/null"], "yes-pod");
     let manifest_path = PathBuf::from("/etc/rk8s/manifests");
     assert!(manifest_path.exists());
 
     let mut pod_file = File::create(manifest_path.join("yes_pod.yaml")).unwrap();
-    pod_file.write_all(serde_yaml::to_string(&yes_pod).unwrap().as_bytes()).unwrap();
+    pod_file
+        .write_all(serde_yaml::to_string(&yes_pod).unwrap().as_bytes())
+        .unwrap();
     let mut pod_file = File::create(manifest_path.join("wrong.yaml")).unwrap();
     pod_file.write_all("Wrong config file!".as_bytes()).unwrap();
 

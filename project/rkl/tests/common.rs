@@ -14,7 +14,7 @@ fn bundles_path(name: &str) -> String {
         .to_string()
 }
 
-pub fn get_pod_config<T, S>(args: Vec<S>, name: T) -> PodTask 
+pub fn get_pod_config<T, S>(args: Vec<S>, name: T) -> PodTask
 where
     T: Into<String>,
     S: Into<String>,

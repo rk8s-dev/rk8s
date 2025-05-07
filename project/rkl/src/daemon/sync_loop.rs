@@ -50,8 +50,8 @@ pub struct SyncLoop {
     event_listen_list: Vec<ListeningFuture>,
 }
 
-impl SyncLoop {
-    pub fn new() -> Self {
+impl Default for SyncLoop {
+    fn default() -> Self {
         SyncLoop {
             state: Arc::new(State::default()),
             event_handlers: HashMap::new(),
@@ -294,7 +294,7 @@ mod test {
 
     #[tokio::test]
     async fn test_register_event() {
-        let mut sync_loop = SyncLoop::new()
+        let mut sync_loop = SyncLoop::default()
             .register_event(tick_handler)
             .register_event(nothing_handler);
         assert_eq!(sync_loop.event_handlers.len(), 2);

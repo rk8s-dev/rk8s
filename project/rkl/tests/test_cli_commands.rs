@@ -1,15 +1,13 @@
 use std::{env, fs::File, io::Write, path::Path};
 mod common;
-use common::*;
 use anyhow::anyhow;
+use common::*;
 use rkl::{
     cli_commands,
     task::{ContainerRes, PodTask, Resource, TaskRunner},
 };
 use serde_json::Value;
 use serial_test::serial;
-
-
 
 #[test]
 #[serial]
@@ -96,7 +94,10 @@ fn delete(pod_name: &str) {
 #[test]
 #[serial]
 fn test_create_start_and_delete() {
-    let config = get_pod_config(vec!["sleep".to_string(), "100".to_string()], "simple-container-task");
+    let config = get_pod_config(
+        vec!["sleep".to_string(), "100".to_string()],
+        "simple-container-task",
+    );
     try_create(config, false);
 
     let container_state =
@@ -134,7 +135,10 @@ fn test_create_start_and_delete() {
 #[test]
 #[serial]
 fn test_run_pod() {
-    let config = get_pod_config(vec!["sleep".to_string(), "100".to_string()], "simple-container-task");
+    let config = get_pod_config(
+        vec!["sleep".to_string(), "100".to_string()],
+        "simple-container-task",
+    );
     try_create(config, true);
     let container_state =
         std::fs::read_to_string("/run/youki/simple-container-task-main-container1/state.json")
@@ -152,7 +156,10 @@ fn test_run_pod() {
 #[test]
 #[serial]
 fn test_cpu_and_memory_limit() {
-    let mut config = get_pod_config(vec!["sleep".to_string(), "100".to_string()], "simple-container-task");
+    let mut config = get_pod_config(
+        vec!["sleep".to_string(), "100".to_string()],
+        "simple-container-task",
+    );
     config.spec.containers[0].resources = Some(ContainerRes {
         limits: Some(Resource {
             cpu: Some("500m".to_string()),
