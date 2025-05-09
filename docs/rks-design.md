@@ -2,7 +2,7 @@
 
 ## 集群模式
 
-![集群模式图示](images/image1.png)
+![集群模式图示](/docs/image/image1.png)
 
 
 ### 组件功能
@@ -69,7 +69,7 @@
 
 
 ## 本地模式
-![本地模式图示](images/image2.png)
+![本地模式图示](/docs/image/image2.png)
 
 -   无需 Xline、RKS 等中心组件
     
