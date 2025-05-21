@@ -21,21 +21,21 @@ async fn handle_container_request(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let path = rootpath::determine(None);
     match path {
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "msg": e.to_string() })),
-            );
-        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "msg": e.to_string() })),
+        ),
         Ok(p) => {
             let container = load_container(p, &container_id);
             match container {
-                Ok(c) => {
-                    return (StatusCode::OK, Json(serde_json::to_value(&c.state).unwrap()));
-                }
-                Err(e) => {
-                    return (StatusCode::BAD_REQUEST, Json(json!({ "msg": e.to_string() })));
-                }
+                Ok(c) => (
+                    StatusCode::OK,
+                    Json(serde_json::to_value(&c.state).unwrap()),
+                ),
+                Err(e) => (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "msg": e.to_string() })),
+                ),
             }
         }
     }
