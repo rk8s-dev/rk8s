@@ -279,14 +279,10 @@ pub fn exec_pod(args: exec_cli::Exec) -> Result<i32> {
     Ok(exit_code)
 }
 
-pub fn start_daemon() -> Result<(), anyhow::Error> {
+pub fn set_daemonize() -> Result<(), anyhow::Error> {
     let log_path = PathBuf::from("/var/log/rk8s/");
-    let manifest_path = Path::new("/etc/rk8s/manifests");
     if !log_path.exists() {
         std::fs::create_dir(log_path)?;
-    }
-    if !manifest_path.exists() {
-        std::fs::create_dir(manifest_path)?;
     }
 
     let time_stamp = SystemTime::now()
@@ -298,5 +294,15 @@ pub fn start_daemon() -> Result<(), anyhow::Error> {
     let pid = format!("/tmp/rkl_{}.pid", time_stamp);
     let daemonize = Daemonize::new().pid_file(&pid).stdout(out).stderr(err);
     daemonize.start()?;
+    Ok(())
+}
+
+pub fn start_daemon() -> Result<(), anyhow::Error> {
+    let manifest_path = Path::new("/etc/rk8s/manifests");
+    if !manifest_path.exists() {
+        std::fs::create_dir(manifest_path)?;
+    }
+    #[cfg(not(debug_assertions))]
+    set_daemonize()?;
     daemon::main()
 }
