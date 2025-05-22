@@ -13,7 +13,7 @@ use std::{
         fd::{AsRawFd, FromRawFd, RawFd},
         unix::ffi::OsStringExt,
     },
-    sync::Arc,
+    sync::{atomic::Ordering, Arc},
     time::Duration,
 };
 
@@ -64,7 +64,6 @@ bitflags! {
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn open_inode(&self, inode: Inode, flags: i32) -> io::Result<File> {
         let data = self.inode_map.get(inode).await?;
-        // data.refcount.fetch_add(1).await;
         if !is_safe_inode(data.mode) {
             Err(ebadf())
         } else {
@@ -303,7 +302,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let file = self.open_inode(inode, flags as i32).await?;
 
         let data = HandleData::new(inode, file, flags);
-        let handle = self.next_handle.fetch_add(1).await;
+        let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
         self.handle_map.insert(handle, data).await;
 
         let mut opts = OpenOptions::empty();
@@ -345,7 +344,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         // kernel sends 0 as handle in case of no_open, and it depends on fuse server to handle
         // this case correctly.
-        if !self.no_open.load().await && handle.is_some() {
+        if !self.no_open.load(Ordering::Relaxed) && handle.is_some() {
             // Safe as we just checked handle
             let hd = self.handle_map.get(handle.unwrap(), inode).await?;
             st = stat_fd(hd.get_file(), None);
@@ -384,7 +383,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         inode: Inode,
         flags: libc::c_int,
     ) -> io::Result<Arc<HandleData>> {
-        let no_open = self.no_opendir.load().await;
+        let no_open = self.no_opendir.load(Ordering::Relaxed);
         if !no_open {
             self.handle_map.get(handle, inode).await
         } else {
@@ -399,7 +398,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         inode: Inode,
         flags: libc::c_int,
     ) -> io::Result<Arc<HandleData>> {
-        let no_open = self.no_open.load().await;
+        let no_open = self.no_open.load(Ordering::Relaxed);
         if !no_open {
             self.handle_map.get(handle, inode).await
         } else {
@@ -500,7 +499,7 @@ impl Filesystem for PassthroughFs {
         }
 
         let file = inode_data.get_file()?;
-        let data = if self.no_open.load().await {
+        let data = if self.no_open.load(Ordering::Relaxed) {
             let pathname = CString::new(format!("{}", file.as_raw_fd()))
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             Data::ProcPath(pathname)
@@ -516,7 +515,7 @@ impl Filesystem for PassthroughFs {
             }
         };
 
-        if set_attr.size.is_some() && self.seal_size.load().await {
+        if set_attr.size.is_some() && self.seal_size.load(Ordering::Relaxed){
             return Err(io::Error::from_raw_os_error(libc::EPERM).into());
         }
 
@@ -620,7 +619,7 @@ impl Filesystem for PassthroughFs {
         let empty = unsafe { CStr::from_bytes_with_nul_unchecked(EMPTY_CSTR) };
         let mut buf = Vec::<u8>::with_capacity(libc::PATH_MAX as usize);
         let data = self.inode_map.get(inode).await?;
-        data.refcount.fetch_add(1).await;
+        
         let file = data.get_file()?;
 
         // Safe because this will only modify the contents of `buf` and we check the return value.
@@ -850,7 +849,7 @@ impl Filesystem for PassthroughFs {
     /// [fuse_common.h](https://libfuse.github.io/doxygen/include_2fuse__common_8h_source.html) for
     /// more details.
     async fn open(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
-        if self.no_open.load().await {
+        if self.no_open.load(Ordering::Relaxed) {
             info!("fuse: open is not supported.");
             Err(enosys().into())
         } else {
@@ -992,7 +991,7 @@ impl Filesystem for PassthroughFs {
         _lock_owner: u64,
         _flush: bool,
     ) -> Result<()> {
-        if self.no_open.load().await {
+        if self.no_open.load(Ordering::Relaxed) {
             Err(enosys().into())
         } else {
             self.do_release(inode, fh).await.map_err(|e| e.into())
@@ -1179,7 +1178,7 @@ impl Filesystem for PassthroughFs {
     /// errors. If the filesystem supports file locking operations ([`setlk`][Filesystem::setlk],
     /// [`getlk`][Filesystem::getlk]) it should remove all locks belonging to `lock_owner`.
     async fn flush(&self, _req: Request, inode: Inode, fh: u64, _lock_owner: u64) -> Result<()> {
-        if self.no_open.load().await {
+        if self.no_open.load(Ordering::Relaxed) {
             return Err(enosys().into());
         }
 
@@ -1210,7 +1209,7 @@ impl Filesystem for PassthroughFs {
     /// sets [`MountOptions::no_open_dir_support`][crate::MountOptions::no_open_dir_support] and
     /// if the kernel supports `FUSE_NO_OPENDIR_SUPPORT`.
     async fn opendir(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
-        if self.no_opendir.load().await {
+        if self.no_opendir.load(Ordering::Relaxed) {
             info!("fuse: opendir is not supported.");
             Err(enosys().into())
         } else {
@@ -1235,7 +1234,7 @@ impl Filesystem for PassthroughFs {
         fh: u64,
         offset: i64,
     ) -> Result<ReplyDirectory<Self::DirEntryStream<'_>>> {
-        if self.no_readdir.load().await {
+        if self.no_readdir.load(Ordering::Relaxed) {
             return Err(enosys().into());
         }
         let mut entry_list = Vec::new();
@@ -1256,7 +1255,7 @@ impl Filesystem for PassthroughFs {
         offset: u64,
         _lock_owner: u64,
     ) -> Result<ReplyDirectoryPlus<Self::DirEntryPlusStream<'_>>> {
-        if self.no_readdir.load().await {
+        if self.no_readdir.load(Ordering::Relaxed) {
             return Err(enosys().into());
         }
         let mut entry_list = Vec::new();
@@ -1271,7 +1270,7 @@ impl Filesystem for PassthroughFs {
     /// [`opendir`][Filesystem::opendir] method, or will be undefined if the
     /// [`opendir`][Filesystem::opendir] method didn't set any value.
     async fn releasedir(&self, _req: Request, inode: Inode, fh: u64, _flags: u32) -> Result<()> {
-        if self.no_opendir.load().await {
+        if self.no_opendir.load(Ordering::Relaxed) {
             info!("fuse: releasedir is not supported.");
             Err(io::Error::from_raw_os_error(libc::ENOSYS).into())
         } else {
@@ -1391,8 +1390,8 @@ impl Filesystem for PassthroughFs {
             }
         };
 
-        let ret_handle = if !self.no_open.load().await {
-            let handle = self.next_handle.fetch_add(1).await;
+        let ret_handle = if !self.no_open.load(Ordering::Relaxed) {
+            let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
             let data = HandleData::new(entry.attr.ino, file, flags);
             self.handle_map.insert(handle, data).await;
             handle
