@@ -1,0 +1,17 @@
+repos:
+-   repo: local
+    hooks:
+    -   id: rust-linting
+        name: Rust linting
+        description: Run cargo fmt on files included in the commit.
+        entry: cargo fmt --manifest-path project/Cargo.toml --all --check --
+        pass_filenames: false
+        types: [file, rust]
+        language: system
+    -   id: rust-clippy
+        name: Rust clippy
+        description: Run cargo clippy on files included in the commit.
+        entry: cargo clippy --manifest-path project/Cargo.toml --workspace -- -D warnings
+        pass_filenames: false
+        types: [file, rust]
+        language: system
