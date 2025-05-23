@@ -484,6 +484,17 @@ impl Drop for RealInode {
     }
 }
 
+// impl AsyncDrop for RealInode {
+//     async fn drop(self: std::pin::Pin<&mut Self>) {
+//         // Release refcount of inode in layer.
+//         let layer = self.layer.clone();
+//         let inode = self.inode;
+//         debug!("ASYNCDrop forget inode {} by 1 for backend inode in layer ", inode);
+//         let ctx = Request::default();
+//         layer.forget(ctx, inode, 1).await;
+//     }
+// }
+
 impl OverlayInode {
     pub fn new() -> Self {
         OverlayInode::default()
@@ -657,6 +668,9 @@ impl OverlayInode {
 
             // Merge entries from one layer to all_layer_inodes.
             for (name, inode) in entries {
+                if name == "." || name == ".." {
+                    continue;
+                }
                 match all_layer_inodes.get_mut(&name) {
                     Some(v) => {
                         // Append additional RealInode to the end of vector.

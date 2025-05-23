@@ -710,7 +710,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 Some(data) => {
                     // An inode was added concurrently while we did not hold a lock on
                     // `self.inodes_map`, so we use that instead. `handle` will be dropped.
-                    data.refcount.fetch_add(1, Ordering::Relaxed);
+                    let vl = data.refcount.fetch_add(1, Ordering::Relaxed);
+                    println!("VLOOKUP NAME:{} ADD: {} -> {}", &name.to_str().unwrap(),id.ino, vl+1);
                     data.inode
                 }
                 None => {
@@ -727,6 +728,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                         .into());
                     }
                     drop(inodes);
+                    println!("VLOOKUP NAME(new):{} ADD: {} -> {}", &name.to_str().unwrap(),inode, 1);
                     self.inode_map
                         .inodes
                         .write()
@@ -770,7 +772,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         })
     }
 
-    async fn forget_one(&self, inodes: &mut InodeStore, inode: Inode, count: u64) {
+    fn forget_one(&self, inodes: &mut InodeStore, inode: Inode, count: u64) {
+        
         // ROOT_ID should not be forgotten, or we're not able to access to files any more.
         if inode == ROOT_ID {
             return;
@@ -787,12 +790,13 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 // Saturating sub because it doesn't make sense for a refcount to go below zero and
                 // we don't want misbehaving clients to cause integer overflow.
                 let new = curr.saturating_sub(count);
-
+                
                 // Synchronizes with the acquire load in `do_lookup`.
                 if data
                     .refcount
                     .compare_exchange(curr, new, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok() {
+                    println!("FORGET VLOOPUP delete{}:inode {} -> new {}",count, inode, new);
                     if new == 0 {
                         // We just removed the last refcount for this inode.
                         // The allocated inode number should be kept in the map when use_host_ino

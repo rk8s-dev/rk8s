@@ -51,7 +51,6 @@ impl Filesystem for OverlayFs {
     /// look up a directory entry by name and get its attributes.
     async fn lookup(&self, req: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {
         let tmp = name.to_string_lossy().to_string();
-        println!("LOOKUP: parent: {}, name: {}\n", parent, tmp);
         let result = self.do_lookup(req, parent, tmp.as_str()).await;
         match result {
             Ok(e) => Ok(e),
@@ -868,7 +867,7 @@ mod tests {
             "/home/luxian/github/buck2-rust-third-party".to_string(),
         ];
         let upperdir =
-            "/home/luxian/github/build_test".to_string();
+            "/home/luxian/upper".to_string();
 
         // Create lower layers
         let mut lower_layers = Vec::new();
