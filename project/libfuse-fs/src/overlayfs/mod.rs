@@ -46,7 +46,6 @@ const INODE_ALLOC_BATCH: u64 = 0x1_0000_0000;
 // RealInode represents one inode object in specific layer.
 // Also, each RealInode maps to one Entry, which should be 'forgotten' after drop.
 // Important note: do not impl Clone trait for it or refcount will be messed up.
-#[derive(Clone)]
 pub(crate) struct RealInode {
     pub layer: Arc<PassthroughFs>,
     pub in_upper_layer: bool,
@@ -664,7 +663,7 @@ impl OverlayInode {
             }
 
             // Read all entries from one layer.
-            let entries = ri.readdir(ctx).await?;
+            let entries: HashMap<String, RealInode> = ri.readdir(ctx).await?;
 
             // Merge entries from one layer to all_layer_inodes.
             for (name, inode) in entries {
@@ -679,7 +678,7 @@ impl OverlayInode {
                     None => {
                         all_layer_inodes.insert(name, vec![inode]);
                     }
-                };
+                }
             }
 
             // if opaque, stop here
@@ -703,7 +702,7 @@ impl OverlayInode {
 
     // Create a new directory in upper layer for node, node must be directory.
     pub async fn create_upper_dir(
-        self: &Arc<Self>,
+        self: Arc<Self>,
         ctx: Request,
         mode_umask: Option<(u32, u32)>,
     ) -> Result<()> {
@@ -725,11 +724,11 @@ impl OverlayInode {
         };
 
         if !pnode.in_upper_layer().await {
-            Box::pin(pnode.create_upper_dir(ctx, None)).await?; // recursive call
+            Box::pin(pnode.clone().create_upper_dir(ctx, None)).await?; // recursive call
         }
         let child: Arc<Mutex<Option<RealInode>>> = Arc::new(Mutex::new(None));
         let _ = pnode
-            .handle_upper_inode_locked(&mut |parent_upper_inode: Option<RealInode>| async {
+            .handle_upper_inode_locked(&mut |parent_upper_inode: Option<&RealInode>| async {
                 match parent_upper_inode {
                     Some(parent_ri) => {
                         let ri = match mode_umask {
@@ -862,7 +861,7 @@ impl OverlayInode {
     /// such as creating, modifying, or deleting files/directories in the overlay filesystem's upper layer.
     pub async fn handle_upper_inode_locked<F, Fut>(&self, mut f: F) -> Result<bool>
     where
-        F: FnMut(Option<RealInode>) -> Fut,
+        F: FnMut(Option<&RealInode>) -> Fut,
         Fut: Future<Output = Result<bool>>,
     {
         let all_inodes = self.real_inodes.lock().await;
@@ -870,7 +869,7 @@ impl OverlayInode {
         match first {
             Some(v) => {
                 if v.in_upper_layer {
-                    f(Some(v.clone())).await
+                    f(Some(v)).await
                 } else {
                     f(None).await
                 }
@@ -1124,7 +1123,8 @@ impl OverlayFs {
             let arc_child = Arc::new(child);
             node_children.insert(name, arc_child.clone());
             // Record overlay inode in whole OverlayFs.
-            inode_store.insert_inode(ino, arc_child.clone());
+            inode_store.insert_inode(ino, arc_child);
+
         }
 
         node.loaded.store(true, Ordering::Relaxed);
@@ -1342,7 +1342,7 @@ impl OverlayFs {
     async fn do_mkdir(
         &self,
         ctx: Request,
-        parent_node: &Arc<OverlayInode>,
+        parent_node: Arc<OverlayInode>,
         name: &str,
         mode: u32,
         umask: u32,
@@ -1378,7 +1378,7 @@ impl OverlayFs {
         }
 
         // Copy parent node up if necessary.
-        let pnode = self.copy_node_up(ctx, Arc::clone(parent_node)).await?;
+        let pnode = self.copy_node_up(ctx, parent_node).await?;
 
         let path = format!("{}/{}", pnode.path, name);
         let path_ref = &path;
@@ -1943,7 +1943,7 @@ impl OverlayFs {
         let (self_layer, _, self_inode) = node.first_layer_inode().await;
 
         if !parent_node.in_upper_layer().await {
-            parent_node.create_upper_dir(ctx, None).await?;
+            parent_node.clone().create_upper_dir(ctx, None).await?;
         }
 
         // Read the linkname from lower layer.
@@ -1972,7 +1972,7 @@ impl OverlayFs {
             node.add_upper_inode(real_inode, true).await;
         }
 
-        Ok(Arc::clone(&node))
+        Ok(node)
     }
 
     // Copy regular file from lower layer to upper layer.
@@ -1996,7 +1996,7 @@ impl OverlayFs {
         let (lower_layer, _, lower_inode) = node.first_layer_inode().await;
 
         if !parent_node.in_upper_layer().await {
-            parent_node.create_upper_dir(ctx, None).await?;
+            parent_node.clone().create_upper_dir(ctx, None).await?;
         }
 
         // create the file in upper layer using information from lower layer
@@ -2077,7 +2077,7 @@ impl OverlayFs {
             node.add_upper_inode(ri, true).await;
         }
 
-        Ok(Arc::clone(&node))
+        Ok(node)
     }
 
     /// Copies the specified node to the upper layer of the filesystem
@@ -2105,7 +2105,7 @@ impl OverlayFs {
         let st = node.stat64(ctx).await?;
         match st.attr.kind {
             FileType::Directory => {
-                node.create_upper_dir(ctx, None).await?;
+                node.clone().create_upper_dir(ctx, None).await?;
                 Ok(node)
             }
             FileType::Symlink => {

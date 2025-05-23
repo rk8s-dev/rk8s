@@ -219,7 +219,7 @@ impl Filesystem for OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOENT).into());
         }
 
-        self.do_mkdir(req, &pnode, sname.as_str(), mode, umask)
+        self.do_mkdir(req, pnode, sname.as_str(), mode, umask)
             .await?;
         self.do_lookup(req, parent, sname.as_str())
             .await

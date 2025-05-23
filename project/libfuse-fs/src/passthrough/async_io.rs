@@ -278,8 +278,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 let name = osstr_to_cstr(&entry.name)?;
                 debug!("readdir:{}", name.to_str().unwrap());
                 let _entry = self.do_lookup(inode, &name).await?;
-                // let mut inodes = self.inode_map.inodes.write().await;
-                // self.forget_one(&mut inodes, _entry.attr.ino, 1).await;
+                let mut inodes = self.inode_map.inodes.write().await;
+                self.forget_one(&mut inodes, _entry.attr.ino, 1);
                 entry.inode = _entry.attr.ino;
 
                 entry_list.push(Ok(DirectoryEntryPlus {
@@ -465,9 +465,9 @@ impl Filesystem for PassthroughFs {
     /// discussion for this <https://github.com/bazil/fuse/issues/82#issuecomment-88126886>,
     /// <https://sourceforge.net/p/fuse/mailman/message/31995737/>
     async fn forget(&self, _req: Request, inode: Inode, nlookup: u64) {
-        // let mut inodes = self.inode_map.inodes.write().await;
-        // println!("forget  inode:{} ,vlookup:{}",inode,nlookup); 
-        // self.forget_one(&mut inodes, inode, nlookup)
+        let mut inodes = self.inode_map.inodes.write().await;
+        println!("PLAIN forget  inode:{} ,vlookup:{},req:{:?}",inode,nlookup,_req); 
+        self.forget_one(&mut inodes, inode, nlookup)
     }
 
     /// get file attributes. If `fh` is None, means `fh` is not set.
