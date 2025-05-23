@@ -766,9 +766,9 @@ impl Filesystem for OverlayFs {
     }
 
     /// forget more than one inode. This is a batch version [`forget`][Filesystem::forget]
-    async fn batch_forget(&self, _req: Request, inodes: &[Inode]) {
+    async fn batch_forget(&self, _req: Request, inodes: &[(Inode, u64)]) {
         for inode in inodes {
-            self.forget_one(*inode, 1).await;
+            self.forget_one(inode.0, inode.1).await;
         }
     }
 
@@ -865,10 +865,10 @@ mod tests {
         // Set up test environment
         let mountpoint = "/home/luxian/megatest/true_temp".to_string();
         let lowerdir = vec![
-            "/home/luxian/megadir/store/2bd95906a56f443e84acb10dfaf86717ceb481a0/lower".to_string(),
+            "/home/luxian/github/buck2-rust-third-party".to_string(),
         ];
         let upperdir =
-            "/home/luxian/megadir/store/2bd95906a56f443e84acb10dfaf86717ceb481a0/upper".to_string();
+            "/home/luxian/github/build_test".to_string();
 
         // Create lower layers
         let mut lower_layers = Vec::new();

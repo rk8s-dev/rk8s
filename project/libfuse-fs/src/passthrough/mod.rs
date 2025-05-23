@@ -710,7 +710,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 Some(data) => {
                     // An inode was added concurrently while we did not hold a lock on
                     // `self.inodes_map`, so we use that instead. `handle` will be dropped.
-                     data.refcount.fetch_add(1, Ordering::Relaxed);
+                    data.refcount.fetch_add(1, Ordering::Relaxed);
                     data.inode
                 }
                 None => {

@@ -221,7 +221,8 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
                 data.data.len()
             );
         }
-        self.log_result(&uuid, method, &result);
+        
+        //self.log_result(&uuid, method, &result);
         result
     }
 
@@ -565,14 +566,14 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         self.log_result(&uuid, method, &result);
         result
     }
-    async fn batch_forget(&self, req: Request, inodes: &[fuse3::Inode]) {
+    async fn batch_forget(&self, req: Request, inodes: &[(Inode,u64)]) {
         let uuid = Uuid::new_v4();
         let method = "batch_forget";
         let args = vec![(
             "inodes",
             inodes
                 .iter()
-                .map(|inode| inode.to_string())
+                .map(|inode| inode.0.to_string())
                 .collect::<Vec<_>>()
                 .join(", "),
         )];

@@ -1422,11 +1422,11 @@ impl Filesystem for PassthroughFs {
     }
 
     /// forget more than one inode. This is a batch version [`forget`][Filesystem::forget]
-    async fn batch_forget(&self, _req: Request, inodes: &[Inode]) {
+    async fn batch_forget(&self, _req: Request, inodes: &[(Inode, u64)]) {
         let mut inodes_w = self.inode_map.inodes.write().await;
 
         for i in inodes {
-            self.forget_one(&mut inodes_w, *i, 1).await;
+            self.forget_one(&mut inodes_w, i.0, i.1).await;
         }
     }
 

@@ -1131,18 +1131,16 @@ impl OverlayFs {
             }
         };
 
-        // FIXME: need atomic protection around lookups' load & store. @weizhang555
-        let mut lookups = v.lookups.load(Ordering::Relaxed);
-
-        if lookups < count {
-            lookups = 0;
-        } else {
-            lookups -= count;
-        }
-        v.lookups.store(lookups, Ordering::Relaxed);
-
-        // TODO: use compare_exchange.
-        //v.lookups.compare_exchange(old, new);
+        // Use fetch_update to atomically update lookups in a loop until it succeeds
+        let lookups = v.lookups.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            // If count is larger than current lookups, return 0
+            // Otherwise subtract count from current lookups
+            if current < count {
+                Some(0)
+            } else {
+                Some(current - count) 
+            }
+        }).expect("fetch_update failed");
 
         if lookups == 0 {
             debug!("inode is forgotten: {}, name {}", inode, v.name);
