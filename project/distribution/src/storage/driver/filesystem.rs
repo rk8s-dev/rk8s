@@ -50,7 +50,7 @@ impl Storage for FilesystemStorage {
         async {
             // Convert the stream into an `AsyncRead`.
             let body_with_io_error =
-                stream.map_err(|err| io::Error::new(io::ErrorKind::Other, err));
+                stream.map_err(io::Error::other);
             let body_reader = StreamReader::new(body_with_io_error);
             futures::pin_mut!(body_reader);
 
@@ -76,7 +76,7 @@ impl Storage for FilesystemStorage {
             Ok::<_, io::Error>(())
         }
         .await
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        .map_err(io::Error::other)
     }
 
     async fn write_by_uuid(
@@ -88,7 +88,7 @@ impl Storage for FilesystemStorage {
         async {
             // Convert the stream into an `AsyncRead`.
             let body_with_io_error =
-                stream.map_err(|err| io::Error::new(io::ErrorKind::Other, err));
+                stream.map_err(io::Error::other);
             let body_reader = StreamReader::new(body_with_io_error);
             futures::pin_mut!(body_reader);
 
@@ -114,7 +114,7 @@ impl Storage for FilesystemStorage {
             Ok::<_, io::Error>(())
         }
         .await
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        .map_err(io::Error::other)
     }
 
     async fn move_to_digest(&self, session_id: &str, digest: &Digest) -> io::Result<()> {
