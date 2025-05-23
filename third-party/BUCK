@@ -5337,6 +5337,12 @@ cargo.rust_library(
     ],
 )
 
+alias(
+    name = "idna_adapter",
+    actual = ":idna_adapter-1.2.0",
+    visibility = ["PUBLIC"],
+)
+
 cargo.rust_library(
     name = "idna_adapter-1.2.0",
     srcs = ["vendor/idna_adapter-1.2.0/src/lib.rs"],
