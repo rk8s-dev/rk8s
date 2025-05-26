@@ -177,7 +177,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
                 let _entry = self.do_lookup(inode, &name).await?;
                 let mut inodes = self.inode_map.inodes.write().await;
-                println!("READdir forget one {:?}",_entry.attr.ino); 
+               
                 self.forget_one(&mut inodes, _entry.attr.ino, 1);
                 entry.inode = _entry.attr.ino;
                 entry_list.push(Ok(entry));
@@ -466,7 +466,7 @@ impl Filesystem for PassthroughFs {
     /// <https://sourceforge.net/p/fuse/mailman/message/31995737/>
     async fn forget(&self, _req: Request, inode: Inode, nlookup: u64) {
         let mut inodes = self.inode_map.inodes.write().await;
-        println!("PLAIN forget  inode:{} ,vlookup:{},req:{:?}",inode,nlookup,_req); 
+       
         self.forget_one(&mut inodes, inode, nlookup)
     }
 
@@ -1428,7 +1428,6 @@ impl Filesystem for PassthroughFs {
         let mut inodes_w = self.inode_map.inodes.write().await;
 
         for i in inodes {
-            println!("BATCH forget one inode:{} ,vlookup:{}",i.0,i.1); 
             self.forget_one(&mut inodes_w, i.0, i.1);
         }
     }
