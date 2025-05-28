@@ -16,6 +16,11 @@ use super::Inode;
 use super::OverlayFs;
 use super::utils;
 impl Filesystem for OverlayFs {
+    async  fn rename2(&self,req:Request,parent:fuse3::Inode,name: &OsStr,new_parent:fuse3::Inode,new_name: &OsStr,flags:u32,) -> Result<()> {
+
+        Ok(())
+    }
+
     /// initialize filesystem. Called before any other filesystem method.
     async fn init(&self, _req: Request) -> Result<ReplyInit> {
         if self.config.do_import {
@@ -433,7 +438,7 @@ impl Filesystem for OverlayFs {
     async fn release(
         &self,
         req: Request,
-        _inode: Inode,
+        inode: Inode,
         fh: u64,
         flags: u32,
         lock_owner: u64,
@@ -458,7 +463,7 @@ impl Filesystem for OverlayFs {
         }
 
         self.handles.lock().await.remove(&fh);
-
+        
         Ok(())
     }
 

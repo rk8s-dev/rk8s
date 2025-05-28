@@ -278,8 +278,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 let name = osstr_to_cstr(&entry.name)?;
                 debug!("readdir:{}", name.to_str().unwrap());
                 let _entry = self.do_lookup(inode, &name).await?;
-                let mut inodes = self.inode_map.inodes.write().await;
-                self.forget_one(&mut inodes, _entry.attr.ino, 1);
                 entry.inode = _entry.attr.ino;
 
                 entry_list.push(Ok(DirectoryEntryPlus {
@@ -748,6 +746,7 @@ impl Filesystem for PassthroughFs {
         let name = name.as_ref();
         self.validate_path_component(name)?;
         self.do_unlink(parent, name, 0).await.map_err(|e| e.into())
+
     }
 
     /// remove a directory.
@@ -760,45 +759,7 @@ impl Filesystem for PassthroughFs {
             .map_err(|e| e.into())
     }
 
-    /// rename a file or directory.
-    async fn rename(
-        &self,
-        _req: Request,
-        parent: Inode,
-        name: &OsStr,
-        new_parent: Inode,
-        new_name: &OsStr,
-    ) -> Result<()> {
-        let oldname = osstr_to_cstr(name).unwrap();
-        let oldname = oldname.as_ref();
-        let newname = osstr_to_cstr(new_name).unwrap();
-        let newname = newname.as_ref();
-        self.validate_path_component(oldname)?;
-        self.validate_path_component(newname)?;
-
-        let old_inode = self.inode_map.get(parent).await?;
-        let new_inode = self.inode_map.get(new_parent).await?;
-        let old_file = old_inode.get_file()?;
-        let new_file = new_inode.get_file()?;
-
-        //TODO: Switch to libc::renameat2 -> libc::renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
-        let res = unsafe {
-            libc::renameat2(
-                old_file.as_raw_fd(),
-                oldname.as_ptr(),
-                new_file.as_raw_fd(),
-                newname.as_ptr(),
-                0,
-            )
-        };
-
-        if res == 0 {
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error().into())
-        }
-    }
-
+ 
     /// create a hard link.
     async fn link(
         &self,
@@ -1210,7 +1171,7 @@ impl Filesystem for PassthroughFs {
     /// I/O and not store anything in `fh`.  A file system need not implement this method if it
     /// sets [`MountOptions::no_open_dir_support`][crate::MountOptions::no_open_dir_support] and
     /// if the kernel supports `FUSE_NO_OPENDIR_SUPPORT`.
-    async fn opendir(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
+    async fn opendir(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen>{
         if self.no_opendir.load(Ordering::Relaxed) {
             info!("fuse: opendir is not supported.");
             Err(enosys().into())
@@ -1478,17 +1439,81 @@ impl Filesystem for PassthroughFs {
         }
     }
 
-    /// rename a file or directory with flags.
-    async fn rename2(
+       /// rename a file or directory.
+    async fn rename(
         &self,
-        req: Request,
+        _req: Request,
         parent: Inode,
         name: &OsStr,
         new_parent: Inode,
         new_name: &OsStr,
-        _flags: u32,
     ) -> Result<()> {
-        self.rename(req, parent, name, new_parent, new_name).await
+        let oldname = osstr_to_cstr(name).unwrap();
+        let oldname = oldname.as_ref();
+        let newname = osstr_to_cstr(new_name).unwrap();
+        let newname = newname.as_ref();
+        self.validate_path_component(oldname)?;
+        self.validate_path_component(newname)?;
+
+        let old_inode = self.inode_map.get(parent).await?;
+        let new_inode = self.inode_map.get(new_parent).await?;
+        let old_file = old_inode.get_file()?;
+        let new_file = new_inode.get_file()?;
+
+        //TODO: Switch to libc::renameat2 -> libc::renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
+        let res = unsafe {
+            libc::renameat(
+                old_file.as_raw_fd(),
+                oldname.as_ptr(),
+                new_file.as_raw_fd(),
+                newname.as_ptr(),
+            )
+        };
+
+        if res == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error().into())
+        }
+    }
+
+    /// rename a file or directory with flags.
+    async fn rename2(
+        &self,
+        _req: Request,
+        parent: Inode,
+        name: &OsStr,
+        new_parent: Inode,
+        new_name: &OsStr,
+        flags: u32,
+    ) -> Result<()> {
+        let oldname = osstr_to_cstr(name).unwrap();
+        let oldname = oldname.as_ref();
+        let newname = osstr_to_cstr(new_name).unwrap();
+        let newname = newname.as_ref();
+        self.validate_path_component(oldname)?;
+        self.validate_path_component(newname)?;
+
+        let old_inode = self.inode_map.get(parent).await?;
+        let new_inode = self.inode_map.get(new_parent).await?;
+        let old_file = old_inode.get_file()?;
+        let new_file = new_inode.get_file()?;
+         //TODO: Switch to libc::renameat2 -> libc::renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
+        let res = unsafe {
+            libc::renameat2(
+                old_file.as_raw_fd(),
+                oldname.as_ptr(),
+                new_file.as_raw_fd(),
+                newname.as_ptr(),
+                flags,
+            )
+        };
+
+        if res == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error().into())
+        }
     }
 
     /// find next data or hole after the specified offset.

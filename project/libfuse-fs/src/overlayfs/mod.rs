@@ -2218,53 +2218,63 @@ impl OverlayFs {
             *need_whiteout.lock().await = false;
         }
 
-        let mut path_removed = None;
+        
+        // lookups decrease by 1.
+        node.lookups.fetch_sub(1, Ordering::Relaxed);
+        let mut df =  |parent_upper_inode:  Option<Arc<RealInode>>| async {
+            let parent_real_inode = parent_upper_inode.ok_or_else(|| {
+                error!(
+                    "BUG: parent {} has no upper inode after copy up",
+                    pnode.inode
+                );
+                Error::from_raw_os_error(libc::EINVAL)
+            })?;
+
+            // Parent is opaque, it shadows everything in lower layers so no need to create extra whiteouts.
+            if parent_real_inode.opaque {
+                *need_whiteout.lock().await = false;
+            }
+            if dir {
+                parent_real_inode
+                    .layer
+                    .rmdir(ctx, parent_real_inode.inode, name)
+                    .await?;
+            } else {
+                parent_real_inode
+                    .layer
+                    .unlink(ctx, parent_real_inode.inode, name)
+                    .await?;
+            }
+
+            Ok(false)
+        };
+
         if node.in_upper_layer().await {
-            pnode
-                .handle_upper_inode_locked(&mut |parent_upper_inode:  Option<Arc<RealInode>>| async {
-                    let parent_real_inode = parent_upper_inode.ok_or_else(|| {
-                        error!(
-                            "BUG: parent {} has no upper inode after copy up",
-                            pnode.inode
-                        );
-                        Error::from_raw_os_error(libc::EINVAL)
-                    })?;
-
-                    // Parent is opaque, it shadows everything in lower layers so no need to create extra whiteouts.
-                    if parent_real_inode.opaque {
-                        *need_whiteout.lock().await = false;
-                    }
-                    if dir {
-                        parent_real_inode
-                            .layer
-                            .rmdir(ctx, parent_real_inode.inode, name)
-                            .await?;
-                    } else {
-                        parent_real_inode
-                            .layer
-                            .unlink(ctx, parent_real_inode.inode, name)
-                            .await?;
-                    }
-
-                    Ok(false)
-                })
-                .await?;
-
-            path_removed.replace(node.path.clone());
+           
+            let hh = pnode.handle_upper_inode_locked(&mut df);
+            // remove it from hashmap
+            let ops = tokio::join!(
+                hh,
+                self.remove_inode(node.inode, Some(node.path.clone())), 
+                pnode.remove_child(node.name.as_str()),
+               
+            );
+           
+            
+        }else{
+              let ops = tokio::join!(
+                self.remove_inode(node.inode, None), 
+                pnode.remove_child(node.name.as_str())
+            );
         }
+
 
         trace!(
             "Remove inode {} from global hashmap and parent's children hashmap\n",
             node.inode
         );
 
-        // lookups decrease by 1.
-        node.lookups.fetch_sub(1, Ordering::Relaxed);
-
-        // remove it from hashmap
-        self.remove_inode(node.inode, path_removed).await;
-        pnode.remove_child(node.name.as_str()).await;
-
+        
         if *need_whiteout.lock().await {
             trace!("do_rm: creating whiteout\n");
             // pnode is copied up, so it has upper layer.

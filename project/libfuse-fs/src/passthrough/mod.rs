@@ -729,17 +729,15 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                     }
                     drop(inodes);
                  
-                    self.inode_map
-                        .inodes
-                        .write()
-                        .await
-                        .insert(Arc::new(InodeData::new(
+                    self.inode_map.insert(
+                        Arc::new(InodeData::new(
                             inode,
                             handle,
                             1,
                             id,
                             st.st.st_mode,
-                        )));
+                        )
+                    )).await;
 
                     inode
                 }
@@ -916,7 +914,7 @@ mod tests {
         let cfg = Config {
             xattr: false,
             do_import: true,
-            root_dir: String::from("/home/luxian/code/leetcode"),
+            root_dir: String::from("/home/luxian/github/buck2-rust-third-party"),
             ..Default::default()
         };
 
