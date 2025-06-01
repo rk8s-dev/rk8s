@@ -89,7 +89,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         );
         match self.inner.lookup(req, parent, name).await {
             Ok(reply) => {
-                println!("look up result :{:?}", reply);
+                println!("look up result :{reply:?}");
                 Ok(reply)
             }
             Err(e) => {
@@ -120,7 +120,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         );
         match self.inner.getattr(req, inode, fh, flags).await {
             Ok(reply) => {
-                println!("getattr result :{:?}", reply);
+                println!("getattr result :{reply:?}");
                 Ok(reply)
             }
             Err(e) => {

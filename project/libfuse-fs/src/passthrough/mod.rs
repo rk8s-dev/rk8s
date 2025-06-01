@@ -41,7 +41,6 @@ mod os_compat;
 mod statx;
 mod util;
 
-
 /// Current directory
 pub const CURRENT_DIR_CSTR: &[u8] = b".\0";
 /// Parent directory
@@ -323,13 +322,13 @@ impl HandleMap {
         // Do not expect poisoned lock here, so safe to unwrap().
         let mut handles = self.handles.write().await;
 
-        if let btree_map::Entry::Occupied(e) = handles.entry(handle) {
-            if e.get().inode == inode {
-                // We don't need to close the file here because that will happen automatically when
-                // the last `Arc` is dropped.
-                e.remove();
-                return Ok(());
-            }
+        if let btree_map::Entry::Occupied(e) = handles.entry(handle)
+            && e.get().inode == inode
+        {
+            // We don't need to close the file here because that will happen automatically when
+            // the last `Arc` is dropped.
+            e.remove();
+            return Ok(());
         }
 
         Err(ebadf())
@@ -710,8 +709,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 Some(data) => {
                     // An inode was added concurrently while we did not hold a lock on
                     // `self.inodes_map`, so we use that instead. `handle` will be dropped.
-                    let vl = data.refcount.fetch_add(1, Ordering::Relaxed);
-                   
+                    data.refcount.fetch_add(1, Ordering::Relaxed);
                     data.inode
                 }
                 None => {
@@ -721,23 +719,22 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
                     if inode > VFS_MAX_INO {
                         error!("fuse: max inode number reached: {}", VFS_MAX_INO);
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("max inode number reached: {VFS_MAX_INO}"),
-                        )
+                        return Err(io::Error::other(format!(
+                            "max inode number reached: {VFS_MAX_INO}"
+                        ))
                         .into());
                     }
                     drop(inodes);
-                 
-                    self.inode_map.insert(
-                        Arc::new(InodeData::new(
+
+                    self.inode_map
+                        .insert(Arc::new(InodeData::new(
                             inode,
                             handle,
                             1,
                             id,
                             st.st.st_mode,
-                        )
-                    )).await;
+                        )))
+                        .await;
 
                     inode
                 }
@@ -771,7 +768,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     }
 
     fn forget_one(&self, inodes: &mut InodeStore, inode: Inode, count: u64) {
-        
         // ROOT_ID should not be forgotten, or we're not able to access to files any more.
         if inode == ROOT_ID {
             return;
@@ -788,13 +784,13 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 // Saturating sub because it doesn't make sense for a refcount to go below zero and
                 // we don't want misbehaving clients to cause integer overflow.
                 let new = curr.saturating_sub(count);
-                
+
                 // Synchronizes with the acquire load in `do_lookup`.
                 if data
                     .refcount
                     .compare_exchange(curr, new, Ordering::AcqRel, Ordering::Acquire)
-                    .is_ok() {
-                    
+                    .is_ok()
+                {
                     if new == 0 {
                         // We just removed the last refcount for this inode.
                         // The allocated inode number should be kept in the map when use_host_ino

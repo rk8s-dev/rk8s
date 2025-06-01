@@ -14,3 +14,4 @@ Features:
 cargo test --package libfuse-fs --lib -- overlayfs::async_io::tests::test_a_ovlfs --exact --nocapture --ignored > test.log 2>&1
 cargo test --package libfuse-fs --lib -- passthrough::tests::test_passthrough --exact --nocapture --ignored 
 ```
+![alt text](image.png)

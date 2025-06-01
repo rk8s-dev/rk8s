@@ -8,19 +8,14 @@ use std::ffi::OsStr;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::num::NonZeroU32;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::vec::IntoIter;
 
 use super::Inode;
 use super::OverlayFs;
 use super::utils;
 impl Filesystem for OverlayFs {
-    async  fn rename2(&self,req:Request,parent:fuse3::Inode,name: &OsStr,new_parent:fuse3::Inode,new_name: &OsStr,flags:u32,) -> Result<()> {
-
-        Ok(())
-    }
-
     /// initialize filesystem. Called before any other filesystem method.
     async fn init(&self, _req: Request) -> Result<ReplyInit> {
         if self.config.do_import {
@@ -84,23 +79,23 @@ impl Filesystem for OverlayFs {
         fh: Option<u64>,
         flags: u32,
     ) -> Result<ReplyAttr> {
-        if !self.no_open.load(Ordering::Relaxed) {
-            if let Some(h) = fh {
-                if let Some(hd) = self.handles.lock().await.get(&h) {
-                    if let Some(ref rh) = hd.real_handle {
-                        let rep = rh
+        if !self.no_open.load(Ordering::Relaxed)
+            && let Some(h) = fh
+                && let Some(hd) = self.handles.lock().await.get(&h)
+                    && let Some(ref rh) = hd.real_handle {
+                        let mut rep: ReplyAttr = rh
                             .layer
                             .getattr(req, rh.inode, Some(rh.handle.load(Ordering::Relaxed)), 0)
                             .await?;
+                        rep.attr.ino = inode;
                         return Ok(rep);
                     }
-                }
-            }
-        }
 
-        let node = self.lookup_node(req, inode, "").await?;
-        let (layer, _, inode) = node.first_layer_inode().await;
-        layer.getattr(req, inode, None, flags).await
+        let node: Arc<super::OverlayInode> = self.lookup_node(req, inode, "").await?;
+        let (layer, _, lower_inode) = node.first_layer_inode().await;
+        let mut re = layer.getattr(req, lower_inode, None, flags).await?;
+        re.attr.ino = inode;
+        Ok(re)
     }
 
     /// set file attributes. If `fh` is None, means `fh` is not set.
@@ -118,23 +113,25 @@ impl Filesystem for OverlayFs {
             .ok_or_else(|| Error::from_raw_os_error(libc::EROFS))?;
 
         // deal with handle first
-        if !self.no_open.load(Ordering::Relaxed) {
-            if let Some(h) = fh {
-                if let Some(hd) = self.handles.lock().await.get(&h) {
-                    if let Some(ref rhd) = hd.real_handle {
+        if !self.no_open.load(Ordering::Relaxed)
+            && let Some(h) = fh
+                && let Some(hd) = self.handles.lock().await.get(&h)
+                    && let Some(ref rhd) = hd.real_handle {
                         // handle opened in upper layer
                         if rhd.in_upper_layer {
                             let rep = rhd
                                 .layer
-                                .setattr(req, rhd.inode, Some(rhd.handle.load(Ordering::Relaxed)), set_attr)
+                                .setattr(
+                                    req,
+                                    rhd.inode,
+                                    Some(rhd.handle.load(Ordering::Relaxed)),
+                                    set_attr,
+                                )
                                 .await?;
 
                             return Ok(rep);
                         }
                     }
-                }
-            }
-        }
 
         let mut node = self.lookup_node(req, inode, "").await?;
 
@@ -379,7 +376,13 @@ impl Filesystem for OverlayFs {
             None => Err(Error::from_raw_os_error(libc::ENOENT).into()),
             Some(ref hd) => {
                 hd.layer
-                    .read(req, hd.inode, hd.handle.load( Ordering::Relaxed), offset, size)
+                    .read(
+                        req,
+                        hd.inode,
+                        hd.handle.load(Ordering::Relaxed),
+                        offset,
+                        size,
+                    )
                     .await
             }
         }
@@ -438,7 +441,7 @@ impl Filesystem for OverlayFs {
     async fn release(
         &self,
         req: Request,
-        inode: Inode,
+        _inode: Inode,
         fh: u64,
         flags: u32,
         lock_owner: u64,
@@ -453,7 +456,7 @@ impl Filesystem for OverlayFs {
             let rh = if let Some(ref h) = hd.real_handle {
                 h
             } else {
-                return Err(Error::new(ErrorKind::Other, "no handle").into());
+                return Err(Error::other("no handle").into());
             };
             let real_handle = rh.handle.load(Ordering::Relaxed);
             let real_inode = rh.inode;
@@ -463,7 +466,7 @@ impl Filesystem for OverlayFs {
         }
 
         self.handles.lock().await.remove(&fh);
-        
+
         Ok(())
     }
 
@@ -569,7 +572,7 @@ impl Filesystem for OverlayFs {
     /// errors. If the filesystem supports file locking operations ([`setlk`][Filesystem::setlk],
     /// [`getlk`][Filesystem::getlk]) it should remove all locks belonging to `lock_owner`.
     async fn flush(&self, req: Request, inode: Inode, fh: u64, lock_owner: u64) -> Result<()> {
-        if self.no_open.load(Ordering::Relaxed)  {
+        if self.no_open.load(Ordering::Relaxed) {
             return Err(Error::from_raw_os_error(libc::ENOSYS).into());
         }
 
@@ -807,7 +810,7 @@ impl Filesystem for OverlayFs {
                     .fallocate(
                         req,
                         rhd.inode,
-                        rhd.handle.load(Ordering::Relaxed) ,
+                        rhd.handle.load(Ordering::Relaxed),
                         offset,
                         length,
                         mode,
@@ -868,11 +871,8 @@ mod tests {
         env_logger::init();
         // Set up test environment
         let mountpoint = "/home/luxian/megatest/true_temp".to_string();
-        let lowerdir = vec![
-            "/home/luxian/github/buck2-rust-third-party".to_string(),
-        ];
-        let upperdir =
-            "/home/luxian/upper".to_string();
+        let lowerdir = vec!["/home/luxian/github/buck2-rust-third-party".to_string()];
+        let upperdir = "/home/luxian/upper".to_string();
 
         // Create lower layers
         let mut lower_layers = Vec::new();
