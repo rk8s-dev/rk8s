@@ -602,7 +602,8 @@ impl OverlayInode {
                 count += 1;
             }
         }
-
+        // Return the count and whiteouts.
+        println!("count_entries_and_whiteout: {}, {}", count, whiteouts);
         Ok((count, whiteouts))
     }
 
@@ -1697,12 +1698,12 @@ impl OverlayFs {
             }
             // If it's a whiteout, allow rename to proceed (overwrite whiteout)
         }
-
+       
         let src_node = parent_node
             .child(name_str)
             .await
             .ok_or_else(|| Error::from_raw_os_error(libc::ENOENT))?;
-
+        let need_whiteout = src_node.upper_layer_only().await;
         self.copy_node_up(req, parent_node.clone()).await?;
         if src_node.is_dir(req).await? {
             // Directory can't be renamed.
@@ -1736,7 +1737,11 @@ impl OverlayFs {
             }
             Err(e) => return Err(e.into()),
         }
-        let _ = src_lay.create_whiteout(req, src_true_inode, name).await?;
+        
+        if !need_whiteout{
+             let _ = src_lay.create_whiteout(req, src_true_inode, name).await?;
+        }
+       
         // Insert into new parent, update node name and path
         let _ = parent_node
             .remove_child(name_str)
@@ -2233,11 +2238,11 @@ impl OverlayFs {
             trace!("whiteouts deleted!\n");
         }
 
-        let need_whiteout = Arc::new(Mutex::new(true));
+        let need_whiteout = AtomicBool::new(true);
         let pnode = self.copy_node_up(ctx, Arc::clone(&pnode)).await?;
 
         if node.upper_layer_only().await {
-            *need_whiteout.lock().await = false;
+            need_whiteout.store(false, Ordering::Relaxed);
         }
 
         // lookups decrease by 1.
@@ -2253,7 +2258,7 @@ impl OverlayFs {
 
             // Parent is opaque, it shadows everything in lower layers so no need to create extra whiteouts.
             if parent_real_inode.opaque {
-                *need_whiteout.lock().await = false;
+                need_whiteout.store(false, Ordering::Relaxed);
             }
             if dir {
                 parent_real_inode
@@ -2289,7 +2294,7 @@ impl OverlayFs {
             );
         }
 
-        if *need_whiteout.lock().await {
+        if need_whiteout.load(Ordering::Relaxed){
             println!("do_rm: creating whiteout\n");
             // pnode is copied up, so it has upper layer.
             pnode

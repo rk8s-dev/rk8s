@@ -15,6 +15,9 @@ create_files() {
     
     for ((i=1; i<=num_files; i++)); do
         echo "#!/bin/bash\necho 'Hello'" > "$dir/script_${i}.sh" ;
+        echo "#!/bin/bash\necho 'Hello'" > "$dir/.tmp_script_${i}.sh" ;
+        mv "$dir/script_${i}.sh" "$dir/new_script_${i}.sh" ;
+        mv "$dir/.tmp_script_${i}.sh" "$dir/.new_tmp_script_${i}.sh" ;
     done
 }
 
@@ -22,7 +25,7 @@ create_files() {
 create_tree() {
     local base_dir=$1
     local depth=$2
-    local max_depth=12
+    local max_depth=14
     
     if [ "$depth" -gt "$max_depth" ]; then
         return
