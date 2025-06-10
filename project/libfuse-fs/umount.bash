@@ -115,7 +115,9 @@ main() {
     
     # 执行清理
     stop_buck2d
+    unmount_path "/home/luxian/pass"
     unmount_path "$mount_point"
+    
     
     echo "清理完成"
 }

@@ -49,9 +49,10 @@ impl InodeStore {
             ino += 1;
         }
         error!("reached maximum inode number: {}", self.inode_limit);
-        Err(Error::other(
-            format!("maximum inode number {} reached", self.inode_limit),
-        ))
+        Err(Error::other(format!(
+            "maximum inode number {} reached",
+            self.inode_limit
+        )))
     }
 
     pub(crate) fn alloc_inode(&mut self, path: &str) -> Result<Inode> {
@@ -166,7 +167,9 @@ mod test {
         let empty_node = Arc::new(OverlayInode::new());
         store.insert_inode(1, empty_node.clone()).await;
         store.insert_inode(2, empty_node.clone()).await;
-        store.insert_inode(VFS_MAX_INO - 1, empty_node.clone()).await;
+        store
+            .insert_inode(VFS_MAX_INO - 1, empty_node.clone())
+            .await;
 
         let inode = store.alloc_unique_inode().unwrap();
         assert_eq!(inode, 3);

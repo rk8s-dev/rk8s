@@ -7,7 +7,7 @@ use std::{
     ffi::{CStr, CString, OsStr, OsString},
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
-    mem::{self, ManuallyDrop, MaybeUninit},
+    mem::{ManuallyDrop, MaybeUninit},
     num::NonZeroU32,
     os::{
         fd::{AsRawFd, FromRawFd, RawFd},
@@ -103,7 +103,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // Since we are going to work with the kernel offset, we have to acquire the file lock
         // for both the `lseek64` and `getdents64` syscalls to ensure that no other thread
         // changes the kernel offset while we are using it.
-        let (guard, dir) = data.get_file_mut().await;
+        let (_guard, dir) = data.get_file_mut().await;
 
         // alloc buff ,pay attention to alian.
         let mut buffer = vec![0u8; BUFFER_SIZE];
@@ -186,9 +186,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             }
         }
 
-        // Explicitly drop the lock so that it's not held while we fill in the fuse buffer.
-        mem::drop(guard);
-
         Ok(())
     }
 
@@ -206,7 +203,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // Since we are going to work with the kernel offset, we have to acquire the file lock
         // for both the `lseek64` and `getdents64` syscalls to ensure that no other thread
         // changes the kernel offset while we are using it.
-        let (guard, dir) = data.get_file_mut().await;
+        let (_guard, dir) = data.get_file_mut().await;
 
         // alloc buff ,pay attention to alian.
         let mut buffer = vec![0u8; BUFFER_SIZE];
@@ -292,7 +289,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 offset += dirent64.d_reclen as usize;
             }
         }
-        drop(guard);
         Ok(())
     }
 
@@ -358,11 +354,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     }
 
     async fn do_unlink(&self, parent: Inode, name: &CStr, flags: libc::c_int) -> io::Result<()> {
-        println!(
-            "do_unlink: parent = {}, name = {}",
-            parent,
-            name.to_str().unwrap_or("<invalid UTF-8>")
-        );
         let data = self.inode_map.get(parent).await?;
         let file = data.get_file()?;
         // Safe because this doesn't modify any memory and we check the return value.
@@ -812,7 +803,6 @@ impl Filesystem for PassthroughFs {
             Err(enosys().into())
         } else {
             let re = self.do_open(inode, flags).await?;
-            println!("open handle:{}", re.0.unwrap());
             Ok(ReplyOpen {
                 fh: re.0.unwrap(),
                 flags: re.1.bits(),
@@ -849,7 +839,6 @@ impl Filesystem for PassthroughFs {
                 return Err(err.into());
             }
         };
-
         Ok(ReplyData {
             data: Bytes::from(buf),
         })
@@ -881,7 +870,7 @@ impl Filesystem for PassthroughFs {
         // so data.file won't be closed.
         let f = unsafe { File::from_raw_fd(handle_data.borrow_fd().as_raw_fd()) };
         let mut f = ManuallyDrop::new(f);
-        self.check_fd_flags(handle_data.clone(), f.as_raw_fd(), flags)
+        self.check_fd_flags(handle_data, f.as_raw_fd(), flags)
             .await?; //TODO: deal with this flags. 
 
         // if self.seal_size.load().await {
@@ -1157,6 +1146,22 @@ impl Filesystem for PassthroughFs {
                 Ok(())
             }
         }
+        // if self.no_open.load(Ordering::Relaxed) {
+        //         return Err(enosys().into());
+        //     }
+
+        // let data = self.handle_map.get(fh, inode).await?;
+
+        // // std flush impl
+        // unsafe {
+        //     let fd = data.borrow_fd().as_raw_fd();
+        //     if libc::fsync(fd) < 0 {
+        //         let err = io::Error::last_os_error();
+        //         error!("Failed to fsync file descriptor {}: {}", fd, err);
+        //         return Err(err.into());
+        //     }
+        // }
+        // Ok(())
     }
 
     /// open a directory. Filesystem may store an arbitrary file handle (pointer, index, etc) in
@@ -1427,6 +1432,7 @@ impl Filesystem for PassthroughFs {
                 length as libc::off64_t,
             )
         };
+
         if res == 0 {
             Ok(())
         } else {

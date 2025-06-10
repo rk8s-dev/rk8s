@@ -100,6 +100,7 @@ pub struct OverlayFs {
     root_inodes: u64,
 }
 
+// This is a wrapper of one inode in specific layer, It can't impl Clone trait.
 struct RealHandle {
     layer: Arc<PassthroughFs>,
     in_upper_layer: bool,
@@ -189,10 +190,12 @@ impl RealInode {
             }
             Err(e) => {
                 let ioerror: std::io::Error = e.into();
-                if let Some(raw_error) = ioerror.raw_os_error()
-                    && (raw_error == libc::ENOENT || raw_error == libc::ENAMETOOLONG) {
+                if let Some(raw_error) = ioerror.raw_os_error() {
+                    if raw_error == libc::ENOENT || raw_error == libc::ENAMETOOLONG {
                         return Ok(None);
                     }
+                }
+
                 Err(e.into())
             }
         }
@@ -278,7 +281,7 @@ impl RealInode {
         };
 
         let child_names = self.layer.readdir(ctx, self.inode, handle.fh, 0).await?;
-        // Non-zero handle indicates successful 'open', we should 'release' it.????? DIFFierent
+        // Non-zero handle indicates successful 'open', we should 'release' it.
         if handle.fh > 0 {
             self.layer
                 .releasedir(ctx, self.inode, handle.fh, handle.flags)
@@ -293,7 +296,11 @@ impl RealInode {
             match entery {
                 Ok(dire) => {
                     let dname = dire.name.into_string().unwrap();
-                    if let Some(child) = self.lookup_child(ctx, &dname).await.unwrap() {
+                    if dname == "." || dname == ".." {
+                        // Skip . and .. entries.
+                        return Ok(());
+                    }
+                    if let Some(child) = self.lookup_child(ctx, &dname).await? {
                         child_real_inodes.lock().await.insert(dname, child);
                     }
                     Ok(())
@@ -602,8 +609,6 @@ impl OverlayInode {
                 count += 1;
             }
         }
-        // Return the count and whiteouts.
-        println!("count_entries_and_whiteout: {}, {}", count, whiteouts);
         Ok((count, whiteouts))
     }
 
@@ -651,9 +656,6 @@ impl OverlayInode {
 
             // Merge entries from one layer to all_layer_inodes.
             for (name, inode) in entries {
-                if name == "." || name == ".." {
-                    continue;
-                }
                 match all_layer_inodes.get_mut(&name) {
                     Some(v) => {
                         // Append additional RealInode to the end of vector.
@@ -859,12 +861,10 @@ impl OverlayInode {
                     f(None).await
                 }
             }
-            None => Err(Error::other(
-                format!(
-                    "BUG: dangling OverlayInode {} without any backend inode",
-                    self.inode
-                ),
-            )),
+            None => Err(Error::other(format!(
+                "BUG: dangling OverlayInode {} without any backend inode",
+                self.inode
+            ))),
         }
     }
 }
@@ -1064,10 +1064,11 @@ impl OverlayFs {
         match self.lookup_node(ctx, parent, name).await {
             Ok(n) => Ok(Some(Arc::clone(&n))),
             Err(e) => {
-                if let Some(raw_error) = e.raw_os_error()
-                    && raw_error == libc::ENOENT {
+                if let Some(raw_error) = e.raw_os_error() {
+                    if raw_error == libc::ENOENT {
                         return Ok(None);
                     }
+                }
                 Err(e)
             }
         }
@@ -1128,8 +1129,7 @@ impl OverlayFs {
         };
 
         // Use fetch_update to atomically update lookups in a loop until it succeeds
-        let lookups = v
-            .lookups
+        v.lookups
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 // If count is larger than current lookups, return 0
                 // Otherwise subtract count from current lookups
@@ -1141,6 +1141,13 @@ impl OverlayFs {
             })
             .expect("fetch_update failed");
 
+        let lookups = v.lookups.load(Ordering::Relaxed);
+        trace!(
+            "forget inode: {}, name {}, lookups: {}",
+            inode,
+            v.name.read().await,
+            lookups
+        );
         if lookups == 0 {
             debug!(
                 "inode is forgotten: {}, name {}",
@@ -1698,7 +1705,7 @@ impl OverlayFs {
             }
             // If it's a whiteout, allow rename to proceed (overwrite whiteout)
         }
-       
+
         let src_node = parent_node
             .child(name_str)
             .await
@@ -1737,11 +1744,11 @@ impl OverlayFs {
             }
             Err(e) => return Err(e.into()),
         }
-        
-        if !need_whiteout{
-             let _ = src_lay.create_whiteout(req, src_true_inode, name).await?;
+
+        if !need_whiteout {
+            let _ = src_lay.create_whiteout(req, src_true_inode, name).await?;
         }
-       
+
         // Insert into new parent, update node name and path
         let _ = parent_node
             .remove_child(name_str)
@@ -2279,13 +2286,12 @@ impl OverlayFs {
             let hh = pnode.handle_upper_inode_locked(&mut df);
             // remove it from hashmap
             let node_name = node.name.read().await.clone();
-            let (h1,_,_) = tokio::join!(
+            let (h1, _, _) = tokio::join!(
                 hh,
                 self.remove_inode(node.inode, Some(node.path.read().await.clone())),
                 pnode.remove_child(&node_name),
             );
             h1?;
-
         } else {
             let node_name = node.name.read().await.clone();
             tokio::join!(
@@ -2294,7 +2300,7 @@ impl OverlayFs {
             );
         }
 
-        if need_whiteout.load(Ordering::Relaxed){
+        if need_whiteout.load(Ordering::Relaxed) {
             println!("do_rm: creating whiteout\n");
             // pnode is copied up, so it has upper layer.
             pnode
@@ -2379,7 +2385,9 @@ impl OverlayFs {
         let iter = node
             .childrens
             .lock()
-            .await.values().cloned()
+            .await
+            .values()
+            .cloned()
             .collect::<Vec<_>>();
 
         for child in iter {
@@ -2451,11 +2459,13 @@ impl OverlayFs {
     ) -> Result<Arc<HandleData>> {
         let no_open = self.no_open.load(Ordering::Relaxed);
         if !no_open {
-            if let Some(h) = handle
-                && let Some(v) = self.handles.lock().await.get(&h)
-                    && v.node.inode == inode {
+            if let Some(h) = handle {
+                if let Some(v) = self.handles.lock().await.get(&h) {
+                    if v.node.inode == inode {
                         return Ok(Arc::clone(v));
                     }
+                }
+            }
         } else {
             let readonly: bool = flags
                 & (libc::O_APPEND | libc::O_CREAT | libc::O_TRUNC | libc::O_RDWR | libc::O_WRONLY)

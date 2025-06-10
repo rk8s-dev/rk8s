@@ -34,7 +34,6 @@ mod async_io;
 mod config;
 mod file_handle;
 mod inode_store;
-pub mod logfs;
 mod mount_fd;
 pub mod newlogfs;
 mod os_compat;
@@ -58,6 +57,7 @@ pub async fn new_passthroughfs_layer(rootdir: &str) -> Result<PassthroughFs> {
         // enable xattr`
         xattr: true,
         do_import: true,
+        inode_file_handles: true,
         ..Default::default()
     };
 
@@ -322,13 +322,14 @@ impl HandleMap {
         // Do not expect poisoned lock here, so safe to unwrap().
         let mut handles = self.handles.write().await;
 
-        if let btree_map::Entry::Occupied(e) = handles.entry(handle)
-            && e.get().inode == inode
-        {
-            // We don't need to close the file here because that will happen automatically when
-            // the last `Arc` is dropped.
-            e.remove();
-            return Ok(());
+        if let btree_map::Entry::Occupied(e) = handles.entry(handle) {
+            if e.get().inode == inode {
+                // We don't need to close the file here because that will happen automatically when
+                // the last `Arc` is dropped.
+                e.remove();
+
+                return Ok(());
+            }
         }
 
         Err(ebadf())
@@ -902,19 +903,13 @@ mod tests {
     use fuse3::{MountOptions, raw::Session};
     use tokio::signal;
 
-    use crate::passthrough::{PassthroughFs, config::Config, newlogfs::LoggingFileSystem};
+    use crate::passthrough::newlogfs::LoggingFileSystem;
 
     #[tokio::test]
-    #[ignore]
     async fn test_passthrough() {
-        let cfg = Config {
-            xattr: false,
-            do_import: true,
-            root_dir: String::from("/home/luxian/github/buck2-rust-third-party"),
-            ..Default::default()
-        };
-
-        let fs = PassthroughFs::<()>::new(cfg).unwrap();
+        let fs = super::new_passthroughfs_layer("/home/luxian/github/buck2-rust-third-party")
+            .await
+            .unwrap();
         let logfs = LoggingFileSystem::new(fs);
 
         let mount_path = OsString::from("/home/luxian/pass");
@@ -922,7 +917,7 @@ mod tests {
         let uid = unsafe { libc::getuid() };
         let gid = unsafe { libc::getgid() };
 
-        let not_unprivileged = false;
+        let not_unprivileged = true;
 
         let mut mount_options = MountOptions::default();
         // .allow_other(true)

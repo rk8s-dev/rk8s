@@ -137,25 +137,19 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         fh: Option<u64>,
         set_attr: SetAttr,
     ) -> Result<ReplyAttr> {
-        println!(
-            "fs:{}, setattr: inode: {:?}, fh: {:?}, set_attr: {:?}",
-            self.fsname, inode, fh, set_attr
-        );
         match self.inner.setattr(req, inode, fh, set_attr).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, setattr error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn readlink(&self, req: Request, inode: Inode) -> Result<ReplyData> {
-        println!("fs:{}, readlink: inode: {:?}", self.fsname, inode);
+
         match self.inner.readlink(req, inode).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, readlink error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -168,14 +162,9 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         name: &OsStr,
         link: &OsStr,
     ) -> Result<ReplyEntry> {
-        println!(
-            "fs:{}, symlink: parent: {:?}, name: {:?}, link: {:?}",
-            self.fsname, parent, name, link
-        );
         match self.inner.symlink(req, parent, name, link).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, symlink error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -189,10 +178,6 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         mode: u32,
         rdev: u32,
     ) -> Result<ReplyEntry> {
-        println!(
-            "fs:{}, mknod: parent: {:?}, name: {:?}, mode: {}, rdev: {}",
-            self.fsname, parent, name, mode, rdev
-        );
         match self.inner.mknod(req, parent, name, mode, rdev).await {
             Ok(reply) => Ok(reply),
             Err(e) => {

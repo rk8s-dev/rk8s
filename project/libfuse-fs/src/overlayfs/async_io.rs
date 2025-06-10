@@ -79,10 +79,11 @@ impl Filesystem for OverlayFs {
         fh: Option<u64>,
         flags: u32,
     ) -> Result<ReplyAttr> {
-        if !self.no_open.load(Ordering::Relaxed)
-            && let Some(h) = fh
-                && let Some(hd) = self.handles.lock().await.get(&h)
-                    && let Some(ref rh) = hd.real_handle {
+        if !self.no_open.load(Ordering::Relaxed) {
+            if let Some(h) = fh {
+                let handles = self.handles.lock().await;
+                if let Some(hd) = handles.get(&h) {
+                    if let Some(ref rh) = hd.real_handle {
                         let mut rep: ReplyAttr = rh
                             .layer
                             .getattr(req, rh.inode, Some(rh.handle.load(Ordering::Relaxed)), 0)
@@ -90,6 +91,9 @@ impl Filesystem for OverlayFs {
                         rep.attr.ino = inode;
                         return Ok(rep);
                     }
+                }
+            }
+        }
 
         let node: Arc<super::OverlayInode> = self.lookup_node(req, inode, "").await?;
         let (layer, _, lower_inode) = node.first_layer_inode().await;
@@ -113,10 +117,11 @@ impl Filesystem for OverlayFs {
             .ok_or_else(|| Error::from_raw_os_error(libc::EROFS))?;
 
         // deal with handle first
-        if !self.no_open.load(Ordering::Relaxed)
-            && let Some(h) = fh
-                && let Some(hd) = self.handles.lock().await.get(&h)
-                    && let Some(ref rhd) = hd.real_handle {
+        if !self.no_open.load(Ordering::Relaxed) {
+            if let Some(h) = fh {
+                let handles = self.handles.lock().await;
+                if let Some(hd) = handles.get(&h) {
+                    if let Some(ref rhd) = hd.real_handle {
                         // handle opened in upper layer
                         if rhd.in_upper_layer {
                             let rep = rhd
@@ -128,10 +133,12 @@ impl Filesystem for OverlayFs {
                                     set_attr,
                                 )
                                 .await?;
-
                             return Ok(rep);
                         }
                     }
+                }
+            }
+        }
 
         let mut node = self.lookup_node(req, inode, "").await?;
 
@@ -686,7 +693,6 @@ impl Filesystem for OverlayFs {
         }
 
         self.handles.lock().await.remove(&fh);
-
         Ok(())
     }
 
@@ -868,7 +874,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_a_ovlfs() {
-        env_logger::init();
+        env_logger::Builder::new()
+            .filter_level(log::LevelFilter::Trace)
+            .init();
         // Set up test environment
         let mountpoint = "/home/luxian/megatest/true_temp".to_string();
         let lowerdir = vec!["/home/luxian/github/buck2-rust-third-party".to_string()];

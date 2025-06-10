@@ -71,9 +71,9 @@ impl UniqueInodeGenerator {
             id.ino
         } else {
             if self.next_virtual_inode.load(Ordering::Relaxed) > MAX_HOST_INO {
-                return Err(io::Error::other(
-                    format!("the virtual inode excess {MAX_HOST_INO}"),
-                ));
+                return Err(io::Error::other(format!(
+                    "the virtual inode excess {MAX_HOST_INO}"
+                )));
             }
             self.next_virtual_inode.fetch_add(1, Ordering::Relaxed) | VIRTUAL_INODE_FLAG
         };
@@ -179,11 +179,11 @@ pub fn stat_fd(dir: &impl AsRawFd, path: Option<&CStr>) -> io::Result<libc::stat
     let pathname =
         path.unwrap_or_else(|| unsafe { CStr::from_bytes_with_nul_unchecked(EMPTY_CSTR) });
     let mut st = MaybeUninit::<libc::stat64>::zeroed();
-
+    let dir_fd = dir.as_raw_fd();
     // Safe because the kernel will only write data in `st` and we check the return value.
     let res = unsafe {
         libc::fstatat64(
-            dir.as_raw_fd(),
+            dir_fd,
             pathname.as_ptr(),
             st.as_mut_ptr(),
             libc::AT_EMPTY_PATH | libc::AT_SYMLINK_NOFOLLOW,
