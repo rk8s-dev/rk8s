@@ -1,6 +1,6 @@
 use std::{fmt::Display, path::PathBuf};
 
-use fuse3::{FileType, Timestamp, raw::reply::FileAttr};
+use rfuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use libc::stat64;
 use serde::{Deserialize, Serialize};
 

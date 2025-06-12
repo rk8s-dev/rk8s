@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use bytes::Bytes;
-use fuse3::{Errno, Inode, Result, raw::prelude::*};
+use rfuse3::{Errno, Inode, Result, raw::prelude::*};
 use futures::stream;
 use futures_util::stream::Iter;
 use std::{

@@ -1,8 +1,8 @@
 use crate::overlayfs::AtomicU64;
 use crate::overlayfs::HandleData;
 use crate::overlayfs::RealHandle;
-use fuse3::raw::prelude::*;
-use fuse3::*;
+use rfuse3::raw::prelude::*;
+use rfuse3::*;
 use futures::stream::Iter;
 use std::ffi::OsStr;
 use std::io::Error;
@@ -863,7 +863,7 @@ impl Filesystem for OverlayFs {
 mod tests {
     use std::{ffi::OsString, sync::Arc};
 
-    use fuse3::{MountOptions, raw::Session};
+    use rfuse3::{MountOptions, raw::Session};
     use tokio::signal;
 
     use crate::{
@@ -912,7 +912,7 @@ mod tests {
         // .allow_other(true)
         mount_options.force_readdir_plus(true).uid(uid).gid(gid);
 
-        let mut mount_handle: fuse3::raw::MountHandle = if !not_unprivileged {
+        let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
             Session::new(mount_options)
                 .mount_with_unprivileged(logfs, mount_path)
                 .await

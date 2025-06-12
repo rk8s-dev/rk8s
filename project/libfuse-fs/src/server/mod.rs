@@ -1,5 +1,5 @@
-use fuse3::raw::{Filesystem, MountHandle};
-use fuse3::{MountOptions, raw::Session};
+use rfuse3::raw::{Filesystem, MountHandle};
+use rfuse3::{MountOptions, raw::Session};
 use std::ffi::{OsStr, OsString};
 
 #[allow(unused)]

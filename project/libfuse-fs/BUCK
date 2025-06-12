@@ -7,7 +7,7 @@ rust_library(
     deps = [
         "//third-party:uuid",
         "//third-party:clap",
-        "//third-party:fuse3",
+        
         "//third-party:tokio",
         "//third-party:reqwest",
         "//third-party:serde",
@@ -22,6 +22,7 @@ rust_library(
         "//third-party:env_logger",
         "//third-party:vmm-sys-util",
         "//third-party:bitflags",
+        "//project/rfuse3:rfuse3",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

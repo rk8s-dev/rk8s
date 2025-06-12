@@ -17,14 +17,14 @@ use std::future::Future;
 use std::io::{Error, Result};
 
 use config::Config;
-use fuse3::raw::reply::{
+use rfuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyEntry, ReplyOpen, ReplyStatFs,
 };
-use fuse3::raw::{Filesystem, Request, Session};
+use rfuse3::raw::{Filesystem, Request, Session};
 use futures::StreamExt as _;
 use std::sync::{Arc, Weak};
 
-use fuse3::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
+use rfuse3::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
 const SLASH_ASCII: char = '/';
 use futures::future::join_all;
 use futures::stream::iter;
@@ -1208,7 +1208,7 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-    ) -> Result<<OverlayFs as fuse3::raw::Filesystem>::DirEntryStream<'a>> {
+    ) -> Result<<OverlayFs as rfuse3::raw::Filesystem>::DirEntryStream<'a>> {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
             Some(dir) => dir.node.clone(),
@@ -1271,7 +1271,7 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-    ) -> Result<<OverlayFs as fuse3::raw::Filesystem>::DirEntryPlusStream<'a>> {
+    ) -> Result<<OverlayFs as rfuse3::raw::Filesystem>::DirEntryPlusStream<'a>> {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
             Some(dir) => dir.node.clone(),
@@ -2532,7 +2532,7 @@ pub async fn mount_fs(
     upperdir: String,
     lowerdir: Vec<String>,
     not_unprivileged: bool,
-) -> fuse3::raw::MountHandle {
+) -> rfuse3::raw::MountHandle {
     // Create lower layers
     let mut lower_layers = Vec::new();
     for lower in &lowerdir {

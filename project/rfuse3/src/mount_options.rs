@@ -10,7 +10,7 @@ use nix::unistd;
 /// mount options.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct MountOptions {
-    // Options implemented within fuse3
+    // Options implemented within rfuse3
     pub(crate) nonempty: bool,
 
     // mount options

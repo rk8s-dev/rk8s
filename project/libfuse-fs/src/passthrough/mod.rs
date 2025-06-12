@@ -1,7 +1,7 @@
 use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
-use fuse3::{Errno, raw::reply::ReplyEntry};
+use rfuse3::{Errno, raw::reply::ReplyEntry};
 use inode_store::{InodeId, InodeStore};
 
 use crate::util::convert_stat64_to_file_attr;
@@ -900,7 +900,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 mod tests {
     use std::ffi::OsString;
 
-    use fuse3::{MountOptions, raw::Session};
+    use rfuse3::{MountOptions, raw::Session};
     use tokio::signal;
 
     use crate::passthrough::newlogfs::LoggingFileSystem;
@@ -923,7 +923,7 @@ mod tests {
         // .allow_other(true)
         mount_options.force_readdir_plus(true).uid(uid).gid(gid);
 
-        let mut mount_handle: fuse3::raw::MountHandle = if !not_unprivileged {
+        let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
             Session::new(mount_options)
                 .mount_with_unprivileged(logfs, mount_path)
                 .await

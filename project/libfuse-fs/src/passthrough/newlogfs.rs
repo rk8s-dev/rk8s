@@ -3,10 +3,10 @@ use std::ffi::OsStr;
 
 use super::Inode;
 use bytes::Bytes;
-use fuse3::notify::Notify;
-use fuse3::raw::reply::*;
-use fuse3::raw::{Filesystem, Request, reply::ReplyInit};
-use fuse3::{Result, SetAttr};
+use rfuse3::notify::Notify;
+use rfuse3::raw::reply::*;
+use rfuse3::raw::{Filesystem, Request, reply::ReplyInit};
+use rfuse3::{Result, SetAttr};
 use uuid::Uuid;
 // LoggingFileSystem . provide log info for a filesystem trait.
 pub struct LoggingFileSystem<FS: Filesystem> {
@@ -41,7 +41,7 @@ impl<FS: Filesystem> LoggingFileSystem<FS> {
     }
 }
 
-impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileSystem<FS> {
+impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileSystem<FS> {
     type DirEntryStream<'a>
         = FS::DirEntryStream<'a>
     where
@@ -343,7 +343,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn mkdir(
         &self,
         req: Request,
-        parent: fuse3::Inode,
+        parent: rfuse3::Inode,
         name: &OsStr,
         mode: u32,
         umask: u32,
@@ -361,7 +361,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         self.log_result(&uuid, method, &re);
         re
     }
-    async fn access(&self, req: Request, inode: fuse3::Inode, mask: u32) -> Result<()> {
+    async fn access(&self, req: Request, inode: rfuse3::Inode, mask: u32) -> Result<()> {
         let uuid = Uuid::new_v4();
         let method = "access";
         let args = vec![("inode", inode.to_string()), ("mask", mask.to_string())];
@@ -373,7 +373,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn getxattr(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         name: &OsStr,
         size: u32,
     ) -> Result<ReplyXAttr> {
@@ -392,7 +392,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn create(
         &self,
         req: Request,
-        parent: fuse3::Inode,
+        parent: rfuse3::Inode,
         name: &OsStr,
         mode: u32,
         flags: u32,
@@ -413,7 +413,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn lseek(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         fh: u64,
         offset: u64,
         whence: u32,
@@ -435,7 +435,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn mknod(
         &self,
         req: Request,
-        parent: fuse3::Inode,
+        parent: rfuse3::Inode,
         name: &OsStr,
         mode: u32,
         rdev: u32,
@@ -457,9 +457,9 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn rename(
         &self,
         req: Request,
-        parent: fuse3::Inode,
+        parent: rfuse3::Inode,
         name: &OsStr,
-        new_parent: fuse3::Inode,
+        new_parent: rfuse3::Inode,
         new_name: &OsStr,
     ) -> Result<()> {
         let uuid = Uuid::new_v4();
@@ -478,7 +478,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         self.log_result(&uuid, method, &result);
         result
     }
-    async fn listxattr(&self, req: Request, inode: fuse3::Inode, size: u32) -> Result<ReplyXAttr> {
+    async fn listxattr(&self, req: Request, inode: rfuse3::Inode, size: u32) -> Result<ReplyXAttr> {
         let uuid = Uuid::new_v4();
         let method = "listxattr";
         let args = vec![("inode", inode.to_string()), ("size", size.to_string())];
@@ -488,7 +488,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         result
     }
 
-    async fn open(&self, req: Request, inode: fuse3::Inode, flags: u32) -> Result<ReplyOpen> {
+    async fn open(&self, req: Request, inode: rfuse3::Inode, flags: u32) -> Result<ReplyOpen> {
         let uuid = Uuid::new_v4();
         let method = "open";
         let args = vec![("inode", inode.to_string()), ("flags", flags.to_string())];
@@ -504,7 +504,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         result
     }
 
-    async fn rmdir(&self, req: Request, parent: fuse3::Inode, name: &OsStr) -> Result<()> {
+    async fn rmdir(&self, req: Request, parent: rfuse3::Inode, name: &OsStr) -> Result<()> {
         let uuid = Uuid::new_v4();
         let method = "rmdir";
         let args = vec![
@@ -517,7 +517,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         result
     }
 
-    async fn statfs(&self, req: Request, inode: fuse3::Inode) -> Result<ReplyStatFs> {
+    async fn statfs(&self, req: Request, inode: rfuse3::Inode) -> Result<ReplyStatFs> {
         let uuid = Uuid::new_v4();
         let method = "statfs";
         let args = vec![("inode", inode.to_string())];
@@ -530,8 +530,8 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn link(
         &self,
         req: Request,
-        inode: fuse3::Inode,
-        new_parent: fuse3::Inode,
+        inode: rfuse3::Inode,
+        new_parent: rfuse3::Inode,
         new_name: &OsStr,
     ) -> Result<ReplyEntry> {
         let uuid = Uuid::new_v4();
@@ -550,7 +550,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn symlink(
         &self,
         req: Request,
-        parent: fuse3::Inode,
+        parent: rfuse3::Inode,
         name: &OsStr,
         link: &OsStr,
     ) -> Result<ReplyEntry> {
@@ -584,7 +584,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn bmap(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         blocksize: u32,
         idx: u64,
     ) -> Result<ReplyBmap> {
@@ -603,10 +603,10 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn copy_file_range(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         fh_in: u64,
         off_in: u64,
-        inode_out: fuse3::Inode,
+        inode_out: rfuse3::Inode,
         fh_out: u64,
         off_out: u64,
         length: u64,
@@ -638,7 +638,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn fallocate(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         fh: u64,
         offset: u64,
         length: u64,
@@ -665,7 +665,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn flush(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         fh: u64,
         lock_owner: u64,
     ) -> Result<()> {
@@ -685,7 +685,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn fsyncdir(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         fh: u64,
         datasync: bool,
     ) -> Result<()> {
@@ -717,7 +717,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn notify_reply(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         offset: u64,
         data: Bytes,
     ) -> Result<()> {
@@ -733,7 +733,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn poll(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         fh: u64,
         kh: Option<u64>,
         flags: u32,
@@ -757,7 +757,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         result
     }
 
-    async fn readlink(&self, req: Request, inode: fuse3::Inode) -> Result<ReplyData> {
+    async fn readlink(&self, req: Request, inode: rfuse3::Inode) -> Result<ReplyData> {
         let uuid = Uuid::new_v4();
         let method = "readlink";
         let args = vec![("inode", inode.to_string())];
@@ -770,7 +770,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn release(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         fh: u64,
         flags: u32,
         lock_owner: u64,
@@ -797,7 +797,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     async fn releasedir(
         &self,
         req: Request,
-        inode: fuse3::Inode,
+        inode: rfuse3::Inode,
         fh: u64,
         flags: u32,
     ) -> Result<()> {
@@ -814,7 +814,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         result
     }
 
-    async fn removexattr(&self, req: Request, inode: fuse3::Inode, name: &OsStr) -> Result<()> {
+    async fn removexattr(&self, req: Request, inode: rfuse3::Inode, name: &OsStr) -> Result<()> {
         let uuid = Uuid::new_v4();
         let method = "removexattr";
         let args = vec![
