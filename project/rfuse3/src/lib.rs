@@ -24,7 +24,7 @@
     all(target_os = "linux", feature = "unprivileged"),
     target_os = "macos"
 ))]
-use std::io::{self, ErrorKind};
+use std::io;
 #[cfg(target_os = "macos")]
 use std::path::Path;
 #[cfg(any(
@@ -237,8 +237,7 @@ impl From<SystemTime> for Timestamp {
 #[cfg(all(target_os = "linux", feature = "unprivileged"))]
 fn find_fusermount3() -> io::Result<PathBuf> {
     which::which("fusermount3").map_err(|err| {
-        io::Error::new(
-            ErrorKind::Other,
+        io::Error::other(
             format!("find fusermount3 binary failed {err:?}"),
         )
     })

@@ -4,12 +4,7 @@ use std::env;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
-#[cfg(any(
-    all(target_os = "linux", feature = "unprivileged"),
-    target_os = "freebsd",
-    target_os = "macos",
-))]
-use std::io::ErrorKind;
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::io::Write;
 use std::io::{IoSlice, IoSliceMut};
@@ -481,8 +476,7 @@ impl NonBlockFuseConnection {
             .spawn()?;
 
         if !child.wait().await?.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "fusermount run failed",
             ));
         }
@@ -509,12 +503,12 @@ impl NonBlockFuseConnection {
 
             let fd = if let Some(ControlMessageOwned::ScmRights(fds)) = msg.cmsgs()?.next() {
                 if fds.is_empty() {
-                    return Err(io::Error::new(ErrorKind::Other, "no fuse fd"));
+                    return Err(io::Error::other("no fuse fd"));
                 }
 
                 fds[0]
             } else {
-                return Err(io::Error::new(ErrorKind::Other, "get fuse fd failed"));
+                return Err(io::Error::other("get fuse fd failed"));
             };
 
             Ok(fd)
