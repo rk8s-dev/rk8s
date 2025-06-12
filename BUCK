@@ -14,5 +14,6 @@ rust_binary(
         "root//project/libipam:libipam",
         "root//project/rkb:rkb",
         "root//project/rkl:rkl_bin",
+        "root//project/rfuse3:rfuse3",
     ],
 )
