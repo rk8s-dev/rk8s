@@ -455,7 +455,7 @@ pub trait Filesystem {
 
     /// forget more than one inode. This is a batch version [`forget`][Filesystem::forget]
     ///  (Inode ,Vlookup)
-    async fn batch_forget(&self, req: Request, inodes: &[(Inode,u64)]) {}
+    async fn batch_forget(&self, req: Request, inodes: &[(Inode, u64)]) {}
 
     /// allocate space for an open file. This function ensures that required space is allocated for
     /// specified file.

@@ -1,7 +1,7 @@
 use std::{fmt::Display, path::PathBuf};
 
-use rfuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use libc::stat64;
+use rfuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]

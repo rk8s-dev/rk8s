@@ -196,9 +196,7 @@ impl MountHandleInner {
                         .args([OsStr::new("-u"), self.mount_path.as_os_str()])
                         .spawn()?;
                     if !child.wait().await?.success() {
-                        return Err(IoError::other(
-                            "call fusermount3 -u to unmount failed",
-                        ));
+                        return Err(IoError::other("call fusermount3 -u to unmount failed"));
                     }
 
                     return Ok(());
@@ -589,9 +587,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
 
                 reply_error_in_place(libc::ENOSYS.into(), request, &self.response_sender).await;
 
-                return Err(IoError::other(
-                    format!("receive unknown opcode {}", err.0),
-                ));
+                return Err(IoError::other(format!("receive unknown opcode {}", err.0)));
             }
 
             Ok(opcode) => opcode,
@@ -602,9 +598,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
         if opcode != fuse_opcode::FUSE_INIT {
             error!(?opcode, "received unexpected opcode");
 
-            return Err(IoError::other(
-                format!("unexpected opcode {opcode:?}"),
-            ));
+            return Err(IoError::other(format!("unexpected opcode {opcode:?}")));
         }
 
         let data_size = in_header.len as usize - FUSE_IN_HEADER_SIZE;
@@ -3033,7 +3027,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 "readdir unique {} inode {} fh {} offset {}",
                 request.unique, in_header.nodeid, read_in.fh, read_in.offset
             );
-            
+
             let reply_readdir = match fs
                 .readdir(request, in_header.nodeid, read_in.fh, read_in.offset as i64)
                 .await
@@ -3830,7 +3824,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
         spawn(debug_span!("fuse_batch_forget"), async move {
             let inodes = forgets
                 .into_iter()
-                .map(|forget_one| (forget_one.nodeid,forget_one._nlookup))
+                .map(|forget_one| (forget_one.nodeid, forget_one._nlookup))
                 .collect::<Vec<_>>();
 
             debug!("batch_forget unique {} inodes {:?}", request.unique, inodes);

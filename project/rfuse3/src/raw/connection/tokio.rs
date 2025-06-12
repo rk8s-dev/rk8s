@@ -476,9 +476,7 @@ impl NonBlockFuseConnection {
             .spawn()?;
 
         if !child.wait().await?.success() {
-            return Err(io::Error::other(
-                "fusermount run failed",
-            ));
+            return Err(io::Error::other("fusermount run failed"));
         }
 
         let fd1 = sock1.as_raw_fd();

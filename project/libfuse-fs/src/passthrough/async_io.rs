@@ -1,8 +1,8 @@
 use bitflags::bitflags;
 use bytes::Bytes;
-use rfuse3::{Errno, Inode, Result, raw::prelude::*};
 use futures::stream;
 use futures_util::stream::Iter;
+use rfuse3::{Errno, Inode, Result, raw::prelude::*};
 use std::{
     ffi::{CStr, CString, OsStr, OsString},
     fs::File,

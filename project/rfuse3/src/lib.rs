@@ -236,11 +236,8 @@ impl From<SystemTime> for Timestamp {
 
 #[cfg(all(target_os = "linux", feature = "unprivileged"))]
 fn find_fusermount3() -> io::Result<PathBuf> {
-    which::which("fusermount3").map_err(|err| {
-        io::Error::other(
-            format!("find fusermount3 binary failed {err:?}"),
-        )
-    })
+    which::which("fusermount3")
+        .map_err(|err| io::Error::other(format!("find fusermount3 binary failed {err:?}")))
 }
 
 #[cfg(target_os = "macos")]

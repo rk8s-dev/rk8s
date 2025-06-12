@@ -17,11 +17,11 @@ use std::future::Future;
 use std::io::{Error, Result};
 
 use config::Config;
+use futures::StreamExt as _;
 use rfuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyEntry, ReplyOpen, ReplyStatFs,
 };
 use rfuse3::raw::{Filesystem, Request, Session};
-use futures::StreamExt as _;
 use std::sync::{Arc, Weak};
 
 use rfuse3::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
