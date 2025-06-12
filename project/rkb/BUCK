@@ -9,7 +9,7 @@ rust_binary(
         "//third-party:clap",
         "//third-party:nix",
         "//third-party:tokio",
-        "//third-party:fuse3",
+        
         "//third-party:libc",
         "//third-party:dockerfile-parser",
         "//third-party:anyhow",
@@ -22,6 +22,7 @@ rust_binary(
         "//third-party:chrono",
         "//third-party:tempfile",
         "//project/libfuse-fs:libfuse-fs",
+        "//project/rfuse3:rfuse3",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",
