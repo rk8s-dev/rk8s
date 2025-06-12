@@ -16,10 +16,17 @@ path = "top/main.rs"
 # and all options Cargo supports.
 [dependencies]
 anyhow = "1.0.97"
+async-fs = { version = "2.1.1"}
 async-std = "1.12"
 async-trait = "0.1.86"
+async-global-executor = { version = "2.4.1" }
+async-lock = { version = "3.3.0" }
+async-notify = "0.3"
+async-io = { version = "2.3.1"}
+async-process = { version = "2.1.0"}
 axum = "0.8.1"
 bitflags = "2.9.0"
+bincode = "1.3.3"
 bytes = "1.10.1"
 caps = "0.5.5"
 chrono = { version = "0.4", default-features = false, features = [
@@ -34,8 +41,8 @@ errno = { version = "0.3.10", optional = true }
 fastrand = "^2.3.0"
 fixedbitset = "0.5.7"
 flate2 = "1.1.1"
-fuse3 = { version = "0.8.1", features = ["tokio-runtime", "unprivileged"] }
 futures = "0.3.31"
+futures-channel = { version = "0.3.30", features = ["sink"] }
 futures-util = "0.3.31"
 hex = "0.4.3"
 http-body = "0.4.5"
@@ -90,6 +97,7 @@ serde_json = "1.0.138"
 serde_yaml = "0.9"
 sha2 = "0.10.8"
 sha256 = "1.6.0"
+slab = "0.4.9"
 tar = "0.4.44"
 tempfile = "3.19.1"
 thiserror = "2.0.12"
@@ -99,6 +107,7 @@ tonic = "0.13"
 tracing = { version = "0.1.41", features = ["attributes"] }
 tracing-journald = "0.3.1"
 tracing-subscriber = { version = "0.3.19", features = ["json", "env-filter"] }
+trait-make = "0.1"
 uuid = { version = "1.15.1", features = [
     "v4",
     "fast-rng",
@@ -107,6 +116,8 @@ uuid = { version = "1.15.1", features = [
 vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"
 walkdir = "2.3"
+which = { version = "4.4.2" }
+
 
 # Local patches - typically git references
 [patch.crates-io]
