@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use rkl::cli_commands;
 
 #[derive(Parser)]
@@ -9,12 +9,22 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Subcommand, Clone, ValueEnum)]
+enum RunType {
+    #[clap(name = "pod")]
+    Pod,
+    #[clap(name = "container")]
+    Container,
+    #[clap(name = "compose")]
+    Compose,
+}
+
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Run a pod from a YAML file using ./rkl run pod.yaml")]
+    #[command(about = "Run the container/pod.yaml/compose.yml")]
     Run {
-        #[arg(value_name = "POD_YAML")]
-        pod_yaml: String,
+        #[arg(value_name = "RUN_TYPE")]
+        run_type: RunType,
     },
     #[command(about = "Create a pod from a YAML file using ./rkl create pod.yaml")]
     Create {
