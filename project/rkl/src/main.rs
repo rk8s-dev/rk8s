@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use rkl::cli_commands;
 
 #[derive(Parser)]
@@ -9,21 +9,61 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(Subcommand, Clone, ValueEnum)]
+impl Cli {
+    pub fn run(self) -> Result<(), anyhow::Error> {
+        match self.command {
+            Commands::Run { run_type } => run_type.run(),
+            Commands::Create { pod_yaml } => cli_commands::create_pod(&pod_yaml),
+            Commands::Start { pod_name } => cli_commands::start_pod(&pod_name),
+            Commands::Delete { pod_name } => cli_commands::delete_pod(&pod_name),
+            Commands::State { pod_name } => cli_commands::state_pod(&pod_name),
+            Commands::Exec(exec) => {
+                let exit_code = cli_commands::exec_pod(*exec)?;
+                std::process::exit(exit_code);
+            }
+        }
+    }
+}
+
+/// define the 3 state for the run command "container" "pod" "compose"
+#[derive(Subcommand, Clone)]
 enum RunType {
+    /// Run a pod from a YAML file using ./rkl run pod.yaml
     #[clap(name = "pod")]
-    Pod,
+    Pod {
+        #[arg(value_name = "POD_YAML")]
+        pod_yaml: String,
+    },
+    /// Run a single container directly
     #[clap(name = "container")]
-    Container,
+    Container {
+        #[arg(value_name = "CAONTAINER_SPEC")]
+        container_spec: String,
+    },
+
+    /// Run docker compose YAML
     #[clap(name = "compose")]
-    Compose,
+    Compose {
+        #[arg(value_name = "COMPOSE_YAML")]
+        compose_yaml: String,
+    },
+}
+
+impl RunType {
+    pub fn run(&self) -> Result<(), anyhow::Error> {
+        match self {
+            RunType::Pod { pod_yaml } => cli_commands::run_pod(&pod_yaml),
+            RunType::Container { container_spec } => cli_commands::run_container(&container_spec),
+            RunType::Compose { compose_yaml } => cli_commands::run_compose(&compose_yaml),
+        }
+    }
 }
 
 #[derive(Subcommand)]
 enum Commands {
     #[command(about = "Run the container/pod.yaml/compose.yml")]
     Run {
-        #[arg(value_name = "RUN_TYPE")]
+        #[command(subcommand)]
         run_type: RunType,
     },
     #[command(about = "Create a pod from a YAML file using ./rkl create pod.yaml")]
@@ -52,16 +92,5 @@ enum Commands {
 
 fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
-
-    match cli.command {
-        Commands::Run { pod_yaml } => cli_commands::run_pod(&pod_yaml),
-        Commands::Create { pod_yaml } => cli_commands::create_pod(&pod_yaml),
-        Commands::Start { pod_name } => cli_commands::start_pod(&pod_name),
-        Commands::Delete { pod_name } => cli_commands::delete_pod(&pod_name),
-        Commands::State { pod_name } => cli_commands::state_pod(&pod_name),
-        Commands::Exec(exec) => {
-            let exit_code = cli_commands::exec_pod(*exec)?;
-            std::process::exit(exit_code);
-        }
-    }
+    cli.run()
 }
