@@ -1,13 +1,14 @@
 use crate::{
-    commands::create,
+    commands::{create, start, state},
     cri::cri_api::{
-        ContainerConfig, ContainerMetadata, CreateContainerResponse, ImageSpec, KeyValue, Mount,
+        ContainerConfig, ContainerFilter, ContainerMetadata, CreateContainerResponse, ImageSpec,
+        KeyValue, ListContainersRequest, Mount, StartContainerResponse,
     },
     rootpath,
     task::{ContainerSpec, add_cap_net_raw, get_linux_container_config},
 };
 use anyhow::{Ok, Result, anyhow};
-use liboci_cli::Create;
+use liboci_cli::{Create, Start, State};
 use oci_spec::runtime::{
     LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, ProcessBuilder, Spec,
 };
@@ -16,10 +17,12 @@ use std::{
     io::{BufWriter, Read, Write},
     path::Path,
 };
+use tracing::debug;
 
 struct ContainerRunner {
     sepc: ContainerSpec,
     config: Option<ContainerConfig>,
+    id: Option<String>,
 }
 
 impl ContainerRunner {
@@ -31,10 +34,35 @@ impl ContainerRunner {
         file.read_to_string(&mut content)?;
 
         let container_spec: ContainerSpec = serde_yaml::from_str(&content)?;
+        let container_id = container_spec.name.clone();
         Ok(ContainerRunner {
-            sepc: container_spec,
+            sepc: (container_spec),
             config: None,
+            id: Some(container_id),
         })
+    }
+
+    pub fn from_container_id(id: &str) -> Result<Self> {
+        Ok(ContainerRunner {
+            sepc: ContainerSpec {
+                name: id.to_string(),
+                image: "".to_string(),
+                ports: vec![],
+                args: vec![],
+                resources: None,
+            },
+            config: None,
+            id: Some(id.to_string()),
+        })
+    }
+
+    pub fn get_container_id(&self) -> Result<String> {
+        let container_id = self
+            .config
+            .as_ref()
+            .and_then(|c| c.metadata.as_ref().map(|m| m.name.clone()))
+            .ok_or_else(|| anyhow!("Failed to get the container id"))?;
+        Ok(container_id)
     }
 
     pub fn build_config(&mut self) -> Result<()> {
@@ -106,11 +134,7 @@ impl ContainerRunner {
             .as_ref()
             .ok_or_else(|| anyhow!("Container's Config is required"))?;
 
-        let container_id = config
-            .metadata
-            .as_ref()
-            .map(|data| data.name.clone())
-            .ok_or_else(|| anyhow!("Container's metadata is required"))?;
+        let container_id = self.get_container_id()?;
 
         // 3. create oci spec
         let mut spec = Spec::default();
@@ -204,6 +228,60 @@ impl ContainerRunner {
             container_id: container_id,
         });
     }
+
+    // pub fn build_list_container_request(&self) -> Result<ListContainersRequest> {
+    //     Ok(ListContainersRequest {
+    //         filter: Some(ContainerFilter {
+    //             id: todo!(),
+    //             state: todo!(),
+    //             pod_sandbox_id: todo!(),
+    //             label_selector: todo!(),
+    //         }),
+    //     })
+    // }
+
+    pub fn state(&self) -> Result<()> {
+        let root_path = rootpath::determine(None)?;
+
+        let container_id = self.get_container_id()?;
+
+        let _ = state::state(
+            State {
+                container_id: container_id,
+            },
+            root_path,
+        )?;
+        Ok(())
+    }
+
+    pub fn start_container(&self, id: Option<String>) -> Result<StartContainerResponse> {
+        let root_path = rootpath::determine(None)?;
+        match id {
+            None => {
+                let id = self.get_container_id()?;
+                start::start(
+                    Start {
+                        container_id: id.clone(),
+                    },
+                    root_path,
+                )
+                .map_err(|e| anyhow!("Failed to start container {id} due to {e}"))?;
+
+                Ok(StartContainerResponse {})
+            }
+            Some(id) => {
+                start::start(
+                    Start {
+                        container_id: id.clone(),
+                    },
+                    root_path,
+                )
+                .map_err(|e| anyhow!("Failed to start container {id} due to {e}"))?;
+
+                Ok(StartContainerResponse {})
+            }
+        }
+    }
 }
 
 pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
@@ -213,9 +291,73 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     // create container_config
     runner.build_config()?;
 
-    // create container
-    runner.create_container()?;
+    let id = runner.id.as_deref().unwrap_or("<unknown>");
+    // See if the container exists
+    match runner.state().is_ok() {
+        // exist
+        true => {
+            runner
+                .start_container(None)
+                .map_err(|e| anyhow!("Failed to start container {} due to {}", id, e))?;
+            println!("Container: {id} runs successfully!");
+            Ok(())
+        }
+        // not exist
+        false => {
+            // create container
+            let CreateContainerResponse { container_id } = runner
+                .create_container()
+                .map_err(|e| anyhow!("Failed to start a new container {} due to  {}", id, e))?;
 
-    println!("{path}");
-    Ok(())
+            println!("Container: {container_id} runs successfully!");
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use core::panic;
+
+    use serial_test::serial;
+
+    use super::*;
+    fn runner_from_file(path: &str) -> Result<ContainerRunner> {
+        let mut runner = ContainerRunner::from_file(path)?;
+        runner.build_config()?;
+
+        Ok(runner)
+    }
+
+    #[test]
+    #[serial]
+    fn test_run_container() {
+        let path = "/home/erasernoob/project/rk8s/project/test/single_container.yaml";
+        println!("{path}");
+        let runner = ContainerRunner::from_container_id(path)
+            .unwrap_or_else(|e| panic!("Initialize the Runner failed:{e} "));
+        runner
+            .create_container()
+            .unwrap_or_else(|e| panic!("Got Runner failed: {e}"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_start_container() {
+        let container_id = "main-container1";
+        let runner = ContainerRunner::from_container_id(container_id)
+            .unwrap_or_else(|e| panic!("Initialize the Runner failed:{e} "));
+        let _ = runner
+            .start_container(Some(container_id.to_string()))
+            .unwrap_or_else(|e| panic!("Start Container Failed: {e}"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_the_state() {
+        let path = "/home/erasernoob/project/rk8s/project/test/single_container.yaml";
+        println!("{path}");
+        let runner = runner_from_file(path).unwrap_or_else(|e| panic!("Got Runner failed:{e} "));
+        let _ = runner.state().map_err(|e| eprintln!("state failed: {}", e));
+    }
 }

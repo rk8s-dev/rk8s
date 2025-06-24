@@ -37,8 +37,8 @@ enum RunType {
     /// Run a single container directly
     #[clap(name = "container")]
     Container {
-        #[arg(value_name = "CAONTAINER_SPEC")]
-        container_spec: String,
+        #[arg(value_name = "CAONTAINER_YAML")]
+        container_yaml: String,
     },
 
     /// Run docker compose YAML
@@ -53,7 +53,7 @@ impl RunType {
     pub fn run(&self) -> Result<(), anyhow::Error> {
         match self {
             RunType::Pod { pod_yaml } => cli_commands::run_pod(&pod_yaml),
-            RunType::Container { container_spec } => cli_commands::run_container(&container_spec),
+            RunType::Container { container_yaml } => cli_commands::run_container(&container_yaml),
             RunType::Compose { compose_yaml } => cli_commands::run_compose(&compose_yaml),
         }
     }
@@ -61,7 +61,7 @@ impl RunType {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Run the container/pod.yaml/compose.yml")]
+    #[command(about = "Run a pod, a single container, or a compose YAML file")]
     Run {
         #[command(subcommand)]
         run_type: RunType,
