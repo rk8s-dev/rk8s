@@ -1,8 +1,8 @@
 use crate::{
     commands::{create, start, state},
     cri::cri_api::{
-        ContainerConfig, ContainerFilter, ContainerMetadata, CreateContainerResponse, ImageSpec,
-        KeyValue, ListContainersRequest, Mount, StartContainerResponse,
+        ContainerConfig, ContainerMetadata, CreateContainerResponse, ImageSpec, KeyValue, Mount,
+        StartContainerResponse,
     },
     rootpath,
     task::{ContainerSpec, add_cap_net_raw, get_linux_container_config},
@@ -17,7 +17,6 @@ use std::{
     io::{BufWriter, Read, Write},
     path::Path,
 };
-use tracing::debug;
 
 struct ContainerRunner {
     sepc: ContainerSpec,
@@ -161,7 +160,7 @@ impl ContainerRunner {
                 .build()?,
         ];
 
-        let mut linux = LinuxBuilder::default().namespaces(namespaces);
+        let mut linux: LinuxBuilder = LinuxBuilder::default().namespaces(namespaces);
         if let Some(x) = &config.linux {
             if let Some(r) = &x.resources {
                 linux = linux.resources(r);
@@ -242,6 +241,7 @@ impl ContainerRunner {
 
     pub fn state(&self) -> Result<()> {
         let root_path = rootpath::determine(None)?;
+        println!("ROOT PATH: {}", root_path.to_str().unwrap_or_default());
 
         let container_id = self.get_container_id()?;
 
@@ -296,9 +296,7 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     match runner.state().is_ok() {
         // exist
         true => {
-            runner
-                .start_container(None)
-                .map_err(|e| anyhow!("Failed to start container {} due to {}", id, e))?;
+            runner.start_container(None)?;
             println!("Container: {id} runs successfully!");
             Ok(())
         }
@@ -349,7 +347,7 @@ mod test {
             .unwrap_or_else(|e| panic!("Initialize the Runner failed:{e} "));
         let _ = runner
             .start_container(Some(container_id.to_string()))
-            .unwrap_or_else(|e| panic!("Start Container Failed: {e}"));
+            .unwrap_or_else(|e| panic!("{e}"));
     }
 
     #[test]
