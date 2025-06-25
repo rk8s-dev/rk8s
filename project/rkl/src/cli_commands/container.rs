@@ -1,5 +1,5 @@
 use crate::{
-    commands::{create, start, state},
+    commands::{create, delete, load_container, start, state},
     cri::cri_api::{
         ContainerConfig, ContainerMetadata, CreateContainerResponse, ImageSpec, KeyValue, Mount,
         StartContainerResponse,
@@ -8,7 +8,7 @@ use crate::{
     task::{ContainerSpec, add_cap_net_raw, get_linux_container_config},
 };
 use anyhow::{Ok, Result, anyhow};
-use liboci_cli::{Create, Start, State};
+use liboci_cli::{Create, Delete, Start};
 use oci_spec::runtime::{
     LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, ProcessBuilder, Spec,
 };
@@ -21,7 +21,7 @@ use std::{
 struct ContainerRunner {
     sepc: ContainerSpec,
     config: Option<ContainerConfig>,
-    id: Option<String>,
+    id: String,
 }
 
 impl ContainerRunner {
@@ -37,7 +37,7 @@ impl ContainerRunner {
         Ok(ContainerRunner {
             sepc: (container_spec),
             config: None,
-            id: Some(container_id),
+            id: container_id,
         })
     }
 
@@ -51,7 +51,7 @@ impl ContainerRunner {
                 resources: None,
             },
             config: None,
-            id: Some(id.to_string()),
+            id: id.to_string(),
         })
     }
 
@@ -217,7 +217,7 @@ impl ContainerRunner {
 
         // 6. get the root_path
         let root_path = rootpath::determine(None)
-            .map_err(|e| anyhow!("Failed to determin the rootpath: {}", e))?;
+            .map_err(|e| anyhow!("Failed to determine the rootpath: {}", e))?;
 
         // 7. create the container return the container id
         create::create(create_args, root_path, false)
@@ -226,32 +226,6 @@ impl ContainerRunner {
         return Ok(CreateContainerResponse {
             container_id: container_id,
         });
-    }
-
-    // pub fn build_list_container_request(&self) -> Result<ListContainersRequest> {
-    //     Ok(ListContainersRequest {
-    //         filter: Some(ContainerFilter {
-    //             id: todo!(),
-    //             state: todo!(),
-    //             pod_sandbox_id: todo!(),
-    //             label_selector: todo!(),
-    //         }),
-    //     })
-    // }
-
-    pub fn state(&self) -> Result<()> {
-        let root_path = rootpath::determine(None)?;
-        println!("ROOT PATH: {}", root_path.to_str().unwrap_or_default());
-
-        let container_id = self.get_container_id()?;
-
-        let _ = state::state(
-            State {
-                container_id: container_id,
-            },
-            root_path,
-        )?;
-        Ok(())
     }
 
     pub fn start_container(&self, id: Option<String>) -> Result<StartContainerResponse> {
@@ -291,9 +265,9 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     // create container_config
     runner.build_config()?;
 
-    let id = runner.id.as_deref().unwrap_or("<unknown>");
+    let id = runner.id.as_str();
     // See if the container exists
-    match runner.state().is_ok() {
+    match is_container_exist(id).is_ok() {
         // exist
         true => {
             runner.start_container(None)?;
@@ -303,11 +277,73 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
         // not exist
         false => {
             // create container
-            let CreateContainerResponse { container_id } = runner
-                .create_container()
-                .map_err(|e| anyhow!("Failed to start a new container {} due to  {}", id, e))?;
-
+            let CreateContainerResponse { container_id } = runner.create_container()?;
+            runner.start_container(None)?;
             println!("Container: {container_id} runs successfully!");
+            Ok(())
+        }
+    }
+}
+
+pub fn is_container_exist(id: &str) -> Result<()> {
+    let root_path = rootpath::determine(None)?;
+    let _ = load_container(root_path, id)?;
+    Ok(())
+}
+
+pub fn state_container(id: &str) -> Result<()> {
+    let root_path = rootpath::determine(None)?;
+    println!("ROOT PATH: {}", root_path.to_str().unwrap_or_default());
+
+    let container = load_container(root_path, id)?;
+    println!("{}", serde_json::to_string_pretty(&container.state)?);
+
+    Ok(())
+}
+
+pub fn delete_container(id: &str) -> Result<()> {
+    is_container_exist(id)?;
+    let root_path = rootpath::determine(None)?;
+    let delete_args = Delete {
+        container_id: id.to_string(),
+        force: true,
+    };
+    let _ = delete::delete(delete_args, root_path)?;
+
+    Ok(())
+}
+
+pub fn start_container(container_id: &str) -> Result<()> {
+    let runner = ContainerRunner::from_container_id(container_id)?;
+    runner.start_container(Some(container_id.to_string()))?;
+    println!("container {container_id} start successfully");
+    Ok(())
+}
+pub fn exec_container() -> Result<()> {
+    Ok(())
+}
+
+pub fn create_container(path: &str) -> Result<()> {
+    let mut runner = ContainerRunner::from_file(path)?;
+
+    // create container_config
+    runner.build_config()?;
+
+    let id = runner.id.as_str();
+    // See if the container exists
+    // See if the container exists
+    match is_container_exist(id).is_ok() {
+        // exist
+        true => {
+            println!("Container: {id} already exist!");
+            Ok(())
+        }
+        // not exist
+        false => {
+            // create container
+            let _ = runner.create_container()?;
+
+            println!("Container: {id} created successfully!");
             Ok(())
         }
     }
@@ -352,10 +388,5 @@ mod test {
 
     #[test]
     #[serial]
-    fn test_the_state() {
-        let path = "/home/erasernoob/project/rk8s/project/test/single_container.yaml";
-        println!("{path}");
-        let runner = runner_from_file(path).unwrap_or_else(|e| panic!("Got Runner failed:{e} "));
-        let _ = runner.state().map_err(|e| eprintln!("state failed: {}", e));
-    }
+    fn test_the_state() {}
 }

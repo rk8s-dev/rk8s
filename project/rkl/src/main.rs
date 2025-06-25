@@ -29,8 +29,12 @@ impl Cli {
             },
             Workload::Container(cmd) => match cmd {
                 ContainerCommand::Run { container_yaml,  } => cli_commands::run_container(&container_yaml),
-                // 其它 container 子命令...
-                _ => todo!(),
+                ContainerCommand::Start { container_name,  } => cli_commands::start_container(&container_name),
+                ContainerCommand::State { container_name,  } => cli_commands::state_container(&container_name),
+                ContainerCommand::Delete { container_name,  } => cli_commands::delete_container(&container_name),
+                ContainerCommand::Create { container_yaml,  } => cli_commands::create_container(&container_yaml),
+                ContainerCommand::Exec(exec) => cli_commands::exec_container(),
+                // _ => todo!(),
             },
             Workload::Compose(cmd) => match cmd {
                 ComposeCommand::Run { compose_yaml } => cli_commands::run_compose(&compose_yaml),
@@ -81,7 +85,7 @@ enum ContainerCommand {
         #[arg(value_name = "CONTAINER_NAME")]
         container_name: String,
     },
-    // Exec(Box<rkl::commands::exec_cli::Exec>),
+    Exec(Box<rkl::commands::exec_cli::Exec>),
 }
 
 #[derive(Subcommand)]
