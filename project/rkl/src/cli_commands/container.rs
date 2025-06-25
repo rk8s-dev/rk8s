@@ -1,5 +1,5 @@
 use crate::{
-    commands::{create, delete, load_container, start, state},
+    commands::{create, delete, exec, exec::Exec, exec_cli::ExecContainer, load_container, start},
     cri::cri_api::{
         ContainerConfig, ContainerMetadata, CreateContainerResponse, ImageSpec, KeyValue, Mount,
         StartContainerResponse,
@@ -238,8 +238,7 @@ impl ContainerRunner {
                         container_id: id.clone(),
                     },
                     root_path,
-                )
-                .map_err(|e| anyhow!("Failed to start container {id} due to {e}"))?;
+                )?;
 
                 Ok(StartContainerResponse {})
             }
@@ -249,8 +248,7 @@ impl ContainerRunner {
                         container_id: id.clone(),
                     },
                     root_path,
-                )
-                .map_err(|e| anyhow!("Failed to start container {id} due to {e}"))?;
+                )?;
 
                 Ok(StartContainerResponse {})
             }
@@ -319,8 +317,12 @@ pub fn start_container(container_id: &str) -> Result<()> {
     println!("container {container_id} start successfully");
     Ok(())
 }
-pub fn exec_container() -> Result<()> {
-    Ok(())
+pub fn exec_container(args: ExecContainer) -> Result<i32> {
+    let rootpath = rootpath::determine(None)?;
+    let args = Exec::from(args);
+
+    let exit_code = exec::exec(args, rootpath)?;
+    Ok(exit_code)
 }
 
 pub fn create_container(path: &str) -> Result<()> {
@@ -356,12 +358,12 @@ mod test {
     use serial_test::serial;
 
     use super::*;
-    fn runner_from_file(path: &str) -> Result<ContainerRunner> {
-        let mut runner = ContainerRunner::from_file(path)?;
-        runner.build_config()?;
+    // fn runner_from_file(path: &str) -> Result<ContainerRunner> {
+    //     let mut runner = ContainerRunner::from_file(path)?;
+    //     runner.build_config()?;
 
-        Ok(runner)
-    }
+    //     Ok(runner)
+    // }
 
     #[test]
     #[serial]

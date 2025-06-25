@@ -33,8 +33,10 @@ impl Cli {
                 ContainerCommand::State { container_name,  } => cli_commands::state_container(&container_name),
                 ContainerCommand::Delete { container_name,  } => cli_commands::delete_container(&container_name),
                 ContainerCommand::Create { container_yaml,  } => cli_commands::create_container(&container_yaml),
-                ContainerCommand::Exec(exec) => cli_commands::exec_container(),
-                // _ => todo!(),
+                ContainerCommand::Exec(exec) => {
+                    let exit_code = cli_commands::exec_container(*exec)?;
+                    std::process::exit(exit_code)
+                }
             },
             Workload::Compose(cmd) => match cmd {
                 ComposeCommand::Run { compose_yaml } => cli_commands::run_compose(&compose_yaml),
@@ -85,7 +87,7 @@ enum ContainerCommand {
         #[arg(value_name = "CONTAINER_NAME")]
         container_name: String,
     },
-    Exec(Box<rkl::commands::exec_cli::Exec>),
+    Exec(Box<rkl::commands::exec_cli::ExecContainer>),
 }
 
 #[derive(Subcommand)]
@@ -125,7 +127,7 @@ enum PodCommand {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
     },
-    Exec(Box<rkl::commands::exec_cli::Exec>),
+    Exec(Box<rkl::commands::exec_cli::ExecPod>),
 }
 
 fn main() -> Result<(), anyhow::Error> {
