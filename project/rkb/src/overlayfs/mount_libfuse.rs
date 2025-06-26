@@ -1,6 +1,6 @@
 // use std::{ffi::OsString, sync::Arc};
 
-// use fuse3::{raw::Session, MountOptions};
+// use rfuse3::{raw::Session, MountOptions};
 // use libfuse_fs::{overlayfs::{config::Config, OverlayFs}, passthrough::{logfs::LoggingFileSystem, new_passthroughfs_layer}};
 // use tokio::signal;
 

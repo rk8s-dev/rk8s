@@ -12,9 +12,9 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
-use fuse3::raw::reply::FileAttr;
-use fuse3::{FileType, Timestamp};
 use libc::stat64;
+use rfuse3::raw::reply::FileAttr;
+use rfuse3::{FileType, Timestamp};
 
 use super::inode_store::InodeId;
 use super::{CURRENT_DIR_CSTR, EMPTY_CSTR, MAX_HOST_INO, PARENT_DIR_CSTR};
@@ -56,8 +56,7 @@ impl UniqueInodeGenerator {
                 btree_map::Entry::Occupied(v) => *v.get(),
                 btree_map::Entry::Vacant(v) => {
                     if self.next_unique_id.load(Ordering::Relaxed) == u8::MAX {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
+                        return Err(io::Error::other(
                             "the number of combinations of dev and mntid exceeds 255",
                         ));
                     }
@@ -72,10 +71,9 @@ impl UniqueInodeGenerator {
             id.ino
         } else {
             if self.next_virtual_inode.load(Ordering::Relaxed) > MAX_HOST_INO {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("the virtual inode excess {}", MAX_HOST_INO),
-                ));
+                return Err(io::Error::other(format!(
+                    "the virtual inode excess {MAX_HOST_INO}"
+                )));
             }
             self.next_virtual_inode.fetch_add(1, Ordering::Relaxed) | VIRTUAL_INODE_FLAG
         };
@@ -90,7 +88,7 @@ impl UniqueInodeGenerator {
         if inode > VFS_MAX_INO {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("the inode {} excess {}", inode, VFS_MAX_INO),
+                format!("the inode {inode} excess {VFS_MAX_INO}"),
             ));
         }
 
@@ -98,7 +96,7 @@ impl UniqueInodeGenerator {
         if dev_mntid == u8::MAX {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("invalid dev and mntid {} excess 255", dev_mntid),
+                format!("invalid dev and mntid {dev_mntid} excess 255"),
             ));
         }
 
@@ -119,10 +117,7 @@ impl UniqueInodeGenerator {
         if !found {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!(
-                    "invalid dev and mntid {},there is no record in memory ",
-                    dev_mntid
-                ),
+                format!("invalid dev and mntid {dev_mntid},there is no record in memory "),
             ));
         }
         Ok(InodeId {
@@ -184,11 +179,11 @@ pub fn stat_fd(dir: &impl AsRawFd, path: Option<&CStr>) -> io::Result<libc::stat
     let pathname =
         path.unwrap_or_else(|| unsafe { CStr::from_bytes_with_nul_unchecked(EMPTY_CSTR) });
     let mut st = MaybeUninit::<libc::stat64>::zeroed();
-
+    let dir_fd = dir.as_raw_fd();
     // Safe because the kernel will only write data in `st` and we check the return value.
     let res = unsafe {
         libc::fstatat64(
-            dir.as_raw_fd(),
+            dir_fd,
             pathname.as_ptr(),
             st.as_mut_ptr(),
             libc::AT_EMPTY_PATH | libc::AT_SYMLINK_NOFOLLOW,

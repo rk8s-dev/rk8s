@@ -2,7 +2,4 @@ extra_srcs = [
     "src/restore/*.s",
 ]
 
-[[buildscript]]
-[buildscript.gen_srcs]
-[[buildscript]]
-[buildscript.rustc_flags]
+[buildscript.run]

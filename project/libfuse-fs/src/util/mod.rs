@@ -1,9 +1,8 @@
 use std::{fmt::Display, path::PathBuf};
 
-use fuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use libc::stat64;
+use rfuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use serde::{Deserialize, Serialize};
-pub mod atomic;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct GPath {

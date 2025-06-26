@@ -1,10 +1,10 @@
 use std::ffi::OsStr;
 
 use bytes::Bytes;
-use fuse3::notify::Notify;
-use fuse3::raw::reply::*;
-use fuse3::raw::{Filesystem, Request, reply::ReplyInit};
-use fuse3::{Result, SetAttr};
+use rfuse3::notify::Notify;
+use rfuse3::raw::reply::*;
+use rfuse3::raw::{Filesystem, Request, reply::ReplyInit};
+use rfuse3::{Result, SetAttr};
 
 use super::Inode;
 use std::any::type_name_of_val;
@@ -24,7 +24,7 @@ impl<FS: Filesystem> LoggingFileSystem<FS> {
     }
 }
 
-impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileSystem<FS> {
+impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileSystem<FS> {
     type DirEntryStream<'a>
         = FS::DirEntryStream<'a>
     where
@@ -89,7 +89,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         );
         match self.inner.lookup(req, parent, name).await {
             Ok(reply) => {
-                println!("look up result :{:?}", reply);
+                println!("look up result :{reply:?}");
                 Ok(reply)
             }
             Err(e) => {
@@ -120,7 +120,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         );
         match self.inner.getattr(req, inode, fh, flags).await {
             Ok(reply) => {
-                println!("getattr result :{:?}", reply);
+                println!("getattr result :{reply:?}");
                 Ok(reply)
             }
             Err(e) => {
@@ -137,25 +137,19 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         fh: Option<u64>,
         set_attr: SetAttr,
     ) -> Result<ReplyAttr> {
-        println!(
-            "fs:{}, setattr: inode: {:?}, fh: {:?}, set_attr: {:?}",
-            self.fsname, inode, fh, set_attr
-        );
         match self.inner.setattr(req, inode, fh, set_attr).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, setattr error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn readlink(&self, req: Request, inode: Inode) -> Result<ReplyData> {
-        println!("fs:{}, readlink: inode: {:?}", self.fsname, inode);
+
         match self.inner.readlink(req, inode).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, readlink error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -168,14 +162,9 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         name: &OsStr,
         link: &OsStr,
     ) -> Result<ReplyEntry> {
-        println!(
-            "fs:{}, symlink: parent: {:?}, name: {:?}, link: {:?}",
-            self.fsname, parent, name, link
-        );
         match self.inner.symlink(req, parent, name, link).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, symlink error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -189,10 +178,6 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
         mode: u32,
         rdev: u32,
     ) -> Result<ReplyEntry> {
-        println!(
-            "fs:{}, mknod: parent: {:?}, name: {:?}, mode: {}, rdev: {}",
-            self.fsname, parent, name, mode, rdev
-        );
         match self.inner.mknod(req, parent, name, mode, rdev).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
@@ -724,7 +709,7 @@ impl<FS: fuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileS
     }
 
     /// forget more than one inode. This is a batch version [`forget`][Filesystem::forget]
-    async fn batch_forget(&self, req: Request, inodes: &[Inode]) {
+    async fn batch_forget(&self, req: Request, inodes: &[(Inode, u64)]) {
         let _ = self.inner.batch_forget(req, inodes).await;
     }
 

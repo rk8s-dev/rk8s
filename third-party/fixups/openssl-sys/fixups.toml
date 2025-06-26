@@ -1,5 +1,4 @@
 cargo_env = true
 
-[[buildscript]]
-[buildscript.rustc_flags]
+[buildscript.run]
 env = { OPT_LEVEL = "3" }

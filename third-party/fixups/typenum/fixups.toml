@@ -2,5 +2,4 @@
 # without using Cargo, such as with Bazel."
 features = ["force_unix_path_separator"]
 
-[[buildscript]]
-[buildscript.gen_srcs]
+[buildscript.run]
