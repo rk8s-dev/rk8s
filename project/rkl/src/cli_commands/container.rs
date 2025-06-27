@@ -18,13 +18,22 @@ use std::{
     path::Path,
 };
 
-struct ContainerRunner {
+pub struct ContainerRunner {
     sepc: ContainerSpec,
     config: Option<ContainerConfig>,
     id: String,
 }
 
 impl ContainerRunner {
+    pub fn from_spec(spec: ContainerSpec) -> Result<Self> {
+        let id = spec.name.clone();
+        Ok(ContainerRunner {
+            sepc: spec,
+            config: None,
+            id: id,
+        })
+    }
+
     pub fn from_file(spec_path: &str) -> Result<Self> {
         // read the container_spec bytes
         let mut file = File::open(spec_path)
@@ -53,6 +62,31 @@ impl ContainerRunner {
             config: None,
             id: id.to_string(),
         })
+    }
+
+    pub fn run(&mut self) -> Result<()> {
+        let _ = self.create_container()?;
+        // create container_config
+        self.build_config()?;
+
+        let id = self.id.as_str();
+        // See if the container exists
+        match is_container_exist(id).is_ok() {
+            // exist
+            true => {
+                self.start_container(None)?;
+                println!("Container: {id} runs successfully!");
+                Ok(())
+            }
+            // not exist
+            false => {
+                // create container
+                let CreateContainerResponse { container_id } = self.create_container()?;
+                self.start_container(None)?;
+                println!("Container: {container_id} runs successfully!");
+                Ok(())
+            }
+        }
     }
 
     pub fn get_container_id(&self) -> Result<String> {
@@ -324,28 +358,7 @@ pub fn exec_container(args: ExecContainer) -> Result<i32> {
 
 pub fn create_container(path: &str) -> Result<()> {
     let mut runner = ContainerRunner::from_file(path)?;
-
-    // create container_config
-    runner.build_config()?;
-
-    let id = runner.id.as_str();
-    // See if the container exists
-    // See if the container exists
-    match is_container_exist(id).is_ok() {
-        // exist
-        true => {
-            println!("Container: {id} already exist!");
-            Ok(())
-        }
-        // not exist
-        false => {
-            // create container
-            let _ = runner.create_container()?;
-
-            println!("Container: {id} created successfully!");
-            Ok(())
-        }
-    }
+    runner.run()
 }
 
 #[cfg(test)]
