@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use rkl::cli_commands;
+use rkl::{cli_commands, ComposeCommand};
 
 #[derive(Parser)]
 #[command(name = "rkl")]
@@ -38,13 +38,10 @@ impl Cli {
                     std::process::exit(exit_code)
                 }
             },
-            Workload::Compose(cmd) => match cmd {
-                ComposeCommand::Up { compose_yaml } => cli_commands::run_compose(compose_yaml),
-                ComposeCommand::Down { } => cli_commands::run_compose(compose_yaml),
-            },
+            Workload::Compose(cmd) =>  cli_commands::execute(cmd)
+        }
+    }
 }
-    }
-    }
 
 /// define the 3 state for the run command "container" "pod" "compose"
 #[derive(Subcommand)]
@@ -90,21 +87,7 @@ enum ContainerCommand {
     Exec(Box<rkl::commands::exec_cli::ExecContainer>),
 }
 
-#[derive(Subcommand)]
-enum ComposeCommand {
 
-
-    #[command(about = "Start a from a compose yaml")]
-    Up {
-        #[arg(value_name = "COMPOSE_YAML")]
-        compose_yaml: Option<String>,
-        
-    },
-    Down {
-        // #[arg(value_name = "COMPOSE_YAML")]
-        // compose_yaml: String,
-    },
-}
 
 #[derive(Subcommand)]
 enum PodCommand {
