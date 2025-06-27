@@ -39,8 +39,8 @@ impl Cli {
                 }
             },
             Workload::Compose(cmd) => match cmd {
-                ComposeCommand::Run { compose_yaml } => cli_commands::run_compose(&compose_yaml),
-                // 其它 compose 子命令...
+                ComposeCommand::Up { compose_yaml } => cli_commands::run_compose(compose_yaml),
+                ComposeCommand::Down { } => cli_commands::run_compose(compose_yaml),
             },
 }
     }
@@ -92,10 +92,17 @@ enum ContainerCommand {
 
 #[derive(Subcommand)]
 enum ComposeCommand {
-    #[command(about = "Run a compose yaml")]
-    Run {
+
+
+    #[command(about = "Start a from a compose yaml")]
+    Up {
         #[arg(value_name = "COMPOSE_YAML")]
-        compose_yaml: String,
+        compose_yaml: Option<String>,
+        
+    },
+    Down {
+        // #[arg(value_name = "COMPOSE_YAML")]
+        // compose_yaml: String,
     },
 }
 

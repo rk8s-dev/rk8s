@@ -135,7 +135,7 @@ impl ContainerRunner {
 
         let container_id = self.get_container_id()?;
 
-        // 3. create oci spec
+        //  create oci spec
         let mut spec = Spec::default();
 
         // use the default namesapce configuration
@@ -180,7 +180,7 @@ impl ContainerRunner {
         process.set_capabilities(Some(capabilities));
         spec.set_process(Some(process));
 
-        // 4. create a config.path at the bundle path
+        // create a config.path at the bundle path
         let bundle_path = self.sepc.image.clone();
         if bundle_path.is_empty() {
             return Err(anyhow!("Bundle path (image) is empty"));
@@ -204,7 +204,6 @@ impl ContainerRunner {
         serde_json::to_writer_pretty(&mut writer, &spec)?;
         writer.flush()?;
 
-        // 5. get the create_args
         let create_args = Create {
             bundle: bundle_path.clone().into(),
             console_socket: None,
@@ -215,11 +214,9 @@ impl ContainerRunner {
             container_id: container_id.clone(),
         };
 
-        // 6. get the root_path
         let root_path = rootpath::determine(None)
             .map_err(|e| anyhow!("Failed to determine the rootpath: {}", e))?;
 
-        // 7. create the container return the container id
         create::create(create_args, root_path, false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
