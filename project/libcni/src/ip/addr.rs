@@ -148,7 +148,7 @@ impl TryFrom<&AddressMessage> for Addr {
                         addr.ipnet = d;
                     }
                 }
-            }else {
+            } else {
                 addr.ipnet = local;
                 addr.peer = dst;
             }
