@@ -13,7 +13,7 @@ members = [
     "rkl",
 ]
 
-default-members = ["distribution", "rkl", "libbridge", "libipam", "rkb"]
+default-members = ["distribution", "rkl", "libbridge", "libipam", "rkb", "libflannel"]
 resolver = "1"
 
 [workspace.dependencies]
@@ -22,3 +22,4 @@ libcgroups = { path = "libcgroups" }
 libcni = { path = "libcni" }
 libcontainer = { path = "libcontainer" }
 libfuse-fs = { path = "libfuse-fs" }
+libflannel = { path = "libflannel"}

@@ -3,20 +3,7 @@
     "name": "rkbridge",
     "plugins": [
         {
-            "type": "libbridge",
-            "bridge": "rk0",
-            "isDefaultGateway": true, 
-            "forceAddress": false,
-            "ipMasq": true,
-            "hairpinMode": true,
-            "ipam": {
-                "type": "libipam",
-                "ranges":[[
-        	        {   "subnet": "10.10.0.0/16",
-        	            "gateway": "10.10.0.1"
-        	        }
-                ]]
-            }
+            "type": "libflannel"
         }
-    ]   
+    ]
 }

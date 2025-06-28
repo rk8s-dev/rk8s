@@ -15,7 +15,7 @@ path = "top/main.rs"
 # List of packages to be imported, with version constraints, features
 # and all options Cargo supports.
 [dependencies]
-anyhow = "1.0.97"
+anyhow = "1.0.98"
 async-fs = { version = "2.1.1"}
 async-std = "1.12"
 async-trait = "0.1.86"
