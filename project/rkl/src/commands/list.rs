@@ -1,9 +1,10 @@
-use crate::cri::cri_api::{self, ContainerFilter};
+use crate::cri::cri_api::ContainerFilter;
 use anyhow::{Ok, Result};
 use liboci_cli::List;
 
 use crate::cri::cri_api::ListContainersRequest;
 
+#[allow(unused)]
 pub fn list(args: List) -> Result<()> {
     let request = ListContainersRequest {
         filter: Some(ContainerFilter {

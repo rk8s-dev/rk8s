@@ -2,9 +2,11 @@ use std::{
     collections, env,
     fs::{self, File},
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use anyhow::{Ok, Result, anyhow};
+use libcontainer::container::State;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -93,6 +95,10 @@ impl ComposeManager {
     }
 
     fn down(&self, _: DownArgs) -> Result<()> {
+        let path = PathBuf::from_str("/run/youki/123")?;
+        if let Some(pat) = rootpath::determine(Some(path))?.to_str() {
+            println!("{}", (pat));
+        }
         Ok(())
     }
 
@@ -124,7 +130,7 @@ impl ComposeManager {
     /// "containers": [ {} {},],
     /// ""
     ///}
-    fn persist_compose_state(&self, states: Vec<String>) -> Result<()> {
+    fn persist_compose_state(&self, states: Vec<State>) -> Result<()> {
         let obj = json!({
             "project_name": self.project_name,
             "containers": states
@@ -142,14 +148,14 @@ impl ComposeManager {
             .to_str()
             .ok_or_else(|| anyhow!("compose.yml file is None"))?;
         let reader = File::open(path)?;
-        let spec: ComposeSpec = serde_yaml::from_reader(reader).map_err(|err| {
+        let spec: ComposeSpec = serde_yaml::from_reader(reader).map_err(|_| {
             anyhow!("Read the compose specification failed, make sure the file is valid")
         })?;
         Ok(spec)
     }
 
-    fn run(&self, spec: ComposeSpec) -> Result<Vec<String>> {
-        let mut states: Vec<String> = vec![];
+    fn run(&self, spec: ComposeSpec) -> Result<Vec<State>> {
+        let mut states: Vec<State> = vec![];
         for (srv_name, srv) in spec.services {
             let container_ports = map_port_style(srv.ports.clone())?;
 
@@ -245,7 +251,7 @@ pub fn get_manager_from_name(project_name: Option<String>) -> Result<ComposeMana
     }
 }
 
-pub fn execute(command: ComposeCommand) -> Result<()> {
+pub fn compose_execute(command: ComposeCommand) -> Result<()> {
     let (project_name, action): (
         Option<String>,
         Box<dyn FnOnce(ComposeManager) -> Result<()>>,
@@ -263,18 +269,6 @@ pub fn execute(command: ComposeCommand) -> Result<()> {
     let manager = get_manager_from_name(project_name)?;
     action(manager)
 }
-
-// pub fn execute(command: ComposeCommand) -> Result<()> {
-//     match command {
-//         ComposeCommand::Up(up_args) => {
-//             let manager = get_manager_from_name(up_args.project_name.clone())?;
-//             manager.up(up_args)
-//         }
-//         ComposeCommand::Down(down_args) => {
-//             get_manager_from_name(down_args.project_name.clone())?.down(down_args)
-//         }
-//     }
-// }
 
 #[cfg(test)]
 mod test {

@@ -1,5 +1,11 @@
 use crate::{
-    commands::{create, delete, exec, exec::Exec, exec_cli::ExecContainer, load_container, start},
+    ContainerCommand,
+    commands::{
+        create, delete,
+        exec::{self, Exec},
+        exec_cli::ExecContainer,
+        load_container, start,
+    },
     cri::cri_api::{
         ContainerConfig, ContainerMetadata, CreateContainerResponse, ImageSpec, KeyValue, Mount,
         StartContainerResponse,
@@ -8,6 +14,7 @@ use crate::{
     task::{ContainerSpec, add_cap_net_raw, get_linux_container_config},
 };
 use anyhow::{Ok, Result, anyhow};
+use libcontainer::container::State;
 use liboci_cli::{Create, Delete, Start};
 use oci_spec::runtime::{
     LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, ProcessBuilder, Spec,
@@ -65,9 +72,10 @@ impl ContainerRunner {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        let _ = self.create_container()?;
         // create container_config
         self.build_config()?;
+
+        let _ = self.create_container()?;
 
         let id = self.id.as_str();
         // See if the container exists
@@ -89,10 +97,10 @@ impl ContainerRunner {
         }
     }
 
-    pub fn get_container_state(&self) -> Result<String> {
+    pub fn get_container_state(&self) -> Result<State> {
         let root_path = rootpath::determine(None)?;
         let container = load_container(root_path, &self.id)?;
-        Ok(serde_json::to_string_pretty(&container.state)?)
+        Ok(container.state)
     }
 
     pub fn get_container_id(&self) -> Result<String> {
@@ -354,6 +362,12 @@ pub fn start_container(container_id: &str) -> Result<()> {
     println!("container {container_id} start successfully");
     Ok(())
 }
+
+// TODO:
+pub fn list_container() -> Result<()> {
+    Ok(())
+}
+
 pub fn exec_container(args: ExecContainer) -> Result<i32> {
     let rootpath = rootpath::determine(None)?;
     let args = Exec::from(args);
@@ -365,6 +379,21 @@ pub fn exec_container(args: ExecContainer) -> Result<i32> {
 pub fn create_container(path: &str) -> Result<()> {
     let mut runner = ContainerRunner::from_file(path)?;
     runner.run()
+}
+
+pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
+    match cmd {
+        ContainerCommand::Run { container_yaml } => run_container(&container_yaml),
+        ContainerCommand::Start { container_name } => start_container(&container_name),
+        ContainerCommand::State { container_name } => state_container(&container_name),
+        ContainerCommand::Delete { container_name } => delete_container(&container_name),
+        ContainerCommand::Create { container_yaml } => create_container(&container_yaml),
+        ContainerCommand::List {} => list_container(),
+        ContainerCommand::Exec(exec) => {
+            let exit_code = exec_container(*exec)?;
+            std::process::exit(exit_code)
+        }
+    }
 }
 
 #[cfg(test)]
