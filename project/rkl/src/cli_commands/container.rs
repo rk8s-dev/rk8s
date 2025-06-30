@@ -37,7 +37,7 @@ impl ContainerRunner {
         Ok(ContainerRunner {
             sepc: spec,
             config: None,
-            id: id,
+            id,
         })
     }
 
@@ -268,9 +268,7 @@ impl ContainerRunner {
         create::create(create_args, root_path, false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
-        return Ok(CreateContainerResponse {
-            container_id: container_id,
-        });
+        Ok(CreateContainerResponse { container_id })
     }
 
     pub fn start_container(&self, id: Option<String>) -> Result<StartContainerResponse> {
@@ -351,7 +349,7 @@ pub fn delete_container(id: &str) -> Result<()> {
         container_id: id.to_string(),
         force: true,
     };
-    let _ = delete::delete(delete_args, root_path)?;
+    delete::delete(delete_args, root_path)?;
 
     Ok(())
 }

@@ -17,6 +17,8 @@ use crate::{
     task::{ContainerSpec, Port},
 };
 
+type ComposeAction = Box<dyn FnOnce(ComposeManager) -> Result<()>>;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComposeSpec {
@@ -246,16 +248,13 @@ pub fn get_manager_from_name(project_name: Option<String>) -> Result<ComposeMana
                 .and_then(|os_str| os_str.to_str())
                 .ok_or_else(|| anyhow!("Failed to get current directory'name"))?
                 .to_string();
-            return ComposeManager::new(project_name);
+            ComposeManager::new(project_name)
         }
     }
 }
 
 pub fn compose_execute(command: ComposeCommand) -> Result<()> {
-    let (project_name, action): (
-        Option<String>,
-        Box<dyn FnOnce(ComposeManager) -> Result<()>>,
-    ) = match command {
+    let (project_name, action): (Option<String>, ComposeAction) = match command {
         ComposeCommand::Up(up_args) => {
             let name = up_args.project_name.clone();
             (name, Box::new(move |manager| manager.up(up_args)))
