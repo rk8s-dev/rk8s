@@ -1,11 +1,12 @@
 use std::{
     collections, env,
-    fs::File,
+    fs::{self, File},
     path::{Path, PathBuf},
 };
 
 use anyhow::{Ok, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::{
     ComposeCommand, DownArgs, UpArgs,
@@ -15,6 +16,7 @@ use crate::{
 };
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ComposeSpec {
     #[serde(default)]
     pub services: collections::HashMap<String, ServiceSpec>,
@@ -36,6 +38,7 @@ pub struct ComposeSpec {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServiceSpec {
     #[serde(default)]
     pub image: String,
@@ -56,15 +59,19 @@ pub struct ServiceSpec {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NetworkSpec {}
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VolumeSpec {}
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigSpec {}
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecretSpec {}
 
 pub struct ComposeManager {
@@ -101,10 +108,33 @@ impl ComposeManager {
         // read the yaml
         let spec = self.read_spec(target_path)?;
 
-        // store the spec info into a .yml file
-
         // start the whole containers
-        self.run(spec)
+        let states = self.run(spec)?;
+
+        // store the spec info into a .json file
+        self.persist_compose_state(states)?;
+
+        println!("Project {} starts successfully", self.project_name);
+        Ok(())
+    }
+
+    // persist the compose application's status to a json file
+    ///{
+    /// "project_name": "",
+    /// "containers": [ {} {},],
+    /// ""
+    ///}
+    fn persist_compose_state(&self, states: Vec<String>) -> Result<()> {
+        let obj = json!({
+            "project_name": self.project_name,
+            "containers": states
+        });
+        let json_str = serde_json::to_string_pretty(&obj)?;
+
+        let file_path = self.root_path.join("state.json");
+        fs::create_dir_all(&self.root_path)?;
+        fs::write(file_path, json_str)?;
+        Ok(())
     }
 
     pub fn read_spec(&self, path: PathBuf) -> Result<ComposeSpec> {
@@ -112,12 +142,14 @@ impl ComposeManager {
             .to_str()
             .ok_or_else(|| anyhow!("compose.yml file is None"))?;
         let reader = File::open(path)?;
-        let spec: ComposeSpec = serde_yaml::from_reader(reader)
-            .map_err(|err| anyhow!("Read the compose specification failed: {}", err))?;
+        let spec: ComposeSpec = serde_yaml::from_reader(reader).map_err(|err| {
+            anyhow!("Read the compose specification failed, make sure the file is valid")
+        })?;
         Ok(spec)
     }
 
-    fn run(&self, spec: ComposeSpec) -> Result<()> {
+    fn run(&self, spec: ComposeSpec) -> Result<Vec<String>> {
+        let mut states: Vec<String> = vec![];
         for (srv_name, srv) in spec.services {
             let container_ports = map_port_style(srv.ports.clone())?;
 
@@ -132,8 +164,10 @@ impl ComposeManager {
 
             let mut runner = ContainerRunner::from_spec(container_spec)?;
             runner.run()?;
+            states.push(runner.get_container_state()?);
         }
-        Ok(())
+        // return the compose application's state
+        Ok(states)
     }
 }
 
@@ -212,13 +246,53 @@ pub fn get_manager_from_name(project_name: Option<String>) -> Result<ComposeMana
 }
 
 pub fn execute(command: ComposeCommand) -> Result<()> {
-    match command {
+    let (project_name, action): (
+        Option<String>,
+        Box<dyn FnOnce(ComposeManager) -> Result<()>>,
+    ) = match command {
         ComposeCommand::Up(up_args) => {
-            let manager = get_manager_from_name(up_args.project_name.clone())?;
-            manager.up(up_args)
+            let name = up_args.project_name.clone();
+            (name, Box::new(move |manager| manager.up(up_args)))
         }
         ComposeCommand::Down(down_args) => {
-            get_manager_from_name(down_args.project_name.clone())?.down(down_args)
+            let name = down_args.project_name.clone();
+            (name, Box::new(move |manager| manager.down(down_args)))
         }
+    };
+
+    let manager = get_manager_from_name(project_name)?;
+    action(manager)
+}
+
+// pub fn execute(command: ComposeCommand) -> Result<()> {
+//     match command {
+//         ComposeCommand::Up(up_args) => {
+//             let manager = get_manager_from_name(up_args.project_name.clone())?;
+//             manager.up(up_args)
+//         }
+//         ComposeCommand::Down(down_args) => {
+//             get_manager_from_name(down_args.project_name.clone())?.down(down_args)
+//         }
+//     }
+// }
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+
+    use super::*;
+    use anyhow::Result;
+
+    use crate::cli_commands::ComposeManager;
+
+    #[test]
+    pub fn test_parse_compose_spec() -> Result<()> {
+        let manager = ComposeManager::new("test_project".to_string()).unwrap();
+
+        let path = PathBuf::from_str("/home/erasernoob/srv.yaml").unwrap();
+        let spec = manager.read_spec(path).unwrap();
+        let yaml_str = serde_yaml::to_string(&spec)?;
+        println!("{}", yaml_str);
+        Ok(())
     }
 }

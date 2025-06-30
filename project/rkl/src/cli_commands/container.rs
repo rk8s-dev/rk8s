@@ -89,6 +89,12 @@ impl ContainerRunner {
         }
     }
 
+    pub fn get_container_state(&self) -> Result<String> {
+        let root_path = rootpath::determine(None)?;
+        let container = load_container(root_path, &self.id)?;
+        Ok(serde_json::to_string_pretty(&container.state)?)
+    }
+
     pub fn get_container_id(&self) -> Result<String> {
         let container_id = self
             .config
