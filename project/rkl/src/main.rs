@@ -23,10 +23,12 @@ impl Cli {
                 PodCommand::Delete { pod_name } => cli_commands::delete_pod(&pod_name),
                 PodCommand::State { pod_name } => cli_commands::state_pod(&pod_name),
                 PodCommand::Exec(exec) => {
-                    let exit_code = cli_commands::exec_pod(*exec)?;
-                    std::process::exit(exit_code);
+                            let exit_code = cli_commands::exec_pod(*exec)?;
+                            std::process::exit(exit_code);
                 }
-            },
+                PodCommand::Daemon => cli_commands::start_daemon(),
+    },
+
             Workload::Container(cmd) => match cmd {
                 ContainerCommand::Run { container_yaml,  } => cli_commands::run_container(&container_yaml),
                 ContainerCommand::Start { container_name,  } => cli_commands::start_container(&container_name),
@@ -118,9 +120,13 @@ enum PodCommand {
         pod_name: String,
     },
     Exec(Box<rkl::commands::exec_cli::ExecPod>),
+    // Run as a daemon process.
+    // For convenient, I won't remove cli part now.
+    Daemon,
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     cli.run()
 }

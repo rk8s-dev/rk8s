@@ -2326,6 +2326,25 @@ cargo.rust_library(
     ],
 )
 
+alias(
+    name = "daemonize",
+    actual = ":daemonize-0.5.0",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "daemonize-0.5.0",
+    srcs = [
+        "vendor/daemonize-0.5.0/src/error.rs",
+        "vendor/daemonize-0.5.0/src/lib.rs",
+    ],
+    crate = "daemonize",
+    crate_root = "vendor/daemonize-0.5.0/src/lib.rs",
+    edition = "2015",
+    visibility = [],
+    deps = [":libc-0.2.172"],
+)
+
 cargo.rust_library(
     name = "darling-0.20.11",
     srcs = [
@@ -3216,6 +3235,62 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [":percent-encoding-2.3.1"],
+)
+
+alias(
+    name = "fuse3",
+    actual = ":fuse3-0.8.1",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "fuse3-0.8.1",
+    srcs = [
+        "vendor/fuse3-0.8.1/src/errno.rs",
+        "vendor/fuse3-0.8.1/src/helper.rs",
+        "vendor/fuse3-0.8.1/src/lib.rs",
+        "vendor/fuse3-0.8.1/src/mount_options.rs",
+        "vendor/fuse3-0.8.1/src/notify.rs",
+        "vendor/fuse3-0.8.1/src/path/inode_generator.rs",
+        "vendor/fuse3-0.8.1/src/path/inode_path_bridge.rs",
+        "vendor/fuse3-0.8.1/src/path/mod.rs",
+        "vendor/fuse3-0.8.1/src/path/path_filesystem.rs",
+        "vendor/fuse3-0.8.1/src/path/reply.rs",
+        "vendor/fuse3-0.8.1/src/path/session.rs",
+        "vendor/fuse3-0.8.1/src/raw/abi.rs",
+        "vendor/fuse3-0.8.1/src/raw/connection/async_io.rs",
+        "vendor/fuse3-0.8.1/src/raw/connection/mod.rs",
+        "vendor/fuse3-0.8.1/src/raw/connection/tokio.rs",
+        "vendor/fuse3-0.8.1/src/raw/filesystem.rs",
+        "vendor/fuse3-0.8.1/src/raw/flags.rs",
+        "vendor/fuse3-0.8.1/src/raw/mod.rs",
+        "vendor/fuse3-0.8.1/src/raw/reply.rs",
+        "vendor/fuse3-0.8.1/src/raw/request.rs",
+        "vendor/fuse3-0.8.1/src/raw/session.rs",
+    ],
+    crate = "fuse3",
+    crate_root = "vendor/fuse3-0.8.1/src/lib.rs",
+    edition = "2021",
+    features = [
+        "tokio-runtime",
+        "unprivileged",
+    ],
+    visibility = [],
+    deps = [
+        ":async-notify-0.3.0",
+        ":bincode-1.3.3",
+        ":bytes-1.10.1",
+        ":futures-channel-0.3.31",
+        ":futures-util-0.3.31",
+        ":libc-0.2.172",
+        ":nix-0.29.0",
+        ":serde-1.0.219",
+        ":slab-0.4.9",
+        ":tokio-1.44.2",
+        ":tracing-0.1.41",
+        ":trait-make-0.1.0",
+        ":which-6.0.3",
+    ],
 )
 
 alias(
