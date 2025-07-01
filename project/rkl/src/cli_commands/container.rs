@@ -4,6 +4,7 @@ use crate::{
         create, delete,
         exec::{self, Exec},
         exec_cli::ExecContainer,
+        list::list,
         load_container, start,
     },
     cri::cri_api::{
@@ -15,7 +16,7 @@ use crate::{
 };
 use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
-use liboci_cli::{Create, Delete, Start};
+use liboci_cli::{Create, Delete, List, Start};
 use oci_spec::runtime::{
     LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, ProcessBuilder, Spec,
 };
@@ -371,7 +372,14 @@ pub fn start_container(container_id: &str) -> Result<()> {
 }
 
 // TODO:
-pub fn list_container() -> Result<()> {
+pub fn list_container(quiet: Option<bool>, format: Option<String>) -> Result<()> {
+    list(
+        List {
+            format: format.unwrap_or("default".to_owned()),
+            quiet: quiet.unwrap_or(false),
+        },
+        rootpath::determine(None)?,
+    )?;
     Ok(())
 }
 
@@ -400,7 +408,7 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
         ContainerCommand::State { container_name } => state_container(&container_name),
         ContainerCommand::Delete { container_name } => delete_container(&container_name),
         ContainerCommand::Create { container_yaml } => create_container(&container_yaml),
-        ContainerCommand::List {} => list_container(),
+        ContainerCommand::List { quiet, format } => list_container(quiet, format),
         ContainerCommand::Exec(exec) => {
             // root_path => default directory
             let exit_code = exec_container(*exec, None)?;

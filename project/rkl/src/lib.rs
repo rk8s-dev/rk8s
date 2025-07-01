@@ -63,7 +63,15 @@ pub enum ContainerCommand {
     },
 
     #[command(about = "List the current running container")]
-    List {},
+    List {
+        /// Only display container IDs default is false 
+        #[arg(long, short)]
+        quiet: Option<bool>,
+
+        /// Specify the format (default or table)
+        #[arg(long, short)]
+        format: Option<String>,
+    },
 
     Exec(Box<commands::exec_cli::ExecContainer>),
 }
