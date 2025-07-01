@@ -25,7 +25,7 @@ const DEFAULT_DATA_DIR: &str = "/var/lib/cni/flannel";
 
 /// Entry point of the CNI bridge plugin.
 fn main() {
-    cni_plugin::logger::install("libflannel.log");
+    cni_plugin::logger::install("libnetwork.log");
     debug!(
         "{} (CNI flannel plugin) version {}",
         env!("CARGO_PKG_NAME"),
@@ -117,39 +117,39 @@ fn load_flannel_subnet_env(path: &str) -> Result<SubnetEnv, CniError> {
             let k = k.trim();
             let v = v.trim();
             match k {
-                "FLANNEL_NETWORK" => {
+                "RKL_NETWORK" => {
                     subnet_env.networks = v
                         .split(',')
                         .map(|s| s.parse::<Ipv4Network>())
                         .collect::<Result<_, _>>()
                         .map_err(|e| CniError::Generic(e.to_string()))?;
                 }
-                "FLANNEL_IPV6_NETWORK" => {
+                "RKL_IPV6_NETWORK" => {
                     subnet_env.ip6_networks = v
                         .split(',')
                         .map(|s| s.parse::<Ipv6Network>())
                         .collect::<Result<_, _>>()
                         .map_err(|e| CniError::Generic(e.to_string()))?;
                 }
-                "FLANNEL_SUBNET" => {
+                "RKL_SUBNET" => {
                     subnet_env.subnet = Some(
                         v.parse::<Ipv4Network>()
                             .map_err(|e| CniError::Generic(e.to_string()))?,
                     );
                 }
-                "FLANNEL_IPV6_SUBNET" => {
+                "RKL_IPV6_SUBNET" => {
                     subnet_env.ip6_subnet = Some(
                         v.parse::<Ipv6Network>()
                             .map_err(|e| CniError::Generic(e.to_string()))?,
                     );
                 }
-                "FLANNEL_MTU" => {
+                "RKL_MTU" => {
                     subnet_env.mtu = Some(
                         v.parse::<u32>()
                             .map_err(|e| CniError::Generic(e.to_string()))?,
                     );
                 }
-                "FLANNEL_IPMASQ" => {
+                "RKL_IPMASQ" => {
                     subnet_env.ipmasq = Some(
                         v.parse::<bool>()
                             .map_err(|e| CniError::Generic(e.to_string()))?,
@@ -497,10 +497,10 @@ mod tests {
     fn test_load_flannel_subnet_env_with_spaces_and_comments() {
         let content = r#"
             # Flannel configuration
-            FLANNEL_NETWORK = 10.244.0.0/16
-            FLANNEL_SUBNET = 10.244.1.0/24  
+            RKL_NETWORK = 10.244.0.0/16
+            RKL_SUBNET = 10.244.1.0/24  
             # MTU setting
-            FLANNEL_MTU = 1500
+            RKL_MTU = 1500
         "#;
         let file = create_temp_file(content);
         let result = load_flannel_subnet_env(file.path().to_str().unwrap()).unwrap();

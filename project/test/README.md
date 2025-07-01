@@ -1,7 +1,7 @@
 # 测试指南
 
 测试 rkl 之前请先构建 dev 版本的 libbridge 和 libipam。
-
+需要将test目录下test.conflist和subnet.env放到 /etc/cni/net.d 目录下
 ## 自动测试
 
 目前已经为 rkl 的基本功能编写了集成测试，在 `project/rkl` 下运行 `cargo test --test test_cli_commands` 可运行集成测试。测试需要 root 权限才能运行。

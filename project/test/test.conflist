@@ -3,7 +3,7 @@
     "name": "rkbridge",
     "plugins": [
         {
-            "type": "libflannel"
+            "type": "libnetwork"
         }
     ]
 }

@@ -1,5 +1,5 @@
 rust_binary(
-    name = "libflannel",
+    name = "libnetwork",
     srcs = glob(
         ["src/**/*.rs"],
     ),
