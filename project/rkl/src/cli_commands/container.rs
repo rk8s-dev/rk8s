@@ -22,22 +22,28 @@ use oci_spec::runtime::{
 use std::{
     fs::File,
     io::{BufWriter, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 pub struct ContainerRunner {
     sepc: ContainerSpec,
     config: Option<ContainerConfig>,
+    root_path: PathBuf,
     id: String,
 }
 
 impl ContainerRunner {
-    pub fn from_spec(spec: ContainerSpec) -> Result<Self> {
+    pub fn from_spec(spec: ContainerSpec, root_path: Option<PathBuf>) -> Result<Self> {
         let id = spec.name.clone();
+
         Ok(ContainerRunner {
             sepc: spec,
             config: None,
             id,
+            root_path: match root_path {
+                Some(p) => p,
+                None => rootpath::determine(None)?,
+            },
         })
     }
 
@@ -50,14 +56,16 @@ impl ContainerRunner {
 
         let container_spec: ContainerSpec = serde_yaml::from_str(&content)?;
         let container_id = container_spec.name.clone();
+        let root_path = rootpath::determine(None)?;
         Ok(ContainerRunner {
-            sepc: (container_spec),
+            sepc: container_spec,
+            root_path,
             config: None,
             id: container_id,
         })
     }
 
-    pub fn from_container_id(id: &str) -> Result<Self> {
+    pub fn from_container_id(id: &str, root_path: Option<PathBuf>) -> Result<Self> {
         Ok(ContainerRunner {
             sepc: ContainerSpec {
                 name: id.to_string(),
@@ -68,6 +76,10 @@ impl ContainerRunner {
             },
             config: None,
             id: id.to_string(),
+            root_path: match root_path {
+                Some(path) => path,
+                None => rootpath::determine(None)?,
+            },
         })
     }
 
@@ -79,7 +91,7 @@ impl ContainerRunner {
 
         let id = self.id.as_str();
         // See if the container exists
-        match is_container_exist(id).is_ok() {
+        match is_container_exist(id, &self.root_path).is_ok() {
             // exist
             true => {
                 self.start_container(None)?;
@@ -98,8 +110,7 @@ impl ContainerRunner {
     }
 
     pub fn get_container_state(&self) -> Result<State> {
-        let root_path = rootpath::determine(None)?;
-        let container = load_container(root_path, &self.id)?;
+        let container = load_container(&self.root_path, &self.id)?;
         Ok(container.state)
     }
 
@@ -262,17 +273,14 @@ impl ContainerRunner {
             container_id: container_id.clone(),
         };
 
-        let root_path = rootpath::determine(None)
-            .map_err(|e| anyhow!("Failed to determine the rootpath: {}", e))?;
-
-        create::create(create_args, root_path, false)
+        create::create(create_args, self.root_path.clone(), false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
         Ok(CreateContainerResponse { container_id })
     }
 
     pub fn start_container(&self, id: Option<String>) -> Result<StartContainerResponse> {
-        let root_path = rootpath::determine(None)?;
+        let root_path = self.root_path.clone();
         match id {
             None => {
                 let id = self.get_container_id()?;
@@ -308,7 +316,7 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
 
     let id = runner.id.as_str();
     // See if the container exists
-    match is_container_exist(id).is_ok() {
+    match is_container_exist(id, &runner.root_path).is_ok() {
         // exist
         true => {
             runner.start_container(None)?;
@@ -326,12 +334,12 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     }
 }
 
-pub fn is_container_exist(id: &str) -> Result<()> {
-    let root_path = rootpath::determine(None)?;
+pub fn is_container_exist(id: &str, root_path: &PathBuf) -> Result<()> {
     let _ = load_container(root_path, id)?;
     Ok(())
 }
 
+/// command state
 pub fn state_container(id: &str) -> Result<()> {
     let root_path = rootpath::determine(None)?;
     println!("ROOT PATH: {}", root_path.to_str().unwrap_or_default());
@@ -342,9 +350,10 @@ pub fn state_container(id: &str) -> Result<()> {
     Ok(())
 }
 
+/// command delete
 pub fn delete_container(id: &str) -> Result<()> {
-    is_container_exist(id)?;
     let root_path = rootpath::determine(None)?;
+    is_container_exist(id, &root_path)?;
     let delete_args = Delete {
         container_id: id.to_string(),
         force: true,
@@ -355,7 +364,7 @@ pub fn delete_container(id: &str) -> Result<()> {
 }
 
 pub fn start_container(container_id: &str) -> Result<()> {
-    let runner = ContainerRunner::from_container_id(container_id)?;
+    let runner = ContainerRunner::from_container_id(container_id, None)?;
     runner.start_container(Some(container_id.to_string()))?;
     println!("container {container_id} start successfully");
     Ok(())
@@ -366,11 +375,16 @@ pub fn list_container() -> Result<()> {
     Ok(())
 }
 
-pub fn exec_container(args: ExecContainer) -> Result<i32> {
-    let rootpath = rootpath::determine(None)?;
+pub fn exec_container(args: ExecContainer, root_path: Option<PathBuf>) -> Result<i32> {
     let args = Exec::from(args);
 
-    let exit_code = exec::exec(args, rootpath)?;
+    let exit_code = exec::exec(
+        args,
+        match root_path {
+            Some(path) => path,
+            None => rootpath::determine(None)?,
+        },
+    )?;
     Ok(exit_code)
 }
 
@@ -388,7 +402,8 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
         ContainerCommand::Create { container_yaml } => create_container(&container_yaml),
         ContainerCommand::List {} => list_container(),
         ContainerCommand::Exec(exec) => {
-            let exit_code = exec_container(*exec)?;
+            // root_path => default directory
+            let exit_code = exec_container(*exec, None)?;
             std::process::exit(exit_code)
         }
     }
@@ -413,7 +428,7 @@ mod test {
     fn test_run_container() {
         let path = "/home/erasernoob/project/rk8s/project/test/single_container.yaml";
         println!("{path}");
-        let runner = ContainerRunner::from_container_id(path)
+        let runner = ContainerRunner::from_container_id(path, None)
             .unwrap_or_else(|e| panic!("Initialize the Runner failed:{e} "));
         runner
             .create_container()
@@ -424,7 +439,7 @@ mod test {
     #[serial]
     fn test_start_container() {
         let container_id = "main-container1";
-        let runner = ContainerRunner::from_container_id(container_id)
+        let runner = ContainerRunner::from_container_id(container_id, None)
             .unwrap_or_else(|e| panic!("Initialize the Runner failed:{e} "));
         let _ = runner
             .start_container(Some(container_id.to_string()))

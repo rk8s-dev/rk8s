@@ -170,7 +170,8 @@ impl ComposeManager {
                 resources: None,
             };
 
-            let mut runner = ContainerRunner::from_spec(container_spec)?;
+            let mut runner =
+                ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
             runner.run()?;
             states.push(runner.get_container_state()?);
         }
