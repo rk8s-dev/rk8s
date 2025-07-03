@@ -1,19 +1,20 @@
 use std::{
     collections, env,
-    fs::{self, File},
+    fs::{self, File, read_dir},
     path::{Path, PathBuf},
-    str::FromStr,
 };
 
 use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
+use liboci_cli::List;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{
-    ComposeCommand, DownArgs, UpArgs,
+    ComposeCommand, DownArgs, PsArgs, UpArgs,
     cli_commands::ContainerRunner,
-    rootpath,
+    commands::list::list,
+    rootpath::{self},
     task::{ContainerSpec, Port},
 };
 
@@ -22,6 +23,9 @@ type ComposeAction = Box<dyn FnOnce(ComposeManager) -> Result<()>>;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComposeSpec {
+    #[serde(default)]
+    pub name: Option<String>,
+
     #[serde(default)]
     pub services: collections::HashMap<String, ServiceSpec>,
 
@@ -97,11 +101,26 @@ impl ComposeManager {
     }
 
     fn down(&self, _: DownArgs) -> Result<()> {
-        let path = PathBuf::from_str("/run/youki/123")?;
-        if let Some(pat) = rootpath::determine(Some(path))?.to_str() {
-            println!("{}", (pat));
+        // delete all the containers in the compose application
+        if !self.root_path.exists() {
+            return Err(anyhow!("The project {} does not exist", self.project_name));
+        }
+
+        // iterate rootpath find the container in the compose application and delete one by one
+        for entry in read_dir(&self.root_path)? {
+            let path = entry?.path();
+            // delete the container directory
+            if path.is_dir() {
+                fs::remove_dir_all(path)?;
+            }
         }
         Ok(())
+    }
+
+    fn get_root_path_by_name(&self, project_name: String) -> Result<PathBuf> {
+        let root_path = rootpath::determine(None)?;
+        let new_path = Path::new(&root_path).join("compose").join(project_name);
+        Ok(new_path)
     }
 
     fn up(&self, args: UpArgs) -> Result<()> {
@@ -117,7 +136,7 @@ impl ComposeManager {
         let spec = self.read_spec(target_path)?;
 
         // start the whole containers
-        let states = self.run(spec)?;
+        let states = self.run(&spec)?;
 
         // store the spec info into a .json file
         self.persist_compose_state(states)?;
@@ -156,17 +175,17 @@ impl ComposeManager {
         Ok(spec)
     }
 
-    fn run(&self, spec: ComposeSpec) -> Result<Vec<State>> {
+    fn run(&self, spec: &ComposeSpec) -> Result<Vec<State>> {
         let mut states: Vec<State> = vec![];
-        for (srv_name, srv) in spec.services {
+        for (srv_name, srv) in &spec.services {
             let container_ports = map_port_style(srv.ports.clone())?;
 
             let container_spec = ContainerSpec {
-                name: srv_name,
-                image: srv.image,
+                name: srv_name.clone(),
+                image: srv.image.clone(),
                 ports: container_ports,
                 // TODO: Here just pass the command directly not support ENTRYPOINT yet
-                args: srv.command,
+                args: srv.command.clone(),
                 resources: None,
             };
 
@@ -177,6 +196,32 @@ impl ComposeManager {
         }
         // return the compose application's state
         Ok(states)
+    }
+
+    fn ps(&self, ps_args: PsArgs) -> Result<()> {
+        let PsArgs { compose_yaml } = ps_args;
+        let list_arg = List {
+            format: "".to_string(),
+            quiet: false,
+        };
+
+        // now the self.project_name is the current_env
+        if !self.root_path.exists() {
+            let yml_file = get_yml_path(compose_yaml)?;
+            let spec = self.read_spec(yml_file)?;
+            match spec.name {
+                Some(name) => {
+                    let new_path = self.get_root_path_by_name(name)?;
+                    list(list_arg, new_path)?;
+                    return Ok(());
+                }
+                None => return Err(anyhow!("Invalid Compose Spec (no project name is set)")),
+            }
+        } else {
+            // use the cur_dir first
+            // list all the containers
+            list(list_arg, self.root_path.clone())
+        }
     }
 }
 
@@ -264,6 +309,7 @@ pub fn compose_execute(command: ComposeCommand) -> Result<()> {
             let name = down_args.project_name.clone();
             (name, Box::new(move |manager| manager.down(down_args)))
         }
+        ComposeCommand::Ps(ps_args) => (None, Box::new(move |manager| manager.ps(ps_args))),
     };
 
     let manager = get_manager_from_name(project_name)?;

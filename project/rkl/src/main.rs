@@ -29,13 +29,17 @@ impl Cli {
 /// define the 3 state for the run command "container" "pod" "compose"
 #[derive(Subcommand)]
 enum Workload {
-    #[command(subcommand, about = "Operations related to pods")]
+    #[command(subcommand, about = "Operations related to pods", alias = "p")]
     Pod(PodCommand),
 
-    #[command(subcommand, about = "Manage standalone containers")]
+    #[command(subcommand, about = "Manage standalone containers", alias = "c")]
     Container(ContainerCommand),
 
-    #[command(subcommand, about = "Manage multi-container apps using Compose")]
+    #[command(
+        subcommand,
+        about = "Manage multi-container apps using Compose",
+        alias = "C"
+    )]
     Compose(ComposeCommand),
 }
 

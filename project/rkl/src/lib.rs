@@ -10,16 +10,35 @@ pub mod task;
 
 #[derive(Subcommand)]
 pub enum ComposeCommand {
-    // #[command(about = "Start a from a compose yaml")]
+    #[command(about = "Start a compose application  from a compose yaml")]
     Up(UpArgs),
+
+    #[command(about = "Stopped and delete all the container in compose application")]
     Down(DownArgs),
+
+    #[command(about = "List all the containers' state in compose application")]
+    Ps(PsArgs),
+}
+
+#[derive(Args)]
+pub struct PsArgs {
+    // /// specify the compose application's name, default is the cwd
+    // #[arg(long = "project-name", short, value_name = "PROJECT_NAME")]
+    // project_name: Option<String>,
+    /// specify the target compose_yml path
+    #[arg(short = 'f', value_name = "COMPOSE_YAML")]
+    compose_yaml: Option<String>,
 }
 
 #[derive(Args)]
 pub struct DownArgs {
     /// specify the compose application's name, default is the cwd
-    #[arg(long = "project-name", value_name = "PROJECT_NAME")]
+    #[arg(long = "project-name", short, value_name = "PROJECT_NAME")]
     project_name: Option<String>,
+
+    /// specify the compose application's name, default is the cwd
+    #[arg(short = 'f', value_name = "COMPOSE_YAML")]
+    compose_yaml: Option<String>,
 }
 
 #[derive(Args)]
@@ -64,7 +83,7 @@ pub enum ContainerCommand {
 
     #[command(about = "List the current running container")]
     List {
-        /// Only display container IDs default is false 
+        /// Only display container IDs default is false
         #[arg(long, short)]
         quiet: Option<bool>,
 
