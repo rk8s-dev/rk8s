@@ -27,7 +27,7 @@ use std::{
 };
 
 pub struct ContainerRunner {
-    sepc: ContainerSpec,
+    spec: ContainerSpec,
     config: Option<ContainerConfig>,
     root_path: PathBuf,
     id: String,
@@ -38,7 +38,7 @@ impl ContainerRunner {
         let id = spec.name.clone();
 
         Ok(ContainerRunner {
-            sepc: spec,
+            spec: spec,
             config: None,
             id,
             root_path: match root_path {
@@ -59,7 +59,7 @@ impl ContainerRunner {
         let container_id = container_spec.name.clone();
         let root_path = rootpath::determine(None)?;
         Ok(ContainerRunner {
-            sepc: container_spec,
+            spec: container_spec,
             root_path,
             config: None,
             id: container_id,
@@ -68,7 +68,7 @@ impl ContainerRunner {
 
     pub fn from_container_id(id: &str, root_path: Option<PathBuf>) -> Result<Self> {
         Ok(ContainerRunner {
-            sepc: ContainerSpec {
+            spec: ContainerSpec {
                 name: id.to_string(),
                 image: "".to_string(),
                 ports: vec![],
@@ -127,17 +127,17 @@ impl ContainerRunner {
     pub fn build_config(&mut self) -> Result<()> {
         let config = ContainerConfig {
             metadata: Some(ContainerMetadata {
-                name: self.sepc.name.clone(),
+                name: self.spec.name.clone(),
                 attempt: 0,
             }),
             image: Some(ImageSpec {
-                image: self.sepc.image.clone(),
+                image: self.spec.image.clone(),
                 annotations: std::collections::HashMap::new(),
-                user_specified_image: self.sepc.image.clone(),
+                user_specified_image: self.spec.image.clone(),
                 runtime_handler: String::new(),
             }),
             command: vec!["bin/sh".to_string()],
-            args: self.sepc.args.clone(),
+            args: self.spec.args.clone(),
             working_dir: String::from("/"),
             envs: vec![KeyValue {
                 key: "PATH".to_string(),
@@ -172,11 +172,11 @@ impl ContainerRunner {
             devices: vec![],
             labels: std::collections::HashMap::new(),
             annotations: std::collections::HashMap::new(),
-            log_path: format!("{}/0.log", self.sepc.name),
+            log_path: format!("{}/0.log", self.spec.name),
             stdin: false,
             stdin_once: false,
             tty: false,
-            linux: get_linux_container_config(self.sepc.resources.clone())?,
+            linux: get_linux_container_config(self.spec.resources.clone())?,
             windows: None,
             cdi_devices: vec![],
             stop_signal: 0,
@@ -231,7 +231,7 @@ impl ContainerRunner {
 
         // build the procss path
         let mut process = ProcessBuilder::default()
-            .args(self.sepc.args.clone())
+            .args(self.spec.args.clone())
             .build()?;
 
         let mut capabilities = process.capabilities().clone().unwrap();
@@ -241,7 +241,7 @@ impl ContainerRunner {
         spec.set_process(Some(process));
 
         // create a config.path at the bundle path
-        let bundle_path = self.sepc.image.clone();
+        let bundle_path = self.spec.image.clone();
         if bundle_path.is_empty() {
             return Err(anyhow!("Bundle path (image) is empty"));
         }
@@ -371,7 +371,6 @@ pub fn start_container(container_id: &str) -> Result<()> {
     Ok(())
 }
 
-// TODO:
 pub fn list_container(quiet: Option<bool>, format: Option<String>) -> Result<()> {
     list(
         List {
