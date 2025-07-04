@@ -307,7 +307,7 @@ async fn cmd_add(mut config: FlannelNetConf, inputs: Inputs) -> Result<SuccessRe
     let subnet_env = load_flannel_subnet_env(config.subnet_file.as_ref().unwrap())?;
     info!("subnet_env: {:?}", subnet_env);
 
-    match &config.delegate {
+    match &mut config.delegate {
         None => {
             config.delegate = Some(HashMap::new());
         }
@@ -317,15 +317,24 @@ async fn cmd_add(mut config: FlannelNetConf, inputs: Inputs) -> Result<SuccessRe
                 .map(|it| it.is_string())
                 .unwrap_or(false)
             {
-                "'delegate' dictionary, if present, must have (string) 'type' field".to_string();
+                return Err(CniError::Generic(
+                    "'delegate' dictionary, if present, must have (string) 'type' field"
+                        .to_string(),
+                ));
             }
+
             if delegate.get("name").is_some() {
-                "'delegate' dictionary must not have 'name' field, it'll be set by flannel"
-                    .to_string();
+                return Err(CniError::Generic(
+                    "'delegate' dictionary must not have 'name' field, it'll be set by flannel"
+                        .to_string(),
+                ));
             }
+
             if delegate.get("ipam").is_some() {
-                "'delegate' dictionary must not have 'ipam' field, it'll be set by flannel"
-                    .to_string();
+                return Err(CniError::Generic(
+                    "'delegate' dictionary must not have 'ipam' field, it'll be set by flannel"
+                        .to_string(),
+                ));
             }
         }
     }
@@ -473,10 +482,10 @@ mod tests {
     #[test]
     fn test_load_flannel_subnet_env_normal() {
         let content = r#"
-            FLANNEL_NETWORK=10.244.0.0/16,192.168.0.0/24
-            FLANNEL_SUBNET=10.244.1.0/24
-            FLANNEL_MTU=1450
-            FLANNEL_IPMASQ=true
+            RKL_NETWORK=10.244.0.0/16,192.168.0.0/24
+            RKL_SUBNET=10.244.1.0/24
+            RKL_MTU=1450
+            RKL_IPMASQ=true
         "#;
         let file = create_temp_file(content);
         let result = load_flannel_subnet_env(file.path().to_str().unwrap()).unwrap();
@@ -564,7 +573,6 @@ mod tests {
         // Save once
         save_scratch_net_conf(cid, data_dir, content).expect("save failed");
 
-        // 第一次测试：I/O 错误，不应该删除文件
         {
             let (cleanup, _) = consume_scratch_net_conf(cid, data_dir).expect("consume failed");
             let path = build_cache_path(cid, data_dir)
