@@ -653,7 +653,6 @@ async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, 
             let ipam_plugin = config.net_conf.ipam.clone().unwrap().plugin;
             match delegate(&ipam_plugin, Command::Del, &config.net_conf.clone()).await {
                 Ok(reply) => {
-                    // 处理成功结果
                     let _: IpamSuccessReply = reply;
                 }
                 Err(e) => return Err(AppError::IpamError(e.to_string())),
@@ -684,10 +683,7 @@ async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, 
         match link::del_link_by_name(&inputs.ifname).await {
             Ok(_) => Ok(()),
             Err(e) if e.to_string().contains("link not found") => Ok(()),
-            Err(e) => {
-                // 将错误转换为 anyhow::Error
-                Err(anyhow!(e)) // 或 e.into()
-            }
+            Err(e) => Err(anyhow!(e)),
         }
     })
     .await?;

@@ -140,9 +140,14 @@ impl TryFrom<&AddressMessage> for Addr {
                 _ => {}
             }
         }
+        #[allow(clippy::collapsible_if)]
         if let Some(local) = local {
-            if family == AddressFamily::Inet && dst.is_some() && dst.unwrap().ip() == local.ip() {
-                addr.ipnet = dst.unwrap();
+            if family == AddressFamily::Inet {
+                if let Some(d) = dst {
+                    if d.ip() == local.ip() {
+                        addr.ipnet = d;
+                    }
+                }
             } else {
                 addr.ipnet = local;
                 addr.peer = dst;

@@ -246,7 +246,7 @@ pub fn get_mac_address(attributes: &[LinkAttribute]) -> Option<MacAddr> {
 
 pub async fn route_add(route: Route) -> anyhow::Result<()> {
     if route.gw.is_none() {
-        bail!("Gateway must be specified");
+        bail!("Route Gateway must be specified");
     }
     let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
     let route_handle = handle.route();
