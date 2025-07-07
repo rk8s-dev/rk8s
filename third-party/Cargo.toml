@@ -15,7 +15,7 @@ path = "top/main.rs"
 # List of packages to be imported, with version constraints, features
 # and all options Cargo supports.
 [dependencies]
-anyhow = "1.0.97"
+anyhow = "1.0"   
 async-fs = { version = "2.1.1"}
 async-std = "1.12"
 async-trait = "0.1.86"
@@ -26,7 +26,7 @@ async-io = { version = "2.3.1"}
 async-process = { version = "2.1.0"}
 axum = "0.8.1"
 bitflags = "2.9.0"
-bincode = "1.3.3"
+bincode = "1.3"   
 bytes = "1.10.1"
 caps = "0.5.5"
 chrono = { version = "0.4", default-features = false, features = [
@@ -38,10 +38,11 @@ cni-plugin = { version = "0.2.1", features = ["with-smol"] }
 dockerfile-parser = "0.9.0"
 env_logger = "0.11.7"
 errno = { version = "0.3.10", optional = true }
+etcd-client = "0.15.0"
 fastrand = "^2.3.0"
 fixedbitset = "0.5.7"
 flate2 = "1.1.1"
-futures = "0.3.31"
+futures = "0.3"      
 futures-channel = { version = "0.3.30", features = ["sink"] }
 futures-util = "0.3.31"
 hex = "0.4.3"
@@ -79,9 +80,11 @@ procfs = "0.17.0"
 prost = "0.13.5"
 prost-types = "0.12.6"
 protobuf = "=3.2.0"
+quinn = {version = "0.10.2"}    
 radix_trie = "0.2.1"
 rand = "0.9.0"
 rbpf = { version = "0.3.0", optional = true }
+rcgen = "0.11"
 regex = { version = "1.10.6", default-features = false, features = [
     "std",
     "unicode-perl",
@@ -90,6 +93,7 @@ reqwest = { version = "0.12.7", features = ["json", "blocking"] }
 rtnetlink =  "0.16.0"
 rust-criu = "0.4.0"
 rust-cni = "0.1.2"
+rustls = { version = "0.21.0" ,features = ["dangerous_configuration"]}  
 safe-path = "0.1.0"
 semver = "0.11.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -101,7 +105,7 @@ slab = "0.4.9"
 tar = "0.4.44"
 tempfile = "3.19.1"
 thiserror = "2.0.12"
-tokio = { version = "1.44.0", features = ["full"] }
+tokio = { version = "1.40", features = ["full"] }
 tokio-util = { version = "0.7.13", features = ["io"] }
 tonic = "0.13"
 tracing = { version = "0.1.41", features = ["attributes"] }
@@ -117,7 +121,6 @@ vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"
 walkdir = "2.3"
 which = { version = "4.4.2" }
-
 
 # Local patches - typically git references
 [patch.crates-io]

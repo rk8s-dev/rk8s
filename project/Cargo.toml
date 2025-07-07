@@ -10,10 +10,11 @@ members = [
     "rfuse3", 
     "libipam", 
     "rkb",
-    "rkl",
+    "rkl", 
+    "rks",
 ]
 
-default-members = ["distribution", "rkl", "libbridge", "libipam", "rkb"]
+default-members = ["distribution", "rkl", "libbridge", "libipam", "rkb","rks"]
 resolver = "1"
 
 [workspace.dependencies]
