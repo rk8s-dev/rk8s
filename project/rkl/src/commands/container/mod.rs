@@ -1,11 +1,7 @@
 use crate::{
     ContainerCommand,
     commands::{
-        create, delete,
-        exec::{self, Exec},
-        exec_cli::ExecContainer,
-        list::list,
-        load_container, start,
+        create, delete, exec, list, load_container, start, {Exec, ExecContainer},
     },
     cri::cri_api::{
         ContainerConfig, ContainerMetadata, CreateContainerResponse, ImageSpec, KeyValue, Mount,
@@ -38,7 +34,7 @@ impl ContainerRunner {
         let id = spec.name.clone();
 
         Ok(ContainerRunner {
-            spec: spec,
+            spec,
             config: None,
             id,
             root_path: match root_path {
@@ -275,7 +271,7 @@ impl ContainerRunner {
             container_id: container_id.clone(),
         };
 
-        create::create(create_args, self.root_path.clone(), false)
+        create(create_args, self.root_path.clone(), false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
         Ok(CreateContainerResponse { container_id })
@@ -286,7 +282,7 @@ impl ContainerRunner {
         match id {
             None => {
                 let id = self.get_container_id()?;
-                start::start(
+                start(
                     Start {
                         container_id: id.clone(),
                     },
@@ -296,7 +292,7 @@ impl ContainerRunner {
                 Ok(StartContainerResponse {})
             }
             Some(id) => {
-                start::start(
+                start(
                     Start {
                         container_id: id.clone(),
                     },
@@ -360,7 +356,7 @@ pub fn delete_container(id: &str) -> Result<()> {
         container_id: id.to_string(),
         force: true,
     };
-    delete::delete(delete_args, root_path)?;
+    delete(delete_args, root_path)?;
 
     Ok(())
 }
@@ -386,7 +382,7 @@ pub fn list_container(quiet: Option<bool>, format: Option<String>) -> Result<()>
 pub fn exec_container(args: ExecContainer, root_path: Option<PathBuf>) -> Result<i32> {
     let args = Exec::from(args);
 
-    let exit_code = exec::exec(
+    let exit_code = exec(
         args,
         match root_path {
             Some(path) => path,

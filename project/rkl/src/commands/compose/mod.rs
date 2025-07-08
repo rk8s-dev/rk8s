@@ -1,5 +1,5 @@
 use std::{
-    collections, env,
+    env,
     fs::{self, File, read_dir},
     path::{Path, PathBuf},
 };
@@ -7,80 +7,18 @@ use std::{
 use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
 use liboci_cli::List;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{
     ComposeCommand, DownArgs, PsArgs, UpArgs,
-    cli_commands::ContainerRunner,
-    commands::list::list,
+    commands::{compose::spec::ComposeSpec, container::ContainerRunner, list},
     rootpath::{self},
     task::{ContainerSpec, Port},
 };
 
 type ComposeAction = Box<dyn FnOnce(ComposeManager) -> Result<()>>;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ComposeSpec {
-    #[serde(default)]
-    pub name: Option<String>,
-
-    #[serde(default)]
-    pub services: collections::HashMap<String, ServiceSpec>,
-
-    #[serde(default)]
-    pub volumes: Vec<VolumeSpec>,
-
-    #[serde(default)]
-    pub configs: Vec<ConfigSpec>,
-
-    #[serde(default)]
-    pub networks: Vec<NetworkSpec>,
-
-    #[serde(default)]
-    pub secrets: Vec<SecretSpec>,
-
-    #[serde(default)]
-    pub depends_on: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ServiceSpec {
-    #[serde(default)]
-    pub image: String,
-    #[serde(default)]
-    pub ports: Vec<String>,
-
-    #[serde(default)]
-    pub networks: Vec<String>,
-
-    #[serde(default)]
-    pub command: Vec<String>,
-
-    #[serde(default)]
-    pub configs: Option<Vec<String>>,
-
-    #[serde(default)]
-    pub secrets: Option<Vec<String>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NetworkSpec {}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VolumeSpec {}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConfigSpec {}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SecretSpec {}
+pub mod spec;
 
 pub struct ComposeManager {
     /// the path to store the basic info of compose application
@@ -213,9 +151,9 @@ impl ComposeManager {
                 Some(name) => {
                     let new_path = self.get_root_path_by_name(name)?;
                     list(list_arg, new_path)?;
-                    return Ok(());
+                    Ok(())
                 }
-                None => return Err(anyhow!("Invalid Compose Spec (no project name is set)")),
+                None => Err(anyhow!("Invalid Compose Spec (no project name is set)")),
             }
         } else {
             // use the cur_dir first

@@ -1,7 +1,6 @@
 use clap::{Args, Subcommand};
 
 pub mod bundle;
-pub mod cli_commands;
 pub mod commands;
 mod cri;
 pub mod daemon;
@@ -92,7 +91,7 @@ pub enum ContainerCommand {
         format: Option<String>,
     },
 
-    Exec(Box<commands::exec_cli::ExecContainer>),
+    Exec(Box<commands::ExecContainer>),
 }
 
 #[derive(Subcommand)]
@@ -123,7 +122,7 @@ pub enum PodCommand {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
     },
-    Exec(Box<commands::exec_cli::ExecPod>),
+    Exec(Box<commands::ExecPod>),
     // Run as a daemon process.
     // For convenient, I won't remove cli part now.
     Daemon,

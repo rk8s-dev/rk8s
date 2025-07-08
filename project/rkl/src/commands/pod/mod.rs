@@ -1,5 +1,5 @@
-use crate::commands::exec::Exec;
-use crate::commands::{delete, exec, exec_cli, load_container, start, state};
+use crate::commands::{Exec, ExecPod};
+use crate::commands::{delete, exec, load_container, start, state};
 use crate::rootpath;
 use crate::task::{self, TaskRunner};
 use crate::{PodCommand, daemon};
@@ -174,7 +174,7 @@ pub fn start_pod(pod_name: &str) -> Result<(), anyhow::Error> {
         let start_args = Start {
             container_id: container_name.clone(),
         };
-        start::start(start_args, root_path.clone())
+        start(start_args, root_path.clone())
             .map_err(|e| anyhow!("Failed to start container {}: {}", container_name, e))?;
         info!("Container started: {}", container_name);
     }
@@ -200,7 +200,7 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
             force: true,
         };
         let root_path = rootpath::determine(None)?;
-        if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
+        if let Err(delete_err) = delete(delete_args, root_path.clone()) {
             error!(
                 "Failed to delete container {}: {}",
                 container_name, delete_err
@@ -216,7 +216,7 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
         force: true,
     };
     let root_path = rootpath::determine(None)?;
-    if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
+    if let Err(delete_err) = delete(delete_args, root_path.clone()) {
         error!(
             "Failed to delete PodSandbox {}: {}",
             pod_info.pod_sandbox_id, delete_err
@@ -250,7 +250,7 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     println!("Pod: {}", pod_name);
 
     println!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
-    let _ = state::state(
+    let _ = state(
         State {
             container_id: pod_info.pod_sandbox_id.clone(),
         },
@@ -259,7 +259,7 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
 
     println!("Containers:");
     for container_name in &pod_info.container_names {
-        let _container_state = state::state(
+        let _container_state = state(
             State {
                 container_id: container_name.clone(),
             },
@@ -270,14 +270,14 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub fn exec_pod(args: exec_cli::ExecPod) -> Result<i32> {
+pub fn exec_pod(args: ExecPod) -> Result<i32> {
     let root_path = rootpath::determine(None)?;
     let pod_info_path = root_path.join("pods").join(&args.pod_name);
     if !pod_info_path.exists() {
         return Err(anyhow::anyhow!("Pod {} not found", args.pod_name));
     }
     let args = Exec::from(args);
-    let exit_code = exec::exec(args, root_path)?;
+    let exit_code = exec(args, root_path)?;
     Ok(exit_code)
 }
 

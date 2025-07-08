@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use rkl::{
     ComposeCommand, ContainerCommand, PodCommand,
-    cli_commands::{compose_execute, container_execute, pod_execute},
+    commands::{compose::compose_execute, container::container_execute, pod::pod_execute},
 };
 
 #[derive(Parser)]
