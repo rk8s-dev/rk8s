@@ -10,7 +10,7 @@ pub mod task;
 
 #[derive(Subcommand)]
 pub enum ComposeCommand {
-    #[command(about = "Start a compose application  from a compose yaml")]
+    #[command(about = "Start a compose application from a compose yaml")]
     Up(UpArgs),
 
     #[command(about = "Stopped and delete all the container in compose application")]

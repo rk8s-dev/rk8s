@@ -318,21 +318,75 @@ pub fn compose_execute(command: ComposeCommand) -> Result<()> {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use super::*;
-    use anyhow::Result;
-
-    use crate::cli_commands::ComposeManager;
+    use serial_test::serial;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
-    pub fn test_parse_compose_spec() -> Result<()> {
-        let manager = ComposeManager::new("test_project".to_string()).unwrap();
+    fn test_new_compose_manager() {
+        let mgr = ComposeManager::new("demo_proj".to_string());
+        assert!(mgr.is_ok());
+        let mgr = mgr.unwrap();
+        assert!(mgr.root_path.ends_with("compose/demo_proj"));
+        assert_eq!(mgr.project_name, "demo_proj");
+    }
 
-        let path = PathBuf::from_str("/home/erasernoob/srv.yaml").unwrap();
-        let spec = manager.read_spec(path).unwrap();
-        let yaml_str = serde_yaml::to_string(&spec)?;
-        println!("{}", yaml_str);
-        Ok(())
+    #[test]
+    fn test_get_root_path_by_name() {
+        let mgr = ComposeManager::new("abc".to_string()).unwrap();
+        let path = mgr.get_root_path_by_name("xyz".to_string()).unwrap();
+        assert!(path.ends_with("compose/xyz"));
+    }
+
+    #[test]
+    fn test_persist_and_read_spec() {
+        let dir = tempdir().unwrap();
+        let test_path = dir.path().join("compose.yml");
+        let yaml = r#"
+name: test_proj
+services:
+  web:
+    image: nginx:latest
+    ports: ["8080:80"]
+"#;
+        fs::write(&test_path, yaml).unwrap();
+        let mgr = ComposeManager::new("test_proj".to_string()).unwrap();
+        let spec = mgr.read_spec(test_path.clone()).unwrap();
+        assert_eq!(spec.name, Some("test_proj".to_string()));
+        assert!(spec.services.contains_key("web"));
+        assert_eq!(spec.services["web"].image, "nginx:latest");
+    }
+
+    #[test]
+    fn test_map_port_style() {
+        let ports = vec!["127.0.0.1:8080:80".to_string(), "8081:81".to_string()];
+        let mapped = map_port_style(ports).unwrap();
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0].host_ip, "127.0.0.1");
+        assert_eq!(mapped[0].host_port, 8080);
+        assert_eq!(mapped[0].container_port, 80);
+        assert_eq!(mapped[1].host_ip, "");
+        assert_eq!(mapped[1].host_port, 8081);
+        assert_eq!(mapped[1].container_port, 81);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_yml_path_with_none() {
+        let dir = tempdir().unwrap();
+        let yml = dir.path().join("compose.yml");
+        fs::write(&yml, "name: demo\nservices: {}\n").unwrap();
+        let _cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let path = get_yml_path(None).unwrap();
+        assert!(path.ends_with("compose.yml"));
+        std::env::set_current_dir(_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_get_manager_from_name_some() {
+        let mgr = get_manager_from_name(Some("abc_proj".to_string())).unwrap();
+        assert_eq!(mgr.project_name, "abc_proj");
     }
 }

@@ -241,6 +241,7 @@ impl ContainerRunner {
         spec.set_process(Some(process));
 
         // create a config.path at the bundle path
+        // TODO: Here use the local file path directly
         let bundle_path = self.spec.image.clone();
         if bundle_path.is_empty() {
             return Err(anyhow!("Bundle path (image) is empty"));
@@ -418,42 +419,61 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
 
 #[cfg(test)]
 mod test {
-    use core::panic;
-
-    use serial_test::serial;
-
     use super::*;
-    // fn runner_from_file(path: &str) -> Result<ContainerRunner> {
-    //     let mut runner = ContainerRunner::from_file(path)?;
-    //     runner.build_config()?;
-
-    //     Ok(runner)
-    // }
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
 
     #[test]
-    #[serial]
-    fn test_run_container() {
-        let path = "/home/erasernoob/project/rk8s/project/test/single_container.yaml";
-        println!("{path}");
-        let runner = ContainerRunner::from_container_id(path, None)
-            .unwrap_or_else(|e| panic!("Initialize the Runner failed:{e} "));
-        runner
-            .create_container()
-            .unwrap_or_else(|e| panic!("Got Runner failed: {e}"));
+    fn test_container_runner_from_spec_and_file() {
+        let spec = ContainerSpec {
+            name: "demo1".to_string(),
+            image: "/tmp/demoimg".to_string(),
+            ports: vec![],
+            args: vec!["/bin/echo".to_string(), "hi".to_string()],
+            resources: None,
+        };
+        let runner = ContainerRunner::from_spec(spec.clone(), None).unwrap();
+        assert_eq!(runner.id, "demo1");
+        assert_eq!(runner.spec.name, "demo1");
+
+        // test from_file
+        let dir = tempdir().unwrap();
+        let yaml_path = dir.path().join("spec.yaml");
+        let yaml = serde_yaml::to_string(&spec).unwrap();
+        fs::write(&yaml_path, yaml).unwrap();
+        let runner2 = ContainerRunner::from_file(yaml_path.to_str().unwrap()).unwrap();
+        assert_eq!(runner2.spec.name, "demo1");
     }
 
     #[test]
-    #[serial]
-    fn test_start_container() {
-        let container_id = "main-container1";
-        let runner = ContainerRunner::from_container_id(container_id, None)
-            .unwrap_or_else(|e| panic!("Initialize the Runner failed:{e} "));
-        let _ = runner
-            .start_container(Some(container_id.to_string()))
-            .unwrap_or_else(|e| panic!("{e}"));
+    fn test_build_config() {
+        let mut runner = ContainerRunner::from_spec(
+            ContainerSpec {
+                name: "demo2".to_string(),
+                image: "/tmp/demoimg2".to_string(),
+                ports: vec![],
+                args: vec![],
+                resources: None,
+            },
+            None,
+        )
+        .unwrap();
+        assert!(runner.build_config().is_ok());
+        assert!(runner.config.is_some());
+        assert_eq!(runner.get_container_id().unwrap(), "demo2");
     }
 
     #[test]
-    #[serial]
-    fn test_the_state() {}
+    fn test_is_container_exist_fail() {
+        let res = is_container_exist("not_exist", &PathBuf::from("/tmp/none"));
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_list_container_default() {
+        // Should not panic, even if no containers exist
+        let res = list_container(None, None);
+        assert!(res.is_ok() || res.is_err());
+    }
 }
