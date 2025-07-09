@@ -2,7 +2,7 @@ use crate::api::xlinestore::XlineStore;
 use crate::protocol::{PodTask, RksMessage, RksResponse};
 use anyhow::Result;
 use quinn::{Connection, Endpoint, ServerConfig};
-use rustls::{Certificate, PrivateKey};
+use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 /// spawn a new task for each accepted connection (either worker or user).
 pub async fn serve(addr: String, xline_store: Arc<XlineStore>) -> anyhow::Result<()> {
     // Create QUIC endpoint and server certificate
-    let (endpoint, _server_cert) = make_server_endpoint(addr.parse()?).await?;
+    let endpoint = make_server_endpoint(addr.parse()?).await?;
 
     // set up a broadcast channel for distributing pod events
     let (tx, _rx) = broadcast::channel::<RksMessage>(100);
@@ -302,23 +302,19 @@ async fn dispatch_user(msg: RksMessage, xline_store: &Arc<XlineStore>, conn: &Co
 }
 
 /// set up the QUIC server endpoint with TLS certificate.
-async fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, Vec<u8>)> {
-    let (server_config, server_cert) = configure_server()?;
+async fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<Endpoint> {
+    let server_config = configure_server()?;
     let endpoint = Endpoint::server(server_config, bind_addr)?;
-    Ok((endpoint, server_cert))
+    Ok(endpoint)
 }
 
 /// generates a self-signed TLS certificate and constructs QUIC server config.
-fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-    let cert_der = cert.serialize_der()?;
-    let priv_key_der = cert.serialize_private_key_der();
-    let priv_key = PrivateKey(priv_key_der);
-    let cert_chain = vec![Certificate(cert_der.clone())];
-
-    let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key)?;
-    let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport_config.max_concurrent_uni_streams(0_u8.into());
-
-    Ok((server_config, cert_der))
+fn configure_server() -> anyhow::Result<ServerConfig> {
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+    let cert_der = CertificateDer::from(cert.serialize_der()?);
+    let key = PrivatePkcs8KeyDer::from(cert.serialize_private_key_der());
+    let certs = vec![cert_der];
+    let server_config =
+        ServerConfig::with_single_cert(certs, rustls::pki_types::PrivateKeyDer::Pkcs8(key))?;
+    Ok(server_config)
 }
