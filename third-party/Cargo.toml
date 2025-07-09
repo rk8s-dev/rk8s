@@ -89,7 +89,7 @@ regex = { version = "1.10.6", default-features = false, features = [
     "unicode-perl",
 ] }
 reqwest = { version = "0.12.7", features = ["json", "blocking"] }
-rcgen = "0.11"
+rcgen = "0.12.1"
 rtnetlink =  "0.16.0"
 rust-criu = "0.4.0"
 rust-cni = "0.1.2"
