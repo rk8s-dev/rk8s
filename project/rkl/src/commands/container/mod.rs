@@ -1,14 +1,12 @@
 use crate::{
     ContainerCommand,
     commands::{
-        create, delete, exec, list, load_container, start, {Exec, ExecContainer},
+        Exec, ExecContainer, container::builder::ContainerConfigBuilder, create, delete, exec,
+        list, load_container, start,
     },
-    cri::cri_api::{
-        ContainerConfig, ContainerMetadata, CreateContainerResponse, ImageSpec, KeyValue, Mount,
-        StartContainerResponse,
-    },
+    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
     rootpath,
-    task::{ContainerSpec, add_cap_net_raw, get_linux_container_config},
+    task::{ContainerSpec, add_cap_net_raw},
 };
 use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
@@ -22,9 +20,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub mod builder;
+
 pub struct ContainerRunner {
     spec: ContainerSpec,
     config: Option<ContainerConfig>,
+    config_builder: ContainerConfigBuilder,
     root_path: PathBuf,
     id: String,
 }
@@ -36,6 +37,7 @@ impl ContainerRunner {
         Ok(ContainerRunner {
             spec,
             config: None,
+            config_builder: ContainerConfigBuilder::default(),
             id,
             root_path: match root_path {
                 Some(p) => p,
@@ -56,6 +58,7 @@ impl ContainerRunner {
         let root_path = rootpath::determine(None)?;
         Ok(ContainerRunner {
             spec: container_spec,
+            config_builder: ContainerConfigBuilder::default(),
             root_path,
             config: None,
             id: container_id,
@@ -64,6 +67,7 @@ impl ContainerRunner {
 
     pub fn from_container_id(id: &str, root_path: Option<PathBuf>) -> Result<Self> {
         Ok(ContainerRunner {
+            config_builder: ContainerConfigBuilder::default(),
             spec: ContainerSpec {
                 name: id.to_string(),
                 image: "".to_string(),
@@ -78,6 +82,10 @@ impl ContainerRunner {
                 None => rootpath::determine(None)?,
             },
         })
+    }
+
+    pub fn add_mounts(&mut self, mounts: Vec<Mount>) {
+        self.config_builder.mounts(mounts);
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -121,64 +129,13 @@ impl ContainerRunner {
     }
 
     pub fn build_config(&mut self) -> Result<()> {
-        let config = ContainerConfig {
-            metadata: Some(ContainerMetadata {
-                name: self.spec.name.clone(),
-                attempt: 0,
-            }),
-            image: Some(ImageSpec {
-                image: self.spec.image.clone(),
-                annotations: std::collections::HashMap::new(),
-                user_specified_image: self.spec.image.clone(),
-                runtime_handler: String::new(),
-            }),
-            command: vec!["bin/sh".to_string()],
-            args: self.spec.args.clone(),
-            working_dir: String::from("/"),
-            envs: vec![KeyValue {
-                key: "PATH".to_string(),
-                value: "usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
-            }],
-            mounts: vec![
-                Mount {
-                    container_path: "/proc".to_string(),
-                    host_path: "proc".to_string(),
-                    readonly: false,
-                    selinux_relabel: false,
-                    propagation: 0,
-                    uid_mappings: vec![],
-                    gid_mappings: vec![],
-                    recursive_read_only: false,
-                    image: None,
-                    image_sub_path: "".to_string(),
-                },
-                Mount {
-                    container_path: "/dev".to_string(),
-                    host_path: "tmpfs".to_string(),
-                    readonly: false,
-                    selinux_relabel: false,
-                    propagation: 0,
-                    uid_mappings: vec![],
-                    gid_mappings: vec![],
-                    recursive_read_only: false,
-                    image: None,
-                    image_sub_path: "".to_string(),
-                },
-            ],
-            devices: vec![],
-            labels: std::collections::HashMap::new(),
-            annotations: std::collections::HashMap::new(),
-            log_path: format!("{}/0.log", self.spec.name),
-            stdin: false,
-            stdin_once: false,
-            tty: false,
-            linux: get_linux_container_config(self.spec.resources.clone())?,
-            windows: None,
-            cdi_devices: vec![],
-            stop_signal: 0,
-        };
-        self.config = std::option::Option::Some(config);
+        let config = self
+            .config_builder
+            .from_container_spec(self.spec.clone())?
+            .clone()
+            .build();
 
+        self.config = Some(config);
         Ok(())
     }
 

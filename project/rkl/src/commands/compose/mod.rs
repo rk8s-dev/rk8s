@@ -11,7 +11,12 @@ use serde_json::json;
 
 use crate::{
     ComposeCommand, DownArgs, PsArgs, UpArgs,
-    commands::{compose::spec::ComposeSpec, container::ContainerRunner, list},
+    commands::{
+        compose::spec::{ComposeSpec, ServiceVolume},
+        container::ContainerRunner,
+        list,
+    },
+    cri::cri_api::Mount,
     rootpath::{self},
     task::{ContainerSpec, Port},
 };
@@ -118,6 +123,8 @@ impl ComposeManager {
         for (srv_name, srv) in &spec.services {
             let container_ports = map_port_style(srv.ports.clone())?;
 
+            let volumes = handle_volumes(srv.volumes.clone())?;
+
             let container_spec = ContainerSpec {
                 name: srv_name.clone(),
                 image: srv.image.clone(),
@@ -129,6 +136,8 @@ impl ComposeManager {
 
             let mut runner =
                 ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
+
+            runner.add_mounts(volumes);
             runner.run()?;
             states.push(runner.get_container_state()?);
         }
@@ -161,6 +170,57 @@ impl ComposeManager {
             list(list_arg, self.root_path.clone())
         }
     }
+}
+
+fn handle_volumes(volumes: Vec<String>) -> Result<Vec<Mount>> {
+    let mapped_volumes = map_volumes_style(volumes)?;
+    mapped_volumes
+        .into_iter()
+        .map(|srv_v| {
+            // validate the hostpath and the container path
+            // if the hostpath is not exist create one
+            let path = Path::new(&srv_v.host_path);
+            if !path.exists() {
+                fs::create_dir_all(path)?;
+            }
+            Ok(Mount {
+                container_path: srv_v.container_path,
+                host_path: srv_v.host_path,
+                readonly: srv_v.read_only,
+                selinux_relabel: false,
+                propagation: 0,
+                uid_mappings: vec![],
+                gid_mappings: vec![],
+                recursive_read_only: false,
+                image: None,
+                image_sub_path: "".to_string(),
+            })
+        })
+        .collect()
+}
+
+fn map_volumes_style(volumes: Vec<String>) -> Result<Vec<ServiceVolume>> {
+    volumes
+        .into_iter()
+        .map(|v| {
+            let parts: Vec<&str> = v.split(":").collect();
+            let (host_path, container_path, read_only) = match parts.len() {
+                2 => (parts[0], parts[1], ""),
+                3 => (parts[0], parts[1], parts[2]),
+                _ => return Err(anyhow!("Invalid volumes mapping syntax in compose file")),
+            };
+            // validate the read_only str
+            if !read_only.is_empty() && !read_only.eq("ro") {
+                return Err(anyhow!("Invalid volumes mapping syntax in compose file"));
+            }
+
+            Ok(ServiceVolume {
+                host_path: host_path.to_string(),
+                container_path: container_path.to_string(),
+                read_only: !read_only.is_empty(),
+            })
+        })
+        .collect()
 }
 
 // map the compose-style port to k8s-container-style ports
@@ -287,6 +347,9 @@ services:
   web:
     image: nginx:latest
     ports: ["8080:80"]
+    volumes: 
+      - ./tmp/mount/dir:/app/data
+      - /home/erasernoob/project/libra-test/data:/app/data2
 "#;
         fs::write(&test_path, yaml).unwrap();
         let mgr = ComposeManager::new("test_proj".to_string()).unwrap();
@@ -294,6 +357,28 @@ services:
         assert_eq!(spec.name, Some("test_proj".to_string()));
         assert!(spec.services.contains_key("web"));
         assert_eq!(spec.services["web"].image, "nginx:latest");
+        assert_eq!(spec.services["web"].volumes[0], "./tmp/mount/dir:/app/data");
+        assert_eq!(
+            spec.services["web"].volumes[1],
+            "/home/erasernoob/project/libra-test/data:/app/data2"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_map_volume_style() {
+        let volumes = vec![
+            "./tmp/mount/dir:/app/data:ro".to_string(),
+            "/home/erasernoob/data:/app/data2".to_string(),
+        ];
+        let mapped = map_volumes_style(volumes).unwrap();
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0].host_path, "./tmp/mount/dir");
+        assert_eq!(mapped[0].container_path, "/app/data");
+        assert_eq!(mapped[0].read_only, true);
+        assert_eq!(mapped[1].host_path, "/home/erasernoob/data");
+        assert_eq!(mapped[1].container_path, "/app/data2");
+        assert_eq!(mapped[1].read_only, false);
     }
 
     #[test]

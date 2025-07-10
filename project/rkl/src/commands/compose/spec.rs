@@ -38,6 +38,9 @@ pub struct ServiceSpec {
     pub networks: Vec<String>,
 
     #[serde(default)]
+    pub volumes: Vec<String>,
+
+    #[serde(default)]
     pub command: Vec<String>,
 
     #[serde(default)]
@@ -62,3 +65,9 @@ pub struct ConfigSpec {}
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SecretSpec {}
+
+pub struct ServiceVolume {
+    pub host_path: String,
+    pub container_path: String,
+    pub read_only: bool,
+}
