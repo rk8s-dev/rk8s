@@ -280,7 +280,7 @@ async fn dispatch_user(msg: RksMessage, xline_store: &Arc<XlineStore>, conn: &Co
             }
         }
         RksMessage::DeletePod(pod_name) => {
-            xline_store.insert_pod_yaml(&pod_name, "").await.unwrap();
+            let _ = xline_store.delete_pod(&pod_name).await;
             println!("[user dispatch] deleted pod: {}", pod_name);
             let response = RksResponse::Ack;
             let data = bincode::serialize(&response).unwrap();

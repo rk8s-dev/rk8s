@@ -90,4 +90,17 @@ impl XlineStore {
         }
         Ok(result)
     }
+
+    pub async fn delete_pod(&self, pod_name: &str) -> Result<()> {
+        let key = format!("/registry/pods/{}", pod_name);
+        let mut client = self.client.write().await;
+        client.delete(key, None).await?;
+        Ok(())
+    }
+    // pub async fn delete_node(&self, node_name: &str) -> Result<()> {
+    //     let key = format!("/registry/nodes/{}", node_name);
+    //     let mut client = self.client.write().await;
+    //     client.delete(key, None).await?;
+    //     Ok(())
+    // }
 }
