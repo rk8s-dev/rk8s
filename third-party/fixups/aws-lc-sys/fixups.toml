@@ -1,1 +1,6 @@
+cargo_env = true
+env = { OPT_LEVEL = "3" }
+rustc_flags = ["-lstatic=aws_lc_0_29_0_crypto", "-Lnative=$(location :aws-lc-sys-0.29.0-build-script-main-run[out_dir])"]
+
 [buildscript.run]
+env = { OPT_LEVEL = "3" }
