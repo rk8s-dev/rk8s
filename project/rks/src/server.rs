@@ -261,7 +261,20 @@ async fn dispatch_user(msg: RksMessage, xline_store: &Arc<XlineStore>, conn: &Co
             if let Ok(nodes) = xline_store.list_nodes().await {
                 if let Some((node_name, _)) = nodes.first() {
                     pod_task.nodename = node_name.clone();
-                    let pod_yaml = serde_yaml::to_string(&pod_task).unwrap();
+                    let pod_yaml = match serde_yaml::to_string(&pod_task) {
+                        Ok(yaml) => yaml,
+                        Err(e) => {
+                            eprintln!("[user dispatch] Failed to serialize pod task: {}", e);
+                            let response =
+                                RksResponse::Error(format!("Serialization error: {}", e));
+                            let data = bincode::serialize(&response).unwrap_or_else(|_| vec![]);
+                            if let Ok(mut stream) = conn.open_uni().await {
+                                let _ = stream.write_all(&data).await;
+                            }
+                            return;
+                        }
+                    };
+
                     xline_store
                         .insert_pod_yaml(&pod_task.metadata.name, &pod_yaml)
                         .await
