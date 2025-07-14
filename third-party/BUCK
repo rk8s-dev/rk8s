@@ -1363,6 +1363,12 @@ buildscript_run(
     version = "1.13.1",
 )
 
+alias(
+    name = "aws-lc-sys",
+    actual = ":aws-lc-sys-0.29.0",
+    visibility = ["PUBLIC"],
+)
+
 cargo.rust_library(
     name = "aws-lc-sys-0.29.0",
     srcs = [
@@ -1400,11 +1406,7 @@ cargo.rust_library(
         "OUT_DIR": "$(location :aws-lc-sys-0.29.0-build-script-main-run[out_dir])",
     },
     features = ["prebuilt-nasm"],
-    rustc_flags = [
-        "-Lnative=$(location :aws-lc-sys-0.29.0-build-script-main-run[out_dir])",
-        "-lstatic=aws_lc_0_29_0_crypto",
-        "@$(location :aws-lc-sys-0.29.0-build-script-main-run[rustc_flags])",
-    ],
+    rustc_flags = ["@$(location :aws-lc-sys-0.29.0-build-script-main-run[rustc_flags])"],
     visibility = [],
 )
 
