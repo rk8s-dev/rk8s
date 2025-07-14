@@ -7,7 +7,7 @@ async fn test_xline_rw() {
     // let config =
     //     load_config("/home/ich/rk8s/project/rks/tests/config.yaml").expect("Failed to load config");
     let config_path = std::env::var("TEST_CONFIG_PATH")
-        .unwrap_or_else(|_| format!("{}/tests/config.yaml", env!("CARGO_MANIFEST_DIR")));
+        .unwrap_or_else(|_| format!("{}/tests/config.yaml", std::env::var("CARGO_MANIFEST_DIR").unwrap()));
     let config = load_config(&config_path).expect("Failed to load config");
     let endpoints: Vec<&str> = config.xline_endpoints.iter().map(|s| s.as_str()).collect();
     let store = Arc::new(
