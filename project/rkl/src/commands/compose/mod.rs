@@ -6,15 +6,16 @@ use std::{
 
 use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
-use liboci_cli::List;
+use liboci_cli::{Delete, List};
 use serde_json::json;
+use tracing::info;
 
 use crate::{
     ComposeCommand, DownArgs, PsArgs, UpArgs,
     commands::{
         compose::{network::NetworkManager, spec::ComposeSpec, volume::VolumeManager},
-        container::ContainerRunner,
-        list,
+        container::{ContainerRunner, delete_container},
+        delete, list,
     },
     rootpath::{self},
     task::{ContainerSpec, Port},
@@ -150,8 +151,32 @@ impl ComposeManager {
                 ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
 
             runner.add_mounts(volumes);
-            runner.run()?;
-            states.push(runner.get_container_state()?);
+            match runner.run() {
+                std::result::Result::Ok(_) => {
+                    states.push(runner.get_container_state()?);
+                }
+                Err(err) => {
+                    // create one container failed delete others
+                    println!(
+                        "container {} created failed: {}",
+                        runner.get_container_id()?,
+                        err
+                    );
+                    for state in &states {
+                        if let Err(err) = delete(
+                            Delete {
+                                container_id: state.id.clone(),
+                                force: true,
+                            },
+                            self.root_path.clone(),
+                        ) {
+                            println!("container {} deleted failed: {}", state.id, err)
+                        } else {
+                            println!("container {} deleted during the rollback", state.id)
+                        }
+                    }
+                }
+            };
         }
         // return the compose application's state
         Ok(states)
