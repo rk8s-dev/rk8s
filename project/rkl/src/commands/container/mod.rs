@@ -6,14 +6,12 @@ use crate::{
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
     rootpath,
-    task::{ContainerSpec, add_cap_net_raw},
+    task::{ContainerSpec, add_cap_net_raw, get_cni},
 };
 use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
 use liboci_cli::{Create, Delete, List, Start};
-use oci_spec::runtime::{
-    LinuxBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, ProcessBuilder, Spec,
-};
+use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
 use std::{
     fs::File,
     io::{BufWriter, Read, Write},
@@ -27,18 +25,18 @@ pub struct ContainerRunner {
     config: Option<ContainerConfig>,
     config_builder: ContainerConfigBuilder,
     root_path: PathBuf,
-    id: String,
+    container_id: String,
 }
 
 impl ContainerRunner {
     pub fn from_spec(spec: ContainerSpec, root_path: Option<PathBuf>) -> Result<Self> {
-        let id = spec.name.clone();
+        let container_id = spec.name.clone();
 
         Ok(ContainerRunner {
             spec,
             config: None,
             config_builder: ContainerConfigBuilder::default(),
-            id,
+            container_id,
             root_path: match root_path {
                 Some(p) => p,
                 None => rootpath::determine(None)?,
@@ -61,22 +59,22 @@ impl ContainerRunner {
             config_builder: ContainerConfigBuilder::default(),
             root_path,
             config: None,
-            id: container_id,
+            container_id,
         })
     }
 
-    pub fn from_container_id(id: &str, root_path: Option<PathBuf>) -> Result<Self> {
+    pub fn from_container_id(container_id: &str, root_path: Option<PathBuf>) -> Result<Self> {
         Ok(ContainerRunner {
             config_builder: ContainerConfigBuilder::default(),
             spec: ContainerSpec {
-                name: id.to_string(),
+                name: container_id.to_string(),
                 image: "".to_string(),
                 ports: vec![],
                 args: vec![],
                 resources: None,
             },
             config: None,
-            id: id.to_string(),
+            container_id: container_id.to_string(),
             root_path: match root_path {
                 Some(path) => path,
                 None => rootpath::determine(None)?,
@@ -94,7 +92,7 @@ impl ContainerRunner {
 
         let _ = self.create_container()?;
 
-        let id = self.id.as_str();
+        let id = self.container_id.as_str();
         // See if the container exists
         match is_container_exist(id, &self.root_path).is_ok() {
             // exist
@@ -115,7 +113,7 @@ impl ContainerRunner {
     }
 
     pub fn get_container_state(&self) -> Result<State> {
-        let container = load_container(&self.root_path, &self.id)?;
+        let container = load_container(&self.root_path, &self.container_id)?;
         Ok(container.state)
     }
 
@@ -152,26 +150,7 @@ impl ContainerRunner {
         let mut spec = Spec::default();
 
         // use the default namesapce configuration
-        let namespaces = vec![
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Pid)
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Network)
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Ipc)
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Uts)
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Mount)
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Cgroup)
-                .build()?,
-        ];
+        let namespaces = get_default_namespaces();
 
         let mut linux: LinuxBuilder = LinuxBuilder::default().namespaces(namespaces);
         if let Some(x) = &config.linux {
@@ -234,8 +213,30 @@ impl ContainerRunner {
         Ok(CreateContainerResponse { container_id })
     }
 
+    pub fn setup_container_network(&self) -> Result<()> {
+        let mut cni = get_cni()?;
+        let container_pid = self
+            .get_container_state()?
+            .pid
+            .ok_or_else(|| anyhow!("get container {} pid failed", self.container_id))?;
+        cni.load_default_conf();
+
+        println!("Get container PID: {}", container_pid);
+
+        cni.setup(
+            self.container_id.clone(),
+            format!("/proc/{}/ns/net", container_pid),
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))?;
+        Ok(())
+    }
+
     pub fn start_container(&self, id: Option<String>) -> Result<StartContainerResponse> {
         let root_path = self.root_path.clone();
+
+        // setup the network
+        self.setup_container_network()?;
+
         match id {
             None => {
                 let id = self.get_container_id()?;
@@ -269,7 +270,7 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     // create container_config
     runner.build_config()?;
 
-    let id = runner.id.as_str();
+    let id = runner.container_id.as_str();
     // See if the container exists
     match is_container_exist(id, &runner.root_path).is_ok() {
         // exist
@@ -387,7 +388,7 @@ mod test {
             resources: None,
         };
         let runner = ContainerRunner::from_spec(spec.clone(), None).unwrap();
-        assert_eq!(runner.id, "demo1");
+        assert_eq!(runner.container_id, "demo1");
         assert_eq!(runner.spec.name, "demo1");
 
         // test from_file
