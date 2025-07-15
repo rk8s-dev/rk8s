@@ -12,23 +12,28 @@ use serde_json::json;
 use crate::{
     ComposeCommand, DownArgs, PsArgs, UpArgs,
     commands::{
-        compose::spec::{ComposeSpec, ServiceVolume},
+        compose::{network::NetworkManager, spec::ComposeSpec, volume::VolumeManager},
         container::ContainerRunner,
         list,
     },
-    cri::cri_api::Mount,
     rootpath::{self},
     task::{ContainerSpec, Port},
 };
 
-type ComposeAction = Box<dyn FnOnce(ComposeManager) -> Result<()>>;
+type ComposeAction = Box<dyn FnOnce(&mut ComposeManager) -> Result<()>>;
 
+// pub mod config;
+pub mod network;
+pub mod service;
 pub mod spec;
+pub mod volume;
 
 pub struct ComposeManager {
     /// the path to store the basic info of compose application
     root_path: PathBuf,
     project_name: String,
+    network_manager: NetworkManager,
+    volume_manager: VolumeManager,
 }
 
 impl ComposeManager {
@@ -37,9 +42,12 @@ impl ComposeManager {
 
         // /root_path/compose/compose_id to store the state of current compose application
         let root_path = Path::new(&root_path).join("compose").join(&project_name);
+
         Ok(Self {
             root_path,
             project_name,
+            network_manager: NetworkManager::new(),
+            volume_manager: VolumeManager::new(),
         })
     }
 
@@ -66,7 +74,7 @@ impl ComposeManager {
         Ok(new_path)
     }
 
-    fn up(&self, args: UpArgs) -> Result<()> {
+    fn up(&mut self, args: UpArgs) -> Result<()> {
         let compose_yaml = args.compose_yaml;
         // check the project_id exists?
         if self.root_path.exists() {
@@ -76,7 +84,11 @@ impl ComposeManager {
         let target_path = get_yml_path(compose_yaml)?;
 
         // read the yaml
-        let spec = self.read_spec(target_path)?;
+        let spec = parse_spec(target_path)?;
+
+        // top-field manager handle those field
+        // &mut self.volume_manager.handle(&spec);
+        &mut self.network_manager.handle(&spec);
 
         // start the whole containers
         let states = self.run(&spec)?;
@@ -122,9 +134,6 @@ impl ComposeManager {
         let mut states: Vec<State> = vec![];
         for (srv_name, srv) in &spec.services {
             let container_ports = map_port_style(srv.ports.clone())?;
-
-            let volumes = handle_volumes(srv.volumes.clone())?;
-
             let container_spec = ContainerSpec {
                 name: srv_name.clone(),
                 image: srv.image.clone(),
@@ -133,6 +142,9 @@ impl ComposeManager {
                 args: srv.command.clone(),
                 resources: None,
             };
+
+            // generate the volumes Mount
+            let volumes = VolumeManager::map_to_mount(srv.volumes.clone())?;
 
             let mut runner =
                 ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
@@ -172,55 +184,15 @@ impl ComposeManager {
     }
 }
 
-fn handle_volumes(volumes: Vec<String>) -> Result<Vec<Mount>> {
-    let mapped_volumes = map_volumes_style(volumes)?;
-    mapped_volumes
-        .into_iter()
-        .map(|srv_v| {
-            // validate the hostpath and the container path
-            // if the hostpath is not exist create one
-            let path = Path::new(&srv_v.host_path);
-            if !path.exists() {
-                fs::create_dir_all(path)?;
-            }
-            Ok(Mount {
-                container_path: srv_v.container_path,
-                host_path: srv_v.host_path,
-                readonly: srv_v.read_only,
-                selinux_relabel: false,
-                propagation: 0,
-                uid_mappings: vec![],
-                gid_mappings: vec![],
-                recursive_read_only: false,
-                image: None,
-                image_sub_path: "".to_string(),
-            })
-        })
-        .collect()
-}
-
-fn map_volumes_style(volumes: Vec<String>) -> Result<Vec<ServiceVolume>> {
-    volumes
-        .into_iter()
-        .map(|v| {
-            let parts: Vec<&str> = v.split(":").collect();
-            let (host_path, container_path, read_only) = match parts.len() {
-                2 => (parts[0], parts[1], ""),
-                3 => (parts[0], parts[1], parts[2]),
-                _ => return Err(anyhow!("Invalid volumes mapping syntax in compose file")),
-            };
-            // validate the read_only str
-            if !read_only.is_empty() && !read_only.eq("ro") {
-                return Err(anyhow!("Invalid volumes mapping syntax in compose file"));
-            }
-
-            Ok(ServiceVolume {
-                host_path: host_path.to_string(),
-                container_path: container_path.to_string(),
-                read_only: !read_only.is_empty(),
-            })
-        })
-        .collect()
+pub fn parse_spec(path: PathBuf) -> Result<ComposeSpec> {
+    let path = path
+        .to_str()
+        .ok_or_else(|| anyhow!("compose.yml file is None"))?;
+    let reader = File::open(path)?;
+    let spec: ComposeSpec = serde_yaml::from_reader(reader).map_err(|_| {
+        anyhow!("Read the compose specification failed, make sure the file is valid")
+    })?;
+    Ok(spec)
 }
 
 // map the compose-style port to k8s-container-style ports
@@ -282,8 +254,8 @@ pub fn get_yml_path(compose_yaml: Option<String>) -> Result<PathBuf> {
     Ok(target_path)
 }
 
-pub fn get_manager_from_name(project_name: Option<String>) -> Result<ComposeManager> {
-    match project_name {
+pub fn get_manager_from_name(project_name: Option<String>) -> Result<Box<ComposeManager>> {
+    let manager = match project_name {
         Some(name) => ComposeManager::new(name),
         None => {
             let cwd = env::current_dir()?;
@@ -294,7 +266,8 @@ pub fn get_manager_from_name(project_name: Option<String>) -> Result<ComposeMana
                 .to_string();
             ComposeManager::new(project_name)
         }
-    }
+    }?;
+    Ok(Box::new(manager))
 }
 
 pub fn compose_execute(command: ComposeCommand) -> Result<()> {
@@ -310,8 +283,8 @@ pub fn compose_execute(command: ComposeCommand) -> Result<()> {
         ComposeCommand::Ps(ps_args) => (None, Box::new(move |manager| manager.ps(ps_args))),
     };
 
-    let manager = get_manager_from_name(project_name)?;
-    action(manager)
+    let mut manager = get_manager_from_name(project_name)?;
+    action(&mut manager)
 }
 
 #[cfg(test)]
@@ -350,6 +323,8 @@ services:
     volumes: 
       - ./tmp/mount/dir:/app/data
       - /home/erasernoob/project/libra-test/data:/app/data2
+volumes:
+  
 "#;
         fs::write(&test_path, yaml).unwrap();
         let mgr = ComposeManager::new("test_proj".to_string()).unwrap();
@@ -371,7 +346,7 @@ services:
             "./tmp/mount/dir:/app/data:ro".to_string(),
             "/home/erasernoob/data:/app/data2".to_string(),
         ];
-        let mapped = map_volumes_style(volumes).unwrap();
+        let mapped = VolumeManager::string_to_pattern(volumes).unwrap();
         assert_eq!(mapped.len(), 2);
         assert_eq!(mapped[0].host_path, "./tmp/mount/dir");
         assert_eq!(mapped[0].container_path, "/app/data");

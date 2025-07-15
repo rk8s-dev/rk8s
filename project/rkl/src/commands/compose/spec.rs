@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -8,10 +8,10 @@ pub struct ComposeSpec {
     pub name: Option<String>,
 
     #[serde(default)]
-    pub services: collections::HashMap<String, ServiceSpec>,
+    pub services: HashMap<String, ServiceSpec>,
 
     #[serde(default)]
-    pub volumes: Vec<VolumeSpec>,
+    pub volumes: Option<VolumeSpec>,
 
     #[serde(default)]
     pub configs: Vec<ConfigSpec>,
@@ -21,9 +21,6 @@ pub struct ComposeSpec {
 
     #[serde(default)]
     pub secrets: Vec<SecretSpec>,
-
-    #[serde(default)]
-    pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,6 +45,9 @@ pub struct ServiceSpec {
 
     #[serde(default)]
     pub secrets: Option<Vec<String>>,
+
+    #[serde(default)]
+    pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,7 +56,9 @@ pub struct NetworkSpec {}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VolumeSpec {}
+pub struct VolumeSpec(HashMap<String, Vec<String>>);
+
+impl VolumeSpec {}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -65,9 +67,3 @@ pub struct ConfigSpec {}
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SecretSpec {}
-
-pub struct ServiceVolume {
-    pub host_path: String,
-    pub container_path: String,
-    pub read_only: bool,
-}

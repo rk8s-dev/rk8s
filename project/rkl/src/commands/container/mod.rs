@@ -1,8 +1,8 @@
 use crate::{
     ContainerCommand,
     commands::{
-        Exec, ExecContainer, container::builder::ContainerConfigBuilder, create, delete, exec,
-        list, load_container, start,
+        Exec, ExecContainer, container::config::ContainerConfigBuilder, create, delete, exec, list,
+        load_container, start,
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
     rootpath,
@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub mod builder;
+pub mod config;
 
 pub struct ContainerRunner {
     spec: ContainerSpec,

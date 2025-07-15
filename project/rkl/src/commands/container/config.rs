@@ -116,6 +116,11 @@ impl ContainerConfigBuilder {
         self
     }
 
+    // pub fn mounts(&mut self, envs: Vec<KeyValue>) -> &mut Self {
+    //     self.envs.extend(mounts);
+    //     self
+    // }
+
     pub fn build(self) -> ContainerConfig {
         ContainerConfig {
             metadata: self.metadata,
