@@ -9,14 +9,18 @@ use crate::{
     task::{ContainerSpec, add_cap_net_raw, get_cni},
 };
 use anyhow::{Ok, Result, anyhow};
-use libcontainer::container::State;
+use chrono::{DateTime, Local};
+use libcontainer::container::{Container, State, state};
 use liboci_cli::{Create, Delete, List, Start};
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
+use std::{fmt::Write as _, io};
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
 };
+use tabwriter::TabWriter;
+use tracing::debug;
 
 pub mod config;
 
@@ -298,12 +302,8 @@ pub fn is_container_exist(id: &str, root_path: &PathBuf) -> Result<()> {
 /// command state
 pub fn state_container(id: &str) -> Result<()> {
     let root_path = rootpath::determine(None)?;
-    println!("ROOT PATH: {}", root_path.to_str().unwrap_or_default());
-
-    let container = load_container(root_path, id)?;
-    println!("{}", serde_json::to_string_pretty(&container.state)?);
-
-    Ok(())
+    debug!("ROOT PATH: {}", root_path.to_str().unwrap_or_default());
+    print_status(id.to_owned(), root_path)
 }
 
 /// command delete
@@ -353,6 +353,51 @@ pub fn exec_container(args: ExecContainer, root_path: Option<PathBuf>) -> Result
 pub fn create_container(path: &str) -> Result<()> {
     let mut runner = ContainerRunner::from_file(path)?;
     runner.run()
+}
+
+pub fn print_status(container_id: String, root_path: PathBuf) -> Result<()> {
+    let root_path = fs::canonicalize(root_path)?;
+    let container_root = root_path.join(container_id);
+    let mut content = String::new();
+
+    let state_file = state::State::file_path(&container_root);
+    if !state_file.exists() {
+        return Err(anyhow!(
+            "Broken container_file: no container state find in {}",
+            container_root.to_str().unwrap()
+        ));
+    }
+    let container = Container::load(container_root)?;
+    let pid = if let Some(pid) = container.pid() {
+        pid.to_string()
+    } else {
+        "".to_owned()
+    };
+
+    let creator = container.creator().unwrap_or_default();
+    let created = if let Some(utc) = container.created() {
+        let local: DateTime<Local> = DateTime::from(utc);
+        local.to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+    } else {
+        "".to_owned()
+    };
+    let _ = writeln!(
+        content,
+        "{}\t{}\t{}\t{}\t{}\t{}",
+        container.id(),
+        pid,
+        container.status(),
+        container.bundle().display(),
+        created,
+        creator.to_string_lossy()
+    );
+
+    let mut tab_writer = TabWriter::new(io::stdout());
+    writeln!(&mut tab_writer, "ID\tPID\tSTATUS\tBUNDLE\tCREATED\tCREATOR")?;
+    write!(&mut tab_writer, "{content}")?;
+    tab_writer.flush()?;
+
+    Ok(())
 }
 
 pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
