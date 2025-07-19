@@ -12,7 +12,7 @@ pub enum ComposeCommand {
     #[command(about = "Start a compose application from a compose yaml")]
     Up(UpArgs),
 
-    #[command(about = "Stopped and delete all the container in compose application")]
+    #[command(about = "stop and delete all the containers in the compose application")]
     Down(DownArgs),
 
     #[command(about = "List all the containers' state in compose application")]
@@ -74,7 +74,7 @@ pub enum ContainerCommand {
         #[arg(value_name = "CONTAINER_NAME")]
         container_name: String,
     },
-    #[command(about = "Get the state of a Container using rkl state Container-name")]
+    #[command(about = "Get the state of a container using rkl state container-name")]
     State {
         #[arg(value_name = "CONTAINER_NAME")]
         container_name: String,
