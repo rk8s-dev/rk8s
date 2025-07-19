@@ -87,6 +87,7 @@ impl ComposeManager {
         let spec = parse_spec(target_path)?;
 
         // top-field manager handle those field
+
         // &mut self.volume_manager.handle(&spec);
         // &mut self.network_manager.handle(&spec);
 
@@ -135,7 +136,10 @@ impl ComposeManager {
         for (srv_name, srv) in &spec.services {
             let container_ports = map_port_style(srv.ports.clone())?;
             let container_spec = ContainerSpec {
-                name: srv_name.clone(),
+                name: srv
+                    .container_name
+                    .clone()
+                    .unwrap_or(self.generate_container_name(srv_name)),
                 image: srv.image.clone(),
                 ports: container_ports,
                 // TODO: Here just pass the command directly not support ENTRYPOINT yet
@@ -206,6 +210,17 @@ impl ComposeManager {
             list(list_arg, self.root_path.clone())
         }
     }
+    /// if the `container_name` field is not supplied then create a random container_name
+    /// for the service container
+    pub fn generate_container_name(&self, srv_name: &String) -> String {
+        let root = self
+            .root_path
+            .file_name()
+            .and_then(|os_str| os_str.to_str())
+            .unwrap_or("unknown");
+        let timestamp = chrono::Utc::now().timestamp() % 1000; // persist 4 bits
+        return format!("{}_{}_{}", root, srv_name, timestamp);
+    }
 }
 
 pub fn parse_spec(path: PathBuf) -> Result<ComposeSpec> {
@@ -213,8 +228,11 @@ pub fn parse_spec(path: PathBuf) -> Result<ComposeSpec> {
         .to_str()
         .ok_or_else(|| anyhow!("compose.yml file is None"))?;
     let reader = File::open(path)?;
-    let spec: ComposeSpec = serde_yaml::from_reader(reader).map_err(|_| {
-        anyhow!("Read the compose specification failed, make sure the file is valid")
+    let spec: ComposeSpec = serde_yaml::from_reader(reader).map_err(|e| {
+        anyhow!(
+            "Read the compose specification failed, make sure the file is valid: {}",
+            e
+        )
     })?;
     Ok(spec)
 }

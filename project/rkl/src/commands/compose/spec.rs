@@ -27,7 +27,11 @@ pub struct ComposeSpec {
 #[serde(deny_unknown_fields)]
 pub struct ServiceSpec {
     #[serde(default)]
+    pub container_name: Option<String>,
+
+    #[serde(default)]
     pub image: String,
+
     #[serde(default)]
     pub ports: Vec<String>,
 
