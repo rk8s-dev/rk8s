@@ -1,6 +1,6 @@
 use std::{
     env,
-    fs::{self, File, read_dir},
+    fs::{self, File, read_dir, remove_dir_all, remove_file},
     path::{Path, PathBuf},
 };
 
@@ -57,15 +57,12 @@ impl ComposeManager {
             return Err(anyhow!("The project {} does not exist", self.project_name));
         }
 
-        // iterate rootpath find the container in the compose application and delete one by one
-        for entry in read_dir(&self.root_path)? {
-            let path = entry?.path();
-            // delete the container directory
-            if path.is_dir() {
-                fs::remove_dir_all(path)?;
-            }
-        }
-        Ok(())
+        self.clean_up()
+    }
+
+    fn clean_up(&self) -> Result<()> {
+        fs::remove_dir_all(&self.root_path)
+            .map_err(|e| anyhow!("failed to delete the whole project: {}", e))
     }
 
     fn get_root_path_by_name(&self, project_name: String) -> Result<PathBuf> {
@@ -92,8 +89,13 @@ impl ComposeManager {
         // &mut self.network_manager.handle(&spec);
 
         // start the whole containers
-        let states = self.run(&spec)?;
-
+        let states = match self.run(&spec) {
+            std::result::Result::Ok(states) => states,
+            Err(_) => {
+                self.clean_up().ok();
+                return Err(anyhow!("failed to up"));
+            }
+        };
         // store the spec info into a .json file
         self.persist_compose_state(states)?;
 
@@ -178,6 +180,7 @@ impl ComposeManager {
                             println!("container {} deleted during the rollback", state.id)
                         }
                     }
+                    return Err(err);
                 }
             };
         }
@@ -235,6 +238,35 @@ pub fn parse_spec(path: PathBuf) -> Result<ComposeSpec> {
         )
     })?;
     Ok(spec)
+}
+
+/// delete all the file and dir in the target_dir
+pub fn clear_dir<P: AsRef<Path>>(dir: P) -> Result<()> {
+    for entry in read_dir(&dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            remove_dir_all(&path).map_err(|e| {
+                anyhow!(
+                    "failed to delete the {}: {}",
+                    path.file_name()
+                        .and_then(|os_str| os_str.to_str())
+                        .unwrap_or("unknown"),
+                    e
+                )
+            })?;
+        } else {
+            remove_file(&path).map_err(|e| {
+                anyhow!(
+                    "failed to remove the file {}: {}",
+                    path.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown"),
+                    e
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 // map the compose-style port to k8s-container-style ports
@@ -336,6 +368,22 @@ mod test {
     use std::fs;
     use tempfile::tempdir;
 
+    fn get_test_yml() -> String {
+        r#"
+name: test_proj
+services:
+  web:
+    image: nginx:latest
+    ports: ["8080:80"]
+    volumes: 
+      - ./tmp/mount/dir:/app/data
+      - /home/erasernoob/project/libra-test/data:/app/data2
+volumes:
+  
+"#
+        .to_string()
+    }
+
     #[test]
     fn test_new_compose_manager() {
         let mgr = ComposeManager::new("demo_proj".to_string());
@@ -428,5 +476,28 @@ volumes:
     fn test_get_manager_from_name_some() {
         let mgr = get_manager_from_name(Some("abc_proj".to_string())).unwrap();
         assert_eq!(mgr.project_name, "abc_proj");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_up() {
+        let root_dir = tempdir().unwrap();
+        let root_path = root_dir.path();
+        let project_name = root_dir
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        fs::write(root_dir.path().join("compose.yml"), get_test_yml()).unwrap();
+        let mut manager = ComposeManager::new(project_name.clone()).unwrap();
+        manager
+            .up(UpArgs {
+                compose_yaml: Some(root_path.join("compose.yml").to_str().unwrap().to_owned()),
+                project_name: Some(project_name),
+            })
+            .unwrap();
     }
 }
