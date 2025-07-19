@@ -8,13 +8,12 @@ use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
 use liboci_cli::{Delete, List};
 use serde_json::json;
-use tracing::info;
 
 use crate::{
     ComposeCommand, DownArgs, PsArgs, UpArgs,
     commands::{
         compose::{network::NetworkManager, spec::ComposeSpec, volume::VolumeManager},
-        container::{ContainerRunner, delete_container},
+        container::ContainerRunner,
         delete, list,
     },
     rootpath::{self},
@@ -89,7 +88,7 @@ impl ComposeManager {
 
         // top-field manager handle those field
         // &mut self.volume_manager.handle(&spec);
-        &mut self.network_manager.handle(&spec);
+        // &mut self.network_manager.handle(&spec);
 
         // start the whole containers
         let states = self.run(&spec)?;

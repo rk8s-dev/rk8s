@@ -76,7 +76,7 @@ impl VolumeManager {
             .collect()
     }
 
-    pub fn handle(&mut self, spec: &ComposeSpec) -> Result<()> {
+    pub fn handle(&mut self, _: &ComposeSpec) -> Result<()> {
         // TODO:  implements the top-volume definition
         // if let Some(volumes) = spec.volumes {}
         Ok(())
