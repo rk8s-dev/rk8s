@@ -86,16 +86,23 @@ pub struct PodTask {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum RksMessage {
+    //request
     CreatePod(Box<PodTask>),
     DeletePod(String),
     GetNodeCount,
     RegisterNode(String),
     UserRequest(String),
-}
+    Heartbeat(String),
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum RksResponse {
+    //response
     Ack,
     Error(String),
     NodeCount(usize),
 }
+
+// #[derive(Debug, Serialize, Deserialize, Clone)]
+// pub enum RksResponse {
+//     Ack,
+//     Error(String),
+//     NodeCount(usize),
+// }

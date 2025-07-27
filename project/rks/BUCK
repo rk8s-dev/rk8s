@@ -16,6 +16,7 @@ rust_binary(
         "//third-party:anyhow",
         "//third-party:rcgen",
         "//third-party:etcd-client",
+        "//third-party:clap",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",
