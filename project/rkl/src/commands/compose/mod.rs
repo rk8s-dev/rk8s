@@ -143,7 +143,7 @@ impl ComposeManager {
 
             // let mut parent_container_pid = String::from("");
 
-            for (_, (srv_name, srv)) in services.into_iter().enumerate() {
+            for (srv_name, srv) in services.into_iter() {
                 let container_ports = map_port_style(srv.ports.clone())?;
                 let container_spec = ContainerSpec {
                     name: srv
@@ -236,7 +236,7 @@ impl ComposeManager {
             .and_then(|os_str| os_str.to_str())
             .unwrap_or("unknown");
         let timestamp = chrono::Utc::now().timestamp() % 1000; // persist 4 bits
-        return format!("{}_{}_{}", root, srv_name, timestamp);
+        format!("{}_{}_{}", root, srv_name, timestamp)
     }
 }
 

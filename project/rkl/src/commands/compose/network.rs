@@ -48,7 +48,7 @@ impl NetworkManager {
     }
 
     pub fn is_default(&self) -> bool {
-        return self.is_default;
+        self.is_default
     }
 
     pub fn write_network_config(&self) -> Result<()> {

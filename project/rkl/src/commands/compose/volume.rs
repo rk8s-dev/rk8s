@@ -19,6 +19,12 @@ pub struct VolumePattern {
     pub read_only: bool,
 }
 
+impl Default for VolumeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct VolumeManager {
     // storage the key-value <volume_name>:<specific_path>
     pub volumes: HashMap<String, String>,

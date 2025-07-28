@@ -172,7 +172,7 @@ impl ContainerRunner {
         add_cap_net_raw(&mut capabilities);
         process.set_capabilities(Some(capabilities));
         spec.set_process(Some(process));
-        return Ok(spec);
+        Ok(spec)
     }
 
     pub fn create_container(&self) -> Result<CreateContainerResponse> {
