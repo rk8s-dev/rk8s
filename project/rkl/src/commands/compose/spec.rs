@@ -11,19 +11,19 @@ pub struct ComposeSpec {
     pub services: HashMap<String, ServiceSpec>,
 
     #[serde(default)]
-    pub volumes: Option<VolumeSpec>,
+    pub volumes: Option<VolumesSpec>,
 
     #[serde(default)]
-    pub configs: Vec<ConfigSpec>,
+    pub configs: Option<ConfigSpec>,
 
     #[serde(default)]
-    pub networks: Vec<NetworkSpec>,
-
+    // pub networks: Option<HashMap<String, NetworkSpec>>,
+    pub networks: Option<NetworksSpec>,
     #[serde(default)]
-    pub secrets: Vec<SecretSpec>,
+    pub secrets: Option<SecretSpec>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceSpec {
     #[serde(default)]
@@ -56,13 +56,10 @@ pub struct ServiceSpec {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct NetworkSpec {}
+pub struct VolumesSpec(pub HashMap<String, VolumeSpec>);
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VolumeSpec(HashMap<String, Vec<String>>);
-
-impl VolumeSpec {}
+pub struct VolumeSpec {}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,3 +68,25 @@ pub struct ConfigSpec {}
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SecretSpec {}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+// #[serde(transparent)]
+pub struct NetworksSpec(pub HashMap<String, NetworkSpec>);
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkSpec {
+    external: Option<bool>,
+    driver: Option<NetworkDirver>,
+}
+
+/// network driver: default: Bridge
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkDirver {
+    Bridge,
+    Overlay,
+    Host,
+    None,
+}
