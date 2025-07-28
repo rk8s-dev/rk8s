@@ -37,7 +37,7 @@ enum Workload {
 
     #[command(
         subcommand,
-        about = "Manage multi-container apps using Compose",
+        about = "Manage multi-container apps using compose",
         alias = "C"
     )]
     Compose(ComposeCommand),
