@@ -45,9 +45,9 @@ impl ComposeManager {
 
         Ok(Self {
             root_path,
-            project_name,
-            network_manager: NetworkManager::new(),
+            network_manager: NetworkManager::new(project_name.clone()),
             volume_manager: VolumeManager::new(),
+            project_name,
         })
     }
 
@@ -84,9 +84,9 @@ impl ComposeManager {
         let spec = parse_spec(target_path)?;
 
         // top-field manager handle those field
+        let _ = &mut self.network_manager.handle(&spec)?;
 
-        // &mut self.volume_manager.handle(&spec);
-        // &mut self.network_manager.handle(&spec);
+        let _ = &mut self.volume_manager.handle(&spec)?;
 
         // start the whole containers
         let states = match self.run(&spec) {
@@ -133,56 +133,70 @@ impl ComposeManager {
         Ok(spec)
     }
 
-    fn run(&self, spec: &ComposeSpec) -> Result<Vec<State>> {
+    fn run(&self, _: &ComposeSpec) -> Result<Vec<State>> {
         let mut states: Vec<State> = vec![];
-        for (srv_name, srv) in &spec.services {
-            let container_ports = map_port_style(srv.ports.clone())?;
-            let container_spec = ContainerSpec {
-                name: srv
-                    .container_name
-                    .clone()
-                    .unwrap_or(self.generate_container_name(srv_name)),
-                image: srv.image.clone(),
-                ports: container_ports,
-                // TODO: Here just pass the command directly not support ENTRYPOINT yet
-                args: srv.command.clone(),
-                resources: None,
-            };
 
-            // generate the volumes Mount
-            let volumes = VolumeManager::map_to_mount(srv.volumes.clone())?;
+        let network_mapping = self.network_manager.network_service_mapping();
 
-            let mut runner =
-                ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
+        for (network_name, services) in network_mapping {
+            println!("Creating network: {}", network_name);
 
-            runner.add_mounts(volumes);
-            match runner.run() {
-                std::result::Result::Ok(_) => {
-                    states.push(runner.get_container_state()?);
-                }
-                Err(err) => {
-                    // create one container failed delete others
-                    println!(
-                        "container {} created failed: {}",
-                        runner.get_container_id()?,
-                        err
-                    );
-                    for state in &states {
-                        if let Err(err) = delete(
-                            Delete {
-                                container_id: state.id.clone(),
-                                force: true,
-                            },
-                            self.root_path.clone(),
-                        ) {
-                            println!("container {} deleted failed: {}", state.id, err)
-                        } else {
-                            println!("container {} deleted during the rollback", state.id)
-                        }
+            // let mut parent_container_pid = String::from("");
+
+            for (_, (srv_name, srv)) in services.into_iter().enumerate() {
+                let container_ports = map_port_style(srv.ports.clone())?;
+                let container_spec = ContainerSpec {
+                    name: srv
+                        .container_name
+                        .clone()
+                        .unwrap_or(self.generate_container_name(&srv_name)),
+                    image: srv.image.clone(),
+                    ports: container_ports,
+                    // TODO: Here just pass the command directly not support ENTRYPOINT yet
+                    args: srv.command.clone(),
+                    resources: None,
+                };
+
+                // generate the volumes Mount
+                let volumes = VolumeManager::map_to_mount(srv.volumes.clone())?;
+
+                let mut runner =
+                    ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
+                // TODO: if there are parent_container_pid
+                // let mut runner = if parent_container_pid.is_empty() {
+                // } else {
+                //     return Err(anyhow!("Panic"));
+                // };
+
+                runner.add_mounts(volumes);
+                match runner.run() {
+                    std::result::Result::Ok(_) => {
+                        states.push(runner.get_container_state()?);
                     }
-                    return Err(err);
-                }
-            };
+                    Err(err) => {
+                        // create one container failed delete others
+                        println!(
+                            "container {} created failed: {}",
+                            runner.get_container_id()?,
+                            err
+                        );
+                        for state in &states {
+                            if let Err(err) = delete(
+                                Delete {
+                                    container_id: state.id.clone(),
+                                    force: true,
+                                },
+                                self.root_path.clone(),
+                            ) {
+                                println!("container {} deleted failed: {}", state.id, err)
+                            } else {
+                                println!("container {} deleted during the rollback", state.id)
+                            }
+                        }
+                        return Err(err);
+                    }
+                };
+            }
         }
         // return the compose application's state
         Ok(states)
@@ -373,13 +387,39 @@ mod test {
 name: test_proj
 services:
   web:
-    image: nginx:latest
+    image: test/bundles/busybox/
     ports: ["8080:80"]
     volumes: 
       - ./tmp/mount/dir:/app/data
-      - /home/erasernoob/project/libra-test/data:/app/data2
+      - ./data:/app/data2
+
 volumes:
   
+"#
+        .to_string()
+    }
+
+    fn get_test_mutiple_service() -> String {
+        r#"
+services:
+  backend:
+    container_name: back
+    image: test/bundles/busybox
+    command: ["sleep", "300"]
+    ports:
+      - "8080:8080"
+    networks:
+      - libra-net
+    volumes:
+      - /tmp/mount/dir:/app/data
+  frontend:
+    container_name: front
+    image: test/bundles/busybox
+    ports:
+      - "80:80"
+networks: 
+  libra-net: 
+    driver: bridge 
 "#
         .to_string()
     }
@@ -404,18 +444,8 @@ volumes:
     fn test_persist_and_read_spec() {
         let dir = tempdir().unwrap();
         let test_path = dir.path().join("compose.yml");
-        let yaml = r#"
-name: test_proj
-services:
-  web:
-    image: nginx:latest
-    ports: ["8080:80"]
-    volumes: 
-      - ./tmp/mount/dir:/app/data
-      - /home/erasernoob/project/libra-test/data:/app/data2
-volumes:
-  
-"#;
+        let yaml = get_test_yml();
+
         fs::write(&test_path, yaml).unwrap();
         let mgr = ComposeManager::new("test_proj".to_string()).unwrap();
         let spec = mgr.read_spec(test_path.clone()).unwrap();
@@ -491,7 +521,15 @@ volumes:
             .unwrap()
             .to_string();
 
-        fs::write(root_dir.path().join("compose.yml"), get_test_yml()).unwrap();
+        fs::write(
+            root_dir.path().join("compose.yml"),
+            get_test_mutiple_service(),
+        )
+        .unwrap();
+        // cd to the current_dir's parent
+        let root = env::current_dir().expect("Failed to get current dev");
+        env::set_current_dir(root.parent().unwrap()).unwrap();
+
         let mut manager = ComposeManager::new(project_name.clone()).unwrap();
         manager
             .up(UpArgs {
@@ -499,5 +537,7 @@ volumes:
                 project_name: Some(project_name),
             })
             .unwrap();
+
+        env::set_current_dir(root).unwrap();
     }
 }

@@ -141,16 +141,13 @@ impl ContainerRunner {
         Ok(())
     }
 
-    pub fn create_container(&self) -> Result<CreateContainerResponse> {
+    pub fn create_oci_spec(&self) -> Result<Spec> {
         // validate the config
         let config = self
             .config
             .as_ref()
             .ok_or_else(|| anyhow!("Container's Config is required"))?;
 
-        let container_id = self.get_container_id()?;
-
-        //  create oci spec
         let mut spec = Spec::default();
 
         // use the default namesapce configuration
@@ -175,6 +172,14 @@ impl ContainerRunner {
         add_cap_net_raw(&mut capabilities);
         process.set_capabilities(Some(capabilities));
         spec.set_process(Some(process));
+        return Ok(spec);
+    }
+
+    pub fn create_container(&self) -> Result<CreateContainerResponse> {
+        let container_id = self.get_container_id()?;
+
+        //  create oci spec
+        let spec = self.create_oci_spec()?;
 
         // create a config.path at the bundle path
         // TODO: Here use the local file path directly
