@@ -3,11 +3,13 @@ use file_handle::{FileHandle, OpenableFileHandle};
 
 use inode_store::{InodeId, InodeStore};
 use rfuse3::{Errno, raw::reply::ReplyEntry};
+use uuid::Uuid;
 
 use crate::util::convert_stat64_to_file_attr;
 use mount_fd::MountFds;
 use statx::StatExt;
 use std::io::Result;
+use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::{
     collections::{BTreeMap, btree_map},
@@ -405,6 +407,8 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     cfg: Config,
 
+    _uuid: Uuid,
+
     phantom: PhantomData<S>,
 }
 
@@ -462,6 +466,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             dir_entry_timeout,
             dir_attr_timeout,
             cfg,
+
+            _uuid: Uuid::new_v4(),
 
             phantom: PhantomData,
         })
@@ -640,7 +646,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             } else {
                 self.ino_allocator.get_unique_inode(id)?
             };
-
+            // trace!("fuse: allocate inode: {} for id: {:?}", inode, id);
             Ok(inode)
         }
     }
@@ -661,6 +667,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let dir_file = dir.get_file()?;
         let (path_fd, handle_opt, st) = Self::open_file_and_handle(self, &dir_file, name)?;
         let id = InodeId::from_stat(&st);
+        // trace!("FS {} do_lookup: parent: {}, name: {}, path_fd: {:?}, handle_opt: {:?}, id: {:?}",
+        // self.uuid, parent, name.to_string_lossy(), path_fd.as_raw_fd(), handle_opt, id);
 
         let mut found = None;
         'search: loop {
@@ -700,16 +708,18 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             };
 
             // Write guard get_alt_locked() and insert_lock() to avoid race conditions.
-            let inodes = self.inode_map.inodes.read().await;
+            let mut inodes = self.inode_map.inodes.write().await;
 
             // Lookup inode_map again after acquiring the inode_map lock, as there might be another
             // racing thread already added an inode with the same id while we're not holding
             // the lock. If so just use the newly added inode, otherwise the inode will be replaced
             // and results in EBADF.
+            // trace!("FS {} looking up inode for id: {:?} with handle: {:?}", self.uuid, id, handle);
             match InodeMap::get_alt_locked(&inodes, &id, handle_opt.as_ref()) {
                 Some(data) => {
                     // An inode was added concurrently while we did not hold a lock on
                     // `self.inodes_map`, so we use that instead. `handle` will be dropped.
+                    // trace!("FS {} found existing inode: {}", self.uuid, data.inode);
                     data.refcount.fetch_add(1, Ordering::Relaxed);
                     data.inode
                 }
@@ -717,6 +727,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                     let inode = self
                         .allocate_inode(&inodes, &id, handle_opt.as_ref())
                         .await?;
+                    // trace!("FS {} allocated new inode: {} for id: {:?}", self.uuid, inode, id);
 
                     if inode > VFS_MAX_INO {
                         error!("fuse: max inode number reached: {}", VFS_MAX_INO);
@@ -725,17 +736,11 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                         ))
                         .into());
                     }
-                    drop(inodes);
 
-                    self.inode_map
-                        .insert(Arc::new(InodeData::new(
-                            inode,
-                            handle,
-                            1,
-                            id,
-                            st.st.st_mode,
-                        )))
-                        .await;
+                    InodeMap::insert_locked(
+                        inodes.deref_mut(),
+                        Arc::new(InodeData::new(inode, handle, 1, id, st.st.st_mode)),
+                    );
 
                     inode
                 }

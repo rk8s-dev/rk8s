@@ -5,3 +5,6 @@ overlay/
 output/
 src/bin/*
 src/bin
+*.log
+*.txt
+filter_log.py

@@ -88,6 +88,10 @@ impl InodeStore {
             Some(v) => {
                 // Refcount is not 0, we have to delay the removal.
                 if v.lookups.load(Ordering::Relaxed) > 0 {
+                    trace!(
+                        "InodeStore:remove_inode: inode {} is still in use, delaying removal.",
+                        inode
+                    );
                     self.deleted.insert(inode, v.clone());
                     return None;
                 }

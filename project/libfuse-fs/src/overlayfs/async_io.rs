@@ -124,7 +124,7 @@ impl Filesystem for OverlayFs {
                     if let Some(ref rhd) = hd.real_handle {
                         // handle opened in upper layer
                         if rhd.in_upper_layer {
-                            let rep = rhd
+                            let mut rep = rhd
                                 .layer
                                 .setattr(
                                     req,
@@ -133,6 +133,7 @@ impl Filesystem for OverlayFs {
                                     set_attr,
                                 )
                                 .await?;
+                            rep.attr.ino = inode;
                             return Ok(rep);
                         }
                     }
@@ -147,7 +148,10 @@ impl Filesystem for OverlayFs {
         }
 
         let (layer, _, real_inode) = node.first_layer_inode().await;
-        layer.setattr(req, real_inode, None, set_attr).await
+        // layer.setattr(req, real_inode, None, set_attr).await
+        let mut rep = layer.setattr(req, real_inode, None, set_attr).await?;
+        rep.attr.ino = inode;
+        Ok(rep)
     }
 
     /// read symbolic link.
@@ -281,7 +285,12 @@ impl Filesystem for OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOENT).into());
         }
         let name = new_name.to_str().unwrap();
+        trace!(
+            "LINK: inode: {}, new_parent: {}, name: {}, trying to do_link: src_inode: {}, newpnode: {}",
+            inode, new_parent, name, node.inode, newpnode.inode
+        );
         self.do_link(req, &node, &newpnode, name).await?;
+        trace!("LINK: done, looking up new entry");
         self.do_lookup(req, new_parent, name)
             .await
             .map_err(|e| e.into())
@@ -622,12 +631,20 @@ impl Filesystem for OverlayFs {
         }
 
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
+        // Get the layer information and open directory in the underlying layer
+        let (layer, in_upper_layer, real_inode) = node.first_layer_inode().await;
+        let reply = layer.opendir(req, real_inode, flags).await?;
 
         self.handles.lock().await.insert(
             handle,
             Arc::new(HandleData {
                 node: Arc::clone(&node),
-                real_handle: None,
+                real_handle: Some(RealHandle {
+                    layer,
+                    in_upper_layer,
+                    inode: real_inode,
+                    handle: AtomicU64::new(reply.fh),
+                }),
             }),
         );
 
@@ -679,7 +696,20 @@ impl Filesystem for OverlayFs {
             info!("fuse: readdir is not supported.");
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
+        trace!(
+            "readdirplus: parent: {}, fh: {}, offset: {}",
+            parent, fh, offset
+        );
         let entries = self.do_readdirplus(req, parent, fh, offset).await?;
+        match self.handles.lock().await.get(&fh) {
+            Some(h) => {
+                trace!(
+                    "after readdirplus: found handle, seeing real_handle: {}",
+                    h.real_handle.is_some()
+                );
+            }
+            None => trace!("after readdirplus: no handle found: {}", fh),
+        }
         Ok(ReplyDirectoryPlus { entries })
     }
     /// release an open directory. For every [`opendir`][Filesystem::opendir] call there will
@@ -859,6 +889,7 @@ impl Filesystem for OverlayFs {
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::{ffi::OsString, sync::Arc};
