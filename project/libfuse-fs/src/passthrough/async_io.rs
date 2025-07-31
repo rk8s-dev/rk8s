@@ -341,7 +341,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             // error!("fuse: do_getattr ino {} Not find err {:?}", inode, e);
             e
         })?;
-        // trace!("FS {} passthrough: do_getattr: got data {:?}", self.uuid, data);
+        trace!("do_getattr: got data {:?}", data);
 
         // kernel sends 0 as handle in case of no_open, and it depends on fuse server to handle
         // this case correctly.
@@ -1166,6 +1166,7 @@ impl Filesystem for PassthroughFs {
         }
 
         let data = self.handle_map.get(fh, inode).await?;
+        trace!("flush: data.inode={}", data.inode);
 
         // Since this method is called whenever an fd is closed in the client, we can emulate that
         // behavior by doing the same thing (dup-ing the fd and then immediately closing it). Safe

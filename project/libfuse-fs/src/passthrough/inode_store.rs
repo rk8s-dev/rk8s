@@ -119,9 +119,9 @@ impl InodeStore {
 
     pub fn get(&self, inode: &Inode) -> Option<&Arc<InodeData>> {
         let res = self.data.get(inode);
-        if res.is_none() {
-            trace!("get: inode {} not found", inode);
-        }
+        // if res.is_none() {
+        //     trace!("get: inode {} not found", inode);
+        // }
         res
     }
 

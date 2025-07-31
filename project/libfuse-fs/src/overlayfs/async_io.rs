@@ -284,14 +284,14 @@ impl Filesystem for OverlayFs {
         if newpnode.whiteout.load(Ordering::Relaxed) {
             return Err(Error::from_raw_os_error(libc::ENOENT).into());
         }
-        let name = new_name.to_str().unwrap();
-        trace!(
-            "LINK: inode: {}, new_parent: {}, name: {}, trying to do_link: src_inode: {}, newpnode: {}",
-            inode, new_parent, name, node.inode, newpnode.inode
-        );
-        self.do_link(req, &node, &newpnode, name).await?;
-        trace!("LINK: done, looking up new entry");
-        self.do_lookup(req, new_parent, name)
+        let new_name = new_name.to_str().unwrap();
+        // trace!(
+        //     "LINK: inode: {}, new_parent: {}, name: {}, trying to do_link: src_inode: {}, newpnode: {}",
+        //     inode, new_parent, name, node.inode, newpnode.inode
+        // );
+        self.do_link(req, &node, &newpnode, new_name).await?;
+        // trace!("LINK: done, looking up new entry");
+        self.do_lookup(req, new_parent, new_name)
             .await
             .map_err(|e| e.into())
     }
@@ -592,7 +592,12 @@ impl Filesystem for OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOSYS).into());
         }
 
+        trace!(
+            "FLUSH: inode: {}, fh: {}, lock_owner: {}",
+            inode, fh, lock_owner
+        );
         let node = self.lookup_node(req, inode, "").await?;
+        trace!("FLUSH: found node: {}", node.inode);
 
         if node.whiteout.load(Ordering::Relaxed) {
             return Err(Error::from_raw_os_error(libc::ENOENT).into());
@@ -601,7 +606,22 @@ impl Filesystem for OverlayFs {
         let (layer, real_inode, real_handle) = self.find_real_info_from_handle(fh).await?;
 
         // FIXME: need to test if inode matches corresponding handle?
+        if inode
+            != self
+                .handles
+                .lock()
+                .await
+                .get(&fh)
+                .map(|h| h.node.inode)
+                .unwrap_or(0)
+        {
+            return Err(Error::other("inode does not match handle").into());
+        }
 
+        trace!(
+            "flushing, real_inode: {}, real_handle: {}",
+            real_inode, real_handle
+        );
         layer.flush(req, real_inode, real_handle, lock_owner).await
     }
 
