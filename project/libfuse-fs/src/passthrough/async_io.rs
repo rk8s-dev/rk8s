@@ -341,7 +341,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             // error!("fuse: do_getattr ino {} Not find err {:?}", inode, e);
             e
         })?;
-        trace!("do_getattr: got data {:?}", data);
+        // trace!("do_getattr: got data {:?}", data);
 
         // kernel sends 0 as handle in case of no_open, and it depends on fuse server to handle
         // this case correctly.

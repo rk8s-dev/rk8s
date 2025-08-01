@@ -592,15 +592,20 @@ impl Filesystem for OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOSYS).into());
         }
 
-        trace!(
-            "FLUSH: inode: {}, fh: {}, lock_owner: {}",
-            inode, fh, lock_owner
-        );
-        let node = self.lookup_node(req, inode, "").await?;
-        trace!("FLUSH: found node: {}", node.inode);
-
-        if node.whiteout.load(Ordering::Relaxed) {
-            return Err(Error::from_raw_os_error(libc::ENOENT).into());
+        let node = self.lookup_node(req, inode, "").await;
+        match node {
+            Ok(n) => {
+                if n.whiteout.load(Ordering::Relaxed) {
+                    return Err(Error::from_raw_os_error(libc::ENOENT).into());
+                }
+            }
+            Err(e) => {
+                if e.raw_os_error() == Some(libc::ENOENT) {
+                    trace!("flush: inode {} is stale", inode);
+                } else {
+                    return Err(e.into());
+                }
+            }
         }
 
         let (layer, real_inode, real_handle) = self.find_real_info_from_handle(fh).await?;

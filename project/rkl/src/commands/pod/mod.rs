@@ -74,7 +74,7 @@ impl PodInfo {
         writeln!(file, "PodSandbox ID: {}", self.pod_sandbox_id)?;
         writeln!(file, "Containers:")?;
         for container_name in &self.container_names {
-            writeln!(file, "- {}", container_name)?;
+            writeln!(file, "- {container_name}")?;
         }
         Ok(())
     }
@@ -235,7 +235,7 @@ pub fn remove_pod_network(pid: i32) -> Result<(), anyhow::Error> {
     let mut cni = task::get_cni()?;
     cni.load_default_conf();
 
-    let netns_path = format!("/proc/{}/ns/net", pid);
+    let netns_path = format!("/proc/{pid}/ns/net");
     let id = pid.to_string();
     cni.remove(id, netns_path.clone())
         .map_err(|e| anyhow::anyhow!("Failed to remove CNI network: {}", e))?;
@@ -247,7 +247,7 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None)?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
 
-    println!("Pod: {}", pod_name);
+    println!("Pod: {pod_name}");
 
     println!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
     let _ = state(
@@ -291,9 +291,9 @@ pub fn set_daemonize() -> Result<(), anyhow::Error> {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis();
-    let out = File::create(format!("/var/log/rk8s/log_{}.out", time_stamp)).unwrap();
-    let err = File::create(format!("/var/log/rk8s/log_{}.err", time_stamp)).unwrap();
-    let pid = format!("/tmp/rkl_{}.pid", time_stamp);
+    let out = File::create(format!("/var/log/rk8s/log_{time_stamp}.out")).unwrap();
+    let err = File::create(format!("/var/log/rk8s/log_{time_stamp}.err")).unwrap();
+    let pid = format!("/tmp/rkl_{time_stamp}.pid");
     let daemonize = Daemonize::new().pid_file(&pid).stdout(out).stderr(err);
     daemonize.start()?;
     Ok(())

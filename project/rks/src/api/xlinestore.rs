@@ -26,14 +26,14 @@ impl XlineStore {
     }
 
     pub async fn insert_pod_yaml(&self, pod_name: &str, pod_yaml: &str) -> Result<()> {
-        let key = format!("/registry/pods/{}", pod_name);
+        let key = format!("/registry/pods/{pod_name}");
         let mut client = self.client.write().await;
         client.put(key, pod_yaml, None).await?;
         Ok(())
     }
 
     pub async fn get_pod_yaml(&self, pod_name: &str) -> Result<Option<String>> {
-        let key = format!("/registry/pods/{}", pod_name);
+        let key = format!("/registry/pods/{pod_name}");
         let mut client = self.client.write().await;
         let resp = client.get(key, None).await?;
         Ok(resp
@@ -55,7 +55,7 @@ impl XlineStore {
     }
 
     pub async fn insert_node_info(&self, node_name: &str, ip: &str, status: &str) -> Result<()> {
-        let key = format!("/registry/nodes/{}", node_name);
+        let key = format!("/registry/nodes/{node_name}");
         let value = serde_yaml::to_string(&NodeInfo {
             ip: ip.to_string(),
             status: status.to_string(),
@@ -92,7 +92,7 @@ impl XlineStore {
     }
 
     pub async fn delete_pod(&self, pod_name: &str) -> Result<()> {
-        let key = format!("/registry/pods/{}", pod_name);
+        let key = format!("/registry/pods/{pod_name}");
         let mut client = self.client.write().await;
         client.delete(key, None).await?;
         Ok(())

@@ -58,7 +58,7 @@ pub(crate) struct RealInode {
 }
 
 // OverlayInode must be protected by lock, it can be operated by multiple threads.
-#[derive(Default)]
+// #[derive(Default)]
 pub(crate) struct OverlayInode {
     // Inode hash table, map from 'name' to 'OverlayInode'.
     pub childrens: Mutex<HashMap<String, Arc<OverlayInode>>>,
@@ -74,6 +74,8 @@ pub(crate) struct OverlayInode {
     pub whiteout: AtomicBool,
     // Directory is loaded.
     pub loaded: AtomicBool,
+    // hard link counter(nlink), init as 1
+    pub nlink: AtomicU64,
 }
 
 #[derive(Default)]
@@ -494,7 +496,18 @@ impl Drop for RealInode {
 
 impl OverlayInode {
     pub fn new() -> Self {
-        OverlayInode::default()
+        Self {
+            childrens: Mutex::new(HashMap::new()),
+            parent: Mutex::new(Weak::new()),
+            real_inodes: Mutex::new(vec![]),
+            inode: 0,
+            path: RwLock::new(String::new()),
+            name: RwLock::new(String::new()),
+            lookups: AtomicU64::new(0),
+            whiteout: AtomicBool::new(false),
+            loaded: AtomicBool::new(false),
+            nlink: AtomicU64::new(1),
+        }
     }
     // Allocate new OverlayInode based on one RealInode,
     // inode number is always 0 since only OverlayFs has global unique inode allocator.
@@ -1894,6 +1907,7 @@ impl OverlayFs {
             }
         }
 
+        src_node.nlink.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -2258,16 +2272,20 @@ impl OverlayFs {
     }
 
     async fn do_rm(&self, ctx: Request, parent: u64, name: &OsStr, dir: bool) -> Result<()> {
+        // 1. Read-only mount guard
         if self.upper_layer.is_none() {
             return Err(Error::from_raw_os_error(libc::EROFS));
         }
 
+        // 2. Locate the parent Overlay Inode.
         // Find parent Overlay Inode.
         let pnode = self.lookup_node(ctx, parent, "").await?;
         if pnode.whiteout.load(Ordering::Relaxed) {
             return Err(Error::from_raw_os_error(libc::ENOENT));
         }
         let to_name = name.to_str().unwrap();
+
+        // 3. Locate the child Overlay Inode for the given name
         // Find the Overlay Inode for child with <name>.
         let node = self.lookup_node(ctx, parent, to_name).await?;
         if node.whiteout.load(Ordering::Relaxed) {
@@ -2275,6 +2293,7 @@ impl OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOENT));
         }
 
+        // 4. If removing a directory, ensure it is empty of real entries
         if dir {
             self.load_directory(ctx, &node).await?;
             let (count, whiteouts) = node.count_entries_and_whiteout(ctx).await?;
@@ -2291,6 +2310,8 @@ impl OverlayFs {
             trace!("whiteouts deleted!\n");
         }
 
+        // 5. Decide whether we need to create a whiteout entry
+        // We'll filp this off if upper-layer unlink suffices or parent is opaque
         let need_whiteout = AtomicBool::new(true);
         let pnode = self.copy_node_up(ctx, Arc::clone(&pnode)).await?;
 
@@ -2298,6 +2319,7 @@ impl OverlayFs {
             need_whiteout.store(false, Ordering::Relaxed);
         }
 
+        // 6. Decrement the FUSE lookup (open handle) counter on this node
         // lookups decrease by 1.
         let origin = node.lookups.fetch_sub(1, Ordering::Relaxed);
         trace!(
@@ -2333,24 +2355,51 @@ impl OverlayFs {
             Ok(false)
         };
 
+        // 7. Perform the unlink/rmdir operation if the node exists in upper layer
+        // decrement hardlink count
+        let prev_nlink = node.nlink.fetch_sub(1, Ordering::Relaxed);
+        let remaining_links = prev_nlink.saturating_sub(1);
+        let open_handles = node.lookups.load(Ordering::Relaxed);
         if node.in_upper_layer().await {
+            // run upper-layer remove + maybe remove overlay inode + remove child
             let hh = pnode.handle_upper_inode_locked(&mut df);
-            // remove it from hashmap
-            let node_name = node.name.read().await.clone();
-            let (h1, _, _) = tokio::join!(
+            let (res, _, _) = tokio::join!(
                 hh,
-                self.remove_inode(node.inode, Some(node.path.read().await.clone())),
-                pnode.remove_child(&node_name),
+                async {
+                    if remaining_links == 0 && open_handles == 0 {
+                        self.remove_inode(node.inode, Some(node.path.read().await.clone()))
+                            .await
+                            .unwrap();
+                    } else {
+                        trace!(
+                            "in upper layer, defer remove_inode {}, links={}, open_handles={}",
+                            node.inode, remaining_links, open_handles
+                        );
+                    }
+                    Ok::<(), Error>(())
+                },
+                pnode.remove_child(name.to_str().unwrap()),
             );
-            h1?;
+            res?;
         } else {
-            let node_name = node.name.read().await.clone();
-            tokio::join!(
-                self.remove_inode(node.inode, None),
-                pnode.remove_child(&node_name)
+            // no upper layer entry: only lower layer, so no real fn unlink here
+            let _ = tokio::join!(
+                async {
+                    if remaining_links == 0 && open_handles == 0 {
+                        self.remove_inode(node.inode, None).await.unwrap();
+                    } else {
+                        trace!(
+                            "not in upper layer, defer remove_inode {}, links={}, open_handles={}",
+                            node.inode, remaining_links, open_handles
+                        );
+                    }
+                    Ok::<(), Error>(())
+                },
+                pnode.remove_child(name.to_str().unwrap()),
             );
         }
 
+        // 8. If needed, create a entry in the upper layer to mask lower-layer files
         if need_whiteout.load(Ordering::Relaxed) {
             trace!("do_rm: creating whiteout\n");
             // pnode is copied up, so it has upper layer.

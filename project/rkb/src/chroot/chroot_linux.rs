@@ -25,6 +25,6 @@ pub fn execute_command(command: &Vec<&str>, envp: &Vec<CString>) -> Result<()> {
         .map(|arg| CString::new(*arg).unwrap())
         .collect::<Vec<CString>>();
     execvpe(&file, &argv, envp.as_slice())
-        .with_context(|| format!("Failed to execute command: {:?}", command))?;
+        .with_context(|| format!("Failed to execute command: {command:?}"))?;
     Ok(())
 }

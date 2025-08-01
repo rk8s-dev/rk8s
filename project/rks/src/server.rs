@@ -27,16 +27,16 @@ pub async fn serve(addr: String, xline_store: Arc<XlineStore>) -> anyhow::Result
                 match connecting.await {
                     Ok(conn) => {
                         let remote_addr = conn.remote_address().to_string();
-                        println!("[server] connection accepted: addr={}", remote_addr);
+                        println!("[server] connection accepted: addr={remote_addr}");
 
                         // spawn new task to handle this connection
                         tokio::spawn(async move {
                             if let Err(e) = handle_connection(conn, xline_store, tx).await {
-                                eprintln!("[server] handle_connection error: {:?}", e);
+                                eprintln!("[server] handle_connection error: {e:?}");
                             }
                         });
                     }
-                    Err(e) => eprintln!("[server] failed to establish connection: {:?}", e),
+                    Err(e) => eprintln!("[server] failed to establish connection: {e:?}"),
                 }
             }
             None => break,
@@ -127,7 +127,7 @@ async fn handle_connection(
                             node_id = Some(id.clone());
                             let ip = conn.remote_address().ip().to_string();
                             xline_store.insert_node_info(&id, &ip, "Ready").await?;
-                            println!("[server] registered worker node: {}, ip: {}", id, ip);
+                            println!("[server] registered worker node: {id}, ip: {ip}");
 
                             let response = RksMessage::Ack;
                             let data = bincode::serialize(&response)?;
@@ -150,7 +150,7 @@ async fn handle_connection(
                 }
             }
             Ok(None) => eprintln!("[server] stream closed"),
-            Err(e) => eprintln!("[server] read error: {:?}", e),
+            Err(e) => eprintln!("[server] read error: {e:?}"),
         }
     }
 
@@ -184,11 +184,11 @@ async fn handle_connection(
                         }
                     }
                     Ok(None) => println!("[server] stream closed"),
-                    Err(e) => println!("[server] read error: {}", e),
+                    Err(e) => println!("[server] read error: {e}"),
                 }
             }
             Err(e) => {
-                println!("[server] connection error: {}", e);
+                println!("[server] connection error: {e}");
                 break;
             }
         }
@@ -201,10 +201,7 @@ async fn handle_connection(
 async fn dispatch_worker(msg: RksMessage, conn: &Connection) -> Result<()> {
     match msg {
         RksMessage::Heartbeat(node_id) => {
-            println!(
-                "[worker dispatch] received heartbeat from node: {}",
-                node_id
-            );
+            println!("[worker dispatch] received heartbeat from node: {node_id}");
             let response = RksMessage::Ack;
             let data = bincode::serialize(&response)?;
             if let Ok(mut stream) = conn.open_uni().await {
@@ -213,7 +210,7 @@ async fn dispatch_worker(msg: RksMessage, conn: &Connection) -> Result<()> {
             }
         }
         RksMessage::Error(err_msg) => {
-            println!("[worker dispatch] reported error: {}", err_msg);
+            println!("[worker dispatch] reported error: {err_msg}");
         }
         RksMessage::Ack => {
             println!("[worker dispatch] received Ack");
@@ -244,7 +241,7 @@ pub async fn dispatch_user(
 
         RksMessage::GetNodeCount => {
             let count = xline_store.list_nodes().await?.len();
-            println!("[user dispatch] node count: {}", count);
+            println!("[user dispatch] node count: {count}");
             let response = RksMessage::NodeCount(count);
             let data = bincode::serialize(&response)?;
             if let Ok(mut stream) = conn.open_uni().await {

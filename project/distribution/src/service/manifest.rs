@@ -359,7 +359,7 @@ pub async fn get_tag_list_handler(
                     n_value,
                     tag_list.tags().last().unwrap()
                 );
-                let link_header = format!(r#"<{}>; rel="next""#, next_link);
+                let link_header = format!(r#"<{next_link}>; rel="next""#);
                 response.headers_mut().insert(
                     header::LINK,
                     header::HeaderValue::from_str(&link_header).unwrap(),

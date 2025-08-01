@@ -192,7 +192,7 @@ impl ContainerRunner {
             return Err(anyhow!("Bundle directory does not exist"));
         }
 
-        let config_path = format!("{}/config.json", bundle_path);
+        let config_path = format!("{bundle_path}/config.json");
         if Path::new(&config_path).exists() {
             std::fs::remove_file(&config_path).map_err(|e| {
                 anyhow!(
@@ -230,11 +230,11 @@ impl ContainerRunner {
             .ok_or_else(|| anyhow!("get container {} pid failed", self.container_id))?;
         cni.load_default_conf();
 
-        println!("Get container PID: {}", container_pid);
+        println!("Get container PID: {container_pid}");
 
         cni.setup(
             self.container_id.clone(),
-            format!("/proc/{}/ns/net", container_pid),
+            format!("/proc/{container_pid}/ns/net"),
         )
         .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))?;
         Ok(())
