@@ -9,7 +9,7 @@ use futures::FutureExt;
 use tokio::time::sleep;
 
 use crate::task::TaskRunner;
-use crate::{cli_commands, task::PodTask};
+use crate::{commands::pod, task::PodTask};
 
 use crate::daemon::sync_loop::{Event, State, WithEvent};
 
@@ -74,7 +74,7 @@ async fn run_new_pods(state: Arc<State>, pods: Vec<PodTask>) {
         .for_each(|p| {
             let runner = TaskRunner::from_task(p.clone()).unwrap();
             let name = runner.task.metadata.name.clone();
-            let res = cli_commands::run_pod_from_taskrunner(runner);
+            let res = pod::run_pod_from_taskrunner(runner);
             if let Err(e) = res {
                 error!("Failed to run pod {}: {e}", name);
             } else {
@@ -99,7 +99,7 @@ async fn stop_removed_pods(state: Arc<State>, pods: &Vec<PodTask>) -> Result<(),
             let hs = calculate_hash(p);
             !pods_hash.contains(&hs)
         })
-        .map(|p| cli_commands::delete_pod(&p.metadata.name))
+        .map(|p| pod::delete_pod(&p.metadata.name))
         .filter(|r| r.is_err())
         .collect();
     if !del_err_vec.is_empty() {

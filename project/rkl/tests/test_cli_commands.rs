@@ -3,7 +3,7 @@ mod common;
 use anyhow::anyhow;
 use common::*;
 use rkl::{
-    cli_commands,
+    commands::pod::{create_pod, delete_pod, run_pod, start_pod},
     task::{ContainerRes, PodTask, Resource, TaskRunner},
 };
 use serde_json::Value;
@@ -56,9 +56,9 @@ fn create(config: PodTask, run: bool) -> Result<(), anyhow::Error> {
     env::set_current_dir(root.parent().unwrap().join("target/debug"))
         .map_err(|_| anyhow!("Failed to set current dir"))?;
     if !run {
-        cli_commands::create_pod(config_path.to_str().unwrap())?;
+        create_pod(config_path.to_str().unwrap())?;
     } else {
-        cli_commands::run_pod(config_path.to_str().unwrap())?;
+        run_pod(config_path.to_str().unwrap())?;
     }
     env::set_current_dir(root).map_err(|_| anyhow!("Failed to set back current dir"))?;
     std::fs::remove_file(config_path)?;
@@ -85,7 +85,7 @@ fn delete(pod_name: &str) {
     env::set_current_dir(root.parent().unwrap().join("target/debug"))
         .map_err(|_| anyhow!("Failed to set current dir"))
         .unwrap();
-    cli_commands::delete_pod(pod_name).unwrap();
+    delete_pod(pod_name).unwrap();
     env::set_current_dir(root)
         .map_err(|_| anyhow!("Failed to set back current dir"))
         .unwrap();
@@ -114,7 +114,7 @@ fn test_create_start_and_delete() {
     env::set_current_dir(root.parent().unwrap().join("target/debug"))
         .map_err(|_| anyhow!("Failed to set current dir"))
         .unwrap();
-    cli_commands::start_pod("simple-container-task").unwrap();
+    start_pod("simple-container-task").unwrap();
 
     let container_state =
         std::fs::read_to_string("/run/youki/simple-container-task-main-container1/state.json")
@@ -122,7 +122,7 @@ fn test_create_start_and_delete() {
     let container_state: Value = serde_json::from_str(&container_state).unwrap();
     assert_eq!(container_state["status"], "running");
 
-    cli_commands::delete_pod("simple-container-task").unwrap();
+    delete_pod("simple-container-task").unwrap();
     env::set_current_dir(root)
         .map_err(|_| anyhow!("Failed to set back current dir"))
         .unwrap();

@@ -239,13 +239,13 @@ impl TaskRunner {
         let root_path = rootpath::determine(None)
             .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
 
-        create::create(create_args, root_path.clone(), false)
+        create(create_args, root_path.clone(), false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
         let start_args = Start {
             container_id: sandbox_id.clone(),
         };
-        start::start(start_args, root_path.clone())
+        start(start_args, root_path.clone())
             .map_err(|e| anyhow!("Failed to start container: {}", e))?;
 
         let container = load_container(root_path.clone(), &sandbox_id)
@@ -256,7 +256,7 @@ impl TaskRunner {
             .ok_or_else(|| anyhow!("PID not found for container {}", sandbox_id))?;
 
         Self::setup_pod_network(pid_i32).map_err(|e| {
-            let rollback_res = delete::delete(
+            let rollback_res = delete(
                 Delete {
                     container_id: sandbox_id.clone(),
                     force: true,
@@ -474,7 +474,7 @@ impl TaskRunner {
         let root_path = rootpath::determine(None)
             .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
 
-        create::create(create_args, root_path.clone(), false)
+        create(create_args, root_path.clone(), false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
         Ok(CreateContainerResponse { container_id })
@@ -490,7 +490,7 @@ impl TaskRunner {
         let start_args = Start {
             container_id: container_id.clone(),
         };
-        start::start(start_args, root_path.clone())
+        start(start_args, root_path.clone())
             .map_err(|e| anyhow!("Failed to start container {}: {}", container_id, e))?;
 
         Ok(StartContainerResponse {})
@@ -508,7 +508,7 @@ impl TaskRunner {
             signal: "SIGKILL".to_string(),
             all: false,
         };
-        kill::kill(kill_args, root_path.clone())
+        kill(kill_args, root_path.clone())
             .map_err(|e| anyhow!("Failed to stop PodSandbox {}: {}", pod_sandbox_id, e))?;
         Ok(StopPodSandboxResponse {})
     }
@@ -523,7 +523,7 @@ impl TaskRunner {
             container_id: pod_sandbox_id.clone(),
             force: true,
         };
-        delete::delete(delete_args, root_path.clone())
+        delete(delete_args, root_path.clone())
             .map_err(|e| anyhow!("Failed to delete PodSandbox {}: {}", pod_sandbox_id, e))?;
 
         Ok(RemovePodSandboxResponse {})
@@ -577,7 +577,7 @@ impl TaskRunner {
                             force: true,
                         };
                         let root_path = rootpath::determine(None)?;
-                        if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
+                        if let Err(delete_err) = delete(delete_args, root_path.clone()) {
                             error!(
                                 "Failed to delete container {} during rollback: {}",
                                 container_id, delete_err
@@ -639,7 +639,7 @@ impl TaskRunner {
                             force: true,
                         };
                         let root_path = rootpath::determine(None)?;
-                        if let Err(delete_err) = delete::delete(delete_args, root_path.clone()) {
+                        if let Err(delete_err) = delete(delete_args, root_path.clone()) {
                             error!(
                                 "Failed to delete container {} during rollback: {}",
                                 container_id, delete_err
@@ -683,7 +683,7 @@ impl TaskRunner {
 }
 
 // only support limit config now.
-fn get_linux_container_config(
+pub fn get_linux_container_config(
     res: Option<ContainerRes>,
 ) -> Result<Option<LinuxContainerConfig>, anyhow::Error> {
     if let Some(limits) = res.and_then(|r| r.limits) {
@@ -778,7 +778,7 @@ pub fn get_cni() -> Result<Libcni, anyhow::Error> {
     Ok(cni)
 }
 
-fn add_cap_net_raw(capabilities: &mut LinuxCapabilities) {
+pub fn add_cap_net_raw(capabilities: &mut LinuxCapabilities) {
     let mut bounding = capabilities.bounding().clone().unwrap();
     bounding.insert(Capability::NetRaw);
     capabilities.set_bounding(Some(bounding));
