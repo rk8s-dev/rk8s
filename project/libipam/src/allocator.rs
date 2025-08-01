@@ -265,14 +265,14 @@ mod tests {
         );
         let mut iter = allocator.new_iter();
         let ip = iter.next();
-        println!("{:?}", ip)
+        println!("{ip:?}")
     }
 
     #[test]
     fn test_last_ip() {
         let subnet = IpNetwork::new(IpAddr::V4(Ipv4Addr::new(10, 10, 0, 0)), 16).unwrap();
         let last = last_ip(&subnet);
-        println!("{:?}", last);
+        println!("{last:?}");
     }
 
     fn get_last_ip_in_subnet(subnet: &str) -> anyhow::Result<Ipv4Addr> {
@@ -292,8 +292,8 @@ mod tests {
     fn test_1() {
         let subnet = "192.168.1.0/24";
         match get_last_ip_in_subnet(subnet) {
-            Ok(ip) => println!("Last IP in the subnet is: {}", ip),
-            Err(e) => println!("Error: {}", e),
+            Ok(ip) => println!("Last IP in the subnet is: {ip}"),
+            Err(e) => println!("Error: {e}"),
         }
     }
 
@@ -309,11 +309,11 @@ mod tests {
         let alloc = IpAllocator::new(range_set, store, 1);
 
         for i in 2..7 {
-            let ip = alloc.get(&format!("ID{}", i), "eth0".into(), None)?;
-            println!("{}----{:?}", i, ip);
+            let ip = alloc.get(&format!("ID{i}"), "eth0", None)?;
+            println!("{i}----{ip:?}");
             assert_eq!(ip.address.ip(), Ipv4Addr::new(192, 168, 1, i));
         }
-        let result = alloc.get("ID8", "eth0".into(), None);
+        let result = alloc.get("ID8", "eth0", None);
         assert!(result.is_err());
 
         Ok(())
@@ -329,11 +329,11 @@ mod tests {
         std::fs::remove_dir_all("/tmp/ipam2").unwrap_or_default();
         let store = Arc::new(Store::new(Some("/tmp/ipam2".into())).unwrap());
         let alloc = IpAllocator::new(range_set, store, 1);
-        let res = alloc.get("ID", "eth0".into(), None).unwrap();
+        let res = alloc.get("ID", "eth0", None).unwrap();
         assert_eq!(res.address, "192.168.1.2/29".parse().unwrap());
         alloc.release("ID", "eth0").unwrap();
 
-        let res = alloc.get("ID", "eth0".into(), None).unwrap();
+        let res = alloc.get("ID", "eth0", None).unwrap();
         assert_eq!(res.address, "192.168.1.3/29".parse().unwrap());
     }
 
@@ -461,7 +461,7 @@ mod tests {
             std::fs::remove_dir_all("/tmp/ipam4").unwrap_or_default();
             let store = Arc::new(Store::new(Some("/tmp/ipam4".into())).unwrap());
             let alloc = IpAllocator::new(range_set, store, 1);
-            let ip = alloc.get("ID", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.0.2".parse::<IpAddr>().unwrap());
         }
 
@@ -474,7 +474,7 @@ mod tests {
             std::fs::remove_dir_all("/tmp/ipam4").unwrap_or_default();
             let store = Arc::new(Store::new(Some("/tmp/ipam4".into())).unwrap());
             let alloc = IpAllocator::new(range_set, store, 1);
-            let ip = alloc.get("ID", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.0.2".parse::<IpAddr>().unwrap());
         }
 
@@ -487,7 +487,7 @@ mod tests {
             std::fs::remove_dir_all("/tmp/ipam4").unwrap_or_default();
             let store = Arc::new(Store::new(Some("/tmp/ipam4".into())).unwrap());
             let alloc = IpAllocator::new(range_set, store, 1);
-            let ip = alloc.get("ID1", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID1", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.0.3".parse::<IpAddr>().unwrap());
         }
         {
@@ -503,7 +503,7 @@ mod tests {
                 .store
                 .reserve("ID0", "eth0", "10.0.0.5".parse().unwrap(), "0")
                 .unwrap();
-            let ip = alloc.get("ID1", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID1", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.0.6".parse::<IpAddr>().unwrap());
         }
         {
@@ -527,7 +527,7 @@ mod tests {
                 .store
                 .reserve("ID0", "eth0", "10.0.0.3".parse().unwrap(), "0")
                 .unwrap();
-            let ip = alloc.get("ID1", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID1", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.0.6".parse::<IpAddr>().unwrap());
         }
         {
@@ -548,7 +548,7 @@ mod tests {
                 .reserve("ID1", "eth0", "10.0.0.5".parse().unwrap(), "0")
                 .unwrap();
             alloc.store.release_by_id("ID1", "eth0").unwrap();
-            let ip = alloc.get("ID1", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID1", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.0.2".parse::<IpAddr>().unwrap());
         }
         {
@@ -581,7 +581,7 @@ mod tests {
                 .reserve("ID3", "eth0", "10.0.0.3".parse().unwrap(), "0")
                 .unwrap();
             alloc.store.release_by_id("ID3", "eth0").unwrap();
-            let ip = alloc.get("ID3", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID3", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.0.3".parse::<IpAddr>().unwrap());
         }
         // advance to next subnet
@@ -605,7 +605,7 @@ mod tests {
                 .reserve("ID2", "eth0", "10.0.0.2".parse().unwrap(), "0")
                 .unwrap();
             alloc.store.release_by_id("ID2", "eth0").unwrap();
-            let ip = alloc.get("ID3", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID3", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.1.2".parse::<IpAddr>().unwrap());
         }
         {
@@ -632,7 +632,7 @@ mod tests {
                 .reserve("ID2", "eth0", "10.0.2.2".parse().unwrap(), "0")
                 .unwrap();
             alloc.store.release_by_id("ID2", "eth0").unwrap();
-            let ip = alloc.get("ID3", "eth0".into(), None).unwrap();
+            let ip = alloc.get("ID3", "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), "10.0.0.2".parse::<IpAddr>().unwrap());
         }
     }
@@ -648,10 +648,10 @@ mod tests {
         let store = Arc::new(Store::new(Some("/tmp/ipam5".into())).unwrap());
         let alloc = IpAllocator::new(range_set, store, 0);
         for i in 2..7 {
-            let ip = alloc.get(&format!("ID{}", i), "eth0".into(), None).unwrap();
+            let ip = alloc.get(&format!("ID{i}"), "eth0", None).unwrap();
             assert_eq!(ip.address.ip(), Ipv4Addr::new(10, 0, 0, i));
         }
-        let result = alloc.get("ID8", "eth0".into(), None);
+        let result = alloc.get("ID8", "eth0", None);
         assert!(result.is_err());
     }
 
@@ -666,10 +666,10 @@ mod tests {
         let store = Arc::new(Store::new(Some("/tmp/ipam6".into())).unwrap());
         let alloc = IpAllocator::new(range_set, store, 0);
         let ip = alloc
-            .get("ID", "eth0".into(), Some("192.168.1.5".parse().unwrap()))
+            .get("ID", "eth0", Some("192.168.1.5".parse().unwrap()))
             .unwrap();
         assert_eq!(ip.address.ip(), "192.168.1.5".parse::<IpAddr>().unwrap());
-        let result = alloc.get("ID", "eth0".into(), Some("192.168.1.5".parse().unwrap()));
+        let result = alloc.get("ID", "eth0", Some("192.168.1.5".parse().unwrap()));
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
@@ -688,7 +688,7 @@ mod tests {
         std::fs::remove_dir_all("/tmp/ipam7").unwrap_or_default();
         let store = Arc::new(Store::new(Some("/tmp/ipam7".into())).unwrap());
         let alloc = IpAllocator::new(range_set, store, 0);
-        let result = alloc.get("ID", "eth0".into(), Some("192.168.1.5".parse().unwrap()));
+        let result = alloc.get("ID", "eth0", Some("192.168.1.5".parse().unwrap()));
         assert!(result.is_err());
 
         let mut range_set: RangeSet = vec![IpRange {
@@ -700,7 +700,7 @@ mod tests {
         std::fs::remove_dir_all("/tmp/ipam7").unwrap_or_default();
         let store = Arc::new(Store::new(Some("/tmp/ipam7".into())).unwrap());
         let alloc = IpAllocator::new(range_set, store, 0);
-        let result = alloc.get("ID", "eth0".into(), Some("192.168.1.2".parse().unwrap()));
+        let result = alloc.get("ID", "eth0", Some("192.168.1.2".parse().unwrap()));
         assert!(result.is_err());
     }
 }

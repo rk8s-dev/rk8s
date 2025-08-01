@@ -355,7 +355,7 @@ pub async fn patch_blob_handler(
             Ok(_) => Response::builder()
                 .status(StatusCode::ACCEPTED)
                 .header(LOCATION, location)
-                .header(RANGE, format!("0-{}", end_of_range))
+                .header(RANGE, format!("0-{end_of_range}"))
                 .body(axum::body::Body::empty())
                 .unwrap(),
             Err(_) => Response::builder()
@@ -388,7 +388,7 @@ pub async fn get_blob_status_handler(
         Response::builder()
             .status(StatusCode::NO_CONTENT)
             .header(LOCATION, location)
-            .header(RANGE, format!("0-{}", end_of_range))
+            .header(RANGE, format!("0-{end_of_range}"))
             .body(axum::body::Body::empty())
             .unwrap()
     } else {

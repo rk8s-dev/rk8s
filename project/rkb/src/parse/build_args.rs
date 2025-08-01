@@ -64,7 +64,7 @@ pub fn execute(build_args: &BuildArgs) -> Result<()> {
                 .collect::<String>()
         });
 
-        let image_output_dir = PathBuf::from(format!("{}/{}", output_dir, tag));
+        let image_output_dir = PathBuf::from(format!("{output_dir}/{tag}"));
 
         if fs::metadata(&image_output_dir).is_ok() {
             fs::remove_dir_all(&image_output_dir).with_context(|| {
@@ -138,7 +138,7 @@ mod tests {
                 .collect::<String>()
         });
 
-        let image_output_dir = PathBuf::from(&format!("{}/{}", output_dir, tag));
+        let image_output_dir = PathBuf::from(&format!("{output_dir}/{tag}"));
 
         assert_eq!("output_dir/image1", image_output_dir.to_str().unwrap());
 
@@ -158,7 +158,7 @@ mod tests {
                 .collect::<String>()
         });
 
-        let image_output_dir = PathBuf::from(&format!("{}/{}", output_dir, tag));
+        let image_output_dir = PathBuf::from(&format!("{output_dir}/{tag}"));
 
         assert!(image_output_dir.to_str().unwrap().starts_with("./"));
         assert_eq!(image_output_dir.to_str().unwrap().len(), 12);
@@ -188,7 +188,7 @@ mod tests {
                                 }
                             }
                         }
-                        println!("commands: {:?}", commands);
+                        println!("commands: {commands:?}");
                     }
                 }
             }

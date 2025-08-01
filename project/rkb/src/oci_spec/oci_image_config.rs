@@ -45,7 +45,7 @@ impl OciImageConfig {
             .diff_ids(
                 rootfs
                     .iter()
-                    .map(|s| format!("sha256:{}", s))
+                    .map(|s| format!("sha256:{s}"))
                     .collect::<Vec<String>>(),
             )
             .build()

@@ -47,7 +47,7 @@ pub async fn convert_image_to_bundle<P: AsRef<Path>>(
     // Extract layers from the OCI image
     let layers = extract_layers(image_path, &bundle_path).await?;
 
-    println!("layers: {:?}", layers);
+    println!("layers: {layers:?}");
 
     // Mount the layers and copy to the bundle
     mount_and_copy_bundle(bundle_path, &layers).await?;
@@ -71,7 +71,7 @@ async fn extract_layers<P: AsRef<Path>>(
     let image_manifest_hash = image_manifest_descriptor
         .as_digest_sha256()
         .with_context(|| "Failed to get digest from manifest descriptor")?;
-    println!("image_manifest_hash: {}", image_manifest_hash);
+    println!("image_manifest_hash: {image_manifest_hash}");
 
     let image_path = image_path.as_ref().join("blobs/sha256");
 
@@ -83,7 +83,7 @@ async fn extract_layers<P: AsRef<Path>>(
         .config()
         .as_digest_sha256()
         .with_context(|| "Failed to get digest from config descriptor")?;
-    println!("image_config_hash: {}", image_config_hash);
+    println!("image_config_hash: {image_config_hash}");
 
     let image_config_path = image_path.join(image_config_hash);
     let image_config = ImageConfiguration::from_file(image_config_path)
@@ -99,10 +99,10 @@ async fn extract_layers<P: AsRef<Path>>(
         let layer_digest = layer
             .as_digest_sha256()
             .with_context(|| "Failed to get digest from layer descriptor")?;
-        println!("layer_digest: {}", layer_digest);
+        println!("layer_digest: {layer_digest}");
         let layer_path = image_path.join(layer_digest);
-        let layer_tar_output_path = bundle_path.join(format!("{}.tar", layer_digest));
-        let layer_output_path = bundle_path.join(format!("layer{}", layer_digest));
+        let layer_tar_output_path = bundle_path.join(format!("{layer_digest}.tar"));
+        let layer_output_path = bundle_path.join(format!("layer{layer_digest}"));
 
         let digest = digest.clone();
 
@@ -148,9 +148,9 @@ async fn decompress_gzip_to_tar<P: AsRef<Path>>(
             .with_context(|| format!("Failed to copy data to {:?}", output_path.display()))?;
 
         let tar_digest = try_digest(&output_path)
-            .with_context(|| format!("Failed to calculate tar digest of {}", digest))?;
+            .with_context(|| format!("Failed to calculate tar digest of {digest}"))?;
         assert_eq!(
-            format!("sha256:{}", tar_digest),
+            format!("sha256:{tar_digest}"),
             digest,
             "Digest mismatch - expected: {} - got: sha256:{}",
             digest,
@@ -195,34 +195,31 @@ async fn mount_and_copy_bundle<P: AsRef<Path>>(
 
     fs::create_dir_all(&upper_dir)
         .await
-        .with_context(|| format!("Failed to create upper directory: {:?}", upper_dir))?;
+        .with_context(|| format!("Failed to create upper directory: {upper_dir:?}"))?;
     fs::create_dir_all(&merged_dir)
         .await
-        .with_context(|| format!("Failed to create merged directory: {:?}", merged_dir))?;
+        .with_context(|| format!("Failed to create merged directory: {merged_dir:?}"))?;
     fs::create_dir_all(&work_dir)
         .await
-        .with_context(|| format!("Failed to create work directory: {:?}", work_dir))?;
+        .with_context(|| format!("Failed to create work directory: {work_dir:?}"))?;
 
     let lower_dirs = layers
         .iter()
         .map(|dir| {
             Path::new(dir)
                 .canonicalize()
-                .with_context(|| format!("Failed to get canonical path for: {:?}", dir))
+                .with_context(|| format!("Failed to get canonical path for: {dir:?}"))
                 .map(|p| p.display().to_string())
         })
         .collect::<Result<Vec<String>, _>>()?
         .join(":");
 
-    let upper_canon = Path::new(&upper_dir).canonicalize().with_context(|| {
-        format!(
-            "Failed to get canonical path for upper dir: {:?}",
-            upper_dir
-        )
-    })?;
+    let upper_canon = Path::new(&upper_dir)
+        .canonicalize()
+        .with_context(|| format!("Failed to get canonical path for upper dir: {upper_dir:?}"))?;
     let work_canon = Path::new(&work_dir)
         .canonicalize()
-        .with_context(|| format!("Failed to get canonical path for work dir: {:?}", work_dir))?;
+        .with_context(|| format!("Failed to get canonical path for work dir: {work_dir:?}"))?;
 
     let options = format!(
         "lowerdir={},upperdir={},workdir={}",
@@ -238,12 +235,12 @@ async fn mount_and_copy_bundle<P: AsRef<Path>>(
         MsFlags::empty(),
         Some(options.as_str()),
     )
-    .with_context(|| format!("Failed to mount overlay filesystem at: {:?}", merged_dir))?;
+    .with_context(|| format!("Failed to mount overlay filesystem at: {merged_dir:?}"))?;
 
     let rootfs = bundle_path.join("rootfs");
     fs::create_dir_all(&rootfs)
         .await
-        .with_context(|| format!("Failed to create rootfs directory: {:?}", rootfs))?;
+        .with_context(|| format!("Failed to create rootfs directory: {rootfs:?}"))?;
 
     let unmount_result = std::panic::catch_unwind(|| {
         let status = Command::new("sh")
@@ -267,7 +264,7 @@ async fn mount_and_copy_bundle<P: AsRef<Path>>(
     });
 
     mount::umount(&merged_dir)
-        .with_context(|| format!("Failed to unmount overlay at: {:?}", merged_dir))?;
+        .with_context(|| format!("Failed to unmount overlay at: {merged_dir:?}"))?;
 
     if let Err(e) = unmount_result {
         return Err(anyhow::anyhow!(
@@ -278,39 +275,39 @@ async fn mount_and_copy_bundle<P: AsRef<Path>>(
 
     fs::remove_dir_all(&upper_dir)
         .await
-        .with_context(|| format!("Failed to remove upper directory: {:?}", upper_dir))?;
+        .with_context(|| format!("Failed to remove upper directory: {upper_dir:?}"))?;
     fs::remove_dir_all(&merged_dir)
         .await
-        .with_context(|| format!("Failed to remove merged directory: {:?}", merged_dir))?;
+        .with_context(|| format!("Failed to remove merged directory: {merged_dir:?}"))?;
     fs::remove_dir_all(&work_dir)
         .await
-        .with_context(|| format!("Failed to remove work directory: {:?}", work_dir))?;
+        .with_context(|| format!("Failed to remove work directory: {work_dir:?}"))?;
 
     for layer in layers {
         fs::remove_dir_all(layer)
             .await
-            .with_context(|| format!("Failed to remove layer directory: {:?}", layer))?;
+            .with_context(|| format!("Failed to remove layer directory: {layer:?}"))?;
     }
 
     let mut entries = fs::read_dir(bundle_path)
         .await
-        .with_context(|| format!("Failed to read directory: {:?}", bundle_path))?;
+        .with_context(|| format!("Failed to read directory: {bundle_path:?}"))?;
 
     while let Some(entry) = entries
         .next_entry()
         .await
-        .with_context(|| format!("Failed to read next directory entry in: {:?}", bundle_path))?
+        .with_context(|| format!("Failed to read next directory entry in: {bundle_path:?}"))?
     {
         let path = entry.path();
         let metadata = fs::metadata(&path)
             .await
-            .with_context(|| format!("Failed to get metadata for: {:?}", path))?;
+            .with_context(|| format!("Failed to get metadata for: {path:?}"))?;
 
         if metadata.is_file() && path.extension().is_some_and(|ext| ext == "tar") {
-            println!("Removing: {:?}", path);
+            println!("Removing: {path:?}");
             fs::remove_file(&path)
                 .await
-                .with_context(|| format!("Failed to remove tar file: {:?}", path))?;
+                .with_context(|| format!("Failed to remove tar file: {path:?}"))?;
         }
     }
 

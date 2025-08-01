@@ -20,7 +20,7 @@ pub async fn mount_filesystem<F: Filesystem + std::marker::Sync + Send + 'static
     mount_options.force_readdir_plus(true).uid(uid).gid(gid);
 
     Session::<F>::new(mount_options)
-        .mount_with_unprivileged(fs, mount_path)
+        .mount(fs, mount_path)
         .await
         .unwrap()
 }

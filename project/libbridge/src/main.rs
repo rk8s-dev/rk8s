@@ -57,15 +57,12 @@ fn main() {
     let bridge_conf = match load_bri_netconf(inputs.config.clone()) {
         Ok(conf) => conf,
         Err(err) => {
-            error!("Failed to load bridge config: {}", err);
+            error!("Failed to load bridge config: {err}");
             return;
         }
     };
 
-    info!(
-        "(CNI bridge plugin) version bridge config: {:?}",
-        bridge_conf
-    );
+    info!("(CNI bridge plugin) version bridge config: {bridge_conf:?}");
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -83,11 +80,11 @@ fn main() {
 
     match res {
         Ok(res) => {
-            debug!("success! {:#?}", res);
+            debug!("success! {res:#?}");
             reply(res)
         }
         Err(res) => {
-            error!("error: {}", res);
+            error!("error: {res}");
             reply(res.into_reply(cni_version))
         }
     }
@@ -229,8 +226,7 @@ async fn bridge_by_name(name: &str) -> Result<Bridge, AppError> {
 
     if !is_bridge {
         return Err(AppError::NetlinkError(format!(
-            "{} already exists but is not a bridge",
-            name
+            "{name} already exists but is not a bridge"
         )));
     }
 
@@ -266,15 +262,14 @@ pub async fn ensure_bridge(
     if let Err(e) = add_result {
         if !e.to_string().contains("File exists") {
             return Err(AppError::NetlinkError(format!(
-                "Could not add {}: {}",
-                br_name, e
+                "Could not add {br_name}: {e}"
             )));
         }
     }
 
     let br_link = link::link_by_name(br_name)
         .await
-        .map_err(|e| AppError::LinkError(format!("{}:{}", e, br_name)))?;
+        .map_err(|e| AppError::LinkError(format!("{e}:{br_name}")))?;
 
     let msg_builder = LinkBridge::new(br_name)
         .set_info_data(InfoData::Bridge(vec![InfoBridge::VlanFiltering(true)]));
@@ -292,7 +287,7 @@ pub async fn ensure_bridge(
         .set_flags(NLM_F_ACK | NLM_F_REQUEST)
         .execute()
         .await
-        .map_err(|e| AppError::LinkError(format!("{}:{}", e, br_name)))?;
+        .map_err(|e| AppError::LinkError(format!("{e}:{br_name}")))?;
 
     bridge_by_name(br_name).await
 }
@@ -314,7 +309,7 @@ pub async fn setup_bridge(n: &BridgeNetConf) -> Result<(Bridge, Interface), AppE
 
     let link = link::link_by_name(name)
         .await
-        .map_err(|e| AppError::LinkError(format!("{}", e)))?;
+        .map_err(|e| AppError::LinkError(format!("{e}")))?;
     let mut ifname: String = Default::default();
     let mac_address = link::get_mac_address(&link.attributes);
     for attr in &link.attributes {
@@ -372,7 +367,7 @@ pub async fn setup_veth(
     })
     .await?;
 
-    info!("veth: {:?}", veth);
+    info!("veth: {veth:?}");
 
     let br_link = link::link_by_name(&br.name)
         .await
@@ -386,11 +381,11 @@ pub async fn setup_veth(
 
     link::link_set_master(&host_inf_link, &br_link)
         .await
-        .map_err(|e| AppError::LinkError(format!("can not set master{}", e)))?;
+        .map_err(|e| AppError::LinkError(format!("can not set master{e}")))?;
 
     link::link_set_hairpin(&host_inf_link, hairpin_mode)
         .await
-        .map_err(|e| AppError::LinkError(format!("can not set hairpin{}", e)))?;
+        .map_err(|e| AppError::LinkError(format!("can not set hairpin{e}")))?;
 
     Ok(veth)
 }
@@ -431,16 +426,16 @@ async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
     let netns = if let Some(ref netns_path) = inputs.netns {
         Netns::get_from_path(netns_path)
             .map_err(|e| {
-                AppError::NetnsError(format!("failed to access netns {:?}: {}", netns_path, e))
+                AppError::NetnsError(format!("failed to access netns {netns_path:?}: {e}"))
             })?
             .ok_or_else(|| {
-                AppError::NetnsError(format!("netns not found at path {:?}", netns_path))
+                AppError::NetnsError(format!("netns not found at path {netns_path:?}"))
             })?
     } else {
         return Err(AppError::NetnsError("netns path is None".to_string()));
     };
     let current_ns = Netns::get()
-        .map_err(|e| AppError::NetnsError(format!("failed to open current netns : {}", e)))?;
+        .map_err(|e| AppError::NetnsError(format!("failed to open current netns : {e}")))?;
 
     let mac: Option<MacAddr> = config.mac.as_ref().and_then(|s| MacAddr::from_str(s).ok());
     let veth = setup_veth(
@@ -457,13 +452,13 @@ async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
         config.port_isolation.unwrap_or(false),
     )
     .await
-    .map_err(|e| AppError::VethError(format!("failed to set up veth : {}", e)))?;
+    .map_err(|e| AppError::VethError(format!("failed to set up veth : {e}")))?;
 
-    debug!(" veth :{:?}", veth);
+    debug!(" veth :{veth:?}");
 
     let (container_interface, host_interface) = veth
         .to_interface()
-        .map_err(|e| AppError::VethError(format!("veth can not to interface : {}", e)))?;
+        .map_err(|e| AppError::VethError(format!("veth can not to interface : {e}")))?;
 
     let mut bridge_result = SuccessReply {
         cni_version: config.net_conf.cni_version.clone(),
@@ -483,16 +478,16 @@ async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
                     return Err(AppError::IpamError(err.to_string()));
                 }
             };
-        debug!("ipam_result:{:?}", ipam_result);
+        debug!("ipam_result:{ipam_result:?}");
         bridge_result.ips = ipam_result.ips.clone();
         bridge_result.routes = ipam_result.routes.clone();
         bridge_result.dns = ipam_result.dns.clone();
-        debug!("bridge_result:{:?}", bridge_result);
+        debug!("bridge_result:{bridge_result:?}");
 
         let gateway_infos = calc_gateway(&mut bridge_result, &config)?;
-        info!("gateway_infos: {:?}", gateway_infos);
+        info!("gateway_infos: {gateway_infos:?}");
 
-        info!("bridge_result: {:?}", bridge_result);
+        info!("bridge_result: {bridge_result:?}");
 
         netns::exec_netns(&current_ns, &netns, async {
             ipam::config_interface(&inputs.ifname, &bridge_result).await?;
@@ -524,7 +519,7 @@ async fn ensure_addr(br: Bridge, ip: &IpNetwork, force_address: bool) -> Result<
     };
     let link = link::link_by_name(&br.name)
         .await
-        .map_err(|e| AppError::LinkError(format!("{}", e)))?;
+        .map_err(|e| AppError::LinkError(format!("{e}")))?;
     let addrs = addr::addr_list(link.header.index, family).await?;
     for addr_item in addrs {
         if addr_item.ipnet.ip() == ip.ip() {
@@ -551,7 +546,7 @@ async fn ensure_addr(br: Bridge, ip: &IpNetwork, force_address: bool) -> Result<
         ipnet: *ip,
         ..Default::default()
     };
-    info!("add addr to br, addr: {:?}", addr);
+    info!("add addr to br, addr: {addr:?}");
     addr::addr_add(link.header.index, addr.ipnet.ip(), addr.ipnet.prefix()).await?;
     // todo set bridge mac addr
 
@@ -669,16 +664,16 @@ async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, 
     let netns = if let Some(ref netns_path) = inputs.netns {
         Netns::get_from_path(netns_path)
             .map_err(|e| {
-                AppError::NetnsError(format!("failed to access netns {:?}: {}", netns_path, e))
+                AppError::NetnsError(format!("failed to access netns {netns_path:?}: {e}"))
             })?
             .ok_or_else(|| {
-                AppError::NetnsError(format!("netns not found at path {:?}", netns_path))
+                AppError::NetnsError(format!("netns not found at path {netns_path:?}"))
             })?
     } else {
         return Err(AppError::NetnsError("netns path is None".to_string()));
     };
     let current_ns = Netns::get()
-        .map_err(|e| AppError::NetnsError(format!("failed to open current netns: {}", e)))?;
+        .map_err(|e| AppError::NetnsError(format!("failed to open current netns: {e}")))?;
     netns::exec_netns(&current_ns, &netns, async {
         match link::del_link_by_name(&inputs.ifname).await {
             Ok(_) => Ok(()),
@@ -739,8 +734,8 @@ mod tests {
 
         match result {
             Ok((bridge, interface)) => {
-                println!("Bridge created: {:?}", bridge);
-                println!("Interface created: {:?}", interface);
+                println!("Bridge created: {bridge:?}");
+                println!("Interface created: {interface:?}");
 
                 assert_eq!(bridge.name, "test0");
                 assert_eq!(bridge.mtu, 1500);
@@ -749,7 +744,7 @@ mod tests {
                 assert!(interface.mac.is_some());
             }
             Err(e) => {
-                panic!("setup_bridge failed: {:?}", e);
+                panic!("setup_bridge failed: {e:?}");
             }
         }
     }
@@ -789,11 +784,11 @@ mod tests {
 
         match result {
             Ok(veth) => {
-                println!("Veth:{:?}", veth);
+                println!("Veth:{veth:?}");
                 assert_eq!(veth.interface.name, "veth0");
             }
             Err(e) => {
-                panic!("Expected Ok result, but got an error: {:?}", e);
+                panic!("Expected Ok result, but got an error: {e:?}");
             }
         }
     }
@@ -811,7 +806,7 @@ mod tests {
         match result {
             Ok(_) => {}
             Err(e) => {
-                panic!("Expected Ok result, but got an error: {:?}", e);
+                panic!("Expected Ok result, but got an error: {e:?}");
             }
         }
     }

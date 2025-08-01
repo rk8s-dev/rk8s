@@ -126,8 +126,8 @@ pub fn mount_linux(config: &MountConfig) -> Result<MountManager> {
     for file in [
         "full", "zero", "null", "random", "urandom", "tty", "console",
     ] {
-        let host_dev = format!("/dev/{}", file);
-        let container_dev = mountpoint.join(format!("dev/{}", file));
+        let host_dev = format!("/dev/{file}");
+        let container_dev = mountpoint.join(format!("dev/{file}"));
         fs::File::create(&container_dev).unwrap();
         mount::<_, _, str, str>(
             Some(Path::new(&host_dev)),
@@ -136,7 +136,7 @@ pub fn mount_linux(config: &MountConfig) -> Result<MountManager> {
             MsFlags::MS_BIND | MsFlags::MS_REC,
             None,
         )
-        .with_context(|| format!("Failed to mount {}", host_dev))?;
+        .with_context(|| format!("Failed to mount {host_dev}"))?;
         mount_manager.add_mountpoint(container_dev.clone());
     }
 
@@ -149,7 +149,7 @@ pub fn mount_linux(config: &MountConfig) -> Result<MountManager> {
     ];
 
     for (src, dest) in symlinks {
-        symlink(src, dest).with_context(|| format!("Failed to create symlink {}", src))?;
+        symlink(src, dest).with_context(|| format!("Failed to create symlink {src}"))?;
     }
 
     Ok(mount_manager)

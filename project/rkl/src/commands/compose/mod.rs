@@ -139,7 +139,7 @@ impl ComposeManager {
         let network_mapping = self.network_manager.network_service_mapping();
 
         for (network_name, services) in network_mapping {
-            println!("Creating network: {}", network_name);
+            println!("Creating network: {network_name}");
 
             // let mut parent_container_pid = String::from("");
 
@@ -236,7 +236,7 @@ impl ComposeManager {
             .and_then(|os_str| os_str.to_str())
             .unwrap_or("unknown");
         let timestamp = chrono::Utc::now().timestamp() % 1000; // persist 4 bits
-        format!("{}_{}_{}", root, srv_name, timestamp)
+        format!("{root}_{srv_name}_{timestamp}")
     }
 }
 
@@ -470,10 +470,10 @@ networks:
         assert_eq!(mapped.len(), 2);
         assert_eq!(mapped[0].host_path, "./tmp/mount/dir");
         assert_eq!(mapped[0].container_path, "/app/data");
-        assert_eq!(mapped[0].read_only, true);
+        assert!(mapped[0].read_only);
         assert_eq!(mapped[1].host_path, "/home/erasernoob/data");
         assert_eq!(mapped[1].container_path, "/app/data2");
-        assert_eq!(mapped[1].read_only, false);
+        assert!(!mapped[1].read_only);
     }
 
     #[test]

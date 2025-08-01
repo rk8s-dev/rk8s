@@ -16,7 +16,7 @@ impl OciImageManifest {
             .size(config_size)
             .digest(
                 Sha256Digest::from_str(config_sha256sum.as_str())
-                    .with_context(|| format!("Invalid digest format: {}", config_sha256sum))?,
+                    .with_context(|| format!("Invalid digest format: {config_sha256sum}"))?,
             )
             .build()
             .with_context(|| "Failed to build config descriptor")?;
@@ -31,14 +31,14 @@ impl OciImageManifest {
 
         for (size, digest_str) in layers.iter() {
             let digest = Sha256Digest::from_str(digest_str)
-                .with_context(|| format!("Invalid digest format: {}", digest_str))?;
+                .with_context(|| format!("Invalid digest format: {digest_str}"))?;
 
             let descriptor = DescriptorBuilder::default()
                 .media_type(MediaType::ImageLayerGzip)
                 .size(*size)
                 .digest(digest)
                 .build()
-                .with_context(|| format!("Failed to build layer descriptor {}", digest_str))?;
+                .with_context(|| format!("Failed to build layer descriptor {digest_str}"))?;
 
             descriptors.push(descriptor);
         }

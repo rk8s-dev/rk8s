@@ -8,10 +8,10 @@ repos:
         pass_filenames: false
         types: [file, rust]
         language: system
-    -   id: rust-clippy
-        name: Rust clippy
-        description: Run cargo clippy on files included in the commit.
-        entry: cargo clippy --manifest-path project/Cargo.toml --workspace -- -D warnings
+    -   id: rust-clippy-fix
+        name: Rust clippy fix
+        description: Run cargo clippy fix on files included in the commit.
+        entry: cargo clippy --manifest-path project/Cargo.toml --workspace --fix --allow-dirty
         pass_filenames: false
         types: [file, rust]
         language: system

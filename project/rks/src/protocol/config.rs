@@ -12,7 +12,7 @@ pub struct Config {
 
 pub fn load_config(path: &str) -> Result<Config> {
     let content =
-        fs::read_to_string(path).with_context(|| format!("Failed to read config from {}", path))?;
+        fs::read_to_string(path).with_context(|| format!("Failed to read config from {path}"))?;
     let cfg: Config = serde_yaml::from_str(&content).context("Failed to parse YAML config")?;
     Ok(cfg)
 }

@@ -255,7 +255,7 @@ pub async fn route_add(route: Route) -> anyhow::Result<()> {
     builder = builder
         .destination_prefix(route.dst.ip(), route.dst.prefix())?
         .gateway(route.gw.unwrap())?;
-    debug!("route_builder:{:?}", builder);
+    debug!("route_builder:{builder:?}");
     route_handle.add(builder.build()).execute().await?;
 
     Ok(())
@@ -305,7 +305,7 @@ mod tests {
     async fn test_del_link() {
         let name = "mynet0";
         let result = del_link_by_name(name).await;
-        println!("Result: {:?}", result);
-        assert!(result.is_ok(), "del_link failed with error: {:?}", result);
+        println!("Result: {result:?}");
+        assert!(result.is_ok(), "del_link failed with error: {result:?}");
     }
 }

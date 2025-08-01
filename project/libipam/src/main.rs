@@ -53,11 +53,11 @@ fn main() {
 
     match res {
         Ok(res) => {
-            debug!("success! {:#?}", res);
+            debug!("success! {res:#?}");
             reply(res)
         }
         Err(res) => {
-            error!("error: {}", res);
+            error!("error: {res}");
             reply(res.into_reply(cni_version))
         }
     }
