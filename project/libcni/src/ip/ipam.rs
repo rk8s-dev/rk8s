@@ -18,7 +18,7 @@ pub async fn config_interface(if_name: &str, exec_result: &SuccessReply) -> anyh
     if exec_result.ips.is_empty() {
         return Err(anyhow!("ips not found"));
     }
-    debug!("ips:{:?}", ips);
+    debug!("ips:{ips:?}");
     for ip in ips {
         if ip.interface.is_none() {
             continue;
@@ -33,7 +33,7 @@ pub async fn config_interface(if_name: &str, exec_result: &SuccessReply) -> anyh
             );
         }
         // add address to veth interface
-        debug!("add ip:{:?} to:{:?}", ips, if_name);
+        debug!("add ip:{ips:?} to:{if_name:?}");
         addr::addr_add(link.header.index, ip.address.ip(), ip.address.prefix()).await?;
     }
 

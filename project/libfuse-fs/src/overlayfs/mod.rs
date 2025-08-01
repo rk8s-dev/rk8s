@@ -141,7 +141,7 @@ impl RealInode {
                 ri.stat = v;
             }
             Err(e) => {
-                error!("stat64 failed during RealInode creation: {}", e);
+                error!("stat64 failed during RealInode creation: {e}");
             }
         }
         ri
@@ -1046,15 +1046,13 @@ impl OverlayFs {
                 match self.get_all_inode(parent).await {
                     Some(v) => {
                         trace!(
-                            "overlayfs:mod.rs:1031:lookup_node: parent inode {} is deleted",
-                            parent
+                            "overlayfs:mod.rs:1031:lookup_node: parent inode {parent} is deleted"
                         );
                         v
                     }
                     None => {
                         trace!(
-                            "overlayfs:mod.rs:1034:lookup_node: parent inode {} not found",
-                            parent
+                            "overlayfs:mod.rs:1034:lookup_node: parent inode {parent} not found"
                         );
                         // Parent inode is not found, return ENOENT.
                         return Err(Error::from_raw_os_error(libc::ENOENT));
@@ -1088,7 +1086,7 @@ impl OverlayFs {
             // Child is found.
             Some(v) => Ok(v),
             None => {
-                trace!("lookup_node: child {} not found", name);
+                trace!("lookup_node: child {name} not found");
                 Err(Error::from_raw_os_error(libc::ENOENT))
             }
         }
@@ -1166,7 +1164,7 @@ impl OverlayFs {
         let v = match self.get_all_inode(inode).await {
             Some(n) => n,
             None => {
-                trace!("forget unknown inode: {}", inode);
+                trace!("forget unknown inode: {inode}");
                 return;
             }
         };
@@ -1209,7 +1207,7 @@ impl OverlayFs {
 
     async fn do_lookup(&self, ctx: Request, parent: Inode, name: &str) -> Result<ReplyEntry> {
         let node = self.lookup_node(ctx, parent, name).await?;
-        debug!("do_lookup: {:?}, found", name);
+        debug!("do_lookup: {name:?}, found");
 
         if node.whiteout.load(Ordering::Relaxed) {
             eprintln!("Error: node.whiteout.load() called.");
@@ -1326,10 +1324,7 @@ impl OverlayFs {
                 dir.node.clone()
             }
             None => {
-                trace!(
-                    "do_readdirplus: handle {} not found, lookup inode {}",
-                    handle, inode
-                );
+                trace!("do_readdirplus: handle {handle} not found, lookup inode {inode}");
                 // Try to get data with inode.
                 let node = self.lookup_node(ctx, inode, ".").await?;
 
@@ -2297,7 +2292,7 @@ impl OverlayFs {
         if dir {
             self.load_directory(ctx, &node).await?;
             let (count, whiteouts) = node.count_entries_and_whiteout(ctx).await?;
-            trace!("entries: {}, whiteouts: {}\n", count, whiteouts);
+            trace!("entries: {count}, whiteouts: {whiteouts}\n");
             if count > 0 {
                 return Err(Error::from_raw_os_error(libc::ENOTEMPTY));
             }
@@ -2446,15 +2441,12 @@ impl OverlayFs {
             .get_data(ctx, Some(handle), inode, libc::O_RDONLY as u32)
             .await?;
 
-        trace!("do_fsync: got data for handle: {}, inode:{}", handle, inode);
+        trace!("do_fsync: got data for handle: {handle}, inode:{inode}");
 
         match data.real_handle {
             // FIXME: need to test if inode matches corresponding handle?
             None => {
-                trace!(
-                    "do_fsync: no real handle found for handle: {}, inode:{}",
-                    handle, inode
-                );
+                trace!("do_fsync: no real handle found for handle: {handle}, inode:{inode}");
                 Err(Error::from_raw_os_error(libc::ENOENT))
             }
             Some(ref rh) => {

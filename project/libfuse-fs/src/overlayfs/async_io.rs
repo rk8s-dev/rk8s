@@ -156,7 +156,7 @@ impl Filesystem for OverlayFs {
 
     /// read symbolic link.
     async fn readlink(&self, req: Request, inode: Inode) -> Result<ReplyData> {
-        trace!("READLINK: inode: {}\n", inode);
+        trace!("READLINK: inode: {inode}\n");
 
         let node = self.lookup_node(req, inode, "").await?;
 
@@ -365,7 +365,7 @@ impl Filesystem for OverlayFs {
 
         self.handles.lock().await.insert(hd, Arc::new(handle_data));
 
-        trace!("OPEN: returning handle: {}", hd);
+        trace!("OPEN: returning handle: {hd}");
 
         Ok(ReplyOpen {
             fh: hd,
@@ -601,7 +601,7 @@ impl Filesystem for OverlayFs {
             }
             Err(e) => {
                 if e.raw_os_error() == Some(libc::ENOENT) {
-                    trace!("flush: inode {} is stale", inode);
+                    trace!("flush: inode {inode} is stale");
                 } else {
                     return Err(e.into());
                 }
@@ -623,10 +623,7 @@ impl Filesystem for OverlayFs {
             return Err(Error::other("inode does not match handle").into());
         }
 
-        trace!(
-            "flushing, real_inode: {}, real_handle: {}",
-            real_inode, real_handle
-        );
+        trace!("flushing, real_inode: {real_inode}, real_handle: {real_handle}");
         layer.flush(req, real_inode, real_handle, lock_owner).await
     }
 
@@ -721,10 +718,7 @@ impl Filesystem for OverlayFs {
             info!("fuse: readdir is not supported.");
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
-        trace!(
-            "readdirplus: parent: {}, fh: {}, offset: {}",
-            parent, fh, offset
-        );
+        trace!("readdirplus: parent: {parent}, fh: {fh}, offset: {offset}");
         let entries = self.do_readdirplus(req, parent, fh, offset).await?;
         match self.handles.lock().await.get(&fh) {
             Some(h) => {
@@ -733,7 +727,7 @@ impl Filesystem for OverlayFs {
                     h.real_handle.is_some()
                 );
             }
-            None => trace!("after readdirplus: no handle found: {}", fh),
+            None => trace!("after readdirplus: no handle found: {fh}"),
         }
         Ok(ReplyDirectoryPlus { entries })
     }

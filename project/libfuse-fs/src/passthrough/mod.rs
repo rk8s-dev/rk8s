@@ -479,7 +479,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let (path_fd, handle_opt, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root)
             .map_err(|e| {
-                error!("fuse: import: failed to get file or handle: {:?}", e);
+                error!("fuse: import: failed to get file or handle: {e:?}");
                 e
             })?;
         let id = InodeId::from_stat(&st);
@@ -617,7 +617,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         .map(Arc::new)
         .map_err(|e| {
             if !e.silent() {
-                error!("{}", e);
+                error!("{e}");
             }
             e.into_inner()
         })
@@ -730,7 +730,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                     // trace!("FS {} allocated new inode: {} for id: {:?}", self.uuid, inode, id);
 
                     if inode > VFS_MAX_INO {
-                        error!("fuse: max inode number reached: {}", VFS_MAX_INO);
+                        error!("fuse: max inode number reached: {VFS_MAX_INO}");
                         return Err(io::Error::other(format!(
                             "max inode number reached: {VFS_MAX_INO}"
                         ))

@@ -89,8 +89,7 @@ impl InodeStore {
                 // Refcount is not 0, we have to delay the removal.
                 if v.lookups.load(Ordering::Relaxed) > 0 {
                     trace!(
-                        "InodeStore:remove_inode: inode {} is still in use, delaying removal.",
-                        inode
+                        "InodeStore:remove_inode: inode {inode} is still in use, delaying removal."
                     );
                     self.deleted.insert(inode, v.clone());
                     return None;
@@ -137,7 +136,7 @@ impl InodeStore {
             .collect::<Vec<_>>();
         let mut all_inodes = join_all(all_inodes_f).await;
         all_inodes.sort_by(|a, b| a.0.cmp(b.0));
-        trace!("all active inodes: {:?}", all_inodes);
+        trace!("all active inodes: {all_inodes:?}");
 
         let to_delete = self
             .deleted
@@ -152,7 +151,7 @@ impl InodeStore {
             .collect::<Vec<_>>();
         let mut delete_to = join_all(to_delete).await;
         delete_to.sort_by(|a, b| a.0.cmp(b.0));
-        trace!("all deleted inodes: {:?}", delete_to);
+        trace!("all deleted inodes: {delete_to:?}");
     }
 
     pub fn extend_inode_number(&mut self, next_inode: u64, limit_inode: u64) {

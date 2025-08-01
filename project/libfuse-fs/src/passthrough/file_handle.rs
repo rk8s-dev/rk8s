@@ -306,7 +306,7 @@ impl OpenableFileHandle {
             Ok(file)
         } else {
             let e = io::Error::last_os_error();
-            error!("open_by_handle_at failed error {:?}", e);
+            error!("open_by_handle_at failed error {e:?}");
             Err(e)
         }
     }

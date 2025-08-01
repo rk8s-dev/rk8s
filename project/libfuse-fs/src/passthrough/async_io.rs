@@ -165,7 +165,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 }
                 let name = bytes_to_cstr(name)
                     .map_err(|e| {
-                        error!("fuse: do_readdir: {:?}", e);
+                        error!("fuse: do_readdir: {e:?}");
                         einval()
                     })?
                     .to_bytes();
@@ -263,7 +263,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 }
                 let name = bytes_to_cstr(name)
                     .map_err(|e| {
-                        error!("fuse: do_readdir: {:?}", e);
+                        error!("fuse: do_readdir: {e:?}");
                         einval()
                     })?
                     .to_bytes();
@@ -338,7 +338,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     ) -> io::Result<(libc::stat64, Duration)> {
         // trace!("FS {} passthrough: do_getattr: before get: inode={}, handle={:?}", self.uuid, inode, handle);
         let data = self.inode_map.get(inode).await.map_err(|e| {
-            // error!("fuse: do_getattr ino {} Not find err {:?}", inode, e);
+            error!("fuse: do_getattr ino {inode} Not find err {e:?}");
             e
         })?;
         // trace!("do_getattr: got data {:?}", data);
@@ -357,7 +357,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // trace!("FS {} passthrough: do_getattr: after stat", self.uuid);
 
         let mut st = st.map_err(|e| {
-            error!("fuse: do_getattr stat failed ino {} err {:?}", inode, e);
+            error!("fuse: do_getattr stat failed ino {inode} err {e:?}");
             e
         })?;
         st.st_ino = inode; //FIX BUG!
@@ -439,7 +439,7 @@ impl Filesystem for PassthroughFs {
         self.inode_map.clear().await;
 
         if let Err(e) = self.import().await {
-            error!("fuse: failed to destroy instance, {:?}", e);
+            error!("fuse: failed to destroy instance, {e:?}");
         };
     }
 
@@ -777,9 +777,9 @@ impl Filesystem for PassthroughFs {
         let newname = newname.as_ref();
         self.validate_path_component(newname)?;
 
-        trace!("link: trying to get inode {}", inode);
+        trace!("link: trying to get inode {inode}");
         let data = self.inode_map.get(inode).await?;
-        trace!("link: trying to get new parent {}", new_parent);
+        trace!("link: trying to get new parent {new_parent}");
         let new_inode = self.inode_map.get(new_parent).await?;
         let file = data.get_file()?;
         let new_file = new_inode.get_file()?;
@@ -870,7 +870,7 @@ impl Filesystem for PassthroughFs {
                 }
             }
             Err(err) => {
-                error!("read error: {}", err);
+                error!("read error: {err}");
                 return Err(err.into());
             }
         };

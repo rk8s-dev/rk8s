@@ -118,11 +118,12 @@ impl InodeStore {
     }
 
     pub fn get(&self, inode: &Inode) -> Option<&Arc<InodeData>> {
-        let res = self.data.get(inode);
+        // let res = self.data.get(inode);
         // if res.is_none() {
         //     trace!("get: inode {} not found", inode);
         // }
-        res
+        // res
+        self.data.get(inode)
     }
 
     pub fn get_by_id(&self, id: &InodeId) -> Option<&Arc<InodeData>> {
