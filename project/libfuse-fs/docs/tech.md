@@ -429,3 +429,20 @@ sequenceDiagram
 | **Use Cases**   | All file systems | Prototyping/Network FS  | Virtualization   | Containers/Live OS  |
 
 ---  
+
+### General Characteristics of File Systems  
+
+1. The `rename` operation is atomic.  
+2. Hard links retain the same inode number.  
+3. A single inode can correspond to multiple filenames.  
+4. Hard links can only be created within the same file system.  
+5. Creating a hard link increments the link count in the inode.  
+6. A file is deleted **if and only if** its inode's link count reaches zero.  
+7. Inodes are unique within the same file system.  
+8. `rename`/`mv` does not change the inode number.  
+9. An empty directory has two hard links:  
+   - `.` points to itself.  
+   - `..` points to its parent directory.  
+
+10. Each subdirectory in a parent directory creates a hard link (`..`) pointing back to the parent.  
+11. `rm` decrements the inode's link count. The inode and data blocks are marked as free **only when the link count drops to zero**.
