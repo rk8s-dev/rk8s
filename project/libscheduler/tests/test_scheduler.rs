@@ -10,7 +10,7 @@ fn make_pod(name: &str, priority: u64, cpu: u64, memory: u64) -> PodInfo {
         cpu,
         memory,
         priority,
-        attemps: 0,
+        attempts: 0,
         scheduled: None,
     }
 }

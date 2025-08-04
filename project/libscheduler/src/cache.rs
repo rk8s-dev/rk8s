@@ -25,7 +25,7 @@ impl Cache {
         }
         self.pods
             .entry(pod_name.to_string())
-            .and_modify(|p| p.attemps += 1);
+            .and_modify(|p| p.attempts += 1);
         true
     }
 
@@ -70,7 +70,7 @@ impl Cache {
             .filter(|p| matches!(&p.scheduled, Some(name) if name == node_name))
             .for_each(|p| {
                 p.scheduled = None;
-                p.attemps = 0;
+                p.attempts = 0;
                 res.push((p.priority, p.name.clone()));
             });
         res

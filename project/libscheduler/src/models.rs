@@ -12,7 +12,7 @@ pub struct PodInfo {
     /// Priority to the scheduler.
     pub priority: u64,
     /// Scheduling failed attempts.
-    pub attemps: usize,
+    pub attempts: usize,
     pub scheduled: Option<String>,
 }
 
@@ -39,9 +39,9 @@ impl Ord for PodInfo {
 #[derive(Clone)]
 pub struct NodeInfo {
     pub name: String,
-    /// Avaliable CPU resources on the node, measured in millicores.
+    /// Available CPU resources on the node, measured in millicores.
     pub cpu: u64,
-    /// Avaliable memory resources on the node, measured in bytes.
+    /// Available memory resources on the node, measured in bytes.
     pub memory: u64,
 }
 

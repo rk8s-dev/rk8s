@@ -25,7 +25,7 @@ pub struct SchedulingQueue {
     active_queue: ActiveQueue,
     backoff_queue: BackoffQueue,
     unschedulable_queue: UnschedulableQueue,
-    /// Use for waiting for state changes when no Pods are schedulable.
+    /// Used for waiting for state changes when no Pods are schedulable.
     /// Each Pod addition increments the state change counter.
     status_count: Mutex<watch::Receiver<usize>>,
     status_sx: watch::Sender<usize>,
@@ -164,13 +164,13 @@ impl SchedulingQueue {
     }
 
     async fn push_backoff(&self, mut pod: PodInfo) {
-        pod.attemps += 1;
-        let expire = Instant::now() + Duration::from_secs(2_u64.pow(pod.attemps as u32));
+        pod.attempts += 1;
+        let expire = Instant::now() + Duration::from_secs(2_u64.pow(pod.attempts as u32));
         let backoff_pod = BackOffPod {
             pod: (pod.priority, pod.name.clone()),
             expire,
         };
-        if pod.attemps > 8 {
+        if pod.attempts > 8 {
             let mut guard = self.unschedulable_queue.lock().await;
             guard.push((backoff_pod, Instant::now()));
         } else {
@@ -243,8 +243,8 @@ impl<A: Algorithm> Scheduler<A> {
         rx
     }
 
-    /// Only need call update when on usual update occured.
-    /// It is in no need to update scheduled update,
+    /// Only need to call update when an unusual update occurred.
+    /// There is no need to update scheduled updates;
     /// cache will update automatically.
     pub async fn update_cache_pod(&mut self, pod: PodInfo) {
         let mut write_lock = self.cache.write().await;
@@ -328,7 +328,7 @@ mod tests {
             cpu: 1,
             memory: 1,
             priority,
-            attemps: 0,
+            attempts: 0,
             scheduled: None,
         }
     }
@@ -341,7 +341,7 @@ mod tests {
             cpu: 1,
             memory: 1,
             priority: 1,
-            attemps: 9,
+            attempts: 9,
             scheduled: None,
         };
         queue.push_backoff(pod).await;
@@ -357,7 +357,7 @@ mod tests {
             cpu: 1,
             memory: 1,
             priority: 1,
-            attemps: 0,
+            attempts: 0,
             scheduled: None,
         };
         queue.run();
@@ -425,7 +425,7 @@ mod tests {
             cpu: 2,
             memory: 3,
             priority: 1,
-            attemps: 1,
+            attempts: 1,
             scheduled: None,
         });
         drop(cache);
