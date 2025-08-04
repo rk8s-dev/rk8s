@@ -7,7 +7,7 @@ This project is built on top of [Youki](https://github.com/youki-dev/youki), a c
 By following the CRI(Container Runtime Interface) provided by kubernetes, it implements the basic functionality for three common container workloads:
 
 1. **Single Container** - Manage and run standalone containers.
-2. **Pod** - Group multiple containers that sharing same namespace and lifestyle. Kubernetes-Pod-Llike 
+2. **Pod** - Group multiple containers that are sharing the same namespace and lifestyle. Kubernetes-Pod-Like 
 3. **Compose** - Run multi-container applications use Docker-Compose-style definitions. 
 
 ## Directory Structure
@@ -186,7 +186,7 @@ spec:
           cpu: "500m"
           memory: "512Mi"
 ```
- **Pod cmmand details**
+ **Pod command details**
 ```bash
 $ rkl pod
 Operations related to pods
@@ -305,7 +305,7 @@ services:
     networks:
       - libra-net
     volumes:
-      - ./tmp/mount/dir:/app/data # if the target direcotry is not exists, rkl will create it mannually
+      - ./tmp/mount/dir:/app/data # if the target directory is not exists, rkl will create it manually
       - ./data:/app/data2
 
   frontend:
@@ -349,7 +349,7 @@ Container: back runs successfully!
 Container: frontend runs successfully!
 Project test-compose starts successfully
 ```
-One the application is up and running, run `rkl compose ps` to check the status of all containers.
+Once the application is up and running, run `rkl compose ps` to check the status of all containers.
 
 ```bash
 $ rkl compose ps
