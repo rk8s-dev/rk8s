@@ -6,6 +6,8 @@
 
 VFS 是 Linux 内核提供的抽象层，用于统一不同文件系统的访问接口，使上层应用无需关心底层文件系统的具体实现。
 
+![VFS](images/VFS.png)
+
 ---
 
 ### **1.1 Superblock（超级块）**
@@ -20,8 +22,6 @@ Superblock 存储已挂载文件系统的元数据，通常包含：
   - 挂载点、挂载选项（如 `ro`、`noatime`）
   - 挂载状态（如 `clean` 或 `dirty`）
 - **文件系统特定配置**（如日志大小、压缩选项）
-- **魔数（Magic Number）**：用于校验文件系统完整性
-- **Superblock 副本**：某些文件系统（如 ext4）会存储多个副本，防止损坏
 
 ---
 
@@ -65,8 +65,6 @@ Superblock 存储已挂载文件系统的元数据，通常包含：
   - **三重间接指针**（某些文件系统支持）
 - **扩展属性（xattr）**：
   - 存储额外的元数据（如 SELinux 标签、ACL）
-- **校验和（Checksum）**：
-  - 某些文件系统（如 ZFS、Btrfs）存储数据校验信息
 
 ---
 
@@ -82,8 +80,6 @@ Superblock 存储已挂载文件系统的元数据，通常包含：
 - **现代优化**：
   - **哈希表**（如 ext4 的 `htree`）加速查找
   - **B-Tree**（如 XFS、Btrfs）支持高效插入/删除
-- **目录项缓存（dcache）**：
-  - 内核缓存最近访问的 dentry，加速路径解析（如 `/usr/bin/ls`）
 
 ---
 
@@ -168,6 +164,8 @@ FUSE 采用分层架构，通过虚拟设备`/dev/fuse`实现内核与用户态�
    - 监听`/dev/fuse`设备，解析内核请求。
    - 执行自定义文件系统逻辑（如网络传输、加解密）。
    - 返回处理结果（数据或错误码）。
+
+![FUSE](images/FUSE_VFS.png)
 
 ---
 
@@ -292,15 +290,6 @@ sequenceDiagram
     - **关键安全措施：**
         - **路径遍历防护：** 必须严格检查并处理路径中的 `..`（上一级目录）和符号链接（`symlink`），防止容器内应用通过 `../../../` 或恶意符号链接访问到挂载点之外的宿主文件系统路径，造成越权访问。
         - **根目录锁定：** 转换后的路径必须限定在预先配置给该 PassthroughFS 实例的宿主目录范围内。
-3. **数据与元数据缓存 (Caching)**
-    - **目的：** 为提高性能（减少对宿主文件系统的频繁访问），PassthroughFS (或 FUSE 层) 通常会对宿主文件系统的部分数据进行缓存，包括：
-        - **元数据 (`attribute cache`):** 文件大小、权限、时间戳、inode 信息等。
-        - **目录结构 (`readdir cache`)**
-    - **缓存一致性挑战：** 当宿主文件系统的数据或元数据被**直接修改**时（例如，另一个进程直接在宿主机上修改文件，绕过 PassthroughFS），缓存会失效（stale）。
-    - **解决方案：**
-        - **依赖内核机制：** 利用宿主文件系统支持的 `inotify`/`fanotify` 机制监控文件变更事件，触发缓存失效。
-        - **主动刷新：** 提供配置选项或接口手动刷新缓存（如 `echo 1 > /proc/sys/vm/drop_caches` 的部分效果或 FUSE 特定的挂载参数 `-o attr_timeout=0` 等，但需权衡性能）。
-        - **保守缓存策略：** 缩短元数据缓存时间（`attr_timeout`, `entry_timeout` 挂载参数），牺牲部分性能换取更高的实时性。**纯透传的理想是零缓存或极短缓存超时，但这会显著降低性能。**
 
 ---
 
@@ -354,7 +343,6 @@ flowchart BT
 `OverlayFS`负责在访问`MergedLayer`时，按特定规则从`LowerLayer(s)`和`UpperLayer`中查找和组合文件：
 
 - **查找文件**： 当在`MergedLayer`中查找一个文件/目录时，首先在`UpperLayer`中查找。如果找到，则使用它；如果没找到，则依次在`LowerLayer(s)`中查找（从最上层的`LowerLayer`开始向下找，直到找到或搜索完）。
-- **目录合并**： 如果`lowerLayer(s)`和`UpperLayer`中存在同名目录，`OverlayFS`会将它们的内容在`MergedLayer`中合并成一个目录（内容取并集）。
 
 ---
   
@@ -363,13 +351,6 @@ flowchart BT
 - **读取**： 读取文件直接从找到它的层（`UpperLayer`或某个`LowerLayer`）读取，无额外开销。
 
 - **写入**：如果要修改一个存在于`LowerLayer`但不在`UpperLayer`中的文件，OverlayFS会先将该文件的完整副本从`LowerLayer`复制到`UpperLayer`（这就是“写时复制”），然后再修改`UpperLayer`中的这个副本。后续对该文件的读写都指向`UpperLayer`中的副本。  
-
-  如果要修改一个已经存在于`UpperLayer`中的文件，则直接修改`UpperLayer`中的文件。
-如果要创建新文件或目录，则直接在`UpperLayer`中创建。
-
-- **删除**：
-  - **删除文件**： 如果要删除一个存在于`LowerLayer`（但不在`UpperLayer`）的文件，OverlayFS会在`UpperLayer`中创建一个特殊的whiteout文件（通常是一个以.wh.开头的同名文件，或使用扩展属性标记）。当在`MergedLayer`中查找时，这个whiteout文件会隐藏底层`LowerdLayer`中的同名文件，使其看起来被删除了。删除`UpperLayer`中的文件就是直接删除。
-  - **删除目录**： 如果要删除一个存在于`LowerLaer`的空目录（且该目录在`UpperLayer`中不存在），需要在`UpperLayer`中创建一个同名的whiteout文件。如果要删除一个非空目录（无论来自`LowerLayer`还是`UpperLayer`），OverlayFS 2.6+ 要求该目录在`MergedLayer`中是空的（即必须先删除其内容）。在`UpperLayer`中删除目录时，会设置一个特殊的opaque属性（通过trusted.overlay.opaque扩展属性或特定目录名opaque实现），表示即使底层有同名目录，其内容也不应显示。
 
 ```mermaid
 sequenceDiagram
