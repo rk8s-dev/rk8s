@@ -305,34 +305,7 @@ sequenceDiagram
 
 The `MergedLayer` is the final view presented to users. It combines the `UpperLayer` and `LowerLayers`, with the upper layer shadowing the lower layers. If a file exists in the upper layer, all operations apply only to that version.  
 
-```mermaid  
-flowchart BT  
- subgraph LL2["LowerLayer"]
-        LFileD("d.txt")  
-  end  
- subgraph LL1["LowerLayer"]
-        LFileA("a.txt")  
-        LFileB("b.txt")  
-        LFileC("c.txt")  
-  end  
- subgraph UpperLayer["UpperLayer"]
-        UFileA("a.txt")  
-  end  
- subgraph MergedLayer["MergeLayer"]
-        FileA("a.txt")  
-        FileB("b.txt")  
-        FileC("c.txt")  
-        FileD("d.txt")  
-  end  
-    UFileA --> FileA  
-    LFileB --> FileB  
-    LFileC --> FileC  
-    LFileD --> FileD  
-
-    UpperLayer --> MergedLayer
-    LL1 --> UpperLayer  
-    LL2 --> LL1  
-```  
+![Overlay](images/overlay.png)
 
 ---  
 

@@ -305,34 +305,7 @@ sequenceDiagram
 
 `MergedLayer`是用户最终看到的结果。`MergedLayer`是`UpperLayer`和`LowerLayer`联合挂载的结果。用户所感知的是单一、完整的文件系统。需要注意的是在`OverlayFS`中上层会遮蔽下层。如果一个文件在上层存在，那么用户的所有操作都只对上层的文件生效。
 
-```mermaid
-flowchart BT
- subgraph LL2["LowerLayer"]
-        LFileD("d.txt")
-  end
- subgraph LL1["LowerLayer"]
-        LFileA("a.txt")
-        LFileB("b.txt")
-        LFileC("c.txt")
-  end
- subgraph UpperLayer["UpperLayer"]
-        UFileA("a.txt")
-  end
- subgraph MergedLayer["MergeLayer"]
-        FileA("a.txt")
-        FileB("b.txt")
-        FileC("c.txt")
-        FileD("d.txt")
-  end
-    UFileA --> FileA
-    LFileB --> FileB
-    LFileC --> FileC
-    LFileD --> FileD
-
-    UpperLayer --> MergedLayer
-    LL1 --> UpperLayer
-    LL2 --> LL1
-```
+![Overlay](images/overlay.png)
 
 ---
 
