@@ -100,41 +100,6 @@ The file object (`struct file`) represents a file opened by a process:
 
 ---  
 
-### **1.6 Workflow**  
-
-```mermaid  
-sequenceDiagram  
-    participant App as Application  
-    participant VFS as VFS Layer  
-    participant FS as File System (e.g., EXT4)  
-    participant Driver as Block Device Driver  
-
-    App->>VFS: open("/path/file")  
-    VFS->>FS: Calls file_operations.open()  
-    FS->>Driver: Reads disk inode info  
-    Driver-->>FS: Returns inode data  
-    FS-->>VFS: Returns file structure  
-    VFS-->>App: Returns file descriptor fd  
-
-    App->>VFS: read(fd, buf, size)  
-    VFS->>FS: Calls file_operations.read()  
-
-    FS->>Driver: Reads data block from disk  
-    Driver-->>FS: Returns disk data  
-    FS-->>VFS: Returns data  
-
-    VFS-->>App: Returns read result  
-
-    App->>VFS: close(fd)  
-    VFS->>FS: Calls file_operations.release()  
-    FS->>Driver: Writes data  
-    Driver-->>FS: Write operation complete  
-    FS-->>VFS: Releases inode/dentry references  
-    VFS-->>App: Close successful  
-```  
-
----  
-
 ## **2. FUSE (Filesystem in Userspace)**  
 
 FUSE is a framework that allows non-privileged users to implement file systems in user space. By moving core file system logic from kernel space to user space, it significantly improves development flexibility and security while reducing integration complexity with user-space services (e.g., remote storage, encryption modules).  
@@ -166,26 +131,6 @@ FUSE uses a layered architecture, communicating between the kernel and user spac
    - Returns processing results (data or error codes).  
 
 ![FUSE](images/FUSE_VFS.png)  
-
----  
-
-### **2.3 Workflow**  
-
-```mermaid  
-sequenceDiagram  
-    participant User as User Process  
-    participant VFS as VFS Layer  
-    participant FUSE_Kernel as FUSE Kernel Module  
-    participant FUSE_Daemon as FUSE User-Space Daemon  
-
-    User->>VFS: System call (e.g., read)  
-    VFS->>FUSE_Kernel: Routes to FUSE handler  
-    FUSE_Kernel->>FUSE_Daemon: Encodes as FUSE message (OP_READ, inode, offset, etc.)  
-    FUSE_Daemon->>FUSE_Daemon: Executes logic (e.g., reads from SSH server)  
-    FUSE_Daemon-->>FUSE_Kernel: Returns data or error  
-    FUSE_Kernel-->>VFS: Constructs VFS response  
-    VFS-->>User: Returns system call result  
-```  
 
 ---  
 
@@ -245,22 +190,6 @@ When a user process initiates a file system operation:
 3. PassthroughFS maps the request's path, file descriptor (fd), or inode information to the target path/resource identifier on the host file system.  
 4. PassthroughFS uses standard system calls (e.g., `openat`, `read`, `write`) to **directly access** the mapped path/resource on the host file system.  
 5. PassthroughFS returns the host file system's response (data, status code, error) **unchanged** to the kernel via FUSE, ultimately reaching the user process.  
-
-```mermaid  
-sequenceDiagram  
-    participant User as User Process  
-    participant Kernel as Kernel VFS/FUSE  
-    participant PFS as PassthroughFS (User Space)  
-    participant HostFS as Host File System  
-
-    User ->> Kernel: System call (e.g., read, open)  
-    Kernel ->> PFS: FUSE request (includes virtual path)  
-    PFS ->> PFS: Path/resource mapping  
-    PFS ->> HostFS: Executes host system call (e.g., openat, read)  
-    HostFS -->> PFS: Operation result (data/status/error)  
-    PFS -->> Kernel: FUSE response  
-    Kernel -->> User: Returns result  
-```  
 
 ---  
 
@@ -323,39 +252,6 @@ When mounting `OverlayFS`, the `LowerLayer(s)`, `UpperLayer`, and `MergedLayer` 
 
 - **Reads**: Files are read directly from their respective layers (`UpperLayer` or a `LowerLayer`) with no additional overhead.  
 - **Writes**: Modifying a file that exists in a `LowerLayer` but not the `UpperLayer` triggers a CoW operation—OverlayFS first copies the file from the `LowerLayer` to the `UpperLayer` before applying changes. Subsequent operations use the `UpperLayer` copy.  
-
-```mermaid  
-sequenceDiagram  
-    participant User as User Process  
-    participant Overlay as OverlayFS  
-    participant Upper as Upper Layer  
-    participant Lower as Lower Layer  
-
-    %% Initial read  
-    Note over User,Lower: Scenario 1: First read  
-    User->>Overlay: read(fileA)  
-    Overlay->>Lower: Checks Lower layer  
-    Lower-->>Overlay: Returns fileA data  
-    Overlay-->>User: Returns original data  
-
-    %% Write triggers CoW  
-    Note over User,Lower: Scenario 2: First write triggers CoW  
-    User->>Overlay: write(fileA)  
-    alt Upper layer lacks file  
-        Overlay->>Upper: copy_up(fileA)<br/>(Copies from Lower layer)  
-        Upper-->>Overlay: Copy created  
-    end  
-    Overlay->>Upper: Writes changes  
-    Upper-->>Overlay: Confirms write  
-    Overlay-->>User: Returns success  
-
-    %% Subsequent read  
-    Note over User,Lower: Scenario 3: Read modified file  
-    User->>Overlay: read(fileA)  
-    Overlay->>Upper: Checks Upper layer  
-    Upper-->>Overlay: Returns modified data  
-    Overlay-->>User: Returns new data  
-```  
 
 ---  
 

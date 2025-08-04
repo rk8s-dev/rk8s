@@ -100,41 +100,6 @@ Superblock 存储已挂载文件系统的元数据，通常包含：
 
 ---
 
-### **1.6 工作流程**
-
-```mermaid
-sequenceDiagram
-    participant App as 应用程序
-    participant VFS as VFS层
-    participant FS as 具体文件系统(如EXT4)
-    participant Driver as 块设备驱动
-
-    App->>VFS: open("/path/file")
-    VFS->>FS: 调用file_operations.open()
-    FS->>Driver: 读取磁盘inode信息
-    Driver-->>FS: 返回inode数据
-    FS-->>VFS: 返回file结构体
-    VFS-->>App: 返回文件描述符fd
-
-    App->>VFS: read(fd, buf, size)
-    VFS->>FS: 调用file_operations.read()
-
-    FS->>Driver: 从磁盘读取数据块
-    Driver-->>FS: 返回磁盘数据
-    FS-->>VFS: 返回数据
-
-    VFS-->>App: 返回读取结果
-
-    App->>VFS: close(fd)
-    VFS->>FS: 调用file_operations.release()
-    FS->>Driver: 写数据
-    Driver-->>FS: 写操作完成
-    FS-->>VFS: 释放inode/dentry引用
-    VFS-->>App: 关闭成功
-```
-
----
-
 ## **2. FUSE（Filesystem in Userspace）**
 
 FUSE 是一种允许非特权用户在用户空间实现文件系统的技术框架。通过将文件系统核心逻辑从内核态迁移到用户态，显著提升了开发灵活性和安全性，同时降低了与用户态服务（如远程存储、加密模块等）的集成复杂度。
@@ -166,26 +131,6 @@ FUSE 采用分层架构，通过虚拟设备`/dev/fuse`实现内核与用户态�
    - 返回处理结果（数据或错误码）。
 
 ![FUSE](images/FUSE_VFS.png)
-
----
-
-### **2.3 工作流程**
-
-```mermaid
-sequenceDiagram
-    participant User as 用户进程
-    participant VFS as VFS层
-    participant FUSE_Kernel as FUSE内核模块
-    participant FUSE_Daemon as FUSE用户态守护进程
-
-    User->>VFS: 系统调用（如read）
-    VFS->>FUSE_Kernel: 路由到FUSE处理
-    FUSE_Kernel->>FUSE_Daemon: 编码为FUSE消息（OP_READ, inode, offset等）
-    FUSE_Daemon->>FUSE_Daemon: 执行逻辑（如从SSH服务器读取数据）
-    FUSE_Daemon-->>FUSE_Kernel: 返回数据或错误
-    FUSE_Kernel-->>VFS: 构造VFS响应
-    VFS-->>User: 返回系统调用结果
-```
 
 ---
 
@@ -245,22 +190,6 @@ PassthroughFS 是一种特殊的虚拟文件系统，其核心设计理念是充
 3. PassthroughFS 接收到请求后，**对请求中的路径、文件描述符（fd）或 inode 信息进行映射转换**，得到宿主文件系统上的目标路径或资源标识符。
 4. PassthroughFS 使用标准的系统调用（如 `openat`, `read`, `write` 等）**直接访问宿主文件系统**上的映射后路径/资源。
 5. PassthroughFS 将宿主文件系统返回的操作结果（数据、状态码、错误信息）通过 FUSE 接口**原样返回**给内核，最终传递给用户进程。
-
-```mermaid
-sequenceDiagram
-    participant User as 用户进程
-    participant Kernel as 内核VFS/FUSE
-    participant PFS as PassthroughFS (用户态)
-    participant HostFS as 宿主文件系统
-
-    User ->> Kernel: 系统调用 (e.g., read, open)
-    Kernel ->> PFS: FUSE请求 (包含虚拟路径等)
-    PFS ->> PFS: 路径/资源映射转换
-    PFS ->> HostFS: 执行宿主系统调用 (e.g., openat, read)
-    HostFS -->> PFS: 操作结果 (数据/状态/错误)
-    PFS -->> Kernel: FUSE响应
-    Kernel -->> User: 返回结果
-```
 
 ---
 
@@ -324,39 +253,6 @@ sequenceDiagram
 - **读取**： 读取文件直接从找到它的层（`UpperLayer`或某个`LowerLayer`）读取，无额外开销。
 
 - **写入**：如果要修改一个存在于`LowerLayer`但不在`UpperLayer`中的文件，OverlayFS会先将该文件的完整副本从`LowerLayer`复制到`UpperLayer`（这就是“写时复制”），然后再修改`UpperLayer`中的这个副本。后续对该文件的读写都指向`UpperLayer`中的副本。  
-
-```mermaid
-sequenceDiagram
-    participant User as 用户进程
-    participant Overlay as OverlayFS
-    participant Upper as Upper层
-    participant Lower as Lower层
-
-    %% 初始读取流程
-    Note over User,Lower: 场景1：首次读取文件
-    User->>Overlay: read(fileA)
-    Overlay->>Lower: 检查Lower层
-    Lower-->>Overlay: 返回fileA数据
-    Overlay-->>User: 返回原始数据
-
-    %% 修改触发CoW
-    Note over User,Lower: 场景2：首次写入触发CoW
-    User->>Overlay: write(fileA)
-    alt Upper层无此文件
-        Overlay->>Upper: copy_up(fileA)<br/>（从Lower层复制）
-        Upper-->>Overlay: 副本创建成功
-    end
-    Overlay->>Upper: 写入修改内容
-    Upper-->>Overlay: 确认写入
-    Overlay-->>User: 返回成功
-
-    %% 后续读取
-    Note over User,Lower: 场景3：读取修改后文件
-    User->>Overlay: read(fileA)
-    Overlay->>Upper: 检查Upper层
-    Upper-->>Overlay: 返回修改后数据
-    Overlay-->>User: 返回新数据
-```
 
 ---
 
