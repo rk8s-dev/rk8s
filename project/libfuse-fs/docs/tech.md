@@ -134,7 +134,7 @@ FUSE uses a layered architecture, communicating between the kernel and user spac
 
 ---  
 
-### **2.4 Advantages**  
+### **2.3 Advantages**  
 
 1. **Cross-Language Support**  
    Compatible with any language that can manipulate file descriptors (e.g., Python/Go/Rust), eliminating the need for kernel module development.  
@@ -151,7 +151,7 @@ FUSE uses a layered architecture, communicating between the kernel and user spac
 
 ---  
 
-### **2.5 Limitations**  
+### **2.4 Limitations**  
 
 1. **Performance Bottlenecks**  
    - Each operation requires at least 2 context switches (user ↔ kernel space).  

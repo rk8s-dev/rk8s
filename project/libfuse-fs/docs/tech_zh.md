@@ -134,7 +134,7 @@ FUSE 采用分层架构，通过虚拟设备`/dev/fuse`实现内核与用户态�
 
 ---
 
-### **2.4 优势**
+### **2.3 优势**
 
 1. **跨语言支持**  
    兼容任何能操作文件描述符的语言（如Python/Go/Rust），无需内核模块开发。
@@ -151,7 +151,7 @@ FUSE 采用分层架构，通过虚拟设备`/dev/fuse`实现内核与用户态�
 
 ---
 
-### **2.5 局限性**
+### **2.4 局限性**
 
 1. **性能瓶颈**  
    - 每次操作需至少2次上下文切换（用户态↔内核态）。
@@ -230,7 +230,7 @@ PassthroughFS 是一种特殊的虚拟文件系统，其核心设计理念是充
 
 ### **4.1 分层结构**
 
-`OverlayFS` 分为`UpperLayer`和`LowerLayer`。`UpperLayer`必须可读可写，`LowerLayer`只需可读。`UpperLayer`只能有一个，`LowerLayer`可以有多个个。
+`OverlayFS` 分为`UpperLayer`和`LowerLayer`。`UpperLayer`必须可读可写，`LowerLayer`只需可读。`UpperLayer`只能有一个，`LowerLayer`可以有多个。
 
 `MergedLayer`是用户最终看到的结果。`MergedLayer`是`UpperLayer`和`LowerLayer`联合挂载的结果。用户所感知的是单一、完整的文件系统。需要注意的是在`OverlayFS`中上层会遮蔽下层。如果一个文件在上层存在，那么用户的所有操作都只对上层的文件生效。
 
