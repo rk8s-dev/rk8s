@@ -307,18 +307,18 @@ The `MergedLayer` is the final view presented to users. It combines the `UpperLa
 
 ```mermaid  
 flowchart BT  
- subgraph LL2["LowerLayer"]  
+ subgraph LL2["LowerLayer"]
         LFileD("d.txt")  
   end  
- subgraph LL1["LowerLayer"]  
+ subgraph LL1["LowerLayer"]
         LFileA("a.txt")  
         LFileB("b.txt")  
         LFileC("c.txt")  
   end  
- subgraph UpperLayer["UpperLayer"]  
+ subgraph UpperLayer["UpperLayer"]
         UFileA("a.txt")  
   end  
- subgraph MergedLayer["MergeLayer"]  
+ subgraph MergedLayer["MergeLayer"]
         FileA("a.txt")  
         FileB("b.txt")  
         FileC("c.txt")  
@@ -329,7 +329,7 @@ flowchart BT
     LFileC --> FileC  
     LFileD --> FileD  
 
-    UpperLayer --> MergedLayer  
+    UpperLayer --> MergedLayer
     LL1 --> UpperLayer  
     LL2 --> LL1  
 ```  
