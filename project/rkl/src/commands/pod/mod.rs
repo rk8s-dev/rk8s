@@ -302,7 +302,7 @@ pub fn set_daemonize() -> Result<(), anyhow::Error> {
 pub fn start_daemon() -> Result<(), anyhow::Error> {
     let manifest_path = Path::new("/etc/rk8s/manifests");
     if !manifest_path.exists() {
-        std::fs::create_dir(manifest_path)?;
+        std::fs::create_dir_all(manifest_path)?;
     }
     #[cfg(not(debug_assertions))]
     set_daemonize()?;

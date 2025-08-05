@@ -125,5 +125,8 @@ pub enum PodCommand {
     Exec(Box<commands::ExecPod>),
     // Run as a daemon process.
     // For convenient, I won't remove cli part now.
+    #[command(
+        about = "Set rkl on daemon mod monitoring the pod.yaml in '/etc/rk8s/manifests' directory"
+    )]
     Daemon,
 }
