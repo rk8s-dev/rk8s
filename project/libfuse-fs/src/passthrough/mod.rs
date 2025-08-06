@@ -2,6 +2,7 @@ use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
 use inode_store::{InodeId, InodeStore};
+use lru::LruCache;
 use rfuse3::{Errno, raw::reply::ReplyEntry};
 use uuid::Uuid;
 
@@ -9,6 +10,7 @@ use crate::util::convert_stat64_to_file_attr;
 use mount_fd::MountFds;
 use statx::StatExt;
 use std::io::Result;
+use std::num::NonZero;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::{
@@ -410,6 +412,8 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
     _uuid: Uuid,
 
     phantom: PhantomData<S>,
+
+    handle_cache: RwLock<LruCache<String, Arc<FileHandle>>>,
 }
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
@@ -470,6 +474,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             _uuid: Uuid::new_v4(),
 
             phantom: PhantomData,
+
+            handle_cache: RwLock::new(LruCache::new(NonZero::new(1024).unwrap())),
         })
     }
 
@@ -477,7 +483,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     pub async fn import(&self) -> Result<()> {
         let root = CString::new(self.cfg.root_dir.as_str()).expect("CString::new failed");
 
-        let (path_fd, handle_opt, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root)
+        let (path_fd, handle_opt, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root).await
             .map_err(|e| {
                 error!("fuse: import: failed to get file or handle: {e:?}");
                 e
@@ -594,17 +600,28 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     }
 
     /// Create a File or File Handle for `name` under directory `dir_fd` to support `lookup()`.
-    fn open_file_and_handle(
+    async fn open_file_and_handle(
         &self,
         dir: &impl AsRawFd,
         name: &CStr,
     ) -> io::Result<(File, Option<FileHandle>, StatExt)> {
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
         let st = statx::statx(&path_file, None)?;
-        let handle = if self.cfg.inode_file_handles {
-            FileHandle::from_fd(&path_file)?
-        } else {
-            None
+
+        let key = format!("{}:{}", st.st.st_dev, st.st.st_ino);
+        let handle = {
+            let mut cache = self.handle_cache.write().await;
+            if let Some(h) = cache.get(&key) {
+                Some((**h).clone())
+            } else {
+                if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
+                    let handle_arc = Arc::new(handle_from_fd.clone());
+                    cache.put(key, handle_arc);
+                    Some(handle_from_fd)
+                } else {
+                    None
+                }
+            }
         };
 
         Ok((path_file, handle, st))
@@ -665,7 +682,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let dir = self.inode_map.get(parent).await?;
         let dir_file = dir.get_file()?;
-        let (path_fd, handle_opt, st) = Self::open_file_and_handle(self, &dir_file, name)?;
+        let (path_fd, handle_opt, st) = self.open_file_and_handle(&dir_file, name).await?;
         let id = InodeId::from_stat(&st);
         // trace!("FS {} do_lookup: parent: {}, name: {}, path_fd: {:?}, handle_opt: {:?}, id: {:?}",
         // self.uuid, parent, name.to_string_lossy(), path_fd.as_raw_fd(), handle_opt, id);
