@@ -12,6 +12,7 @@ use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use libcontainer::container::{Container, State, state};
 use liboci_cli::{Create, Delete, List, Start};
+use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
 use std::{fmt::Write as _, io};
 use std::{
@@ -317,11 +318,41 @@ pub fn delete_container(id: &str) -> Result<()> {
         container_id: id.to_string(),
         force: true,
     };
+    // delete the network
+    let container = load_container(&root_path, id)?;
+    let pid = container
+        .pid()
+        .ok_or(anyhow!("invalid container {} can't find pid", id))?;
+    remove_container_network(pid)?;
+
     delete(delete_args, root_path)?;
 
     Ok(())
 }
 
+pub fn remove_container(root_path: &PathBuf, state: &State) -> Result<()> {
+    let delete_args = Delete {
+        container_id: state.id.clone(),
+        force: true,
+    };
+    let pid = state
+        .pid
+        .ok_or(anyhow!("failed to get pid of container {}", &state.id))?;
+    // delete the network
+    remove_container_network(Pid::from_raw(pid))?;
+    delete(delete_args, root_path.to_path_buf())?;
+    Ok(())
+}
+
+pub fn remove_container_network(pid: Pid) -> Result<()> {
+    let mut cni = get_cni()?;
+    cni.load_default_conf();
+    let netns_path = format!("/proc/{pid}/ns/net");
+    let id = pid.to_string();
+    cni.remove(id, netns_path.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to remove CNI network: {}", e))?;
+    Ok(())
+}
 pub fn start_container(container_id: &str) -> Result<()> {
     let runner = ContainerRunner::from_container_id(container_id, None)?;
     runner.start_container(Some(container_id.to_string()))?;

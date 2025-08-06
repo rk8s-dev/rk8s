@@ -13,7 +13,7 @@ use crate::{
     ComposeCommand, DownArgs, PsArgs, UpArgs,
     commands::{
         compose::{network::NetworkManager, spec::ComposeSpec, volume::VolumeManager},
-        container::ContainerRunner,
+        container::{ContainerRunner, remove_container},
         delete, list,
     },
     rootpath::{self},
@@ -32,6 +32,7 @@ pub struct ComposeManager {
     /// the path to store the basic info of compose application
     root_path: PathBuf,
     project_name: String,
+    containers: Vec<State>,
     network_manager: NetworkManager,
     volume_manager: VolumeManager,
 }
@@ -48,6 +49,7 @@ impl ComposeManager {
             network_manager: NetworkManager::new(project_name.clone()),
             volume_manager: VolumeManager::new(),
             project_name,
+            containers: vec![],
         })
     }
 
@@ -61,6 +63,11 @@ impl ComposeManager {
     }
 
     fn clean_up(&self) -> Result<()> {
+        // delete container
+        for container in &self.containers {
+            remove_container(&self.root_path, container)?;
+        }
+
         fs::remove_dir_all(&self.root_path)
             .map_err(|e| anyhow!("failed to delete the whole project: {}", e))
     }
@@ -89,15 +96,13 @@ impl ComposeManager {
         let _ = &mut self.volume_manager.handle(&spec)?;
 
         // start the whole containers
-        let states = match self.run(&spec) {
-            std::result::Result::Ok(states) => states,
-            Err(err) => {
-                self.clean_up().ok();
-                return Err(anyhow!("failed to up: {}", err));
-            }
-        };
+        if let Err(err) = self.run(&spec) {
+            self.clean_up().ok();
+            return Err(anyhow!("failed to up: {}", err));
+        }
+
         // store the spec info into a .json file
-        self.persist_compose_state(states)?;
+        self.persist_compose_state()?;
 
         println!("Project {} starts successfully", self.project_name);
         Ok(())
@@ -109,10 +114,10 @@ impl ComposeManager {
     /// "containers": [ {} {},],
     /// ""
     ///}
-    fn persist_compose_state(&self, states: Vec<State>) -> Result<()> {
+    fn persist_compose_state(&self) -> Result<()> {
         let obj = json!({
             "project_name": self.project_name,
-            "containers": states
+            "containers": &self.containers
         });
         let json_str = serde_json::to_string_pretty(&obj)?;
 
@@ -133,9 +138,7 @@ impl ComposeManager {
         Ok(spec)
     }
 
-    fn run(&self, _: &ComposeSpec) -> Result<Vec<State>> {
-        let mut states: Vec<State> = vec![];
-
+    fn run(&mut self, _: &ComposeSpec) -> Result<()> {
         let network_mapping = self.network_manager.network_service_mapping();
 
         for (network_name, services) in network_mapping {
@@ -175,7 +178,7 @@ impl ComposeManager {
 
                 match runner.run() {
                     std::result::Result::Ok(_) => {
-                        states.push(runner.get_container_state()?);
+                        self.containers.push(runner.get_container_state()?);
                     }
                     Err(err) => {
                         // create one container failed delete others
@@ -184,7 +187,7 @@ impl ComposeManager {
                             runner.get_container_id()?,
                             err
                         );
-                        for state in &states {
+                        for state in &self.containers {
                             if let Err(err) = delete(
                                 Delete {
                                     container_id: state.id.clone(),
@@ -203,7 +206,7 @@ impl ComposeManager {
             }
         }
         // return the compose application's state
-        Ok(states)
+        Ok(())
     }
 
     fn ps(&self, ps_args: PsArgs) -> Result<()> {
