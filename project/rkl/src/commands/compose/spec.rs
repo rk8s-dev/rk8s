@@ -11,14 +11,13 @@ pub struct ComposeSpec {
     pub services: HashMap<String, ServiceSpec>,
 
     #[serde(default)]
-    pub volumes: Option<VolumesSpec>,
+    pub volumes: Option<HashMap<String, VolumesSpec>>,
 
     #[serde(default)]
-    pub configs: Option<ConfigSpec>,
+    pub configs: Option<HashMap<String, ConfigsSpec>>,
 
     #[serde(default)]
-    // pub networks: Option<HashMap<String, NetworkSpec>>,
-    pub networks: Option<NetworksSpec>,
+    pub networks: Option<HashMap<String, NetworkSpec>>,
     #[serde(default)]
     pub secrets: Option<SecretSpec>,
 }
@@ -45,7 +44,7 @@ pub struct ServiceSpec {
     pub command: Vec<String>,
 
     #[serde(default)]
-    pub configs: Option<Vec<String>>,
+    pub configs: Option<ConfigSpec>,
 
     #[serde(default)]
     pub secrets: Option<Vec<String>>,
@@ -61,9 +60,20 @@ pub struct VolumesSpec(pub HashMap<String, VolumeSpec>);
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VolumeSpec {}
 
+#[derive(Debug, Serialize, Clone, Deserialize)]
+pub struct ConfigSpec {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub target: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ConfigSpec {}
+pub struct ConfigsSpec {
+    #[serde(default)]
+    pub file: String,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

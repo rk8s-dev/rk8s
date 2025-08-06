@@ -151,7 +151,7 @@ impl NetworkManager {
     pub fn handle(&mut self, spec: &ComposeSpec) -> Result<()> {
         // read the networks
         if let Some(networks_spec) = &spec.networks {
-            self.map = networks_spec.0.clone()
+            self.map = networks_spec.clone()
         } else {
             // there is no definition of networks
             self.is_default = true
