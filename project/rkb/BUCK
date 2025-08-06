@@ -21,8 +21,8 @@ rust_binary(
         "//third-party:rand",
         "//third-party:chrono",
         "//third-party:tempfile",
+        "//third-party:rfuse3",
         "//project/libfuse-fs:libfuse-fs",
-        "//project/rfuse3:rfuse3",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

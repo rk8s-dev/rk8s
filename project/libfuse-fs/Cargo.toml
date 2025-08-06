@@ -1,17 +1,18 @@
 [package]
 name = "libfuse-fs"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "FUSE Filesystem Library"
 homepage = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 documentation = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 license = "MIT OR Apache-2.0"
+exclude = ["BUCK"]
 
 [dependencies]
 uuid = { version = "1.15.1", features = ["v4"] }
 clap = { version = "4.5.32", features = ["derive"] }
-rfuse3 = { path = "../rfuse3", features = ["tokio-runtime", "unprivileged"] }
+rfuse3 = { version = "0.0.3", features = ["tokio-runtime", "unprivileged"] }
 tokio = { version = "1.44.0", features = ["full"] }
 reqwest = { version = "0.12.7", features = ["json", "blocking"] }
 serde = { version = "1.0.210", features = ["derive"] }
