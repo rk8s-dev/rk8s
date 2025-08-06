@@ -91,7 +91,7 @@ regex = { version = "1.10.6", default-features = false, features = [
 ] }
 reqwest = { version = "0.12.7", features = ["json", "blocking"] }
 rcgen = "0.12.1"
-rfuse3 = { version = "0.0.2", features = ["tokio-runtime", "unprivileged"] }
+rfuse3 = { version = "0.0.3", features = ["tokio-runtime", "unprivileged"] }
 rtnetlink =  "0.16.0"
 rust-criu = "0.4.0"
 rust-cni = "0.1.2"
