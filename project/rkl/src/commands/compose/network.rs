@@ -1,4 +1,11 @@
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+
+use crate::commands::compose::spec::NetworkDriver::Bridge;
+use crate::commands::compose::spec::NetworkDriver::Host;
+use crate::commands::compose::spec::NetworkDriver::None;
+use crate::commands::compose::spec::NetworkDriver::Overlay;
 
 use crate::commands::compose::spec::ComposeSpec;
 use crate::commands::compose::spec::NetworkSpec;
@@ -6,9 +13,90 @@ use crate::commands::compose::spec::ServiceSpec;
 use anyhow::Ok;
 use anyhow::Result;
 use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
+
+const CNI_VERSION: &str = "1.0.0";
+const STD_CONF_PATH: &str = "/etc/cni/net.d";
+
+const BRIDGE_PLUGIN_NAME: &str = "libbridge";
+const BRIDGE_CONF: &str = "bridge.conf";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliNetworkConfig {
+    /// default is 1.0.0
+    #[serde(default)]
+    pub cni_version: String,
+    /// the `type` in JSON
+    #[serde(rename = "type")]
+    pub plugin: String,
+    /// network'sname
+    #[serde(default)]
+    pub name: String,
+    /// bridge interface' s name (default cni0）
+    #[serde(default)]
+    pub bridge: String,
+    /// wheather this network should be set the container's default gateway
+    #[serde(default)]
+    pub is_default_gateway: Option<bool>,
+    /// wheather the bridge should at as a gateway
+    #[serde(default)]
+    pub is_gateway: Option<bool>,
+    /// Maximum Transmission Unit (MTU) to set on the bridge interface
+    #[serde(default)]
+    pub mtu: Option<u32>,
+    /// Enable Mac address spoofing check
+    #[serde(default)]
+    pub mac_spoof_check: Option<bool>,
+    /// IPAM type（like host-local, static, etc.）
+    #[serde(default)]
+    pub ipam_type: Option<String>,
+    /// IPAM configuration's file path（可选）
+    #[serde(default)]
+    pub ipam_config: Option<String>,
+    /// enable hairpin mod
+    #[serde(default)]
+    pub hairpin_mode: Option<bool>,
+    /// VLAN ID
+    #[serde(default)]
+    pub vlan: Option<u16>,
+    /// VLAN Trunk
+    #[serde(default)]
+    pub vlan_trunk: Option<Vec<u16>>,
+}
+
+impl CliNetworkConfig {
+    pub fn from_name_bridge(network_name: &str, bridge: &str) -> Self {
+        let mut default_conf = Self::default();
+        default_conf.bridge = bridge.to_string();
+        default_conf.name = network_name.to_string();
+        default_conf
+    }
+}
+
+impl Default for CliNetworkConfig {
+    fn default() -> Self {
+        Self {
+            cni_version: String::from(CNI_VERSION),
+            plugin: String::from(BRIDGE_PLUGIN_NAME),
+            name: Default::default(),
+            bridge: Default::default(),
+            is_default_gateway: Default::default(),
+            is_gateway: Some(true),
+            mtu: Some(1500),
+            mac_spoof_check: Default::default(),
+            ipam_type: Default::default(),
+            ipam_config: Default::default(),
+            hairpin_mode: Default::default(),
+            vlan: Default::default(),
+            vlan_trunk: Default::default(),
+        }
+    }
+}
 
 pub struct NetworkManager {
     map: HashMap<String, NetworkSpec>,
+    /// key: network_name; value: bridge interface
+    network_interface: HashMap<String, String>,
     /// key: service_name value: networks
     service_mapping: HashMap<String, Vec<String>>,
     /// key: network_name value: (srv_name, service_spec) k
@@ -26,11 +114,38 @@ impl NetworkManager {
             is_default: false,
             network_service: HashMap::new(),
             project_name,
+            network_interface: HashMap::new(),
         }
     }
 
     pub fn network_service_mapping(&self) -> HashMap<String, Vec<(String, ServiceSpec)>> {
         self.network_service.clone()
+    }
+
+    pub fn setup_network_conf(&self, network_name: &String) -> Result<()> {
+        // generate the config file
+        let interface = self.network_interface.get(network_name).ok_or_else(|| {
+            anyhow!(
+                "Failed to find bridge interface for network {}",
+                network_name
+            )
+        })?;
+        // check if there is other config file if does delete it
+        let conf = CliNetworkConfig::from_name_bridge(network_name, interface);
+        let conf_value = serde_json::to_value(conf).expect("Failed to parse network config");
+
+        let mut conf_path = PathBuf::from(STD_CONF_PATH);
+        conf_path.push(BRIDGE_CONF);
+        if let Some(parent) = conf_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        // write it to
+        fs::write(conf_path, serde_json::to_string_pretty(&conf_value)?)?;
+
+        Ok(())
     }
 
     pub fn handle(&mut self, spec: &ComposeSpec) -> Result<()> {
@@ -44,7 +159,8 @@ impl NetworkManager {
 
         self.validate(spec)?;
 
-        Ok(())
+        // allocate the bridge interface
+        self.allocate_interface()
     }
 
     pub fn is_default(&self) -> bool {
@@ -68,7 +184,7 @@ impl NetworkManager {
             for network_name in &srv_spec.networks {
                 if !self.map.contains_key(network_name) {
                     return Err(anyhow!(
-                        "wrong networks network {} is not defined",
+                        "bad network's definition network {} is not defined",
                         network_name
                     ));
                 }
@@ -83,7 +199,7 @@ impl NetworkManager {
                     .push((srv.clone(), srv_spec.clone()));
             }
         }
-        // all service doesn't have the network definition create a default network
+        // all the services don't have the network definition then create a default network
         if self.is_default {
             let network_name = format!("{}_default", self.project_name);
 
@@ -93,12 +209,32 @@ impl NetworkManager {
                 .map(|(name, spec)| (name.clone(), spec.clone()))
                 .collect();
 
-            self.network_service.insert(network_name, services);
+            self.network_service.insert(network_name.clone(), services);
+            self.map.insert(
+                network_name,
+                NetworkSpec {
+                    external: Option::None,
+                    driver: Some(Bridge),
+                },
+            );
         }
         Ok(())
     }
 
-    // fn setup_network(&self) -> Result<()> {
-    //     Ok(())
-    // }
+    fn allocate_interface(&mut self) -> Result<()> {
+        for (i, (k, v)) in self.map.iter().enumerate() {
+            if let Some(driver) = &v.driver {
+                match driver {
+                    // add the bridge default is cni0
+                    Bridge => self
+                        .network_interface
+                        .insert(k.to_string(), format!("cni{}", i + 1).to_string()),
+                    Overlay => todo!(),
+                    Host => todo!(),
+                    None => todo!(),
+                };
+            }
+        }
+        Ok(())
+    }
 }

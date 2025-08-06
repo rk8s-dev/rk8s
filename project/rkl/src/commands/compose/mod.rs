@@ -91,9 +91,9 @@ impl ComposeManager {
         // start the whole containers
         let states = match self.run(&spec) {
             std::result::Result::Ok(states) => states,
-            Err(_) => {
+            Err(err) => {
                 self.clean_up().ok();
-                return Err(anyhow!("failed to up"));
+                return Err(anyhow!("failed to up: {}", err));
             }
         };
         // store the spec info into a .json file
@@ -141,8 +141,6 @@ impl ComposeManager {
         for (network_name, services) in network_mapping {
             println!("Creating network: {network_name}");
 
-            // let mut parent_container_pid = String::from("");
-
             for (srv_name, srv) in services.into_iter() {
                 let container_ports = map_port_style(srv.ports.clone())?;
                 let container_spec = ContainerSpec {
@@ -159,16 +157,22 @@ impl ComposeManager {
 
                 // generate the volumes Mount
                 let volumes = VolumeManager::map_to_mount(srv.volumes.clone())?;
+                //  setup the network_conf file
+                self.network_manager
+                    .setup_network_conf(&network_name)
+                    .map_err(|e| {
+                        anyhow!(
+                            "Service [{}] create network Config file failed: {}",
+                            srv_name,
+                            e
+                        )
+                    })?;
 
                 let mut runner =
                     ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
-                // TODO: if there are parent_container_pid
-                // let mut runner = if parent_container_pid.is_empty() {
-                // } else {
-                //     return Err(anyhow!("Panic"));
-                // };
 
                 runner.add_mounts(volumes);
+
                 match runner.run() {
                     std::result::Result::Ok(_) => {
                         states.push(runner.get_container_state()?);

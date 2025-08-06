@@ -77,14 +77,14 @@ pub struct NetworksSpec(pub HashMap<String, NetworkSpec>);
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkSpec {
-    external: Option<bool>,
-    driver: Option<NetworkDirver>,
+    pub external: Option<bool>,
+    pub driver: Option<NetworkDriver>,
 }
 
 /// network driver: default: Bridge
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
-pub enum NetworkDirver {
+pub enum NetworkDriver {
     Bridge,
     Overlay,
     Host,

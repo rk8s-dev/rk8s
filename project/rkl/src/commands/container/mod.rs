@@ -230,8 +230,6 @@ impl ContainerRunner {
             .ok_or_else(|| anyhow!("get container {} pid failed", self.container_id))?;
         cni.load_default_conf();
 
-        println!("Get container PID: {container_pid}");
-
         cni.setup(
             self.container_id.clone(),
             format!("/proc/{container_pid}/ns/net"),
