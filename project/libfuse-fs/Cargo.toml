@@ -7,6 +7,7 @@ homepage = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 documentation = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 license = "MIT OR Apache-2.0"
+exclude = ["BUCK"]
 
 [dependencies]
 uuid = { version = "1.15.1", features = ["v4"] }

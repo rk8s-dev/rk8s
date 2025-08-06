@@ -8,6 +8,7 @@ categories = ["api-bindings", "filesystem"]
 license = "MIT"
 description = "FUSE user-space library async version implementation."
 rust-version = "1.77"
+exclude = ["BUCK"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
