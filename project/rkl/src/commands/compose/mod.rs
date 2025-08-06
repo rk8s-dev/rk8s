@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env::{self},
     fs::{self, File, read_dir, remove_dir_all, remove_file},
     path::{Path, PathBuf},
 };
@@ -216,24 +216,28 @@ impl ComposeManager {
             quiet: false,
         };
 
-        // now the self.project_name is the current_env
-        if !self.root_path.exists() {
+        let target_path = if !self.root_path.exists() {
             let yml_file = get_yml_path(compose_yaml)?;
             let spec = self.read_spec(yml_file)?;
             match spec.name {
-                Some(name) => {
-                    let new_path = self.get_root_path_by_name(name)?;
-                    list(list_arg, new_path)?;
-                    Ok(())
-                }
-                None => Err(anyhow!("Invalid Compose Spec (no project name is set)")),
+                Some(name) => self.get_root_path_by_name(name)?,
+                None => return Err(anyhow!("Invalid Compose Spec (no project name is set)")),
             }
         } else {
-            // use the cur_dir first
-            // list all the containers
-            list(list_arg, self.root_path.clone())
-        }
+            self.root_path.clone()
+        };
+
+        list(list_arg, target_path).map_err(|e| {
+            if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                if io_err.kind() == std::io::ErrorKind::NotFound {
+                    return anyhow!("There is no running compose application");
+                }
+            }
+            // Fallback for other errors, ensuring all list errors are handled consistently
+            anyhow!("Failed to list compose containers: {}", e)
+        })
     }
+
     /// if the `container_name` field is not supplied then create a random container_name
     /// for the service container
     pub fn generate_container_name(&self, srv_name: &String) -> String {
