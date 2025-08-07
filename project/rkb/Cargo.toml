@@ -5,13 +5,13 @@ edition = "2024"
 
 [dependencies]
 libfuse-fs = { path = "../libfuse-fs" }
+rfuse3 = { version = "0.0.3", features = ["tokio-runtime", "unprivileged"] }
 clap = { version = "4.5.31", features = ["derive"] }
 nix = { version = "0.29.0", features = ["fs", "process", "user", "sched", "mount"] }
 tokio = { version = "1.44.0", features = ["full"] }
-rfuse3 = { path = "../rfuse3", features = ["tokio-runtime","unprivileged"]}
 libc = "0.2.171"
 dockerfile-parser = "0.9.0"
-anyhow = "1.0.97"
+anyhow = "1.0.98"
 tar = "0.4.44"
 flate2 = "1.1.1"
 walkdir = "2.3"
@@ -19,6 +19,8 @@ sha256 = "1.6.0"
 oci-spec = "0.8.0"
 rand = "0.9.0"
 chrono = "0.4.40"
+env_logger = "0.11.7"
+log = "0.4.27"
 
 [dev-dependencies]
 tempfile = "3.19.1"

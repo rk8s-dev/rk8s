@@ -45,15 +45,12 @@ fn main() {
     let flannel_conf = match load_flannel_net_conf(inputs.config.clone()) {
         Ok(conf) => conf,
         Err(err) => {
-            error!("Failed to load flannel config: {}", err);
+            error!("Failed to load flannel config: {err}");
             return;
         }
     };
 
-    info!(
-        "(CNI flannel plugin) version flannel config: {:?}",
-        flannel_conf
-    );
+    info!("(CNI flannel plugin) version flannel config: {flannel_conf:?}");
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -71,11 +68,11 @@ fn main() {
 
     match res {
         Ok(res) => {
-            debug!("success! {:#?}", res);
+            debug!("success! {res:#?}");
             reply(res)
         }
         Err(res) => {
-            error!("error: {}", res);
+            error!("error: {res}");
             reply(res.into_reply(cni_version))
         }
     }
@@ -305,7 +302,7 @@ pub fn consume_scratch_net_conf(
 
 async fn cmd_add(mut config: FlannelNetConf, inputs: Inputs) -> Result<SuccessReply, CniError> {
     let subnet_env = load_flannel_subnet_env(config.subnet_file.as_ref().unwrap())?;
-    info!("subnet_env: {:?}", subnet_env);
+    info!("subnet_env: {subnet_env:?}");
 
     match &mut config.delegate {
         None => {
@@ -372,7 +369,7 @@ async fn cmd_add(mut config: FlannelNetConf, inputs: Inputs) -> Result<SuccessRe
         );
     }
 
-    debug!("delegate_conf: {:?}", delegate_mut);
+    debug!("delegate_conf: {delegate_mut:?}");
     let serde_map: Map<String, Value> = config
         .delegate
         .as_ref()
@@ -475,7 +472,7 @@ mod tests {
 
     fn create_temp_file(content: &str) -> NamedTempFile {
         let mut file = NamedTempFile::new().unwrap();
-        write!(file, "{}", content).unwrap();
+        write!(file, "{content}").unwrap();
         file
     }
 
@@ -542,7 +539,7 @@ mod tests {
         // Check file was deleted
         let path = build_cache_path(cid, data_dir)
             .unwrap()
-            .join(format!("{}.json", cid));
+            .join(format!("{cid}.json"));
         assert!(!path.exists(), "file should be cleaned up");
     }
 
@@ -577,10 +574,10 @@ mod tests {
             let (cleanup, _) = consume_scratch_net_conf(cid, data_dir).expect("consume failed");
             let path = build_cache_path(cid, data_dir)
                 .unwrap()
-                .join(format!("{}.json", cid));
+                .join(format!("{cid}.json"));
             assert!(path.exists());
 
-            let io_err = anyhow::anyhow!(std::io::Error::new(std::io::ErrorKind::Other, "dummy"));
+            let io_err = anyhow::anyhow!(std::io::Error::other("dummy"));
             cleanup(&io_err);
             assert!(path.exists(), "file should remain on I/O error");
         }
@@ -590,7 +587,7 @@ mod tests {
                 consume_scratch_net_conf(cid, data_dir).expect("consume failed again");
             let path = build_cache_path(cid, data_dir)
                 .unwrap()
-                .join(format!("{}.json", cid));
+                .join(format!("{cid}.json"));
             assert!(path.exists());
 
             let logic_err = anyhow::anyhow!("some logical error");

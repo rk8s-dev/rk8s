@@ -27,7 +27,7 @@ impl Store {
 
     // 根据容器 ID 和接口名查找已分配的 IP
     pub fn get_by_id(&self, id: &str, ifname: &str) -> anyhow::Result<Vec<IpAddr>> {
-        let text_match = format!("{}{}{}", id, LINE_BREAK, ifname);
+        let text_match = format!("{id}{LINE_BREAK}{ifname}");
         let mut result = Vec::new();
 
         // 遍历目录下的所有文件
@@ -84,13 +84,11 @@ impl Store {
             .create_new(true)
             .mode(0o600) // 设置文件权限为 rw-------
             .open(&file_path)?;
-        let content = format!("{}{}{}", id, LINE_BREAK, ifname);
+        let content = format!("{id}{LINE_BREAK}{ifname}");
         f.write_all(content.as_bytes())?;
 
         // 更新 last_reserved_ip 记录
-        let last_ip_file = self
-            .path
-            .join(format!("{}{}", LAST_IPFILE_PREFIX, range_id));
+        let last_ip_file = self.path.join(format!("{LAST_IPFILE_PREFIX}{range_id}"));
         std::fs::write(last_ip_file, ip.to_string())?;
 
         Ok(true)
@@ -98,9 +96,7 @@ impl Store {
 
     // 获取指定范围最后分配的 IP
     pub fn last_reserved_ip(&self, range_id: &str) -> Option<IpAddr> {
-        let last_ip_file = self
-            .path
-            .join(format!("{}{}", LAST_IPFILE_PREFIX, range_id));
+        let last_ip_file = self.path.join(format!("{LAST_IPFILE_PREFIX}{range_id}"));
         std::fs::read_to_string(last_ip_file)
             .ok()
             .and_then(|s| s.parse().ok())
@@ -109,7 +105,7 @@ impl Store {
     // 根据容器 ID 和接口名释放 IP
     pub fn release_by_id(&self, id: &str, ifname: &str) -> anyhow::Result<bool> {
         let _lock = self.new_lock()?; // 加锁确保原子性
-        let text_match = format!("{}{}{}", id, LINE_BREAK, ifname);
+        let text_match = format!("{id}{LINE_BREAK}{ifname}");
         let mut found = false;
 
         for entry in std::fs::read_dir(&self.path)? {

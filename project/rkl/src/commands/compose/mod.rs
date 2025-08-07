@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env::{self},
     fs::{self, File, read_dir, remove_dir_all, remove_file},
     path::{Path, PathBuf},
 };
@@ -8,12 +8,16 @@ use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
 use liboci_cli::{Delete, List};
 use serde_json::json;
+use tracing::debug;
 
 use crate::{
     ComposeCommand, DownArgs, PsArgs, UpArgs,
     commands::{
-        compose::{network::NetworkManager, spec::ComposeSpec, volume::VolumeManager},
-        container::ContainerRunner,
+        compose::{
+            config::ConfigManager, network::NetworkManager, spec::ComposeSpec,
+            volume::VolumeManager,
+        },
+        container::{ContainerRunner, remove_container},
         delete, list,
     },
     rootpath::{self},
@@ -23,6 +27,7 @@ use crate::{
 type ComposeAction = Box<dyn FnOnce(&mut ComposeManager) -> Result<()>>;
 
 // pub mod config;
+pub mod config;
 pub mod network;
 pub mod service;
 pub mod spec;
@@ -32,8 +37,10 @@ pub struct ComposeManager {
     /// the path to store the basic info of compose application
     root_path: PathBuf,
     project_name: String,
+    containers: Vec<State>,
     network_manager: NetworkManager,
     volume_manager: VolumeManager,
+    config_manager: ConfigManager,
 }
 
 impl ComposeManager {
@@ -46,8 +53,10 @@ impl ComposeManager {
         Ok(Self {
             root_path,
             network_manager: NetworkManager::new(project_name.clone()),
+            config_manager: ConfigManager::new(),
             volume_manager: VolumeManager::new(),
             project_name,
+            containers: vec![],
         })
     }
 
@@ -61,6 +70,11 @@ impl ComposeManager {
     }
 
     fn clean_up(&self) -> Result<()> {
+        // delete container
+        for container in &self.containers {
+            remove_container(&self.root_path, container)?;
+        }
+
         fs::remove_dir_all(&self.root_path)
             .map_err(|e| anyhow!("failed to delete the whole project: {}", e))
     }
@@ -88,16 +102,16 @@ impl ComposeManager {
 
         let _ = &mut self.volume_manager.handle(&spec)?;
 
+        let _ = &mut self.config_manager.handle(&spec);
+
         // start the whole containers
-        let states = match self.run(&spec) {
-            std::result::Result::Ok(states) => states,
-            Err(_) => {
-                self.clean_up().ok();
-                return Err(anyhow!("failed to up"));
-            }
-        };
+        if let Err(err) = self.run(&spec) {
+            self.clean_up().ok();
+            return Err(anyhow!("failed to up: {}", err));
+        }
+
         // store the spec info into a .json file
-        self.persist_compose_state(states)?;
+        self.persist_compose_state()?;
 
         println!("Project {} starts successfully", self.project_name);
         Ok(())
@@ -109,10 +123,10 @@ impl ComposeManager {
     /// "containers": [ {} {},],
     /// ""
     ///}
-    fn persist_compose_state(&self, states: Vec<State>) -> Result<()> {
+    fn persist_compose_state(&self) -> Result<()> {
         let obj = json!({
             "project_name": self.project_name,
-            "containers": states
+            "containers": &self.containers
         });
         let json_str = serde_json::to_string_pretty(&obj)?;
 
@@ -133,15 +147,11 @@ impl ComposeManager {
         Ok(spec)
     }
 
-    fn run(&self, _: &ComposeSpec) -> Result<Vec<State>> {
-        let mut states: Vec<State> = vec![];
-
+    fn run(&mut self, _: &ComposeSpec) -> Result<()> {
         let network_mapping = self.network_manager.network_service_mapping();
 
         for (network_name, services) in network_mapping {
-            println!("Creating network: {}", network_name);
-
-            // let mut parent_container_pid = String::from("");
+            println!("Creating network: {network_name}");
 
             for (srv_name, srv) in services.into_iter() {
                 let container_ports = map_port_style(srv.ports.clone())?;
@@ -160,18 +170,30 @@ impl ComposeManager {
                 // generate the volumes Mount
                 let volumes = VolumeManager::map_to_mount(srv.volumes.clone())?;
 
+                debug!("get mount: {:#?}", volumes);
+
+                //  setup the network_conf file
+                self.network_manager
+                    .setup_network_conf(&network_name)
+                    .map_err(|e| {
+                        anyhow!(
+                            "Service [{}] create network Config file failed: {}",
+                            srv_name,
+                            e
+                        )
+                    })?;
+                // get config
+                let configs_mounts = self.config_manager.get_mounts_by_service(&srv_name);
+
                 let mut runner =
                     ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
-                // TODO: if there are parent_container_pid
-                // let mut runner = if parent_container_pid.is_empty() {
-                // } else {
-                //     return Err(anyhow!("Panic"));
-                // };
 
                 runner.add_mounts(volumes);
+                runner.add_mounts(configs_mounts);
+
                 match runner.run() {
                     std::result::Result::Ok(_) => {
-                        states.push(runner.get_container_state()?);
+                        self.containers.push(runner.get_container_state()?);
                     }
                     Err(err) => {
                         // create one container failed delete others
@@ -180,7 +202,7 @@ impl ComposeManager {
                             runner.get_container_id()?,
                             err
                         );
-                        for state in &states {
+                        for state in &self.containers {
                             if let Err(err) = delete(
                                 Delete {
                                     container_id: state.id.clone(),
@@ -199,7 +221,7 @@ impl ComposeManager {
             }
         }
         // return the compose application's state
-        Ok(states)
+        Ok(())
     }
 
     fn ps(&self, ps_args: PsArgs) -> Result<()> {
@@ -209,24 +231,28 @@ impl ComposeManager {
             quiet: false,
         };
 
-        // now the self.project_name is the current_env
-        if !self.root_path.exists() {
+        let target_path = if !self.root_path.exists() {
             let yml_file = get_yml_path(compose_yaml)?;
             let spec = self.read_spec(yml_file)?;
             match spec.name {
-                Some(name) => {
-                    let new_path = self.get_root_path_by_name(name)?;
-                    list(list_arg, new_path)?;
-                    Ok(())
-                }
-                None => Err(anyhow!("Invalid Compose Spec (no project name is set)")),
+                Some(name) => self.get_root_path_by_name(name)?,
+                None => return Err(anyhow!("Invalid Compose Spec (no project name is set)")),
             }
         } else {
-            // use the cur_dir first
-            // list all the containers
-            list(list_arg, self.root_path.clone())
-        }
+            self.root_path.clone()
+        };
+
+        list(list_arg, target_path).map_err(|e| {
+            if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                if io_err.kind() == std::io::ErrorKind::NotFound {
+                    return anyhow!("There is no running compose application");
+                }
+            }
+            // Fallback for other errors, ensuring all list errors are handled consistently
+            anyhow!("Failed to list compose containers: {}", e)
+        })
     }
+
     /// if the `container_name` field is not supplied then create a random container_name
     /// for the service container
     pub fn generate_container_name(&self, srv_name: &String) -> String {
@@ -236,7 +262,7 @@ impl ComposeManager {
             .and_then(|os_str| os_str.to_str())
             .unwrap_or("unknown");
         let timestamp = chrono::Utc::now().timestamp() % 1000; // persist 4 bits
-        format!("{}_{}_{}", root, srv_name, timestamp)
+        format!("{root}_{srv_name}_{timestamp}")
     }
 }
 
@@ -470,10 +496,10 @@ networks:
         assert_eq!(mapped.len(), 2);
         assert_eq!(mapped[0].host_path, "./tmp/mount/dir");
         assert_eq!(mapped[0].container_path, "/app/data");
-        assert_eq!(mapped[0].read_only, true);
+        assert!(mapped[0].read_only);
         assert_eq!(mapped[1].host_path, "/home/erasernoob/data");
         assert_eq!(mapped[1].container_path, "/app/data2");
-        assert_eq!(mapped[1].read_only, false);
+        assert!(!mapped[1].read_only);
     }
 
     #[test]

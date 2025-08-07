@@ -33,8 +33,8 @@ pub async fn user_create(
             let pod_yaml = match serde_yaml::to_string(&pod_task) {
                 Ok(yaml) => yaml,
                 Err(e) => {
-                    eprintln!("[user dispatch] Failed to serialize pod task: {}", e);
-                    let response = RksMessage::Error(format!("Serialization error: {}", e));
+                    eprintln!("[user dispatch] Failed to serialize pod task: {e}");
+                    let response = RksMessage::Error(format!("Serialization error: {e}"));
                     let data = bincode::serialize(&response).unwrap_or_else(|_| vec![]);
                     if let Ok(mut stream) = conn.open_uni().await {
                         stream.write_all(&data).await?;

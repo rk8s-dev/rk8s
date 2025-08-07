@@ -23,6 +23,8 @@ pub async fn watch_delete(
                         stream.write_all(&data).await?;
                         stream.finish()?;
                     }
+                    let _ = xline_store.delete_pod(&pod_name).await;
+                    println!("[user dispatch] deleted pod: {pod_name}");
                     break;
                 }
             }
@@ -33,13 +35,10 @@ pub async fn watch_delete(
 
 pub async fn user_delete(
     pod_name: String,
-    xline_store: &Arc<XlineStore>,
+    _xline_store: &Arc<XlineStore>,
     conn: &Connection,
     tx: &broadcast::Sender<RksMessage>,
 ) -> Result<()> {
-    let _ = xline_store.delete_pod(&pod_name).await;
-    println!("[user dispatch] deleted pod: {}", pod_name);
-
     let _ = tx.send(RksMessage::DeletePod(pod_name.clone()));
 
     let response = RksMessage::Ack;

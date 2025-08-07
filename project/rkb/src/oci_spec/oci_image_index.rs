@@ -19,7 +19,7 @@ impl OciImageIndex {
                 .size(*size)
                 .digest(
                     Sha256Digest::from_str(digest_str.as_str())
-                        .with_context(|| format!("Invalid digest format: {}", digest_str))?,
+                        .with_context(|| format!("Invalid digest format: {digest_str}"))?,
                 )
                 .annotations(
                     vec![(
@@ -30,7 +30,7 @@ impl OciImageIndex {
                     .collect::<HashMap<_, _>>(),
                 )
                 .build()
-                .with_context(|| format!("Failed to build manifest descriptor {}", digest_str))?;
+                .with_context(|| format!("Failed to build manifest descriptor {digest_str}"))?;
 
             descriptors.push(descriptor);
         }

@@ -49,7 +49,7 @@ pub fn exec_run_in_subprocess(
         Ok(ForkResult::Child) => match do_child_work(mount_config, commands, envp) {
             Ok(_) => std::process::exit(0),
             Err(e) => {
-                eprintln!("Sub process error: {}", e);
+                eprintln!("Sub process error: {e}");
                 std::process::exit(1);
             }
         },
@@ -113,7 +113,7 @@ pub fn exec_copy_in_subprocess<P: AsRef<Path>, Q: AsRef<Path>>(
         Ok(ForkResult::Child) => match do_child_work(mount_config, src, dest) {
             Ok(_) => std::process::exit(0),
             Err(e) => {
-                eprintln!("Sub process error: {}", e);
+                eprintln!("Sub process error: {e}");
                 std::process::exit(1);
             }
         },

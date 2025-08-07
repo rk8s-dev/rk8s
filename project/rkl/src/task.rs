@@ -122,7 +122,7 @@ impl TaskRunner {
 
         for container in &mut task.spec.containers {
             let original_name = container.name.clone();
-            container.name = format!("{}-{}", pod_name, original_name);
+            container.name = format!("{pod_name}-{original_name}");
         }
 
         Ok(TaskRunner {
@@ -283,7 +283,7 @@ impl TaskRunner {
         let mut cni = get_cni()?;
         cni.load_default_conf();
 
-        let netns_path = format!("/proc/{}/ns/net", pid);
+        let netns_path = format!("/proc/{pid}/ns/net");
         let id = pid.to_string();
 
         cni.setup(id.clone(), netns_path.clone())
@@ -391,19 +391,19 @@ impl TaskRunner {
         let namespaces = vec![
             LinuxNamespaceBuilder::default()
                 .typ(LinuxNamespaceType::Pid)
-                .path(format!("/proc/{}/ns/pid", pause_pid))
+                .path(format!("/proc/{pause_pid}/ns/pid"))
                 .build()?,
             LinuxNamespaceBuilder::default()
                 .typ(LinuxNamespaceType::Network)
-                .path(format!("/proc/{}/ns/net", pause_pid))
+                .path(format!("/proc/{pause_pid}/ns/net"))
                 .build()?,
             LinuxNamespaceBuilder::default()
                 .typ(LinuxNamespaceType::Ipc)
-                .path(format!("/proc/{}/ns/ipc", pause_pid))
+                .path(format!("/proc/{pause_pid}/ns/ipc"))
                 .build()?,
             LinuxNamespaceBuilder::default()
                 .typ(LinuxNamespaceType::Uts)
-                .path(format!("/proc/{}/ns/uts", pause_pid))
+                .path(format!("/proc/{pause_pid}/ns/uts"))
                 .build()?,
             LinuxNamespaceBuilder::default()
                 .typ(LinuxNamespaceType::Mount)
@@ -450,7 +450,7 @@ impl TaskRunner {
             return Err(anyhow!("Bundle directory does not exist"));
         }
         // write into config.json
-        let config_path = format!("{}/config.json", bundle_path);
+        let config_path = format!("{bundle_path}/config.json");
         if Path::new(&config_path).exists() {
             fs::remove_file(&config_path)
                 .map_err(|e| anyhow!("Failed to remove existing config.json: {}", e))?;

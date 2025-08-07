@@ -14,7 +14,7 @@ fn main() {
     match parse::execute(&build_args) {
         Ok(_) => {}
         Err(build_error) => {
-            eprintln!("{:?}", build_error);
+            eprintln!("{build_error:?}");
             std::process::exit(1);
         }
     }

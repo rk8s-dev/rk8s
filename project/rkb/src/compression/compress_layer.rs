@@ -59,7 +59,7 @@ fn create_tar(source_path: &Path, tar_path: &Path) -> Result<()> {
         let entry = match entry_result {
             Ok(entry) => entry,
             Err(err) => {
-                eprintln!("Error in walkdir: {}", err);
+                eprintln!("Error in walkdir: {err}");
                 continue;
             }
         };
@@ -141,7 +141,7 @@ fn append_dir(
     let dir_name = if name.ends_with('/') {
         name.to_string()
     } else {
-        format!("{}/", name)
+        format!("{name}/")
     };
     header.set_path(&dir_name)?;
     header.set_size(0);

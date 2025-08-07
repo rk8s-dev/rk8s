@@ -52,11 +52,48 @@ impl InodeStore {
                 .insert(handle.file_handle().clone(), data.inode);
         }
         self.data.insert(data.inode, data);
+        // trace!("inserting data for inodedata {:?}", data);
+        // if let Some(old_inode) = self.by_id.insert(data.id, data.inode) {
+        //     warn!(
+        //         "overwriting `by_id` entry for {:?}. Old inode: {}, new inode: {}",
+        //         data.id,
+        //         old_inode,
+        //         data.inode
+        //     );
+        // }
+
+        // if let InodeHandle::Handle(handle) = &data.handle {
+        //     if let Some(old_inode) = self
+        //         .by_handle
+        //         .insert(handle.file_handle().clone(), data.inode)
+        //     {
+        //         warn!(
+        //             "overwriting `by_handle` entry. Old inode: {}, new inode: {}",
+        //             old_inode,
+        //             data.inode
+        //         );
+        //     }
+        // }
+
+        // if let Some(old_data) = self.data.insert(data.inode, data.clone()) {
+        //     warn!(
+        //         "overwriting `data` entry for inode {}. Old id: {:?}, new id: {:?}",
+        //         data.inode,
+        //         old_data.id,
+        //         data.id
+        //     );
+        // }
+        // assert!(
+        //     self.data.contains_key(&data.inode),
+        //     "Data for inode {} not found after insertion",
+        //     data.inode
+        // );
     }
 
     /// Remove an inode from the manager, keeping the (key, ino) mapping if `remove_data_only` is true.
     #[allow(unused)]
     pub fn remove(&mut self, inode: &Inode, remove_data_only: bool) -> Option<Arc<InodeData>> {
+        // trace!("removing inode: {}, remove_data_only: {}", inode, remove_data_only);
         let data = self.data.remove(inode);
         if remove_data_only {
             // Don't remove by_id and by_handle, we need use it to store inode
@@ -81,6 +118,11 @@ impl InodeStore {
     }
 
     pub fn get(&self, inode: &Inode) -> Option<&Arc<InodeData>> {
+        // let res = self.data.get(inode);
+        // if res.is_none() {
+        //     trace!("get: inode {} not found", inode);
+        // }
+        // res
         self.data.get(inode)
     }
 
@@ -90,7 +132,9 @@ impl InodeStore {
     }
 
     pub fn get_by_handle(&self, handle: &FileHandle) -> Option<&Arc<InodeData>> {
+        // trace!("get_by_handle trying to get: handle={:?}", handle);
         let inode = self.inode_by_handle(handle)?;
+        // trace!("get_by_handle got: handle={:?}, inode={}", handle, inode);
         self.get(inode)
     }
 
@@ -118,7 +162,7 @@ mod test {
     //         if self.inode != other.inode
     //             || self.id != other.id
     //             || self.mode != other.mode
-    //             || self.refcount.load(Ordering::Relaxed) != other.refcount.load(Ordering::Relaxed)
+    //             || self.refcount.load(Ordering::Acquire) != other.refcount.load(Ordering::Acquire)
     //         {
     //             return false;
     //         }

@@ -215,11 +215,7 @@ async fn make_veth(
             Ok(veth) => return Ok((peer_name, veth)),
             Err(e) => {
                 log::error!(
-                    "Attempt {}/10: Failed to create veth pair - {:?}. Peer: {}, Container: {}",
-                    attempt,
-                    e,
-                    peer_name,
-                    container_veth_name
+                    "Attempt {attempt}/10: Failed to create veth pair - {e:?}. Peer: {peer_name}, Container: {container_veth_name}"
                 );
             }
         }
@@ -255,8 +251,7 @@ async fn make_veth_pair(
         "Current namespace does not match the target container namespace"
     );
     info!(
-        "Creating veth pair: container_veth_name={}, host_veth_name={}",
-        container_veth_name, host_veth_name
+        "Creating veth pair: container_veth_name={container_veth_name}, host_veth_name={host_veth_name}"
     );
 
     // Initialize the veth pair

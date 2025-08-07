@@ -289,7 +289,7 @@ mod test {
         assert_eq!(*p, 514);
         drop(p);
         let p = state.get::<u64>().await;
-        matches!(p, None);
+        p.is_none();
     }
 
     #[tokio::test]
@@ -300,23 +300,26 @@ mod test {
         assert_eq!(sync_loop.event_handlers.len(), 2);
         assert_eq!(sync_loop.event_listen_list.len(), 0);
         assert_eq!(sync_loop.event_listeners.len(), 2);
-        matches!(sync_loop.event_handlers.get(&TypeId::of::<Tick>()), Some(_));
-        matches!(
-            sync_loop.event_handlers.get(&TypeId::of::<Nothing>()),
-            Some(_)
-        );
-        matches!(
-            sync_loop.event_listeners.get(&TypeId::of::<Tick>()),
-            Some(_)
-        );
-        matches!(
-            sync_loop.event_listeners.get(&TypeId::of::<Nothing>()),
-            Some(_)
-        );
+        sync_loop
+            .event_handlers
+            .get(&TypeId::of::<Tick>())
+            .is_some();
+        sync_loop
+            .event_handlers
+            .get(&TypeId::of::<Nothing>())
+            .is_some();
+        sync_loop
+            .event_listeners
+            .get(&TypeId::of::<Tick>())
+            .is_some();
+        sync_loop
+            .event_listeners
+            .get(&TypeId::of::<Nothing>())
+            .is_some();
         sync_loop.gen_event_list();
         assert_eq!(sync_loop.event_listen_list.len(), 2);
         let mut ids = Vec::new();
-        while sync_loop.event_listen_list.len() != 0 {
+        while !sync_loop.event_listen_list.is_empty() {
             let (data, _, remain) = select_all(sync_loop.event_listen_list).await;
             ids.push(data.0);
             sync_loop.event_listen_list = remain;

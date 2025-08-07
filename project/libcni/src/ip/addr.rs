@@ -56,7 +56,7 @@ pub enum ReqType {
 pub async fn addr_add(index: u32, address: IpAddr, prefix_len: u8) -> anyhow::Result<()> {
     let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
     let address_handle = handle.address();
-    debug!("container ip add :{}", address);
+    debug!("container ip add :{address}");
     address_handle
         .add(index, address, prefix_len)
         .execute()
@@ -175,8 +175,8 @@ mod tests {
             16, // prefix_len
         )
         .await;
-        println!("Result: {:?}", result);
-        assert!(result.is_ok(), "addr_add failed with error: {:?}", result);
+        println!("Result: {result:?}");
+        assert!(result.is_ok(), "addr_add failed with error: {result:?}");
     }
 
     #[tokio::test]
@@ -189,22 +189,22 @@ mod tests {
             16, // prefix_len
         )
         .await;
-        println!("res: {:?}", res);
+        println!("res: {res:?}");
     }
 
     #[tokio::test]
     async fn test_addr_list() {
         let link = link::link_by_name("vethhost").await.unwrap();
         let result = addr_list(link.header.index, AddressFamily::Inet).await;
-        println!("result: {:?}", result);
+        println!("result: {result:?}");
         match result {
             Ok(result) => {
                 for addr in result {
-                    info!("result: {:?}", addr);
+                    info!("result: {addr:?}");
                 }
             }
             Err(err) => {
-                info!("err: {:?}", err);
+                info!("err: {err:?}");
             }
         }
     }

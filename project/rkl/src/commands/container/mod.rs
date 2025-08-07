@@ -12,7 +12,9 @@ use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use libcontainer::container::{Container, State, state};
 use liboci_cli::{Create, Delete, List, Start};
+use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
+use oci_spec::runtime::{Mount as OciMount, MountBuilder};
 use std::{fmt::Write as _, io};
 use std::{
     fs::{self, File},
@@ -137,6 +139,7 @@ impl ContainerRunner {
             .clone()
             .build();
 
+        debug!("Get Config: {:?}", config);
         self.config = Some(config);
         Ok(())
     }
@@ -148,9 +151,16 @@ impl ContainerRunner {
             .as_ref()
             .ok_or_else(|| anyhow!("Container's Config is required"))?;
 
-        let mut spec = Spec::default();
+        debug!("Get Config: {:#?}", config);
 
-        // use the default namesapce configuration
+        let mut spec = Spec::default();
+        // let root = RootBuilder::default()
+        //     .readonly(false)
+        //     .build()
+        //     .unwrap_or_default();
+        // spec.set_root(Some(root));
+
+        // use the default namespace configuration
         let namespaces = get_default_namespaces();
 
         let mut linux: LinuxBuilder = LinuxBuilder::default().namespaces(namespaces);
@@ -162,7 +172,7 @@ impl ContainerRunner {
         let linux = linux.build()?;
         spec.set_linux(Some(linux));
 
-        // build the procss path
+        // build the process path
         let mut process = ProcessBuilder::default()
             .args(self.spec.args.clone())
             .build()?;
@@ -170,8 +180,16 @@ impl ContainerRunner {
         let mut capabilities = process.capabilities().clone().unwrap();
         // add the CAP_NET_RAW
         add_cap_net_raw(&mut capabilities);
+
         process.set_capabilities(Some(capabilities));
+
         spec.set_process(Some(process));
+
+        let mut mounts = convert_oci_mounts(&config.mounts)?;
+        let existing_mounts = spec.mounts().clone().unwrap_or_default();
+        mounts.extend(existing_mounts);
+        spec.set_mounts(Some(mounts));
+
         Ok(spec)
     }
 
@@ -192,7 +210,7 @@ impl ContainerRunner {
             return Err(anyhow!("Bundle directory does not exist"));
         }
 
-        let config_path = format!("{}/config.json", bundle_path);
+        let config_path = format!("{bundle_path}/config.json");
         if Path::new(&config_path).exists() {
             std::fs::remove_file(&config_path).map_err(|e| {
                 anyhow!(
@@ -230,11 +248,9 @@ impl ContainerRunner {
             .ok_or_else(|| anyhow!("get container {} pid failed", self.container_id))?;
         cni.load_default_conf();
 
-        println!("Get container PID: {}", container_pid);
-
         cni.setup(
             self.container_id.clone(),
-            format!("/proc/{}/ns/net", container_pid),
+            format!("/proc/{container_pid}/ns/net"),
         )
         .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))?;
         Ok(())
@@ -269,6 +285,43 @@ impl ContainerRunner {
                 Ok(StartContainerResponse {})
             }
         }
+    }
+}
+
+fn convert_oci_mounts(mounts: &Vec<Mount>) -> Result<Vec<OciMount>> {
+    let mut oci_mounts: Vec<OciMount> = vec![];
+    for mount in mounts {
+        let oci_mount = MountBuilder::default()
+            .typ(determine_mount_type(&mount.host_path))
+            .destination(&mount.container_path)
+            .source(&mount.host_path)
+            .options(build_mount_options(mount))
+            .build()?;
+        oci_mounts.push(oci_mount);
+    }
+    Ok(oci_mounts)
+}
+
+fn build_mount_options(mount: &Mount) -> Vec<String> {
+    let mut options = vec![];
+
+    if mount.readonly {
+        options.push("ro".to_string());
+    } else {
+        options.push("rw".to_string());
+    }
+
+    options.push("rbind".to_string());
+
+    // TODO: more options
+    options
+}
+
+fn determine_mount_type(host_path: &str) -> String {
+    match host_path {
+        "proc" => "proc".to_string(),
+        "tmpfs" => "tmpfs".to_string(),
+        _ => "bind".to_string(), // default is the bind
     }
 }
 
@@ -319,11 +372,41 @@ pub fn delete_container(id: &str) -> Result<()> {
         container_id: id.to_string(),
         force: true,
     };
+    // delete the network
+    let container = load_container(&root_path, id)?;
+    let pid = container
+        .pid()
+        .ok_or(anyhow!("invalid container {} can't find pid", id))?;
+    remove_container_network(pid)?;
+
     delete(delete_args, root_path)?;
 
     Ok(())
 }
 
+pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
+    let delete_args = Delete {
+        container_id: state.id.clone(),
+        force: true,
+    };
+    let pid = state
+        .pid
+        .ok_or(anyhow!("failed to get pid of container {}", &state.id))?;
+    // delete the network
+    remove_container_network(Pid::from_raw(pid))?;
+    delete(delete_args, root_path.to_path_buf())?;
+    Ok(())
+}
+
+pub fn remove_container_network(pid: Pid) -> Result<()> {
+    let mut cni = get_cni()?;
+    cni.load_default_conf();
+    let netns_path = format!("/proc/{pid}/ns/net");
+    let id = pid.to_string();
+    cni.remove(id, netns_path.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to remove CNI network: {}", e))?;
+    Ok(())
+}
 pub fn start_container(container_id: &str) -> Result<()> {
     let runner = ContainerRunner::from_container_id(container_id, None)?;
     runner.start_container(Some(container_id.to_string()))?;
@@ -415,7 +498,9 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
         ContainerCommand::List { quiet, format } => list_container(quiet, format),
         ContainerCommand::Exec(exec) => {
             // root_path => default directory
-            let exit_code = exec_container(*exec, None)?;
+            // to support enter the container created by compose-style
+            let exit_code =
+                exec_container((*exec).clone(), exec.root_path.as_ref().map(PathBuf::from))?;
             std::process::exit(exit_code)
         }
     }

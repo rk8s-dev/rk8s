@@ -59,7 +59,7 @@ impl<'m> StageExecutor<'m> {
     pub fn execute(&mut self, stage: &Stage<'_>, config: &StageExecutorConfig) -> Result<()> {
         for instruction in stage.instructions.iter() {
             self.execute_instruction(instruction, config)
-                .with_context(|| format!("Failed to execute instruction {:?}", instruction))?;
+                .with_context(|| format!("Failed to execute instruction {instruction:?}"))?;
         }
         Ok(())
     }
@@ -70,7 +70,7 @@ impl<'m> StageExecutor<'m> {
         instruction: &Instruction,
         config: &StageExecutorConfig,
     ) -> Result<()> {
-        println!("Executing instruction: {:?}", instruction);
+        println!("Executing instruction: {instruction:?}");
         match instruction {
             Instruction::From(from_instruction) => {
                 self.execute_from_instruction(from_instruction)?;
@@ -130,7 +130,7 @@ impl<'m> StageExecutor<'m> {
         // TODO: remove this
         let ubuntu_base = "/home/yu/layers/lower";
         let src = fs::canonicalize(ubuntu_base)
-            .with_context(|| format!("Failed to canonicalize {}", ubuntu_base))?;
+            .with_context(|| format!("Failed to canonicalize {ubuntu_base}"))?;
         copy_dir(src, self.mount_config.overlay.join("lower"))?;
         self.mount_config
             .lower_dir
@@ -183,7 +183,7 @@ impl<'m> StageExecutor<'m> {
             .image_config
             .envp
             .iter()
-            .map(|(k, v)| CString::new(format!("{}={}", k, v)).unwrap())
+            .map(|(k, v)| CString::new(format!("{k}={v}")).unwrap())
             .collect();
 
         self.mount_config.prepare()?;

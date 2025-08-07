@@ -90,7 +90,7 @@ impl Executor {
 
         stage_executor
             .execute(stage, &self.stage_executor_config)
-            .with_context(|| format!("Failed to execute stage {:?}", stage))?;
+            .with_context(|| format!("Failed to execute stage {stage:?}"))?;
         Ok(())
     }
 }

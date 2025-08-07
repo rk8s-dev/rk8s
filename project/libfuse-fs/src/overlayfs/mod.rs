@@ -58,7 +58,7 @@ pub(crate) struct RealInode {
 }
 
 // OverlayInode must be protected by lock, it can be operated by multiple threads.
-#[derive(Default)]
+// #[derive(Default)]
 pub(crate) struct OverlayInode {
     // Inode hash table, map from 'name' to 'OverlayInode'.
     pub childrens: Mutex<HashMap<String, Arc<OverlayInode>>>,
@@ -74,6 +74,8 @@ pub(crate) struct OverlayInode {
     pub whiteout: AtomicBool,
     // Directory is loaded.
     pub loaded: AtomicBool,
+    // hard link counter(nlink), init as 1
+    pub nlink: AtomicU64,
 }
 
 #[derive(Default)]
@@ -139,7 +141,7 @@ impl RealInode {
                 ri.stat = v;
             }
             Err(e) => {
-                error!("stat64 failed during RealInode creation: {}", e);
+                error!("stat64 failed during RealInode creation: {e}");
             }
         }
         ri
@@ -150,6 +152,7 @@ impl RealInode {
         if self.inode == 0 {
             return Err(Error::from_raw_os_error(libc::ENOENT));
         }
+        // trace!("stat64: trying to getattr req: {:?}", req);
         layer
             .getattr(*req, self.inode, None, 0)
             .await
@@ -242,7 +245,7 @@ impl RealInode {
         if self.whiteout {
             return Err(Error::from_raw_os_error(libc::ENOENT));
         }
-
+        // trace!("readdir: before stat");
         let stat = match self.stat.clone() {
             Some(v) => v,
             None => self.stat64(&ctx).await?,
@@ -258,6 +261,7 @@ impl RealInode {
             .layer
             .opendir(ctx, self.inode, libc::O_RDONLY as u32)
             .await;
+        // trace!("readdir: after opendir");
         let handle = match opendir_res {
             Ok(handle) => handle,
 
@@ -291,7 +295,7 @@ impl RealInode {
 
         // Lookup all child and construct "RealInode"s.
         let child_real_inodes = Arc::new(Mutex::new(HashMap::new()));
-
+        // trace!("readdir: before iter childrens");
         let a_map = child_names.entries.map(|entery| async {
             match entery {
                 Ok(dire) => {
@@ -300,6 +304,7 @@ impl RealInode {
                         // Skip . and .. entries.
                         return Ok(());
                     }
+                    // trace!("readdir: before lookup child: dname={}", dname);
                     if let Some(child) = self.lookup_child(ctx, &dname).await? {
                         child_real_inodes.lock().await.insert(dname, child);
                     }
@@ -314,7 +319,7 @@ impl RealInode {
         let re = Arc::try_unwrap(child_real_inodes)
             .map_err(|_| Errno::new_not_exist())?
             .into_inner();
-
+        // trace!("readdir: return");
         Ok(re)
     }
 
@@ -491,7 +496,18 @@ impl Drop for RealInode {
 
 impl OverlayInode {
     pub fn new() -> Self {
-        OverlayInode::default()
+        Self {
+            childrens: Mutex::new(HashMap::new()),
+            parent: Mutex::new(Weak::new()),
+            real_inodes: Mutex::new(vec![]),
+            inode: 0,
+            path: RwLock::new(String::new()),
+            name: RwLock::new(String::new()),
+            lookups: AtomicU64::new(0),
+            whiteout: AtomicBool::new(false),
+            loaded: AtomicBool::new(false),
+            nlink: AtomicU64::new(1),
+        }
     }
     // Allocate new OverlayInode based on one RealInode,
     // inode number is always 0 since only OverlayFs has global unique inode allocator.
@@ -967,8 +983,9 @@ impl OverlayFs {
         self.insert_inode(self.root_inode(), Arc::clone(&root_node))
             .await;
 
-        info!("loading root directory\n");
+        info!("loading root directory");
         self.load_directory(ctx, &root_node).await?;
+        info!("loaded root directory");
 
         Ok(())
     }
@@ -1022,9 +1039,26 @@ impl OverlayFs {
         }
 
         // Parent inode is expected to be loaded before this function is called.
+        // TODO: Is this correct?
         let pnode = match self.get_active_inode(parent).await {
             Some(v) => v,
-            None => return Err(Error::from_raw_os_error(libc::ENOENT)),
+            None => {
+                match self.get_all_inode(parent).await {
+                    Some(v) => {
+                        trace!(
+                            "overlayfs:mod.rs:1031:lookup_node: parent inode {parent} is deleted"
+                        );
+                        v
+                    }
+                    None => {
+                        trace!(
+                            "overlayfs:mod.rs:1034:lookup_node: parent inode {parent} not found"
+                        );
+                        // Parent inode is not found, return ENOENT.
+                        return Err(Error::from_raw_os_error(libc::ENOENT));
+                    }
+                }
+            }
         };
 
         // Parent is whiteout-ed, return ENOENT.
@@ -1051,7 +1085,10 @@ impl OverlayFs {
         match pnode.child(name).await {
             // Child is found.
             Some(v) => Ok(v),
-            None => Err(Error::from_raw_os_error(libc::ENOENT)),
+            None => {
+                trace!("lookup_node: child {name} not found");
+                Err(Error::from_raw_os_error(libc::ENOENT))
+            }
         }
     }
 
@@ -1076,12 +1113,14 @@ impl OverlayFs {
 
     // Load entries of the directory from all layers, if node is not directory, return directly.
     async fn load_directory(&self, ctx: Request, node: &Arc<OverlayInode>) -> Result<()> {
-        if node.loaded.load(Ordering::Acquire) {
+        if node.loaded.load(Ordering::Relaxed) {
             return Ok(());
         }
 
         // We got all childrens without inode.
+        // info!("before scan childrens, ctx: {:?}, node: {:?}", ctx, node.inode);
         let childrens = node.scan_childrens(ctx).await?;
+        // info!("scanned children");
 
         // =============== Start Lock Area ===================
         // Lock OverlayFs inodes.
@@ -1095,6 +1134,7 @@ impl OverlayFs {
         }
 
         // Now we have two locks' protection, Fs inodes lock and OverlayInode's childrens lock.
+        // info!("before iter childrens");
         for mut child in childrens.into_iter() {
             // Allocate inode for each child.
             let ino = inode_store.alloc_inode(&child.path.read().await)?;
@@ -1109,6 +1149,7 @@ impl OverlayFs {
             // Record overlay inode in whole OverlayFs.
             inode_store.insert_inode(ino, arc_child).await;
         }
+        // info!("after iter childrens");
 
         node.loaded.store(true, Ordering::Relaxed);
 
@@ -1123,7 +1164,7 @@ impl OverlayFs {
         let v = match self.get_all_inode(inode).await {
             Some(n) => n,
             None => {
-                trace!("forget unknown inode: {}", inode);
+                trace!("forget unknown inode: {inode}");
                 return;
             }
         };
@@ -1166,6 +1207,7 @@ impl OverlayFs {
 
     async fn do_lookup(&self, ctx: Request, parent: Inode, name: &str) -> Result<ReplyEntry> {
         let node = self.lookup_node(ctx, parent, name).await?;
+        debug!("do_lookup: {name:?}, found");
 
         if node.whiteout.load(Ordering::Relaxed) {
             eprintln!("Error: node.whiteout.load() called.");
@@ -1274,8 +1316,15 @@ impl OverlayFs {
     ) -> Result<<OverlayFs as rfuse3::raw::Filesystem>::DirEntryPlusStream<'a>> {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
-            Some(dir) => dir.node.clone(),
+            Some(dir) => {
+                trace!(
+                    "do_readdirplus: handle {} found, inode {}",
+                    handle, dir.node.inode
+                );
+                dir.node.clone()
+            }
             None => {
+                trace!("do_readdirplus: handle {handle} not found, lookup inode {inode}");
                 // Try to get data with inode.
                 let node = self.lookup_node(ctx, inode, ".").await?;
 
@@ -1335,6 +1384,7 @@ impl OverlayFs {
 
         Ok(iter(d.into_iter()))
     }
+
     async fn do_mkdir(
         &self,
         ctx: Request,
@@ -1693,18 +1743,18 @@ impl OverlayFs {
             return Err(Error::from_raw_os_error(libc::EPERM));
         }
 
-        // Ensure new_name does not exist in new_parent
-        // Check if new_name exists in new_parent
-        if let Some(existing_node) = self
-            .lookup_node_ignore_enoent(req, new_parent, new_name_str)
-            .await?
-        {
-            // If the node exists and is not whiteout, return EEXIST
-            if !existing_node.whiteout.load(Ordering::Relaxed) {
-                return Err(Error::from_raw_os_error(libc::EEXIST));
-            }
-            // If it's a whiteout, allow rename to proceed (overwrite whiteout)
-        }
+        // // Ensure new_name does not exist in new_parent
+        // // Check if new_name exists in new_parent
+        // if let Some(existing_node) = self
+        //     .lookup_node_ignore_enoent(req, new_parent, new_name_str)
+        //     .await?
+        // {
+        //     // If the node exists and is not whiteout, return EEXIST
+        //     if !existing_node.whiteout.load(Ordering::Acquire) {
+        //         return Err(Error::from_raw_os_error(libc::EEXIST));
+        //     }
+        //     // If it's a whiteout, allow rename to proceed (overwrite whiteout)
+        // }
 
         let src_node = parent_node
             .child(name_str)
@@ -1791,6 +1841,7 @@ impl OverlayFs {
             .await?
         {
             Some(n) => {
+                // trace!("do_link: found existing node with name '{}'", name);
                 // Node with same name exists, let's check if it's whiteout.
                 if !n.whiteout.load(Ordering::Relaxed) {
                     return Err(Error::from_raw_os_error(libc::EEXIST));
@@ -1827,7 +1878,7 @@ impl OverlayFs {
             }
             None => {
                 // Copy parent node up if necessary.
-                let new_node: Arc<Mutex<Option<OverlayInode>>> = Arc::new(Mutex::new(None));
+                // trace!("do_link: no existing node found, creating new link");
                 new_parent
                     .handle_upper_inode_locked(
                         &mut |parent_real_inode: Option<Arc<RealInode>>| async {
@@ -1839,26 +1890,19 @@ impl OverlayFs {
                                 }
                             };
 
-                            // Allocate inode number.
-                            let path = format!("{}/{}", new_parent.path.read().await, name);
-                            let ino = self.alloc_inode(&path).await?;
-                            let child_ri = parent_real_inode.link(ctx, src_ino, name).await?;
-                            let ovi =
-                                OverlayInode::new_from_real_inode(name, ino, path, child_ri).await;
+                            parent_real_inode.link(ctx, src_ino, name).await?;
 
-                            new_node.lock().await.replace(ovi);
                             Ok(false)
                         },
                     )
                     .await?;
 
-                // new_node is always 'Some'
-                let arc_node = Arc::new(new_node.lock().await.take().unwrap());
-                self.insert_inode(arc_node.inode, arc_node.clone()).await;
-                new_parent.insert_child(name, arc_node).await;
+                // Points to the same node as src_node.
+                new_parent.insert_child(name, Arc::clone(&src_node)).await;
             }
         }
 
+        src_node.nlink.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -2030,6 +2074,10 @@ impl OverlayFs {
 
         let st = node.stat64(ctx).await?;
         let (lower_layer, _, lower_inode) = node.first_layer_inode().await;
+        trace!(
+            "copy_regfile_up: node {} in lower layer's inode {}",
+            node.inode, lower_inode
+        );
 
         if !parent_node.in_upper_layer().await {
             parent_node.clone().create_upper_dir(ctx, None).await?;
@@ -2057,6 +2105,11 @@ impl OverlayFs {
                         flags.try_into().unwrap(),
                     )
                     .await?;
+                trace!(
+                    "copy_regfile_up: created upper file {} with inode {}",
+                    node.name.read().await,
+                    inode.inode
+                );
                 *upper_handle.lock().await = h.unwrap_or(0);
                 upper_real_inode.lock().await.replace(inode);
                 Ok(false)
@@ -2093,19 +2146,21 @@ impl OverlayFs {
 
         _offset = 0;
         let u_handle = *upper_handle.lock().await;
-        while let Some(ref ri) = upper_real_inode.lock().await.take() {
-            let ret = ri
+        let ri = upper_real_inode.lock().await.take();
+        if let Some(ri) = ri {
+            // loop {
+            let res = ri
                 .layer
                 .write(ctx, ri.inode, u_handle, _offset as u64, &ret.data, 0, 0)
                 .await?;
-            if ret.written == 0 {
-                break;
-            }
+            //     if ret.written == 0 {
+            //         break;
+            //     }
+            //     trace!("write {} bytes to upper layer", ret.written);
 
-            _offset += ret.written as usize;
-        }
-
-        if let Some(ri) = upper_real_inode.lock().await.take() {
+            //     _offset += ret.written as usize;
+            // }
+            assert!(res.written as usize == ret.data.len());
             if let Err(e) = ri.layer.release(ctx, ri.inode, u_handle, 0, 0, true).await {
                 let e: std::io::Error = e.into();
                 // Ignore ENOSYS.
@@ -2113,12 +2168,12 @@ impl OverlayFs {
                     return Err(e);
                 }
             }
-
-            // update upper_inode and first_inode()
             node.add_upper_inode(ri, true).await;
+        } else {
+            error!("BUG: upper real inode is None after copy up");
         }
 
-        Ok(node)
+        Ok(Arc::clone(&node))
     }
 
     /// Copies the specified node to the upper layer of the filesystem
@@ -2212,16 +2267,20 @@ impl OverlayFs {
     }
 
     async fn do_rm(&self, ctx: Request, parent: u64, name: &OsStr, dir: bool) -> Result<()> {
+        // 1. Read-only mount guard
         if self.upper_layer.is_none() {
             return Err(Error::from_raw_os_error(libc::EROFS));
         }
 
+        // 2. Locate the parent Overlay Inode.
         // Find parent Overlay Inode.
         let pnode = self.lookup_node(ctx, parent, "").await?;
         if pnode.whiteout.load(Ordering::Relaxed) {
             return Err(Error::from_raw_os_error(libc::ENOENT));
         }
         let to_name = name.to_str().unwrap();
+
+        // 3. Locate the child Overlay Inode for the given name
         // Find the Overlay Inode for child with <name>.
         let node = self.lookup_node(ctx, parent, to_name).await?;
         if node.whiteout.load(Ordering::Relaxed) {
@@ -2229,10 +2288,11 @@ impl OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOENT));
         }
 
+        // 4. If removing a directory, ensure it is empty of real entries
         if dir {
             self.load_directory(ctx, &node).await?;
             let (count, whiteouts) = node.count_entries_and_whiteout(ctx).await?;
-            trace!("entries: {}, whiteouts: {}\n", count, whiteouts);
+            trace!("entries: {count}, whiteouts: {whiteouts}\n");
             if count > 0 {
                 return Err(Error::from_raw_os_error(libc::ENOTEMPTY));
             }
@@ -2245,6 +2305,8 @@ impl OverlayFs {
             trace!("whiteouts deleted!\n");
         }
 
+        // 5. Decide whether we need to create a whiteout entry
+        // We'll filp this off if upper-layer unlink suffices or parent is opaque
         let need_whiteout = AtomicBool::new(true);
         let pnode = self.copy_node_up(ctx, Arc::clone(&pnode)).await?;
 
@@ -2252,8 +2314,14 @@ impl OverlayFs {
             need_whiteout.store(false, Ordering::Relaxed);
         }
 
+        // 6. Decrement the FUSE lookup (open handle) counter on this node
         // lookups decrease by 1.
-        node.lookups.fetch_sub(1, Ordering::Relaxed);
+        let origin = node.lookups.fetch_sub(1, Ordering::Relaxed);
+        trace!(
+            "overlay:do_rm: node {} sub lookups to {}",
+            node.inode,
+            origin - 1
+        );
         let mut df = |parent_upper_inode: Option<Arc<RealInode>>| async {
             let parent_real_inode = parent_upper_inode.ok_or_else(|| {
                 error!(
@@ -2282,26 +2350,53 @@ impl OverlayFs {
             Ok(false)
         };
 
+        // 7. Perform the unlink/rmdir operation if the node exists in upper layer
+        // decrement hardlink count
+        let prev_nlink = node.nlink.fetch_sub(1, Ordering::Relaxed);
+        let remaining_links = prev_nlink.saturating_sub(1);
+        let open_handles = node.lookups.load(Ordering::Relaxed);
         if node.in_upper_layer().await {
+            // run upper-layer remove + maybe remove overlay inode + remove child
             let hh = pnode.handle_upper_inode_locked(&mut df);
-            // remove it from hashmap
-            let node_name = node.name.read().await.clone();
-            let (h1, _, _) = tokio::join!(
+            let (res, _, _) = tokio::join!(
                 hh,
-                self.remove_inode(node.inode, Some(node.path.read().await.clone())),
-                pnode.remove_child(&node_name),
+                async {
+                    if remaining_links == 0 && open_handles == 0 {
+                        self.remove_inode(node.inode, Some(node.path.read().await.clone()))
+                            .await
+                            .unwrap();
+                    } else {
+                        trace!(
+                            "in upper layer, defer remove_inode {}, links={}, open_handles={}",
+                            node.inode, remaining_links, open_handles
+                        );
+                    }
+                    Ok::<(), Error>(())
+                },
+                pnode.remove_child(name.to_str().unwrap()),
             );
-            h1?;
+            res?;
         } else {
-            let node_name = node.name.read().await.clone();
-            tokio::join!(
-                self.remove_inode(node.inode, None),
-                pnode.remove_child(&node_name)
+            // no upper layer entry: only lower layer, so no real fn unlink here
+            let _ = tokio::join!(
+                async {
+                    if remaining_links == 0 && open_handles == 0 {
+                        self.remove_inode(node.inode, None).await.unwrap();
+                    } else {
+                        trace!(
+                            "not in upper layer, defer remove_inode {}, links={}, open_handles={}",
+                            node.inode, remaining_links, open_handles
+                        );
+                    }
+                    Ok::<(), Error>(())
+                },
+                pnode.remove_child(name.to_str().unwrap()),
             );
         }
 
+        // 8. If needed, create a entry in the upper layer to mask lower-layer files
         if need_whiteout.load(Ordering::Relaxed) {
-            println!("do_rm: creating whiteout\n");
+            trace!("do_rm: creating whiteout\n");
             // pnode is copied up, so it has upper layer.
             pnode
                 .handle_upper_inode_locked(
@@ -2346,13 +2441,22 @@ impl OverlayFs {
             .get_data(ctx, Some(handle), inode, libc::O_RDONLY as u32)
             .await?;
 
+        trace!("do_fsync: got data for handle: {handle}, inode:{inode}");
+
         match data.real_handle {
             // FIXME: need to test if inode matches corresponding handle?
-            None => Err(Error::from_raw_os_error(libc::ENOENT)),
+            None => {
+                trace!("do_fsync: no real handle found for handle: {handle}, inode:{inode}");
+                Err(Error::from_raw_os_error(libc::ENOENT))
+            }
             Some(ref rh) => {
                 let real_handle = rh.handle.load(Ordering::Relaxed);
                 // TODO: check if it's in upper layer? @weizhang555
                 if syncdir {
+                    trace!(
+                        "do_fsync: layer.fsyncdir called for handle: {}, inode:{}; rh.inode: {}, real_handle: {}",
+                        handle, inode, rh.inode, real_handle
+                    );
                     rh.layer
                         .fsyncdir(ctx, rh.inode, real_handle, datasync)
                         .await
@@ -2429,11 +2533,17 @@ impl OverlayFs {
     ) -> Result<(Arc<BoxedLayer>, Inode, Handle)> {
         match self.handles.lock().await.get(&handle) {
             Some(h) => match h.real_handle {
-                Some(ref rhd) => Ok((
-                    rhd.layer.clone(),
-                    rhd.inode,
-                    rhd.handle.load(Ordering::Relaxed),
-                )),
+                Some(ref rhd) => {
+                    trace!(
+                        "find_real_info_from_handle: layer in upper: {}",
+                        rhd.in_upper_layer
+                    );
+                    Ok((
+                        rhd.layer.clone(),
+                        rhd.inode,
+                        rhd.handle.load(Ordering::Relaxed),
+                    ))
+                }
                 None => Err(Error::from_raw_os_error(libc::ENOENT)),
             },
 
@@ -2443,6 +2553,10 @@ impl OverlayFs {
 
     async fn find_real_inode(&self, inode: Inode) -> Result<(Arc<BoxedLayer>, Inode)> {
         if let Some(n) = self.get_active_inode(inode).await {
+            let (first_layer, _, first_inode) = n.first_layer_inode().await;
+            return Ok((first_layer, first_inode));
+        } else if let Some(n) = self.get_all_inode(inode).await {
+            trace!("find_real_inode: found inode by get_all_inode: {}", n.inode);
             let (first_layer, _, first_inode) = n.first_layer_inode().await;
             return Ok((first_layer, first_inode));
         }
@@ -2462,6 +2576,7 @@ impl OverlayFs {
             if let Some(h) = handle {
                 if let Some(v) = self.handles.lock().await.get(&h) {
                     if v.node.inode == inode {
+                        // trace!("get_data: found handle");
                         return Ok(Arc::clone(v));
                     }
                 }
@@ -2569,11 +2684,13 @@ pub async fn mount_fs(
 
     // Mount filesystem based on privilege flag and return the mount handle
     if !not_unprivileged {
+        println!("Mounting with unprivileged mode");
         Session::new(mount_options)
             .mount_with_unprivileged(logfs, mount_path)
             .await
             .expect("Unprivileged mount failed")
     } else {
+        println!("Mounting with privileged mode");
         Session::new(mount_options)
             .mount(logfs, mount_path)
             .await

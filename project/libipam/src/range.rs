@@ -103,7 +103,7 @@ impl IpRangeExt for IpRange {
             .map(|ip| ip.to_string())
             .unwrap_or_else(|| "<nil>".to_string());
 
-        format!("{}-{}", start_str, end_str)
+        format!("{start_str}-{end_str}")
     }
 
     fn default_range() -> Self {

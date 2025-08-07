@@ -258,7 +258,7 @@ pub fn filetype_from_mode(st_mode: u32) -> FileType {
         libc::S_IFLNK => FileType::Symlink,
         libc::S_IFSOCK => FileType::Socket,
         _ => {
-            error!("wrong st mode : {}", st_mode);
+            error!("wrong st mode : {st_mode}");
             unreachable!();
         }
     }

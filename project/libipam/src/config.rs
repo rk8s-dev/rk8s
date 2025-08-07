@@ -94,6 +94,6 @@ mod tests {
 }
         "#;
         let ipam_config: Net = serde_json::from_str(str).unwrap();
-        println!("{:?}", ipam_config)
+        println!("{ipam_config:?}")
     }
 }
