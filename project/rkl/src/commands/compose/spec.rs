@@ -44,7 +44,7 @@ pub struct ServiceSpec {
     pub command: Vec<String>,
 
     #[serde(default)]
-    pub configs: Option<ConfigSpec>,
+    pub configs: Option<Vec<ConfigSpec>>,
 
     #[serde(default)]
     pub secrets: Option<Vec<String>>,
@@ -68,7 +68,7 @@ pub struct ConfigSpec {
     pub target: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigsSpec {
     #[serde(default)]

@@ -14,6 +14,7 @@ use libcontainer::container::{Container, State, state};
 use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
+use oci_spec::runtime::{Mount as OciMount, MountBuilder};
 use std::{fmt::Write as _, io};
 use std::{
     fs::{self, File},
@@ -138,6 +139,7 @@ impl ContainerRunner {
             .clone()
             .build();
 
+        debug!("Get Config: {:?}", config);
         self.config = Some(config);
         Ok(())
     }
@@ -149,9 +151,16 @@ impl ContainerRunner {
             .as_ref()
             .ok_or_else(|| anyhow!("Container's Config is required"))?;
 
-        let mut spec = Spec::default();
+        debug!("Get Config: {:#?}", config);
 
-        // use the default namesapce configuration
+        let mut spec = Spec::default();
+        // let root = RootBuilder::default()
+        //     .readonly(false)
+        //     .build()
+        //     .unwrap_or_default();
+        // spec.set_root(Some(root));
+
+        // use the default namespace configuration
         let namespaces = get_default_namespaces();
 
         let mut linux: LinuxBuilder = LinuxBuilder::default().namespaces(namespaces);
@@ -163,7 +172,7 @@ impl ContainerRunner {
         let linux = linux.build()?;
         spec.set_linux(Some(linux));
 
-        // build the procss path
+        // build the process path
         let mut process = ProcessBuilder::default()
             .args(self.spec.args.clone())
             .build()?;
@@ -171,8 +180,16 @@ impl ContainerRunner {
         let mut capabilities = process.capabilities().clone().unwrap();
         // add the CAP_NET_RAW
         add_cap_net_raw(&mut capabilities);
+
         process.set_capabilities(Some(capabilities));
+
         spec.set_process(Some(process));
+
+        let mut mounts = convert_oci_mounts(&config.mounts)?;
+        let existing_mounts = spec.mounts().clone().unwrap_or_default();
+        mounts.extend(existing_mounts);
+        spec.set_mounts(Some(mounts));
+
         Ok(spec)
     }
 
@@ -271,6 +288,43 @@ impl ContainerRunner {
     }
 }
 
+fn convert_oci_mounts(mounts: &Vec<Mount>) -> Result<Vec<OciMount>> {
+    let mut oci_mounts: Vec<OciMount> = vec![];
+    for mount in mounts {
+        let oci_mount = MountBuilder::default()
+            .typ(determine_mount_type(&mount.host_path))
+            .destination(&mount.container_path)
+            .source(&mount.host_path)
+            .options(build_mount_options(mount))
+            .build()?;
+        oci_mounts.push(oci_mount);
+    }
+    Ok(oci_mounts)
+}
+
+fn build_mount_options(mount: &Mount) -> Vec<String> {
+    let mut options = vec![];
+
+    if mount.readonly {
+        options.push("ro".to_string());
+    } else {
+        options.push("rw".to_string());
+    }
+
+    options.push("rbind".to_string());
+
+    // TODO: more options
+    options
+}
+
+fn determine_mount_type(host_path: &str) -> String {
+    match host_path {
+        "proc" => "proc".to_string(),
+        "tmpfs" => "tmpfs".to_string(),
+        _ => "bind".to_string(), // default is the bind
+    }
+}
+
 pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     // read the container_spec bytes to container_spec struct
     let mut runner = ContainerRunner::from_file(path)?;
@@ -297,6 +351,8 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
         }
     }
 }
+
+// pub fn convert_oci_mounts()
 
 pub fn is_container_exist(id: &str, root_path: &PathBuf) -> Result<()> {
     let _ = load_container(root_path, id)?;
@@ -444,7 +500,10 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
         ContainerCommand::List { quiet, format } => list_container(quiet, format),
         ContainerCommand::Exec(exec) => {
             // root_path => default directory
-            let exit_code = exec_container(*exec, None)?;
+            let exit_code = exec_container(
+                (*exec).clone(),
+                exec.root_path.as_ref().map(|p| PathBuf::from(p)),
+            )?;
             std::process::exit(exit_code)
         }
     }

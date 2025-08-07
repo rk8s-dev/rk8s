@@ -8,11 +8,15 @@ use anyhow::{Ok, Result, anyhow};
 use libcontainer::container::State;
 use liboci_cli::{Delete, List};
 use serde_json::json;
+use tracing::debug;
 
 use crate::{
     ComposeCommand, DownArgs, PsArgs, UpArgs,
     commands::{
-        compose::{network::NetworkManager, spec::ComposeSpec, volume::VolumeManager},
+        compose::{
+            config::ConfigManager, network::NetworkManager, spec::ComposeSpec,
+            volume::VolumeManager,
+        },
         container::{ContainerRunner, remove_container},
         delete, list,
     },
@@ -23,6 +27,7 @@ use crate::{
 type ComposeAction = Box<dyn FnOnce(&mut ComposeManager) -> Result<()>>;
 
 // pub mod config;
+pub mod config;
 pub mod network;
 pub mod service;
 pub mod spec;
@@ -35,6 +40,7 @@ pub struct ComposeManager {
     containers: Vec<State>,
     network_manager: NetworkManager,
     volume_manager: VolumeManager,
+    config_manager: ConfigManager,
 }
 
 impl ComposeManager {
@@ -47,6 +53,7 @@ impl ComposeManager {
         Ok(Self {
             root_path,
             network_manager: NetworkManager::new(project_name.clone()),
+            config_manager: ConfigManager::new(),
             volume_manager: VolumeManager::new(),
             project_name,
             containers: vec![],
@@ -94,6 +101,8 @@ impl ComposeManager {
         let _ = &mut self.network_manager.handle(&spec)?;
 
         let _ = &mut self.volume_manager.handle(&spec)?;
+
+        let _ = &mut self.config_manager.handle(&spec);
 
         // start the whole containers
         if let Err(err) = self.run(&spec) {
@@ -160,6 +169,9 @@ impl ComposeManager {
 
                 // generate the volumes Mount
                 let volumes = VolumeManager::map_to_mount(srv.volumes.clone())?;
+
+                debug!("get mount: {:#?}", volumes);
+
                 //  setup the network_conf file
                 self.network_manager
                     .setup_network_conf(&network_name)
@@ -170,11 +182,14 @@ impl ComposeManager {
                             e
                         )
                     })?;
+                // get config
+                let configs_mounts = self.config_manager.get_mounts_by_service(&srv_name);
 
                 let mut runner =
                     ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
 
                 runner.add_mounts(volumes);
+                runner.add_mounts(configs_mounts);
 
                 match runner.run() {
                     std::result::Result::Ok(_) => {
