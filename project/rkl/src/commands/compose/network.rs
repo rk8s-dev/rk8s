@@ -50,7 +50,7 @@ pub struct CliNetworkConfig {
     /// IPAM type（like host-local, static, etc.）
     #[serde(default)]
     pub ipam_type: Option<String>,
-    /// IPAM configuration's file path（可选）
+    /// IPAM configuration's file path（Optional）
     #[serde(default)]
     pub ipam_config: Option<String>,
     /// enable hairpin mod

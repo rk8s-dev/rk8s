@@ -352,8 +352,6 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     }
 }
 
-// pub fn convert_oci_mounts()
-
 pub fn is_container_exist(id: &str, root_path: &PathBuf) -> Result<()> {
     let _ = load_container(root_path, id)?;
     Ok(())

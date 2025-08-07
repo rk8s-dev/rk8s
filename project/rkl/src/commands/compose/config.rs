@@ -29,7 +29,6 @@ impl ConfigManager {
         }
     }
 
-    /// 处理 ComposeSpec，填充 configs_map 和每个 service 的 config 映射 mount 信息
     pub fn handle(&mut self, spec: &ComposeSpec) {
         if let Some(configs) = &spec.configs {
             self.configs_map = configs.clone();
