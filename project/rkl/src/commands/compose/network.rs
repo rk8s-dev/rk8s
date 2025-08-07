@@ -29,16 +29,16 @@ pub struct CliNetworkConfig {
     /// the `type` in JSON
     #[serde(rename = "type")]
     pub plugin: String,
-    /// network'sname
+    /// network's name
     #[serde(default)]
     pub name: String,
     /// bridge interface' s name (default cni0）
     #[serde(default)]
     pub bridge: String,
-    /// wheather this network should be set the container's default gateway
+    /// whether this network should be set the container's default gateway
     #[serde(default)]
     pub is_default_gateway: Option<bool>,
-    /// wheather the bridge should at as a gateway
+    /// whether the bridge should at as a gateway
     #[serde(default)]
     pub is_gateway: Option<bool>,
     /// Maximum Transmission Unit (MTU) to set on the bridge interface
