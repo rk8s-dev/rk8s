@@ -72,9 +72,6 @@ pub async fn addr_del(index: u32, address: IpAddr) -> anyhow::Result<()> {
     let mut req = address_handle.get().set_address_filter(address);
     let msg = req.message_mut();
     msg.header.index = index;
-    //let mut address_message = AddressMessage::default();
-    //address_message.header.index = index;
-    //address_handle.del(address_message).execute().await?;
     address_handle.del(msg.clone()).execute().await?;
     Ok(())
 }
