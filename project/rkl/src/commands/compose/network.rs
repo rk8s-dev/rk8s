@@ -66,10 +66,11 @@ pub struct CliNetworkConfig {
 
 impl CliNetworkConfig {
     pub fn from_name_bridge(network_name: &str, bridge: &str) -> Self {
-        let mut default_conf = Self::default();
-        default_conf.bridge = bridge.to_string();
-        default_conf.name = network_name.to_string();
-        default_conf
+        Self {
+            bridge: bridge.to_string(),
+            name: network_name.to_string(),
+            ..Default::default()
+        }
     }
 }
 

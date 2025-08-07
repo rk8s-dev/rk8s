@@ -15,6 +15,12 @@ pub struct ConfigManager {
     service_config_mounts: HashMap<String, Vec<ConfigMountInfo>>,
 }
 
+impl Default for ConfigManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigManager {
     pub fn new() -> Self {
         Self {

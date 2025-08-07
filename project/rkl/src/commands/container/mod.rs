@@ -386,7 +386,7 @@ pub fn delete_container(id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn remove_container(root_path: &PathBuf, state: &State) -> Result<()> {
+pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
     let delete_args = Delete {
         container_id: state.id.clone(),
         force: true,
@@ -500,10 +500,9 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
         ContainerCommand::List { quiet, format } => list_container(quiet, format),
         ContainerCommand::Exec(exec) => {
             // root_path => default directory
-            let exit_code = exec_container(
-                (*exec).clone(),
-                exec.root_path.as_ref().map(|p| PathBuf::from(p)),
-            )?;
+            // to support enter the container created by compose-style
+            let exit_code =
+                exec_container((*exec).clone(), exec.root_path.as_ref().map(PathBuf::from))?;
             std::process::exit(exit_code)
         }
     }
