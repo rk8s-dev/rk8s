@@ -413,7 +413,7 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     phantom: PhantomData<S>,
 
-    handle_cache: RwLock<LruCache<String, Arc<FileHandle>>>,
+    handle_cache: RwLock<LruCache<InodeId, Arc<FileHandle>>>,
 }
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
@@ -475,7 +475,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             phantom: PhantomData,
 
-            handle_cache: RwLock::new(LruCache::new(NonZero::new(1024).unwrap())),
+            handle_cache: RwLock::new(LruCache::new(NonZero::new(65536).unwrap())),
         })
     }
 
@@ -608,7 +608,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
         let st = statx::statx(&path_file, None)?;
 
-        let key = format!("{}:{}", st.st.st_dev, st.st.st_ino);
+        let key=InodeId::from_stat(&st);
         let handle = {
             let mut cache = self.handle_cache.write().await;
             if let Some(h) = cache.get(&key) {
