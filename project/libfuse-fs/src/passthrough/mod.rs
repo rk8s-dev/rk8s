@@ -61,7 +61,6 @@ pub async fn new_passthroughfs_layer(rootdir: &str) -> Result<PassthroughFs> {
         // enable xattr`
         xattr: true,
         do_import: true,
-        inode_file_handles: true,
         ..Default::default()
     };
 
@@ -483,7 +482,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     pub async fn import(&self) -> Result<()> {
         let root = CString::new(self.cfg.root_dir.as_str()).expect("CString::new failed");
 
-        let (path_fd, handle_opt, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root).await
+        let (path_fd, handle_opt, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root)
+            .await
             .map_err(|e| {
                 error!("fuse: import: failed to get file or handle: {e:?}");
                 e
@@ -608,19 +608,17 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
         let st = statx::statx(&path_file, None)?;
 
-        let key=InodeId::from_stat(&st);
+        let key = InodeId::from_stat(&st);
         let handle = {
             let mut cache = self.handle_cache.write().await;
             if let Some(h) = cache.get(&key) {
                 Some((**h).clone())
+            } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
+                let handle_arc = Arc::new(handle_from_fd.clone());
+                cache.put(key, handle_arc);
+                Some(handle_from_fd)
             } else {
-                if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
-                    let handle_arc = Arc::new(handle_from_fd.clone());
-                    cache.put(key, handle_arc);
-                    Some(handle_from_fd)
-                } else {
-                    None
-                }
+                None
             }
         };
 
@@ -969,11 +967,11 @@ mod tests {
 
     #[tokio::test]
     async fn bench_open_file_and_handle() {
+        use super::*;
         use std::env;
         use std::ffi::CString;
         use std::fs::{self, File};
         use std::time::Instant;
-        use super::*;
 
         // create a temporary directory for testing
         let temp_dir = env::temp_dir().join("bench_open_file_and_handle");
@@ -988,7 +986,9 @@ mod tests {
         File::create(&file_path).unwrap();
 
         // initialize PassthroughFs
-        let fs = new_passthroughfs_layer(temp_dir.to_str().unwrap()).await.unwrap();
+        let fs = new_passthroughfs_layer(temp_dir.to_str().unwrap())
+            .await
+            .unwrap();
         let c_name = CString::new("test_file").unwrap();
         let dir_fd = File::open(temp_dir).unwrap();
 
@@ -1005,7 +1005,10 @@ mod tests {
         println!("Second open (cache hit): {:?}", second_duration);
 
         // validate that the second open is faster than the first
-        assert!(second_duration < first_duration, "Cache hit should be faster");
+        assert!(
+            second_duration < first_duration,
+            "Cache hit should be faster"
+        );
 
         // clean up
         fs::remove_dir_all(temp_dir).unwrap();
