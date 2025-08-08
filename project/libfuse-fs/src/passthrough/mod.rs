@@ -966,4 +966,48 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn bench_open_file_and_handle() {
+        use std::env;
+        use std::ffi::CString;
+        use std::fs::{self, File};
+        use std::time::Instant;
+        use super::*;
+
+        // create a temporary directory for testing
+        let temp_dir = env::temp_dir().join("bench_open_file_and_handle");
+        let temp_dir = temp_dir.as_path();
+        if temp_dir.exists() {
+            // ensure the directory is empty
+            fs::remove_dir_all(temp_dir).unwrap();
+        }
+        fs::create_dir_all(temp_dir).unwrap();
+
+        let file_path = temp_dir.join("test_file");
+        File::create(&file_path).unwrap();
+
+        // initialize PassthroughFs
+        let fs = new_passthroughfs_layer(temp_dir.to_str().unwrap()).await.unwrap();
+        let c_name = CString::new("test_file").unwrap();
+        let dir_fd = File::open(temp_dir).unwrap();
+
+        // Firest open (cache miss)
+        let start = Instant::now();
+        let (_, _, _) = fs.open_file_and_handle(&dir_fd, &c_name).await.unwrap();
+        let first_duration = start.elapsed();
+        println!("First open (cache miss): {:?}", first_duration);
+
+        // Second open (cache hit)
+        let start = Instant::now();
+        let (_, _, _) = fs.open_file_and_handle(&dir_fd, &c_name).await.unwrap();
+        let second_duration = start.elapsed();
+        println!("Second open (cache hit): {:?}", second_duration);
+
+        // validate that the second open is faster than the first
+        assert!(second_duration < first_duration, "Cache hit should be faster");
+
+        // clean up
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 }
