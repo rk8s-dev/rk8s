@@ -1,6 +1,6 @@
 # rfuse3
 an async version fuse library for rust
-This project contains code derived from [rfuse3](https://github.com/Sherlock-Holo/rfuse3)
+This project contains code derived from [fuse3](https://github.com/Sherlock-Holo/fuse3)
 Enhanced and optimized async FUSE implementation.
 
 [![Cargo](https://img.shields.io/crates/v/rfuse3.svg)](
