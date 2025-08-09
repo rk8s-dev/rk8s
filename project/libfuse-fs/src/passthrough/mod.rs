@@ -213,15 +213,12 @@ impl InodeMap {
     fn get_inode_locked(
         inodes: &InodeStore,
         id: &InodeId,
-        handle: Option<&FileHandle>,
+        handle: &Arc<FileHandle>,
     ) -> Option<Inode> {
-        match handle {
-            Some(h) => inodes.inode_by_handle(h).copied(),
-            None => inodes.inode_by_id(id).copied(),
-        }
+        inodes.inode_by_handle(handle).copied()
     }
 
-    async fn get_alt(&self, id: &InodeId, handle: Option<&FileHandle>) -> Option<Arc<InodeData>> {
+    async fn get_alt(&self, id: &InodeId, handle: &Arc<FileHandle>) -> Option<Arc<InodeData>> {
         // Do not expect poisoned lock here, so safe to unwrap().
         let inodes = self.inodes.read().await;
 
@@ -231,10 +228,11 @@ impl InodeMap {
     fn get_alt_locked(
         inodes: &InodeStore,
         id: &InodeId,
-        handle: Option<&FileHandle>,
+        handle: &Arc<FileHandle>,
     ) -> Option<Arc<InodeData>> {
-        handle
-            .and_then(|h| inodes.get_by_handle(h))
+        inodes
+            .get_by_handle(handle)
+            .or_else(|| inodes.get_by_id(id))
             .or_else(|| {
                 inodes.get_by_id(id).filter(|data| {
                     // When we have to fall back to looking up an inode by its IDs, ensure that
@@ -245,7 +243,7 @@ impl InodeMap {
                     // inode ID.
                     // (This can happen when we look up a new file that has reused the inode ID
                     // of some previously unlinked inode we still have in `.inodes`.)
-                    handle.is_none() || data.handle.file_handle().is_none()
+                    data.handle.file_handle().is_none()
                 })
             })
             .cloned()
@@ -482,18 +480,14 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     pub async fn import(&self) -> Result<()> {
         let root = CString::new(self.cfg.root_dir.as_str()).expect("CString::new failed");
 
-        let (path_fd, handle_opt, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root)
+        let (h, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root)
             .await
             .map_err(|e| {
                 error!("fuse: import: failed to get file or handle: {e:?}");
                 e
             })?;
         let id = InodeId::from_stat(&st);
-        let handle = if let Some(h) = handle_opt {
-            InodeHandle::Handle(self.to_openable_handle(h)?)
-        } else {
-            InodeHandle::File(path_fd)
-        };
+        let handle = InodeHandle::Handle(self.to_openable_handle(h)?);
 
         // Safe because this doesn't modify any memory and there is no need to check the return
         // value because this system call always succeeds. We need to clear the umask here because
@@ -604,57 +598,68 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         &self,
         dir: &impl AsRawFd,
         name: &CStr,
-    ) -> io::Result<(File, Option<FileHandle>, StatExt)> {
+    ) -> io::Result<(Arc<FileHandle>, StatExt)> {
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
         let st = statx::statx(&path_file, None)?;
 
         let key = InodeId::from_stat(&st);
-        let handle = {
+        let handle_arc = {
             let mut cache = self.handle_cache.write().await;
-            if let Some(h) = cache.get(&key) {
-                Some((**h).clone())
+            if let Some(h) = cache.get(&key).cloned() {
+                h
             } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
-                let handle_arc = Arc::new(handle_from_fd.clone());
-                cache.put(key, handle_arc);
-                Some(handle_from_fd)
+                let handle_arc = Arc::new(handle_from_fd);
+                cache.put(key, Arc::clone(&handle_arc));
+                handle_arc
             } else {
-                None
+                return Err(Error::new(io::ErrorKind::NotFound, "File not found"));
             }
         };
 
-        Ok((path_file, handle, st))
+        // let handle = {
+        //     if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
+        //         handle_from_fd
+        //     } else {
+        //         return Err(Error::new(io::ErrorKind::NotFound, "File not found"));
+        //     }
+        // };
+        // let handle_arc = Arc::new(handle);
+
+        Ok((handle_arc, st))
     }
 
-    fn to_openable_handle(&self, fh: FileHandle) -> io::Result<Arc<OpenableFileHandle>> {
-        fh.into_openable(&self.mount_fds, |fd, flags, _mode| {
-            reopen_fd_through_proc(&fd, flags, &self.proc_self_fd)
-        })
-        .map(Arc::new)
-        .map_err(|e| {
-            if !e.silent() {
-                error!("{e}");
-            }
-            e.into_inner()
-        })
+    fn to_openable_handle(&self, fh: Arc<FileHandle>) -> io::Result<Arc<OpenableFileHandle>> {
+        (*Arc::as_ref(&fh))
+            .clone()
+            .into_openable(&self.mount_fds, |fd, flags, _mode| {
+                reopen_fd_through_proc(&fd, flags, &self.proc_self_fd)
+            })
+            .map(Arc::new)
+            .map_err(|e| {
+                if !e.silent() {
+                    error!("{e}");
+                }
+                e.into_inner()
+            })
     }
 
     async fn allocate_inode(
         &self,
         inodes: &InodeStore,
         id: &InodeId,
-        handle_opt: Option<&FileHandle>,
+        handle: &Arc<FileHandle>,
     ) -> io::Result<Inode> {
         if !self.cfg.use_host_ino {
             // If the inode has already been assigned before, the new inode is not reassigned,
             // ensuring that the same file is always the same inode
-            match InodeMap::get_inode_locked(inodes, id, handle_opt) {
+            match InodeMap::get_inode_locked(inodes, id, handle) {
                 Some(a) => Ok(a),
                 None => Ok(self.next_inode.fetch_add(1, Ordering::Relaxed)),
             }
         } else {
             let inode = if id.ino > MAX_HOST_INO {
                 // Prefer looking for previous mappings from memory
-                match InodeMap::get_inode_locked(inodes, id, handle_opt) {
+                match InodeMap::get_inode_locked(inodes, id, handle) {
                     Some(ino) => ino,
                     None => self.ino_allocator.get_unique_inode(id)?,
                 }
@@ -680,14 +685,14 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let dir = self.inode_map.get(parent).await?;
         let dir_file = dir.get_file()?;
-        let (path_fd, handle_opt, st) = self.open_file_and_handle(&dir_file, name).await?;
+        let (handle_arc, st) = self.open_file_and_handle(&dir_file, name).await?;
         let id = InodeId::from_stat(&st);
-        // trace!("FS {} do_lookup: parent: {}, name: {}, path_fd: {:?}, handle_opt: {:?}, id: {:?}",
-        // self.uuid, parent, name.to_string_lossy(), path_fd.as_raw_fd(), handle_opt, id);
+        // trace!("FS {} do_lookup: parent: {}, name: {}, path_fd: {:?}, handle: {:?}, id: {:?}",
+        // self.uuid, parent, name.to_string_lossy(), path_fd.as_raw_fd(), handle_arc, id);
 
         let mut found = None;
         'search: loop {
-            match self.inode_map.get_alt(&id, handle_opt.as_ref()).await {
+            match self.inode_map.get_alt(&id, &handle_arc).await {
                 // No existing entry found
                 None => break 'search,
                 Some(data) => {
@@ -716,11 +721,10 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let inode = if let Some(v) = found {
             v
         } else {
-            let handle = if let Some(h) = handle_opt.clone() {
-                InodeHandle::Handle(self.to_openable_handle(h)?)
-            } else {
-                InodeHandle::File(path_fd)
-            };
+            // Clone handle_arc before moving it
+            let handle_arc_clone = Arc::clone(&handle_arc);
+            let handle_clone =
+                InodeHandle::Handle(self.to_openable_handle(Arc::clone(&handle_arc))?);
 
             // Write guard get_alt_locked() and insert_lock() to avoid race conditions.
             let mut inodes = self.inode_map.inodes.write().await;
@@ -730,7 +734,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             // the lock. If so just use the newly added inode, otherwise the inode will be replaced
             // and results in EBADF.
             // trace!("FS {} looking up inode for id: {:?} with handle: {:?}", self.uuid, id, handle);
-            match InodeMap::get_alt_locked(&inodes, &id, handle_opt.as_ref()) {
+            match InodeMap::get_alt_locked(&inodes, &id, &handle_arc_clone) {
                 Some(data) => {
                     // An inode was added concurrently while we did not hold a lock on
                     // `self.inodes_map`, so we use that instead. `handle` will be dropped.
@@ -739,9 +743,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                     data.inode
                 }
                 None => {
-                    let inode = self
-                        .allocate_inode(&inodes, &id, handle_opt.as_ref())
-                        .await?;
+                    let inode = self.allocate_inode(&inodes, &id, &handle_arc).await?;
                     // trace!("FS {} allocated new inode: {} for id: {:?}", self.uuid, inode, id);
 
                     if inode > VFS_MAX_INO {
@@ -754,7 +756,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
                     InodeMap::insert_locked(
                         inodes.deref_mut(),
-                        Arc::new(InodeData::new(inode, handle, 1, id, st.st.st_mode)),
+                        Arc::new(InodeData::new(inode, handle_clone, 1, id, st.st.st_mode)),
                     );
 
                     inode
@@ -927,12 +929,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_passthrough() {
-        let fs = super::new_passthroughfs_layer("/home/luxian/github/buck2-rust-third-party")
+        let temp_dir = std::env::temp_dir();
+        let source_dir = temp_dir.join("test_passthrough_fs_src");
+        let mount_dir = temp_dir.join("test_passthrough_fs_mnt");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&mount_dir).unwrap();
+
+        let fs = super::new_passthroughfs_layer(source_dir.to_str().unwrap())
             .await
             .unwrap();
-        let logfs = LoggingFileSystem::new(fs);
 
-        let mount_path = OsString::from("/home/luxian/pass");
+        let mount_path = OsString::from(mount_dir.to_str().unwrap());
 
         let uid = unsafe { libc::getuid() };
         let gid = unsafe { libc::getgid() };
@@ -945,12 +952,12 @@ mod tests {
 
         let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
             Session::new(mount_options)
-                .mount_with_unprivileged(logfs, mount_path)
+                .mount_with_unprivileged(fs, mount_path)
                 .await
                 .unwrap()
         } else {
             Session::new(mount_options)
-                .mount(logfs, mount_path)
+                .mount(fs, mount_path)
                 .await
                 .unwrap()
         };
@@ -958,59 +965,14 @@ mod tests {
         let handle = &mut mount_handle;
 
         tokio::select! {
-            res = handle => res.unwrap(),
+        res = handle => {
+            std::fs::remove_dir_all(&source_dir).unwrap();
+            std::fs::remove_dir_all(&mount_dir).unwrap();
+            res.unwrap();
+        },
             _ = signal::ctrl_c() => {
                 mount_handle.unmount().await.unwrap()
             }
         }
-    }
-
-    #[tokio::test]
-    async fn bench_open_file_and_handle() {
-        use super::*;
-        use std::env;
-        use std::ffi::CString;
-        use std::fs::{self, File};
-        use std::time::Instant;
-
-        // create a temporary directory for testing
-        let temp_dir = env::temp_dir().join("bench_open_file_and_handle");
-        let temp_dir = temp_dir.as_path();
-        if temp_dir.exists() {
-            // ensure the directory is empty
-            fs::remove_dir_all(temp_dir).unwrap();
-        }
-        fs::create_dir_all(temp_dir).unwrap();
-
-        let file_path = temp_dir.join("test_file");
-        File::create(&file_path).unwrap();
-
-        // initialize PassthroughFs
-        let fs = new_passthroughfs_layer(temp_dir.to_str().unwrap())
-            .await
-            .unwrap();
-        let c_name = CString::new("test_file").unwrap();
-        let dir_fd = File::open(temp_dir).unwrap();
-
-        // Firest open (cache miss)
-        let start = Instant::now();
-        let (_, _, _) = fs.open_file_and_handle(&dir_fd, &c_name).await.unwrap();
-        let first_duration = start.elapsed();
-        println!("First open (cache miss): {:?}", first_duration);
-
-        // Second open (cache hit)
-        let start = Instant::now();
-        let (_, _, _) = fs.open_file_and_handle(&dir_fd, &c_name).await.unwrap();
-        let second_duration = start.elapsed();
-        println!("Second open (cache hit): {:?}", second_duration);
-
-        // validate that the second open is faster than the first
-        assert!(
-            second_duration < first_duration,
-            "Cache hit should be faster"
-        );
-
-        // clean up
-        fs::remove_dir_all(temp_dir).unwrap();
     }
 }
