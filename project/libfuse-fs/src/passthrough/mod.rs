@@ -110,7 +110,9 @@ impl AsFd for InodeFile<'_> {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum InodeHandle {
+    // TODO: Remove this variant once we have a way to handle files that are not
     File(File),
     Handle(Arc<OpenableFileHandle>),
 }
@@ -210,11 +212,7 @@ impl InodeMap {
             .ok_or_else(ebadf)
     }
 
-    fn get_inode_locked(
-        inodes: &InodeStore,
-        id: &InodeId,
-        handle: &Arc<FileHandle>,
-    ) -> Option<Inode> {
+    fn get_inode_locked(inodes: &InodeStore, handle: &Arc<FileHandle>) -> Option<Inode> {
         inodes.inode_by_handle(handle).copied()
     }
 
@@ -612,7 +610,10 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 cache.put(key, Arc::clone(&handle_arc));
                 handle_arc
             } else {
-                return Err(Error::new(io::ErrorKind::NotFound, "File not found"));
+                return Err(Error::new(
+                    io::ErrorKind::NotFound,
+                    "Failed to create file handle",
+                ));
             }
         };
 
@@ -652,14 +653,14 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         if !self.cfg.use_host_ino {
             // If the inode has already been assigned before, the new inode is not reassigned,
             // ensuring that the same file is always the same inode
-            match InodeMap::get_inode_locked(inodes, id, handle) {
+            match InodeMap::get_inode_locked(inodes, handle) {
                 Some(a) => Ok(a),
                 None => Ok(self.next_inode.fetch_add(1, Ordering::Relaxed)),
             }
         } else {
             let inode = if id.ino > MAX_HOST_INO {
                 // Prefer looking for previous mappings from memory
-                match InodeMap::get_inode_locked(inodes, id, handle) {
+                match InodeMap::get_inode_locked(inodes, handle) {
                     Some(ino) => ino,
                     None => self.ino_allocator.get_unique_inode(id)?,
                 }
@@ -924,8 +925,6 @@ mod tests {
 
     use rfuse3::{MountOptions, raw::Session};
     use tokio::signal;
-
-    use crate::passthrough::newlogfs::LoggingFileSystem;
 
     #[tokio::test]
     async fn test_passthrough() {

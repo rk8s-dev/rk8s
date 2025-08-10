@@ -23,6 +23,7 @@ rust_library(
         "//third-party:vmm-sys-util",
         "//third-party:bitflags",
         "//third-party:rfuse3",
+        "//third-party:lru",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

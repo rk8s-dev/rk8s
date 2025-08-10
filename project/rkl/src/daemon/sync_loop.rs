@@ -289,7 +289,7 @@ mod test {
         assert_eq!(*p, 514);
         drop(p);
         let p = state.get::<u64>().await;
-        p.is_none();
+        let _ = p.is_none();
     }
 
     #[tokio::test]
@@ -300,19 +300,19 @@ mod test {
         assert_eq!(sync_loop.event_handlers.len(), 2);
         assert_eq!(sync_loop.event_listen_list.len(), 0);
         assert_eq!(sync_loop.event_listeners.len(), 2);
-        sync_loop
+        let _ = sync_loop
             .event_handlers
             .get(&TypeId::of::<Tick>())
             .is_some();
-        sync_loop
+        let _ = sync_loop
             .event_handlers
             .get(&TypeId::of::<Nothing>())
             .is_some();
-        sync_loop
+        let _ = sync_loop
             .event_listeners
             .get(&TypeId::of::<Tick>())
             .is_some();
-        sync_loop
+        let _ = sync_loop
             .event_listeners
             .get(&TypeId::of::<Nothing>())
             .is_some();
