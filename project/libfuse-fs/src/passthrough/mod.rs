@@ -34,6 +34,8 @@ use util::{
 };
 use vm_memory::bitmap::BitmapSlice;
 
+use nix::sys::resource::{Resource, getrlimit};
+
 mod async_io;
 mod config;
 mod file_handle;
@@ -444,6 +446,11 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let mount_fds = MountFds::new(None)?;
 
+        let fd_limit = match getrlimit(Resource::RLIMIT_NOFILE) {
+            Ok((soft, _)) => soft,
+            Err(_) => 65536,
+        };
+
         Ok(PassthroughFs {
             inode_map: InodeMap::new(),
             next_inode: AtomicU64::new(ROOT_ID + 1),
@@ -470,7 +477,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             phantom: PhantomData,
 
-            handle_cache: RwLock::new(LruCache::new(NonZero::new(65536).unwrap())),
+            handle_cache: RwLock::new(LruCache::new(NonZero::new(fd_limit as usize).unwrap())),
         })
     }
 
