@@ -22,7 +22,6 @@ async fn test_xline_rw() {
 
     let _node_list = store.list_nodes().await.expect("List nodes failed");
 
-
     // Pod YAML
     let pod_name = "pod-test";
     let pod_yaml = "apiVersion: v1\nkind: Pod\nmetadata:\n  name: pod-test\n";
