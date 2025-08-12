@@ -4,6 +4,7 @@ use std::env;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
+use std::io::ErrorKind; // added for explicit ErrorKind references
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::io::Write;
 use std::io::{IoSlice, IoSliceMut};

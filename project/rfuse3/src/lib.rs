@@ -25,6 +25,11 @@
     target_os = "macos"
 ))]
 use std::io;
+#[cfg(any(
+    all(target_os = "linux", feature = "unprivileged"),
+    target_os = "macos"
+))]
+use std::io::ErrorKind; // needed for ErrorKind::NotFound usage
 #[cfg(target_os = "macos")]
 use std::path::Path;
 #[cfg(any(
