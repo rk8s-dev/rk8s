@@ -122,11 +122,17 @@ async fn handle_connection(
                 println!("[server] received raw data: {:?}", &buf[..n]);
                 if let Ok(msg) = bincode::deserialize::<RksMessage>(&buf[..n]) {
                     match msg {
-                        RksMessage::RegisterNode(id) => {
+                        RksMessage::RegisterNode(node) => {
+                            let id = node.metadata.name.clone();
+                            if id.is_empty() {
+                                eprintln!("[server] invalid node: metadata.name is empty");
+                                return Ok(());
+                            }
                             is_worker = true;
                             node_id = Some(id.clone());
                             let ip = conn.remote_address().ip().to_string();
-                            xline_store.insert_node_info(&id, &ip, "Ready").await?;
+                            let node_yaml = serde_yaml::to_string(&*node)?;
+                            xline_store.insert_node_yaml(&id, &node_yaml).await?;
                             println!("[server] registered worker node: {id}, ip: {ip}");
 
                             let response = RksMessage::Ack;

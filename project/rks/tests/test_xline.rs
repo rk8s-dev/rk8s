@@ -20,12 +20,6 @@ async fn test_xline_rw() {
             .expect("Failed to connect Xline"),
     );
 
-    // Node Info
-    store
-        .insert_node_info("node-test", "127.0.0.1", "Ready")
-        .await
-        .expect("Insert node failed");
-
     let node_list = store.list_nodes().await.expect("List nodes failed");
     assert!(node_list.iter().any(|(name, _)| name == "node-test"));
 

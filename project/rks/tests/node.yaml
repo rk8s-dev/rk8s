@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Node
+metadata:
+  name: worker1
+  labels:
+    kubernetes.io/hostname: worker1
+spec:
+  podCIDR: 10.244.1.0/24
+status:
+  capacity:
+    cpu: "8"
+    memory: "32Gi"
+    pods: "110"
+  allocatable:
+    cpu: "7"
+    memory: "30Gi"
+    pods: "100"
+  addresses:
+    - type: InternalIP
+      address: "192.168.73.129"
+    - type: Hostname
+      address: "worker1"
+  conditions:
+    - type: Ready
+      status: "False"
+      lastHeartbeatTime: "2025-08-09T06:10:00Z"
+    - type: MemoryPressure
+      status: "False"
+      lastHeartbeatTime: "2025-08-09T06:10:00Z"
