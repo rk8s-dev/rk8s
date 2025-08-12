@@ -2,7 +2,7 @@ use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
 use inode_store::{InodeId, InodeStore};
-use lru::LruCache;
+use moka::future::Cache;
 use rfuse3::{Errno, raw::reply::ReplyEntry};
 use uuid::Uuid;
 
@@ -10,7 +10,6 @@ use crate::util::convert_stat64_to_file_attr;
 use mount_fd::MountFds;
 use statx::StatExt;
 use std::io::Result;
-use std::num::NonZero;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::{
@@ -410,7 +409,7 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     phantom: PhantomData<S>,
 
-    handle_cache: RwLock<LruCache<InodeId, Arc<FileHandle>>>,
+    handle_cache: Cache<InodeId, Arc<FileHandle>>,
 }
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
@@ -477,7 +476,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             phantom: PhantomData,
 
-            handle_cache: RwLock::new(LruCache::new(NonZero::new(fd_limit as usize).unwrap())),
+            handle_cache: moka::future::Cache::new(fd_limit),
         })
     }
 
@@ -609,12 +608,12 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let key = InodeId::from_stat(&st);
         let handle_arc = {
-            let mut cache = self.handle_cache.write().await;
-            if let Some(h) = cache.get(&key).cloned() {
+            let cache = self.handle_cache.clone();
+            if let Some(h) = cache.get(&key).await {
                 h
             } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
                 let handle_arc = Arc::new(handle_from_fd);
-                cache.put(key, Arc::clone(&handle_arc));
+                cache.insert(key, Arc::clone(&handle_arc)).await;
                 handle_arc
             } else {
                 return Err(Error::new(
