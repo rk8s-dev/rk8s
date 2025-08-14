@@ -37,7 +37,6 @@ rust_binary(
         "//third-party:dotenvy",
         "//third-party:tempfile",
         "//third-party:tokio-util",
-        "//third-party:tokio-util",
         "//project/libcni:libcni",
     ],
     env = {

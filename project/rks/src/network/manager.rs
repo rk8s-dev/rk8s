@@ -28,6 +28,7 @@ use crate::network::{
 
 const RACE_RETRIES: usize = 10;
 const SUBNET_TTL: Duration = Duration::seconds(86400);
+const LEASE_RETRY_SLEEP_SECS: u64 = 5;
 
 #[derive(Clone)]
 pub struct LocalManager {
@@ -315,7 +316,7 @@ impl LocalManager {
                         }
                     }
                 }
-                sleep(StdDuration::from_secs(5)).await;
+                sleep(StdDuration::from_secs(LEASE_RETRY_SLEEP_SECS)).await;
             }
         });
 

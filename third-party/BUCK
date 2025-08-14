@@ -63,6 +63,34 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "allocator-api2-0.2.21",
+    srcs = [
+        "vendor/allocator-api2-0.2.21/src/lib.rs",
+        "vendor/allocator-api2-0.2.21/src/nightly.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/alloc/global.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/alloc/mod.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/alloc/system.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/boxed.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/macros.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/mod.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/raw_vec.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/slice.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/unique.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/drain.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/into_iter.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/mod.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/partial_eq.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/set_len_on_drop.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/splice.rs",
+    ],
+    crate = "allocator_api2",
+    crate_root = "vendor/allocator-api2-0.2.21/src/lib.rs",
+    edition = "2018",
+    features = ["alloc"],
+    visibility = [],
+)
+
+cargo.rust_library(
     name = "anstream-0.6.19",
     srcs = [
         "vendor/anstream-0.6.19/src/_macros.rs",
@@ -4469,6 +4497,21 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "foldhash-0.1.5",
+    srcs = [
+        "vendor/foldhash-0.1.5/src/convenience.rs",
+        "vendor/foldhash-0.1.5/src/fast.rs",
+        "vendor/foldhash-0.1.5/src/lib.rs",
+        "vendor/foldhash-0.1.5/src/quality.rs",
+        "vendor/foldhash-0.1.5/src/seed.rs",
+    ],
+    crate = "foldhash",
+    crate_root = "vendor/foldhash-0.1.5/src/lib.rs",
+    edition = "2021",
+    visibility = [],
+)
+
+cargo.rust_library(
     name = "foreign-types-0.3.2",
     srcs = ["vendor/foreign-types-0.3.2/src/lib.rs"],
     crate = "foreign_types",
@@ -5402,7 +5445,20 @@ cargo.rust_library(
     crate = "hashbrown",
     crate_root = "vendor/hashbrown-0.15.4/src/lib.rs",
     edition = "2021",
+    features = [
+        "allocator-api2",
+        "default",
+        "default-hasher",
+        "equivalent",
+        "inline-more",
+        "raw-entry",
+    ],
     visibility = [],
+    deps = [
+        ":allocator-api2-0.2.21",
+        ":equivalent-1.0.2",
+        ":foldhash-0.1.5",
+    ],
 )
 
 cargo.rust_library(
@@ -9025,6 +9081,26 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [":value-bag-1.11.1"],
+)
+
+alias(
+    name = "lru",
+    actual = ":lru-0.16.0",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "lru-0.16.0",
+    srcs = ["vendor/lru-0.16.0/src/lib.rs"],
+    crate = "lru",
+    crate_root = "vendor/lru-0.16.0/src/lib.rs",
+    edition = "2015",
+    features = [
+        "default",
+        "hashbrown",
+    ],
+    visibility = [],
+    deps = [":hashbrown-0.15.4"],
 )
 
 cargo.rust_library(

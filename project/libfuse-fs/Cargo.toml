@@ -2,12 +2,12 @@
 name = "libfuse-fs"
 version = "0.1.4"
 edition = "2024"
-description = "FUSE Filesystem Library"
+description = "fuse filesystem library"
 homepage = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 documentation = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
-license = "MIT OR Apache-2.0"
-exclude = ["BUCK"]
+license = "mit or apache-2.0"
+exclude = ["buck"]
 
 [dependencies]
 uuid = { version = "1.15.1", features = ["v4"] }
@@ -27,3 +27,5 @@ log = "0.4.26"
 env_logger = "0.11.7"
 vmm-sys-util = "0.12.1"
 bitflags = "2.9.0"
+lru = "0.16.0"
+nix = "0.29.0"

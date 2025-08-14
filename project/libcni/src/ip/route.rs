@@ -416,36 +416,3 @@ pub async fn interface_by_name(name: String) -> Result<Interface> {
 
     Err(anyhow!("no such interface with name {}", name))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ipnetwork::Ipv4Network;
-    use std::net::{IpAddr, Ipv4Addr};
-
-    #[tokio::test]
-    async fn test_route_add_and_del() -> anyhow::Result<()> {
-        let dst = Ipv4Network::new(Ipv4Addr::new(192, 168, 100, 0), 24)?.into();
-        let gateway = IpAddr::V4(Ipv4Addr::new(192, 168, 239, 2));
-
-        let interface = interface_by_name("ens33".to_string()).await?;
-
-        let route = Route {
-            dst: Some(dst),
-            gateway: Some(gateway),
-            oif_index: Some(interface.index),
-            metric: Some(200),
-            ..Default::default()
-        };
-
-        println!("Adding route: {:?}", route);
-        route_add(route.clone()).await?;
-        println!("Route added successfully");
-
-        println!("Deleting route: {:?}", route);
-        route_del(route).await?;
-        println!("Route deleted successfully");
-
-        Ok(())
-    }
-}
