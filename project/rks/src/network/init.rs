@@ -91,23 +91,20 @@ pub async fn init_network(cfg: &mut XlineConfig, cancel_token: CancellationToken
         anyhow::anyhow!("Failed to determine IP family stack: {e}")
     })?;
 
-    if config.enable_ipv4 {
-        if !Path::new("/proc/sys/net/bridge/bridge-nf-call-iptables").exists() {
-            let err = anyhow::anyhow!(
-                "br_netfilter check failed: /proc/sys/net/bridge/bridge-nf-call-iptables missing"
-            );
-            error!("{err}");
-            return Err(err);
-        }
+    if config.enable_ipv4 && !Path::new("/proc/sys/net/bridge/bridge-nf-call-iptables").exists() {
+        let err = anyhow::anyhow!(
+            "br_netfilter check failed: /proc/sys/net/bridge/bridge-nf-call-iptables missing"
+        );
+        error!("{err}");
+        return Err(err);
     }
-    if config.enable_ipv6 {
-        if !Path::new("/proc/sys/net/bridge/bridge-nf-call-ip6tables").exists() {
-            let err = anyhow::anyhow!(
-                "br_netfilter check failed: /proc/sys/net/bridge/bridge-nf-call-ip6tables missing"
-            );
-            error!("{err}");
-            return Err(err);
-        }
+
+    if config.enable_ipv6 && !Path::new("/proc/sys/net/bridge/bridge-nf-call-ip6tables").exists() {
+        let err = anyhow::anyhow!(
+            "br_netfilter check failed: /proc/sys/net/bridge/bridge-nf-call-ip6tables missing"
+        );
+        error!("{err}");
+        return Err(err);
     }
 
     let opts_public = PublicIPOpts {
