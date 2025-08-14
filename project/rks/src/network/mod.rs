@@ -1,8 +1,10 @@
-pub mod subnet;
+pub mod annotation;
+pub mod backend;
+pub mod config;
+pub mod iface;
+pub mod init;
 pub mod ip;
 pub mod lease;
-pub mod config;
-pub mod annotation;
-pub mod registry;
 pub mod manager;
-pub mod controller;
+pub mod registry;
+pub mod subnet;

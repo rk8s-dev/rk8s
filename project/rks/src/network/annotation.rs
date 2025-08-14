@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use regex::Regex;
 
 /// Kubernetes annotations
@@ -43,16 +43,15 @@ pub fn new_annotations(prefix: &str) -> Result<Annotations> {
     }
 
     Ok(Annotations {
-        subnet_kube_managed: format!("{}rks-subnet-manager", prefix),
-        backend_data: format!("{}backend-data", prefix),
-        backend_v6_data: format!("{}backend-v6-data", prefix),
-        backend_type: format!("{}backend-type", prefix),
-        backend_public_ip: format!("{}public-ip", prefix),
-        backend_node_public_ip: format!("{}node-public-ip", prefix),
-        backend_public_ip_overwrite: format!("{}public-ip-overwrite", prefix),
-        backend_public_ipv6: format!("{}public-ipv6", prefix),
-        backend_node_public_ipv6: format!("{}node-public-ipv6", prefix),
-        backend_public_ipv6_overwrite: format!("{}public-ipv6-overwrite", prefix),
+        subnet_kube_managed: format!("{prefix}rks-subnet-manager"),
+        backend_data: format!("{prefix}backend-data"),
+        backend_v6_data: format!("{prefix}backend-v6-data"),
+        backend_type: format!("{prefix}backend-type"),
+        backend_public_ip: format!("{prefix}public-ip"),
+        backend_node_public_ip: format!("{prefix}node-public-ip"),
+        backend_public_ip_overwrite: format!("{prefix}public-ip-overwrite"),
+        backend_public_ipv6: format!("{prefix}public-ipv6"),
+        backend_node_public_ipv6: format!("{prefix}node-public-ipv6"),
+        backend_public_ipv6_overwrite: format!("{prefix}public-ipv6-overwrite"),
     })
 }
-

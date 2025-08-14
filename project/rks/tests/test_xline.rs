@@ -13,7 +13,12 @@ async fn test_xline_rw() {
         )
     });
     let config = load_config(&config_path).expect("Failed to load config");
-    let endpoints: Vec<&str> = config.xline_endpoints.iter().map(|s| s.as_str()).collect();
+    let endpoints: Vec<&str> = config
+        .xline_config
+        .endpoints
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
     let store = Arc::new(
         XlineStore::new(&endpoints)
             .await

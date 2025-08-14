@@ -1,22 +1,19 @@
 use std::fs;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::Path;
-use std::sync::Arc;
 use std::str;
+use std::sync::Arc;
 
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use lazy_static::lazy_static;
 use log::{error, info};
-use num_bigint:: BigUint;
-use num_traits::One;
 use regex::Regex;
 use tokio::sync::mpsc::{self, Sender};
 
-use crate::network::ip::AddIP;
-use crate::network::lease::{Event, EventType, Lease, LeaseAttrs, LeaseWatchResult, LeaseWatcher};
 use crate::network::config::Config;
-use anyhow::{Context, Result};
+use crate::network::lease::{Event, EventType, Lease, LeaseAttrs, LeaseWatchResult, LeaseWatcher};
 
 lazy_static! {
     static ref SUBNET_REGEX: Regex =
@@ -45,7 +42,11 @@ pub fn parse_subnet_key(s: &str) -> Option<(Ipv4Network, Option<Ipv6Network>)> {
 
 pub fn make_subnet_key(sn4: &Ipv4Network, sn6: Option<&Ipv6Network>) -> String {
     match sn6 {
-        Some(v6) => format!("{}&{}", sn4.to_string().replace("/", "-"), v6.to_string().replace("/", "-")),
+        Some(v6) => format!(
+            "{}&{}",
+            sn4.to_string().replace("/", "-"),
+            v6.to_string().replace("/", "-")
+        ),
         None => sn4.to_string().replace("/", "-"),
     }
 }
@@ -68,30 +69,28 @@ pub fn write_subnet_file<P: AsRef<Path>>(
     let temp_file = dir.join(format!(".{}", name.to_string_lossy()));
     let mut contents = String::new();
 
-    if config.enable_ipv4 {
-        if let Some(ref mut net) = sn4 {  
-            contents += &format!("RKL_NETWORK={}\n", config.network.unwrap());
-            let next_ip = net.ip().add(1);
-            contents += &format!("RKL_SUBNET={}/{}\n", next_ip, net.prefix());
-        }
+    if config.enable_ipv4
+        && let Some(ref mut net) = sn4
+    {
+        contents += &format!("RKL_NETWORK={}\n", config.network.unwrap());
+        contents += &format!("RKL_SUBNET={}/{}\n", net.ip(), net.prefix());
     }
-    if config.enable_ipv6 {
-        if let Some(ref mut net) = sn6 {
-            contents += &format!("RKL_IPV6_NETWORK={}\n", config.ipv6_network.unwrap());
-            let big_one = BigUint::one();
-            let next_ip = net.ip().add(&big_one);
-            contents += &format!("RKL_IPV6_SUBNET={}/{}\n", next_ip, net.prefix());
-        }
+
+    if config.enable_ipv6
+        && let Some(ref mut net) = sn6
+    {
+        contents += &format!("RKL_IPV6_NETWORK={}\n", config.ipv6_network.unwrap());
+        contents += &format!("RKL_IPV6_SUBNET={}/{}\n", net.ip(), net.prefix());
     }
-    contents += &format!("RKL_MTU={}\n", mtu);
-    contents += &format!("RKL_IPMASQ={}\n", ip_masq);
+
+    contents += &format!("RKL_MTU={mtu}\n");
+    contents += &format!("RKL_IPMASQ={ip_masq}\n");
 
     fs::write(&temp_file, contents)?;
-    fs::rename(&temp_file, &path)?;
+    fs::rename(&temp_file, path)?;
 
     Ok(())
 }
-
 
 #[async_trait]
 pub trait Manager: Send + Sync {
@@ -118,10 +117,7 @@ pub trait Manager: Send + Sync {
         sender: mpsc::Sender<Vec<LeaseWatchResult>>,
     ) -> Result<()>;
 
-    async fn watch_leases(
-        &self,
-        sender: mpsc::Sender<Vec<LeaseWatchResult>>,
-    ) -> Result<()>;
+    async fn watch_leases(&self, sender: mpsc::Sender<Vec<LeaseWatchResult>>) -> Result<()>;
 
     async fn complete_lease(&self, lease: &Lease) -> Result<()>;
 
@@ -132,13 +128,12 @@ pub trait Manager: Send + Sync {
     fn name(&self) -> String;
 }
 
-
 pub async fn watch_leases(
     sm: Arc<dyn Manager>,
     own_lease: Lease,
     receiver: Sender<Vec<Event>>,
 ) -> Result<()> {
-    let mut lw =  LeaseWatcher {
+    let mut lw = LeaseWatcher {
         own_lease,
         leases: vec![],
     };
@@ -148,7 +143,7 @@ pub async fn watch_leases(
     let sm_clone = sm.clone();
     tokio::spawn(async move {
         if let Err(e) = sm_clone.watch_leases(tx_watch).await {
-            error!("could not watch leases: {}", e);
+            error!("could not watch leases: {e}");
         }
     });
 
@@ -161,7 +156,7 @@ pub async fn watch_leases(
             };
 
             for (i, evt) in batch.iter().enumerate() {
-                info!("Batch elem [{}] is {:?}", i, evt);
+                info!("Batch elem [{i}] is {evt:?}");
             }
 
             if !batch.is_empty() {
@@ -171,7 +166,6 @@ pub async fn watch_leases(
     }
     Ok(())
 }
-
 
 pub async fn watch_lease(
     sm: Arc<dyn Manager>,
@@ -190,7 +184,7 @@ pub async fn watch_lease(
                 info!("Context cancelled, closing receiver channel");
             }
             Err(e) => {
-                error!("Subnet watch failed: {}", e);
+                error!("Subnet watch failed: {e}");
             }
             Ok(_) => {}
         }
@@ -215,4 +209,3 @@ pub async fn watch_lease(
     info!("leaseWatchChan channel closed");
     Ok(())
 }
-

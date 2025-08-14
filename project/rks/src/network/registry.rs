@@ -1,33 +1,39 @@
 use std::sync::Arc;
 
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use anyhow::{anyhow, Context};
-use chrono::{DateTime, Utc, Duration};
-use etcd_client::{Client, Compare, CompareOp, ConnectOptions, Event as WatchEvent, GetOptions, KeyValue, KvClient, PutOptions, Txn, TxnOp, WatchOptions};
+use chrono::{DateTime, Duration, Utc};
+use etcd_client::{
+    Client, Compare, CompareOp, ConnectOptions, Event as WatchEvent, GetOptions, KeyValue,
+    KvClient, PutOptions, Txn, TxnOp, WatchOptions,
+};
 use futures::StreamExt;
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use log::{error, info, warn};
 use regex::Regex;
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration as TokioDuration};
 use tokio::sync::mpsc::Sender;
-use ipnetwork::{Ipv4Network, Ipv6Network};
+use tokio::time::{Duration as TokioDuration, sleep};
 
-use crate::network::lease::{Event as LeaseEvent, Lease, LeaseAttrs, LeaseWatchResult, EventType};
-use crate::network::manager::{is_index_too_small, Cursor, WatchCursor};
+use crate::network::lease::{Event as LeaseEvent, EventType, Lease, LeaseAttrs, LeaseWatchResult};
+use crate::network::manager::{Cursor, WatchCursor, is_index_too_small};
 use crate::network::subnet::{self, parse_subnet_key};
+use crate::protocol::config::XlineConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub enum XlineRegistryError {
     #[error("try again")]
     TryAgain,
-    #[error("flannel config not found in xline store. Did you create your config using etcdv3 API?")]
+    #[error(
+        "flannel config not found in xline store. Did you create your config using etcdv3 API?"
+    )]
     ConfigNotFound,
     #[error("no watch channel")]
     NoWatchChannel,
     #[error("subnet already exists")]
     SubnetAlreadyExists,
     #[error(transparent)]
-    Xline(#[from] etcd_client::Error),
+    Xline(#[from] Box<etcd_client::Error>),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -38,6 +44,12 @@ pub enum XlineRegistryError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+impl From<etcd_client::Error> for XlineRegistryError {
+    fn from(e: etcd_client::Error) -> Self {
+        XlineRegistryError::Xline(Box::new(e))
+    }
 }
 
 #[async_trait]
@@ -92,17 +104,13 @@ pub trait Registry: Send + Sync {
     async fn leases_watch_reset(&self) -> Result<LeaseWatchResult, XlineRegistryError>;
 }
 
-#[derive(Debug, Clone)]
-pub struct XlineConfig {
-    pub endpoints: Vec<String>,
-    pub prefix: String,
-    pub username: Option<String>,
-    pub password: Option<String>,
-}
+pub type XlineNewFunc = fn(
+    Arc<XlineConfig>,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(Client, KvClient), XlineRegistryError>> + Send>,
+>;
 
-pub type XlineNewFunc =
-    fn(Arc<XlineConfig>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(Client, KvClient), XlineRegistryError>> + Send>>;
-
+#[allow(dead_code)]
 pub struct XlineSubnetRegistry {
     cli_new_func: XlineNewFunc,
     kv_api: Arc<Mutex<KvClient>>,
@@ -122,7 +130,7 @@ impl Registry for XlineSubnetRegistry {
 
         let value = resp.kvs()[0].value();
         let s = String::from_utf8(value.to_vec()).map_err(|e| {
-            warn!("Failed to parse network config as UTF8: {}", e);
+            warn!("Failed to parse network config as UTF8: {e}");
             XlineRegistryError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
         })?;
         Ok(s)
@@ -150,14 +158,14 @@ impl Registry for XlineSubnetRegistry {
             let ttl = match ttl_resp {
                 Ok(r) => r.ttl(),
                 Err(e) => {
-                    warn!("Could not read ttl: {:?}", e);
+                    warn!("Could not read ttl: {e:?}");
                     continue;
                 }
             };
             match kv_to_ip_lease(kv, ttl) {
                 Ok(lease) => leases.push(lease),
                 Err(e) => {
-                    warn!("Ignoring bad subnet node: {:?}", e);
+                    warn!("Ignoring bad subnet node: {e:?}");
                     continue;
                 }
             }
@@ -171,13 +179,16 @@ impl Registry for XlineSubnetRegistry {
         sn: Ipv4Network,
         sn6: Option<Ipv6Network>,
     ) -> Result<(Option<Lease>, i64), XlineRegistryError> {
+        info!("sn:{sn:?}, sn6:{sn6:?}");
         let key = format!(
             "{}/subnets/{}",
             self.xline_cfg.prefix,
             subnet::make_subnet_key(&sn, sn6.as_ref())
-        );      
+        );
+        info!("key: {}", key);
         let resp = self.kv().await.get(key, None).await?;
         if resp.kvs().is_empty() {
+            info!("resp's kv is empty");
             return Ok((None, 0));
         }
         let kv = &resp.kvs()[0];
@@ -201,18 +212,25 @@ impl Registry for XlineSubnetRegistry {
             self.xline_cfg.prefix,
             subnet::make_subnet_key(&sn, sn6.as_ref())
         );
-    
+
         let value = serde_json::to_vec(attrs)?;
 
-        let lease_resp = self.cli().await.lease_client().grant(ttl.num_seconds() as i64, None).await?;
-    
+        let lease_resp = self
+            .cli()
+            .await
+            .lease_client()
+            .grant(ttl.num_seconds(), None)
+            .await?;
+
         let lease_id = lease_resp.id();
-        let put_op = TxnOp::put(key.clone(), value, Some(PutOptions::new().with_lease(lease_id)));
+        let put_op = TxnOp::put(
+            key.clone(),
+            value,
+            Some(PutOptions::new().with_lease(lease_id)),
+        );
         let cmp = Compare::version(key.clone(), CompareOp::Equal, 0);
-    
-        let txn = Txn::new()
-            .when([cmp])
-            .and_then([put_op]);
+
+        let txn = Txn::new().when([cmp]).and_then([put_op]);
 
         let txn_resp = match self.cli().await.txn(txn).await {
             Ok(resp) => resp,
@@ -221,16 +239,16 @@ impl Registry for XlineSubnetRegistry {
                 return Err(e.into());
             }
         };
-    
+
         if !txn_resp.succeeded() {
             let _ = self.cli().await.lease_revoke(lease_id).await;
             return Err(XlineRegistryError::SubnetAlreadyExists);
         }
-    
+
         let exp = Utc::now() + chrono::Duration::seconds(lease_resp.ttl());
         Ok(exp)
     }
-    
+
     async fn update_subnet(
         &self,
         sn: Ipv4Network,
@@ -244,41 +262,51 @@ impl Registry for XlineSubnetRegistry {
             self.xline_cfg.prefix,
             subnet::make_subnet_key(&sn, sn6.as_ref())
         );
-    
+
         let value = serde_json::to_vec(attrs)?;
-    
-        // 创建新的租约
-        let lease_resp = self.cli().await.lease_client().grant(ttl.num_seconds() as i64, None).await?;
+
+        let lease_resp = self
+            .cli()
+            .await
+            .lease_client()
+            .grant(ttl.num_seconds(), None)
+            .await?;
         let lease_id = lease_resp.id();
-    
-        // Put 请求
+
         let res = self
-            .kv().await
+            .kv()
+            .await
             .put(key, value, Some(PutOptions::new().with_lease(lease_id)))
             .await;
-    
+
         if let Err(e) = res {
             let _ = self.cli().await.lease_revoke(lease_id).await;
             return Err(e.into());
         }
-    
+
         let exp = Utc::now() + chrono::Duration::seconds(lease_resp.ttl());
         Ok(exp)
     }
-    
+
     async fn delete_subnet(
         &self,
         sn: Ipv4Network,
         sn6: Option<Ipv6Network>,
     ) -> Result<(), XlineRegistryError> {
-        let key = format!("{}/subnets/{}", self.xline_cfg.prefix, subnet::make_subnet_key(&sn, sn6.as_ref()));
+        let key = format!(
+            "{}/subnets/{}",
+            self.xline_cfg.prefix,
+            subnet::make_subnet_key(&sn, sn6.as_ref())
+        );
         self.kv().await.delete(key, None).await?;
         Ok(())
     }
-    
+
     // leasesWatchReset is called when incremental lease watch failed and we need to grab a snapshot
     async fn leases_watch_reset(&self) -> Result<LeaseWatchResult, XlineRegistryError> {
-        let (leases, index) = self.get_subnets().await
+        let (leases, index) = self
+            .get_subnets()
+            .await
             .context("failed to retrieve subnet leases")?;
 
         Ok(LeaseWatchResult {
@@ -293,22 +321,26 @@ impl Registry for XlineSubnetRegistry {
         lease_watch_chan: Sender<Vec<LeaseWatchResult>>,
         mut since: i64,
     ) -> Result<(), XlineRegistryError> {
+        info!("registry watch subnets");
         let key_prefix = format!("{}/subnets", self.xline_cfg.prefix);
 
         let mut backoff = TokioDuration::from_millis(100);
         let max_backoff = TokioDuration::from_secs(5);
 
         loop {
-            info!("registry: watching subnets starting from rev {}", since);
+            info!("registry: watching subnets starting from rev {since}");
 
-            let watch_opts = WatchOptions::new()
-                .with_prefix()
-                .with_start_revision(since);
+            let watch_opts = WatchOptions::new().with_prefix().with_start_revision(since);
 
-            let (mut _watcher, mut stream) = match self.cli().await.watch(key_prefix.clone(), Some(watch_opts)).await {
+            let (mut _watcher, mut stream) = match self
+                .cli()
+                .await
+                .watch(key_prefix.clone(), Some(watch_opts))
+                .await
+            {
                 Ok(watch_pair) => watch_pair,
                 Err(e) => {
-                    error!("Failed to establish etcd watch channel: {}", e);
+                    error!("Failed to establish etcd watch channel: {e}");
                     sleep(backoff).await;
                     backoff = std::cmp::min(backoff * 2, max_backoff);
                     continue;
@@ -321,7 +353,7 @@ impl Registry for XlineSubnetRegistry {
                 let resp = match resp_result {
                     Ok(resp) => resp,
                     Err(e) => {
-                        error!("etcd watch stream error: {}", e);
+                        error!("etcd watch stream error: {e}");
                         break;
                     }
                 };
@@ -338,12 +370,11 @@ impl Registry for XlineSubnetRegistry {
                 for etcd_event in resp.events() {
                     let subnet_result = {
                         let mut cli = self.cli().await;
-                        parse_subnet_watch_response(&mut *cli, etcd_event).await
+                        parse_subnet_watch_response(&mut cli, etcd_event).await
                     };
                     match subnet_result {
                         Ok(subnet_event) => {
-                            info!("watchSubnets: got valid subnet event with revision {}", since);
-                            // 强制 enable_ipv4 true，兼容 vxlan 和 kube 子网管理
+                            info!("watchSubnets: got valid subnet event with revision {since}");
                             let mut lease = subnet_event.lease.unwrap_or_default();
                             lease.enable_ipv4 = true;
 
@@ -361,20 +392,21 @@ impl Registry for XlineSubnetRegistry {
                             warn!("Watch failed due to etcd index outside history window");
                             match self.leases_watch_reset().await {
                                 Ok(wr) => results.push(wr),
-                                Err(e) => error!("error resetting etcd watch: {}", e),
+                                Err(e) => error!("error resetting etcd watch: {e}"),
                             }
                         }
                         Err(e) => {
-                            warn!("Watch of subnet failed with error: {}", e);
+                            warn!("Watch of subnet failed with error: {e}");
                             results.push(LeaseWatchResult::default());
                         }
                     }
                 }
 
                 if !results.is_empty() {
-                    lease_watch_chan.send(results).await.map_err(|_| {
-                        XlineRegistryError::NoWatchChannel
-                    })?;
+                    lease_watch_chan
+                        .send(results)
+                        .await
+                        .map_err(|_| XlineRegistryError::NoWatchChannel)?;
                 }
             }
 
@@ -400,19 +432,18 @@ impl Registry for XlineSubnetRegistry {
         let mut rev = since;
 
         loop {
-            let watch_opts = WatchOptions::new()
-                .with_prefix()
-                .with_start_revision(rev);
+            let watch_opts = WatchOptions::new().with_prefix().with_start_revision(rev);
 
-            let (mut _watcher, mut stream) = match self.cli().await.watch(key.clone(), Some(watch_opts)).await {
-                Ok(watch_pair) => watch_pair,
-                Err(e) => {
-                    error!("Failed to establish etcd watch channel: {}", e);
-                    sleep(backoff).await;
-                    backoff = std::cmp::min(backoff * 2, max_backoff);
-                    continue;
-                }
-            };
+            let (mut _watcher, mut stream) =
+                match self.cli().await.watch(key.clone(), Some(watch_opts)).await {
+                    Ok(watch_pair) => watch_pair,
+                    Err(e) => {
+                        error!("Failed to establish etcd watch channel: {e}");
+                        sleep(backoff).await;
+                        backoff = std::cmp::min(backoff * 2, max_backoff);
+                        continue;
+                    }
+                };
 
             backoff = TokioDuration::from_millis(100);
 
@@ -420,7 +451,7 @@ impl Registry for XlineSubnetRegistry {
                 let resp = match resp_result {
                     Ok(resp) => resp,
                     Err(e) => {
-                        error!("etcd watch stream error: {}", e);
+                        error!("etcd watch stream error: {e}");
                         break;
                     }
                 };
@@ -436,7 +467,7 @@ impl Registry for XlineSubnetRegistry {
                 for etcd_event in resp.events() {
                     let subnet_result = {
                         let mut cli = self.cli().await;
-                        parse_subnet_watch_response(&mut *cli, etcd_event).await
+                        parse_subnet_watch_response(&mut cli, etcd_event).await
                     };
                     match subnet_result {
                         Ok(subnet_event) => {
@@ -454,17 +485,20 @@ impl Registry for XlineSubnetRegistry {
                             warn!("Watch failed due to etcd index outside history window");
                             match self.leases_watch_reset().await {
                                 Ok(wr) => batch.push(wr),
-                                Err(e) => error!("error resetting etcd watch: {}", e),
+                                Err(e) => error!("error resetting etcd watch: {e}"),
                             }
                         }
                         Err(e) => {
-                            error!("couldn't read etcd event: {}", e);
+                            error!("couldn't read etcd event: {e}");
                         }
                     }
                 }
 
                 if !batch.is_empty() {
-                    lease_watch_chan.send(batch).await.map_err(|_| XlineRegistryError::NoWatchChannel)?;
+                    lease_watch_chan
+                        .send(batch)
+                        .await
+                        .map_err(|_| XlineRegistryError::NoWatchChannel)?;
                 }
             }
 
@@ -482,8 +516,8 @@ impl XlineSubnetRegistry {
             ConnectOptions::default().with_user(user.clone(), pass.clone())
         } else {
             ConnectOptions::default()
-        };        
-    
+        };
+
         let cli = Client::connect(config.endpoints.clone(), Some(opts)).await?;
         let kv = cli.kv_client();
         Ok((cli, kv))
@@ -494,13 +528,14 @@ impl XlineSubnetRegistry {
         cli_new_func: Option<XlineNewFunc>,
     ) -> Result<Self, XlineRegistryError> {
         let config_arc = Arc::new(config.clone());
-        let func: XlineNewFunc = cli_new_func.unwrap_or(|cfg| Box::pin(Self::new_xline_client(cfg)));
-    
+        let func: XlineNewFunc =
+            cli_new_func.unwrap_or(|cfg| Box::pin(Self::new_xline_client(cfg)));
+
         let (cli, kv_api) = func(config_arc).await?;
-    
+
         let pattern = format!("{}/([^/]*)(/|/config)?$", config.prefix);
         let network_regex = Regex::new(&pattern).unwrap();
-    
+
         Ok(Self {
             cli_new_func: func,
             cli: Arc::new(Mutex::new(cli)),
@@ -509,64 +544,59 @@ impl XlineSubnetRegistry {
             network_regex,
         })
     }
-    
+
     async fn kv(&self) -> tokio::sync::MutexGuard<'_, KvClient> {
         self.kv_api.lock().await
     }
 
     async fn cli(&self) -> tokio::sync::MutexGuard<'_, Client> {
         self.cli.lock().await
-    }  
+    }
 }
 
 pub fn kv_to_ip_lease(kv: &KeyValue, ttl: i64) -> Result<Lease, XlineRegistryError> {
     let key_str = std::str::from_utf8(kv.key())?;
-    let (subnet4, subnet6_opt) = crate::network::subnet::parse_subnet_key(key_str)
-        .ok_or_else(|| XlineRegistryError::Other(anyhow::anyhow!("invalid subnet key: {}", key_str)))?;
-
-    let ipv6_subnet = subnet6_opt.unwrap_or_else(|| {
-        "::/128".parse::<Ipv6Network>().unwrap()
-    });
-
+    let (subnet4, subnet6) =
+        crate::network::subnet::parse_subnet_key(key_str).ok_or_else(|| {
+            XlineRegistryError::Other(anyhow::anyhow!("invalid subnet key: {}", key_str))
+        })?;
     let attrs: LeaseAttrs = serde_json::from_slice(kv.value())?;
 
     let expiration = Utc::now() + Duration::seconds(ttl);
 
     Ok(Lease {
         enable_ipv4: true,
-        enable_ipv6: !ipv6_subnet.ip().is_unspecified(),
+        enable_ipv6: subnet6.is_some(),
         subnet: subnet4,
-        ipv6_subnet,
+        ipv6_subnet: subnet6,
         attrs,
         expiration,
         asof: Some(kv.mod_revision()),
     })
 }
 
-pub async fn parse_subnet_watch_response(cli: &mut Client, ev: &WatchEvent) -> Result<LeaseEvent, XlineRegistryError> {
+pub async fn parse_subnet_watch_response(
+    cli: &mut Client,
+    ev: &WatchEvent,
+) -> Result<LeaseEvent, XlineRegistryError> {
     let kv = ev.kv().context("no key-value in watch event")?;
     let key = std::str::from_utf8(kv.key())?;
-    let (subnet4_opt, subnet6_opt) = parse_subnet_key(key)
+    let (subnet4, subnet6) = parse_subnet_key(key)
         .ok_or_else(|| anyhow!("{:?}: not a subnet, skipping", ev.event_type()))?;
 
-    let subnet4 = subnet4_opt;
-    let ipv6_subnet = subnet6_opt.unwrap_or_else(|| "0::/128".parse().unwrap());
-
     match ev.event_type() {
-        etcd_client::EventType::Delete => {
-            Ok(LeaseEvent {
-                event_type: EventType::Removed,
-                lease: Some(Lease {
-                    enable_ipv4: true,
-                    enable_ipv6: !ipv6_subnet.ip().is_unspecified(),
-                    subnet: subnet4,
-                    ipv6_subnet,
-                    attrs: LeaseAttrs::default(),
-                    expiration: Utc::now(),
-                    asof: kv.mod_revision().into(),
-                }),
-            })
-        }
+        etcd_client::EventType::Delete => Ok(LeaseEvent {
+            event_type: EventType::Removed,
+            lease: Some(Lease {
+                enable_ipv4: true,
+                enable_ipv6: subnet6.is_some(),
+                subnet: subnet4,
+                ipv6_subnet: subnet6,
+                attrs: LeaseAttrs::default(),
+                expiration: Utc::now(),
+                asof: kv.mod_revision().into(),
+            }),
+        }),
 
         _ => {
             let attrs: LeaseAttrs = serde_json::from_slice(kv.value())?;
@@ -579,9 +609,9 @@ pub async fn parse_subnet_watch_response(cli: &mut Client, ev: &WatchEvent) -> R
                 event_type: EventType::Added,
                 lease: Some(Lease {
                     enable_ipv4: true,
-                    enable_ipv6: !ipv6_subnet.ip().is_unspecified(),
+                    enable_ipv6: subnet6.is_some(),
                     subnet: subnet4,
-                    ipv6_subnet,
+                    ipv6_subnet: subnet6,
                     attrs,
                     expiration,
                     asof: kv.mod_revision().into(),
@@ -594,19 +624,19 @@ pub async fn parse_subnet_watch_response(cli: &mut Client, ev: &WatchEvent) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
-    use ipnetwork::{Ipv4Network, Ipv6Network};
     use chrono::Duration;
+    use ipnetwork::{Ipv4Network, Ipv6Network};
+    use std::str::FromStr;
     use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn test_create_and_get_subnet() {
-        // 创建模拟配置
         let cfg = XlineConfig {
             endpoints: vec!["http://127.0.0.1:2379".to_string()],
             prefix: "/coreos.com/network".to_string(),
             username: None,
             password: None,
+            subnet_lease_renew_margin: None,
         };
 
         let registry = XlineSubnetRegistry::new(cfg, None)
@@ -622,9 +652,7 @@ mod tests {
             backend_data: Some(serde_json::json!({"VNI": 1})),
             ..Default::default()
         };
-        
 
-        // 创建 subnet
         let exp = registry
             .create_subnet(sn4, Some(sn6), &lease_attrs, Duration::seconds(60))
             .await
@@ -632,7 +660,6 @@ mod tests {
 
         println!("Lease expiration: {exp}");
 
-        // 获取 subnet
         let (lease_opt, _) = registry
             .get_subnet(sn4, Some(sn6))
             .await
@@ -649,26 +676,33 @@ mod tests {
             prefix: "/coreos.com/network".to_string(),
             username: None,
             password: None,
+            subnet_lease_renew_margin: None,
         };
-    
-        let registry = Arc::new(XlineSubnetRegistry::new(cfg, None)
+
+        let registry = Arc::new(
+            XlineSubnetRegistry::new(cfg, None)
+                .await
+                .expect("failed to create registry"),
+        );
+
+        let revision = registry
+            .cli()
             .await
-            .expect("failed to create registry"));
-    
-        let revision = registry.cli().await.kv_client().get("/coreos.com/network/subnets", None)
+            .kv_client()
+            .get("/coreos.com/network/subnets", None)
             .await
             .unwrap()
             .header()
             .map(|h| h.revision())
             .unwrap_or(0);
-    
+
         let (tx, mut rx) = mpsc::channel(10);
-    
-        let registry_for_watch = registry.clone(); 
+
+        let registry_for_watch = registry.clone();
         let watch_task = tokio::spawn(async move {
             let _ = registry_for_watch.watch_subnets(tx, revision).await;
         });
-    
+
         let sn4 = Ipv4Network::from_str("10.1.6.0/24").unwrap();
         let sn6 = Ipv6Network::from_str("fd00::/64").unwrap();
         let lease_attrs = LeaseAttrs {
@@ -677,11 +711,12 @@ mod tests {
             backend_data: Some(serde_json::json!({"VNI": 1})),
             ..Default::default()
         };
-    
-        registry.create_subnet(sn4, Some(sn6), &lease_attrs, Duration::seconds(60))
+
+        registry
+            .create_subnet(sn4, Some(sn6), &lease_attrs, Duration::seconds(60))
             .await
             .expect("failed to create subnet");
-    
+
         tokio::select! {
             Some(watch_result) = rx.recv() => {
                 println!("Received watch event: {:?}", watch_result);
@@ -691,8 +726,7 @@ mod tests {
                 panic!("Timeout waiting for watch event");
             }
         }
-    
+
         watch_task.abort();
     }
-
 }

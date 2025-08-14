@@ -1,9 +1,9 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
-use ipnetwork::{Ipv4Network, Ipv6Network};
-use serde::{Serialize, Deserialize};
-use serde_json::Value as JsonValue;
 use chrono::{DateTime, Utc};
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use log::error;
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::network::manager::Cursor;
 
@@ -56,10 +56,10 @@ pub struct Lease {
     pub enable_ipv4: bool,
     pub enable_ipv6: bool,
     pub subnet: Ipv4Network,
-    pub ipv6_subnet: Ipv6Network,
+    pub ipv6_subnet: Option<Ipv6Network>,
     pub attrs: LeaseAttrs,
     pub expiration: DateTime<Utc>, // from chrono crate
-    pub asof: Option<i64>, // only used in etcd
+    pub asof: Option<i64>,         // only used in etcd
 }
 
 impl Default for Lease {
@@ -68,7 +68,7 @@ impl Default for Lease {
             enable_ipv4: false,
             enable_ipv6: false,
             subnet: "0.0.0.0/32".parse().unwrap(),
-            ipv6_subnet: "::/128".parse().unwrap(),
+            ipv6_subnet: None,
             attrs: LeaseAttrs::default(),
             expiration: Utc::now(),
             asof: None,
@@ -76,27 +76,31 @@ impl Default for Lease {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LeaseWatchResult {
     pub events: Vec<Event>,
     pub snapshot: Vec<Lease>, // only used in etcd
-    pub cursor: Cursor, // Only used in etcd
+    pub cursor: Cursor,       // Only used in etcd
 }
 
 #[derive(Debug, Clone)]
 pub struct LeaseWatcher {
-    pub own_lease: Lease,  // Lease with subnet of the local node
-    pub leases: Vec<Lease> // Leases from other nodes
+    pub own_lease: Lease,   // Lease with subnet of the local node
+    pub leases: Vec<Lease>, // Leases from other nodes
 }
 
 impl std::fmt::Display for LeaseAttrs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BackendType: {}, PublicIP: {}", self.backend_type, self.public_ip)?;
+        write!(
+            f,
+            "BackendType: {}, PublicIP: {}",
+            self.backend_type, self.public_ip
+        )?;
         write!(
             f,
             ", PublicIPv6: {}",
-            self.public_ipv6.map_or("(nil)".to_string(), |v| v.to_string())
+            self.public_ipv6
+                .map_or("(nil)".to_string(), |v| v.to_string())
         )?;
         write!(
             f,
@@ -131,13 +135,23 @@ impl LeaseWatcher {
         let mut batch = Vec::new();
 
         for new_lease in &new_leases {
-            if same_subnet(new_lease.enable_ipv4, new_lease.enable_ipv6, &self.own_lease, new_lease) {
+            if same_subnet(
+                new_lease.enable_ipv4,
+                new_lease.enable_ipv6,
+                &self.own_lease,
+                new_lease,
+            ) {
                 continue;
             }
 
             let mut found = false;
             self.leases.retain(|old_lease| {
-                if same_subnet(old_lease.enable_ipv4, old_lease.enable_ipv6, old_lease, new_lease) {
+                if same_subnet(
+                    old_lease.enable_ipv4,
+                    old_lease.enable_ipv6,
+                    old_lease,
+                    new_lease,
+                ) {
                     found = true;
                     false // remove this old lease
                 } else {
@@ -208,7 +222,12 @@ impl LeaseWatcher {
 
     fn remove(&mut self, lease: &Lease) -> Event {
         for i in 0..self.leases.len() {
-            if same_subnet(self.leases[i].enable_ipv4, self.leases[i].enable_ipv6, &self.leases[i], lease) {
+            if same_subnet(
+                self.leases[i].enable_ipv4,
+                self.leases[i].enable_ipv6,
+                &self.leases[i],
+                lease,
+            ) {
                 let removed = self.leases.remove(i);
                 return Event {
                     event_type: EventType::Removed,
@@ -219,9 +238,8 @@ impl LeaseWatcher {
 
         // Not found, but still return an event
         error!(
-            "Removed subnet ({}) and ipv6 subnet ({}) were not found",
-            lease.subnet,
-            lease.ipv6_subnet
+            "Removed subnet ({}) and ipv6 subnet ({:?}) were not found",
+            lease.subnet, lease.ipv6_subnet
         );
         Event {
             event_type: EventType::Removed,

@@ -114,7 +114,7 @@ impl IpAllocator {
         Ok(())
     }
 
-    pub fn new_iter(&self) -> Iter {
+    pub fn new_iter(&'_ self) -> Iter<'_> {
         let mut iter = Iter {
             range_set: &self.range_set,
             range_index: 0,

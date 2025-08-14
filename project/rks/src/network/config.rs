@@ -1,14 +1,14 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
+use anyhow::{Context, Result};
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use num_bigint::BigUint;
 use num_traits::One;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value as JsonValue};
-use ipnetwork::{Ipv4Network, Ipv6Network};
-use anyhow::{Context, Result};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::network::ip;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
     #[serde(rename = "EnableIPv4", default)]
     pub enable_ipv4: bool,
@@ -44,7 +44,10 @@ pub struct Config {
 }
 
 #[derive(Deserialize)]
-struct BackendType { #[serde(rename = "Type")] pub r#type: String }
+struct BackendType {
+    #[serde(rename = "Type")]
+    pub r#type: String,
+}
 
 fn parse_backend_type(be: &Option<JsonValue>) -> Result<String> {
     if let Some(val) = be {
@@ -52,8 +55,8 @@ fn parse_backend_type(be: &Option<JsonValue>) -> Result<String> {
         if val.is_null() {
             return Ok("hostgw".into());
         }
-        let bt: BackendType = serde_json::from_value(val.clone())
-            .context("decoding Backend property of config")?;
+        let bt: BackendType =
+            serde_json::from_value(val.clone()).context("decoding Backend property of config")?;
         Ok(bt.r#type)
     } else {
         Ok("hostgw".into())
@@ -61,17 +64,17 @@ fn parse_backend_type(be: &Option<JsonValue>) -> Result<String> {
 }
 
 pub fn parse_config(s: &str) -> Result<Config> {
-    let mut cfg: Config = serde_json::from_str(s)
-        .context("parsing Config JSON")?;
+    let mut cfg: Config = serde_json::from_str(s).context("parsing Config JSON")?;
     // default enable ipv4
-    cfg.enable_ipv4 = cfg.enable_ipv4 || true;
+    cfg.enable_ipv4 = true;
     cfg.backend_type = parse_backend_type(&cfg.backend)?;
     Ok(cfg)
 }
 
 pub fn check_network_config(cfg: &mut Config) -> Result<()> {
     if cfg.enable_ipv4 {
-        let net = cfg.network
+        let net = cfg
+            .network
             .with_context(|| "please define a correct Network parameter in the flannel config")?;
         let prefix = net.prefix();
 
@@ -83,14 +86,12 @@ pub fn check_network_config(cfg: &mut Config) -> Result<()> {
             if cfg.subnet_len < prefix + 2 {
                 anyhow::bail!("network must be able to accommodate at least four subnets");
             }
+        } else if prefix > 28 {
+            anyhow::bail!("network is too small. Minimum useful network prefix is /28");
+        } else if prefix <= 22 {
+            cfg.subnet_len = 24;
         } else {
-            if prefix > 28 {
-                anyhow::bail!("network is too small. Minimum useful network prefix is /28");
-            } else if prefix <= 22 {
-                cfg.subnet_len = 24;
-            } else {
-                cfg.subnet_len = prefix + 2;
-            }
+            cfg.subnet_len = prefix + 2;
         }
 
         let size = 1u32 << (32 - cfg.subnet_len);
@@ -112,8 +113,8 @@ pub fn check_network_config(cfg: &mut Config) -> Result<()> {
             }
             max
         } else {
-            let nxt = ip::AddIP::add(net.broadcast(), 1) ;
-            ip::SubIP::sub(nxt , size)
+            let nxt = ip::AddIP::add(net.broadcast(), 1);
+            ip::SubIP::sub(nxt, size)
         };
         cfg.subnet_max = Some(max_ip);
 
@@ -130,26 +131,24 @@ pub fn check_network_config(cfg: &mut Config) -> Result<()> {
     }
 
     if cfg.enable_ipv6 {
-        let net6 = cfg.ipv6_network
-            .as_ref()
-            .with_context(|| "please define a correct IPv6Network parameter in the flannel config")?;
+        let net6 = cfg.ipv6_network.as_ref().with_context(
+            || "please define a correct IPv6Network parameter in the flannel config",
+        )?;
         let prefix6 = net6.prefix();
 
         if cfg.ipv6_subnet_len > 0 {
             if cfg.ipv6_subnet_len > 126 {
                 anyhow::bail!("SubnetLen must be less than /127");
             }
-            if cfg.ipv6_subnet_len < (prefix6 + 2).into() {
+            if cfg.ipv6_subnet_len < (prefix6 + 2) {
                 anyhow::bail!("network must be able to accommodate at least four subnets");
             }
+        } else if prefix6 > 124 {
+            anyhow::bail!("IPv6Network is too small. Minimum useful network prefix is /124");
+        } else if prefix6 <= 62 {
+            cfg.ipv6_subnet_len = 64;
         } else {
-            if prefix6 > 124 {
-                anyhow::bail!("IPv6Network is too small. Minimum useful network prefix is /124");
-            } else if prefix6 <= 62 {
-                cfg.ipv6_subnet_len = 64;
-            } else {
-                cfg.ipv6_subnet_len = (prefix6 + 2).into();
-            }
+            cfg.ipv6_subnet_len = prefix6 + 2;
         }
 
         // size
@@ -174,22 +173,20 @@ pub fn check_network_config(cfg: &mut Config) -> Result<()> {
             max
         } else {
             let big_one: BigUint = BigUint::one();
-            let nxt = ip::AddIP::add(net6.broadcast(), &big_one) ;
-            ip::SubIP::sub(nxt , &size6)
+            let nxt = ip::AddIP::add(net6.broadcast(), &big_one);
+            ip::SubIP::sub(nxt, &size6)
         };
         cfg.ipv6_subnet_max = Some(max6);
 
         // boundary checks
-        let mask = (BigUint::one() << 128) - BigUint::one() << (128 - cfg.ipv6_subnet_len);
+        let mask = ((BigUint::one() << 128) - BigUint::one()) << (128 - cfg.ipv6_subnet_len);
 
-        // 检查 min6
         let min_b = BigUint::from(min6.to_bits());
         let masked_min = &min_b & &mask;
         if min_b != masked_min {
             anyhow::bail!("SubnetMin is not on a SubnetLen boundary: {}", min6);
         }
 
-        // 检查 max6
         let max_b = BigUint::from(max6.to_bits());
         let masked_max = &max_b & &mask;
         if max_b != masked_max {
@@ -198,26 +195,6 @@ pub fn check_network_config(cfg: &mut Config) -> Result<()> {
     }
 
     Ok(())
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            enable_ipv4: false,
-            enable_ipv6: false,
-            enable_nftables: false,
-            network: None,
-            ipv6_network: None,
-            subnet_min: None,
-            subnet_max: None,
-            ipv6_subnet_min: None,
-            ipv6_subnet_max: None,
-            subnet_len: 0,
-            ipv6_subnet_len: 0,
-            backend_type: String::new(),
-            backend: None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -266,7 +243,13 @@ mod tests {
         };
 
         check_network_config(&mut cfg).expect("IPv6 config should pass");
-        assert_eq!(cfg.ipv6_subnet_min.unwrap(), "fc00:0:0:1::".parse::<Ipv6Addr>().unwrap());
-        assert_eq!(cfg.ipv6_subnet_max.unwrap(), "fdff:ffff:ffff:ffff::".parse::<Ipv6Addr>().unwrap());
+        assert_eq!(
+            cfg.ipv6_subnet_min.unwrap(),
+            "fc00:0:0:1::".parse::<Ipv6Addr>().unwrap()
+        );
+        assert_eq!(
+            cfg.ipv6_subnet_max.unwrap(),
+            "fdff:ffff:ffff:ffff::".parse::<Ipv6Addr>().unwrap()
+        );
     }
 }
