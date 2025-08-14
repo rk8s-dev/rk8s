@@ -83,7 +83,7 @@ pub struct LeaseWatchResult {
     pub cursor: Cursor,       // Only used in etcd
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LeaseWatcher {
     pub own_lease: Lease,   // Lease with subnet of the local node
     pub leases: Vec<Lease>, // Leases from other nodes

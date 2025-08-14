@@ -12967,57 +12967,6 @@ cargo.rust_library(
     deps = [":overload-0.1.1"],
 )
 
-alias(
-    name = "num-bigint",
-    actual = ":num-bigint-0.4.6",
-    visibility = ["PUBLIC"],
-)
-
-cargo.rust_library(
-    name = "num-bigint-0.4.6",
-    srcs = [
-        "vendor/num-bigint-0.4.6/src/bigint.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/addition.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/arbitrary.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/bits.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/convert.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/division.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/multiplication.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/power.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/serde.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/shift.rs",
-        "vendor/num-bigint-0.4.6/src/bigint/subtraction.rs",
-        "vendor/num-bigint-0.4.6/src/bigrand.rs",
-        "vendor/num-bigint-0.4.6/src/biguint.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/addition.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/arbitrary.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/bits.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/convert.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/division.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/iter.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/monty.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/multiplication.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/power.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/serde.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/shift.rs",
-        "vendor/num-bigint-0.4.6/src/biguint/subtraction.rs",
-        "vendor/num-bigint-0.4.6/src/lib.rs",
-        "vendor/num-bigint-0.4.6/src/macros.rs",
-    ],
-    crate = "num_bigint",
-    crate_root = "vendor/num-bigint-0.4.6/src/lib.rs",
-    edition = "2021",
-    features = [
-        "default",
-        "std",
-    ],
-    visibility = [],
-    deps = [
-        ":num-integer-0.1.46",
-        ":num-traits-0.2.19",
-    ],
-)
-
 cargo.rust_library(
     name = "num-conv-0.1.0",
     srcs = ["vendor/num-conv-0.1.0/src/lib.rs"],
@@ -13025,30 +12974,6 @@ cargo.rust_library(
     crate_root = "vendor/num-conv-0.1.0/src/lib.rs",
     edition = "2021",
     visibility = [],
-)
-
-cargo.rust_library(
-    name = "num-integer-0.1.46",
-    srcs = [
-        "vendor/num-integer-0.1.46/src/average.rs",
-        "vendor/num-integer-0.1.46/src/lib.rs",
-        "vendor/num-integer-0.1.46/src/roots.rs",
-    ],
-    crate = "num_integer",
-    crate_root = "vendor/num-integer-0.1.46/src/lib.rs",
-    edition = "2018",
-    features = [
-        "i128",
-        "std",
-    ],
-    visibility = [],
-    deps = [":num-traits-0.2.19"],
-)
-
-alias(
-    name = "num-traits",
-    actual = ":num-traits-0.2.19",
-    visibility = ["PUBLIC"],
 )
 
 cargo.rust_library(
@@ -13080,11 +13005,6 @@ cargo.rust_library(
     env = {
         "OUT_DIR": "$(location :num-traits-0.2.19-build-script-run[out_dir])",
     },
-    features = [
-        "default",
-        "i128",
-        "std",
-    ],
     rustc_flags = ["@$(location :num-traits-0.2.19-build-script-run[rustc_flags])"],
     visibility = [],
 )
@@ -13117,11 +13037,6 @@ cargo.rust_binary(
     crate = "build_script_build",
     crate_root = "vendor/num-traits-0.2.19/build.rs",
     edition = "2021",
-    features = [
-        "default",
-        "i128",
-        "std",
-    ],
     visibility = [],
     deps = [":autocfg-1.5.0"],
 )
@@ -13130,11 +13045,6 @@ buildscript_run(
     name = "num-traits-0.2.19-build-script-run",
     package_name = "num-traits",
     buildscript_rule = ":num-traits-0.2.19-build-script-build",
-    features = [
-        "default",
-        "i128",
-        "std",
-    ],
     version = "0.2.19",
 )
 

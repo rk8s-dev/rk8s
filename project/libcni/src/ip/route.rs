@@ -5,7 +5,7 @@ use anyhow::{Result, anyhow};
 use bitflags::bitflags;
 use futures::TryStreamExt;
 use ipnetwork::IpNetwork;
-use log::info;
+use log::{debug, info};
 use macaddr::{MacAddr, MacAddr6, MacAddr8};
 use netlink_packet_route::{
     AddressFamily,
@@ -172,7 +172,7 @@ pub async fn route_add(route: Route) -> anyhow::Result<()> {
     if let Some(pri) = route.metric {
         builder = builder.priority(pri);
     }
-    info!("route_builder:{builder:?}");
+    debug!("route_builder:{builder:?}");
     route_handle.add(builder.build()).execute().await?;
 
     Ok(())

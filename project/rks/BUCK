@@ -18,8 +18,6 @@ rust_binary(
         "//third-party:etcd-client",
         "//third-party:clap",
         "//third-party:ipnetwork",
-        "//third-party:num-bigint",
-        "//third-party:num-traits",
         "//third-party:serde_json",
         "//third-party:chrono",
         "//third-party:log",

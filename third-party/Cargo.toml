@@ -77,8 +77,6 @@ nix = { version = "0.29.0", features = [
     "hostname",
     "process",
 ] }
-num-bigint = "0.4.6"
-num-traits = "0.2.19"
 oci-spec = { version = "~0.7.1", features = ["runtime"] }
 once_cell = "1.21.2"
 openssl = { version = "0.10.71", features = ["vendored"] }

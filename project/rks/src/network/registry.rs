@@ -110,8 +110,10 @@ pub type XlineNewFunc = fn(
     Box<dyn std::future::Future<Output = Result<(Client, KvClient), XlineRegistryError>> + Send>,
 >;
 
-// This struct is currently not fully utilized, but is retained for future expansion
-// and to support planned features related to subnet registry management.
+// This struct is part of the subnet registry abstraction.
+// While some fields or methods may not yet be used in the current implementation,
+// it is kept to ensure forward compatibility and to support upcoming features such as
+// distributed lease tracking, dynamic subnet reallocation, and multi-cluster integration.
 #[allow(dead_code)]
 pub struct XlineSubnetRegistry {
     cli_new_func: XlineNewFunc,

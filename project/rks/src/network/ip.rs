@@ -2,7 +2,6 @@ use anyhow::{Result, anyhow};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use libcni::ip::route::{self, Interface};
 use log::info;
-use num_bigint::BigUint;
 use regex::Regex;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -27,27 +26,17 @@ impl SubIP<u32> for Ipv4Addr {
     }
 }
 
-impl AddIP<&BigUint> for Ipv6Addr {
-    fn add(self, n: &BigUint) -> Self {
-        let ip_u = BigUint::from(self.to_bits());
-        let sum = ip_u + n;
-        let bytes = sum.to_bytes_be();
-        let mut padded = [0u8; 16];
-        let offset = 16 - bytes.len();
-        padded[offset..].copy_from_slice(&bytes);
-        Ipv6Addr::from(padded)
+impl AddIP<u128> for Ipv6Addr {
+    fn add(self, n: u128) -> Self {
+        let base = u128::from(self);
+        Ipv6Addr::from(base.saturating_add(n))
     }
 }
 
-impl SubIP<&BigUint> for Ipv6Addr {
-    fn sub(self, n: &BigUint) -> Self {
-        let ip_u = BigUint::from(self.to_bits());
-        let diff = ip_u - n;
-        let bytes = diff.to_bytes_be();
-        let mut padded = [0u8; 16];
-        let offset = 16 - bytes.len();
-        padded[offset..].copy_from_slice(&bytes);
-        Ipv6Addr::from(padded)
+impl SubIP<u128> for Ipv6Addr {
+    fn sub(self, n: u128) -> Self {
+        let base = u128::from(self);
+        Ipv6Addr::from(base.saturating_sub(n))
     }
 }
 

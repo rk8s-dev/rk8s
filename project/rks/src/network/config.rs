@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
 use ipnetwork::{Ipv4Network, Ipv6Network};
-use num_bigint::BigUint;
-use num_traits::One;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value as JsonValue};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -151,8 +149,7 @@ pub fn check_network_config(cfg: &mut Config) -> Result<()> {
             cfg.ipv6_subnet_len = prefix6 + 2;
         }
 
-        // size
-        let size6 = BigUint::one() << (128 - cfg.ipv6_subnet_len);
+        let size6: u128 = 1u128 << (128 - cfg.ipv6_subnet_len);
 
         // SubnetMin
         let min6 = if let Some(min) = cfg.ipv6_subnet_min {
@@ -161,7 +158,7 @@ pub fn check_network_config(cfg: &mut Config) -> Result<()> {
             }
             min
         } else {
-            ip::AddIP::add(net6.ip(), &size6)
+            ip::AddIP::add(net6.ip(), size6)
         };
         cfg.ipv6_subnet_min = Some(min6);
 
@@ -172,24 +169,21 @@ pub fn check_network_config(cfg: &mut Config) -> Result<()> {
             }
             max
         } else {
-            let big_one: BigUint = BigUint::one();
-            let nxt = ip::AddIP::add(net6.broadcast(), &big_one);
-            ip::SubIP::sub(nxt, &size6)
+            let nxt = ip::AddIP::add(net6.broadcast(), 1u128);
+            ip::SubIP::sub(nxt, size6)
         };
         cfg.ipv6_subnet_max = Some(max6);
 
         // boundary checks
-        let mask = ((BigUint::one() << 128) - BigUint::one()) << (128 - cfg.ipv6_subnet_len);
+        let mask: u128 = (!0u128) << (128 - cfg.ipv6_subnet_len);
 
-        let min_b = BigUint::from(min6.to_bits());
-        let masked_min = &min_b & &mask;
-        if min_b != masked_min {
+        let min_b = min6.to_bits();
+        if min_b & mask != min_b {
             anyhow::bail!("SubnetMin is not on a SubnetLen boundary: {}", min6);
         }
 
-        let max_b = BigUint::from(max6.to_bits());
-        let masked_max = &max_b & &mask;
-        if max_b != masked_max {
+        let max_b = max6.to_bits();
+        if max_b & mask != max_b {
             anyhow::bail!("SubnetMax is not on a SubnetLen boundary: {}", max6);
         }
     }
