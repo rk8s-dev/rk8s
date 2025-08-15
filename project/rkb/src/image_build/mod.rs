@@ -1,37 +1,20 @@
+pub mod builder;
+pub mod config;
+pub mod executor;
+pub mod stage_executor;
+
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
-use clap::Parser;
 use dockerfile_parser::Dockerfile;
 use rand::{Rng, distr::Alphanumeric};
 
-use crate::build::{build_config::BuildConfig, builder::Builder};
-
-#[derive(Parser, Debug)]
-pub struct BuildArgs {
-    /// Dockerfile or Containerfile
-    #[arg(short, long, value_name = "FILE")]
-    file: Option<PathBuf>,
-
-    /// Name of the resulting image
-    #[arg(short, long, value_name = "IMAGE NAME")]
-    tag: Option<String>,
-
-    /// Turn debugging information on
-    #[arg(short, long)]
-    debug: bool,
-
-    /// Use libfuse-rs or linux mount
-    #[arg(short, long)]
-    lib_fuse: bool,
-
-    /// Output directory for the image
-    #[arg(short, long, value_name = "DIR")]
-    output_dir: Option<String>,
-}
+use crate::build_arg::BuildArgs;
+use builder::Builder;
+use config::BuildConfig;
 
 fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
     let dockerfile_path = dockerfile_path.as_ref().to_path_buf();
@@ -42,10 +25,10 @@ fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
     Ok(dockerfile)
 }
 
-pub fn execute(build_args: &BuildArgs) -> Result<()> {
+pub fn build_image(build_args: &BuildArgs) -> Result<()> {
     let build_config = BuildConfig::default()
-        .debug(build_args.debug)
-        .lib_fuse(build_args.lib_fuse);
+        .verbose(build_args.verbose)
+        .libfuse(build_args.libfuse);
 
     if let Some(dockerfile_path) = build_args.file.as_ref() {
         let dockerfile = parse_dockerfile(dockerfile_path)?;
@@ -81,10 +64,10 @@ pub fn execute(build_args: &BuildArgs) -> Result<()> {
             )
         })?;
 
-        let imgae_builder = Builder::new(dockerfile)
+        let image_builder = Builder::new(dockerfile)
             .config(build_config)
             .image_output_dir(image_output_dir);
-        imgae_builder.build_image()?;
+        image_builder.build_image()?;
     }
 
     Ok(())
@@ -98,9 +81,8 @@ mod tests {
     use dockerfile_parser::{BreakableStringComponent, Instruction, ShellOrExecExpr};
     use rand::{Rng, distr::Alphanumeric};
 
-    use crate::parse::build_args::parse_dockerfile;
-
     use super::BuildArgs;
+    use super::parse_dockerfile;
 
     #[test]
     fn test_dockerfile() {

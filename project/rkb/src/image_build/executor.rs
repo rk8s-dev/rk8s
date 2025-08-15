@@ -6,15 +6,15 @@ use dockerfile_parser::Stage;
 
 use crate::{
     compression::{
-        compress_layer::compress, layer_compression_config::LayerCompressionConfig,
-        layer_compression_result::LayerCompressionResult,
+        compress_layer::compress, compression_result::LayerCompressionResult,
+        config::LayerCompressionConfig,
     },
     overlayfs::mount_config::MountConfig,
 };
 
 use super::{
-    build_config::BuildConfig, image_config::ImageConfig, stage_executor::StageExecutor,
-    stage_executor_config::StageExecutorConfig,
+    config::BuildConfig, config::ImageConfig, config::StageExecutorConfig,
+    stage_executor::StageExecutor,
 };
 
 /// Executor coordinates the entire build by using one or more

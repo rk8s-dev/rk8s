@@ -12,10 +12,7 @@ use sha256::try_digest;
 use tar::{Builder, Header};
 use walkdir::WalkDir;
 
-use super::{
-    layer_compression_config::LayerCompressionConfig,
-    layer_compression_result::LayerCompressionResult,
-};
+use super::{compression_result::LayerCompressionResult, config::LayerCompressionConfig};
 
 /// Skip virtual file system
 fn should_skip_path(path: &Path) -> bool {
@@ -300,7 +297,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::compression::layer_compression_config::LayerCompressionConfig;
+    use crate::compression::config::LayerCompressionConfig;
 
     use super::compress;
 

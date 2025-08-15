@@ -1,21 +1,25 @@
-pub mod build;
+pub mod build_arg;
 pub mod chroot;
 pub mod compression;
+pub mod image_build;
 pub mod oci_spec;
 pub mod overlayfs;
-pub mod parse;
 pub mod registry;
 
+use crate::build_arg::BuildArgs;
+use anyhow::Result;
 use clap::Parser;
-use parse::build_args::BuildArgs;
+use tracing_subscriber::prelude::*;
 
-fn main() {
+fn main() -> Result<()> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_thread_ids(true))
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let build_args = BuildArgs::parse();
-    match parse::execute(&build_args) {
-        Ok(_) => {}
-        Err(build_error) => {
-            eprintln!("{build_error:?}");
-            std::process::exit(1);
-        }
-    }
+    image_build::build_image(&build_args)?;
+    println!("Successfully built image");
+
+    Ok(())
 }

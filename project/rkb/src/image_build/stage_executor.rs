@@ -13,7 +13,7 @@ use dockerfile_parser::{
 
 use crate::{overlayfs::mount_config::MountConfig, registry::pull_image::pull_image};
 
-use super::{image_config::ImageConfig, stage_executor_config::StageExecutorConfig};
+use super::{config::ImageConfig, config::StageExecutorConfig};
 
 use anyhow::{Context, Result, anyhow};
 

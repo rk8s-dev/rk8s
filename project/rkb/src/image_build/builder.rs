@@ -6,13 +6,13 @@ use dockerfile_parser::Dockerfile;
 
 use crate::{
     oci_spec::{
-        oci_builder::OCIBuilder, oci_image_config::OciImageConfig, oci_image_index::OciImageIndex,
-        oci_image_manifest::OciImageManifest,
+        builder::OCIBuilder, config::OciImageConfig, index::OciImageIndex,
+        manifest::OciImageManifest,
     },
     overlayfs::mount_config::MountConfig,
 };
 
-use super::{build_config::BuildConfig, executor::Executor};
+use super::{config::BuildConfig, executor::Executor};
 
 pub struct Builder {
     pub dockerfile: Dockerfile,

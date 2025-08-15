@@ -4,10 +4,7 @@ use anyhow::{Context, Result};
 use oci_spec::image::OciLayoutBuilder;
 use sha256::try_digest;
 
-use super::{
-    oci_image_config::OciImageConfig, oci_image_index::OciImageIndex,
-    oci_image_manifest::OciImageManifest,
-};
+use super::{config::OciImageConfig, index::OciImageIndex, manifest::OciImageManifest};
 
 /// Currently only supports single manifest
 ///
