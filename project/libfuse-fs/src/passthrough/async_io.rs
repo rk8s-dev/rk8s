@@ -20,7 +20,7 @@ use std::{
 use vm_memory::{ByteValued, bitmap::BitmapSlice};
 
 use crate::{
-    passthrough::{CURRENT_DIR_CSTR, EMPTY_CSTR, PARENT_DIR_CSTR},
+    passthrough::{inode_store::InodeId, statx::statx, CURRENT_DIR_CSTR, EMPTY_CSTR, PARENT_DIR_CSTR},
     util::{convert_stat64_to_file_attr, filetype_from_mode},
 };
 
@@ -367,9 +367,13 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn do_unlink(&self, parent: Inode, name: &CStr, flags: libc::c_int) -> io::Result<()> {
         let data = self.inode_map.get(parent).await?;
         let file = data.get_file()?;
+        let st = statx(&file, Some(name))?;
         // Safe because this doesn't modify any memory and we check the return value.
         let res = unsafe { libc::unlinkat(file.as_raw_fd(), name.as_ptr(), flags) };
         if res == 0 {
+
+            let key = InodeId::from_stat(&st);
+            self.handle_cache.remove(&key).await;
             Ok(())
         } else {
             Err(io::Error::last_os_error())
