@@ -347,6 +347,9 @@ impl HandleMap {
     }
 }
 
+#[derive(Hash, Eq, PartialEq)]
+struct FileUniqueKey(u64, i64);
+
 /// A file system that simply "passes through" all requests it receives to the underlying file
 /// system.
 ///
@@ -409,7 +412,9 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     phantom: PhantomData<S>,
 
-    handle_cache: Cache<InodeId, Arc<FileHandle>>,
+    handle_cache: Cache<FileUniqueKey, Arc<FileHandle>>,
+
+    mmap_pool: Cache<FileUniqueKey, Arc<memmap2::Mmap>>,
 }
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
@@ -477,6 +482,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             phantom: PhantomData,
 
             handle_cache: moka::future::Cache::new(fd_limit),
+
+            mmap_pool: moka::future::Cache::new(1024),
         })
     }
 
@@ -606,7 +613,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
         let st = statx::statx(&path_file, None)?;
 
-        let key = InodeId::from_stat(&st);
+        let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
         let handle_arc = {
             let cache = self.handle_cache.clone();
             if let Some(h) = cache.get(&key).await {
@@ -927,7 +934,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
+    use std::{ffi::OsString, path};
 
     use rfuse3::{MountOptions, raw::Session};
     use tokio::signal;
@@ -935,6 +942,7 @@ mod tests {
     #[tokio::test]
     async fn test_passthrough() {
         let temp_dir = std::env::temp_dir();
+        // let temp_dir= path::PathBuf::from("/home/zine/test");
         let source_dir = temp_dir.join("test_passthrough_fs_src");
         let mount_dir = temp_dir.join("test_passthrough_fs_mnt");
         std::fs::create_dir_all(&source_dir).unwrap();
@@ -953,7 +961,11 @@ mod tests {
 
         let mut mount_options = MountOptions::default();
         // .allow_other(true)
-        mount_options.force_readdir_plus(true).uid(uid).gid(gid);
+        mount_options
+            .force_readdir_plus(true)
+            .uid(uid)
+            .gid(gid)
+            .allow_other(true);
 
         let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
             Session::new(mount_options)
