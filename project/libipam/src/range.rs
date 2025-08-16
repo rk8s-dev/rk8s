@@ -59,15 +59,16 @@ impl IpRangeExt for IpRange {
         if !self.subnet.contains(addr) {
             return false;
         }
-        if let Some(range_start) = self.range_start {
-            if addr < range_start {
-                return false;
-            }
+        if let Some(range_start) = self.range_start
+            && addr < range_start
+        {
+            return false;
         }
-        if let Some(range_end) = self.range_end {
-            if addr > range_end {
-                return false;
-            }
+
+        if let Some(range_end) = self.range_end
+            && addr > range_end
+        {
+            return false;
         }
         true
     }
