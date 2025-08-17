@@ -21,7 +21,8 @@ use vm_memory::{ByteValued, bitmap::BitmapSlice};
 
 use crate::{
     passthrough::{
-        statx::{self, statx}, FileUniqueKey, CURRENT_DIR_CSTR, EMPTY_CSTR, PARENT_DIR_CSTR
+        CURRENT_DIR_CSTR, EMPTY_CSTR, FileUniqueKey, PARENT_DIR_CSTR,
+        statx::{self, statx},
     },
     util::{convert_stat64_to_file_attr, filetype_from_mode},
 };
@@ -302,16 +303,14 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
     async fn do_open(&self, inode: Inode, flags: u32) -> io::Result<(Option<Handle>, OpenOptions)> {
         let file = self.open_inode(inode, flags as i32).await?;
-
         if flags & (libc::O_DIRECTORY as u32) == 0 {
-        let mmap = unsafe { memmap2::Mmap::map(&file) }?;
+            let mmap = unsafe { memmap2::Mmap::map(&file) }?;
 
-        let st = statx::statx(&file, None)?;
-        let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
-        let mmap_pool = self.mmap_pool.clone();
-        mmap_pool.insert(key, Arc::new(mmap)).await;
+            let st = statx::statx(&file, None)?;
+            let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
+            let mmap_pool = self.mmap_pool.clone();
+            mmap_pool.insert(key, Arc::new(mmap)).await;
         }
-
 
         let data = HandleData::new(inode, file, flags);
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
@@ -384,13 +383,12 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let res = unsafe { libc::unlinkat(file.as_raw_fd(), name.as_ptr(), flags) };
         if res == 0 {
             if flags & libc::AT_REMOVEDIR == 0
-                && let Some(st) = st {
-                    let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
-                    let cache = self.handle_cache.clone();
-                    cache.remove(&key).await;
-                    let mmap_pool = self.mmap_pool.clone();
-                    mmap_pool.remove(&key).await;
-                }
+                && let Some(st) = st
+            {
+                let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
+                self.handle_cache.remove(&key).await;
+                self.mmap_pool.remove(&key).await;
+            }
 
             Ok(())
         } else {
@@ -884,7 +882,7 @@ impl Filesystem for PassthroughFs {
         let raw_fd = data.borrow_fd().as_raw_fd();
         let f = unsafe { File::from_raw_fd(raw_fd) };
         let mut f = ManuallyDrop::new(f);
-        
+
         let st = statx::statx(&raw_fd, None)?;
         let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
         let mmap_pool = self.mmap_pool.clone();
@@ -976,36 +974,35 @@ impl Filesystem for PassthroughFs {
         flags: u32,
     ) -> Result<ReplyWrite> {
         let handle_data = self.get_data(fh, inode, libc::O_RDWR).await?;
-        let _guard = handle_data.lock.lock().await;
+        let raw_fd = {
+            let _guard = handle_data.lock.lock().await;
+            handle_data.borrow_fd().as_raw_fd()
+        };
 
-        // Manually implement File::try_clone() by borrowing fd of data.file instead of dup().
-        // It's safe because the `data` variable's lifetime spans the whole function,
-        // so data.file won't be closed.
-        let f = unsafe { File::from_raw_fd(handle_data.borrow_fd().as_raw_fd()) };
-        let mut f = ManuallyDrop::new(f);
-        self.check_fd_flags(&handle_data, f.as_raw_fd(), flags)
-            .await?; //TODO: deal with this flags. 
+        self.check_fd_flags(&handle_data, raw_fd, flags).await?;
 
-        // if self.seal_size.load().await {
-        //     let st = stat_fd(&f, None)?;
-        //     self.seal_size_check(Opcode::Write, st.st_size as u64, offset, size as u64, 0)?;
-        // }
+        let written = unsafe {
+            let ret = libc::pwrite(
+                raw_fd,
+                data.as_ptr() as *const libc::c_void,
+                data.len(),
+                offset as libc::off_t,
+            );
+            if ret < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            ret as usize
+        };
 
-        // Cap restored when _killpriv is dropped
-        // let _killpriv =
-        //     if self.killpriv_v2.load(Ordering::Acquire) && (fuse_flags & WRITE_KILL_PRIV != 0) {
-        //         self::drop_cap_fsetid()?
-        //     } else {
-        //         None
-        //     };
-        f.seek(SeekFrom::Start(offset))?;
-        let res = f.write(data)?;
+        if let Ok(st) = statx::statx(&raw_fd, None) {
+            let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
+            self.mmap_pool.remove(&key).await; // 异步移除缓存项
+        }
 
         Ok(ReplyWrite {
-            written: res as u32,
+            written: written as u32,
         })
     }
-
     /// get filesystem statistics.
     async fn statfs(&self, _req: Request, inode: Inode) -> Result<ReplyStatFs> {
         let mut out = MaybeUninit::<libc::statvfs64>::zeroed();

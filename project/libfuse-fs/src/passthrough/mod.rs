@@ -942,7 +942,6 @@ mod tests {
     #[tokio::test]
     async fn test_passthrough() {
         let temp_dir = std::env::temp_dir();
-        // let temp_dir= path::PathBuf::from("/home/zine/test");
         let source_dir = temp_dir.join("test_passthrough_fs_src");
         let mount_dir = temp_dir.join("test_passthrough_fs_mnt");
         std::fs::create_dir_all(&source_dir).unwrap();
