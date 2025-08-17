@@ -204,22 +204,12 @@ cargo.rust_library(
     crate = "anstyle_wincon",
     crate_root = "vendor/anstyle-wincon-3.0.9/src/lib.rs",
     edition = "2021",
-    platform = {
-        "windows-gnu": dict(
-            deps = [
-                ":once_cell_polyfill-1.70.1",
-                ":windows-sys-0.59.0",
-            ],
-        ),
-        "windows-msvc": dict(
-            deps = [
-                ":once_cell_polyfill-1.70.1",
-                ":windows-sys-0.59.0",
-            ],
-        ),
-    },
     visibility = [],
-    deps = [":anstyle-1.0.11"],
+    deps = [
+        ":anstyle-1.0.11",
+        ":once_cell_polyfill-1.70.1",
+        ":windows-sys-0.59.0",
+    ],
 )
 
 alias(
@@ -374,16 +364,16 @@ cargo.rust_library(
 
 alias(
     name = "async-fs",
-    actual = ":async-fs-2.1.3",
+    actual = ":async-fs-2.1.2",
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_library(
-    name = "async-fs-2.1.3",
-    srcs = ["vendor/async-fs-2.1.3/src/lib.rs"],
+    name = "async-fs-2.1.2",
+    srcs = ["vendor/async-fs-2.1.2/src/lib.rs"],
     crate = "async_fs",
-    crate_root = "vendor/async-fs-2.1.3/src/lib.rs",
-    edition = "2021",
+    crate_root = "vendor/async-fs-2.1.2/src/lib.rs",
+    edition = "2018",
     visibility = [],
     deps = [
         ":async-lock-3.4.0",
@@ -422,7 +412,7 @@ cargo.rust_library(
     deps = [
         ":async-channel-2.5.0",
         ":async-executor-1.13.2",
-        ":async-io-2.5.0",
+        ":async-io-2.4.1",
         ":async-lock-3.4.0",
         ":blocking-1.6.2",
         ":futures-lite-2.6.0",
@@ -492,33 +482,33 @@ buildscript_run(
 
 alias(
     name = "async-io",
-    actual = ":async-io-2.5.0",
+    actual = ":async-io-2.4.1",
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_library(
-    name = "async-io-2.5.0",
+    name = "async-io-2.4.1",
     srcs = [
-        "vendor/async-io-2.5.0/src/driver.rs",
-        "vendor/async-io-2.5.0/src/lib.rs",
-        "vendor/async-io-2.5.0/src/os.rs",
-        "vendor/async-io-2.5.0/src/os/kqueue.rs",
-        "vendor/async-io-2.5.0/src/os/unix.rs",
-        "vendor/async-io-2.5.0/src/os/windows.rs",
-        "vendor/async-io-2.5.0/src/reactor.rs",
-        "vendor/async-io-2.5.0/src/reactor/kqueue.rs",
-        "vendor/async-io-2.5.0/src/reactor/unix.rs",
-        "vendor/async-io-2.5.0/src/reactor/windows.rs",
+        "vendor/async-io-2.4.1/src/driver.rs",
+        "vendor/async-io-2.4.1/src/lib.rs",
+        "vendor/async-io-2.4.1/src/os.rs",
+        "vendor/async-io-2.4.1/src/os/kqueue.rs",
+        "vendor/async-io-2.4.1/src/os/unix.rs",
+        "vendor/async-io-2.4.1/src/os/windows.rs",
+        "vendor/async-io-2.4.1/src/reactor.rs",
+        "vendor/async-io-2.4.1/src/reactor/kqueue.rs",
+        "vendor/async-io-2.4.1/src/reactor/unix.rs",
+        "vendor/async-io-2.4.1/src/reactor/windows.rs",
     ],
     crate = "async_io",
-    crate_root = "vendor/async-io-2.5.0/src/lib.rs",
+    crate_root = "vendor/async-io-2.4.1/src/lib.rs",
     edition = "2021",
     platform = {
         "windows-gnu": dict(
-            deps = [":windows-sys-0.60.2"],
+            deps = [":windows-sys-0.59.0"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.60.2"],
+            deps = [":windows-sys-0.59.0"],
         ),
     },
     visibility = [],
@@ -529,9 +519,10 @@ cargo.rust_library(
         ":futures-io-0.3.31",
         ":futures-lite-2.6.0",
         ":parking-2.2.1",
-        ":polling-3.9.0",
+        ":polling-3.8.0",
         ":rustix-1.0.8",
         ":slab-0.4.10",
+        ":tracing-0.1.41",
     ],
 )
 
@@ -621,28 +612,28 @@ cargo.rust_library(
         "linux-arm64": dict(
             deps = [
                 ":async-io-1.13.0",
-                ":async-signal-0.2.12",
+                ":async-signal-0.2.11",
                 ":rustix-0.38.44",
             ],
         ),
         "linux-x86_64": dict(
             deps = [
                 ":async-io-1.13.0",
-                ":async-signal-0.2.12",
+                ":async-signal-0.2.11",
                 ":rustix-0.38.44",
             ],
         ),
         "macos-arm64": dict(
             deps = [
                 ":async-io-1.13.0",
-                ":async-signal-0.2.12",
+                ":async-signal-0.2.11",
                 ":rustix-0.38.44",
             ],
         ),
         "macos-x86_64": dict(
             deps = [
                 ":async-io-1.13.0",
-                ":async-signal-0.2.12",
+                ":async-signal-0.2.11",
                 ":rustix-0.38.44",
             ],
         ),
@@ -670,28 +661,28 @@ cargo.rust_library(
 
 alias(
     name = "async-process",
-    actual = ":async-process-2.4.0",
+    actual = ":async-process-2.3.1",
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_library(
-    name = "async-process-2.4.0",
+    name = "async-process-2.3.1",
     srcs = [
-        "vendor/async-process-2.4.0/src/lib.rs",
-        "vendor/async-process-2.4.0/src/reaper/mod.rs",
-        "vendor/async-process-2.4.0/src/reaper/signal.rs",
-        "vendor/async-process-2.4.0/src/reaper/wait.rs",
-        "vendor/async-process-2.4.0/src/unix.rs",
-        "vendor/async-process-2.4.0/src/windows.rs",
+        "vendor/async-process-2.3.1/src/lib.rs",
+        "vendor/async-process-2.3.1/src/reaper/mod.rs",
+        "vendor/async-process-2.3.1/src/reaper/signal.rs",
+        "vendor/async-process-2.3.1/src/reaper/wait.rs",
+        "vendor/async-process-2.3.1/src/unix.rs",
+        "vendor/async-process-2.3.1/src/windows.rs",
     ],
     crate = "async_process",
-    crate_root = "vendor/async-process-2.4.0/src/lib.rs",
+    crate_root = "vendor/async-process-2.3.1/src/lib.rs",
     edition = "2021",
     platform = {
         "linux-arm64": dict(
             deps = [
                 ":async-channel-2.5.0",
-                ":async-signal-0.2.12",
+                ":async-signal-0.2.11",
                 ":async-task-4.7.1",
                 ":rustix-1.0.8",
             ],
@@ -699,20 +690,20 @@ cargo.rust_library(
         "linux-x86_64": dict(
             deps = [
                 ":async-channel-2.5.0",
-                ":async-signal-0.2.12",
+                ":async-signal-0.2.11",
                 ":async-task-4.7.1",
                 ":rustix-1.0.8",
             ],
         ),
         "macos-arm64": dict(
             deps = [
-                ":async-signal-0.2.12",
+                ":async-signal-0.2.11",
                 ":rustix-1.0.8",
             ],
         ),
         "macos-x86_64": dict(
             deps = [
-                ":async-signal-0.2.12",
+                ":async-signal-0.2.11",
                 ":rustix-1.0.8",
             ],
         ),
@@ -733,79 +724,34 @@ cargo.rust_library(
     },
     visibility = [],
     deps = [
-        ":async-io-2.5.0",
+        ":async-io-2.4.1",
         ":async-lock-3.4.0",
         ":cfg-if-1.0.1",
         ":event-listener-5.4.0",
         ":futures-lite-2.6.0",
+        ":tracing-0.1.41",
     ],
 )
 
 cargo.rust_library(
-    name = "async-signal-0.2.12",
+    name = "async-signal-0.2.11",
     srcs = [
-        "vendor/async-signal-0.2.12/src/channel.rs",
-        "vendor/async-signal-0.2.12/src/lib.rs",
-        "vendor/async-signal-0.2.12/src/pipe.rs",
-        "vendor/async-signal-0.2.12/src/windows_registry.rs",
+        "vendor/async-signal-0.2.11/src/channel.rs",
+        "vendor/async-signal-0.2.11/src/lib.rs",
+        "vendor/async-signal-0.2.11/src/pipe.rs",
+        "vendor/async-signal-0.2.11/src/windows_registry.rs",
     ],
     crate = "async_signal",
-    crate_root = "vendor/async-signal-0.2.12/src/lib.rs",
-    edition = "2021",
-    platform = {
-        "linux-arm64": dict(
-            deps = [
-                ":async-io-2.5.0",
-                ":futures-io-0.3.31",
-                ":rustix-1.0.8",
-                ":signal-hook-registry-1.4.5",
-            ],
-        ),
-        "linux-x86_64": dict(
-            deps = [
-                ":async-io-2.5.0",
-                ":futures-io-0.3.31",
-                ":rustix-1.0.8",
-                ":signal-hook-registry-1.4.5",
-            ],
-        ),
-        "macos-arm64": dict(
-            deps = [
-                ":async-io-2.5.0",
-                ":futures-io-0.3.31",
-                ":rustix-1.0.8",
-                ":signal-hook-registry-1.4.5",
-            ],
-        ),
-        "macos-x86_64": dict(
-            deps = [
-                ":async-io-2.5.0",
-                ":futures-io-0.3.31",
-                ":rustix-1.0.8",
-                ":signal-hook-registry-1.4.5",
-            ],
-        ),
-        "windows-gnu": dict(
-            deps = [
-                ":async-lock-3.4.0",
-                ":atomic-waker-1.1.2",
-                ":slab-0.4.10",
-                ":windows-sys-0.60.2",
-            ],
-        ),
-        "windows-msvc": dict(
-            deps = [
-                ":async-lock-3.4.0",
-                ":atomic-waker-1.1.2",
-                ":slab-0.4.10",
-                ":windows-sys-0.60.2",
-            ],
-        ),
-    },
+    crate_root = "vendor/async-signal-0.2.11/src/lib.rs",
+    edition = "2018",
     visibility = [],
     deps = [
+        ":async-io-2.4.1",
         ":cfg-if-1.0.1",
         ":futures-core-0.3.31",
+        ":futures-io-0.3.31",
+        ":rustix-1.0.8",
+        ":signal-hook-registry-1.4.5",
     ],
 )
 
@@ -1084,57 +1030,16 @@ cargo.rust_library(
         "std",
         "wasm-bindgen-futures",
     ],
-    platform = {
-        "linux-arm64": dict(
-            deps = [
-                ":async-global-executor-2.4.1",
-                ":async-io-2.5.0",
-                ":futures-lite-2.6.0",
-            ],
-        ),
-        "linux-x86_64": dict(
-            deps = [
-                ":async-global-executor-2.4.1",
-                ":async-io-2.5.0",
-                ":futures-lite-2.6.0",
-            ],
-        ),
-        "macos-arm64": dict(
-            deps = [
-                ":async-global-executor-2.4.1",
-                ":async-io-2.5.0",
-                ":futures-lite-2.6.0",
-            ],
-        ),
-        "macos-x86_64": dict(
-            deps = [
-                ":async-global-executor-2.4.1",
-                ":async-io-2.5.0",
-                ":futures-lite-2.6.0",
-            ],
-        ),
-        "windows-gnu": dict(
-            deps = [
-                ":async-global-executor-2.4.1",
-                ":async-io-2.5.0",
-                ":futures-lite-2.6.0",
-            ],
-        ),
-        "windows-msvc": dict(
-            deps = [
-                ":async-global-executor-2.4.1",
-                ":async-io-2.5.0",
-                ":futures-lite-2.6.0",
-            ],
-        ),
-    },
     visibility = [],
     deps = [
         ":async-channel-1.9.0",
+        ":async-global-executor-2.4.1",
+        ":async-io-2.4.1",
         ":async-lock-3.4.0",
         ":crossbeam-utils-0.8.21",
         ":futures-core-0.3.31",
         ":futures-io-0.3.31",
+        ":futures-lite-2.6.0",
         ":kv-log-macro-1.0.7",
         ":log-0.4.27",
         ":memchr-2.7.5",
@@ -5296,15 +5201,6 @@ cargo.rust_library(
         ":quote-1.0.40",
         ":syn-2.0.104",
     ],
-)
-
-cargo.rust_library(
-    name = "glob-0.3.2",
-    srcs = ["vendor/glob-0.3.2/src/lib.rs"],
-    crate = "glob",
-    crate_root = "vendor/glob-0.3.2/src/lib.rs",
-    edition = "2015",
-    visibility = [],
 )
 
 cargo.rust_library(
@@ -17834,22 +17730,22 @@ buildscript_run(
 )
 
 cargo.rust_library(
-    name = "polling-3.9.0",
+    name = "polling-3.8.0",
     srcs = [
-        "vendor/polling-3.9.0/src/epoll.rs",
-        "vendor/polling-3.9.0/src/iocp/afd.rs",
-        "vendor/polling-3.9.0/src/iocp/mod.rs",
-        "vendor/polling-3.9.0/src/iocp/port.rs",
-        "vendor/polling-3.9.0/src/kqueue.rs",
-        "vendor/polling-3.9.0/src/lib.rs",
-        "vendor/polling-3.9.0/src/os.rs",
-        "vendor/polling-3.9.0/src/os/iocp.rs",
-        "vendor/polling-3.9.0/src/os/kqueue.rs",
-        "vendor/polling-3.9.0/src/poll.rs",
-        "vendor/polling-3.9.0/src/port.rs",
+        "vendor/polling-3.8.0/src/epoll.rs",
+        "vendor/polling-3.8.0/src/iocp/afd.rs",
+        "vendor/polling-3.8.0/src/iocp/mod.rs",
+        "vendor/polling-3.8.0/src/iocp/port.rs",
+        "vendor/polling-3.8.0/src/kqueue.rs",
+        "vendor/polling-3.8.0/src/lib.rs",
+        "vendor/polling-3.8.0/src/os.rs",
+        "vendor/polling-3.8.0/src/os/iocp.rs",
+        "vendor/polling-3.8.0/src/os/kqueue.rs",
+        "vendor/polling-3.8.0/src/poll.rs",
+        "vendor/polling-3.8.0/src/port.rs",
     ],
     crate = "polling",
-    crate_root = "vendor/polling-3.9.0/src/lib.rs",
+    crate_root = "vendor/polling-3.8.0/src/lib.rs",
     edition = "2021",
     platform = {
         "linux-arm64": dict(
@@ -17868,19 +17764,22 @@ cargo.rust_library(
             deps = [
                 ":concurrent-queue-2.5.0",
                 ":pin-project-lite-0.2.16",
-                ":windows-sys-0.60.2",
+                ":windows-sys-0.59.0",
             ],
         ),
         "windows-msvc": dict(
             deps = [
                 ":concurrent-queue-2.5.0",
                 ":pin-project-lite-0.2.16",
-                ":windows-sys-0.60.2",
+                ":windows-sys-0.59.0",
             ],
         ),
     },
     visibility = [],
-    deps = [":cfg-if-1.0.1"],
+    deps = [
+        ":cfg-if-1.0.1",
+        ":tracing-0.1.41",
+    ],
 )
 
 cargo.rust_library(
@@ -19052,6 +18951,7 @@ cargo.rust_library(
         ":pin-project-lite-0.2.16",
         ":rustc-hash-2.1.1",
         ":rustls-0.23.29",
+        ":socket2-0.5.10",
         ":thiserror-2.0.12",
         ":tokio-1.46.1",
         ":tracing-0.1.41",
@@ -19948,169 +19848,37 @@ cargo.rust_library(
         "json",
         "system-proxy",
     ],
-    platform = {
-        "linux-arm64": dict(
-            named_deps = {
-                "native_tls_crate": ":native-tls-0.2.14",
-            },
-            deps = [
-                ":encoding_rs-0.8.35",
-                ":futures-channel-0.3.31",
-                ":h2-0.4.11",
-                ":http-body-1.0.1",
-                ":http-body-util-0.1.3",
-                ":hyper-1.6.0",
-                ":hyper-rustls-0.27.7",
-                ":hyper-tls-0.6.0",
-                ":hyper-util-0.1.15",
-                ":log-0.4.27",
-                ":mime-0.3.17",
-                ":percent-encoding-2.3.1",
-                ":pin-project-lite-0.2.16",
-                ":rustls-pki-types-1.12.0",
-                ":tokio-1.46.1",
-                ":tokio-native-tls-0.3.1",
-                ":tower-0.5.2",
-                ":tower-http-0.6.6",
-            ],
-        ),
-        "linux-x86_64": dict(
-            named_deps = {
-                "native_tls_crate": ":native-tls-0.2.14",
-            },
-            deps = [
-                ":encoding_rs-0.8.35",
-                ":futures-channel-0.3.31",
-                ":h2-0.4.11",
-                ":http-body-1.0.1",
-                ":http-body-util-0.1.3",
-                ":hyper-1.6.0",
-                ":hyper-rustls-0.27.7",
-                ":hyper-tls-0.6.0",
-                ":hyper-util-0.1.15",
-                ":log-0.4.27",
-                ":mime-0.3.17",
-                ":percent-encoding-2.3.1",
-                ":pin-project-lite-0.2.16",
-                ":rustls-pki-types-1.12.0",
-                ":tokio-1.46.1",
-                ":tokio-native-tls-0.3.1",
-                ":tower-0.5.2",
-                ":tower-http-0.6.6",
-            ],
-        ),
-        "macos-arm64": dict(
-            named_deps = {
-                "native_tls_crate": ":native-tls-0.2.14",
-            },
-            deps = [
-                ":encoding_rs-0.8.35",
-                ":futures-channel-0.3.31",
-                ":h2-0.4.11",
-                ":http-body-1.0.1",
-                ":http-body-util-0.1.3",
-                ":hyper-1.6.0",
-                ":hyper-rustls-0.27.7",
-                ":hyper-tls-0.6.0",
-                ":hyper-util-0.1.15",
-                ":log-0.4.27",
-                ":mime-0.3.17",
-                ":percent-encoding-2.3.1",
-                ":pin-project-lite-0.2.16",
-                ":rustls-pki-types-1.12.0",
-                ":tokio-1.46.1",
-                ":tokio-native-tls-0.3.1",
-                ":tower-0.5.2",
-                ":tower-http-0.6.6",
-            ],
-        ),
-        "macos-x86_64": dict(
-            named_deps = {
-                "native_tls_crate": ":native-tls-0.2.14",
-            },
-            deps = [
-                ":encoding_rs-0.8.35",
-                ":futures-channel-0.3.31",
-                ":h2-0.4.11",
-                ":http-body-1.0.1",
-                ":http-body-util-0.1.3",
-                ":hyper-1.6.0",
-                ":hyper-rustls-0.27.7",
-                ":hyper-tls-0.6.0",
-                ":hyper-util-0.1.15",
-                ":log-0.4.27",
-                ":mime-0.3.17",
-                ":percent-encoding-2.3.1",
-                ":pin-project-lite-0.2.16",
-                ":rustls-pki-types-1.12.0",
-                ":tokio-1.46.1",
-                ":tokio-native-tls-0.3.1",
-                ":tower-0.5.2",
-                ":tower-http-0.6.6",
-            ],
-        ),
-        "windows-gnu": dict(
-            named_deps = {
-                "native_tls_crate": ":native-tls-0.2.14",
-            },
-            deps = [
-                ":encoding_rs-0.8.35",
-                ":futures-channel-0.3.31",
-                ":h2-0.4.11",
-                ":http-body-1.0.1",
-                ":http-body-util-0.1.3",
-                ":hyper-1.6.0",
-                ":hyper-rustls-0.27.7",
-                ":hyper-tls-0.6.0",
-                ":hyper-util-0.1.15",
-                ":log-0.4.27",
-                ":mime-0.3.17",
-                ":percent-encoding-2.3.1",
-                ":pin-project-lite-0.2.16",
-                ":rustls-pki-types-1.12.0",
-                ":tokio-1.46.1",
-                ":tokio-native-tls-0.3.1",
-                ":tower-0.5.2",
-                ":tower-http-0.6.6",
-            ],
-        ),
-        "windows-msvc": dict(
-            named_deps = {
-                "native_tls_crate": ":native-tls-0.2.14",
-            },
-            deps = [
-                ":encoding_rs-0.8.35",
-                ":futures-channel-0.3.31",
-                ":h2-0.4.11",
-                ":http-body-1.0.1",
-                ":http-body-util-0.1.3",
-                ":hyper-1.6.0",
-                ":hyper-rustls-0.27.7",
-                ":hyper-tls-0.6.0",
-                ":hyper-util-0.1.15",
-                ":log-0.4.27",
-                ":mime-0.3.17",
-                ":percent-encoding-2.3.1",
-                ":pin-project-lite-0.2.16",
-                ":rustls-pki-types-1.12.0",
-                ":tokio-1.46.1",
-                ":tokio-native-tls-0.3.1",
-                ":tower-0.5.2",
-                ":tower-http-0.6.6",
-            ],
-        ),
+    named_deps = {
+        "native_tls_crate": ":native-tls-0.2.14",
     },
     visibility = [],
     deps = [
         ":base64-0.22.1",
         ":bytes-1.10.1",
+        ":encoding_rs-0.8.35",
+        ":futures-channel-0.3.31",
         ":futures-core-0.3.31",
         ":futures-util-0.3.31",
+        ":h2-0.4.11",
         ":http-1.3.1",
+        ":http-body-1.0.1",
+        ":http-body-util-0.1.3",
+        ":hyper-1.6.0",
+        ":hyper-tls-0.6.0",
+        ":hyper-util-0.1.15",
+        ":log-0.4.27",
+        ":mime-0.3.17",
+        ":percent-encoding-2.3.1",
+        ":pin-project-lite-0.2.16",
+        ":rustls-pki-types-1.12.0",
         ":serde-1.0.219",
         ":serde_json-1.0.141",
         ":serde_urlencoded-0.7.1",
         ":sync_wrapper-1.0.2",
+        ":tokio-1.46.1",
+        ":tokio-native-tls-0.3.1",
+        ":tower-0.5.2",
+        ":tower-http-0.6.6",
         ":tower-service-0.3.3",
         ":url-2.5.4",
     ],
@@ -24546,43 +24314,6 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
-    name = "socket2-0.5.10",
-    srcs = [
-        "vendor/socket2-0.5.10/src/lib.rs",
-        "vendor/socket2-0.5.10/src/sockaddr.rs",
-        "vendor/socket2-0.5.10/src/socket.rs",
-        "vendor/socket2-0.5.10/src/sockref.rs",
-        "vendor/socket2-0.5.10/src/sys/unix.rs",
-        "vendor/socket2-0.5.10/src/sys/windows.rs",
-    ],
-    crate = "socket2",
-    crate_root = "vendor/socket2-0.5.10/src/lib.rs",
-    edition = "2021",
-    features = ["all"],
-    platform = {
-        "linux-arm64": dict(
-            deps = [":libc-0.2.174"],
-        ),
-        "linux-x86_64": dict(
-            deps = [":libc-0.2.174"],
-        ),
-        "macos-arm64": dict(
-            deps = [":libc-0.2.174"],
-        ),
-        "macos-x86_64": dict(
-            deps = [":libc-0.2.174"],
-        ),
-        "windows-gnu": dict(
-            deps = [":windows-sys-0.52.0"],
-        ),
-        "windows-msvc": dict(
-            deps = [":windows-sys-0.52.0"],
-        ),
-    },
-    visibility = [],
-)
-
-cargo.rust_library(
     name = "stable_deref_trait-1.2.0",
     srcs = ["vendor/stable_deref_trait-1.2.0/src/lib.rs"],
     crate = "stable_deref_trait",
@@ -26072,41 +25803,33 @@ cargo.rust_library(
             deps = [
                 ":libc-0.2.174",
                 ":signal-hook-registry-1.4.5",
-                ":socket2-0.5.10",
             ],
         ),
         "linux-x86_64": dict(
             deps = [
                 ":libc-0.2.174",
                 ":signal-hook-registry-1.4.5",
-                ":socket2-0.5.10",
             ],
         ),
         "macos-arm64": dict(
             deps = [
                 ":libc-0.2.174",
                 ":signal-hook-registry-1.4.5",
-                ":socket2-0.5.10",
             ],
         ),
         "macos-x86_64": dict(
             deps = [
                 ":libc-0.2.174",
                 ":signal-hook-registry-1.4.5",
-                ":socket2-0.5.10",
             ],
         ),
         "windows-gnu": dict(
-            deps = [
-                ":socket2-0.5.10",
-                ":windows-sys-0.52.0",
-            ],
+            features = ["windows-sys"],
+            deps = [":windows-sys-0.52.0"],
         ),
         "windows-msvc": dict(
-            deps = [
-                ":socket2-0.5.10",
-                ":windows-sys-0.52.0",
-            ],
+            features = ["windows-sys"],
+            deps = [":windows-sys-0.52.0"],
         ),
     },
     visibility = [],
@@ -26115,6 +25838,7 @@ cargo.rust_library(
         ":mio-1.0.4",
         ":parking_lot-0.12.4",
         ":pin-project-lite-0.2.16",
+        ":socket2-0.5.10",
         ":tokio-macros-2.5.0",
     ],
 )
@@ -26147,27 +25871,6 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":native-tls-0.2.14",
-        ":tokio-1.46.1",
-    ],
-)
-
-cargo.rust_library(
-    name = "tokio-rustls-0.26.2",
-    srcs = [
-        "vendor/tokio-rustls-0.26.2/src/client.rs",
-        "vendor/tokio-rustls-0.26.2/src/common/handshake.rs",
-        "vendor/tokio-rustls-0.26.2/src/common/mod.rs",
-        "vendor/tokio-rustls-0.26.2/src/common/test_stream.rs",
-        "vendor/tokio-rustls-0.26.2/src/lib.rs",
-        "vendor/tokio-rustls-0.26.2/src/server.rs",
-    ],
-    crate = "tokio_rustls",
-    crate_root = "vendor/tokio-rustls-0.26.2/src/lib.rs",
-    edition = "2021",
-    features = ["tls12"],
-    visibility = [],
-    deps = [
-        ":rustls-0.23.29",
         ":tokio-1.46.1",
     ],
 )
@@ -27591,46 +27294,12 @@ cargo.rust_library(
         "std",
         "v4",
     ],
-    platform = {
-        "linux-arm64": dict(
-            deps = [
-                ":getrandom-0.3.3",
-                ":rand-0.9.1",
-            ],
-        ),
-        "linux-x86_64": dict(
-            deps = [
-                ":getrandom-0.3.3",
-                ":rand-0.9.1",
-            ],
-        ),
-        "macos-arm64": dict(
-            deps = [
-                ":getrandom-0.3.3",
-                ":rand-0.9.1",
-            ],
-        ),
-        "macos-x86_64": dict(
-            deps = [
-                ":getrandom-0.3.3",
-                ":rand-0.9.1",
-            ],
-        ),
-        "windows-gnu": dict(
-            deps = [
-                ":getrandom-0.3.3",
-                ":rand-0.9.1",
-            ],
-        ),
-        "windows-msvc": dict(
-            deps = [
-                ":getrandom-0.3.3",
-                ":rand-0.9.1",
-            ],
-        ),
-    },
     visibility = [],
-    deps = [":uuid-macro-internal-1.17.0"],
+    deps = [
+        ":getrandom-0.3.3",
+        ":rand-0.9.1",
+        ":uuid-macro-internal-1.17.0",
+    ],
 )
 
 cargo.rust_library(
@@ -30171,25 +29840,13 @@ cargo.rust_library(
     crate_root = "vendor/windows-sys-0.60.2/src/lib.rs",
     edition = "2021",
     features = [
-        "Wdk",
-        "Wdk_Foundation",
-        "Wdk_Storage",
-        "Wdk_Storage_FileSystem",
         "Win32",
         "Win32_Foundation",
         "Win32_Networking",
         "Win32_Networking_WinSock",
-        "Win32_Security",
-        "Win32_Storage",
-        "Win32_Storage_FileSystem",
         "Win32_System",
-        "Win32_System_Console",
         "Win32_System_Diagnostics",
         "Win32_System_Diagnostics_Debug",
-        "Win32_System_IO",
-        "Win32_System_LibraryLoader",
-        "Win32_System_Threading",
-        "Win32_System_WindowsProgramming",
         "default",
     ],
     visibility = [],
