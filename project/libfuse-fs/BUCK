@@ -22,7 +22,9 @@ rust_library(
         "//third-party:env_logger",
         "//third-party:vmm-sys-util",
         "//third-party:bitflags",
-        "//project/rfuse3:rfuse3",
+        "//third-party:rfuse3",
+        "//third-party:lru",
+        "//third-party:nix",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

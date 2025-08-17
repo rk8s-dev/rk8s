@@ -9,3 +9,5 @@
 # Buck2 Output
 /buck-out
 /build
+
+*.code-workspace

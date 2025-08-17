@@ -17,7 +17,12 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Start { config } => {
             let cfg = load_config(config.to_str().unwrap())?;
-            let endpoints: Vec<&str> = cfg.xline_endpoints.iter().map(|s| s.as_str()).collect();
+            let endpoints: Vec<&str> = cfg
+                .xline_config
+                .endpoints
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
             let xline_store = Arc::new(XlineStore::new(&endpoints).await?);
             println!("[rks] listening on {}", cfg.addr);
             serve(cfg.addr, xline_store).await?;

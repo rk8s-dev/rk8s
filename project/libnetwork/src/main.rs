@@ -217,6 +217,12 @@ fn get_delegate_ipam(
             .iter()
             .map(|n| json!({"dst": n.to_string()})),
     );
+    let gateway_v4 = subnet_env
+        .subnet
+        .map(|subnet| subnet.nth(1).unwrap().to_string());
+    if let Some(ref gw) = gateway_v4 {
+        routes.push(json!({"dst": "0.0.0.0/0", "gw": gw}));
+    }
     ipam.specific.insert("routes".into(), Value::Array(routes));
 
     info!("{}", serde_json::to_string(&ipam)?);

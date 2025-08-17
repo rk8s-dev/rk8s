@@ -63,6 +63,34 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "allocator-api2-0.2.21",
+    srcs = [
+        "vendor/allocator-api2-0.2.21/src/lib.rs",
+        "vendor/allocator-api2-0.2.21/src/nightly.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/alloc/global.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/alloc/mod.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/alloc/system.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/boxed.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/macros.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/mod.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/raw_vec.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/slice.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/unique.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/drain.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/into_iter.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/mod.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/partial_eq.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/set_len_on_drop.rs",
+        "vendor/allocator-api2-0.2.21/src/stable/vec/splice.rs",
+    ],
+    crate = "allocator_api2",
+    crate_root = "vendor/allocator-api2-0.2.21/src/lib.rs",
+    edition = "2018",
+    features = ["alloc"],
+    visibility = [],
+)
+
+cargo.rust_library(
     name = "anstream-0.6.19",
     srcs = [
         "vendor/anstream-0.6.19/src/_macros.rs",
@@ -176,12 +204,22 @@ cargo.rust_library(
     crate = "anstyle_wincon",
     crate_root = "vendor/anstyle-wincon-3.0.9/src/lib.rs",
     edition = "2021",
+    platform = {
+        "windows-gnu": dict(
+            deps = [
+                ":once_cell_polyfill-1.70.1",
+                ":windows-sys-0.59.0",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":once_cell_polyfill-1.70.1",
+                ":windows-sys-0.59.0",
+            ],
+        ),
+    },
     visibility = [],
-    deps = [
-        ":anstyle-1.0.11",
-        ":once_cell_polyfill-1.70.1",
-        ":windows-sys-0.59.0",
-    ],
+    deps = [":anstyle-1.0.11"],
 )
 
 alias(
@@ -336,16 +374,16 @@ cargo.rust_library(
 
 alias(
     name = "async-fs",
-    actual = ":async-fs-2.1.2",
+    actual = ":async-fs-2.1.3",
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_library(
-    name = "async-fs-2.1.2",
-    srcs = ["vendor/async-fs-2.1.2/src/lib.rs"],
+    name = "async-fs-2.1.3",
+    srcs = ["vendor/async-fs-2.1.3/src/lib.rs"],
     crate = "async_fs",
-    crate_root = "vendor/async-fs-2.1.2/src/lib.rs",
-    edition = "2018",
+    crate_root = "vendor/async-fs-2.1.3/src/lib.rs",
+    edition = "2021",
     visibility = [],
     deps = [
         ":async-lock-3.4.0",
@@ -384,7 +422,7 @@ cargo.rust_library(
     deps = [
         ":async-channel-2.5.0",
         ":async-executor-1.13.2",
-        ":async-io-2.4.1",
+        ":async-io-2.5.0",
         ":async-lock-3.4.0",
         ":blocking-1.6.2",
         ":futures-lite-2.6.0",
@@ -454,33 +492,33 @@ buildscript_run(
 
 alias(
     name = "async-io",
-    actual = ":async-io-2.4.1",
+    actual = ":async-io-2.5.0",
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_library(
-    name = "async-io-2.4.1",
+    name = "async-io-2.5.0",
     srcs = [
-        "vendor/async-io-2.4.1/src/driver.rs",
-        "vendor/async-io-2.4.1/src/lib.rs",
-        "vendor/async-io-2.4.1/src/os.rs",
-        "vendor/async-io-2.4.1/src/os/kqueue.rs",
-        "vendor/async-io-2.4.1/src/os/unix.rs",
-        "vendor/async-io-2.4.1/src/os/windows.rs",
-        "vendor/async-io-2.4.1/src/reactor.rs",
-        "vendor/async-io-2.4.1/src/reactor/kqueue.rs",
-        "vendor/async-io-2.4.1/src/reactor/unix.rs",
-        "vendor/async-io-2.4.1/src/reactor/windows.rs",
+        "vendor/async-io-2.5.0/src/driver.rs",
+        "vendor/async-io-2.5.0/src/lib.rs",
+        "vendor/async-io-2.5.0/src/os.rs",
+        "vendor/async-io-2.5.0/src/os/kqueue.rs",
+        "vendor/async-io-2.5.0/src/os/unix.rs",
+        "vendor/async-io-2.5.0/src/os/windows.rs",
+        "vendor/async-io-2.5.0/src/reactor.rs",
+        "vendor/async-io-2.5.0/src/reactor/kqueue.rs",
+        "vendor/async-io-2.5.0/src/reactor/unix.rs",
+        "vendor/async-io-2.5.0/src/reactor/windows.rs",
     ],
     crate = "async_io",
-    crate_root = "vendor/async-io-2.4.1/src/lib.rs",
+    crate_root = "vendor/async-io-2.5.0/src/lib.rs",
     edition = "2021",
     platform = {
         "windows-gnu": dict(
-            deps = [":windows-sys-0.59.0"],
+            deps = [":windows-sys-0.60.2"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.59.0"],
+            deps = [":windows-sys-0.60.2"],
         ),
     },
     visibility = [],
@@ -491,10 +529,9 @@ cargo.rust_library(
         ":futures-io-0.3.31",
         ":futures-lite-2.6.0",
         ":parking-2.2.1",
-        ":polling-3.8.0",
+        ":polling-3.9.0",
         ":rustix-1.0.8",
         ":slab-0.4.10",
-        ":tracing-0.1.41",
     ],
 )
 
@@ -584,28 +621,28 @@ cargo.rust_library(
         "linux-arm64": dict(
             deps = [
                 ":async-io-1.13.0",
-                ":async-signal-0.2.11",
+                ":async-signal-0.2.12",
                 ":rustix-0.38.44",
             ],
         ),
         "linux-x86_64": dict(
             deps = [
                 ":async-io-1.13.0",
-                ":async-signal-0.2.11",
+                ":async-signal-0.2.12",
                 ":rustix-0.38.44",
             ],
         ),
         "macos-arm64": dict(
             deps = [
                 ":async-io-1.13.0",
-                ":async-signal-0.2.11",
+                ":async-signal-0.2.12",
                 ":rustix-0.38.44",
             ],
         ),
         "macos-x86_64": dict(
             deps = [
                 ":async-io-1.13.0",
-                ":async-signal-0.2.11",
+                ":async-signal-0.2.12",
                 ":rustix-0.38.44",
             ],
         ),
@@ -633,28 +670,28 @@ cargo.rust_library(
 
 alias(
     name = "async-process",
-    actual = ":async-process-2.3.1",
+    actual = ":async-process-2.4.0",
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_library(
-    name = "async-process-2.3.1",
+    name = "async-process-2.4.0",
     srcs = [
-        "vendor/async-process-2.3.1/src/lib.rs",
-        "vendor/async-process-2.3.1/src/reaper/mod.rs",
-        "vendor/async-process-2.3.1/src/reaper/signal.rs",
-        "vendor/async-process-2.3.1/src/reaper/wait.rs",
-        "vendor/async-process-2.3.1/src/unix.rs",
-        "vendor/async-process-2.3.1/src/windows.rs",
+        "vendor/async-process-2.4.0/src/lib.rs",
+        "vendor/async-process-2.4.0/src/reaper/mod.rs",
+        "vendor/async-process-2.4.0/src/reaper/signal.rs",
+        "vendor/async-process-2.4.0/src/reaper/wait.rs",
+        "vendor/async-process-2.4.0/src/unix.rs",
+        "vendor/async-process-2.4.0/src/windows.rs",
     ],
     crate = "async_process",
-    crate_root = "vendor/async-process-2.3.1/src/lib.rs",
+    crate_root = "vendor/async-process-2.4.0/src/lib.rs",
     edition = "2021",
     platform = {
         "linux-arm64": dict(
             deps = [
                 ":async-channel-2.5.0",
-                ":async-signal-0.2.11",
+                ":async-signal-0.2.12",
                 ":async-task-4.7.1",
                 ":rustix-1.0.8",
             ],
@@ -662,20 +699,20 @@ cargo.rust_library(
         "linux-x86_64": dict(
             deps = [
                 ":async-channel-2.5.0",
-                ":async-signal-0.2.11",
+                ":async-signal-0.2.12",
                 ":async-task-4.7.1",
                 ":rustix-1.0.8",
             ],
         ),
         "macos-arm64": dict(
             deps = [
-                ":async-signal-0.2.11",
+                ":async-signal-0.2.12",
                 ":rustix-1.0.8",
             ],
         ),
         "macos-x86_64": dict(
             deps = [
-                ":async-signal-0.2.11",
+                ":async-signal-0.2.12",
                 ":rustix-1.0.8",
             ],
         ),
@@ -696,34 +733,79 @@ cargo.rust_library(
     },
     visibility = [],
     deps = [
-        ":async-io-2.4.1",
+        ":async-io-2.5.0",
         ":async-lock-3.4.0",
         ":cfg-if-1.0.1",
         ":event-listener-5.4.0",
         ":futures-lite-2.6.0",
-        ":tracing-0.1.41",
     ],
 )
 
 cargo.rust_library(
-    name = "async-signal-0.2.11",
+    name = "async-signal-0.2.12",
     srcs = [
-        "vendor/async-signal-0.2.11/src/channel.rs",
-        "vendor/async-signal-0.2.11/src/lib.rs",
-        "vendor/async-signal-0.2.11/src/pipe.rs",
-        "vendor/async-signal-0.2.11/src/windows_registry.rs",
+        "vendor/async-signal-0.2.12/src/channel.rs",
+        "vendor/async-signal-0.2.12/src/lib.rs",
+        "vendor/async-signal-0.2.12/src/pipe.rs",
+        "vendor/async-signal-0.2.12/src/windows_registry.rs",
     ],
     crate = "async_signal",
-    crate_root = "vendor/async-signal-0.2.11/src/lib.rs",
-    edition = "2018",
+    crate_root = "vendor/async-signal-0.2.12/src/lib.rs",
+    edition = "2021",
+    platform = {
+        "linux-arm64": dict(
+            deps = [
+                ":async-io-2.5.0",
+                ":futures-io-0.3.31",
+                ":rustix-1.0.8",
+                ":signal-hook-registry-1.4.5",
+            ],
+        ),
+        "linux-x86_64": dict(
+            deps = [
+                ":async-io-2.5.0",
+                ":futures-io-0.3.31",
+                ":rustix-1.0.8",
+                ":signal-hook-registry-1.4.5",
+            ],
+        ),
+        "macos-arm64": dict(
+            deps = [
+                ":async-io-2.5.0",
+                ":futures-io-0.3.31",
+                ":rustix-1.0.8",
+                ":signal-hook-registry-1.4.5",
+            ],
+        ),
+        "macos-x86_64": dict(
+            deps = [
+                ":async-io-2.5.0",
+                ":futures-io-0.3.31",
+                ":rustix-1.0.8",
+                ":signal-hook-registry-1.4.5",
+            ],
+        ),
+        "windows-gnu": dict(
+            deps = [
+                ":async-lock-3.4.0",
+                ":atomic-waker-1.1.2",
+                ":slab-0.4.10",
+                ":windows-sys-0.60.2",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":async-lock-3.4.0",
+                ":atomic-waker-1.1.2",
+                ":slab-0.4.10",
+                ":windows-sys-0.60.2",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
-        ":async-io-2.4.1",
         ":cfg-if-1.0.1",
         ":futures-core-0.3.31",
-        ":futures-io-0.3.31",
-        ":rustix-1.0.8",
-        ":signal-hook-registry-1.4.5",
     ],
 )
 
@@ -1002,16 +1084,57 @@ cargo.rust_library(
         "std",
         "wasm-bindgen-futures",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [
+                ":async-global-executor-2.4.1",
+                ":async-io-2.5.0",
+                ":futures-lite-2.6.0",
+            ],
+        ),
+        "linux-x86_64": dict(
+            deps = [
+                ":async-global-executor-2.4.1",
+                ":async-io-2.5.0",
+                ":futures-lite-2.6.0",
+            ],
+        ),
+        "macos-arm64": dict(
+            deps = [
+                ":async-global-executor-2.4.1",
+                ":async-io-2.5.0",
+                ":futures-lite-2.6.0",
+            ],
+        ),
+        "macos-x86_64": dict(
+            deps = [
+                ":async-global-executor-2.4.1",
+                ":async-io-2.5.0",
+                ":futures-lite-2.6.0",
+            ],
+        ),
+        "windows-gnu": dict(
+            deps = [
+                ":async-global-executor-2.4.1",
+                ":async-io-2.5.0",
+                ":futures-lite-2.6.0",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":async-global-executor-2.4.1",
+                ":async-io-2.5.0",
+                ":futures-lite-2.6.0",
+            ],
+        ),
+    },
     visibility = [],
     deps = [
         ":async-channel-1.9.0",
-        ":async-global-executor-2.4.1",
-        ":async-io-2.4.1",
         ":async-lock-3.4.0",
         ":crossbeam-utils-0.8.21",
         ":futures-core-0.3.31",
         ":futures-io-0.3.31",
-        ":futures-lite-2.6.0",
         ":kv-log-macro-1.0.7",
         ":log-0.4.27",
         ":memchr-2.7.5",
@@ -1132,109 +1255,109 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
-    name = "aws-lc-rs-1.13.3",
+    name = "aws-lc-rs-1.13.2",
     srcs = [
-        "vendor/aws-lc-rs-1.13.3/src/aead.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/aead_ctx.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/aes_gcm.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/chacha.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/chacha20_poly1305_openssh.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/nonce.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/nonce_sequence.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/nonce_sequence/counter32.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/nonce_sequence/counter64.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/poly1305.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/quic.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/rand_nonce.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/tests/fips/chacha20_poly1305_openssh.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/tests/fips/quic.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/tls.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/unbound_key.rs",
-        "vendor/aws-lc-rs-1.13.3/src/agreement.rs",
-        "vendor/aws-lc-rs-1.13.3/src/agreement/ephemeral.rs",
-        "vendor/aws-lc-rs-1.13.3/src/agreement/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/bn.rs",
-        "vendor/aws-lc-rs-1.13.3/src/buffer.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cbb.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cbs.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/aes.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/block.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/chacha.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/key.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/padded.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/streaming.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/constant_time.rs",
-        "vendor/aws-lc-rs-1.13.3/src/debug.rs",
-        "vendor/aws-lc-rs-1.13.3/src/digest.rs",
-        "vendor/aws-lc-rs-1.13.3/src/digest/digest_ctx.rs",
-        "vendor/aws-lc-rs-1.13.3/src/digest/sha.rs",
-        "vendor/aws-lc-rs-1.13.3/src/digest/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ec.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ec/encoding.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ec/key_pair.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ec/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ed25519.rs",
-        "vendor/aws-lc-rs-1.13.3/src/encoding.rs",
-        "vendor/aws-lc-rs-1.13.3/src/endian.rs",
-        "vendor/aws-lc-rs-1.13.3/src/error.rs",
-        "vendor/aws-lc-rs-1.13.3/src/evp_pkey.rs",
-        "vendor/aws-lc-rs-1.13.3/src/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hex.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hkdf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hkdf/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hmac.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hmac/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/io.rs",
-        "vendor/aws-lc-rs-1.13.3/src/io/der.rs",
-        "vendor/aws-lc-rs-1.13.3/src/io/positive.rs",
-        "vendor/aws-lc-rs-1.13.3/src/iv.rs",
-        "vendor/aws-lc-rs-1.13.3/src/kdf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/kdf/kbkdf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/kdf/sskdf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/kem.rs",
-        "vendor/aws-lc-rs-1.13.3/src/key_wrap.rs",
-        "vendor/aws-lc-rs-1.13.3/src/key_wrap/tests.rs",
-        "vendor/aws-lc-rs-1.13.3/src/key_wrap/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/lib.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pbkdf2.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pbkdf2/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pkcs8.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pqdsa.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pqdsa/key_pair.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pqdsa/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ptr.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rand.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/encoding.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/encryption.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/encryption/oaep.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/encryption/pkcs1.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/key.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/src/signature/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/signature/tests/fips/keys.rs",
-        "vendor/aws-lc-rs-1.13.3/src/test.rs",
-        "vendor/aws-lc-rs-1.13.3/src/tls_prf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/tls_prf/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/unstable.rs",
-        "vendor/aws-lc-rs-1.13.3/src/unstable/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/aead_ctx.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/aes_gcm.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/chacha.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/chacha20_poly1305_openssh.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/nonce.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/nonce_sequence.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/nonce_sequence/counter32.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/nonce_sequence/counter64.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/poly1305.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/quic.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/rand_nonce.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/tests/fips/chacha20_poly1305_openssh.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/tests/fips/quic.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/tls.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/unbound_key.rs",
+        "vendor/aws-lc-rs-1.13.2/src/agreement.rs",
+        "vendor/aws-lc-rs-1.13.2/src/agreement/ephemeral.rs",
+        "vendor/aws-lc-rs-1.13.2/src/agreement/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/bn.rs",
+        "vendor/aws-lc-rs-1.13.2/src/buffer.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cbb.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cbs.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/aes.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/block.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/chacha.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/key.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/padded.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/streaming.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/constant_time.rs",
+        "vendor/aws-lc-rs-1.13.2/src/debug.rs",
+        "vendor/aws-lc-rs-1.13.2/src/digest.rs",
+        "vendor/aws-lc-rs-1.13.2/src/digest/digest_ctx.rs",
+        "vendor/aws-lc-rs-1.13.2/src/digest/sha.rs",
+        "vendor/aws-lc-rs-1.13.2/src/digest/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ec.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ec/encoding.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ec/key_pair.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ec/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ed25519.rs",
+        "vendor/aws-lc-rs-1.13.2/src/encoding.rs",
+        "vendor/aws-lc-rs-1.13.2/src/endian.rs",
+        "vendor/aws-lc-rs-1.13.2/src/error.rs",
+        "vendor/aws-lc-rs-1.13.2/src/evp_pkey.rs",
+        "vendor/aws-lc-rs-1.13.2/src/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hex.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hkdf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hkdf/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hmac.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hmac/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/io.rs",
+        "vendor/aws-lc-rs-1.13.2/src/io/der.rs",
+        "vendor/aws-lc-rs-1.13.2/src/io/positive.rs",
+        "vendor/aws-lc-rs-1.13.2/src/iv.rs",
+        "vendor/aws-lc-rs-1.13.2/src/kdf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/kdf/kbkdf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/kdf/sskdf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/kem.rs",
+        "vendor/aws-lc-rs-1.13.2/src/key_wrap.rs",
+        "vendor/aws-lc-rs-1.13.2/src/key_wrap/tests.rs",
+        "vendor/aws-lc-rs-1.13.2/src/key_wrap/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/lib.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pbkdf2.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pbkdf2/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pkcs8.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pqdsa.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pqdsa/key_pair.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pqdsa/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ptr.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rand.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/encoding.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/encryption.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/encryption/oaep.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/encryption/pkcs1.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/key.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/signature/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/signature/tests/fips/keys.rs",
+        "vendor/aws-lc-rs-1.13.2/src/test.rs",
+        "vendor/aws-lc-rs-1.13.2/src/tls_prf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/tls_prf/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/unstable.rs",
+        "vendor/aws-lc-rs-1.13.2/src/unstable/signature.rs",
     ],
     crate = "aws_lc_rs",
-    crate_root = "vendor/aws-lc-rs-1.13.3/src/lib.rs",
+    crate_root = "vendor/aws-lc-rs-1.13.2/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :aws-lc-rs-1.13.3-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :aws-lc-rs-1.13.2-build-script-run[out_dir])",
     },
     features = [
         "aws-lc-sys",
         "prebuilt-nasm",
     ],
-    rustc_flags = ["@$(location :aws-lc-rs-1.13.3-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :aws-lc-rs-1.13.2-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
         ":aws-lc-sys-0.30.0",
@@ -1243,104 +1366,104 @@ cargo.rust_library(
 )
 
 cargo.rust_binary(
-    name = "aws-lc-rs-1.13.3-build-script-build",
+    name = "aws-lc-rs-1.13.2-build-script-build",
     srcs = [
-        "vendor/aws-lc-rs-1.13.3/build.rs",
-        "vendor/aws-lc-rs-1.13.3/examples/cipher.rs",
-        "vendor/aws-lc-rs-1.13.3/examples/digest.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/aead_ctx.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/aes_gcm.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/chacha.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/chacha20_poly1305_openssh.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/nonce.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/nonce_sequence.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/nonce_sequence/counter32.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/nonce_sequence/counter64.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/poly1305.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/quic.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/rand_nonce.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/tests/fips/chacha20_poly1305_openssh.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/tests/fips/quic.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/tls.rs",
-        "vendor/aws-lc-rs-1.13.3/src/aead/unbound_key.rs",
-        "vendor/aws-lc-rs-1.13.3/src/agreement.rs",
-        "vendor/aws-lc-rs-1.13.3/src/agreement/ephemeral.rs",
-        "vendor/aws-lc-rs-1.13.3/src/agreement/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/bn.rs",
-        "vendor/aws-lc-rs-1.13.3/src/buffer.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cbb.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cbs.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/aes.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/block.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/chacha.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/key.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/padded.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/streaming.rs",
-        "vendor/aws-lc-rs-1.13.3/src/cipher/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/constant_time.rs",
-        "vendor/aws-lc-rs-1.13.3/src/debug.rs",
-        "vendor/aws-lc-rs-1.13.3/src/digest.rs",
-        "vendor/aws-lc-rs-1.13.3/src/digest/digest_ctx.rs",
-        "vendor/aws-lc-rs-1.13.3/src/digest/sha.rs",
-        "vendor/aws-lc-rs-1.13.3/src/digest/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ec.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ec/encoding.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ec/key_pair.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ec/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ed25519.rs",
-        "vendor/aws-lc-rs-1.13.3/src/encoding.rs",
-        "vendor/aws-lc-rs-1.13.3/src/endian.rs",
-        "vendor/aws-lc-rs-1.13.3/src/error.rs",
-        "vendor/aws-lc-rs-1.13.3/src/evp_pkey.rs",
-        "vendor/aws-lc-rs-1.13.3/src/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hex.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hkdf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hkdf/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hmac.rs",
-        "vendor/aws-lc-rs-1.13.3/src/hmac/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/io.rs",
-        "vendor/aws-lc-rs-1.13.3/src/io/der.rs",
-        "vendor/aws-lc-rs-1.13.3/src/io/positive.rs",
-        "vendor/aws-lc-rs-1.13.3/src/iv.rs",
-        "vendor/aws-lc-rs-1.13.3/src/kdf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/kdf/kbkdf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/kdf/sskdf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/kem.rs",
-        "vendor/aws-lc-rs-1.13.3/src/key_wrap.rs",
-        "vendor/aws-lc-rs-1.13.3/src/key_wrap/tests.rs",
-        "vendor/aws-lc-rs-1.13.3/src/key_wrap/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/lib.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pbkdf2.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pbkdf2/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pkcs8.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pqdsa.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pqdsa/key_pair.rs",
-        "vendor/aws-lc-rs-1.13.3/src/pqdsa/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/src/ptr.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rand.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/encoding.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/encryption.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/encryption/oaep.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/encryption/pkcs1.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/key.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/src/rsa/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/src/signature/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/signature/tests/fips/keys.rs",
-        "vendor/aws-lc-rs-1.13.3/src/test.rs",
-        "vendor/aws-lc-rs-1.13.3/src/tls_prf.rs",
-        "vendor/aws-lc-rs-1.13.3/src/tls_prf/tests/fips.rs",
-        "vendor/aws-lc-rs-1.13.3/src/unstable.rs",
-        "vendor/aws-lc-rs-1.13.3/src/unstable/signature.rs",
-        "vendor/aws-lc-rs-1.13.3/util/process-criterion-csv.rs",
+        "vendor/aws-lc-rs-1.13.2/build.rs",
+        "vendor/aws-lc-rs-1.13.2/examples/cipher.rs",
+        "vendor/aws-lc-rs-1.13.2/examples/digest.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/aead_ctx.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/aes_gcm.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/chacha.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/chacha20_poly1305_openssh.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/nonce.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/nonce_sequence.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/nonce_sequence/counter32.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/nonce_sequence/counter64.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/poly1305.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/quic.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/rand_nonce.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/tests/fips/chacha20_poly1305_openssh.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/tests/fips/quic.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/tls.rs",
+        "vendor/aws-lc-rs-1.13.2/src/aead/unbound_key.rs",
+        "vendor/aws-lc-rs-1.13.2/src/agreement.rs",
+        "vendor/aws-lc-rs-1.13.2/src/agreement/ephemeral.rs",
+        "vendor/aws-lc-rs-1.13.2/src/agreement/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/bn.rs",
+        "vendor/aws-lc-rs-1.13.2/src/buffer.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cbb.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cbs.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/aes.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/block.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/chacha.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/key.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/padded.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/streaming.rs",
+        "vendor/aws-lc-rs-1.13.2/src/cipher/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/constant_time.rs",
+        "vendor/aws-lc-rs-1.13.2/src/debug.rs",
+        "vendor/aws-lc-rs-1.13.2/src/digest.rs",
+        "vendor/aws-lc-rs-1.13.2/src/digest/digest_ctx.rs",
+        "vendor/aws-lc-rs-1.13.2/src/digest/sha.rs",
+        "vendor/aws-lc-rs-1.13.2/src/digest/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ec.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ec/encoding.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ec/key_pair.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ec/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ed25519.rs",
+        "vendor/aws-lc-rs-1.13.2/src/encoding.rs",
+        "vendor/aws-lc-rs-1.13.2/src/endian.rs",
+        "vendor/aws-lc-rs-1.13.2/src/error.rs",
+        "vendor/aws-lc-rs-1.13.2/src/evp_pkey.rs",
+        "vendor/aws-lc-rs-1.13.2/src/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hex.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hkdf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hkdf/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hmac.rs",
+        "vendor/aws-lc-rs-1.13.2/src/hmac/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/io.rs",
+        "vendor/aws-lc-rs-1.13.2/src/io/der.rs",
+        "vendor/aws-lc-rs-1.13.2/src/io/positive.rs",
+        "vendor/aws-lc-rs-1.13.2/src/iv.rs",
+        "vendor/aws-lc-rs-1.13.2/src/kdf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/kdf/kbkdf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/kdf/sskdf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/kem.rs",
+        "vendor/aws-lc-rs-1.13.2/src/key_wrap.rs",
+        "vendor/aws-lc-rs-1.13.2/src/key_wrap/tests.rs",
+        "vendor/aws-lc-rs-1.13.2/src/key_wrap/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/lib.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pbkdf2.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pbkdf2/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pkcs8.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pqdsa.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pqdsa/key_pair.rs",
+        "vendor/aws-lc-rs-1.13.2/src/pqdsa/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/ptr.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rand.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/encoding.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/encryption.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/encryption/oaep.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/encryption/pkcs1.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/key.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/rsa/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/src/signature/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/signature/tests/fips/keys.rs",
+        "vendor/aws-lc-rs-1.13.2/src/test.rs",
+        "vendor/aws-lc-rs-1.13.2/src/tls_prf.rs",
+        "vendor/aws-lc-rs-1.13.2/src/tls_prf/tests/fips.rs",
+        "vendor/aws-lc-rs-1.13.2/src/unstable.rs",
+        "vendor/aws-lc-rs-1.13.2/src/unstable/signature.rs",
+        "vendor/aws-lc-rs-1.13.2/util/process-criterion-csv.rs",
     ],
     crate = "build_script_build",
-    crate_root = "vendor/aws-lc-rs-1.13.3/build.rs",
+    crate_root = "vendor/aws-lc-rs-1.13.2/build.rs",
     edition = "2021",
     features = [
         "aws-lc-sys",
@@ -1350,9 +1473,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "aws-lc-rs-1.13.3-build-script-run",
+    name = "aws-lc-rs-1.13.2-build-script-run",
     package_name = "aws-lc-rs",
-    buildscript_rule = ":aws-lc-rs-1.13.3-build-script-build",
+    buildscript_rule = ":aws-lc-rs-1.13.2-build-script-build",
     env = {
         "DEP_AWS_LC_0_29_0_INCLUDE": "$(location :aws-lc-sys-0.29.0-build-script-main-run[out_dir])/include",
     },
@@ -1360,7 +1483,7 @@ buildscript_run(
         "aws-lc-sys",
         "prebuilt-nasm",
     ],
-    version = "1.13.3",
+    version = "1.13.2",
 )
 
 alias(
@@ -1440,6 +1563,14 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_MINOR": "29",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "macos-arm64": dict(
+            deps = [":bindgen-0.69.5"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":bindgen-0.69.5"],
+        ),
     },
     visibility = [],
     deps = [
@@ -1542,6 +1673,14 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["prebuilt-nasm"],
+    platform = {
+        "macos-arm64": dict(
+            deps = [":bindgen-0.69.5"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":bindgen-0.69.5"],
+        ),
+    },
     visibility = [],
     deps = [
         ":cc-1.2.30",
@@ -1964,6 +2103,185 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "bindgen-0.69.5",
+    srcs = [
+        "vendor/bindgen-0.69.5/build.rs",
+        "vendor/bindgen-0.69.5/callbacks.rs",
+        "vendor/bindgen-0.69.5/clang.rs",
+        "vendor/bindgen-0.69.5/codegen/bitfield_unit.rs",
+        "vendor/bindgen-0.69.5/codegen/bitfield_unit_tests.rs",
+        "vendor/bindgen-0.69.5/codegen/dyngen.rs",
+        "vendor/bindgen-0.69.5/codegen/error.rs",
+        "vendor/bindgen-0.69.5/codegen/helpers.rs",
+        "vendor/bindgen-0.69.5/codegen/impl_debug.rs",
+        "vendor/bindgen-0.69.5/codegen/impl_partialeq.rs",
+        "vendor/bindgen-0.69.5/codegen/mod.rs",
+        "vendor/bindgen-0.69.5/codegen/postprocessing/merge_extern_blocks.rs",
+        "vendor/bindgen-0.69.5/codegen/postprocessing/mod.rs",
+        "vendor/bindgen-0.69.5/codegen/postprocessing/sort_semantically.rs",
+        "vendor/bindgen-0.69.5/codegen/serialize.rs",
+        "vendor/bindgen-0.69.5/codegen/struct_layout.rs",
+        "vendor/bindgen-0.69.5/deps.rs",
+        "vendor/bindgen-0.69.5/diagnostics.rs",
+        "vendor/bindgen-0.69.5/extra_assertions.rs",
+        "vendor/bindgen-0.69.5/features.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/derive.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/has_destructor.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/has_float.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/has_type_param_in_array.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/has_vtable.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/mod.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/sizedness.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/template_params.rs",
+        "vendor/bindgen-0.69.5/ir/annotations.rs",
+        "vendor/bindgen-0.69.5/ir/comment.rs",
+        "vendor/bindgen-0.69.5/ir/comp.rs",
+        "vendor/bindgen-0.69.5/ir/context.rs",
+        "vendor/bindgen-0.69.5/ir/derive.rs",
+        "vendor/bindgen-0.69.5/ir/dot.rs",
+        "vendor/bindgen-0.69.5/ir/enum_ty.rs",
+        "vendor/bindgen-0.69.5/ir/function.rs",
+        "vendor/bindgen-0.69.5/ir/int.rs",
+        "vendor/bindgen-0.69.5/ir/item.rs",
+        "vendor/bindgen-0.69.5/ir/item_kind.rs",
+        "vendor/bindgen-0.69.5/ir/layout.rs",
+        "vendor/bindgen-0.69.5/ir/mod.rs",
+        "vendor/bindgen-0.69.5/ir/module.rs",
+        "vendor/bindgen-0.69.5/ir/objc.rs",
+        "vendor/bindgen-0.69.5/ir/template.rs",
+        "vendor/bindgen-0.69.5/ir/traversal.rs",
+        "vendor/bindgen-0.69.5/ir/ty.rs",
+        "vendor/bindgen-0.69.5/ir/var.rs",
+        "vendor/bindgen-0.69.5/lib.rs",
+        "vendor/bindgen-0.69.5/log_stubs.rs",
+        "vendor/bindgen-0.69.5/options/as_args.rs",
+        "vendor/bindgen-0.69.5/options/helpers.rs",
+        "vendor/bindgen-0.69.5/options/mod.rs",
+        "vendor/bindgen-0.69.5/parse.rs",
+        "vendor/bindgen-0.69.5/regex_set.rs",
+        "vendor/bindgen-0.69.5/time.rs",
+    ],
+    crate = "bindgen",
+    crate_root = "vendor/bindgen-0.69.5/lib.rs",
+    edition = "2018",
+    env = {
+        "OUT_DIR": "$(location :bindgen-0.69.5-build-script-run[out_dir])",
+    },
+    features = [
+        "default",
+        "logging",
+        "prettyplease",
+        "runtime",
+        "which-rustfmt",
+    ],
+    rustc_flags = ["@$(location :bindgen-0.69.5-build-script-run[rustc_flags])"],
+    visibility = [],
+    deps = [
+        ":bitflags-2.9.1",
+        ":cexpr-0.6.0",
+        ":clang-sys-1.8.1",
+        ":itertools-0.12.1",
+        ":lazy_static-1.5.0",
+        ":lazycell-1.3.0",
+        ":log-0.4.27",
+        ":prettyplease-0.2.35",
+        ":proc-macro2-1.0.95",
+        ":quote-1.0.40",
+        ":regex-1.11.1",
+        ":rustc-hash-1.1.0",
+        ":shlex-1.3.0",
+        ":syn-2.0.104",
+        ":which-4.4.2",
+    ],
+)
+
+cargo.rust_binary(
+    name = "bindgen-0.69.5-build-script-build",
+    srcs = [
+        "vendor/bindgen-0.69.5/build.rs",
+        "vendor/bindgen-0.69.5/callbacks.rs",
+        "vendor/bindgen-0.69.5/clang.rs",
+        "vendor/bindgen-0.69.5/codegen/bitfield_unit.rs",
+        "vendor/bindgen-0.69.5/codegen/bitfield_unit_tests.rs",
+        "vendor/bindgen-0.69.5/codegen/dyngen.rs",
+        "vendor/bindgen-0.69.5/codegen/error.rs",
+        "vendor/bindgen-0.69.5/codegen/helpers.rs",
+        "vendor/bindgen-0.69.5/codegen/impl_debug.rs",
+        "vendor/bindgen-0.69.5/codegen/impl_partialeq.rs",
+        "vendor/bindgen-0.69.5/codegen/mod.rs",
+        "vendor/bindgen-0.69.5/codegen/postprocessing/merge_extern_blocks.rs",
+        "vendor/bindgen-0.69.5/codegen/postprocessing/mod.rs",
+        "vendor/bindgen-0.69.5/codegen/postprocessing/sort_semantically.rs",
+        "vendor/bindgen-0.69.5/codegen/serialize.rs",
+        "vendor/bindgen-0.69.5/codegen/struct_layout.rs",
+        "vendor/bindgen-0.69.5/deps.rs",
+        "vendor/bindgen-0.69.5/diagnostics.rs",
+        "vendor/bindgen-0.69.5/extra_assertions.rs",
+        "vendor/bindgen-0.69.5/features.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/derive.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/has_destructor.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/has_float.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/has_type_param_in_array.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/has_vtable.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/mod.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/sizedness.rs",
+        "vendor/bindgen-0.69.5/ir/analysis/template_params.rs",
+        "vendor/bindgen-0.69.5/ir/annotations.rs",
+        "vendor/bindgen-0.69.5/ir/comment.rs",
+        "vendor/bindgen-0.69.5/ir/comp.rs",
+        "vendor/bindgen-0.69.5/ir/context.rs",
+        "vendor/bindgen-0.69.5/ir/derive.rs",
+        "vendor/bindgen-0.69.5/ir/dot.rs",
+        "vendor/bindgen-0.69.5/ir/enum_ty.rs",
+        "vendor/bindgen-0.69.5/ir/function.rs",
+        "vendor/bindgen-0.69.5/ir/int.rs",
+        "vendor/bindgen-0.69.5/ir/item.rs",
+        "vendor/bindgen-0.69.5/ir/item_kind.rs",
+        "vendor/bindgen-0.69.5/ir/layout.rs",
+        "vendor/bindgen-0.69.5/ir/mod.rs",
+        "vendor/bindgen-0.69.5/ir/module.rs",
+        "vendor/bindgen-0.69.5/ir/objc.rs",
+        "vendor/bindgen-0.69.5/ir/template.rs",
+        "vendor/bindgen-0.69.5/ir/traversal.rs",
+        "vendor/bindgen-0.69.5/ir/ty.rs",
+        "vendor/bindgen-0.69.5/ir/var.rs",
+        "vendor/bindgen-0.69.5/lib.rs",
+        "vendor/bindgen-0.69.5/log_stubs.rs",
+        "vendor/bindgen-0.69.5/options/as_args.rs",
+        "vendor/bindgen-0.69.5/options/helpers.rs",
+        "vendor/bindgen-0.69.5/options/mod.rs",
+        "vendor/bindgen-0.69.5/parse.rs",
+        "vendor/bindgen-0.69.5/regex_set.rs",
+        "vendor/bindgen-0.69.5/time.rs",
+    ],
+    crate = "build_script_build",
+    crate_root = "vendor/bindgen-0.69.5/build.rs",
+    edition = "2018",
+    features = [
+        "default",
+        "logging",
+        "prettyplease",
+        "runtime",
+        "which-rustfmt",
+    ],
+    visibility = [],
+)
+
+buildscript_run(
+    name = "bindgen-0.69.5-build-script-run",
+    package_name = "bindgen",
+    buildscript_rule = ":bindgen-0.69.5-build-script-build",
+    features = [
+        "default",
+        "logging",
+        "prettyplease",
+        "runtime",
+        "which-rustfmt",
+    ],
+    version = "0.69.5",
+)
+
+cargo.rust_library(
     name = "bitflags-1.3.2",
     srcs = [
         "vendor/bitflags-1.3.2/src/example_generated.rs",
@@ -2224,6 +2542,21 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "cexpr-0.6.0",
+    srcs = [
+        "vendor/cexpr-0.6.0/src/expr.rs",
+        "vendor/cexpr-0.6.0/src/lib.rs",
+        "vendor/cexpr-0.6.0/src/literal.rs",
+        "vendor/cexpr-0.6.0/src/token.rs",
+    ],
+    crate = "cexpr",
+    crate_root = "vendor/cexpr-0.6.0/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+    deps = [":nom-7.1.3"],
+)
+
+cargo.rust_library(
     name = "cfg-if-1.0.1",
     srcs = ["vendor/cfg-if-1.0.1/src/lib.rs"],
     crate = "cfg_if",
@@ -2335,6 +2668,92 @@ cargo.rust_library(
         ":num-traits-0.2.19",
         ":serde-1.0.219",
     ],
+)
+
+cargo.rust_library(
+    name = "clang-sys-1.8.1",
+    srcs = [
+        "vendor/clang-sys-1.8.1/src/lib.rs",
+        "vendor/clang-sys-1.8.1/src/link.rs",
+        "vendor/clang-sys-1.8.1/src/support.rs",
+    ],
+    crate = "clang_sys",
+    crate_root = "vendor/clang-sys-1.8.1/src/lib.rs",
+    edition = "2021",
+    env = {
+        "OUT_DIR": "$(location :clang-sys-1.8.1-build-script-run[out_dir])",
+    },
+    features = [
+        "clang_3_5",
+        "clang_3_6",
+        "clang_3_7",
+        "clang_3_8",
+        "clang_3_9",
+        "clang_4_0",
+        "clang_5_0",
+        "clang_6_0",
+        "libloading",
+        "runtime",
+    ],
+    rustc_flags = ["@$(location :clang-sys-1.8.1-build-script-run[rustc_flags])"],
+    visibility = [],
+    deps = [
+        ":glob-0.3.2",
+        ":libc-0.2.174",
+        ":libloading-0.8.8",
+    ],
+)
+
+cargo.rust_binary(
+    name = "clang-sys-1.8.1-build-script-build",
+    srcs = [
+        "vendor/clang-sys-1.8.1/build.rs",
+        "vendor/clang-sys-1.8.1/build/common.rs",
+        "vendor/clang-sys-1.8.1/build/dynamic.rs",
+        "vendor/clang-sys-1.8.1/build/macros.rs",
+        "vendor/clang-sys-1.8.1/build/static.rs",
+        "vendor/clang-sys-1.8.1/src/lib.rs",
+        "vendor/clang-sys-1.8.1/src/link.rs",
+        "vendor/clang-sys-1.8.1/src/support.rs",
+        "vendor/clang-sys-1.8.1/tests/build.rs",
+        "vendor/clang-sys-1.8.1/tests/lib.rs",
+    ],
+    crate = "build_script_build",
+    crate_root = "vendor/clang-sys-1.8.1/build.rs",
+    edition = "2021",
+    features = [
+        "clang_3_5",
+        "clang_3_6",
+        "clang_3_7",
+        "clang_3_8",
+        "clang_3_9",
+        "clang_4_0",
+        "clang_5_0",
+        "clang_6_0",
+        "libloading",
+        "runtime",
+    ],
+    visibility = [],
+    deps = [":glob-0.3.2"],
+)
+
+buildscript_run(
+    name = "clang-sys-1.8.1-build-script-run",
+    package_name = "clang-sys",
+    buildscript_rule = ":clang-sys-1.8.1-build-script-build",
+    features = [
+        "clang_3_5",
+        "clang_3_6",
+        "clang_3_7",
+        "clang_3_8",
+        "clang_3_9",
+        "clang_4_0",
+        "clang_5_0",
+        "clang_6_0",
+        "libloading",
+        "runtime",
+    ],
+    version = "1.8.1",
 )
 
 alias(
@@ -2621,6 +3040,37 @@ cargo.rust_library(
     deps = [":crossbeam-utils-0.8.21"],
 )
 
+alias(
+    name = "context",
+    actual = ":context-3.0.0",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "context-3.0.0",
+    srcs = [
+        "vendor/context-3.0.0/src/context.rs",
+        "vendor/context-3.0.0/src/lib.rs",
+        "vendor/context-3.0.0/src/stack.rs",
+        "vendor/context-3.0.0/src/sys/mod.rs",
+        "vendor/context-3.0.0/src/sys/unix/mod.rs",
+        "vendor/context-3.0.0/src/sys/windows/mod.rs",
+    ],
+    crate = "context",
+    crate_root = "vendor/context-3.0.0/src/lib.rs",
+    edition = "2015",
+    platform = {
+        "windows-gnu": dict(
+            deps = [":winapi-0.3.9"],
+        ),
+        "windows-msvc": dict(
+            deps = [":winapi-0.3.9"],
+        ),
+    },
+    visibility = [],
+    deps = [":libc-0.2.174"],
+)
+
 cargo.rust_library(
     name = "core-foundation-0.10.1",
     srcs = [
@@ -2790,12 +3240,50 @@ cargo.rust_library(
     crate = "crc32fast",
     crate_root = "vendor/crc32fast-1.5.0/src/lib.rs",
     edition = "2021",
+    env = {
+        "OUT_DIR": "$(location :crc32fast-1.5.0-build-script-run[out_dir])",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    rustc_flags = ["@$(location :crc32fast-1.5.0-build-script-run[rustc_flags])"],
+    visibility = [],
+    deps = [":cfg-if-1.0.1"],
+)
+
+cargo.rust_binary(
+    name = "crc32fast-1.5.0-build-script-build",
+    srcs = [
+        "vendor/crc32fast-1.5.0/benches/bench.rs",
+        "vendor/crc32fast-1.5.0/build.rs",
+        "vendor/crc32fast-1.5.0/src/baseline.rs",
+        "vendor/crc32fast-1.5.0/src/combine.rs",
+        "vendor/crc32fast-1.5.0/src/lib.rs",
+        "vendor/crc32fast-1.5.0/src/specialized/aarch64.rs",
+        "vendor/crc32fast-1.5.0/src/specialized/mod.rs",
+        "vendor/crc32fast-1.5.0/src/specialized/pclmulqdq.rs",
+        "vendor/crc32fast-1.5.0/src/table.rs",
+    ],
+    crate = "build_script_build",
+    crate_root = "vendor/crc32fast-1.5.0/build.rs",
+    edition = "2021",
     features = [
         "default",
         "std",
     ],
     visibility = [],
-    deps = [":cfg-if-1.0.1"],
+)
+
+buildscript_run(
+    name = "crc32fast-1.5.0-build-script-run",
+    package_name = "crc32fast",
+    buildscript_rule = ":crc32fast-1.5.0-build-script-build",
+    features = [
+        "default",
+        "std",
+    ],
+    version = "1.5.0",
 )
 
 cargo.rust_library(
@@ -3316,6 +3804,28 @@ cargo.rust_library(
     ],
 )
 
+alias(
+    name = "dotenvy",
+    actual = ":dotenvy-0.15.7",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "dotenvy-0.15.7",
+    srcs = [
+        "vendor/dotenvy-0.15.7/src/bin/dotenvy.rs",
+        "vendor/dotenvy-0.15.7/src/errors.rs",
+        "vendor/dotenvy-0.15.7/src/find.rs",
+        "vendor/dotenvy-0.15.7/src/iter.rs",
+        "vendor/dotenvy-0.15.7/src/lib.rs",
+        "vendor/dotenvy-0.15.7/src/parse.rs",
+    ],
+    crate = "dotenvy",
+    crate_root = "vendor/dotenvy-0.15.7/src/lib.rs",
+    edition = "2018",
+    visibility = [],
+)
+
 cargo.rust_library(
     name = "dunce-1.0.5",
     srcs = ["vendor/dunce-1.0.5/src/lib.rs"],
@@ -3497,12 +4007,6 @@ cargo.rust_library(
     deps = [":serde-1.0.219"],
 )
 
-alias(
-    name = "errno",
-    actual = ":errno-0.3.13",
-    visibility = ["PUBLIC"],
-)
-
 cargo.rust_library(
     name = "errno-0.3.13",
     srcs = [
@@ -3518,6 +4022,12 @@ cargo.rust_library(
     edition = "2018",
     features = ["std"],
     platform = {
+        "linux-arm64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":libc-0.2.174"],
+        ),
         "macos-arm64": dict(
             deps = [":libc-0.2.174"],
         ),
@@ -3670,10 +4180,29 @@ cargo.rust_library(
         "parking",
         "std",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "macos-arm64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "windows-gnu": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "windows-msvc": dict(
+            deps = [":parking-2.2.1"],
+        ),
+    },
     visibility = [],
     deps = [
         ":concurrent-queue-2.5.0",
-        ":parking-2.2.1",
         ":pin-project-lite-0.2.16",
     ],
 )
@@ -3695,10 +4224,29 @@ cargo.rust_library(
         "parking",
         "std",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "macos-arm64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "windows-gnu": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "windows-msvc": dict(
+            deps = [":parking-2.2.1"],
+        ),
+    },
     visibility = [],
     deps = [
         ":concurrent-queue-2.5.0",
-        ":parking-2.2.1",
         ":pin-project-lite-0.2.16",
     ],
 )
@@ -3720,10 +4268,29 @@ cargo.rust_library(
         "parking",
         "std",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "macos-arm64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "windows-gnu": dict(
+            deps = [":parking-2.2.1"],
+        ),
+        "windows-msvc": dict(
+            deps = [":parking-2.2.1"],
+        ),
+    },
     visibility = [],
     deps = [
         ":concurrent-queue-2.5.0",
-        ":parking-2.2.1",
         ":pin-project-lite-0.2.16",
     ],
 )
@@ -3926,6 +4493,21 @@ cargo.rust_library(
         "default",
         "std",
     ],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "foldhash-0.1.5",
+    srcs = [
+        "vendor/foldhash-0.1.5/src/convenience.rs",
+        "vendor/foldhash-0.1.5/src/fast.rs",
+        "vendor/foldhash-0.1.5/src/lib.rs",
+        "vendor/foldhash-0.1.5/src/quality.rs",
+        "vendor/foldhash-0.1.5/src/seed.rs",
+    ],
+    crate = "foldhash",
+    crate_root = "vendor/foldhash-0.1.5/src/lib.rs",
+    edition = "2021",
     visibility = [],
 )
 
@@ -4531,7 +5113,12 @@ cargo.rust_library(
     crate = "getrandom",
     crate_root = "vendor/getrandom-0.2.16/src/lib.rs",
     edition = "2018",
-    features = ["std"],
+    features = [
+        "js",
+        "js-sys",
+        "std",
+        "wasm-bindgen",
+    ],
     platform = {
         "linux-arm64": dict(
             deps = [":libc-0.2.174"],
@@ -4590,7 +5177,10 @@ cargo.rust_library(
     env = {
         "OUT_DIR": "$(location :getrandom-0.3.3-build-script-run[out_dir])",
     },
-    features = ["std"],
+    features = [
+        "std",
+        "wasm_js",
+    ],
     platform = {
         "linux-arm64": dict(
             deps = [":libc-0.2.174"],
@@ -4650,7 +5240,10 @@ cargo.rust_binary(
     crate = "build_script_build",
     crate_root = "vendor/getrandom-0.3.3/build.rs",
     edition = "2021",
-    features = ["std"],
+    features = [
+        "std",
+        "wasm_js",
+    ],
     visibility = [],
 )
 
@@ -4658,7 +5251,10 @@ buildscript_run(
     name = "getrandom-0.3.3-build-script-run",
     package_name = "getrandom",
     buildscript_rule = ":getrandom-0.3.3-build-script-build",
-    features = ["std"],
+    features = [
+        "std",
+        "wasm_js",
+    ],
     version = "0.3.3",
 )
 
@@ -4700,6 +5296,15 @@ cargo.rust_library(
         ":quote-1.0.40",
         ":syn-2.0.104",
     ],
+)
+
+cargo.rust_library(
+    name = "glob-0.3.2",
+    srcs = ["vendor/glob-0.3.2/src/lib.rs"],
+    crate = "glob",
+    crate_root = "vendor/glob-0.3.2/src/lib.rs",
+    edition = "2015",
+    visibility = [],
 )
 
 cargo.rust_library(
@@ -4840,7 +5445,20 @@ cargo.rust_library(
     crate = "hashbrown",
     crate_root = "vendor/hashbrown-0.15.4/src/lib.rs",
     edition = "2021",
+    features = [
+        "allocator-api2",
+        "default",
+        "default-hasher",
+        "equivalent",
+        "inline-more",
+        "raw-entry",
+    ],
     visibility = [],
+    deps = [
+        ":allocator-api2-0.2.21",
+        ":equivalent-1.0.2",
+        ":foldhash-0.1.5",
+    ],
 )
 
 cargo.rust_library(
@@ -5339,6 +5957,38 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "hyper-rustls-0.27.7",
+    srcs = [
+        "vendor/hyper-rustls-0.27.7/src/config.rs",
+        "vendor/hyper-rustls-0.27.7/src/connector.rs",
+        "vendor/hyper-rustls-0.27.7/src/connector/builder.rs",
+        "vendor/hyper-rustls-0.27.7/src/lib.rs",
+        "vendor/hyper-rustls-0.27.7/src/stream.rs",
+    ],
+    crate = "hyper_rustls",
+    crate_root = "vendor/hyper-rustls-0.27.7/src/lib.rs",
+    edition = "2021",
+    features = [
+        "http1",
+        "http2",
+        "tls12",
+    ],
+    named_deps = {
+        "pki_types": ":rustls-pki-types-1.12.0",
+    },
+    visibility = [],
+    deps = [
+        ":http-1.3.1",
+        ":hyper-1.6.0",
+        ":hyper-util-0.1.15",
+        ":rustls-0.23.29",
+        ":tokio-1.46.1",
+        ":tokio-rustls-0.26.2",
+        ":tower-service-0.3.3",
+    ],
+)
+
+cargo.rust_library(
     name = "hyper-timeout-0.5.2",
     srcs = [
         "vendor/hyper-timeout-0.5.2/src/lib.rs",
@@ -5505,6 +6155,12 @@ cargo.rust_library(
         ),
         "macos-x86_64": dict(
             deps = [":core-foundation-sys-0.8.7"],
+        ),
+        "windows-gnu": dict(
+            deps = [":windows-core-0.61.2"],
+        ),
+        "windows-msvc": dict(
+            deps = [":windows-core-0.61.2"],
         ),
     },
     visibility = [],
@@ -6347,9 +7003,28 @@ cargo.rust_library(
         "libc",
         "windows-sys",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "macos-arm64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "windows-gnu": dict(
+            deps = [":windows-sys-0.48.0"],
+        ),
+        "windows-msvc": dict(
+            deps = [":windows-sys-0.48.0"],
+        ),
+    },
     rustc_flags = ["@$(location :io-lifetimes-1.0.11-build-script-run[rustc_flags])"],
     visibility = [],
-    deps = [":libc-0.2.174"],
 )
 
 cargo.rust_binary(
@@ -6504,6 +7179,10 @@ cargo.rust_library(
         "std",
     ],
     visibility = [],
+    deps = [
+        ":memchr-2.7.5",
+        ":serde-1.0.219",
+    ],
 )
 
 cargo.rust_library(
@@ -6754,6 +7433,10 @@ cargo.rust_library(
         "std",
     ],
     visibility = [],
+    deps = [
+        ":log-0.4.27",
+        ":serde-1.0.219",
+    ],
 )
 
 cargo.rust_library(
@@ -6824,6 +7507,12 @@ cargo.rust_library(
     deps = [":log-0.4.27"],
 )
 
+alias(
+    name = "lazy_static",
+    actual = ":lazy_static-1.5.0",
+    visibility = ["PUBLIC"],
+)
+
 cargo.rust_library(
     name = "lazy_static-1.5.0",
     srcs = [
@@ -6833,6 +7522,18 @@ cargo.rust_library(
     ],
     crate = "lazy_static",
     crate_root = "vendor/lazy_static-1.5.0/src/lib.rs",
+    edition = "2015",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "lazycell-1.3.0",
+    srcs = [
+        "vendor/lazycell-1.3.0/src/lib.rs",
+        "vendor/lazycell-1.3.0/src/serde_impl.rs",
+    ],
+    crate = "lazycell",
+    crate_root = "vendor/lazycell-1.3.0/src/lib.rs",
     edition = "2015",
     visibility = [],
 )
@@ -7249,6 +7950,46 @@ buildscript_run(
         "std",
     ],
     version = "0.2.174",
+)
+
+cargo.rust_library(
+    name = "libloading-0.8.8",
+    srcs = [
+        "vendor/libloading-0.8.8/src/changelog.rs",
+        "vendor/libloading-0.8.8/src/error.rs",
+        "vendor/libloading-0.8.8/src/lib.rs",
+        "vendor/libloading-0.8.8/src/os/mod.rs",
+        "vendor/libloading-0.8.8/src/os/unix/consts.rs",
+        "vendor/libloading-0.8.8/src/os/unix/mod.rs",
+        "vendor/libloading-0.8.8/src/os/windows/mod.rs",
+        "vendor/libloading-0.8.8/src/safe.rs",
+        "vendor/libloading-0.8.8/src/test_helpers.rs",
+        "vendor/libloading-0.8.8/src/util.rs",
+    ],
+    crate = "libloading",
+    crate_root = "vendor/libloading-0.8.8/src/lib.rs",
+    edition = "2015",
+    platform = {
+        "linux-arm64": dict(
+            deps = [":cfg-if-1.0.1"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":cfg-if-1.0.1"],
+        ),
+        "macos-arm64": dict(
+            deps = [":cfg-if-1.0.1"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":cfg-if-1.0.1"],
+        ),
+        "windows-gnu": dict(
+            deps = [":windows-targets-0.53.2"],
+        ),
+        "windows-msvc": dict(
+            deps = [":windows-targets-0.53.2"],
+        ),
+    },
+    visibility = [],
 )
 
 alias(
@@ -8342,6 +9083,26 @@ cargo.rust_library(
     deps = [":value-bag-1.11.1"],
 )
 
+alias(
+    name = "lru",
+    actual = ":lru-0.16.0",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "lru-0.16.0",
+    srcs = ["vendor/lru-0.16.0/src/lib.rs"],
+    crate = "lru",
+    crate_root = "vendor/lru-0.16.0/src/lib.rs",
+    edition = "2015",
+    features = [
+        "default",
+        "hashbrown",
+    ],
+    visibility = [],
+    deps = [":hashbrown-0.15.4"],
+)
+
 cargo.rust_library(
     name = "lru-slab-0.1.2",
     srcs = ["vendor/lru-slab-0.1.2/src/lib.rs"],
@@ -8537,6 +9298,36 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "minimal-lexical-0.2.1",
+    srcs = [
+        "vendor/minimal-lexical-0.2.1/src/bellerophon.rs",
+        "vendor/minimal-lexical-0.2.1/src/bigint.rs",
+        "vendor/minimal-lexical-0.2.1/src/extended_float.rs",
+        "vendor/minimal-lexical-0.2.1/src/fpu.rs",
+        "vendor/minimal-lexical-0.2.1/src/heapvec.rs",
+        "vendor/minimal-lexical-0.2.1/src/lemire.rs",
+        "vendor/minimal-lexical-0.2.1/src/lib.rs",
+        "vendor/minimal-lexical-0.2.1/src/libm.rs",
+        "vendor/minimal-lexical-0.2.1/src/mask.rs",
+        "vendor/minimal-lexical-0.2.1/src/num.rs",
+        "vendor/minimal-lexical-0.2.1/src/number.rs",
+        "vendor/minimal-lexical-0.2.1/src/parse.rs",
+        "vendor/minimal-lexical-0.2.1/src/rounding.rs",
+        "vendor/minimal-lexical-0.2.1/src/slow.rs",
+        "vendor/minimal-lexical-0.2.1/src/stackvec.rs",
+        "vendor/minimal-lexical-0.2.1/src/table.rs",
+        "vendor/minimal-lexical-0.2.1/src/table_bellerophon.rs",
+        "vendor/minimal-lexical-0.2.1/src/table_lemire.rs",
+        "vendor/minimal-lexical-0.2.1/src/table_small.rs",
+    ],
+    crate = "minimal_lexical",
+    crate_root = "vendor/minimal-lexical-0.2.1/src/lib.rs",
+    edition = "2018",
+    features = ["std"],
+    visibility = [],
+)
+
+cargo.rust_library(
     name = "miniz_oxide-0.8.9",
     srcs = [
         "vendor/miniz_oxide-0.8.9/src/deflate/buffer.rs",
@@ -8666,6 +9457,12 @@ cargo.rust_library(
     crate_root = "vendor/multimap-0.10.1/src/lib.rs",
     edition = "2015",
     visibility = [],
+)
+
+alias(
+    name = "native-tls",
+    actual = ":native-tls-0.2.14",
+    visibility = ["PUBLIC"],
 )
 
 cargo.rust_library(
@@ -12092,6 +12889,52 @@ buildscript_run(
     buildscript_rule = ":nix-0.30.1-build-script-build",
     features = ["default"],
     version = "0.30.1",
+)
+
+cargo.rust_library(
+    name = "nom-7.1.3",
+    srcs = [
+        "vendor/nom-7.1.3/src/bits/complete.rs",
+        "vendor/nom-7.1.3/src/bits/mod.rs",
+        "vendor/nom-7.1.3/src/bits/streaming.rs",
+        "vendor/nom-7.1.3/src/branch/mod.rs",
+        "vendor/nom-7.1.3/src/branch/tests.rs",
+        "vendor/nom-7.1.3/src/bytes/complete.rs",
+        "vendor/nom-7.1.3/src/bytes/mod.rs",
+        "vendor/nom-7.1.3/src/bytes/streaming.rs",
+        "vendor/nom-7.1.3/src/bytes/tests.rs",
+        "vendor/nom-7.1.3/src/character/complete.rs",
+        "vendor/nom-7.1.3/src/character/mod.rs",
+        "vendor/nom-7.1.3/src/character/streaming.rs",
+        "vendor/nom-7.1.3/src/character/tests.rs",
+        "vendor/nom-7.1.3/src/combinator/mod.rs",
+        "vendor/nom-7.1.3/src/combinator/tests.rs",
+        "vendor/nom-7.1.3/src/error.rs",
+        "vendor/nom-7.1.3/src/internal.rs",
+        "vendor/nom-7.1.3/src/lib.rs",
+        "vendor/nom-7.1.3/src/macros.rs",
+        "vendor/nom-7.1.3/src/multi/mod.rs",
+        "vendor/nom-7.1.3/src/multi/tests.rs",
+        "vendor/nom-7.1.3/src/number/complete.rs",
+        "vendor/nom-7.1.3/src/number/mod.rs",
+        "vendor/nom-7.1.3/src/number/streaming.rs",
+        "vendor/nom-7.1.3/src/sequence/mod.rs",
+        "vendor/nom-7.1.3/src/sequence/tests.rs",
+        "vendor/nom-7.1.3/src/str.rs",
+        "vendor/nom-7.1.3/src/traits.rs",
+    ],
+    crate = "nom",
+    crate_root = "vendor/nom-7.1.3/src/lib.rs",
+    edition = "2018",
+    features = [
+        "alloc",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":memchr-2.7.5",
+        ":minimal-lexical-0.2.1",
+    ],
 )
 
 cargo.rust_library(
@@ -16601,7 +17444,10 @@ cargo.rust_library(
         "std",
     ],
     visibility = [],
-    deps = [":base64-0.22.1"],
+    deps = [
+        ":base64-0.22.1",
+        ":serde-1.0.219",
+    ],
 )
 
 cargo.rust_library(
@@ -16901,11 +17747,40 @@ cargo.rust_library(
         "default",
         "std",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "macos-arm64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "windows-gnu": dict(
+            deps = [
+                ":bitflags-1.3.2",
+                ":concurrent-queue-2.5.0",
+                ":pin-project-lite-0.2.16",
+                ":windows-sys-0.48.0",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":bitflags-1.3.2",
+                ":concurrent-queue-2.5.0",
+                ":pin-project-lite-0.2.16",
+                ":windows-sys-0.48.0",
+            ],
+        ),
+    },
     rustc_flags = ["@$(location :polling-2.8.0-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
         ":cfg-if-1.0.1",
-        ":libc-0.2.174",
         ":log-0.4.27",
     ],
 )
@@ -16959,22 +17834,22 @@ buildscript_run(
 )
 
 cargo.rust_library(
-    name = "polling-3.8.0",
+    name = "polling-3.9.0",
     srcs = [
-        "vendor/polling-3.8.0/src/epoll.rs",
-        "vendor/polling-3.8.0/src/iocp/afd.rs",
-        "vendor/polling-3.8.0/src/iocp/mod.rs",
-        "vendor/polling-3.8.0/src/iocp/port.rs",
-        "vendor/polling-3.8.0/src/kqueue.rs",
-        "vendor/polling-3.8.0/src/lib.rs",
-        "vendor/polling-3.8.0/src/os.rs",
-        "vendor/polling-3.8.0/src/os/iocp.rs",
-        "vendor/polling-3.8.0/src/os/kqueue.rs",
-        "vendor/polling-3.8.0/src/poll.rs",
-        "vendor/polling-3.8.0/src/port.rs",
+        "vendor/polling-3.9.0/src/epoll.rs",
+        "vendor/polling-3.9.0/src/iocp/afd.rs",
+        "vendor/polling-3.9.0/src/iocp/mod.rs",
+        "vendor/polling-3.9.0/src/iocp/port.rs",
+        "vendor/polling-3.9.0/src/kqueue.rs",
+        "vendor/polling-3.9.0/src/lib.rs",
+        "vendor/polling-3.9.0/src/os.rs",
+        "vendor/polling-3.9.0/src/os/iocp.rs",
+        "vendor/polling-3.9.0/src/os/kqueue.rs",
+        "vendor/polling-3.9.0/src/poll.rs",
+        "vendor/polling-3.9.0/src/port.rs",
     ],
     crate = "polling",
-    crate_root = "vendor/polling-3.8.0/src/lib.rs",
+    crate_root = "vendor/polling-3.9.0/src/lib.rs",
     edition = "2021",
     platform = {
         "linux-arm64": dict(
@@ -16993,22 +17868,19 @@ cargo.rust_library(
             deps = [
                 ":concurrent-queue-2.5.0",
                 ":pin-project-lite-0.2.16",
-                ":windows-sys-0.59.0",
+                ":windows-sys-0.60.2",
             ],
         ),
         "windows-msvc": dict(
             deps = [
                 ":concurrent-queue-2.5.0",
                 ":pin-project-lite-0.2.16",
-                ":windows-sys-0.59.0",
+                ":windows-sys-0.60.2",
             ],
         ),
     },
     visibility = [],
-    deps = [
-        ":cfg-if-1.0.1",
-        ":tracing-0.1.41",
-    ],
+    deps = [":cfg-if-1.0.1"],
 )
 
 cargo.rust_library(
@@ -17067,38 +17939,39 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
-    name = "prettyplease-0.2.36",
+    name = "prettyplease-0.2.35",
     srcs = [
-        "vendor/prettyplease-0.2.36/src/algorithm.rs",
-        "vendor/prettyplease-0.2.36/src/attr.rs",
-        "vendor/prettyplease-0.2.36/src/classify.rs",
-        "vendor/prettyplease-0.2.36/src/convenience.rs",
-        "vendor/prettyplease-0.2.36/src/data.rs",
-        "vendor/prettyplease-0.2.36/src/expr.rs",
-        "vendor/prettyplease-0.2.36/src/file.rs",
-        "vendor/prettyplease-0.2.36/src/fixup.rs",
-        "vendor/prettyplease-0.2.36/src/generics.rs",
-        "vendor/prettyplease-0.2.36/src/item.rs",
-        "vendor/prettyplease-0.2.36/src/iter.rs",
-        "vendor/prettyplease-0.2.36/src/lib.rs",
-        "vendor/prettyplease-0.2.36/src/lifetime.rs",
-        "vendor/prettyplease-0.2.36/src/lit.rs",
-        "vendor/prettyplease-0.2.36/src/mac.rs",
-        "vendor/prettyplease-0.2.36/src/pat.rs",
-        "vendor/prettyplease-0.2.36/src/path.rs",
-        "vendor/prettyplease-0.2.36/src/precedence.rs",
-        "vendor/prettyplease-0.2.36/src/ring.rs",
-        "vendor/prettyplease-0.2.36/src/stmt.rs",
-        "vendor/prettyplease-0.2.36/src/token.rs",
-        "vendor/prettyplease-0.2.36/src/ty.rs",
+        "vendor/prettyplease-0.2.35/src/algorithm.rs",
+        "vendor/prettyplease-0.2.35/src/attr.rs",
+        "vendor/prettyplease-0.2.35/src/classify.rs",
+        "vendor/prettyplease-0.2.35/src/convenience.rs",
+        "vendor/prettyplease-0.2.35/src/data.rs",
+        "vendor/prettyplease-0.2.35/src/expr.rs",
+        "vendor/prettyplease-0.2.35/src/file.rs",
+        "vendor/prettyplease-0.2.35/src/fixup.rs",
+        "vendor/prettyplease-0.2.35/src/generics.rs",
+        "vendor/prettyplease-0.2.35/src/item.rs",
+        "vendor/prettyplease-0.2.35/src/iter.rs",
+        "vendor/prettyplease-0.2.35/src/lib.rs",
+        "vendor/prettyplease-0.2.35/src/lifetime.rs",
+        "vendor/prettyplease-0.2.35/src/lit.rs",
+        "vendor/prettyplease-0.2.35/src/mac.rs",
+        "vendor/prettyplease-0.2.35/src/pat.rs",
+        "vendor/prettyplease-0.2.35/src/path.rs",
+        "vendor/prettyplease-0.2.35/src/precedence.rs",
+        "vendor/prettyplease-0.2.35/src/ring.rs",
+        "vendor/prettyplease-0.2.35/src/stmt.rs",
+        "vendor/prettyplease-0.2.35/src/token.rs",
+        "vendor/prettyplease-0.2.35/src/ty.rs",
     ],
     crate = "prettyplease",
-    crate_root = "vendor/prettyplease-0.2.36/src/lib.rs",
+    crate_root = "vendor/prettyplease-0.2.35/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :prettyplease-0.2.36-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :prettyplease-0.2.35-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :prettyplease-0.2.36-build-script-run[rustc_flags])"],
+    features = ["verbatim"],
+    rustc_flags = ["@$(location :prettyplease-0.2.35-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
         ":proc-macro2-1.0.95",
@@ -17107,49 +17980,51 @@ cargo.rust_library(
 )
 
 cargo.rust_binary(
-    name = "prettyplease-0.2.36-build-script-build",
+    name = "prettyplease-0.2.35-build-script-build",
     srcs = [
-        "vendor/prettyplease-0.2.36/build.rs",
-        "vendor/prettyplease-0.2.36/examples/input.rs",
-        "vendor/prettyplease-0.2.36/examples/output.prettyplease.rs",
-        "vendor/prettyplease-0.2.36/examples/output.rustc.rs",
-        "vendor/prettyplease-0.2.36/examples/output.rustfmt.rs",
-        "vendor/prettyplease-0.2.36/src/algorithm.rs",
-        "vendor/prettyplease-0.2.36/src/attr.rs",
-        "vendor/prettyplease-0.2.36/src/classify.rs",
-        "vendor/prettyplease-0.2.36/src/convenience.rs",
-        "vendor/prettyplease-0.2.36/src/data.rs",
-        "vendor/prettyplease-0.2.36/src/expr.rs",
-        "vendor/prettyplease-0.2.36/src/file.rs",
-        "vendor/prettyplease-0.2.36/src/fixup.rs",
-        "vendor/prettyplease-0.2.36/src/generics.rs",
-        "vendor/prettyplease-0.2.36/src/item.rs",
-        "vendor/prettyplease-0.2.36/src/iter.rs",
-        "vendor/prettyplease-0.2.36/src/lib.rs",
-        "vendor/prettyplease-0.2.36/src/lifetime.rs",
-        "vendor/prettyplease-0.2.36/src/lit.rs",
-        "vendor/prettyplease-0.2.36/src/mac.rs",
-        "vendor/prettyplease-0.2.36/src/pat.rs",
-        "vendor/prettyplease-0.2.36/src/path.rs",
-        "vendor/prettyplease-0.2.36/src/precedence.rs",
-        "vendor/prettyplease-0.2.36/src/ring.rs",
-        "vendor/prettyplease-0.2.36/src/stmt.rs",
-        "vendor/prettyplease-0.2.36/src/token.rs",
-        "vendor/prettyplease-0.2.36/src/ty.rs",
-        "vendor/prettyplease-0.2.36/tests/test.rs",
-        "vendor/prettyplease-0.2.36/tests/test_precedence.rs",
+        "vendor/prettyplease-0.2.35/build.rs",
+        "vendor/prettyplease-0.2.35/examples/input.rs",
+        "vendor/prettyplease-0.2.35/examples/output.prettyplease.rs",
+        "vendor/prettyplease-0.2.35/examples/output.rustc.rs",
+        "vendor/prettyplease-0.2.35/examples/output.rustfmt.rs",
+        "vendor/prettyplease-0.2.35/src/algorithm.rs",
+        "vendor/prettyplease-0.2.35/src/attr.rs",
+        "vendor/prettyplease-0.2.35/src/classify.rs",
+        "vendor/prettyplease-0.2.35/src/convenience.rs",
+        "vendor/prettyplease-0.2.35/src/data.rs",
+        "vendor/prettyplease-0.2.35/src/expr.rs",
+        "vendor/prettyplease-0.2.35/src/file.rs",
+        "vendor/prettyplease-0.2.35/src/fixup.rs",
+        "vendor/prettyplease-0.2.35/src/generics.rs",
+        "vendor/prettyplease-0.2.35/src/item.rs",
+        "vendor/prettyplease-0.2.35/src/iter.rs",
+        "vendor/prettyplease-0.2.35/src/lib.rs",
+        "vendor/prettyplease-0.2.35/src/lifetime.rs",
+        "vendor/prettyplease-0.2.35/src/lit.rs",
+        "vendor/prettyplease-0.2.35/src/mac.rs",
+        "vendor/prettyplease-0.2.35/src/pat.rs",
+        "vendor/prettyplease-0.2.35/src/path.rs",
+        "vendor/prettyplease-0.2.35/src/precedence.rs",
+        "vendor/prettyplease-0.2.35/src/ring.rs",
+        "vendor/prettyplease-0.2.35/src/stmt.rs",
+        "vendor/prettyplease-0.2.35/src/token.rs",
+        "vendor/prettyplease-0.2.35/src/ty.rs",
+        "vendor/prettyplease-0.2.35/tests/test.rs",
+        "vendor/prettyplease-0.2.35/tests/test_precedence.rs",
     ],
     crate = "build_script_build",
-    crate_root = "vendor/prettyplease-0.2.36/build.rs",
+    crate_root = "vendor/prettyplease-0.2.35/build.rs",
     edition = "2021",
+    features = ["verbatim"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "prettyplease-0.2.36-build-script-run",
+    name = "prettyplease-0.2.35-build-script-run",
     package_name = "prettyplease",
-    buildscript_rule = ":prettyplease-0.2.36-build-script-build",
-    version = "0.2.36",
+    buildscript_rule = ":prettyplease-0.2.35-build-script-build",
+    features = ["verbatim"],
+    version = "0.2.35",
 )
 
 cargo.rust_library(
@@ -17542,7 +18417,7 @@ cargo.rust_library(
         ":multimap-0.10.1",
         ":once_cell-1.21.3",
         ":petgraph-0.7.1",
-        ":prettyplease-0.2.36",
+        ":prettyplease-0.2.35",
         ":prost-0.13.5",
         ":prost-types-0.13.5",
         ":regex-1.11.1",
@@ -18150,6 +19025,26 @@ cargo.rust_library(
         "proto": ":quinn-proto-0.11.12",
         "udp": ":quinn-udp-0.5.13",
     },
+    platform = {
+        "linux-arm64": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+        "macos-arm64": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+        "windows-gnu": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+        "windows-msvc": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+    },
     rustc_flags = ["@$(location :quinn-0.11.8-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
@@ -18157,7 +19052,6 @@ cargo.rust_library(
         ":pin-project-lite-0.2.16",
         ":rustc-hash-2.1.1",
         ":rustls-0.23.29",
-        ":socket2-0.5.10",
         ":thiserror-2.0.12",
         ":tokio-1.46.1",
         ":tracing-0.1.41",
@@ -18325,15 +19219,29 @@ cargo.rust_library(
         "tracing",
     ],
     platform = {
+        "linux-arm64": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+        "macos-arm64": dict(
+            deps = [":socket2-0.5.10"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":socket2-0.5.10"],
+        ),
         "windows-gnu": dict(
             deps = [
                 ":once_cell-1.21.3",
+                ":socket2-0.5.10",
                 ":windows-sys-0.59.0",
             ],
         ),
         "windows-msvc": dict(
             deps = [
                 ":once_cell-1.21.3",
+                ":socket2-0.5.10",
                 ":windows-sys-0.59.0",
             ],
         ),
@@ -18342,7 +19250,6 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":libc-0.2.174",
-        ":socket2-0.5.10",
         ":tracing-0.1.41",
     ],
 )
@@ -19041,39 +19948,222 @@ cargo.rust_library(
         "json",
         "system-proxy",
     ],
-    named_deps = {
-        "native_tls_crate": ":native-tls-0.2.14",
+    platform = {
+        "linux-arm64": dict(
+            named_deps = {
+                "native_tls_crate": ":native-tls-0.2.14",
+            },
+            deps = [
+                ":encoding_rs-0.8.35",
+                ":futures-channel-0.3.31",
+                ":h2-0.4.11",
+                ":http-body-1.0.1",
+                ":http-body-util-0.1.3",
+                ":hyper-1.6.0",
+                ":hyper-rustls-0.27.7",
+                ":hyper-tls-0.6.0",
+                ":hyper-util-0.1.15",
+                ":log-0.4.27",
+                ":mime-0.3.17",
+                ":percent-encoding-2.3.1",
+                ":pin-project-lite-0.2.16",
+                ":rustls-pki-types-1.12.0",
+                ":tokio-1.46.1",
+                ":tokio-native-tls-0.3.1",
+                ":tower-0.5.2",
+                ":tower-http-0.6.6",
+            ],
+        ),
+        "linux-x86_64": dict(
+            named_deps = {
+                "native_tls_crate": ":native-tls-0.2.14",
+            },
+            deps = [
+                ":encoding_rs-0.8.35",
+                ":futures-channel-0.3.31",
+                ":h2-0.4.11",
+                ":http-body-1.0.1",
+                ":http-body-util-0.1.3",
+                ":hyper-1.6.0",
+                ":hyper-rustls-0.27.7",
+                ":hyper-tls-0.6.0",
+                ":hyper-util-0.1.15",
+                ":log-0.4.27",
+                ":mime-0.3.17",
+                ":percent-encoding-2.3.1",
+                ":pin-project-lite-0.2.16",
+                ":rustls-pki-types-1.12.0",
+                ":tokio-1.46.1",
+                ":tokio-native-tls-0.3.1",
+                ":tower-0.5.2",
+                ":tower-http-0.6.6",
+            ],
+        ),
+        "macos-arm64": dict(
+            named_deps = {
+                "native_tls_crate": ":native-tls-0.2.14",
+            },
+            deps = [
+                ":encoding_rs-0.8.35",
+                ":futures-channel-0.3.31",
+                ":h2-0.4.11",
+                ":http-body-1.0.1",
+                ":http-body-util-0.1.3",
+                ":hyper-1.6.0",
+                ":hyper-rustls-0.27.7",
+                ":hyper-tls-0.6.0",
+                ":hyper-util-0.1.15",
+                ":log-0.4.27",
+                ":mime-0.3.17",
+                ":percent-encoding-2.3.1",
+                ":pin-project-lite-0.2.16",
+                ":rustls-pki-types-1.12.0",
+                ":tokio-1.46.1",
+                ":tokio-native-tls-0.3.1",
+                ":tower-0.5.2",
+                ":tower-http-0.6.6",
+            ],
+        ),
+        "macos-x86_64": dict(
+            named_deps = {
+                "native_tls_crate": ":native-tls-0.2.14",
+            },
+            deps = [
+                ":encoding_rs-0.8.35",
+                ":futures-channel-0.3.31",
+                ":h2-0.4.11",
+                ":http-body-1.0.1",
+                ":http-body-util-0.1.3",
+                ":hyper-1.6.0",
+                ":hyper-rustls-0.27.7",
+                ":hyper-tls-0.6.0",
+                ":hyper-util-0.1.15",
+                ":log-0.4.27",
+                ":mime-0.3.17",
+                ":percent-encoding-2.3.1",
+                ":pin-project-lite-0.2.16",
+                ":rustls-pki-types-1.12.0",
+                ":tokio-1.46.1",
+                ":tokio-native-tls-0.3.1",
+                ":tower-0.5.2",
+                ":tower-http-0.6.6",
+            ],
+        ),
+        "windows-gnu": dict(
+            named_deps = {
+                "native_tls_crate": ":native-tls-0.2.14",
+            },
+            deps = [
+                ":encoding_rs-0.8.35",
+                ":futures-channel-0.3.31",
+                ":h2-0.4.11",
+                ":http-body-1.0.1",
+                ":http-body-util-0.1.3",
+                ":hyper-1.6.0",
+                ":hyper-rustls-0.27.7",
+                ":hyper-tls-0.6.0",
+                ":hyper-util-0.1.15",
+                ":log-0.4.27",
+                ":mime-0.3.17",
+                ":percent-encoding-2.3.1",
+                ":pin-project-lite-0.2.16",
+                ":rustls-pki-types-1.12.0",
+                ":tokio-1.46.1",
+                ":tokio-native-tls-0.3.1",
+                ":tower-0.5.2",
+                ":tower-http-0.6.6",
+            ],
+        ),
+        "windows-msvc": dict(
+            named_deps = {
+                "native_tls_crate": ":native-tls-0.2.14",
+            },
+            deps = [
+                ":encoding_rs-0.8.35",
+                ":futures-channel-0.3.31",
+                ":h2-0.4.11",
+                ":http-body-1.0.1",
+                ":http-body-util-0.1.3",
+                ":hyper-1.6.0",
+                ":hyper-rustls-0.27.7",
+                ":hyper-tls-0.6.0",
+                ":hyper-util-0.1.15",
+                ":log-0.4.27",
+                ":mime-0.3.17",
+                ":percent-encoding-2.3.1",
+                ":pin-project-lite-0.2.16",
+                ":rustls-pki-types-1.12.0",
+                ":tokio-1.46.1",
+                ":tokio-native-tls-0.3.1",
+                ":tower-0.5.2",
+                ":tower-http-0.6.6",
+            ],
+        ),
     },
     visibility = [],
     deps = [
         ":base64-0.22.1",
         ":bytes-1.10.1",
-        ":encoding_rs-0.8.35",
-        ":futures-channel-0.3.31",
         ":futures-core-0.3.31",
         ":futures-util-0.3.31",
-        ":h2-0.4.11",
         ":http-1.3.1",
-        ":http-body-1.0.1",
-        ":http-body-util-0.1.3",
-        ":hyper-1.6.0",
-        ":hyper-tls-0.6.0",
-        ":hyper-util-0.1.15",
-        ":log-0.4.27",
-        ":mime-0.3.17",
-        ":percent-encoding-2.3.1",
-        ":pin-project-lite-0.2.16",
-        ":rustls-pki-types-1.12.0",
         ":serde-1.0.219",
         ":serde_json-1.0.141",
         ":serde_urlencoded-0.7.1",
         ":sync_wrapper-1.0.2",
-        ":tokio-1.46.1",
-        ":tokio-native-tls-0.3.1",
-        ":tower-0.5.2",
-        ":tower-http-0.6.6",
         ":tower-service-0.3.3",
         ":url-2.5.4",
+    ],
+)
+
+alias(
+    name = "rfuse3",
+    actual = ":rfuse3-0.0.3",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "rfuse3-0.0.3",
+    srcs = [
+        "vendor/rfuse3-0.0.3/src/errno.rs",
+        "vendor/rfuse3-0.0.3/src/helper.rs",
+        "vendor/rfuse3-0.0.3/src/lib.rs",
+        "vendor/rfuse3-0.0.3/src/mount_options.rs",
+        "vendor/rfuse3-0.0.3/src/notify.rs",
+        "vendor/rfuse3-0.0.3/src/raw/abi.rs",
+        "vendor/rfuse3-0.0.3/src/raw/connection/async_io.rs",
+        "vendor/rfuse3-0.0.3/src/raw/connection/mod.rs",
+        "vendor/rfuse3-0.0.3/src/raw/connection/tokio.rs",
+        "vendor/rfuse3-0.0.3/src/raw/filesystem.rs",
+        "vendor/rfuse3-0.0.3/src/raw/flags.rs",
+        "vendor/rfuse3-0.0.3/src/raw/mod.rs",
+        "vendor/rfuse3-0.0.3/src/raw/reply.rs",
+        "vendor/rfuse3-0.0.3/src/raw/request.rs",
+        "vendor/rfuse3-0.0.3/src/raw/session.rs",
+    ],
+    crate = "rfuse3",
+    crate_root = "vendor/rfuse3-0.0.3/src/lib.rs",
+    edition = "2021",
+    features = [
+        "default",
+        "tokio-runtime",
+        "unprivileged",
+    ],
+    visibility = [],
+    deps = [
+        ":async-notify-0.3.0",
+        ":bincode-1.3.3",
+        ":bytes-1.10.1",
+        ":futures-channel-0.3.31",
+        ":futures-util-0.3.31",
+        ":libc-0.2.174",
+        ":nix-0.29.0",
+        ":serde-1.0.219",
+        ":slab-0.4.10",
+        ":tokio-1.46.1",
+        ":tracing-0.1.41",
+        ":trait-make-0.1.0",
+        ":which-4.4.2",
     ],
 )
 
@@ -19261,6 +20351,7 @@ cargo.rust_library(
         "alloc",
         "default",
         "dev_urandom_fallback",
+        "wasm32_unknown_unknown_js",
     ],
     platform = {
         "linux-arm64": dict(
@@ -19271,9 +20362,9 @@ cargo.rust_library(
         ),
     },
     rustc_flags = [
+        "-Lnative=$(location :ring-0.17.14-build-script-run[out_dir])",
         "-lstatic=ring_core_0_17_14_",
         "-lstatic=ring_core_0_17_14__test",
-        "-Lnative=$(location :ring-0.17.14-build-script-run[out_dir])",
         "@$(location :ring-0.17.14-build-script-run[rustc_flags])",
     ],
     visibility = [],
@@ -19480,6 +20571,7 @@ cargo.rust_binary(
         "alloc",
         "default",
         "dev_urandom_fallback",
+        "wasm32_unknown_unknown_js",
     ],
     visibility = [],
     deps = [":cc-1.2.30"],
@@ -19504,6 +20596,7 @@ buildscript_run(
         "alloc",
         "default",
         "dev_urandom_fallback",
+        "wasm32_unknown_unknown_js",
     ],
     version = "0.17.14",
 )
@@ -19689,6 +20782,19 @@ buildscript_run(
     package_name = "rust-criu",
     buildscript_rule = ":rust-criu-0.4.0-build-script-build",
     version = "0.4.0",
+)
+
+cargo.rust_library(
+    name = "rustc-hash-1.1.0",
+    srcs = ["vendor/rustc-hash-1.1.0/src/lib.rs"],
+    crate = "rustc_hash",
+    crate_root = "vendor/rustc-hash-1.1.0/src/lib.rs",
+    edition = "2015",
+    features = [
+        "default",
+        "std",
+    ],
+    visibility = [],
 )
 
 cargo.rust_library(
@@ -19986,6 +21092,18 @@ cargo.rust_library(
                 "libc_errno": ":errno-0.3.13",
             },
             deps = [":libc-0.2.174"],
+        ),
+        "windows-gnu": dict(
+            named_deps = {
+                "libc_errno": ":errno-0.3.13",
+            },
+            deps = [":windows-sys-0.48.0"],
+        ),
+        "windows-msvc": dict(
+            named_deps = {
+                "libc_errno": ":errno-0.3.13",
+            },
+            deps = [":windows-sys-0.48.0"],
         ),
     },
     rustc_flags = ["@$(location :rustix-0.37.28-build-script-run[rustc_flags])"],
@@ -20623,10 +21741,22 @@ cargo.rust_library(
     ],
     platform = {
         "linux-arm64": dict(
-            deps = [":linux-raw-sys-0.4.15"],
+            named_deps = {
+                "libc_errno": ":errno-0.3.13",
+            },
+            deps = [
+                ":libc-0.2.174",
+                ":linux-raw-sys-0.4.15",
+            ],
         ),
         "linux-x86_64": dict(
-            deps = [":linux-raw-sys-0.4.15"],
+            named_deps = {
+                "libc_errno": ":errno-0.3.13",
+            },
+            deps = [
+                ":libc-0.2.174",
+                ":linux-raw-sys-0.4.15",
+            ],
         ),
         "macos-arm64": dict(
             named_deps = {
@@ -21369,52 +22499,41 @@ cargo.rust_library(
     },
     features = [
         "alloc",
+        "default",
+        "event",
         "fs",
         "net",
+        "pipe",
+        "process",
         "std",
+        "time",
     ],
     platform = {
         "linux-arm64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
+            named_deps = {
+                "libc_errno": ":errno-0.3.13",
+            },
+            deps = [
+                ":libc-0.2.174",
+                ":linux-raw-sys-0.9.4",
             ],
-            deps = [":linux-raw-sys-0.9.4"],
         ),
         "linux-x86_64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
+            named_deps = {
+                "libc_errno": ":errno-0.3.13",
+            },
+            deps = [
+                ":libc-0.2.174",
+                ":linux-raw-sys-0.9.4",
             ],
-            deps = [":linux-raw-sys-0.9.4"],
         ),
         "macos-arm64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
             named_deps = {
                 "libc_errno": ":errno-0.3.13",
             },
             deps = [":libc-0.2.174"],
         ),
         "macos-x86_64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
             named_deps = {
                 "libc_errno": ":errno-0.3.13",
             },
@@ -21777,48 +22896,15 @@ cargo.rust_binary(
     },
     features = [
         "alloc",
+        "default",
+        "event",
         "fs",
         "net",
+        "pipe",
+        "process",
         "std",
+        "time",
     ],
-    platform = {
-        "linux-arm64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
-        ),
-        "linux-x86_64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
-        ),
-        "macos-x86_64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
-        ),
-    },
     visibility = [],
 )
 
@@ -21837,48 +22923,15 @@ buildscript_run(
     },
     features = [
         "alloc",
+        "default",
+        "event",
         "fs",
         "net",
+        "pipe",
+        "process",
         "std",
+        "time",
     ],
-    platform = {
-        "linux-arm64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
-        ),
-        "linux-x86_64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
-        ),
-        "macos-arm64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
-        ),
-        "macos-x86_64": dict(
-            features = [
-                "default",
-                "event",
-                "pipe",
-                "process",
-                "time",
-            ],
-        ),
-    },
     version = "1.0.8",
 )
 
@@ -22022,7 +23075,7 @@ cargo.rust_library(
     rustc_flags = ["@$(location :rustls-0.23.29-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
-        ":aws-lc-rs-1.13.3",
+        ":aws-lc-rs-1.13.2",
         ":log-0.4.27",
         ":once_cell-1.21.3",
         ":ring-0.17.14",
@@ -22195,8 +23248,27 @@ cargo.rust_library(
     named_deps = {
         "pki_types": ":rustls-pki-types-1.12.0",
     },
+    platform = {
+        "linux-arm64": dict(
+            deps = [":openssl-probe-0.1.6"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":openssl-probe-0.1.6"],
+        ),
+        "macos-arm64": dict(
+            deps = [":security-framework-3.2.0"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":security-framework-3.2.0"],
+        ),
+        "windows-gnu": dict(
+            deps = [":schannel-0.1.27"],
+        ),
+        "windows-msvc": dict(
+            deps = [":schannel-0.1.27"],
+        ),
+    },
     visibility = [],
-    deps = [":openssl-probe-0.1.6"],
 )
 
 cargo.rust_library(
@@ -22232,6 +23304,8 @@ cargo.rust_library(
         "alloc",
         "default",
         "std",
+        "web",
+        "web-time",
     ],
     visibility = [],
     deps = [":zeroize-1.8.1"],
@@ -22342,7 +23416,7 @@ cargo.rust_library(
     },
     visibility = [],
     deps = [
-        ":aws-lc-rs-1.13.3",
+        ":aws-lc-rs-1.13.2",
         ":ring-0.17.14",
         ":untrusted-0.9.0",
     ],
@@ -23165,10 +24239,29 @@ cargo.rust_library(
         "default",
         "std",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [":cpufeatures-0.2.17"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":cpufeatures-0.2.17"],
+        ),
+        "macos-arm64": dict(
+            deps = [":cpufeatures-0.2.17"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":cpufeatures-0.2.17"],
+        ),
+        "windows-gnu": dict(
+            deps = [":cpufeatures-0.2.17"],
+        ),
+        "windows-msvc": dict(
+            deps = [":cpufeatures-0.2.17"],
+        ),
+    },
     visibility = [],
     deps = [
         ":cfg-if-1.0.1",
-        ":cpufeatures-0.2.17",
         ":digest-0.10.7",
     ],
 )
@@ -23429,8 +24522,27 @@ cargo.rust_library(
     crate_root = "vendor/socket2-0.4.10/src/lib.rs",
     edition = "2018",
     features = ["all"],
+    platform = {
+        "linux-arm64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "macos-arm64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":libc-0.2.174"],
+        ),
+        "windows-gnu": dict(
+            deps = [":winapi-0.3.9"],
+        ),
+        "windows-msvc": dict(
+            deps = [":winapi-0.3.9"],
+        ),
+    },
     visibility = [],
-    deps = [":libc-0.2.174"],
 )
 
 cargo.rust_library(
@@ -24062,28 +25174,45 @@ cargo.rust_library(
     ],
     platform = {
         "linux-arm64": dict(
-            deps = [":rustix-1.0.8"],
+            deps = [
+                ":getrandom-0.3.3",
+                ":rustix-1.0.8",
+            ],
         ),
         "linux-x86_64": dict(
-            deps = [":rustix-1.0.8"],
+            deps = [
+                ":getrandom-0.3.3",
+                ":rustix-1.0.8",
+            ],
         ),
         "macos-arm64": dict(
-            deps = [":rustix-1.0.8"],
+            deps = [
+                ":getrandom-0.3.3",
+                ":rustix-1.0.8",
+            ],
         ),
         "macos-x86_64": dict(
-            deps = [":rustix-1.0.8"],
+            deps = [
+                ":getrandom-0.3.3",
+                ":rustix-1.0.8",
+            ],
         ),
         "windows-gnu": dict(
-            deps = [":windows-sys-0.59.0"],
+            deps = [
+                ":getrandom-0.3.3",
+                ":windows-sys-0.59.0",
+            ],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.59.0"],
+            deps = [
+                ":getrandom-0.3.3",
+                ":windows-sys-0.59.0",
+            ],
         ),
     },
     visibility = [],
     deps = [
         ":fastrand-2.3.0",
-        ":getrandom-0.3.3",
         ":once_cell-1.21.3",
     ],
 )
@@ -24473,6 +25602,7 @@ cargo.rust_library(
         ":deranged-0.4.0",
         ":num-conv-0.1.0",
         ":powerfmt-0.2.0",
+        ":serde-1.0.219",
         ":time-core-0.1.4",
     ],
 )
@@ -24935,39 +26065,48 @@ cargo.rust_library(
         "sync",
         "time",
         "tokio-macros",
+        "windows-sys",
     ],
     platform = {
         "linux-arm64": dict(
             deps = [
                 ":libc-0.2.174",
                 ":signal-hook-registry-1.4.5",
+                ":socket2-0.5.10",
             ],
         ),
         "linux-x86_64": dict(
             deps = [
                 ":libc-0.2.174",
                 ":signal-hook-registry-1.4.5",
+                ":socket2-0.5.10",
             ],
         ),
         "macos-arm64": dict(
             deps = [
                 ":libc-0.2.174",
                 ":signal-hook-registry-1.4.5",
+                ":socket2-0.5.10",
             ],
         ),
         "macos-x86_64": dict(
             deps = [
                 ":libc-0.2.174",
                 ":signal-hook-registry-1.4.5",
+                ":socket2-0.5.10",
             ],
         ),
         "windows-gnu": dict(
-            features = ["windows-sys"],
-            deps = [":windows-sys-0.52.0"],
+            deps = [
+                ":socket2-0.5.10",
+                ":windows-sys-0.52.0",
+            ],
         ),
         "windows-msvc": dict(
-            features = ["windows-sys"],
-            deps = [":windows-sys-0.52.0"],
+            deps = [
+                ":socket2-0.5.10",
+                ":windows-sys-0.52.0",
+            ],
         ),
     },
     visibility = [],
@@ -24976,7 +26115,6 @@ cargo.rust_library(
         ":mio-1.0.4",
         ":parking_lot-0.12.4",
         ":pin-project-lite-0.2.16",
-        ":socket2-0.5.10",
         ":tokio-macros-2.5.0",
     ],
 )
@@ -25009,6 +26147,27 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":native-tls-0.2.14",
+        ":tokio-1.46.1",
+    ],
+)
+
+cargo.rust_library(
+    name = "tokio-rustls-0.26.2",
+    srcs = [
+        "vendor/tokio-rustls-0.26.2/src/client.rs",
+        "vendor/tokio-rustls-0.26.2/src/common/handshake.rs",
+        "vendor/tokio-rustls-0.26.2/src/common/mod.rs",
+        "vendor/tokio-rustls-0.26.2/src/common/test_stream.rs",
+        "vendor/tokio-rustls-0.26.2/src/lib.rs",
+        "vendor/tokio-rustls-0.26.2/src/server.rs",
+    ],
+    crate = "tokio_rustls",
+    crate_root = "vendor/tokio-rustls-0.26.2/src/lib.rs",
+    edition = "2021",
+    features = ["tls12"],
+    visibility = [],
+    deps = [
+        ":rustls-0.23.29",
         ":tokio-1.46.1",
     ],
 )
@@ -25413,7 +26572,7 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [
-        ":prettyplease-0.2.36",
+        ":prettyplease-0.2.35",
         ":proc-macro2-1.0.95",
         ":prost-build-0.13.5",
         ":prost-types-0.13.5",
@@ -26432,12 +27591,46 @@ cargo.rust_library(
         "std",
         "v4",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [
+                ":getrandom-0.3.3",
+                ":rand-0.9.1",
+            ],
+        ),
+        "linux-x86_64": dict(
+            deps = [
+                ":getrandom-0.3.3",
+                ":rand-0.9.1",
+            ],
+        ),
+        "macos-arm64": dict(
+            deps = [
+                ":getrandom-0.3.3",
+                ":rand-0.9.1",
+            ],
+        ),
+        "macos-x86_64": dict(
+            deps = [
+                ":getrandom-0.3.3",
+                ":rand-0.9.1",
+            ],
+        ),
+        "windows-gnu": dict(
+            deps = [
+                ":getrandom-0.3.3",
+                ":rand-0.9.1",
+            ],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":getrandom-0.3.3",
+                ":rand-0.9.1",
+            ],
+        ),
+    },
     visibility = [],
-    deps = [
-        ":getrandom-0.3.3",
-        ":rand-0.9.1",
-        ":uuid-macro-internal-1.17.0",
-    ],
+    deps = [":uuid-macro-internal-1.17.0"],
 )
 
 cargo.rust_library(
@@ -26676,17 +27869,34 @@ cargo.rust_library(
     crate_root = "vendor/which-4.4.2/src/lib.rs",
     edition = "2021",
     platform = {
+        "linux-arm64": dict(
+            deps = [":home-0.5.11"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":home-0.5.11"],
+        ),
+        "macos-arm64": dict(
+            deps = [":home-0.5.11"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":home-0.5.11"],
+        ),
         "windows-gnu": dict(
-            deps = [":once_cell-1.21.3"],
+            deps = [
+                ":home-0.5.11",
+                ":once_cell-1.21.3",
+            ],
         ),
         "windows-msvc": dict(
-            deps = [":once_cell-1.21.3"],
+            deps = [
+                ":home-0.5.11",
+                ":once_cell-1.21.3",
+            ],
         ),
     },
     visibility = [],
     deps = [
         ":either-1.15.0",
-        ":home-0.5.11",
         ":rustix-0.38.44",
     ],
 )
@@ -27150,8 +28360,13 @@ cargo.rust_library(
         "errhandlingapi",
         "fileapi",
         "handleapi",
+        "memoryapi",
+        "minwindef",
         "processenv",
         "sysinfoapi",
+        "winnt",
+        "ws2ipdef",
+        "ws2tcpip",
     ],
     platform = {
         "windows-gnu": dict(
@@ -27579,8 +28794,13 @@ cargo.rust_binary(
         "errhandlingapi",
         "fileapi",
         "handleapi",
+        "memoryapi",
+        "minwindef",
         "processenv",
         "sysinfoapi",
+        "winnt",
+        "ws2ipdef",
+        "ws2tcpip",
     ],
     visibility = [],
 )
@@ -27594,8 +28814,13 @@ buildscript_run(
         "errhandlingapi",
         "fileapi",
         "handleapi",
+        "memoryapi",
+        "minwindef",
         "processenv",
         "sysinfoapi",
+        "winnt",
+        "ws2ipdef",
+        "ws2tcpip",
     ],
     version = "0.3.9",
 )
@@ -27612,8 +28837,15 @@ cargo.rust_library(
     crate = "winapi_util",
     crate_root = "vendor/winapi-util-0.1.9/src/lib.rs",
     edition = "2021",
+    platform = {
+        "windows-gnu": dict(
+            deps = [":windows-sys-0.59.0"],
+        ),
+        "windows-msvc": dict(
+            deps = [":windows-sys-0.59.0"],
+        ),
+    },
     visibility = [],
-    deps = [":windows-sys-0.59.0"],
 )
 
 cargo.rust_library(
@@ -27646,6 +28878,94 @@ buildscript_run(
     package_name = "winapi-x86_64-pc-windows-gnu",
     buildscript_rule = ":winapi-x86_64-pc-windows-gnu-0.4.0-build-script-build",
     version = "0.4.0",
+)
+
+cargo.rust_library(
+    name = "windows-core-0.61.2",
+    srcs = [
+        "vendor/windows-core-0.61.2/src/agile_reference.rs",
+        "vendor/windows-core-0.61.2/src/array.rs",
+        "vendor/windows-core-0.61.2/src/as_impl.rs",
+        "vendor/windows-core-0.61.2/src/com_object.rs",
+        "vendor/windows-core-0.61.2/src/event.rs",
+        "vendor/windows-core-0.61.2/src/guid.rs",
+        "vendor/windows-core-0.61.2/src/handles.rs",
+        "vendor/windows-core-0.61.2/src/imp/bindings.rs",
+        "vendor/windows-core-0.61.2/src/imp/can_into.rs",
+        "vendor/windows-core-0.61.2/src/imp/com_bindings.rs",
+        "vendor/windows-core-0.61.2/src/imp/factory_cache.rs",
+        "vendor/windows-core-0.61.2/src/imp/generic_factory.rs",
+        "vendor/windows-core-0.61.2/src/imp/marshaler.rs",
+        "vendor/windows-core-0.61.2/src/imp/mod.rs",
+        "vendor/windows-core-0.61.2/src/imp/ref_count.rs",
+        "vendor/windows-core-0.61.2/src/imp/sha1.rs",
+        "vendor/windows-core-0.61.2/src/imp/weak_ref_count.rs",
+        "vendor/windows-core-0.61.2/src/imp/windows.rs",
+        "vendor/windows-core-0.61.2/src/inspectable.rs",
+        "vendor/windows-core-0.61.2/src/interface.rs",
+        "vendor/windows-core-0.61.2/src/lib.rs",
+        "vendor/windows-core-0.61.2/src/out_param.rs",
+        "vendor/windows-core-0.61.2/src/out_ref.rs",
+        "vendor/windows-core-0.61.2/src/param.rs",
+        "vendor/windows-core-0.61.2/src/param_value.rs",
+        "vendor/windows-core-0.61.2/src/ref.rs",
+        "vendor/windows-core-0.61.2/src/runtime_name.rs",
+        "vendor/windows-core-0.61.2/src/runtime_type.rs",
+        "vendor/windows-core-0.61.2/src/scoped_interface.rs",
+        "vendor/windows-core-0.61.2/src/type.rs",
+        "vendor/windows-core-0.61.2/src/unknown.rs",
+        "vendor/windows-core-0.61.2/src/weak.rs",
+        "vendor/windows-core-0.61.2/src/windows.rs",
+    ],
+    crate = "windows_core",
+    crate_root = "vendor/windows-core-0.61.2/src/lib.rs",
+    edition = "2021",
+    features = [
+        "default",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":windows-implement-0.60.0",
+        ":windows-interface-0.59.1",
+        ":windows-link-0.1.3",
+        ":windows-result-0.3.4",
+        ":windows-strings-0.4.2",
+    ],
+)
+
+cargo.rust_library(
+    name = "windows-implement-0.60.0",
+    srcs = [
+        "vendor/windows-implement-0.60.0/src/gen.rs",
+        "vendor/windows-implement-0.60.0/src/lib.rs",
+        "vendor/windows-implement-0.60.0/src/tests.rs",
+    ],
+    crate = "windows_implement",
+    crate_root = "vendor/windows-implement-0.60.0/src/lib.rs",
+    edition = "2021",
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":proc-macro2-1.0.95",
+        ":quote-1.0.40",
+        ":syn-2.0.104",
+    ],
+)
+
+cargo.rust_library(
+    name = "windows-interface-0.59.1",
+    srcs = ["vendor/windows-interface-0.59.1/src/lib.rs"],
+    crate = "windows_interface",
+    crate_root = "vendor/windows-interface-0.59.1/src/lib.rs",
+    edition = "2021",
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":proc-macro2-1.0.95",
+        ":quote-1.0.40",
+        ":syn-2.0.104",
+    ],
 )
 
 cargo.rust_library(
@@ -28023,8 +29343,19 @@ cargo.rust_library(
     features = [
         "Win32",
         "Win32_Foundation",
+        "Win32_NetworkManagement",
+        "Win32_NetworkManagement_IpHelper",
+        "Win32_Networking",
+        "Win32_Networking_WinSock",
+        "Win32_Security",
+        "Win32_Storage",
+        "Win32_Storage_FileSystem",
         "Win32_System",
+        "Win32_System_IO",
+        "Win32_System_LibraryLoader",
         "Win32_System_Threading",
+        "Win32_System_WindowsProgramming",
+        "default",
     ],
     visibility = [],
     deps = [":windows-targets-0.48.5"],
@@ -28840,13 +30171,25 @@ cargo.rust_library(
     crate_root = "vendor/windows-sys-0.60.2/src/lib.rs",
     edition = "2021",
     features = [
+        "Wdk",
+        "Wdk_Foundation",
+        "Wdk_Storage",
+        "Wdk_Storage_FileSystem",
         "Win32",
         "Win32_Foundation",
         "Win32_Networking",
         "Win32_Networking_WinSock",
+        "Win32_Security",
+        "Win32_Storage",
+        "Win32_Storage_FileSystem",
         "Win32_System",
+        "Win32_System_Console",
         "Win32_System_Diagnostics",
         "Win32_System_Diagnostics_Debug",
+        "Win32_System_IO",
+        "Win32_System_LibraryLoader",
+        "Win32_System_Threading",
+        "Win32_System_WindowsProgramming",
         "default",
     ],
     visibility = [],
@@ -28860,6 +30203,9 @@ cargo.rust_library(
     crate_root = "vendor/windows-targets-0.48.5/src/lib.rs",
     edition = "2018",
     platform = {
+        "linux-x86_64": dict(
+            deps = [":windows_x86_64_gnu-0.48.5"],
+        ),
         "windows-gnu": dict(
             deps = [":windows_x86_64_gnu-0.48.5"],
         ),
@@ -28877,6 +30223,9 @@ cargo.rust_library(
     crate_root = "vendor/windows-targets-0.52.6/src/lib.rs",
     edition = "2021",
     platform = {
+        "linux-x86_64": dict(
+            deps = [":windows_x86_64_gnu-0.52.6"],
+        ),
         "windows-gnu": dict(
             deps = [":windows_x86_64_gnu-0.52.6"],
         ),
@@ -28894,6 +30243,9 @@ cargo.rust_library(
     crate_root = "vendor/windows-targets-0.53.2/src/lib.rs",
     edition = "2021",
     platform = {
+        "linux-x86_64": dict(
+            deps = [":windows_x86_64_gnu-0.53.0"],
+        ),
         "windows-gnu": dict(
             deps = [":windows_x86_64_gnu-0.53.0"],
         ),
@@ -29142,8 +30494,21 @@ cargo.rust_library(
         "default",
         "unsupported",
     ],
+    platform = {
+        "linux-arm64": dict(
+            deps = [":rustix-1.0.8"],
+        ),
+        "linux-x86_64": dict(
+            deps = [":rustix-1.0.8"],
+        ),
+        "macos-arm64": dict(
+            deps = [":rustix-1.0.8"],
+        ),
+        "macos-x86_64": dict(
+            deps = [":rustix-1.0.8"],
+        ),
+    },
     visibility = [],
-    deps = [":rustix-1.0.8"],
 )
 
 cargo.rust_library(
@@ -29200,6 +30565,7 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [
+        ":serde-1.0.219",
         ":stable_deref_trait-1.2.0",
         ":yoke-derive-0.7.5",
         ":zerofrom-0.1.6",

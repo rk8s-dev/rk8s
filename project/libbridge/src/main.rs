@@ -110,15 +110,15 @@ pub fn load_bri_netconf(config: NetworkConfig) -> Result<BridgeNetConf, AppError
     let mut bridge_conf: BridgeNetConf =
         serde_json::from_value(json_value).map_err(CniError::from)?;
 
-    if let Some(vlan) = bridge_conf.vlan {
-        if !(0..=4094).contains(&vlan) {
-            return Err(CniError::InvalidField {
-                field: "vlan",
-                expected: "0 <= vlan <= 4094",
-                value: vlan.into(),
-            }
-            .into());
+    if let Some(vlan) = bridge_conf.vlan
+        && !(0..=4094).contains(&vlan)
+    {
+        return Err(CniError::InvalidField {
+            field: "vlan",
+            expected: "0 <= vlan <= 4094",
+            value: vlan.into(),
         }
+        .into());
     }
 
     bridge_conf.vlans = Some(collect_vlan_trunk(bridge_conf.vlan_trunk.as_deref())?);
@@ -133,10 +133,10 @@ pub fn load_bri_netconf(config: NetworkConfig) -> Result<BridgeNetConf, AppError
     }
 
     bridge_conf.mac = bridge_conf.args.as_ref().and_then(|args| args.mac.clone());
-    if let Some(runtime) = &bridge_conf.net_conf.runtime {
-        if let Some(mac_addr) = &runtime.mac {
-            bridge_conf.mac = Some(mac_addr.to_string());
-        }
+    if let Some(runtime) = &bridge_conf.net_conf.runtime
+        && let Some(mac_addr) = &runtime.mac
+    {
+        bridge_conf.mac = Some(mac_addr.to_string());
     }
 
     Ok(bridge_conf)
@@ -259,12 +259,12 @@ pub async fn ensure_bridge(
     let link_message = builder.build();
 
     let add_result = link::add_link(link_message).await;
-    if let Err(e) = add_result {
-        if !e.to_string().contains("File exists") {
-            return Err(AppError::NetlinkError(format!(
-                "Could not add {br_name}: {e}"
-            )));
-        }
+    if let Err(e) = add_result
+        && !e.to_string().contains("File exists")
+    {
+        return Err(AppError::NetlinkError(format!(
+            "Could not add {br_name}: {e}"
+        )));
     }
 
     let br_link = link::link_by_name(br_name)
