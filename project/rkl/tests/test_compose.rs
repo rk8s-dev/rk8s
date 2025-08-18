@@ -120,7 +120,7 @@ fn test_compose_duplicate_project() {
 
 fn create_compose_helper(compose_config: &str, project_name: &str) -> Result<(), anyhow::Error> {
     let root = env::current_dir()?;
-    let config_path = root.parent().unwrap().join("test/test-compose.yaml");
+    let config_path = root.join("test/test-compose.yaml");
     if Path::new(&config_path).exists() {
         std::fs::remove_file(&config_path)?;
     }
