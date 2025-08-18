@@ -79,11 +79,11 @@ impl Filesystem for OverlayFs {
         fh: Option<u64>,
         flags: u32,
     ) -> Result<ReplyAttr> {
-        if !self.no_open.load(Ordering::Relaxed) {
-            if let Some(h) = fh {
+        if !self.no_open.load(Ordering::Relaxed)
+            && let Some(h) = fh {
                 let handles = self.handles.lock().await;
-                if let Some(hd) = handles.get(&h) {
-                    if let Some(ref rh) = hd.real_handle {
+                if let Some(hd) = handles.get(&h)
+                    && let Some(ref rh) = hd.real_handle {
                         let mut rep: ReplyAttr = rh
                             .layer
                             .getattr(req, rh.inode, Some(rh.handle.load(Ordering::Relaxed)), 0)
@@ -91,9 +91,7 @@ impl Filesystem for OverlayFs {
                         rep.attr.ino = inode;
                         return Ok(rep);
                     }
-                }
             }
-        }
 
         let node: Arc<super::OverlayInode> = self.lookup_node(req, inode, "").await?;
         let (layer, _, lower_inode) = node.first_layer_inode().await;
