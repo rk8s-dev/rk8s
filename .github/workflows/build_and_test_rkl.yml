@@ -1,4 +1,4 @@
-name: Buck2 Test
+name: RKL Test
 
 on:
   push:
@@ -14,7 +14,7 @@ on:
 
 jobs:
   test:
-    name:  Rkl Cargo Test
+    name: Test
     runs-on: [self-hosted]
     steps:
       - name: Checkout repository
