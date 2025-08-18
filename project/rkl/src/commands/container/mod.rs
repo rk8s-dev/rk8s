@@ -15,7 +15,7 @@ use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
 use oci_spec::runtime::{Mount as OciMount, MountBuilder};
-use std::{fmt::Write as _, io};
+use std::{env, fmt::Write as _, io};
 use std::{
     fs::{self, File},
     io::{BufWriter, Read, Write},
@@ -215,7 +215,8 @@ impl ContainerRunner {
         }
         let bundle_dir = Path::new(&bundle_path);
         if !bundle_dir.exists() {
-            return Err(anyhow!("Bundle directory does not exist"));
+            println!("current root: {:?}", env::current_dir()?);
+            return Err(anyhow!("Bundle directory does not exist: {:?}", bundle_dir));
         }
 
         let config_path = format!("{bundle_path}/config.json");

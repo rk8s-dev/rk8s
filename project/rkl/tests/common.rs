@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 pub fn bundles_path(name: &str) -> String {
     let root_dir = env::current_dir().unwrap();
     root_dir
-        .parent()
-        .unwrap()
         .join("test/bundles/")
         .join(name)
         .to_str()

@@ -59,10 +59,6 @@ fn test_compose_up_and_down() {
     assert!(backend_state.is_ok());
     assert!(frontend_state.is_ok());
 
-    // Test compose down
-    let root = env::current_dir().unwrap();
-    let _dir_guard = DirGuard::change_to(root.parent().unwrap().join("target/debug")).unwrap();
-
     compose_execute(ComposeCommand::Down(DownArgs {
         project_name: Some("test-compose-app".to_string()),
         compose_yaml: None,
@@ -79,9 +75,6 @@ fn test_compose_ps() {
     let compose_config = get_compose_config("test-compose-ps");
     try_create_compose(compose_config, "test-compose-ps");
 
-    let root = env::current_dir().unwrap();
-    let _dir_guard = DirGuard::change_to(root.parent().unwrap().join("target/debug")).unwrap();
-
     // Test compose ps
     let result = compose_execute(ComposeCommand::Ps(PsArgs {
         project_name: Some("test-compose-ps".to_string()),
@@ -96,8 +89,6 @@ fn test_compose_ps() {
         compose_yaml: None,
     }))
     .unwrap();
-
-    println!("{:?}", &root);
 }
 
 #[test]
@@ -119,8 +110,6 @@ fn test_compose_duplicate_project() {
     assert!(!res.is_err());
 
     // Cleanup
-    let root = env::current_dir().unwrap();
-    let _dir_guard = DirGuard::change_to(root.parent().unwrap().join("target/debug")).unwrap();
 
     compose_execute(ComposeCommand::Down(DownArgs {
         project_name: Some("test-duplicate".to_string()),
@@ -148,9 +137,6 @@ fn create_compose_helper(compose_config: &str, project_name: &str) -> Result<(),
         );
         std::fs::remove_dir_all(compose_dir)?;
     }
-
-    let root = env::current_dir().unwrap();
-    let _dir_guard = DirGuard::change_to(root.parent().unwrap().join("target/debug")).unwrap();
 
     compose_execute(ComposeCommand::Up(UpArgs {
         compose_yaml: Some(config_path.to_str().unwrap().to_string()),

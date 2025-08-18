@@ -437,7 +437,7 @@ volumes:
 services:
   backend:
     container_name: back
-    image: test/bundles/busybox
+    image: ./test/bundles/busybox
     command: ["sleep", "300"]
     ports:
       - "8080:8080"
@@ -447,7 +447,7 @@ services:
       - /tmp/mount/dir:/app/data
   frontend:
     container_name: front
-    image: test/bundles/busybox
+    image: ./test/bundles/busybox
     command: ["sleep", "300"]
     ports:
       - "80:80"
@@ -559,7 +559,6 @@ networks:
         .unwrap();
         // cd to the current_dir's parent
         let root = env::current_dir().expect("Failed to get current dev");
-        env::set_current_dir(root.parent().unwrap()).unwrap();
 
         let mut manager = ComposeManager::new(project_name.clone()).unwrap();
         manager

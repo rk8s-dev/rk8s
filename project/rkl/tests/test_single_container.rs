@@ -43,8 +43,6 @@ fn test_container_create_start_and_delete() {
     let container_state: Value = serde_json::from_str(&container_state).unwrap();
     assert_eq!(container_state["status"], "created");
 
-    let root = env::current_dir().unwrap();
-    let _dir_guard = DirGuard::change_to(root.parent().unwrap().join("target/debug")).unwrap();
     start_container("test-container").unwrap();
 
     let container_state = std::fs::read_to_string("/run/youki/test-container/state.json").unwrap();
@@ -123,7 +121,7 @@ fn test_container_nonexistent_image() {
 fn create_container_helper(config: ContainerSpec, run: bool) -> Result<(), anyhow::Error> {
     let file_content = serde_yaml::to_string(&config)?;
     let root = env::current_dir()?;
-    let config_path = root.parent().unwrap().join("test/test-container.yaml");
+    let config_path = root.join("rkl/tests/test-container.yaml");
     if Path::new(&config_path).exists() {
         std::fs::remove_file(&config_path)?;
     }
@@ -136,8 +134,6 @@ fn create_container_helper(config: ContainerSpec, run: bool) -> Result<(), anyho
     if container_dir.exists() {
         std::fs::remove_dir_all(container_dir)?;
     }
-
-    let _dir_guard = DirGuard::change_to(root.parent().unwrap().join("target/debug")).unwrap();
 
     if !run {
         create_container(config_path.to_str().unwrap())?;
@@ -164,7 +160,5 @@ fn try_create_container(config: ContainerSpec, run: bool) {
 }
 
 fn delete_container_helper(container_name: &str) {
-    let root = env::current_dir().unwrap();
-    let _dir_guard = DirGuard::change_to(root.parent().unwrap().join("target/debug")).unwrap();
     delete_container(container_name).unwrap();
 }
