@@ -324,13 +324,14 @@ impl HandleMap {
         let mut handles = self.handles.write().await;
 
         if let btree_map::Entry::Occupied(e) = handles.entry(handle)
-            && e.get().inode == inode {
-                // We don't need to close the file here because that will happen automatically when
-                // the last `Arc` is dropped.
-                e.remove();
+            && e.get().inode == inode
+        {
+            // We don't need to close the file here because that will happen automatically when
+            // the last `Arc` is dropped.
+            e.remove();
 
-                return Ok(());
-            }
+            return Ok(());
+        }
 
         Err(ebadf())
     }
