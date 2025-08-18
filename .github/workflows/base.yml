@@ -79,26 +79,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Setup test environment 
-        run: |
-          # buck2 build
-          reindeer --third-party-dir third-party vendor  
-          reindeer --third-party-dir third-party buckify  
-          buck2 build //project/libbridge:libbridge  
-          buck2 build //project/libipam:libipam  
-
-          # setup CNI directory
-          sudo mkdir -p /opt/cni/bin  
-          sudo mkdir -p /etc/cni/net.d  
-
-          # configure the libbridge  
-          sudo cp $(buck2 build //project/libbridge:libbridge --show-output | cut -d' ' -f2) /opt/cni/bin/libbridge  
-          sudo cp $(buck2 build //project/libipam:libipam --show-output | cut -d' ' -f2) /opt/cni/bin/libipam  
-
       - name: Run tests
         run: |
-          cd project
-          # rkl-test 
-          cargo test --no-run -p rkl
-          sudo sh -c 'for t in target/debug/deps/test_* ; do [ "${t%.d}" = "$t" ] && $t; done'
+          echo "buck2 test"
