@@ -19,6 +19,9 @@ async fn test_static_pod() {
     let yes_pod = get_pod_config(vec!["sh", "-c", "yes > /dev/null"], "yes-pod");
     let zero_null_pod = get_pod_config(vec!["dd", "if=/dev/zero", "of=/dev/null"], "zero-null-pod");
     let manifest_path = PathBuf::from("/etc/rk8s/manifests");
+    if !manifest_path.exists() {
+        std::fs::create_dir_all(&manifest_path).unwrap();
+    }
     assert!(manifest_path.exists());
 
     let mut pod_file = File::create(manifest_path.join("yes_pod.yaml")).unwrap();
@@ -61,6 +64,9 @@ async fn test_skip_invalid_pod() {
     let handle = tokio::spawn(sync_loop.run());
     let yes_pod = get_pod_config(vec!["sh", "-c", "yes > /dev/null"], "yes-pod");
     let manifest_path = PathBuf::from("/etc/rk8s/manifests");
+    if !manifest_path.exists() {
+        std::fs::create_dir_all(&manifest_path).unwrap();
+    }
     assert!(manifest_path.exists());
 
     let mut pod_file = File::create(manifest_path.join("yes_pod.yaml")).unwrap();
