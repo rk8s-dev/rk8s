@@ -6,7 +6,7 @@ use rfuse3::{Errno, Inode, Result, raw::prelude::*};
 use std::{
     ffi::{CStr, CString, OsStr, OsString},
     fs::File,
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom},
     mem::{ManuallyDrop, MaybeUninit},
     num::NonZeroU32,
     os::{
