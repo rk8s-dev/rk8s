@@ -98,5 +98,7 @@ jobs:
 
       - name: Run tests
         run: |
-          sudo cargo test --manifest-path project/Cargo.toml -p rkl
-
+          cd project
+          # rkl-test 
+          cargo test --no-run -p rkl
+          sudo sh -c 'for t in target/debug/deps/test_* target/debug/deps/rkl-*; do [ "${t%.d}" = "$t" ] && $t; done'
