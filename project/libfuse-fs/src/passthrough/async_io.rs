@@ -996,7 +996,7 @@ impl Filesystem for PassthroughFs {
 
         if let Ok(st) = statx::statx(&raw_fd, None) {
             let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
-            self.mmap_pool.remove(&key).await; // 异步移除缓存项
+            self.mmap_pool.remove(&key).await; // remove the mmap cache
         }
 
         Ok(ReplyWrite {
