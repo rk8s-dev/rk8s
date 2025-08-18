@@ -424,8 +424,7 @@ services:
     image: test/bundles/busybox/
     ports: ["8080:80"]
     volumes: 
-      - ./tmp/mount/dir:/app/data
-      - ./data:/app/data2
+      - /tmp/mount/dir:/mnt
 volumes:
   
 "#
@@ -444,7 +443,7 @@ services:
     networks:
       - libra-net
     volumes:
-      - /tmp/mount/dir:/app/data
+      - /tmp/mount/dir:/mnt
   frontend:
     container_name: front
     image: ./test/bundles/busybox
@@ -486,23 +485,22 @@ networks:
         assert_eq!(spec.name, Some("test_proj".to_string()));
         assert!(spec.services.contains_key("web"));
         assert_eq!(spec.services["web"].image, "test/bundles/busybox/");
-        assert_eq!(spec.services["web"].volumes[0], "./tmp/mount/dir:/app/data");
-        assert_eq!(spec.services["web"].volumes[1], "./data:/app/data2");
+        assert_eq!(spec.services["web"].volumes[0], "/tmp/mount/dir:/mnt");
     }
 
     #[tokio::test]
     #[serial]
     async fn test_map_volume_style() {
         let volumes = vec![
-            "./tmp/mount/dir:/app/data:ro".to_string(),
-            "/home/erasernoob/data:/app/data2".to_string(),
+            "/tmp/mount/dir:/app/data:ro".to_string(),
+            "/tmp/data:/app/data2".to_string(),
         ];
         let mapped = VolumeManager::string_to_pattern(volumes).unwrap();
         assert_eq!(mapped.len(), 2);
-        assert_eq!(mapped[0].host_path, "./tmp/mount/dir");
+        assert_eq!(mapped[0].host_path, "/tmp/mount/dir");
         assert_eq!(mapped[0].container_path, "/app/data");
         assert!(mapped[0].read_only);
-        assert_eq!(mapped[1].host_path, "/home/erasernoob/data");
+        assert_eq!(mapped[1].host_path, "/tmp/data");
         assert_eq!(mapped[1].container_path, "/app/data2");
         assert!(!mapped[1].read_only);
     }
@@ -557,8 +555,6 @@ networks:
             get_test_multiple_service(),
         )
         .unwrap();
-        // cd to the current_dir's parent
-        let root = env::current_dir().expect("Failed to get current dev");
 
         let mut manager = ComposeManager::new(project_name.clone()).unwrap();
         manager
@@ -567,7 +563,5 @@ networks:
                 project_name: Some(project_name),
             })
             .unwrap();
-
-        env::set_current_dir(root).unwrap();
     }
 }
