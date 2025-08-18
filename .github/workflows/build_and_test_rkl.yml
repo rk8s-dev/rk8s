@@ -1,0 +1,53 @@
+name: RKL Test
+
+on:
+  push:
+    paths:
+      - 'project/libbridge/**'
+      - 'project/libipam/**'
+      - 'project/rkl/**'
+  pull_request:
+    paths:
+      - 'project/libbridge/**'
+      - 'project/libipam/**'
+      - 'project/rkl/**'
+
+jobs:
+  test:
+    name: Test
+    runs-on: [self-hosted]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup test environment
+        run: |
+          reindeer --third-party-dir third-party vendor
+          reindeer --third-party-dir third-party buckify
+          buck2 build //project/libbridge:libbridge
+          buck2 build //project/libipam:libipam
+
+          sudo mkdir -p /opt/cni/bin
+          sudo mkdir -p /etc/cni/net.d
+
+          sudo cp $(buck2 build //project/libbridge:libbridge --show-output | cut -d' ' -f2) /opt/cni/bin/libbridge
+          sudo cp $(buck2 build //project/libipam:libipam --show-output | cut -d' ' -f2) /opt/cni/bin/libipam
+
+      - name: Run tests
+        run: |
+          cd project
+          cargo test --no-run -p rkl
+
+          # to avoid exit code equals 0
+
+          FAIL=0
+          sudo sh -c '
+          for t in $(find target/debug/deps/ -type f -executable -name "test_*"); do
+              $t || FAIL=1
+          done
+          exit $FAIL
+          '
+
+

@@ -1,3 +1,5 @@
+use rkl::daemon::{static_pods, sync_loop::SyncLoop};
+use serial_test::serial;
 use std::{
     fs::File,
     io::Write,
@@ -5,10 +7,9 @@ use std::{
     time::Duration,
 };
 
-use rkl::daemon::{static_pods, sync_loop::SyncLoop};
+use crate::common::get_pod_config;
+
 mod common;
-use common::*;
-use serial_test::serial;
 
 #[tokio::test]
 #[serial]
@@ -18,6 +19,9 @@ async fn test_static_pod() {
     let yes_pod = get_pod_config(vec!["sh", "-c", "yes > /dev/null"], "yes-pod");
     let zero_null_pod = get_pod_config(vec!["dd", "if=/dev/zero", "of=/dev/null"], "zero-null-pod");
     let manifest_path = PathBuf::from("/etc/rk8s/manifests");
+    if !manifest_path.exists() {
+        std::fs::create_dir_all(&manifest_path).unwrap();
+    }
     assert!(manifest_path.exists());
 
     let mut pod_file = File::create(manifest_path.join("yes_pod.yaml")).unwrap();
@@ -60,6 +64,9 @@ async fn test_skip_invalid_pod() {
     let handle = tokio::spawn(sync_loop.run());
     let yes_pod = get_pod_config(vec!["sh", "-c", "yes > /dev/null"], "yes-pod");
     let manifest_path = PathBuf::from("/etc/rk8s/manifests");
+    if !manifest_path.exists() {
+        std::fs::create_dir_all(&manifest_path).unwrap();
+    }
     assert!(manifest_path.exists());
 
     let mut pod_file = File::create(manifest_path.join("yes_pod.yaml")).unwrap();

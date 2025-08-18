@@ -1,24 +1,22 @@
-use std::{env, fs::File, io::Write, path::Path};
-mod common;
+use crate::common::get_pod_config;
 use anyhow::anyhow;
-use common::*;
+use rkl::task::PodTask;
 use rkl::{
     commands::pod::{create_pod, delete_pod, run_pod, start_pod},
-    task::{ContainerRes, PodTask, Resource, TaskRunner},
+    task::{ContainerRes, Resource, TaskRunner},
 };
 use serde_json::Value;
 use serial_test::serial;
+use std::{env, fs::File, io::Write, path::Path};
+
+mod common;
 
 #[test]
 #[serial]
 fn test_from_file() {
     let config = get_pod_config(vec!["echo".to_string()], "simple-container-task");
     let file_content = serde_yaml::to_string(&config).unwrap();
-    let config_path = env::current_dir()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("test/test.yaml");
+    let config_path = env::current_dir().unwrap().join("rkl/tests/test.yaml");
     let mut file = File::create(&config_path).unwrap();
     file.write_all(file_content.as_bytes()).unwrap();
     let runner = TaskRunner::from_file(config_path.as_os_str().to_str().unwrap()).unwrap();
@@ -32,7 +30,7 @@ fn test_from_file() {
 fn create(config: PodTask, run: bool) -> Result<(), anyhow::Error> {
     let file_content = serde_yaml::to_string(&config)?;
     let root = env::current_dir()?;
-    let config_path = root.parent().unwrap().join("test/test-pod.yaml");
+    let config_path = root.join("rkl/tests/test-pod.yaml");
     if Path::new(&config_path).exists() {
         std::fs::remove_file(&config_path)?;
     }
@@ -53,14 +51,11 @@ fn create(config: PodTask, run: bool) -> Result<(), anyhow::Error> {
         std::fs::remove_dir_all(container_dir)?;
     }
 
-    env::set_current_dir(root.parent().unwrap().join("target/debug"))
-        .map_err(|_| anyhow!("Failed to set current dir"))?;
     if !run {
         create_pod(config_path.to_str().unwrap())?;
     } else {
         run_pod(config_path.to_str().unwrap())?;
     }
-    env::set_current_dir(root).map_err(|_| anyhow!("Failed to set back current dir"))?;
     std::fs::remove_file(config_path)?;
     Ok(())
 }
@@ -81,14 +76,7 @@ fn try_create(config: PodTask, run: bool) {
 }
 
 fn delete(pod_name: &str) {
-    let root = env::current_dir().unwrap();
-    env::set_current_dir(root.parent().unwrap().join("target/debug"))
-        .map_err(|_| anyhow!("Failed to set current dir"))
-        .unwrap();
     delete_pod(pod_name).unwrap();
-    env::set_current_dir(root)
-        .map_err(|_| anyhow!("Failed to set back current dir"))
-        .unwrap();
 }
 
 #[test]
@@ -110,10 +98,6 @@ fn test_create_start_and_delete() {
     assert_eq!(container_state["status"], "created");
     assert_eq!(pause_state["status"], "running");
 
-    let root = env::current_dir().unwrap();
-    env::set_current_dir(root.parent().unwrap().join("target/debug"))
-        .map_err(|_| anyhow!("Failed to set current dir"))
-        .unwrap();
     start_pod("simple-container-task").unwrap();
 
     let container_state =
@@ -123,9 +107,6 @@ fn test_create_start_and_delete() {
     assert_eq!(container_state["status"], "running");
 
     delete_pod("simple-container-task").unwrap();
-    env::set_current_dir(root)
-        .map_err(|_| anyhow!("Failed to set back current dir"))
-        .unwrap();
 
     assert!(!Path::new("/run/youki/simple-container-task-main-container1").exists());
     assert!(!Path::new("/run/youki/simple-container-task").exists());

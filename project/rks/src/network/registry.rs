@@ -189,7 +189,7 @@ impl Registry for XlineSubnetRegistry {
             self.xline_cfg.prefix,
             subnet::make_subnet_key(&sn, sn6.as_ref())
         );
-        info!("key: {}", key);
+        info!("key: {key}");
         let resp = self.kv().await.get(key, None).await?;
         if resp.kvs().is_empty() {
             info!("resp's kv is empty");

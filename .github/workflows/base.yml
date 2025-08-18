@@ -79,6 +79,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Run tests with Buck2
-        run: echo "Running tests with Buck2 ..."
+      - name: Run tests
+        run: |
+          echo "buck2 test"
