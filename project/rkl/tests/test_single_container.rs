@@ -121,7 +121,7 @@ fn test_container_nonexistent_image() {
 fn create_container_helper(config: ContainerSpec, run: bool) -> Result<(), anyhow::Error> {
     let file_content = serde_yaml::to_string(&config)?;
     let root = env::current_dir()?;
-    let config_path = root.join("rkl/tests/test-container.yaml");
+    let config_path = root.join("/tmp/single-container.yml");
     if Path::new(&config_path).exists() {
         std::fs::remove_file(&config_path)?;
     }
