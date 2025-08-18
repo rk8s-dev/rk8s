@@ -307,7 +307,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             let mmap = unsafe { memmap2::Mmap::map(&file) }?;
 
             let st = statx::statx(&file, None)?;
-            let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
+            let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
             let mmap_pool = self.mmap_pool.clone();
             mmap_pool.insert(key, Arc::new(mmap)).await;
         }
@@ -385,7 +385,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             if flags & libc::AT_REMOVEDIR == 0
                 && let Some(st) = st
             {
-                let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
+                let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
                 self.handle_cache.remove(&key).await;
                 self.mmap_pool.remove(&key).await;
             }
@@ -884,7 +884,7 @@ impl Filesystem for PassthroughFs {
         let mut f = ManuallyDrop::new(f);
 
         let st = statx::statx(&raw_fd, None)?;
-        let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
+        let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
         let mmap_pool = self.mmap_pool.clone();
         let mmap = mmap_pool.get(&key).await;
         let mmap = match mmap {
@@ -995,7 +995,7 @@ impl Filesystem for PassthroughFs {
         };
 
         if let Ok(st) = statx::statx(&raw_fd, None) {
-            let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
+            let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
             self.mmap_pool.remove(&key).await; // remove the mmap cache
         }
 

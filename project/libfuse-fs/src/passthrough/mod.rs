@@ -2,6 +2,7 @@ use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
 use inode_store::{InodeId, InodeStore};
+use libc::statx_timestamp;
 use moka::future::Cache;
 use rfuse3::{Errno, raw::reply::ReplyEntry};
 use uuid::Uuid;
@@ -322,15 +323,14 @@ impl HandleMap {
         // Do not expect poisoned lock here, so safe to unwrap().
         let mut handles = self.handles.write().await;
 
-        if let btree_map::Entry::Occupied(e) = handles.entry(handle) {
-            if e.get().inode == inode {
+        if let btree_map::Entry::Occupied(e) = handles.entry(handle)
+            && e.get().inode == inode {
                 // We don't need to close the file here because that will happen automatically when
                 // the last `Arc` is dropped.
                 e.remove();
 
                 return Ok(());
             }
-        }
 
         Err(ebadf())
     }
@@ -348,7 +348,7 @@ impl HandleMap {
 }
 
 #[derive(Hash, Eq, PartialEq)]
-struct FileUniqueKey(u64, i64);
+struct FileUniqueKey(u64, statx_timestamp);
 
 /// A file system that simply "passes through" all requests it receives to the underlying file
 /// system.
@@ -613,7 +613,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
         let st = statx::statx(&path_file, None)?;
 
-        let key = FileUniqueKey(st.st.st_ino, st.st.st_ctime);
+        let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
         let handle_arc = {
             let cache = self.handle_cache.clone();
             if let Some(h) = cache.get(&key).await {

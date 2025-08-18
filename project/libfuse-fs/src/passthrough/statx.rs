@@ -7,6 +7,8 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::io::AsRawFd;
 
+use libc::statx_timestamp;
+
 use super::{
     EMPTY_CSTR,
     os_compat::{STATX_BASIC_STATS, STATX_MNT_ID, statx_st},
@@ -18,6 +20,7 @@ pub type MountId = u64;
 pub struct StatExt {
     pub st: libc::stat64,
     pub mnt_id: MountId,
+    pub btime: Option<statx_timestamp>,
 }
 
 /*
@@ -138,8 +141,8 @@ pub fn statx(dir: &impl AsRawFd, path: Option<&CStr>) -> io::Result<StatExt> {
         let st = stx
             .stat64()
             .ok_or_else(|| io::Error::from_raw_os_error(libc::ENOSYS))?;
-
-        Ok(StatExt { st, mnt_id })
+        let btime = Some(stx.stx_btime);
+        Ok(StatExt { st, mnt_id, btime })
     } else {
         Err(io::Error::last_os_error())
     }
