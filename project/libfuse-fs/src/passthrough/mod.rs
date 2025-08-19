@@ -2,7 +2,8 @@ use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
 use inode_store::{InodeId, InodeStore};
-use lru::LruCache;
+use libc::statx_timestamp;
+use moka::future::Cache;
 use rfuse3::{Errno, raw::reply::ReplyEntry};
 use uuid::Uuid;
 
@@ -10,7 +11,6 @@ use crate::util::convert_stat64_to_file_attr;
 use mount_fd::MountFds;
 use statx::StatExt;
 use std::io::Result;
-use std::num::NonZero;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::{
@@ -323,14 +323,14 @@ impl HandleMap {
         // Do not expect poisoned lock here, so safe to unwrap().
         let mut handles = self.handles.write().await;
 
-        if let btree_map::Entry::Occupied(e) = handles.entry(handle) {
-            if e.get().inode == inode {
-                // We don't need to close the file here because that will happen automatically when
-                // the last `Arc` is dropped.
-                e.remove();
+        if let btree_map::Entry::Occupied(e) = handles.entry(handle)
+            && e.get().inode == inode
+        {
+            // We don't need to close the file here because that will happen automatically when
+            // the last `Arc` is dropped.
+            e.remove();
 
-                return Ok(());
-            }
+            return Ok(());
         }
 
         Err(ebadf())
@@ -347,6 +347,9 @@ impl HandleMap {
             .ok_or_else(ebadf)
     }
 }
+
+#[derive(Hash, Eq, PartialEq)]
+struct FileUniqueKey(u64, statx_timestamp);
 
 /// A file system that simply "passes through" all requests it receives to the underlying file
 /// system.
@@ -410,7 +413,9 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     phantom: PhantomData<S>,
 
-    handle_cache: RwLock<LruCache<InodeId, Arc<FileHandle>>>,
+    handle_cache: Cache<FileUniqueKey, Arc<FileHandle>>,
+
+    mmap_pool: Cache<FileUniqueKey, Arc<memmap2::Mmap>>,
 }
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
@@ -477,7 +482,9 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             phantom: PhantomData,
 
-            handle_cache: RwLock::new(LruCache::new(NonZero::new(fd_limit as usize).unwrap())),
+            handle_cache: moka::future::Cache::new(fd_limit),
+
+            mmap_pool: moka::future::Cache::new(1024),
         })
     }
 
@@ -607,14 +614,14 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
         let st = statx::statx(&path_file, None)?;
 
-        let key = InodeId::from_stat(&st);
+        let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
         let handle_arc = {
-            let mut cache = self.handle_cache.write().await;
-            if let Some(h) = cache.get(&key).cloned() {
+            let cache = self.handle_cache.clone();
+            if let Some(h) = cache.get(&key).await {
                 h
             } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
                 let handle_arc = Arc::new(handle_from_fd);
-                cache.put(key, Arc::clone(&handle_arc));
+                cache.insert(key, Arc::clone(&handle_arc)).await;
                 handle_arc
             } else {
                 return Err(Error::new(
@@ -928,7 +935,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
+    use std::{ffi::OsString, path};
 
     use rfuse3::{MountOptions, raw::Session};
     use tokio::signal;
@@ -954,7 +961,11 @@ mod tests {
 
         let mut mount_options = MountOptions::default();
         // .allow_other(true)
-        mount_options.force_readdir_plus(true).uid(uid).gid(gid);
+        mount_options
+            .force_readdir_plus(true)
+            .uid(uid)
+            .gid(gid)
+            .allow_other(true);
 
         let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
             Session::new(mount_options)

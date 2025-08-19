@@ -23,7 +23,8 @@ rust_library(
         "//third-party:vmm-sys-util",
         "//third-party:bitflags",
         "//third-party:rfuse3",
-        "//third-party:lru",
+        "//third-party:moka",
+        "//third-party:memmap2",
         "//third-party:nix",
     ],
     env = {

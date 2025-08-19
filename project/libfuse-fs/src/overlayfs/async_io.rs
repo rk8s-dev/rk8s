@@ -79,19 +79,19 @@ impl Filesystem for OverlayFs {
         fh: Option<u64>,
         flags: u32,
     ) -> Result<ReplyAttr> {
-        if !self.no_open.load(Ordering::Relaxed) {
-            if let Some(h) = fh {
-                let handles = self.handles.lock().await;
-                if let Some(hd) = handles.get(&h) {
-                    if let Some(ref rh) = hd.real_handle {
-                        let mut rep: ReplyAttr = rh
-                            .layer
-                            .getattr(req, rh.inode, Some(rh.handle.load(Ordering::Relaxed)), 0)
-                            .await?;
-                        rep.attr.ino = inode;
-                        return Ok(rep);
-                    }
-                }
+        if !self.no_open.load(Ordering::Relaxed)
+            && let Some(h) = fh
+        {
+            let handles = self.handles.lock().await;
+            if let Some(hd) = handles.get(&h)
+                && let Some(ref rh) = hd.real_handle
+            {
+                let mut rep: ReplyAttr = rh
+                    .layer
+                    .getattr(req, rh.inode, Some(rh.handle.load(Ordering::Relaxed)), 0)
+                    .await?;
+                rep.attr.ino = inode;
+                return Ok(rep);
             }
         }
 
