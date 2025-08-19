@@ -209,10 +209,12 @@ mod test {
         let inode_stat1 = StatExt {
             st: stat_fd(tmpfile1.as_file()).unwrap(),
             mnt_id: 0,
+            btime: None,
         };
         let inode_stat2 = StatExt {
             st: stat_fd(tmpfile2.as_file()).unwrap(),
             mnt_id: 0,
+            btime: None,
         };
         let id1 = InodeId::from_stat(&inode_stat1);
         let id2 = InodeId::from_stat(&inode_stat2);
