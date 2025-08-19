@@ -38,22 +38,22 @@ async fn dispatch_handler(
         // tail: /{name}/manifests/{reference}
         [name @ .., "manifests", reference] if !name.is_empty() => {
             let name = name.join("/");
-            match method {
+            match *method {
                 // Pull manifests
-                &Method::GET => {
+                Method::GET => {
                     get_manifest_handler(State(state), Path((name, reference.to_string()))).await
                 }
                 // Check if manifest exists in the registry
-                &Method::HEAD => {
+                Method::HEAD => {
                     head_manifest_handler(State(state), Path((name, reference.to_string()))).await
                 }
                 // Push Manifests
-                &Method::PUT => {
+                Method::PUT => {
                     put_manifest_handler(State(state), Path((name, reference.to_string())), request)
                         .await
                 }
                 // Delete manifests or tags
-                &Method::DELETE => {
+                Method::DELETE => {
                     delete_manifest_handler(State(state), Path((name, reference.to_string()))).await
                 }
                 // Unsupported methods
@@ -63,17 +63,17 @@ async fn dispatch_handler(
         // tail: /{name}/blobs/{digest}
         [name @ .., "blobs", digest] if !name.is_empty() && *digest != "uploads" => {
             let name = name.join("/");
-            match method {
+            match *method {
                 // Pull blobs
-                &Method::GET => {
+                Method::GET => {
                     get_blob_handler(State(state), Path((name, digest.to_string()))).await
                 }
                 // Check if blob exists in the registry
-                &Method::HEAD => {
+                Method::HEAD => {
                     head_blob_handler(State(state), Path((name, digest.to_string()))).await
                 }
                 // Delete blobs
-                &Method::DELETE => {
+                Method::DELETE => {
                     delete_blob_handler(State(state), Path((name, digest.to_string()))).await
                 }
                 // Unsupported methods
@@ -81,7 +81,9 @@ async fn dispatch_handler(
             }
         }
         // tail: /{name}/blobs/uploads/
-        [name @ .., "blobs", "uploads", session_id] if !name.is_empty() && session_id.is_empty() => {
+        [name @ .., "blobs", "uploads", session_id]
+            if !name.is_empty() && session_id.is_empty() =>
+        {
             let name = name.join("/");
             if *method == Method::POST {
                 // Open a blob upload session
@@ -91,11 +93,13 @@ async fn dispatch_handler(
             }
         }
         // tail: /{name}/blobs/uploads/{session_id}
-        [name @ .., "blobs", "uploads", session_id] if !name.is_empty() && !session_id.is_empty() => {
+        [name @ .., "blobs", "uploads", session_id]
+            if !name.is_empty() && !session_id.is_empty() =>
+        {
             let name = name.join("/");
-            match method {
+            match *method {
                 // Push a blob in chunks
-                &Method::PATCH => {
+                Method::PATCH => {
                     patch_blob_handler(
                         State(state),
                         Path((name, session_id.to_string())),
@@ -105,7 +109,7 @@ async fn dispatch_handler(
                     .await
                 }
                 // Close a blob upload session
-                &Method::PUT => {
+                Method::PUT => {
                     put_blob_handler(
                         State(state),
                         Path((name, session_id.to_string())),
@@ -116,7 +120,7 @@ async fn dispatch_handler(
                     .await
                 }
                 // Get the status of a blob upload session
-                &Method::GET => {
+                Method::GET => {
                     get_blob_status_handler(State(state), Path((name, session_id.to_string())))
                         .await
                 }

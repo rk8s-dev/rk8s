@@ -295,7 +295,7 @@ pub async fn put_manifest_handler(
             .unwrap();
     }
 
-    let location = format!("/v2/{}/manifests/{}", name, digest);
+    let location = format!("/v2/{name}/manifests/{digest}");
 
     Response::builder()
         .status(StatusCode::CREATED)

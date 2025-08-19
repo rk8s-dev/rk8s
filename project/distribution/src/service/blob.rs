@@ -158,11 +158,7 @@ pub async fn post_blob_handler(
         // Obtain a session id (upload URL)
         match state.create_session().await {
             Ok(session_id) => {
-                let location = format!(
-                    "/v2/{}/blobs/uploads/{}",
-                    name,
-                    session_id
-                );
+                let location = format!("/v2/{name}/blobs/uploads/{session_id}",);
 
                 Response::builder()
                     .status(StatusCode::ACCEPTED)
@@ -205,8 +201,7 @@ pub async fn post_blob_handler(
             .await
         {
             Ok(_) => {
-                let location =
-                    format!("/v2/{}/blobs/{}", name, digest.digest());
+                let location = format!("/v2/{}/blobs/{}", name, digest.digest());
 
                 Response::builder()
                     .status(StatusCode::CREATED)
@@ -337,11 +332,7 @@ pub async fn patch_blob_handler(
         }
 
         state.update_session(&session_id, content_length).await;
-        let location = format!(
-            "/v2/{}/blobs/uploads/{}",
-            name,
-            session_id
-        );
+        let location = format!("/v2/{name}/blobs/uploads/{session_id}",);
         let end_of_range = state.get_session(&session_id).await.unwrap().uploaded;
 
         match state
@@ -375,11 +366,7 @@ pub async fn get_blob_status_handler(
     Path((name, session_id)): Path<(String, String)>,
 ) -> Response<Body> {
     if let Some(session) = state.get_session(&session_id).await {
-        let location = format!(
-            "/v2/{}/blobs/uploads/{}",
-            name,
-            session_id
-        );
+        let location = format!("/v2/{name}/blobs/uploads/{session_id}",);
         let end_of_range = session.uploaded;
 
         Response::builder()
