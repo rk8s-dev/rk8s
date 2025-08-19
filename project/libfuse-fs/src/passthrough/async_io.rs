@@ -303,13 +303,23 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
     async fn do_open(&self, inode: Inode, flags: u32) -> io::Result<(Option<Handle>, OpenOptions)> {
         let file = self.open_inode(inode, flags as i32).await?;
+        const MMAP_SIZE_THRESHOLD: u64 = 8 * 1024; //8KB
+        const USE_HUGE_PAGE: u64 = 10 * 1024 * 1024; // 10MB
         if flags & (libc::O_DIRECTORY as u32) == 0 {
-            let mmap = unsafe { memmap2::Mmap::map(&file) }?;
+            let file_size = file.metadata()?.len();
+            if file_size >= MMAP_SIZE_THRESHOLD {
+                let page_bits: Option<u8> = if file_size >= USE_HUGE_PAGE {
+                    Some(21)
+                } else {
+                    None
+                };
 
-            let st = statx::statx(&file, None)?;
-            let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
-            let mmap_pool = self.mmap_pool.clone();
-            mmap_pool.insert(key, Arc::new(mmap)).await;
+                let mmap = unsafe { memmap2::MmapOptions::new().huge(page_bits).map(&file) }?;
+                let st = statx::statx(&file, None)?;
+                let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
+                let mmap_pool = self.mmap_pool.clone();
+                mmap_pool.insert(key, Arc::new(mmap)).await;
+            }
         }
 
         let data = HandleData::new(inode, file, flags);
@@ -952,7 +962,6 @@ impl Filesystem for PassthroughFs {
         // Ok(ReplyData {
         //     data: Bytes::from(buf),
         // })
-        //w.wr(&mut *f, size as usize, offset)
     }
 
     /// write data. Write should return exactly the number of bytes requested except on error. An

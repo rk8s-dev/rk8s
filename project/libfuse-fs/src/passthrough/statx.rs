@@ -20,6 +20,7 @@ pub type MountId = u64;
 pub struct StatExt {
     pub st: libc::stat64,
     pub mnt_id: MountId,
+    // Using Option<> for easier testing.
     pub btime: Option<statx_timestamp>,
 }
 
