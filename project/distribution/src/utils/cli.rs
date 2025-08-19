@@ -18,4 +18,8 @@ pub(crate) struct Args {
     /// Registry root path
     #[arg(long, default_value = "/var/lib/oci-registry")]
     pub(crate) root: String,
+
+    /// Registry url
+    #[arg(long, default_value = "http://127.0.0.1:8968")]
+    pub(crate) url: String,
 }

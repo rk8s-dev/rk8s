@@ -15,7 +15,7 @@ use oci_spec::{
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, env, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio_util::io::ReaderStream;
 
 pub(crate) async fn get_manifest_handler(
@@ -346,13 +346,9 @@ pub async fn get_tag_list_handler(
                 .unwrap();
 
             if need_link {
-                // TODO: get the registry URL from the environment
-                let url = env::var("OCI_REGISTRY_URL").unwrap_or_else(|_| "127.0.0.1".to_string());
-                let port = env::var("OCI_REGISTRY_PORT").unwrap_or_else(|_| "8968".to_string());
                 let next_link = format!(
-                    "http://{}:{}/v2/{}/tags/list?n={}&last={}",
-                    url,
-                    port,
+                    "{}/v2/{}/tags/list?n={}&last={}",
+                    state.registry,
                     name,
                     n_value,
                     tag_list.tags().last().unwrap()
