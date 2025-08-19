@@ -74,7 +74,6 @@ In the `conformance` directory, apply a patch and build the test binary:
 
 ```
 cd distribution-spec/conformance/
-find . -type f -name "*.go" -exec sed -i 's/resp.GetRelativeLocation()/resp.Header().Get("Location")/g' {} +
 go test -c
 ```
 
