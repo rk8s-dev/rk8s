@@ -1,5 +1,3 @@
-use std::{collections::HashMap, env, str::FromStr, sync::Arc};
-
 use crate::utils::{
     state::AppState,
     validation::{is_valid_digest, is_valid_name, is_valid_reference},
@@ -8,7 +6,6 @@ use axum::{
     body::Body,
     extract::{Path, Query, Request, State},
     http::{Response, StatusCode, header},
-    response::IntoResponse,
 };
 use futures::StreamExt;
 use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
@@ -18,12 +15,13 @@ use oci_spec::{
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio_util::io::ReaderStream;
 
 pub(crate) async fn get_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     if !is_valid_name(&name) {
         let error_info = ErrorInfoBuilder::default()
             .code(ErrorCode::NameInvalid)
@@ -126,7 +124,7 @@ pub(crate) async fn get_manifest_handler(
 pub(crate) async fn head_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     if !is_valid_name(&name) {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -208,7 +206,7 @@ pub async fn put_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
     request: Request,
-) -> impl IntoResponse {
+) -> Response<Body> {
     if !is_valid_name(&name) {
         let error_info = ErrorInfoBuilder::default()
             .code(ErrorCode::NameInvalid)
@@ -297,7 +295,7 @@ pub async fn put_manifest_handler(
             .unwrap();
     }
 
-    let location = format!("/v2/{}/manifests/{}", name.replace("/", "%2F"), digest);
+    let location = format!("/v2/{name}/manifests/{digest}");
 
     Response::builder()
         .status(StatusCode::CREATED)
@@ -310,7 +308,7 @@ pub async fn get_tag_list_handler(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
     Query(params): Query<HashMap<String, String>>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     match state.storage.walk_repo_dir(&name).await {
         Ok(mut tags) => {
             let has_param_n = params
@@ -348,13 +346,9 @@ pub async fn get_tag_list_handler(
                 .unwrap();
 
             if need_link {
-                // TODO: get the registry URL from the environment
-                let url = env::var("OCI_REGISTRY_URL").unwrap_or_else(|_| "127.0.0.1".to_string());
-                let port = env::var("OCI_REGISTRY_PORT").unwrap_or_else(|_| "8968".to_string());
                 let next_link = format!(
-                    "http://{}:{}/v2/{}/tags/list?n={}&last={}",
-                    url,
-                    port,
+                    "{}/v2/{}/tags/list?n={}&last={}",
+                    state.registry,
                     name,
                     n_value,
                     tag_list.tags().last().unwrap()
@@ -377,7 +371,7 @@ pub async fn get_tag_list_handler(
 pub async fn delete_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     if !is_valid_name(&name) {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)

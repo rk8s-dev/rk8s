@@ -1,27 +1,24 @@
-use std::collections::HashMap;
-use std::str::FromStr;
-use std::sync::Arc;
-
+use crate::utils::state::AppState;
+use crate::utils::validation::{is_valid_name, is_valid_range};
 use axum::body::Body;
 use axum::extract::{Query, Request, State};
 use axum::http::header::{HeaderMap, LOCATION, RANGE};
 use axum::http::{Response, header};
-use axum::response::IntoResponse;
 use axum::{extract::Path, http::StatusCode};
 use futures::StreamExt;
 use oci_spec::distribution::{ErrorCode, ErrorInfoBuilder, ErrorResponseBuilder};
 use oci_spec::image::Digest as oci_digest;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::Arc;
 use tokio_util::io::ReaderStream;
-
-use crate::utils::state::AppState;
-use crate::utils::validation::{is_valid_name, is_valid_range};
 
 pub(crate) async fn get_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((name, digest)): Path<(String, String)>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     if !is_valid_name(&name) {
         let error_info = ErrorInfoBuilder::default()
             .code(ErrorCode::NameInvalid)
@@ -97,7 +94,7 @@ pub(crate) async fn get_blob_handler(
 pub(crate) async fn head_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((name, digest)): Path<(String, String)>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     if !is_valid_name(&name) {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -154,18 +151,14 @@ pub async fn post_blob_handler(
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
     request: Request,
-) -> impl IntoResponse {
+) -> Response<Body> {
     let digest = params.get("digest").unwrap_or(&"".to_string()).clone();
     // TODO: Support mount and from parameters
     if digest.is_empty() {
         // Obtain a session id (upload URL)
         match state.create_session().await {
             Ok(session_id) => {
-                let location = format!(
-                    "/v2/{}/blobs/uploads/{}",
-                    name.replace("/", "%2F"),
-                    session_id
-                );
+                let location = format!("/v2/{name}/blobs/uploads/{session_id}",);
 
                 Response::builder()
                     .status(StatusCode::ACCEPTED)
@@ -208,8 +201,7 @@ pub async fn post_blob_handler(
             .await
         {
             Ok(_) => {
-                let location =
-                    format!("/v2/{}/blobs/{}", name.replace("/", "%2F"), digest.digest());
+                let location = format!("/v2/{}/blobs/{}", name, digest.digest());
 
                 Response::builder()
                     .status(StatusCode::CREATED)
@@ -232,7 +224,7 @@ pub async fn put_blob_handler(
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
     request: Request,
-) -> impl IntoResponse {
+) -> Response<Body> {
     // Invalid PUT request without digest
     let digest = params.get("digest").unwrap_or(&"".to_string()).clone();
     if digest.is_empty() {
@@ -258,7 +250,7 @@ pub async fn put_blob_handler(
 
     if (state.get_session(&session_id).await).is_some() {
         state.update_session(&session_id, content_length).await;
-        let location = format!("/v2/{}/blobs/{}", name.replace("/", "%2F"), digest.digest());
+        let location = format!("/v2/{}/blobs/{}", name, digest.digest());
 
         // Save the final chunk
         if content_length != 0
@@ -303,7 +295,7 @@ pub async fn patch_blob_handler(
     Path((name, session_id)): Path<(String, String)>,
     headers: HeaderMap,
     request: Request,
-) -> impl IntoResponse {
+) -> Response<Body> {
     let content_length = headers
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
@@ -340,11 +332,7 @@ pub async fn patch_blob_handler(
         }
 
         state.update_session(&session_id, content_length).await;
-        let location = format!(
-            "/v2/{}/blobs/uploads/{}",
-            name.replace("/", "%2F"),
-            session_id
-        );
+        let location = format!("/v2/{name}/blobs/uploads/{session_id}",);
         let end_of_range = state.get_session(&session_id).await.unwrap().uploaded;
 
         match state
@@ -376,13 +364,9 @@ pub async fn patch_blob_handler(
 pub async fn get_blob_status_handler(
     State(state): State<Arc<AppState>>,
     Path((name, session_id)): Path<(String, String)>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     if let Some(session) = state.get_session(&session_id).await {
-        let location = format!(
-            "/v2/{}/blobs/uploads/{}",
-            name.replace("/", "%2F"),
-            session_id
-        );
+        let location = format!("/v2/{name}/blobs/uploads/{session_id}",);
         let end_of_range = session.uploaded;
 
         Response::builder()
@@ -403,7 +387,7 @@ pub async fn get_blob_status_handler(
 pub async fn delete_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((_name, digest)): Path<(String, String)>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     let _digest = oci_digest::from_str(&digest);
     if _digest.is_err() {
         return Response::builder()
