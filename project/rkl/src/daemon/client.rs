@@ -121,7 +121,7 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
             }
         }
     };
-    println!("[worker] connected to RKS at {}", server_addr);
+    println!("[worker] connected to RKS at {server_addr}");
 
     // register to rks by sending RegisterNode(Box<Node>)
     let register_msg = RksMessage::RegisterNode(Box::new(node.clone()));
@@ -135,8 +135,8 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
             if let Ok(resp) = bincode::deserialize::<RksMessage>(&buf[..n]) {
                 match resp {
                     RksMessage::Ack => println!("[worker] got register Ack"),
-                    RksMessage::Error(e) => eprintln!("[worker] register error: {}", e),
-                    other => println!("[worker] unexpected register response: {:?}", other),
+                    RksMessage::Error(e) => eprintln!("[worker] register error: {e}"),
+                    other => println!("[worker] unexpected register response: {other:?}"),
                 }
             } else {
                 eprintln!("[worker] failed to parse register response");
@@ -230,7 +230,7 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                             }
                         }
                         Ok(RksMessage::DeletePod(name)) => {
-                            println!("[worker] DeletePod {}", name);
+                            println!("[worker] DeletePod {name}");
                             match pod::delete_pod(&name) {
                                 Ok(_) => {
                                     let _ = send_uni(&connection, &RksMessage::Ack).await;
@@ -239,14 +239,14 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                                     eprintln!("[worker] delete_pod failed: {e:?}");
                                     let _ = send_uni(
                                         &connection,
-                                        &RksMessage::Error(format!("delete {} failed: {e}", name)),
+                                        &RksMessage::Error(format!("delete {name} failed: {e}")),
                                     )
                                     .await;
                                 }
                             }
                         }
                         Ok(other) => {
-                            println!("[worker] unexpected message: {:?}", other);
+                            println!("[worker] unexpected message: {other:?}");
                         }
                         Err(err) => {
                             eprintln!("[worker] deserialize failed: {err}");
