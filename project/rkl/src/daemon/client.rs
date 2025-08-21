@@ -14,7 +14,7 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig as RustlsClientConfig, RootCertStore, SignatureScheme};
 use serde_yaml;
 
-///Skip certificate verification
+/// Skip certificate verification
 #[derive(Debug)]
 struct SkipServerVerification;
 
@@ -269,7 +269,7 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
     }
 }
 
-/// send a message over a unidirectional stream
+/// Send a message over a unidirectional stream
 async fn send_uni(conn: &quinn::Connection, msg: &RksMessage) -> Result<()> {
     let mut uni = conn.open_uni().await?;
     let data = bincode::serialize(msg)?;
