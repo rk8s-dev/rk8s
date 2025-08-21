@@ -35,7 +35,7 @@ where
             annotations: std::collections::HashMap::new(),
         },
         spec: PodSpec {
-            nodename,
+            nodename: None,
             containers: vec![ContainerSpec {
                 name: "main-container1".to_string(),
                 image: bundles_path("busybox"),
