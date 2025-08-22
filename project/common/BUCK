@@ -1,4 +1,4 @@
-rust_binary(
+rust_library(
     name = "common",
     srcs = glob(
         ["src/**/*.rs"],

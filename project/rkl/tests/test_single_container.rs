@@ -1,14 +1,13 @@
 use std::{env, fs::File, io::Write, path::Path};
-mod common;
+mod test_common;
 use anyhow::anyhow;
-use common::*;
-use ::common::{ContainerRes, ContainerSpec, Port, Resource};
-use rkl::{
-    commands::container::{create_container, delete_container, run_container, start_container},
-    //    task::{ContainerRes, ContainerSpec, Port, Resource},
+use common::{ContainerRes, ContainerSpec, Port, Resource};
+use rkl::commands::container::{
+    create_container, delete_container, run_container, start_container,
 };
 use serde_json::Value;
 use serial_test::serial;
+use test_common::*;
 
 pub fn get_container_config<T, S>(args: Vec<S>, name: T) -> ContainerSpec
 where

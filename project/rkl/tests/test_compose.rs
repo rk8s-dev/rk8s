@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use common::*;
 use rkl::ComposeCommand;
 use rkl::DownArgs;
 use rkl::PsArgs;
@@ -7,8 +6,9 @@ use rkl::UpArgs;
 use rkl::commands::compose::compose_execute;
 use serial_test::serial;
 use std::{env, fs::File, io::Write, path::Path};
+use test_common::*;
 
-mod common;
+mod test_common;
 
 pub fn get_compose_config<T>(project_name: T) -> String
 where
