@@ -2,7 +2,7 @@ use std::{env, fs::File, io::Write, path::Path};
 mod common;
 use anyhow::anyhow;
 use common::*;
-use common::{ContainerRes, ContainerSpec, Port, Resource};
+use ::common::{ContainerRes, ContainerSpec, Port, Resource};
 use rkl::{
     commands::container::{create_container, delete_container, run_container, start_container},
     //    task::{ContainerRes, ContainerSpec, Port, Resource},

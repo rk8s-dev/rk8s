@@ -3,7 +3,7 @@ rust_binary(
     srcs = glob(
         ["src/**/*.rs"],
     ),
-    crate_root = "src/main.rs",
+    crate_root = "src/lib.rs",
     edition = "2024",
     deps = [
         "//third-party:serde",
