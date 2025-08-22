@@ -1,6 +1,6 @@
 use crate::api::xlinestore::XlineStore;
-use crate::protocol::{PodTask, RksMessage};
 use anyhow::Result;
+use common::{PodTask, RksMessage};
 use quinn::Connection;
 use std::sync::Arc;
 use tokio::sync::broadcast;

@@ -1,7 +1,8 @@
 use crate::api::xlinestore::XlineStore;
 use crate::commands::{create, delete};
-use crate::protocol::{PodTask, RksMessage};
+//use crate::protocol::{PodTask, RksMessage};
 use anyhow::Result;
+use common::{PodTask, RksMessage};
 use quinn::{Connection, Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use std::net::SocketAddr;
