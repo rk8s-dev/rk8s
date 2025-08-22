@@ -6,8 +6,9 @@ use crate::{
         CdiDevice, ContainerConfig, ContainerMetadata, Device, ImageSpec, KeyValue,
         LinuxContainerConfig, Mount, WindowsContainerConfig,
     },
-    task::{ContainerSpec, get_linux_container_config},
+    task::get_linux_container_config,
 };
+use common::ContainerSpec;
 
 #[derive(Clone)]
 pub struct ContainerConfigBuilder {

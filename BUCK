@@ -17,5 +17,6 @@ rust_binary(
         "root//project/rks:rks",
         "root//project/rkl:rkl_bin",
         "root//project/rfuse3:rfuse3",
+        "root//project/common:common",
     ],
 )

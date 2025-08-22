@@ -37,7 +37,8 @@ rust_binary(
         "//third-party:bincode",
         "//project/libcgroups:libcgroups",
         "//project/libcontainer:libcontainer",
-        "//project/rkl:rkl"
+        "//project/rkl:rkl",
+        "//project/common:common",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",
@@ -93,6 +94,7 @@ rust_library(
         "//third-party:bincode",
         "//project/libcgroups:libcgroups",
         "//project/libcontainer:libcontainer",
+        "//project/common:common",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

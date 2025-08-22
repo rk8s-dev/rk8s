@@ -12,6 +12,7 @@ name = "rkl"
 path = "src/main.rs"
 
 [dependencies]
+common = { path = "../common" }
 libcgroups = { path = "../libcgroups", version = "0.5.1" }
 libcontainer = { path = "../libcontainer", version = "0.5.1" }
 clap = { version = "4.5", features = ["derive"] }

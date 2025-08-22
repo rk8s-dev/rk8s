@@ -6,7 +6,8 @@ use std::{env, fs, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time;
 
 use crate::commands::pod;
-use crate::task::{Node, PodTask, RksMessage, TaskRunner};
+use crate::task::TaskRunner;
+use common::{Node, PodTask, RksMessage};
 use rustls::DigitallySignedStruct;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;

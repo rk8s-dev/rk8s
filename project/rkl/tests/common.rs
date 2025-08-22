@@ -1,5 +1,6 @@
 use anyhow::{Ok, Result};
-use rkl::task::{ContainerSpec, ObjectMeta, PodSpec, PodTask, Port};
+//use rkl::task::{ContainerSpec, ObjectMeta, PodSpec, PodTask, Port};
+use common::{ContainerSpec, ObjectMeta, PodSpec, PodTask, Port};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};

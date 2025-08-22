@@ -1,9 +1,10 @@
 use crate::common::get_pod_config;
 use anyhow::anyhow;
-use rkl::task::PodTask;
+//use rkl::task::PodTask;
+use common::{ContainerRes, PodTask};
 use rkl::{
     commands::pod::{create_pod, delete_pod, run_pod, start_pod},
-    task::{ContainerRes, Resource, TaskRunner},
+    task::{Resource, TaskRunner},
 };
 use serde_json::Value;
 use serial_test::serial;
