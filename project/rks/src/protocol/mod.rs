@@ -1,5 +1,6 @@
 pub mod config;
 
+use libcni::ip::route::Route;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -93,6 +94,8 @@ pub enum RksMessage {
     RegisterNode(Box<Node>),
     UserRequest(String),
     Heartbeat(String),
+    SetNetwork(Box<NodeNetworkConfig>),
+    UpdateRoutes(String, Vec<Route>),
 
     //response
     Ack,
@@ -145,4 +148,10 @@ pub struct Node {
     pub metadata: ObjectMeta,
     pub spec: NodeSpec,
     pub status: NodeStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NodeNetworkConfig {
+    node_id: String,
+    subnet_env: String,
 }

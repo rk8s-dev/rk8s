@@ -1,26 +1,98 @@
 use crate::api::xlinestore::XlineStore;
 use crate::commands::{create, delete};
+use crate::network::backend::route::{get_route_form_lease, get_v6_route_form_lease};
+use crate::network::lease::{LeaseAttrs, LeaseWatchResult};
+use crate::network::{lease::Lease, manager::LocalManager};
 use crate::protocol::{PodTask, RksMessage};
 use anyhow::Result;
+use libcni::ip::route::Route;
 use quinn::{Connection, Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, Notify, broadcast, mpsc};
+
+#[derive(Clone)]
+pub struct WorkerSession {
+    pub tx: mpsc::Sender<RksMessage>,
+    pub cancel_notify: Arc<Notify>,
+    pub lease: Arc<Mutex<Lease>>,
+}
+
+#[derive(Default)]
+pub struct NodeRegistry {
+    inner: Mutex<HashMap<String, Arc<WorkerSession>>>,
+}
+#[allow(dead_code)]
+impl NodeRegistry {
+    pub async fn register(&self, node_id: String, session: Arc<WorkerSession>) {
+        let mut inner = self.inner.lock().await;
+        inner.insert(node_id, session);
+    }
+
+    pub async fn unregister(&self, node_id: &str) {
+        let mut inner = self.inner.lock().await;
+        if let Some(session) = inner.remove(node_id) {
+            session.cancel_notify.notify_one();
+        }
+    }
+
+    pub async fn get(&self, node_id: &str) -> Option<Arc<WorkerSession>> {
+        let inner = self.inner.lock().await;
+        inner.get(node_id).cloned()
+    }
+}
 
 /// launche the RKS server to listen for incoming QUIC connections.
 /// spawn a new task for each accepted connection (either worker or user).
-pub async fn serve(addr: String, xline_store: Arc<XlineStore>) -> anyhow::Result<()> {
+pub async fn serve(
+    addr: String,
+    xline_store: Arc<XlineStore>,
+    local_manager: Arc<LocalManager>,
+) -> anyhow::Result<()> {
     // Create QUIC endpoint and server certificate
     let endpoint = make_server_endpoint(addr.parse()?).await?;
 
+    let node_registry = Arc::new(NodeRegistry::default());
+
     // set up a broadcast channel for distributing pod events
     let (tx, _rx) = broadcast::channel::<RksMessage>(100);
+
+    let (lease_tx, mut lease_rx) = mpsc::channel::<Vec<LeaseWatchResult>>(16);
+    let local_manager_clone = local_manager.clone();
+    tokio::spawn(async move {
+        local_manager_clone.watch_leases(lease_tx).await.unwrap();
+    });
+
+    let node_registry_clone = node_registry.clone();
+    tokio::spawn(async move {
+        while let Some(results) = lease_rx.recv().await {
+            let leases = results
+                .iter()
+                .flat_map(|r| r.snapshot.clone())
+                .collect::<Vec<_>>();
+            let node_ids: Vec<String> = leases.iter().map(|l| l.attrs.node_id.clone()).collect();
+            for node_id in node_ids {
+                let routes = calculate_routes_for_node(&node_id, &leases);
+                let msg = RksMessage::UpdateRoutes(node_id.clone(), routes);
+                if let Some(worker) = node_registry_clone.get(&node_id).await {
+                    if let Err(e) = worker.tx.try_send(msg) {
+                        eprintln!("Failed to enqueue message for {node_id}: {e:?}");
+                    }
+                } else {
+                    eprintln!("No active worker for {node_id}");
+                }
+            }
+        }
+    });
 
     loop {
         let connecting = endpoint.accept().await;
         let tx = tx.clone();
         let xline_store = xline_store.clone();
+        let local_manager = local_manager.clone();
+        let node_registry = node_registry.clone();
 
         match connecting {
             Some(connecting) => {
@@ -31,7 +103,15 @@ pub async fn serve(addr: String, xline_store: Arc<XlineStore>) -> anyhow::Result
 
                         // spawn new task to handle this connection
                         tokio::spawn(async move {
-                            if let Err(e) = handle_connection(conn, xline_store, tx).await {
+                            if let Err(e) = handle_connection(
+                                conn,
+                                xline_store,
+                                tx,
+                                local_manager,
+                                node_registry,
+                            )
+                            .await
+                            {
                                 eprintln!("[server] handle_connection error: {e:?}");
                             }
                         });
@@ -110,6 +190,8 @@ async fn handle_connection(
     conn: Connection,
     xline_store: Arc<XlineStore>,
     tx: broadcast::Sender<RksMessage>,
+    local_manager: Arc<LocalManager>,
+    node_registry: Arc<NodeRegistry>,
 ) -> Result<()> {
     let mut buf = vec![0u8; 4096];
     let mut is_worker = false;
@@ -134,6 +216,41 @@ async fn handle_connection(
                             let node_yaml = serde_yaml::to_string(&*node)?;
                             xline_store.insert_node_yaml(&id, &node_yaml).await?;
                             println!("[server] registered worker node: {id}, ip: {ip}");
+
+                            let (public_ip, public_ipv6) = match conn.remote_address().ip() {
+                                IpAddr::V4(v4) => (v4, None),
+                                IpAddr::V6(v6) => (Ipv4Addr::new(0, 0, 0, 0), Some(v6)),
+                            };
+                            let lease_attrs = LeaseAttrs {
+                                public_ip,
+                                public_ipv6,
+                                backend_type: "hostgw".to_string(),
+                                node_id: id.clone(),
+                                ..Default::default()
+                            };
+                            let lease = local_manager.acquire_lease(&lease_attrs).await?;
+
+                            let (msg_tx, mut msg_rx) = mpsc::channel::<RksMessage>(32);
+
+                            let conn_clone = conn.clone();
+                            tokio::spawn(async move {
+                                while let Some(msg) = msg_rx.recv().await {
+                                    if let Ok(mut stream) = conn_clone.open_uni().await {
+                                        if let Ok(data) = bincode::serialize(&msg) {
+                                            let _ = stream.write_all(&data).await;
+                                            let _ = stream.finish();
+                                        }
+                                    }
+                                }
+                            });
+                            let cancel_notify = Arc::new(Notify::new());
+                            let my_lease = Arc::new(Mutex::new(lease));
+                            let session = Arc::new(WorkerSession {
+                                tx: msg_tx.clone(),
+                                cancel_notify: cancel_notify.clone(),
+                                lease: my_lease.clone(),
+                            });
+                            node_registry.register(id.clone(), session.clone()).await;
 
                             let response = RksMessage::Ack;
                             let data = bincode::serialize(&response)?;
@@ -164,9 +281,27 @@ async fn handle_connection(
     if is_worker && node_id.is_some() {
         let xline_store_clone = xline_store.clone();
         let conn_clone = conn.clone();
+        let node_id_clone = node_id.clone().unwrap();
+        let node_registry_clone = node_registry.clone();
+        let local_manager_clone = local_manager.clone();
         let mut rx = tx.subscribe();
         tokio::spawn(async move {
             let _ = watch_pods(&xline_store_clone, &mut rx, &conn_clone, node_id).await;
+        });
+
+        tokio::spawn(async move {
+            if let Some(worker_session) = node_registry_clone.get(&node_id_clone).await {
+                let my_lease_clone = worker_session.lease.clone();
+                let cancel_notify_clone = worker_session.cancel_notify.clone();
+                if let Err(e) = local_manager_clone
+                    .complete_lease(my_lease_clone, cancel_notify_clone)
+                    .await
+                {
+                    eprintln!("[server] complete_lease error for node={node_id_clone}: {e:?}");
+                }
+            } else {
+                eprintln!("[server] no active worker session for node={node_id_clone}");
+            }
         });
     }
 
@@ -280,4 +415,20 @@ fn configure_server() -> anyhow::Result<ServerConfig> {
     let server_config =
         ServerConfig::with_single_cert(certs, rustls::pki_types::PrivateKeyDer::Pkcs8(key))?;
     Ok(server_config)
+}
+
+fn calculate_routes_for_node(node_id: &str, leases: &[Lease]) -> Vec<Route> {
+    let mut routes = Vec::new();
+    for lease in leases {
+        if lease.attrs.node_id == node_id {
+            continue;
+        }
+        if let Some(route) = get_route_form_lease(lease) {
+            routes.push(route);
+        }
+        if let Some(route_v6) = get_v6_route_form_lease(lease) {
+            routes.push(route_v6);
+        }
+    }
+    routes
 }

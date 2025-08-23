@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::network::{config::Config, lease::Lease};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -7,7 +8,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub mod hostgw;
-pub mod interface;
 pub mod route;
 
 #[cfg(test)]
