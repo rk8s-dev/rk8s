@@ -1,15 +1,16 @@
-use crate::common::get_pod_config;
+use crate::test_common::get_pod_config;
 use anyhow::anyhow;
-use rkl::task::PodTask;
+//use rkl::task::PodTask;
+use common::{ContainerRes, PodTask, Resource};
 use rkl::{
     commands::pod::{create_pod, delete_pod, run_pod, start_pod},
-    task::{ContainerRes, Resource, TaskRunner},
+    task::TaskRunner,
 };
 use serde_json::Value;
 use serial_test::serial;
 use std::{env, fs::File, io::Write, path::Path};
 
-mod common;
+mod test_common;
 
 #[test]
 #[serial]

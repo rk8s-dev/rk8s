@@ -1,12 +1,12 @@
 use crate::api::xlinestore::XlineStore;
-use crate::protocol::{PodTask, RksMessage};
 use anyhow::Result;
+use common::{PodTask, RksMessage};
 use quinn::Connection;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
 pub async fn watch_create(pod_task: &PodTask, conn: &Connection, node_id: &str) -> Result<()> {
-    if pod_task.nodename == node_id {
+    if pod_task.spec.nodename.as_deref() == Some(node_id) {
         let msg = RksMessage::CreatePod(Box::new(pod_task.clone()));
         let data = bincode::serialize(&msg)?;
         if let Ok(mut stream) = conn.open_uni().await {
@@ -30,7 +30,7 @@ pub async fn user_create(
     if let Ok(nodes) = xline_store.list_nodes().await
         && let Some((node_name, _)) = nodes.first()
     {
-        pod_task.nodename = node_name.clone();
+        pod_task.spec.nodename = Some(node_name.clone());
         let pod_yaml = match serde_yaml::to_string(&pod_task) {
             Ok(yaml) => yaml,
             Err(e) => {

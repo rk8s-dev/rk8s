@@ -36,6 +36,7 @@ rust_binary(
         "//third-party:tempfile",
         "//third-party:tokio-util",
         "//project/libcni:libcni",
+        "//project/common:common"
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",
