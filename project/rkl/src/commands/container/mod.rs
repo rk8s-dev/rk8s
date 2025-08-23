@@ -6,16 +6,17 @@ use crate::{
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
     rootpath,
-    task::{ContainerSpec, add_cap_net_raw, get_cni},
+    task::{add_cap_net_raw, get_cni},
 };
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
+use common::ContainerSpec;
 use libcontainer::container::{Container, State, state};
 use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
 use oci_spec::runtime::{Mount as OciMount, MountBuilder};
-use std::{fmt::Write as _, io};
+use std::{env, fmt::Write as _, io};
 use std::{
     fs::{self, File},
     io::{BufWriter, Read, Write},
@@ -90,6 +91,14 @@ impl ContainerRunner {
 
     pub fn add_mounts(&mut self, mounts: Vec<Mount>) {
         self.config_builder.mounts(mounts);
+    }
+
+    pub fn create(&mut self) -> Result<()> {
+        // create container_config
+        self.build_config()?;
+
+        let _ = self.create_container()?;
+        Ok(())
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -207,7 +216,8 @@ impl ContainerRunner {
         }
         let bundle_dir = Path::new(&bundle_path);
         if !bundle_dir.exists() {
-            return Err(anyhow!("Bundle directory does not exist"));
+            println!("current root: {:?}", env::current_dir()?);
+            return Err(anyhow!("Bundle directory does not exist: {:?}", bundle_dir));
         }
 
         let config_path = format!("{bundle_path}/config.json");
@@ -440,7 +450,7 @@ pub fn exec_container(args: ExecContainer, root_path: Option<PathBuf>) -> Result
 
 pub fn create_container(path: &str) -> Result<()> {
     let mut runner = ContainerRunner::from_file(path)?;
-    runner.run()
+    runner.create()
 }
 
 pub fn print_status(container_id: String, root_path: PathBuf) -> Result<()> {

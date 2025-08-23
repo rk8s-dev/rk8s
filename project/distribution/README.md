@@ -20,6 +20,7 @@ Options:
   -p, --port <PORT>        Registry listening port [default: 8968]
   -s, --storage <STORAGE>  Storage backend type [default: FILESYSTEM]
       --root <ROOT>        Registry root path [default: /var/lib/oci-registry]
+      --url <URL>          Registry url [default: http://127.0.0.1:8968]
   -h, --help               Print help
   -V, --version            Print version
 ```
@@ -74,7 +75,6 @@ In the `conformance` directory, apply a patch and build the test binary:
 
 ```
 cd distribution-spec/conformance/
-find . -type f -name "*.go" -exec sed -i 's/resp.GetRelativeLocation()/resp.Header().Get("Location")/g' {} +
 go test -c
 ```
 

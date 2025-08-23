@@ -37,6 +37,7 @@ rust_binary(
         "//third-party:tokio-util",
         "//third-party:once_cell",
         "//project/libcni:libcni",
+        "//project/common:common",
     ],
     linker_flags = [
         "-lssl",

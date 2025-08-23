@@ -1,12 +1,13 @@
-use std::{collections::HashMap, env};
+use anyhow::{Ok, Result};
+//use rkl::task::{ContainerSpec, ObjectMeta, PodSpec, PodTask, Port};
+use common::{ContainerSpec, ObjectMeta, PodSpec, PodTask, Port};
+use std::collections::HashMap;
+use std::env;
+use std::path::{Path, PathBuf};
 
-use rkl::task::{ContainerSpec, ObjectMeta, PodSpec, PodTask, Port};
-
-fn bundles_path(name: &str) -> String {
+pub fn bundles_path(name: &str) -> String {
     let root_dir = env::current_dir().unwrap();
     root_dir
-        .parent()
-        .unwrap()
         .join("test/bundles/")
         .join(name)
         .to_str()
@@ -14,6 +15,7 @@ fn bundles_path(name: &str) -> String {
         .to_string()
 }
 
+#[allow(dead_code)]
 pub fn get_pod_config<T, S>(args: Vec<S>, name: T) -> PodTask
 where
     T: Into<String>,
@@ -34,6 +36,7 @@ where
             annotations: std::collections::HashMap::new(),
         },
         spec: PodSpec {
+            nodename: None,
             containers: vec![ContainerSpec {
                 name: "main-container1".to_string(),
                 image: bundles_path("busybox"),
@@ -48,5 +51,24 @@ where
             }],
             init_containers: vec![],
         },
+    }
+}
+
+pub struct DirGuard {
+    pub original: PathBuf,
+}
+
+#[allow(dead_code)]
+impl DirGuard {
+    pub fn change_to<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let original = env::current_dir()?;
+        env::set_current_dir(path)?;
+        Ok(Self { original })
+    }
+}
+
+impl Drop for DirGuard {
+    fn drop(&mut self) {
+        let _ = env::set_current_dir(&self.original);
     }
 }

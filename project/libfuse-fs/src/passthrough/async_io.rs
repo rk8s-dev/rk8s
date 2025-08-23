@@ -6,7 +6,7 @@ use rfuse3::{Errno, Inode, Result, raw::prelude::*};
 use std::{
     ffi::{CStr, CString, OsStr, OsString},
     fs::File,
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom},
     mem::{ManuallyDrop, MaybeUninit},
     num::NonZeroU32,
     os::{
@@ -20,7 +20,10 @@ use std::{
 use vm_memory::{ByteValued, bitmap::BitmapSlice};
 
 use crate::{
-    passthrough::{CURRENT_DIR_CSTR, EMPTY_CSTR, PARENT_DIR_CSTR},
+    passthrough::{
+        CURRENT_DIR_CSTR, EMPTY_CSTR, FileUniqueKey, PARENT_DIR_CSTR,
+        statx::{self, statx},
+    },
     util::{convert_stat64_to_file_attr, filetype_from_mode},
 };
 
@@ -300,6 +303,24 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
     async fn do_open(&self, inode: Inode, flags: u32) -> io::Result<(Option<Handle>, OpenOptions)> {
         let file = self.open_inode(inode, flags as i32).await?;
+        const MMAP_SIZE_THRESHOLD: u64 = 8 * 1024; //8KB
+        const USE_HUGE_PAGE: u64 = 10 * 1024 * 1024; // 10MB
+        if flags & (libc::O_DIRECTORY as u32) == 0 {
+            let file_size = file.metadata()?.len();
+            if file_size >= MMAP_SIZE_THRESHOLD {
+                let page_bits: Option<u8> = if file_size >= USE_HUGE_PAGE {
+                    Some(21)
+                } else {
+                    None
+                };
+
+                let mmap = unsafe { memmap2::MmapOptions::new().huge(page_bits).map(&file) }?;
+                let st = statx::statx(&file, None)?;
+                let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
+                let mmap_pool = self.mmap_pool.clone();
+                mmap_pool.insert(key, Arc::new(mmap)).await;
+            }
+        }
 
         let data = HandleData::new(inode, file, flags);
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
@@ -367,9 +388,18 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn do_unlink(&self, parent: Inode, name: &CStr, flags: libc::c_int) -> io::Result<()> {
         let data = self.inode_map.get(parent).await?;
         let file = data.get_file()?;
+        let st = statx(&file, Some(name)).ok();
         // Safe because this doesn't modify any memory and we check the return value.
         let res = unsafe { libc::unlinkat(file.as_raw_fd(), name.as_ptr(), flags) };
         if res == 0 {
+            if flags & libc::AT_REMOVEDIR == 0
+                && let Some(st) = st
+            {
+                let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
+                self.handle_cache.remove(&key).await;
+                self.mmap_pool.remove(&key).await;
+            }
+
             Ok(())
         } else {
             Err(io::Error::last_os_error())
@@ -859,25 +889,79 @@ impl Filesystem for PassthroughFs {
     ) -> Result<ReplyData> {
         let data = self.get_data(fh, inode, libc::O_RDONLY).await?;
         let _guard = data.lock.lock().await;
-        let f = unsafe { File::from_raw_fd(data.borrow_fd().as_raw_fd()) };
+        let raw_fd = data.borrow_fd().as_raw_fd();
+        let f = unsafe { File::from_raw_fd(raw_fd) };
         let mut f = ManuallyDrop::new(f);
-        f.seek(SeekFrom::Start(offset))?;
-        let mut buf = vec![0; size as usize];
-        match f.read(&mut buf) {
-            Ok(bytes_read) => {
-                if bytes_read < size as usize {
-                    buf.truncate(bytes_read); // Adjust the buffer size
+
+        let st = statx::statx(&raw_fd, None)?;
+        let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
+        let mmap_pool = self.mmap_pool.clone();
+        let mmap = mmap_pool.get(&key).await;
+        let mmap = match mmap {
+            Some(m) => Some(m),
+            None => {
+                let m = unsafe { memmap2::Mmap::map(&*f) };
+
+                match m {
+                    Ok(m) => {
+                        let m = Arc::new(m);
+                        self.mmap_pool.insert(key, m.clone()).await;
+
+                        Some(m)
+                    }
+                    Err(_) => None,
                 }
             }
-            Err(err) => {
-                error!("read error: {err}");
-                return Err(err.into());
-            }
         };
-        Ok(ReplyData {
-            data: Bytes::from(buf),
-        })
-        //w.wr(&mut *f, size as usize, offset)
+
+        match mmap {
+            Some(m) => {
+                // If mmap is available, read from it directly.
+                let start = offset as usize;
+                let mut end = start + size as usize;
+                if end > m.len() {
+                    end = m.len();
+                }
+                Ok(ReplyData {
+                    data: Bytes::copy_from_slice(&m[start..end]),
+                })
+            }
+            None => {
+                let mut buf = vec![0; size as usize];
+                f.seek(SeekFrom::Start(offset))?;
+                match f.read(&mut buf) {
+                    Ok(bytes_read) => {
+                        if bytes_read < size as usize {
+                            buf.truncate(bytes_read); // Adjust the buffer size
+                        }
+                    }
+                    Err(err) => {
+                        error!("read error: {err}");
+                        return Err(err.into());
+                    }
+                };
+                Ok(ReplyData {
+                    data: Bytes::from(buf),
+                })
+            }
+        }
+
+        // let mut buf = vec![0; size as usize];
+        // f.seek(SeekFrom::Start(offset))?;
+        // match f.read(&mut buf) {
+        //     Ok(bytes_read) => {
+        //         if bytes_read < size as usize {
+        //             buf.truncate(bytes_read); // Adjust the buffer size
+        //         }
+        //     }
+        //     Err(err) => {
+        //         error!("read error: {err}");
+        //         return Err(err.into());
+        //     }
+        // };
+        // Ok(ReplyData {
+        //     data: Bytes::from(buf),
+        // })
     }
 
     /// write data. Write should return exactly the number of bytes requested except on error. An
@@ -899,36 +983,35 @@ impl Filesystem for PassthroughFs {
         flags: u32,
     ) -> Result<ReplyWrite> {
         let handle_data = self.get_data(fh, inode, libc::O_RDWR).await?;
-        let _guard = handle_data.lock.lock().await;
+        let raw_fd = {
+            let _guard = handle_data.lock.lock().await;
+            handle_data.borrow_fd().as_raw_fd()
+        };
 
-        // Manually implement File::try_clone() by borrowing fd of data.file instead of dup().
-        // It's safe because the `data` variable's lifetime spans the whole function,
-        // so data.file won't be closed.
-        let f = unsafe { File::from_raw_fd(handle_data.borrow_fd().as_raw_fd()) };
-        let mut f = ManuallyDrop::new(f);
-        self.check_fd_flags(&handle_data, f.as_raw_fd(), flags)
-            .await?; //TODO: deal with this flags. 
+        self.check_fd_flags(&handle_data, raw_fd, flags).await?;
 
-        // if self.seal_size.load().await {
-        //     let st = stat_fd(&f, None)?;
-        //     self.seal_size_check(Opcode::Write, st.st_size as u64, offset, size as u64, 0)?;
-        // }
+        let written = unsafe {
+            let ret = libc::pwrite(
+                raw_fd,
+                data.as_ptr() as *const libc::c_void,
+                data.len(),
+                offset as libc::off_t,
+            );
+            if ret < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            ret as usize
+        };
 
-        // Cap restored when _killpriv is dropped
-        // let _killpriv =
-        //     if self.killpriv_v2.load(Ordering::Acquire) && (fuse_flags & WRITE_KILL_PRIV != 0) {
-        //         self::drop_cap_fsetid()?
-        //     } else {
-        //         None
-        //     };
-        f.seek(SeekFrom::Start(offset))?;
-        let res = f.write(data)?;
+        if let Ok(st) = statx::statx(&raw_fd, None) {
+            let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
+            self.mmap_pool.remove(&key).await; // remove the mmap cache
+        }
 
         Ok(ReplyWrite {
-            written: res as u32,
+            written: written as u32,
         })
     }
-
     /// get filesystem statistics.
     async fn statfs(&self, _req: Request, inode: Inode) -> Result<ReplyStatFs> {
         let mut out = MaybeUninit::<libc::statvfs64>::zeroed();

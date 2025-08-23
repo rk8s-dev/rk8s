@@ -13,7 +13,7 @@ mod utils;
 async fn main() {
     let args = Args::parse();
 
-    let state = Arc::new(AppState::new(&args.storage, &args.root));
+    let state = Arc::new(AppState::new(&args.storage, &args.root, &args.url));
 
     let app = api::create_router().with_state(state);
 

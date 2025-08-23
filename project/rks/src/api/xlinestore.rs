@@ -1,5 +1,5 @@
-use crate::protocol::Node;
 use anyhow::Result;
+use common::Node;
 use etcd_client::{Client, GetOptions, PutOptions};
 use serde_yaml;
 use std::sync::Arc;
