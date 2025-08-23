@@ -6,10 +6,11 @@ use crate::{
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
     rootpath,
-    task::{ContainerSpec, add_cap_net_raw, get_cni},
+    task::{add_cap_net_raw, get_cni},
 };
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
+use common::ContainerSpec;
 use libcontainer::container::{Container, State, state};
 use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
