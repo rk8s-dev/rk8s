@@ -52,8 +52,7 @@ impl SlidingMmapWindow {
         }
         .map_err(|e| {
             io::Error::other(format!(
-                "Failed to create mmap for file size {}: {}",
-                file_size, e
+                "Failed to create mmap for file size {file_size}: {e}",
             ))
         })?;
 
