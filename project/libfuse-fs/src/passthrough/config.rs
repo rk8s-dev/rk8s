@@ -169,6 +169,10 @@ pub struct Config {
     ///
     /// The default is `true`.
     pub allow_direct_io: bool,
+
+    /// The size of the mmap max usage
+    /// The default is `1024 * 1024 * 1024` (1GB).
+    pub max_mmap_size: u64,
 }
 
 impl Default for Config {
@@ -192,6 +196,7 @@ impl Default for Config {
             dir_attr_timeout: None,
             use_host_ino: false,
             allow_direct_io: true,
+            max_mmap_size: 1024 * 1024 * 1024,
         }
     }
 }
