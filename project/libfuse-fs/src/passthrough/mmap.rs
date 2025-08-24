@@ -6,6 +6,9 @@ use std::{
 
 use crate::passthrough::statx;
 
+const USE_HUGE_PAGE: u64 = 10 * 1024 * 1024; // 10MB
+const MAX_WINDOW_SIZE: u64 = 100 * 1024 * 1024; // 100MB
+
 /// Sliding mmap window structure for large files
 pub struct SlidingMmapWindow {
     fd: RawFd,
@@ -28,9 +31,6 @@ impl SlidingMmapWindow {
     }
 
     async fn create_mmap(file: &impl AsRawFd) -> rfuse3::Result<memmap2::MmapMut> {
-        const USE_HUGE_PAGE: u64 = 10 * 1024 * 1024; // 10MB
-        const MAX_WINDOW_SIZE: u64 = 100 * 1024 * 1024; // 100MB
-
         let st = statx::statx(file, None)?;
         let file_size = st.st.st_size as u64;
 
@@ -66,27 +66,32 @@ impl SlidingMmapWindow {
         // If current window doesn't cover the requested range, create new window
         if offset < self.window_start || requested_end > self.window_end {
             // Use statx to get file size without creating File object
-            let file = unsafe { File::from_raw_fd(self.fd) };
-            let file_size = file.metadata()?.len();
+            let file_size = statx::statx(&self.fd, None)?.st.st_size as u64;
             // Don't let the File object drop - we don't own the fd
-            std::mem::forget(file);
 
             let new_window_start = (offset / self.window_size) * self.window_size;
             let new_window_end = std::cmp::min(new_window_start + self.window_size, file_size);
 
-            unsafe {
+            let page_bits: Option<u8> = if new_window_end - new_window_start >= USE_HUGE_PAGE {
+                Some(21) // Use huge pages for large files
+            } else {
+                None // Use regular pages for smaller files
+            };
+
+            let mmap = unsafe {
                 let temp_file = File::from_raw_fd(self.fd);
                 let mmap = memmap2::MmapOptions::new()
                     .offset(new_window_start)
                     .len((new_window_end - new_window_start) as usize)
+                    .huge(page_bits)
                     .map_mut(&temp_file)?;
                 // Don't let temp_file drop - we don't own the fd
                 std::mem::forget(temp_file);
-
-                self.mmap = mmap;
-                self.window_start = new_window_start;
-                self.window_end = new_window_end;
-            }
+                mmap
+            };
+            self.mmap = mmap;
+            self.window_start = new_window_start;
+            self.window_end = new_window_end;
         }
         Ok(())
     }
