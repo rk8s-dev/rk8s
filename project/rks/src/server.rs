@@ -1,10 +1,14 @@
 use crate::api::xlinestore::XlineStore;
 use crate::commands::{create, delete};
-use crate::network::backend::route::{get_route_form_lease, get_v6_route_form_lease};
-use crate::network::lease::{LeaseAttrs, LeaseWatchResult};
-use crate::network::{lease::Lease, manager::LocalManager};
-use crate::protocol::{PodTask, RksMessage};
-use anyhow::Result;
+use crate::network::{
+    self,
+    backend::route,
+    lease::{Lease, LeaseAttrs, LeaseWatchResult},
+    manager::LocalManager,
+};
+use anyhow::{Context, Result};
+use common::{NodeNetworkConfig, PodTask, RksMessage};
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use libcni::ip::route::Route;
 use quinn::{Connection, Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
@@ -72,9 +76,11 @@ pub async fn serve(
                 .iter()
                 .flat_map(|r| r.snapshot.clone())
                 .collect::<Vec<_>>();
+            println!("[server] get the all leases :{:?}", leases);
             let node_ids: Vec<String> = leases.iter().map(|l| l.attrs.node_id.clone()).collect();
             for node_id in node_ids {
                 let routes = calculate_routes_for_node(&node_id, &leases);
+                println!("[server] send for {node_id}, the routes:{:?}", routes);
                 let msg = RksMessage::UpdateRoutes(node_id.clone(), routes);
                 if let Some(worker) = node_registry_clone.get(&node_id).await {
                     if let Err(e) = worker.tx.try_send(msg) {
@@ -122,7 +128,6 @@ pub async fn serve(
             None => break,
         }
     }
-
     Ok(())
 }
 
@@ -196,7 +201,7 @@ async fn handle_connection(
     let mut buf = vec![0u8; 4096];
     let mut is_worker = false;
     let mut node_id = None;
-
+    let node_registry_clone = node_registry.clone();
     // initial handshake to classify connection (RegisterNode or UserRequest)
     if let Ok(mut recv) = conn.accept_uni().await {
         match recv.read(&mut buf).await {
@@ -217,6 +222,9 @@ async fn handle_connection(
                             xline_store.insert_node_yaml(&id, &node_yaml).await?;
                             println!("[server] registered worker node: {id}, ip: {ip}");
 
+                            let config = local_manager.get_network_config().await?;
+                            println!("[server] get the network config : {:?}", config);
+
                             let (public_ip, public_ipv6) = match conn.remote_address().ip() {
                                 IpAddr::V4(v4) => (v4, None),
                                 IpAddr::V6(v6) => (Ipv4Addr::new(0, 0, 0, 0), Some(v6)),
@@ -228,7 +236,11 @@ async fn handle_connection(
                                 node_id: id.clone(),
                                 ..Default::default()
                             };
+                            println!("[server] get the leaseattrs : {:?}", lease_attrs);
                             let lease = local_manager.acquire_lease(&lease_attrs).await?;
+                            println!("[server] racquire worker node lease : {:?}", lease);
+                            let subnet = lease.subnet;
+                            let ipv6_subnet = lease.ipv6_subnet;
 
                             let (msg_tx, mut msg_rx) = mpsc::channel::<RksMessage>(32);
 
@@ -257,6 +269,22 @@ async fn handle_connection(
                             if let Ok(mut stream) = conn.open_uni().await {
                                 stream.write_all(&data).await?;
                                 stream.finish()?;
+                            }
+
+                            let node_net_config = build_node_network_config(
+                                id.clone(),
+                                &config,
+                                false,
+                                Some(subnet),
+                                ipv6_subnet,
+                            )?;
+                            let msg = RksMessage::SetNetwork(Box::new(node_net_config));
+                            if let Some(worker) = node_registry_clone.get(&id).await {
+                                if let Err(e) = worker.tx.try_send(msg) {
+                                    eprintln!("Failed to enqueue message for {id}: {e:?}");
+                                }
+                            } else {
+                                eprintln!("No active worker for {id}");
                             }
                         }
                         RksMessage::UserRequest(_) => {
@@ -423,12 +451,49 @@ fn calculate_routes_for_node(node_id: &str, leases: &[Lease]) -> Vec<Route> {
         if lease.attrs.node_id == node_id {
             continue;
         }
-        if let Some(route) = get_route_form_lease(lease) {
+        if let Some(route) = route::get_route_form_lease(lease) {
             routes.push(route);
         }
-        if let Some(route_v6) = get_v6_route_form_lease(lease) {
+        if let Some(route_v6) = route::get_v6_route_form_lease(lease) {
             routes.push(route_v6);
         }
     }
     routes
+}
+
+pub fn build_node_network_config(
+    node_id: String,
+    config: &network::config::Config,
+    ip_masq: bool,
+    mut sn4: Option<Ipv4Network>,
+    mut sn6: Option<Ipv6Network>,
+) -> Result<NodeNetworkConfig> {
+    let mut contents = String::new();
+
+    if config.enable_ipv4
+        && let Some(ref mut net) = sn4
+    {
+        contents += &format!(
+            "RKL_NETWORK={}\n",
+            config.network.context("IPv4 network config missing")?
+        );
+        contents += &format!("RKL_SUBNET={}/{}\n", net.ip(), net.prefix());
+    }
+
+    if config.enable_ipv6
+        && let Some(ref mut net) = sn6
+    {
+        contents += &format!(
+            "RKL_IPV6_NETWORK={}\n",
+            config.ipv6_network.context("IPv6 network config missing")?
+        );
+        contents += &format!("RKL_IPV6_SUBNET={}/{}\n", net.ip(), net.prefix());
+    }
+
+    contents += &format!("RKL_IPMASQ={ip_masq}\n");
+
+    Ok(NodeNetworkConfig {
+        node_id,
+        subnet_env: contents,
+    })
 }

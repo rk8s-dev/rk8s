@@ -18,6 +18,11 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    use log::info;
+
+    env_logger::init();
+
+    info!("server started");
 
     match &cli.command {
         Commands::Start { config } => {

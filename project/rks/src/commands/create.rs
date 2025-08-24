@@ -30,7 +30,7 @@ pub async fn user_create(
     if let Ok(nodes) = xline_store.list_nodes().await
         && let Some((node_name, _)) = nodes.first()
     {
-        pod_task.spec.nodename = node_name.clone();
+        pod_task.spec.nodename = Some(node_name.clone());
         let pod_yaml = match serde_yaml::to_string(&pod_task) {
             Ok(yaml) => yaml,
             Err(e) => {

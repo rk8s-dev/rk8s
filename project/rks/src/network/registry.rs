@@ -382,13 +382,13 @@ impl Registry for XlineSubnetRegistry {
                             info!("watchSubnets: got valid subnet event with revision {since}");
                             let mut lease = subnet_event.lease.unwrap_or_default();
                             lease.enable_ipv4 = true;
-
+                            let leases = self.get_subnets().await.unwrap_or_default().0;
                             let wr = LeaseWatchResult {
                                 events: vec![LeaseEvent {
                                     event_type: subnet_event.event_type,
                                     lease: Some(lease),
                                 }],
-                                snapshot: vec![],
+                                snapshot: leases,
                                 cursor: Cursor::Cursor(WatchCursor { index: since }),
                             };
                             results.push(wr);
