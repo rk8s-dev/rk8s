@@ -174,10 +174,10 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                             eprintln!("[worker] register error: {e}");
                         }
                         Ok(RksMessage::SetNetwork(cfg)) => {
-                            eprintln!("[worker] get the network config: {:?}", cfg);
+                            eprintln!("[worker] get the network config: {cfg:?}");
                         }
                         Ok(RksMessage::UpdateRoutes(_id, routes)) => {
-                            eprintln!("[worker] get the routes: {:?}", routes);
+                            eprintln!("[worker] get the routes: {routes:?}");
                         }
                         Ok(RksMessage::CreatePod(pod_box)) => {
                             let pod: PodTask = (*pod_box).clone();

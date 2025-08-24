@@ -76,11 +76,11 @@ pub async fn serve(
                 .iter()
                 .flat_map(|r| r.snapshot.clone())
                 .collect::<Vec<_>>();
-            println!("[server] get the all leases :{:?}", leases);
+            println!("[server] get the all leases :{leases:?}");
             let node_ids: Vec<String> = leases.iter().map(|l| l.attrs.node_id.clone()).collect();
             for node_id in node_ids {
                 let routes = calculate_routes_for_node(&node_id, &leases);
-                println!("[server] send for {node_id}, the routes:{:?}", routes);
+                println!("[server] send for {node_id}, the routes:{routes:?}");
                 let msg = RksMessage::UpdateRoutes(node_id.clone(), routes);
                 if let Some(worker) = node_registry_clone.get(&node_id).await {
                     if let Err(e) = worker.tx.try_send(msg) {
@@ -223,7 +223,7 @@ async fn handle_connection(
                             println!("[server] registered worker node: {id}, ip: {ip}");
 
                             let config = local_manager.get_network_config().await?;
-                            println!("[server] get the network config : {:?}", config);
+                            println!("[server] get the network config : {config:?}");
 
                             let (public_ip, public_ipv6) = match conn.remote_address().ip() {
                                 IpAddr::V4(v4) => (v4, None),
@@ -236,9 +236,8 @@ async fn handle_connection(
                                 node_id: id.clone(),
                                 ..Default::default()
                             };
-                            println!("[server] get the leaseattrs : {:?}", lease_attrs);
                             let lease = local_manager.acquire_lease(&lease_attrs).await?;
-                            println!("[server] racquire worker node lease : {:?}", lease);
+                            println!("[server] racquire worker node lease : {lease:?}");
                             let subnet = lease.subnet;
                             let ipv6_subnet = lease.ipv6_subnet;
 

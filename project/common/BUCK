@@ -7,6 +7,7 @@ rust_library(
     edition = "2024",
     deps = [
         "//third-party:serde",
+        "//project/libcni:libcni",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",
