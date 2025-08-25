@@ -3,8 +3,8 @@ use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use log::{error, info, warn};
+use rand::prelude::IndexedRandom;
 use rand::rngs::ThreadRng;
-use rand::seq::IndexedMutRandom;
 use serde::{Deserialize, Serialize};
 use std::time::Duration as StdDuration;
 use std::{
@@ -221,10 +221,10 @@ impl LocalManager {
         }
 
         let mut rng: ThreadRng = rand::rng();
-        let chosen_v4 = *available_v4.choose_mut(&mut rng).unwrap();
+        let chosen_v4 = *available_v4.choose(&mut rng).unwrap();
 
         let chosen_v6 = if config.enable_ipv6 {
-            Some(*available_v6.choose_mut(&mut rng).unwrap())
+            Some(*available_v6.choose(&mut rng).unwrap())
         } else {
             None
         };
