@@ -450,10 +450,10 @@ fn calculate_routes_for_node(node_id: &str, leases: &[Lease]) -> Vec<Route> {
         if lease.attrs.node_id == node_id {
             continue;
         }
-        if let Some(route) = route::get_route_form_lease(lease) {
+        if let Some(route) = route::get_route_from_lease(lease) {
             routes.push(route);
         }
-        if let Some(route_v6) = route::get_v6_route_form_lease(lease) {
+        if let Some(route_v6) = route::get_v6_route_from_lease(lease) {
             routes.push(route_v6);
         }
     }
