@@ -87,9 +87,8 @@
       "gid": 0
     },
     "args": [
-      "dd",
-      "if=/dev/zero",
-      "of=/dev/null"
+      "sleep",
+      "infinity"
     ],
     "env": [
       "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -141,13 +140,7 @@
   "annotations": {},
   "linux": {
     "resources": {
-      "memory": {
-        "limit": 536870912
-      },
-      "cpu": {
-        "quota": 500000,
-        "period": 1000000
-      }
+      "devices": []
     },
     "namespaces": [
       {

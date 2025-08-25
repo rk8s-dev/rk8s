@@ -130,20 +130,20 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
     println!("[worker] sent RegisterNode({})", node.metadata.name);
 
     // read ack
-    if let Ok(Ok(mut recv)) = time::timeout(Duration::from_secs(3), connection.accept_uni()).await {
-        let mut buf = vec![0u8; 4096];
-        if let Ok(Some(n)) = recv.read(&mut buf).await {
-            if let Ok(resp) = bincode::deserialize::<RksMessage>(&buf[..n]) {
-                match resp {
-                    RksMessage::Ack => println!("[worker] got register Ack"),
-                    RksMessage::Error(e) => eprintln!("[worker] register error: {e}"),
-                    other => println!("[worker] unexpected register response: {other:?}"),
-                }
-            } else {
-                eprintln!("[worker] failed to parse register response");
-            }
-        }
-    }
+    // if let Ok(Ok(mut recv)) = time::timeout(Duration::from_secs(3), connection.accept_uni()).await {
+    //     let mut buf = vec![0u8; 4096];
+    //     if let Ok(Some(n)) = recv.read(&mut buf).await {
+    //         if let Ok(resp) = bincode::deserialize::<RksMessage>(&buf[..n]) {
+    //             match resp {
+    //                 RksMessage::Ack => println!("[worker] got register Ack"),
+    //                 RksMessage::Error(e) => eprintln!("[worker] register error: {e}"),
+    //                 other => println!("[worker] unexpected register response: {other:?}"),
+    //             }
+    //         } else {
+    //             eprintln!("[worker] failed to parse register response");
+    //         }
+    //     }
+    // }
 
     // heartbeat
     let hb_conn = connection.clone();
@@ -167,6 +167,18 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                 let mut buf = vec![0u8; 4096];
                 match recv.read(&mut buf).await {
                     Ok(Some(n)) => match bincode::deserialize::<RksMessage>(&buf[..n]) {
+                        Ok(RksMessage::Ack) => {
+                            println!("[worker] got register Ack");
+                        }
+                        Ok(RksMessage::Error(e)) => {
+                            eprintln!("[worker] register error: {e}");
+                        }
+                        Ok(RksMessage::SetNetwork(cfg)) => {
+                            eprintln!("[worker] get the network config: {cfg:?}");
+                        }
+                        Ok(RksMessage::UpdateRoutes(_id, routes)) => {
+                            eprintln!("[worker] get the routes: {routes:?}");
+                        }
                         Ok(RksMessage::CreatePod(pod_box)) => {
                             let pod: PodTask = (*pod_box).clone();
 

@@ -8,14 +8,12 @@ use tokio::sync::{Mutex, mpsc};
 use crate::network::{
     backend::route::RouteListOps,
     config::Config,
+    iface::check_hostgw_compatibility,
     lease::{Event, EventType, Lease, LeaseAttrs, LeaseWatcher},
     manager::LocalManager,
 };
 
-use super::{
-    Backend, ExternalInterface, Network, SimpleNetwork, interface::check_hostgw_compatibility,
-    route::RouteManager,
-};
+use super::{Backend, ExternalInterface, Network, SimpleNetwork, route::RouteManager};
 
 /// Host-GW backend implementation
 /// This backend uses host routing table to implement container networking
@@ -61,12 +59,11 @@ impl Backend for HostgwBackend {
             public_ip: self.ext_iface.ext_addr.expect("Don't have the ext_addr"),
             public_ipv6: self.ext_iface.ext_v6_addr,
             backend_type: "host-gw".to_string(),
-            backend_data: None,
-            backend_v6_data: None,
+            ..Default::default()
         };
 
         let lease = {
-            let mut manager = self.subnet_manager.lock().await;
+            let manager = self.subnet_manager.lock().await;
             manager.acquire_lease(&lease_attrs).await?
         };
 
