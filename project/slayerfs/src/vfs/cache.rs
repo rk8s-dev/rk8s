@@ -1,0 +1,2 @@
+//! Simple cache helpers (placeholder)
+

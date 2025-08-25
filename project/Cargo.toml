@@ -12,7 +12,9 @@ members = [
     "rkb",
     "rkl",
     "rks",
-    "libscheduler", "common",
+    "libscheduler", 
+    "common",
+    "slayerfs"
 ]
 
 default-members = ["distribution", "rkl", "libbridge", "libipam", "rkb", "libnetwork","rks"]
