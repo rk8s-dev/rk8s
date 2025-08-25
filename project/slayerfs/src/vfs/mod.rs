@@ -15,7 +15,7 @@
 //! Submodules:
 //! - `handles`: file handle and descriptor management
 //! - `cache`: caching helpers and policies
-pub mod handles;
 pub mod cache;
+pub mod handles;
 
 // Module implementation TODOs remain.

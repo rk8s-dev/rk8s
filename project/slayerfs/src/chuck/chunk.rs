@@ -12,6 +12,10 @@ pub struct ChunkMeta {
 #[allow(unused)]
 impl ChunkMeta {
     pub fn new(chunk_id: i64, ino: i64, index: i32) -> Self {
-        Self { chunk_id, ino, index }
+        Self {
+            chunk_id,
+            ino,
+            index,
+        }
     }
 }
