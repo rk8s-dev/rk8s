@@ -164,13 +164,13 @@ impl SchedulingQueue {
     }
 
     async fn push_backoff(&self, mut pod: PodInfo) {
-        pod.attempts += 1;
-        let expire = Instant::now() + Duration::from_secs(2_u64.pow(pod.attempts as u32));
+        pod.queued_info.attempts += 1;
+        let expire = Instant::now() + Duration::from_secs(2_u64.pow(pod.queued_info.attempts as u32));
         let backoff_pod = BackOffPod {
-            pod: (pod.priority, pod.name.clone()),
+            pod: (pod.spec.priority, pod.name.clone()),
             expire,
         };
-        if pod.attempts > 8 {
+        if pod.queued_info.attempts > 8 {
             let mut guard = self.unschedulable_queue.lock().await;
             guard.push((backoff_pod, Instant::now()));
         } else {
@@ -206,7 +206,7 @@ impl<A: Algorithm> Scheduler<A> {
         let nodes = cache_read.get_nodes();
         drop(cache_read);
         if let Some(pod_info) = pod_info {
-            if pod_info.priority != pod_priority {
+            if pod_info.spec.priority != pod_priority {
                 // The pod priority is already updated.
                 return;
             }
@@ -252,10 +252,10 @@ impl<A: Algorithm> Scheduler<A> {
         if pod.scheduled.is_none() {
             if let Some(o) = &ori {
                 if o.scheduled.is_some() {
-                    self.queue.push(pod.name, pod.priority).await;
+                    self.queue.push(pod.name, pod.spec.priority).await;
                 }
             } else {
-                self.queue.push(pod.name, pod.priority).await;
+                self.queue.push(pod.name, pod.spec.priority).await;
             }
         }
     }
@@ -286,10 +286,15 @@ impl<A: Algorithm> Scheduler<A> {
 
 #[cfg(test)]
 mod tests {
+    use std::default;
+
     use tokio::time::timeout;
 
     use super::*;
-    use crate::algorithms::basic::BasicAlgorithm;
+    use crate::{
+        algorithms::basic::BasicAlgorithm,
+        models::{NodeSpec, PodSpec, QueuedInfo, ResourcesRequirements},
+    };
 
     #[tokio::test]
     async fn test_push_and_next_pod() {
@@ -325,10 +330,12 @@ mod tests {
     fn make_pod(pod_name: &str, priority: u64) -> PodInfo {
         PodInfo {
             name: pod_name.to_owned(),
-            cpu: 1,
-            memory: 1,
-            priority,
-            attempts: 0,
+            spec: PodSpec {
+                resources: ResourcesRequirements { cpu: 1, memory: 1 },
+                priority,
+                ..Default::default()
+            },
+            queued_info: QueuedInfo::default(),
             scheduled: None,
         }
     }
@@ -338,10 +345,15 @@ mod tests {
         let queue = SchedulingQueue::new();
         let pod = PodInfo {
             name: "pod".to_owned(),
-            cpu: 1,
-            memory: 1,
-            priority: 1,
-            attempts: 9,
+            spec: PodSpec {
+                resources: ResourcesRequirements { cpu: 1, memory: 1 },
+                priority: 1,
+                ..Default::default()
+            },
+            queued_info: QueuedInfo {
+                attempts: 9,
+                ..Default::default()
+            },
             scheduled: None,
         };
         queue.push_backoff(pod).await;
@@ -353,11 +365,13 @@ mod tests {
     async fn test_backoff_queue_flush() {
         let queue = SchedulingQueue::new();
         let pod = PodInfo {
-            name: "pod".to_owned(),
-            cpu: 1,
-            memory: 1,
-            priority: 1,
-            attempts: 0,
+            name: "pod".to_string(),
+            spec: PodSpec {
+                resources: ResourcesRequirements { cpu: 1, memory: 1 },
+                priority: 1,
+                ..Default::default()
+            },
+            queued_info: QueuedInfo::default(),
             scheduled: None,
         };
         queue.run();
@@ -392,6 +406,8 @@ mod tests {
             name: "node1".to_string(),
             cpu: 2,
             memory: 10,
+            spec: NodeSpec::default(),
+            ..Default::default()
         };
         scheduler.add_cache_node(node).await;
         let cache = scheduler.cache.read().await;
@@ -411,21 +427,30 @@ mod tests {
             name: "node".to_string(),
             cpu: 2,
             memory: 10,
+            spec: NodeSpec::default(),
+            ..Default::default()
         };
         cache.update_node(node);
         let node = NodeInfo {
             name: "node2".to_string(),
             cpu: 1,
             memory: 8,
+            spec: NodeSpec::default(),
+            ..Default::default()
         };
         cache.update_node(node);
 
         cache.update_pod(PodInfo {
             name: "pod".to_string(),
-            cpu: 2,
-            memory: 3,
-            priority: 1,
-            attempts: 1,
+            spec: PodSpec {
+                resources: ResourcesRequirements { cpu: 2, memory: 3 },
+                priority: 1,
+                ..Default::default()
+            },
+            queued_info: QueuedInfo {
+                attempts: 1,
+                ..Default::default()
+            },
             scheduled: None,
         });
         drop(cache);

@@ -12,7 +12,7 @@ impl Algorithm for BasicAlgorithm {
     fn filter(nodes: Vec<NodeInfo>, pod: &PodInfo) -> Vec<NodeInfo> {
         nodes
             .into_iter()
-            .filter(|n| n.cpu >= pod.cpu && n.memory >= pod.memory)
+            .filter(|n| n.cpu >= pod.spec.resources.cpu && n.memory >= pod.spec.resources.memory)
             .collect()
     }
 

@@ -25,7 +25,7 @@ impl Cache {
         }
         self.pods
             .entry(pod_name.to_string())
-            .and_modify(|p| p.attempts += 1);
+            .and_modify(|p| p.queued_info.attempts += 1);
         true
     }
 
@@ -41,8 +41,8 @@ impl Cache {
             return false;
         };
         pod_info.scheduled = Some(node_name.to_owned());
-        node.cpu -= pod_info.cpu;
-        node.memory -= pod_info.memory;
+        node.cpu -= pod_info.spec.resources.cpu;
+        node.memory -= pod_info.spec.resources.memory;
         true
     }
 
@@ -55,8 +55,8 @@ impl Cache {
             if let Some(n) = &p.scheduled {
                 let node = self.nodes.get_mut(n);
                 if let Some(node) = node {
-                    node.cpu += p.cpu;
-                    node.memory += p.memory;
+                    node.cpu += p.spec.resources.cpu;
+                    node.memory += p.spec.resources.memory;
                 }
             }
         }
@@ -70,8 +70,8 @@ impl Cache {
             .filter(|p| matches!(&p.scheduled, Some(name) if name == node_name))
             .for_each(|p| {
                 p.scheduled = None;
-                p.attempts = 0;
-                res.push((p.priority, p.name.clone()));
+                p.queued_info.attempts = 0;
+                res.push((p.spec.priority, p.name.clone()));
             });
         res
     }

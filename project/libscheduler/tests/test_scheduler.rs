@@ -1,5 +1,7 @@
 use libscheduler::algorithms::basic::BasicAlgorithm;
-use libscheduler::models::{NodeInfo, PodInfo};
+use libscheduler::models::{
+    NodeInfo, NodeSpec, PodInfo, PodSpec, QueuedInfo, ResourcesRequirements,
+};
 use libscheduler::scheduler::Scheduler;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -7,10 +9,12 @@ use tokio::time::timeout;
 fn make_pod(name: &str, priority: u64, cpu: u64, memory: u64) -> PodInfo {
     PodInfo {
         name: name.to_string(),
-        cpu,
-        memory,
-        priority,
-        attempts: 0,
+        spec: PodSpec {
+            resources: ResourcesRequirements { cpu, memory },
+            priority,
+            ..Default::default()
+        },
+        queued_info: QueuedInfo::default(),
         scheduled: None,
     }
 }
@@ -20,6 +24,8 @@ fn make_node(name: &str, cpu: u64, memory: u64) -> NodeInfo {
         name: name.to_string(),
         cpu,
         memory,
+        spec: NodeSpec::default(),
+        ..Default::default()
     }
 }
 
