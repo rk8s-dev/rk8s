@@ -3,11 +3,11 @@
 use crate::cadapter::client::ObjectBackend;
 use async_trait::async_trait;
 use aws_sdk_s3::Client;
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use md5;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[allow(dead_code)]
 pub struct S3Backend {
@@ -21,10 +21,17 @@ pub struct S3Backend {
 
 #[allow(dead_code)]
 impl S3Backend {
-    pub async fn new(bucket: impl Into<String>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new(
+        bucket: impl Into<String>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let conf = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
         let client = Client::new(&conf);
-        Ok(Self { client, bucket: bucket.into(), part_size: 8 * 1024 * 1024, max_concurrency: 4 })
+        Ok(Self {
+            client,
+            bucket: bucket.into(),
+            part_size: 8 * 1024 * 1024,
+            max_concurrency: 4,
+        })
     }
 
     fn md5_base64(data: &[u8]) -> String {
@@ -35,11 +42,15 @@ impl S3Backend {
 
 #[async_trait]
 impl ObjectBackend for S3Backend {
-    async fn put_object(&self, key: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn put_object(
+        &self,
+        key: &str,
+        data: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // 小对象直接 put_object；大对象走 multipart。
         if data.len() <= self.part_size {
             // 简单重试 3 次。
-        let checksum = Self::md5_base64(data);
+            let checksum = Self::md5_base64(data);
             let mut attempt = 0;
             loop {
                 attempt += 1;
@@ -48,8 +59,8 @@ impl ObjectBackend for S3Backend {
                     .put_object()
                     .bucket(&self.bucket)
                     .key(key)
-            .body(data.to_owned().into())
-            .content_md5(checksum.clone());
+                    .body(data.to_owned().into())
+                    .content_md5(checksum.clone());
                 match req.send().await {
                     Ok(_) => return Ok(()),
                     Err(_e) if attempt < 3 => {
@@ -70,8 +81,8 @@ impl ObjectBackend for S3Backend {
             .send()
             .await?;
         let upload_id = create.upload_id().unwrap_or_default().to_string();
-    let data_arc = Arc::new(data.to_vec());
-    let sem = Arc::new(tokio::sync::Semaphore::new(self.max_concurrency));
+        let data_arc = Arc::new(data.to_vec());
+        let sem = Arc::new(tokio::sync::Semaphore::new(self.max_concurrency));
 
         // 并发上传各分片
         let mut parts = Vec::new();
@@ -130,15 +141,19 @@ impl ObjectBackend for S3Backend {
 
         let completed_parts = results
             .into_iter()
-            .map(|(pn, etag)| aws_sdk_s3::types::CompletedPart::builder().part_number(pn).set_e_tag(etag).build())
+            .map(|(pn, etag)| {
+                aws_sdk_s3::types::CompletedPart::builder()
+                    .part_number(pn)
+                    .set_e_tag(etag)
+                    .build()
+            })
             .collect::<Vec<_>>();
 
         let completed = aws_sdk_s3::types::CompletedMultipartUpload::builder()
             .set_parts(Some(completed_parts))
             .build();
 
-        self
-            .client
+        self.client
             .complete_multipart_upload()
             .bucket(&self.bucket)
             .key(key)
@@ -150,7 +165,10 @@ impl ObjectBackend for S3Backend {
         Ok(())
     }
 
-    async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_object(
+        &self,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
         let resp = self
             .client
             .get_object()

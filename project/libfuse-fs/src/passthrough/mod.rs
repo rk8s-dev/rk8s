@@ -283,11 +283,11 @@ impl HandleData {
         &self.file
     }
 
-    async fn get_file_mut(&self) -> (MutexGuard<()>, &File) {
+    async fn get_file_mut(&self) -> (MutexGuard<'_, ()>, &File) {
         (self.lock.lock().await, &self.file)
     }
 
-    fn borrow_fd(&self) -> BorrowedFd {
+    fn borrow_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
     }
 

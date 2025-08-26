@@ -10,22 +10,37 @@ pub struct LocalFsBackend {
 }
 
 impl LocalFsBackend {
-    pub fn new<P: AsRef<Path>>(root: P) -> Self { Self { root: root.as_ref().to_path_buf() } }
-    fn path_for(&self, key: &str) -> PathBuf { self.root.join(key) }
+    pub fn new<P: AsRef<Path>>(root: P) -> Self {
+        Self {
+            root: root.as_ref().to_path_buf(),
+        }
+    }
+    fn path_for(&self, key: &str) -> PathBuf {
+        self.root.join(key)
+    }
 }
 
 #[async_trait]
 impl ObjectBackend for LocalFsBackend {
-    async fn put_object(&self, key: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn put_object(
+        &self,
+        key: &str,
+        data: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let path = self.path_for(key);
-        if let Some(dir) = path.parent() { fs::create_dir_all(dir).await?; }
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).await?;
+        }
         let mut f = fs::File::create(path).await?;
         f.write_all(data).await?;
         f.flush().await?;
         Ok(())
     }
 
-    async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_object(
+        &self,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
         let path = self.path_for(key);
         match fs::read(path).await {
             Ok(buf) => Ok(Some(buf)),

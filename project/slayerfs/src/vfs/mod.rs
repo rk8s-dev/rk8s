@@ -16,10 +16,10 @@
 //! - `handles`: file handle and descriptor management
 //! - `cache`: caching helpers and policies
 pub mod cache;
-pub mod handles;
 pub mod demo;
-pub mod simple;
 pub mod fs;
+pub mod handles;
 pub mod sdk;
+pub mod simple;
 
 // Module implementation TODOs remain.

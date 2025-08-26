@@ -12,16 +12,36 @@ pub struct ChunkReader<'a, S: BlockStore> {
 
 impl<'a, S: BlockStore> ChunkReader<'a, S> {
     pub fn new(layout: ChunkLayout, chunk_id: i64, store: &'a S) -> Self {
-        Self { layout, chunk_id, store }
+        Self {
+            layout,
+            chunk_id,
+            store,
+        }
     }
 
     pub async fn read(&self, offset_in_chunk: u64, len: usize) -> Vec<u8> {
-        if len == 0 { return Vec::new(); }
-        let slice = SliceDesc { slice_id: 0, chunk_id: self.chunk_id, offset: offset_in_chunk, length: len as u32 };
-        let spans = slice.to_block_spans(self.layout);
+        if len == 0 {
+            return Vec::new();
+        }
+        let slice = SliceDesc {
+            slice_id: 0,
+            chunk_id: self.chunk_id,
+            offset: offset_in_chunk,
+            length: len as u32,
+        };
+        let spans = slice.block_spans(self.layout);
         let mut out = Vec::with_capacity(len);
         for sp in spans {
-            let part = self.store.read_block_range(self.chunk_id, sp.block_index, sp.offset_in_block, sp.len_in_block as usize, self.layout).await;
+            let part = self
+                .store
+                .read_block_range(
+                    self.chunk_id,
+                    sp.block_index,
+                    sp.offset_in_block,
+                    sp.len_in_block as usize,
+                    self.layout,
+                )
+                .await;
             out.extend(part);
         }
         out
@@ -31,8 +51,8 @@ impl<'a, S: BlockStore> ChunkReader<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::writer::ChunkWriter;
     use crate::chuck::store::InMemoryBlockStore;
+    use crate::chuck::writer::ChunkWriter;
 
     #[tokio::test]
     async fn test_reader_zero_fills_holes() {
@@ -50,7 +70,15 @@ mod tests {
         let res = r.read(off, layout.block_size as usize).await;
         assert_eq!(res.len(), layout.block_size as usize);
         // 前半应为 0 填充，后半应为 1
-        assert!(res[..(layout.block_size / 2) as usize].iter().all(|&b| b == 0));
-        assert!(res[(layout.block_size / 2) as usize..].iter().all(|&b| b == 1));
+        assert!(
+            res[..(layout.block_size / 2) as usize]
+                .iter()
+                .all(|&b| b == 0)
+        );
+        assert!(
+            res[(layout.block_size / 2) as usize..]
+                .iter()
+                .all(|&b| b == 1)
+        );
     }
 }

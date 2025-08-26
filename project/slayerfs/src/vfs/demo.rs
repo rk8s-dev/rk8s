@@ -23,20 +23,20 @@ pub async fn e2e_localfs_demo<P: AsRef<Path>>(root: P) -> Result<(), Box<dyn Err
     let half = (layout.block_size / 2) as usize;
     let len = layout.block_size as usize + half; // 1.5 blocks
     let mut data = vec![0u8; len];
-    for i in 0..len {
-        data[i] = (i % 251) as u8;
+    for (i, b) in data.iter_mut().enumerate().take(len) {
+        *b = (i % 251) as u8;
     }
 
     // 4) 写入（落到两个 block 上）
     {
         let mut writer = ChunkWriter::new(layout, chunk_id, &mut store);
-    let _slice = writer.write(half as u64, &data).await;
+        let _slice = writer.write(half as u64, &data).await;
     }
 
     // 5) 读取并校验
     {
         let reader = ChunkReader::new(layout, chunk_id, &store);
-    let out = reader.read(half as u64, len).await;
+        let out = reader.read(half as u64, len).await;
         if out != data {
             return Err("data mismatch".into());
         }
@@ -52,6 +52,8 @@ mod tests {
     #[tokio::test]
     async fn test_e2e_localfs_demo() {
         let dir = tempfile::tempdir().unwrap();
-        e2e_localfs_demo(dir.path()).await.expect("e2e demo should succeed");
+        e2e_localfs_demo(dir.path())
+            .await
+            .expect("e2e demo should succeed");
     }
 }

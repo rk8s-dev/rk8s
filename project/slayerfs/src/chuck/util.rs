@@ -18,14 +18,20 @@ pub fn split_file_range_into_chunks(
 ) -> Vec<ChunkSpan> {
     let mut remaining = len as u64;
     let mut out = Vec::new();
-    if remaining == 0 { return out; }
+    if remaining == 0 {
+        return out;
+    }
 
     while remaining > 0 {
         let ci = layout.chunk_index_of(file_offset);
         let off_in_chunk = layout.within_chunk_offset(file_offset);
         let cap = layout.chunk_size - off_in_chunk;
         let take = cap.min(remaining) as usize;
-        out.push(ChunkSpan { chunk_index: ci, offset_in_chunk: off_in_chunk, len: take });
+        out.push(ChunkSpan {
+            chunk_index: ci,
+            offset_in_chunk: off_in_chunk,
+            len: take,
+        });
         file_offset += take as u64;
         remaining -= take as u64;
     }

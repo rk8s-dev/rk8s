@@ -52,8 +52,10 @@ impl SliceDesc {
     /// - 每个返回项的 `(block_index, offset_in_block, len_in_block)` 均满足
     ///   `offset_in_block + len_in_block <= block_size`；
     /// - 返回序列覆盖从 `offset` 起始、长度为 `length` 的全部范围。
-    pub fn to_block_spans(&self, layout: ChunkLayout) -> Vec<BlockSpan> {
-        if self.length == 0 { return Vec::new(); }
+    pub fn block_spans(&self, layout: ChunkLayout) -> Vec<BlockSpan> {
+        if self.length == 0 {
+            return Vec::new();
+        }
 
         let mut spans = Vec::new();
         let mut remaining = self.length as u64;
@@ -88,8 +90,13 @@ mod tests {
     #[test]
     fn test_single_block_span() {
         let layout = ChunkLayout::default();
-        let s = SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: DEFAULT_BLOCK_SIZE / 2 };
-        let spans = s.to_block_spans(layout);
+        let s = SliceDesc {
+            slice_id: 1,
+            chunk_id: 1,
+            offset: 0,
+            length: DEFAULT_BLOCK_SIZE / 2,
+        };
+        let spans = s.block_spans(layout);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].block_index, 0);
         assert_eq!(spans[0].offset_in_block, 0);
@@ -100,8 +107,13 @@ mod tests {
     fn test_cross_two_blocks() {
         let layout = ChunkLayout::default();
         let half = (layout.block_size / 2) as u64;
-        let s = SliceDesc { slice_id: 1, chunk_id: 1, offset: half, length: layout.block_size };
-        let spans = s.to_block_spans(layout);
+        let s = SliceDesc {
+            slice_id: 1,
+            chunk_id: 1,
+            offset: half,
+            length: layout.block_size,
+        };
+        let spans = s.block_spans(layout);
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].block_index, 0);
         assert_eq!(spans[0].offset_in_block, (layout.block_size / 2));

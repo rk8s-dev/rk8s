@@ -2,8 +2,8 @@
 
 use super::chunk::ChunkLayout;
 use crate::cadapter::client::{ObjectBackend, ObjectClient};
-use std::collections::HashMap;
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 /// 抽象块存储接口（后续可由 cadapter/S3 等实现）。
 #[async_trait]
@@ -36,7 +36,11 @@ pub struct InMemoryBlockStore {
 }
 
 impl InMemoryBlockStore {
-    pub fn new() -> Self { Self { map: HashMap::new() } }
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
 
     fn ensure_block(&mut self, key: BlockKey, block_size: usize) -> &mut Vec<u8> {
         let entry = self.map.entry(key).or_insert_with(|| vec![0u8; block_size]);
@@ -96,7 +100,9 @@ pub struct ObjectBlockStore<B: ObjectBackend> {
 }
 
 impl<B: ObjectBackend> ObjectBlockStore<B> {
-    pub fn new(client: ObjectClient<B>) -> Self { Self { client } }
+    pub fn new(client: ObjectClient<B>) -> Self {
+        Self { client }
+    }
 
     fn key_for(chunk_id: i64, block_index: u32) -> String {
         format!("chunks/{chunk_id}/{block_index}")
@@ -117,14 +123,21 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         let key = Self::key_for(chunk_id, block_index);
         let bs = layout.block_size as usize;
         // 失败直接 panic，与原同步实现行为一致；后续可改为返回 Result。
-        let existing = self.client.get_object(&key).await
+        let existing = self
+            .client
+            .get_object(&key)
+            .await
             .expect("object store get failed");
         let mut buf = existing.unwrap_or_else(|| vec![0u8; bs]);
-        if buf.len() < bs { buf.resize(bs, 0); }
+        if buf.len() < bs {
+            buf.resize(bs, 0);
+        }
         let start = offset_in_block as usize;
         let end = start + data.len();
         buf[start..end].copy_from_slice(data);
-        self.client.put_object(&key, &buf).await
+        self.client
+            .put_object(&key, &buf)
+            .await
             .expect("object store put failed");
     }
 
@@ -178,9 +191,13 @@ mod tests {
         let layout = ChunkLayout::default();
 
         let data = vec![7u8; layout.block_size as usize / 2];
-        store.write_block_range(42, 3, layout.block_size / 4, &data, layout).await;
+        store
+            .write_block_range(42, 3, layout.block_size / 4, &data, layout)
+            .await;
 
-        let out = store.read_block_range(42, 3, layout.block_size / 4, data.len(), layout).await;
+        let out = store
+            .read_block_range(42, 3, layout.block_size / 4, data.len(), layout)
+            .await;
         assert_eq!(out, data);
     }
 }

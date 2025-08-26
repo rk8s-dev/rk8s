@@ -14,7 +14,13 @@ pub struct SimpleVfs<S: BlockStore, M: MetaStore> {
 }
 
 impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
-    pub fn new(layout: ChunkLayout, store: S, meta: M) -> Self { Self { layout, store, meta } }
+    pub fn new(layout: ChunkLayout, store: S, meta: M) -> Self {
+        Self {
+            layout,
+            store,
+            meta,
+        }
+    }
 
     /// 创建文件，返回 inode 编号。
     pub async fn create(&mut self) -> i64 {
@@ -33,14 +39,22 @@ impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
             // 记录元数据（本简化实现：记录 slice，并更新 size= max(size, off+len)）。
             let mut tx = self.meta.begin().await;
             tx.record_slice(_ino, slice).await.expect("record slice");
-            let new_size = (off_in_chunk + data.len() as u64) as u64; // 简化: 使用 chunk 内偏移近似文件大小
-            tx.update_inode_size(_ino, new_size).await.expect("update size");
+            let new_size = off_in_chunk + data.len() as u64; // 简化: 使用 chunk 内偏移近似文件大小
+            tx.update_inode_size(_ino, new_size)
+                .await
+                .expect("update size");
             tx.commit().await.expect("meta commit");
         }
     }
 
     /// 在指定文件的某个 chunk 上读取（偏移为 chunk 内偏移）。
-    pub async fn pread_chunk(&self, _ino: i64, chunk_id: i64, off_in_chunk: u64, len: usize) -> Vec<u8> {
+    pub async fn pread_chunk(
+        &self,
+        _ino: i64,
+        chunk_id: i64,
+        off_in_chunk: u64,
+        len: usize,
+    ) -> Vec<u8> {
         let reader = ChunkReader::new(self.layout, chunk_id, &self.store);
         reader.read(off_in_chunk, len).await
     }
@@ -68,7 +82,9 @@ mod tests {
         let half = (layout.block_size / 2) as usize;
         let len = layout.block_size as usize + half;
         let mut data = vec![0u8; len];
-        for i in 0..len { data[i] = (i % 251) as u8; }
+        for (i, b) in data.iter_mut().enumerate().take(len) {
+            *b = (i % 251) as u8;
+        }
         vfs.pwrite_chunk(ino, chunk_id, half as u64, &data).await;
         let out = vfs.pread_chunk(ino, chunk_id, half as u64, len).await;
         assert_eq!(out, data);

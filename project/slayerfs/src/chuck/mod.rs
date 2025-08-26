@@ -15,16 +15,17 @@
 #![allow(unused_imports)]
 
 pub mod chunk;
-pub mod slice;
-pub mod writer;
 pub mod reader;
-pub mod util;
+pub mod slice;
 pub mod store;
+pub mod util;
+pub mod writer;
 
-pub use chunk::{chunk_index_of, within_chunk_offset, ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
-pub use slice::{BlockSpan, SliceDesc};
-pub use writer::ChunkWriter;
+pub use chunk::{
+    ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE, chunk_index_of, within_chunk_offset,
+};
 pub use reader::ChunkReader;
-pub use store::{BlockStore, InMemoryBlockStore, ObjectBlockStore, S3BlockStore, RustfsBlockStore};
-pub use util::{split_file_range_into_chunks, ChunkSpan};
-
+pub use slice::{BlockSpan, SliceDesc};
+pub use store::{BlockStore, InMemoryBlockStore, ObjectBlockStore, RustfsBlockStore, S3BlockStore};
+pub use util::{ChunkSpan, split_file_range_into_chunks};
+pub use writer::ChunkWriter;

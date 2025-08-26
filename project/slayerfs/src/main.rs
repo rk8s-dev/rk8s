@@ -1,9 +1,4 @@
-mod cadapter;
-mod chuck;
-mod daemon;
-mod fuse;
-mod meta;
-mod vfs;
+use slayerfs::vfs;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {

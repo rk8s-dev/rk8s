@@ -34,7 +34,10 @@ pub struct ChunkLayout {
 
 impl Default for ChunkLayout {
     fn default() -> Self {
-        Self { chunk_size: DEFAULT_CHUNK_SIZE, block_size: DEFAULT_BLOCK_SIZE }
+        Self {
+            chunk_size: DEFAULT_CHUNK_SIZE,
+            block_size: DEFAULT_BLOCK_SIZE,
+        }
     }
 }
 
@@ -43,20 +46,23 @@ impl ChunkLayout {
     #[allow(dead_code)]
     pub fn blocks_per_chunk(&self) -> u32 {
         let bs = self.block_size as u64;
-        ((self.chunk_size + bs - 1) / bs) as u32
+        self.chunk_size.div_ceil(bs) as u32
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn chunk_index_of(&self, file_offset: u64) -> u64 {
         file_offset / self.chunk_size
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn within_chunk_offset(&self, file_offset: u64) -> u64 {
         file_offset % self.chunk_size
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn block_index_of(&self, offset_in_chunk: u64) -> u32 {
         (offset_in_chunk / self.block_size as u64) as u32
     }
@@ -77,6 +83,7 @@ impl ChunkLayout {
 
 /// 逻辑 chunk 的键（内存索引使用）。
 #[derive(Debug, Clone, Copy, Eq)]
+#[allow(dead_code)]
 pub struct ChunkKey {
     pub ino: i64,
     pub index: i32,
@@ -107,7 +114,11 @@ pub struct ChunkMeta {
 impl ChunkMeta {
     #[allow(dead_code)]
     pub fn new(chunk_id: i64, ino: i64, index: i32) -> Self {
-        Self { chunk_id, ino, index }
+        Self {
+            chunk_id,
+            ino,
+            index,
+        }
     }
 }
 
@@ -118,7 +129,11 @@ pub struct InMemoryChunkIndex {
 }
 
 impl InMemoryChunkIndex {
-    pub fn new() -> Self { Self { map: HashMap::new() } }
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
 
     pub fn incr_slice_count(&mut self, key: ChunkKey) {
         *self.map.entry(key).or_insert(0) += 1;

@@ -190,12 +190,12 @@ impl State {
     }
 
     /// Get a ReadGuard of pods information.
-    pub async fn pods(&self) -> RwLockReadGuard<Vec<PodTask>> {
+    pub async fn pods(&self) -> RwLockReadGuard<'_, Vec<PodTask>> {
         self.pods_info.read().await
     }
 
     /// Get a WriteGuard of pods information.
-    pub async fn pods_mut(&self) -> RwLockWriteGuard<Vec<PodTask>> {
+    pub async fn pods_mut(&self) -> RwLockWriteGuard<'_, Vec<PodTask>> {
         self.pods_info.write().await
     }
 }

@@ -6,9 +6,9 @@
 //! - 提供 LocalFs 的便捷构造
 
 use crate::chuck::chunk::ChunkLayout;
-use crate::vfs::fs::{DirEntry, FileAttr, Fs};
-use crate::meta::{MetaStore, InMemoryMetaStore};
 use crate::chuck::store::BlockStore;
+use crate::meta::{InMemoryMetaStore, MetaStore};
+use crate::vfs::fs::{DirEntry, FileAttr, Fs};
 
 /// SDK 客户端（泛型后端）。
 pub struct Client<S: BlockStore, M: MetaStore> {
@@ -31,7 +31,12 @@ impl<S: BlockStore, M: MetaStore> Client<S, M> {
         Ok(())
     }
 
-    pub async fn write_at(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
+    pub async fn write_at(
+        &mut self,
+        path: &str,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<usize, String> {
         self.fs.write(path, offset, data).await
     }
 
@@ -40,7 +45,10 @@ impl<S: BlockStore, M: MetaStore> Client<S, M> {
     }
 
     pub async fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, String> {
-        self.fs.readdir(path).await.ok_or_else(|| "not a dir or not found".into())
+        self.fs
+            .readdir(path)
+            .await
+            .ok_or_else(|| "not a dir or not found".into())
     }
 
     pub async fn stat(&self, path: &str) -> Result<FileAttr, String> {
@@ -91,8 +99,8 @@ mod tests {
     #[tokio::test]
     async fn test_sdk_local_basic() {
         let layout = ChunkLayout::default();
-    let tmp = tempdir().unwrap();
-    let mut cli = LocalClient::new_local(tmp.path(), layout).await;
+        let tmp = tempdir().unwrap();
+        let mut cli = LocalClient::new_local(tmp.path(), layout).await;
 
         cli.mkdir_p("/a/b").await.unwrap();
         cli.create("/a/b/hello.txt").await.unwrap();
@@ -100,10 +108,17 @@ mod tests {
         let half = (layout.block_size / 2) as usize;
         let len = layout.block_size as usize + half;
         let mut data = vec![0u8; len];
-        for i in 0..len { data[i] = (i % 251) as u8; }
-        cli.write_at("/a/b/hello.txt", half as u64, &data).await.unwrap();
+        for (i, b) in data.iter_mut().enumerate().take(len) {
+            *b = (i % 251) as u8;
+        }
+        cli.write_at("/a/b/hello.txt", half as u64, &data)
+            .await
+            .unwrap();
 
-        let out = cli.read_at("/a/b/hello.txt", half as u64, len).await.unwrap();
+        let out = cli
+            .read_at("/a/b/hello.txt", half as u64, len)
+            .await
+            .unwrap();
         assert_eq!(out, data);
 
         let ent = cli.readdir("/a/b").await.unwrap();
@@ -116,13 +131,15 @@ mod tests {
     #[tokio::test]
     async fn test_sdk_local_ops_extras() {
         let layout = ChunkLayout::default();
-    let tmp = tempdir().unwrap();
-    let cli = LocalClient::new_local(tmp.path(), layout).await;
+        let tmp = tempdir().unwrap();
+        let cli = LocalClient::new_local(tmp.path(), layout).await;
 
         cli.mkdir_p("/x/y").await.unwrap();
         cli.create("/x/y/a.txt").await.unwrap();
         cli.rename("/x/y/a.txt", "/x/y/b.txt").await.unwrap();
-        cli.truncate("/x/y/b.txt", (layout.block_size * 2) as u64).await.unwrap();
+        cli.truncate("/x/y/b.txt", (layout.block_size * 2) as u64)
+            .await
+            .unwrap();
         let st = cli.stat("/x/y/b.txt").await.unwrap();
         assert!(st.size >= (layout.block_size * 2) as u64);
         cli.unlink("/x/y/b.txt").await.unwrap();

@@ -3,20 +3,31 @@
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
-use crate::chuck::util::{split_file_range_into_chunks, ChunkSpan};
+use crate::chuck::util::{ChunkSpan, split_file_range_into_chunks};
 use crate::chuck::writer::ChunkWriter;
 use crate::meta::MetaStore;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FileType { File, Dir }
+pub enum FileType {
+    File,
+    Dir,
+}
 
 #[derive(Clone, Debug)]
-pub struct FileAttr { pub ino: i64, pub size: u64, pub kind: FileType }
+pub struct FileAttr {
+    pub ino: i64,
+    pub size: u64,
+    pub kind: FileType,
+}
 
 #[derive(Clone, Debug)]
-pub struct DirEntry { pub name: String, pub ino: i64, pub kind: FileType }
+pub struct DirEntry {
+    pub name: String,
+    pub ino: i64,
+    pub kind: FileType,
+}
 
 /// 命名空间节点（内存）
 ///
@@ -46,9 +57,23 @@ struct VNode {
 
 impl VNode {
     /// 构造目录节点；`children` 初始为空，由上层在持锁状态下填充。
-    fn dir(name: String, parent: Option<i64>) -> Self { Self { kind: FileType::Dir, name, parent, children: HashMap::new() } }
+    fn dir(name: String, parent: Option<i64>) -> Self {
+        Self {
+            kind: FileType::Dir,
+            name,
+            parent,
+            children: HashMap::new(),
+        }
+    }
     /// 构造文件节点；`children` 始终保持为空。
-    fn file(name: String, parent: Option<i64>) -> Self { Self { kind: FileType::File, name, parent, children: HashMap::new() } }
+    fn file(name: String, parent: Option<i64>) -> Self {
+        Self {
+            kind: FileType::File,
+            name,
+            parent,
+            children: HashMap::new(),
+        }
+    }
 }
 
 /// 命名空间集合：用单一互斥锁保护节点表与路径索引，避免多把锁的死锁风险。
@@ -90,8 +115,8 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// - 初始化内存命名空间（nodes + 路径索引）。
     /// - 约束：根目录的 parent 为 None。
     pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Self {
-    let mut nodes = HashMap::new();
-    let mut lookup = HashMap::new();
+        let mut nodes = HashMap::new();
+        let mut lookup = HashMap::new();
         // 分配根目录 inode
         let root_ino = {
             let mut tx = meta.begin().await;
@@ -103,15 +128,24 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
         lookup.insert("/".into(), root_ino);
         // 设定 chunk_id 计算的基数，避免与 chunk 索引冲突（简化实现）。
         let base = 1_000_000_000i64;
-    let ns = Namespace { nodes, lookup };
-    Self { layout, store, meta, base, ns: Mutex::new(ns), root: root_ino }
+        let ns = Namespace { nodes, lookup };
+        Self {
+            layout,
+            store,
+            meta,
+            base,
+            ns: Mutex::new(ns),
+            root: root_ino,
+        }
     }
 
     /// 规范化路径（内部）：
     /// - 去除多余分隔，确保以 `/` 开头；不解析 `.`/`..`（后续可扩展）。
     fn norm_path(p: &str) -> String {
-        if p.is_empty() { return "/".into(); }
-    let parts: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
+        if p.is_empty() {
+            return "/".into();
+        }
+        let parts: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
         let mut out = String::from("/");
         out.push_str(&parts.join("/"));
         if out.is_empty() { "/".into() } else { out }
@@ -120,10 +154,16 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// 拆分为父目录与基名（内部）。
     fn split_dir_file(path: &str) -> (String, String) {
         let n = path.rfind('/').unwrap_or(0);
-        if n == 0 { ("/".into(), path[1..].into()) } else { (path[..n].into(), path[n + 1..].into()) }
+        if n == 0 {
+            ("/".into(), path[1..].into())
+        } else {
+            (path[..n].into(), path[n + 1..].into())
+        }
     }
 
-    fn chunk_id_for(&self, ino: i64, chunk_index: u64) -> i64 { ino.checked_mul(self.base).unwrap_or(ino) + chunk_index as i64 }
+    fn chunk_id_for(&self, ino: i64, chunk_index: u64) -> i64 {
+        ino.checked_mul(self.base).unwrap_or(ino) + chunk_index as i64
+    }
 
     /// mkdir -p 风格：创建多级目录。
     /// 递归创建目录（mkdir -p）：
@@ -132,19 +172,29 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// - 返回：目标目录的 inode。
     pub async fn mkdir_p(&self, path: &str) -> Result<i64, String> {
         let path = Self::norm_path(path);
-        if &path == "/" { return Ok(self.root); }
-        let mut ns = self.ns.lock().unwrap();
-        if let Some(&ino) = ns.lookup.get(&path) { return Ok(ino); }
+        if &path == "/" {
+            return Ok(self.root);
+        }
+        if let Some(ino) = { self.ns.lock().unwrap().lookup.get(&path).cloned() } {
+            return Ok(ino);
+        }
         // 逐段创建
         let mut cur_ino = self.root;
         let mut cur_path = String::from("/");
         for part in path.trim_start_matches('/').split('/') {
-            if part.is_empty() { continue; }
-            if cur_path != "/" { cur_path.push('/'); }
+            if part.is_empty() {
+                continue;
+            }
+            if cur_path != "/" {
+                cur_path.push('/');
+            }
             cur_path.push_str(part);
-            if let Some(&ino) = ns.lookup.get(&cur_path) {
-                // 冲突：路径段存在但不是目录
-                if let Some(v) = ns.nodes.get(&ino) { if v.kind != FileType::Dir { return Err("not a directory".into()); } }
+            if let Some(ino) = { self.ns.lock().unwrap().lookup.get(&cur_path).cloned() } {
+                if let Some(v) = { self.ns.lock().unwrap().nodes.get(&ino).map(|v| v.kind) }
+                    && v != FileType::Dir
+                {
+                    return Err("not a directory".into());
+                }
                 cur_ino = ino;
                 continue;
             }
@@ -155,9 +205,15 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
                 tx.commit().await.map_err(|e| e.to_string())?;
                 ino
             };
-            ns.nodes.insert(ino, VNode::dir(part.to_string(), Some(cur_ino)));
-            if let Some(parent) = ns.nodes.get_mut(&cur_ino) { parent.children.insert(part.to_string(), ino); }
-            ns.lookup.insert(cur_path.clone(), ino);
+            {
+                let mut ns = self.ns.lock().unwrap();
+                ns.nodes
+                    .insert(ino, VNode::dir(part.to_string(), Some(cur_ino)));
+                if let Some(parent) = ns.nodes.get_mut(&cur_ino) {
+                    parent.children.insert(part.to_string(), ino);
+                }
+                ns.lookup.insert(cur_path.clone(), ino);
+            }
             cur_ino = ino;
         }
         Ok(cur_ino)
@@ -172,15 +228,36 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
         let path = Self::norm_path(path);
         let (dir, name) = Self::split_dir_file(&path);
         let dir_ino = self.mkdir_p(&dir).await?;
-        let mut ns = self.ns.lock().unwrap();
         // 目录必须是目录
-        if let Some(d) = ns.nodes.get(&dir_ino) { if d.kind != FileType::Dir { return Err("not a directory".into()); } }
+        if let Some(kind) = { self.ns.lock().unwrap().nodes.get(&dir_ino).map(|d| d.kind) }
+            && kind != FileType::Dir
+        {
+            return Err("not a directory".into());
+        }
         // 冲突：同名目录存在
-        if let Some(d) = ns.nodes.get(&dir_ino) {
-            if let Some(&ino) = d.children.get(&name) {
-                let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
-                return if vnode.kind == FileType::Dir { Err("is a directory".into()) } else { Ok(ino) };
-            }
+        if let Some(ino) = {
+            self.ns
+                .lock()
+                .unwrap()
+                .nodes
+                .get(&dir_ino)
+                .and_then(|d| d.children.get(&name))
+                .cloned()
+        } {
+            let kind = {
+                self.ns
+                    .lock()
+                    .unwrap()
+                    .nodes
+                    .get(&ino)
+                    .map(|v| v.kind)
+                    .ok_or_else(|| "not found".to_string())?
+            };
+            return if kind == FileType::Dir {
+                Err("is a directory".into())
+            } else {
+                Ok(ino)
+            };
         }
         let ino = {
             let mut tx = self.meta.begin().await;
@@ -188,9 +265,15 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
             tx.commit().await.map_err(|e| e.to_string())?;
             ino
         };
-        ns.nodes.insert(ino, VNode::file(name.clone(), Some(dir_ino)));
-        if let Some(d) = ns.nodes.get_mut(&dir_ino) { d.children.insert(name.clone(), ino); }
-        ns.lookup.insert(path, ino);
+        {
+            let mut ns = self.ns.lock().unwrap();
+            ns.nodes
+                .insert(ino, VNode::file(name.clone(), Some(dir_ino)));
+            if let Some(d) = ns.nodes.get_mut(&dir_ino) {
+                d.children.insert(name.clone(), ino);
+            }
+            ns.lookup.insert(path, ino);
+        }
         Ok(ino)
     }
 
@@ -199,9 +282,14 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// - 未找到返回 None。
     pub async fn stat(&self, path: &str) -> Option<FileAttr> {
         let path = Self::norm_path(path);
-    let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }?;
-    let kind = { self.ns.lock().unwrap().nodes.get(&ino).map(|v| v.kind)? };
-        let size = self.meta.get_inode_meta(ino).await.map(|m| m.size).unwrap_or(0);
+        let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }?;
+        let kind = { self.ns.lock().unwrap().nodes.get(&ino).map(|v| v.kind)? };
+        let size = self
+            .meta
+            .get_inode_meta(ino)
+            .await
+            .map(|m| m.size)
+            .unwrap_or(0);
         Some(FileAttr { ino, size, kind })
     }
 
@@ -213,11 +301,17 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
         let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }?;
         let ns = self.ns.lock().unwrap();
         let vnode = ns.nodes.get(&ino)?;
-        if vnode.kind != FileType::Dir { return None; }
+        if vnode.kind != FileType::Dir {
+            return None;
+        }
         let mut out = Vec::new();
         for (name, &child_ino) in &vnode.children {
             let child = ns.nodes.get(&child_ino)?;
-            out.push(DirEntry { name: name.clone(), ino: child_ino, kind: child.kind });
+            out.push(DirEntry {
+                name: name.clone(),
+                ino: child_ino,
+                kind: child.kind,
+            });
         }
         Some(out)
     }
@@ -226,7 +320,7 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// 路径是否存在（快速查询）。
     pub fn exists(&self, path: &str) -> bool {
         let path = Self::norm_path(path);
-    self.ns.lock().unwrap().lookup.contains_key(&path)
+        self.ns.lock().unwrap().lookup.contains_key(&path)
     }
 
     /// 删除文件（不支持目录）。
@@ -236,13 +330,24 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     pub async fn unlink(&self, path: &str) -> Result<(), String> {
         let path = Self::norm_path(path);
         let mut ns = self.ns.lock().unwrap();
-        let ino = ns.lookup.get(&path).cloned().ok_or_else(|| "not found".to_string())?;
+        let ino = ns
+            .lookup
+            .get(&path)
+            .cloned()
+            .ok_or_else(|| "not found".to_string())?;
         let (parent, kind) = {
             let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
-            (vnode.parent.ok_or_else(|| "orphan".to_string())?, vnode.kind)
+            (
+                vnode.parent.ok_or_else(|| "orphan".to_string())?,
+                vnode.kind,
+            )
         };
-        if kind != FileType::File { return Err("is a directory".into()); }
-        if let Some(p) = ns.nodes.get_mut(&parent) { p.children.retain(|_, v| *v != ino); }
+        if kind != FileType::File {
+            return Err("is a directory".into());
+        }
+        if let Some(p) = ns.nodes.get_mut(&parent) {
+            p.children.retain(|_, v| *v != ino);
+        }
         ns.lookup.remove(&path);
         ns.nodes.remove(&ino);
         Ok(())
@@ -253,16 +358,28 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// - 根目录不可删除；非空返回 `"directory not empty"`。
     pub async fn rmdir(&self, path: &str) -> Result<(), String> {
         let path = Self::norm_path(path);
-        if path == "/" { return Err("cannot remove root".into()); }
-    let mut ns = self.ns.lock().unwrap();
-    let ino = ns.lookup.get(&path).cloned().ok_or_else(|| "not found".to_string())?;
-    let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
-    if vnode.kind != FileType::Dir { return Err("not a directory".into()); }
-    if !vnode.children.is_empty() { return Err("directory not empty".into()); }
-    let parent = vnode.parent.ok_or_else(|| "orphan".to_string())?;
-    if let Some(p) = ns.nodes.get_mut(&parent) { p.children.retain(|_, v| *v != ino); }
-    ns.lookup.remove(&path);
-    ns.nodes.remove(&ino);
+        if path == "/" {
+            return Err("cannot remove root".into());
+        }
+        let mut ns = self.ns.lock().unwrap();
+        let ino = ns
+            .lookup
+            .get(&path)
+            .cloned()
+            .ok_or_else(|| "not found".to_string())?;
+        let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
+        if vnode.kind != FileType::Dir {
+            return Err("not a directory".into());
+        }
+        if !vnode.children.is_empty() {
+            return Err("directory not empty".into());
+        }
+        let parent = vnode.parent.ok_or_else(|| "orphan".to_string())?;
+        if let Some(p) = ns.nodes.get_mut(&parent) {
+            p.children.retain(|_, v| *v != ino);
+        }
+        ns.lookup.remove(&path);
+        ns.nodes.remove(&ino);
         Ok(())
     }
 
@@ -274,30 +391,49 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
         let old = Self::norm_path(old);
         let new = Self::norm_path(new);
         let (new_dir, new_name) = Self::split_dir_file(&new);
-        if self.ns.lock().unwrap().lookup.contains_key(&new) { return Err("target exists".into()); }
-        let ino = { self.ns.lock().unwrap().lookup.get(&old).cloned() }.ok_or_else(|| "not found".to_string())?;
+        if self.ns.lock().unwrap().lookup.contains_key(&new) {
+            return Err("target exists".into());
+        }
+        let ino = { self.ns.lock().unwrap().lookup.get(&old).cloned() }
+            .ok_or_else(|| "not found".to_string())?;
         // 创建缺失的父目录并获取其 inode
         self.mkdir_p(&new_dir).await?;
-        let new_dir_ino = self.ns.lock().unwrap().lookup.get(&new_dir).cloned().ok_or_else(|| "parent not found".to_string())?;
+        let new_dir_ino = self
+            .ns
+            .lock()
+            .unwrap()
+            .lookup
+            .get(&new_dir)
+            .cloned()
+            .ok_or_else(|| "parent not found".to_string())?;
 
         // 操作命名空间时小心借用范围，避免同时持有多个可变借用
         let mut ns = self.ns.lock().unwrap();
         let old_parent = {
             let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
-            if vnode.kind != FileType::File { return Err("only file supported".into()); }
+            if vnode.kind != FileType::File {
+                return Err("only file supported".into());
+            }
             vnode.parent
         };
         // 从旧父目录移除
-        if let Some(parent) = old_parent {
-            if let Some(p) = ns.nodes.get_mut(&parent) { p.children.retain(|_, v| *v != ino); }
+        if let Some(parent) = old_parent
+            && let Some(p) = ns.nodes.get_mut(&parent)
+        {
+            p.children.retain(|_, v| *v != ino);
         }
         // 设置新父与名字
         {
-            let vnode = ns.nodes.get_mut(&ino).ok_or_else(|| "not found".to_string())?;
+            let vnode = ns
+                .nodes
+                .get_mut(&ino)
+                .ok_or_else(|| "not found".to_string())?;
             vnode.parent = Some(new_dir_ino);
             vnode.name = new_name.clone();
         }
-        if let Some(p) = ns.nodes.get_mut(&new_dir_ino) { p.children.insert(new_name.clone(), ino); }
+        if let Some(p) = ns.nodes.get_mut(&new_dir_ino) {
+            p.children.insert(new_name.clone(), ino);
+        }
         // 更新查找表
         ns.lookup.remove(&old);
         ns.lookup.insert(new, ino);
@@ -310,9 +446,12 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// - 大小收缩不会即时清理块数据（后续可增加惰性 GC）。
     pub async fn truncate(&self, path: &str, size: u64) -> Result<(), String> {
         let path = Self::norm_path(path);
-    let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }.ok_or_else(|| "not found".to_string())?;
+        let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }
+            .ok_or_else(|| "not found".to_string())?;
         let mut tx = self.meta.begin().await;
-        tx.update_inode_size(ino, size).await.map_err(|e| e.to_string())?;
+        tx.update_inode_size(ino, size)
+            .await
+            .map_err(|e| e.to_string())?;
         tx.commit().await.map_err(|e| e.to_string())
     }
 
@@ -322,22 +461,25 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// - 返回写入的字节数；当前未保证跨多块的强原子性（后续可引入更细粒度事务）。
     pub async fn write(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
         let path = Self::norm_path(path);
-    let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }.ok_or_else(|| "not found".to_string())?;
+        let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }
+            .ok_or_else(|| "not found".to_string())?;
         let spans: Vec<ChunkSpan> = split_file_range_into_chunks(self.layout, offset, data.len());
         let mut cursor = 0usize;
         for sp in spans {
             let cid = self.chunk_id_for(ino, sp.chunk_index);
             let mut w = ChunkWriter::new(self.layout, cid, &mut self.store);
-            let take = sp.len as usize;
+            let take = sp.len;
             let buf = &data[cursor..cursor + take];
             let _slice = w.write(sp.offset_in_chunk, buf).await;
             cursor += take;
         }
-    // 一次性更新 size
-    let new_size = offset + data.len() as u64;
-    let mut tx = self.meta.begin().await;
-    tx.update_inode_size(ino, new_size).await.map_err(|e| e.to_string())?;
-    tx.commit().await.map_err(|e| e.to_string())?;
+        // 一次性更新 size
+        let new_size = offset + data.len() as u64;
+        let mut tx = self.meta.begin().await;
+        tx.update_inode_size(ino, new_size)
+            .await
+            .map_err(|e| e.to_string())?;
+        tx.commit().await.map_err(|e| e.to_string())?;
         Ok(data.len())
     }
 
@@ -346,14 +488,17 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// - 对未写入区域返回 0 填充；len=0 返回空向量。
     pub async fn read(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, String> {
         let path = Self::norm_path(path);
-    let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }.ok_or_else(|| "not found".to_string())?;
-        if len == 0 { return Ok(Vec::new()); }
+        let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }
+            .ok_or_else(|| "not found".to_string())?;
+        if len == 0 {
+            return Ok(Vec::new());
+        }
         let spans: Vec<ChunkSpan> = split_file_range_into_chunks(self.layout, offset, len);
         let mut out = Vec::with_capacity(len);
         for sp in spans {
             let cid = self.chunk_id_for(ino, sp.chunk_index);
             let r = ChunkReader::new(self.layout, cid, &self.store);
-            let part = r.read(sp.offset_in_chunk, sp.len as usize).await;
+            let part = r.read(sp.offset_in_chunk, sp.len).await;
             out.extend(part);
         }
         Ok(out)
@@ -375,19 +520,30 @@ mod tests {
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
         let store = ObjectBlockStore::new(client);
         let meta = InMemoryMetaStore::new();
-    let mut fs = Fs::new(layout, store, meta).await;
+        let mut fs = Fs::new(layout, store, meta).await;
 
         fs.mkdir_p("/a/b").await.expect("mkdir_p");
         fs.create_file("/a/b/hello.txt").await.expect("create");
         let data_len = layout.block_size as usize + (layout.block_size / 2) as usize;
         let mut data = vec![0u8; data_len];
-        for i in 0..data_len { data[i] = (i % 251) as u8; }
-        fs.write("/a/b/hello.txt", (layout.block_size / 2) as u64, &data).await.expect("write");
-        let out = fs.read("/a/b/hello.txt", (layout.block_size / 2) as u64, data_len).await.expect("read");
+        for (i, b) in data.iter_mut().enumerate().take(data_len) {
+            *b = (i % 251) as u8;
+        }
+        fs.write("/a/b/hello.txt", (layout.block_size / 2) as u64, &data)
+            .await
+            .expect("write");
+        let out = fs
+            .read("/a/b/hello.txt", (layout.block_size / 2) as u64, data_len)
+            .await
+            .expect("read");
         assert_eq!(out, data);
 
         let entries = fs.readdir("/a/b").await.expect("readdir");
-        assert!(entries.iter().any(|e| e.name == "hello.txt" && e.kind == FileType::File));
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.name == "hello.txt" && e.kind == FileType::File)
+        );
 
         let stat = fs.stat("/a/b/hello.txt").await.unwrap();
         assert_eq!(stat.kind, FileType::File);
@@ -401,7 +557,7 @@ mod tests {
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
         let store = ObjectBlockStore::new(client);
         let meta = InMemoryMetaStore::new();
-    let fs = Fs::new(layout, store, meta).await;
+        let fs = Fs::new(layout, store, meta).await;
 
         fs.mkdir_p("/a/b").await.unwrap();
         fs.create_file("/a/b/t.txt").await.unwrap();
@@ -412,7 +568,9 @@ mod tests {
         assert!(!fs.exists("/a/b/t.txt") && fs.exists("/a/b/u.txt"));
 
         // truncate
-        fs.truncate("/a/b/u.txt", (layout.block_size * 2) as u64).await.unwrap();
+        fs.truncate("/a/b/u.txt", layout.block_size as u64 * 2)
+            .await
+            .unwrap();
         let st = fs.stat("/a/b/u.txt").await.unwrap();
         assert!(st.size >= (layout.block_size * 2) as u64);
 
