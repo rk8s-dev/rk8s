@@ -4,7 +4,7 @@ use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
 use crate::chuck::writer::ChunkWriter;
-use crate::meta::{InMemoryMetaStore, MetaStore};
+use crate::meta::MetaStore;
 
 /// 一个最小的 VFS 对象，持有块存储与元数据存储。
 pub struct SimpleVfs<S: BlockStore, M: MetaStore> {
@@ -52,6 +52,7 @@ mod tests {
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
     use crate::chuck::store::ObjectBlockStore;
+    use crate::meta::InMemoryMetaStore;
 
     #[tokio::test]
     async fn test_simple_vfs_write_read() {

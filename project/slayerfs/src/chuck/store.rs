@@ -154,10 +154,13 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
 }
 
 /// 便捷别名：基于真实 S3Backend 的 BlockStore
+#[allow(dead_code)]
 pub type S3BlockStore = ObjectBlockStore<crate::cadapter::s3::S3Backend>;
 /// 便捷别名：基于 RustfsLikeBackend 的 BlockStore
+#[allow(dead_code)]
 pub type RustfsBlockStore = ObjectBlockStore<crate::cadapter::rustfs::RustfsLikeBackend>;
 /// 便捷别名：基于 LocalFsBackend 的 BlockStore（mock 本地目录）
+#[allow(dead_code)]
 pub type LocalFsBlockStore = ObjectBlockStore<crate::cadapter::localfs::LocalFsBackend>;
 
 #[cfg(test)]

@@ -40,6 +40,7 @@ impl Default for ChunkLayout {
 
 impl ChunkLayout {
     #[inline]
+    #[allow(dead_code)]
     pub fn blocks_per_chunk(&self) -> u32 {
         let bs = self.block_size as u64;
         ((self.chunk_size + bs - 1) / bs) as u32
@@ -96,6 +97,7 @@ impl Hash for ChunkKey {
 
 /// chunk 元数据占位（未来可扩展如校验、时间戳等）。
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct ChunkMeta {
     pub chunk_id: i64,
     pub ino: i64,
@@ -103,6 +105,7 @@ pub struct ChunkMeta {
 }
 
 impl ChunkMeta {
+    #[allow(dead_code)]
     pub fn new(chunk_id: i64, ino: i64, index: i32) -> Self {
         Self { chunk_id, ino, index }
     }

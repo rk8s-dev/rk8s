@@ -139,7 +139,8 @@ impl MetaTxn for InMemoryTxn {
 				}
 				Op::UpdateSize { ino, size } => {
 					let inode = guard.inodes.entry(ino).or_insert_with(|| InodeMeta { ino, ..Default::default() });
-					if size > inode.size { inode.size = size; }
+					// 允许扩展和收缩：直接赋值
+					inode.size = size;
 				}
 			}
 		}
