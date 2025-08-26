@@ -1,23 +1,21 @@
-//! rustfs 适配器的最小占位实现：同样用本地目录模拟对象存储。
+//! 本地文件目录后端，用于 mock 存储适配器（实现 ObjectBackend）。
 
 use crate::cadapter::client::ObjectBackend;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use tokio::{fs, io::AsyncWriteExt};
 
-#[allow(dead_code)]
-pub struct RustfsLikeBackend {
+pub struct LocalFsBackend {
     root: PathBuf,
 }
 
-#[allow(dead_code)]
-impl RustfsLikeBackend {
+impl LocalFsBackend {
     pub fn new<P: AsRef<Path>>(root: P) -> Self { Self { root: root.as_ref().to_path_buf() } }
     fn path_for(&self, key: &str) -> PathBuf { self.root.join(key) }
 }
 
 #[async_trait]
-impl ObjectBackend for RustfsLikeBackend {
+impl ObjectBackend for LocalFsBackend {
     async fn put_object(&self, key: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let path = self.path_for(key);
         if let Some(dir) = path.parent() { fs::create_dir_all(dir).await?; }

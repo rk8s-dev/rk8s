@@ -17,5 +17,9 @@
 //! - `cache`: caching helpers and policies
 pub mod cache;
 pub mod handles;
+pub mod demo;
+pub mod simple;
+pub mod fs;
+pub mod sdk;
 
 // Module implementation TODOs remain.

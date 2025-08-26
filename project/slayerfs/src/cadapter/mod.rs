@@ -13,5 +13,5 @@
 pub mod client;
 pub mod rustfs;
 pub mod s3;
-
+pub mod localfs;
 // Module-level TODOs remain: implement concrete adapter logic and tests.

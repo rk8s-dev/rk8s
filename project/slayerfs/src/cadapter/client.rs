@@ -1,17 +1,25 @@
-//! High-level client API for chunk/object store
-//!
-//! This module exports the main client used by writer/reader code to PUT/GET
-//! block objects. Start with simple async functions that wrap the lower-level
-//! backends.
+//! 高层对象客户端，封装后端 put/get。
 
-#[allow(dead_code)]
-pub async fn put_object(_key: &str, _data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: implement
-    Ok(())
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait ObjectBackend: Send + Sync {
+    async fn put_object(&self, key: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>>;
 }
 
-#[allow(dead_code)]
-pub async fn get_object(_key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-    // TODO: implement
-    Ok(None)
+pub struct ObjectClient<B: ObjectBackend> {
+    backend: B,
+}
+
+impl<B: ObjectBackend> ObjectClient<B> {
+    pub fn new(backend: B) -> Self { Self { backend } }
+
+    pub async fn put_object(&self, key: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.backend.put_object(key, data).await
+    }
+
+    pub async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+        self.backend.get_object(key).await
+    }
 }
