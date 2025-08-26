@@ -132,7 +132,9 @@ which = { version = "4.4.2" }
 tabwriter = "1.4.1"
 moka = { version = "0.12.10", features = ["future"] }
 memmap2 = "0.9.7"
-
+gethostname = "0.4"
+get_if_addrs = "0.5"
+sysinfo = "0.30"
 
 # Local patches - typically git references
 [patch.crates-io]
