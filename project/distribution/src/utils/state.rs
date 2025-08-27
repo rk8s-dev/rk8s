@@ -2,6 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
 use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
+use crate::storage::user_storage::UserStorage;
+use crate::utils::cli::Args;
 
 #[derive(Clone, Debug)]
 pub struct UploadSession {
@@ -9,24 +11,41 @@ pub struct UploadSession {
     pub uploaded: u64, // the last uploaded byte index
 }
 
+#[derive(Clone, Debug)]
+pub struct Config {
+    pub host: String,
+    pub port: u16,
+    pub storge_typ: String,
+    pub root_dir: String,
+    pub registry_url: String,
+    pub db_url: String,
+    pub password_salt: String,
+    pub jwt_secret: String,
+    pub jwt_lifetime_secs: i64,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: Arc<RwLock<HashMap<String, UploadSession>>>,
     pub storage: Arc<dyn Storage>,
-    pub registry: Arc<String>, // Registry URL
+    pub user_storage: Arc<UserStorage>,
+    pub config: Arc<Config>,
 }
 
 impl AppState {
-    pub fn new(storage_type: &str, root: &str, registry: &str) -> Self {
-        let storage_backend: Arc<dyn Storage + Send + Sync> = match storage_type {
-            "FILESYSTEM" => Arc::new(FilesystemStorage::new(root)),
-            _ => Arc::new(FilesystemStorage::new(root)),
+    pub async fn new(config: Config) -> anyhow::Result<Self> {
+        let storage_backend: Arc<dyn Storage + Send + Sync> = match config.storge_typ.as_str() {
+            "FILESYSTEM" => Arc::new(FilesystemStorage::new(&config.root_dir)),
+            _ => Arc::new(FilesystemStorage::new(&config.root_dir)),
         };
-        AppState {
+        
+        let db_url = config.db_url.to_string();
+        Ok(AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             storage: storage_backend,
-            registry: Arc::new(registry.to_string()),
-        }
+            config: Arc::new(config),
+            user_storage: Arc::new(UserStorage::new(&db_url).await?),
+        })
     }
 
     pub async fn get_session(&self, id: &str) -> Option<UploadSession> {

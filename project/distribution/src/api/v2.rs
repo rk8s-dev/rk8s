@@ -11,17 +11,47 @@ use axum::Router;
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 pub fn create_v2_router() -> Router<Arc<AppState>> {
-    // NOTE: dispatch_handler is responsible for handling requests with a `name` containing a `/`
     Router::new()
         // Determine support
         .route("/", get(|| async { StatusCode::OK.into_response() }))
+        // Manifests API
+        .route(
+            "/*name/manifests/:reference",
+            get(get_manifest_handler)
+                .head(head_manifest_handler)
+                .put(put_manifest_handler)
+                .delete(delete_manifest_handler),
+        )
+        // Blobs API
+        .route(
+            "/*name/blobs/:digest",
+            get(get_blob_handler)
+                .head(head_blob_handler)
+                .delete(delete_blob_handler),
+        )
+        // Blobs Uploads API
+        .route(
+            "/*name/blobs/uploads/",
+            post(post_blob_handler)
+        )
+        .route(
+            "/*name/blobs/uploads/:session_id",
+            get(get_blob_status_handler)
+                .patch(patch_blob_handler)
+                .put(put_blob_handler)
+        )
+        // Tags API
+        .route(
+            "/*name/tags/list",
+            get(get_tag_list_handler),
+        )
         // List tags
-        .route("/{*tail}", any(dispatch_handler))
+        // .route("/{*tail}", any(dispatch_handler))
 }
 
 async fn dispatch_handler(

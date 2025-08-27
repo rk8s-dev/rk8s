@@ -348,7 +348,7 @@ pub async fn get_tag_list_handler(
             if need_link {
                 let next_link = format!(
                     "{}/v2/{}/tags/list?n={}&last={}",
-                    state.registry,
+                    state.config.registry_url,
                     name,
                     n_value,
                     tag_list.tags().last().unwrap()
