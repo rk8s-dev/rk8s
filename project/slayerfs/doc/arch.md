@@ -1,6 +1,6 @@
 # S3LayerFS
 
-````markdown
+
 # S3LayerFS
 
 Version: 0.1
@@ -36,6 +36,73 @@ Overall architecture (layered)
 - ChunkStore adapter: implementation that targets `rustfs` (preferred) or an S3-compatible adapter
 - Local cache: disk or memory-backed cache
 - Background workers: heartbeat, compaction, GC, upload pools
+
+## Architecture diagram
+
+```mermaid
+flowchart TD
+	subgraph App["CLI / Daemon"]
+		CLI["CLI / Daemon"]
+	end
+
+	subgraph Fuse["FUSE adapter"]
+		FUSE["FUSE adapter"]
+	end
+
+	subgraph VFS["VFS layer"]
+		VFSCore["VFS: POSIX semantics, handles, cache control"]
+		Cache["Local cache (memory/disk)"]
+	end
+
+	subgraph Meta["MetaClient"]
+		MetaClient["Meta client (SQLx)"]
+		DB["Postgres / SQLite"]
+	end
+
+	subgraph Data["Data layer"]
+		Writer["Writer: buffer -> slice -> split -> block"]
+		Reader["Reader: metadata lookup -> assemble blocks"]
+	end
+
+	subgraph Adapter["ChunkStore adapter"]
+		CAdapter["Chunk/Object Store Adapter"]
+		S3["S3-compatible"]
+		Rustfs["rustfs backend"]
+	end
+
+	subgraph BG["Background workers"]
+		Workers["heartbeat, compaction, GC, upload pools"]
+	end
+
+	%% App entry
+	CLI --> FUSE --> VFSCore
+
+	%% VFS interactions
+	VFSCore <--> Cache
+	VFSCore --> MetaClient
+	MetaClient --> DB
+
+	%% Write path
+	VFSCore --> Writer
+	Writer --> CAdapter --> S3
+	CAdapter --> Rustfs
+	Writer --> MetaClient
+
+	%% Read path
+	VFSCore --> Reader
+	Reader --> MetaClient
+	Reader --> CAdapter --> S3
+	Reader -.-> Cache
+
+	%% Background workers
+	Workers --> MetaClient
+	Workers --> CAdapter
+```
+
+说明：
+- 写路径（绿色实线）：VFS 将写缓冲切片与分块后，通过 Adapter 上传块对象，并向 Meta 提交 blocks/slice_blocks/slices 以及 inode.size 的原子更新。
+- 读路径（蓝色虚线）：VFS 先查 Meta 获取块信息，从 Adapter 读取并按需填充本地缓存，再拼装返回。
+- 后台任务：心跳、合并压缩（compaction）、GC、并行上传池等与 Meta/Adapter 协作。
 
 Modules communicate primarily using async Tokio; IO and uploads are asynchronous and concurrent.
 
@@ -99,8 +166,5 @@ CREATE TABLE sessions (
 );
 ```
 
-Transaction principle: visibility updates on the write path (blocks + slice_blocks + slices + inode.size) must be committed within a single DB transaction or otherwise guaranteed to be atomically visible.
-
-````
 
 

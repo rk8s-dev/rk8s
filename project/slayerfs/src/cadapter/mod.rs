@@ -11,7 +11,7 @@
 //! - Expose metrics and concurrency controls for upload/download pools.
 //!
 pub mod client;
+pub mod localfs;
 pub mod rustfs;
 pub mod s3;
-
 // Module-level TODOs remain: implement concrete adapter logic and tests.

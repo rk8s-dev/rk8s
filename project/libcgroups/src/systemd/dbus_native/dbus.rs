@@ -106,9 +106,9 @@ fn get_actual_uid() -> Result<u32> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| DbusError::BusctlError(format!("error in running busctl {:?}", e)))?
+        .map_err(|e| DbusError::BusctlError(format!("error in running busctl {e:?}")))?
         .wait_with_output()
-        .map_err(|e| DbusError::BusctlError(format!("error from busctl execution {:?}", e)))?;
+        .map_err(|e| DbusError::BusctlError(format!("error from busctl execution {e:?}")))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let found =
@@ -356,11 +356,11 @@ impl DbusConnection {
     }
 
     /// Create a proxy for given destination and path
-    pub fn proxy(&self, destination: &str, path: &str) -> Proxy {
+    pub fn proxy(&self, destination: &str, path: &str) -> Proxy<'_> {
         Proxy::new(self, destination, path)
     }
 
-    fn create_proxy(&self) -> Proxy {
+    fn create_proxy(&self) -> Proxy<'_> {
         self.proxy("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
     }
 }

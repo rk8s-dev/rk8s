@@ -193,10 +193,10 @@ impl RealInode {
             }
             Err(e) => {
                 let ioerror: std::io::Error = e.into();
-                if let Some(raw_error) = ioerror.raw_os_error() {
-                    if raw_error == libc::ENOENT || raw_error == libc::ENAMETOOLONG {
-                        return Ok(None);
-                    }
+                if let Some(raw_error) = ioerror.raw_os_error()
+                    && (raw_error == libc::ENOENT || raw_error == libc::ENAMETOOLONG)
+                {
+                    return Ok(None);
                 }
 
                 Err(e.into())
@@ -1101,10 +1101,10 @@ impl OverlayFs {
         match self.lookup_node(ctx, parent, name).await {
             Ok(n) => Ok(Some(Arc::clone(&n))),
             Err(e) => {
-                if let Some(raw_error) = e.raw_os_error() {
-                    if raw_error == libc::ENOENT {
-                        return Ok(None);
-                    }
+                if let Some(raw_error) = e.raw_os_error()
+                    && raw_error == libc::ENOENT
+                {
+                    return Ok(None);
                 }
                 Err(e)
             }
@@ -2573,13 +2573,12 @@ impl OverlayFs {
     ) -> Result<Arc<HandleData>> {
         let no_open = self.no_open.load(Ordering::Relaxed);
         if !no_open {
-            if let Some(h) = handle {
-                if let Some(v) = self.handles.lock().await.get(&h) {
-                    if v.node.inode == inode {
-                        // trace!("get_data: found handle");
-                        return Ok(Arc::clone(v));
-                    }
-                }
+            if let Some(h) = handle
+                && let Some(v) = self.handles.lock().await.get(&h)
+                && v.node.inode == inode
+            {
+                // trace!("get_data: found handle");
+                return Ok(Arc::clone(v));
             }
         } else {
             let readonly: bool = flags

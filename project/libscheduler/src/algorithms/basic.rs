@@ -32,10 +32,10 @@ impl Algorithm for BasicAlgorithm {
         let mut res = Vec::new();
         let mut lst = None;
         nodes.into_iter().for_each(|n| {
-            if let Some(l) = &lst {
-                if let Less | Greater = cmp(l, &n) {
-                    cur -= 1;
-                }
+            if let Some(l) = &lst
+                && let Less | Greater = cmp(l, &n)
+            {
+                cur -= 1;
             }
             lst = Some(n.clone());
             res.push((n, cur));
