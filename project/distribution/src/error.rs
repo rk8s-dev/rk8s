@@ -2,7 +2,7 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use thiserror::Error;
-use crate::utils::state::Config;
+use crate::config::Config;
 
 #[derive(Error, Debug)]
 pub enum AppError {
@@ -16,7 +16,7 @@ pub enum AppError {
     Bcrypt(#[from] bcrypt::BcryptError),
 
     #[error("jwt error: {0}")]
-    JWT(#[from] jsonwebtoken::errors::Error),
+    Jwt(#[from] jsonwebtoken::errors::Error),
 
     #[error("{0} not found")]
     NotFound(String),
@@ -29,6 +29,9 @@ pub enum AppError {
 
     #[error("{0}")]
     Unauthorized(String, Option<Arc<Config>>),
+
+    #[error("{0}")]
+    Forbidden(String),
 }
 
 impl IntoResponse for AppError {
@@ -47,7 +50,7 @@ impl IntoResponse for AppError {
             Self::NotFound(_) => {
                 (StatusCode::NOT_FOUND, self.to_string()).into_response()
             }
-            Self::JWT(_) => {
+            Self::Jwt(_) => {
                 (StatusCode::UNAUTHORIZED, self.to_string()).into_response()
             }
             Self::Unauthorized(_, config) => {
@@ -66,6 +69,9 @@ impl IntoResponse for AppError {
                     ).into_response();
                 }
                 (StatusCode::UNAUTHORIZED, self.to_string()).into_response()
+            }
+            Self::Forbidden(_) => {
+                (StatusCode::FORBIDDEN, self.to_string()).into_response()
             }
         }
     }

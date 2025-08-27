@@ -9,10 +9,11 @@ use axum_extra::TypedHeader;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use crate::config::Config;
 use crate::error::AppError;
 use crate::utils::jwt::gen_token;
 use crate::domain::user_model::User;
-use crate::utils::state::{AppState, Config};
+use crate::utils::state::{AppState};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserReq {

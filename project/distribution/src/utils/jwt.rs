@@ -1,13 +1,13 @@
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use crate::config::Config;
 use crate::error::AppError;
-use crate::utils::state::Config;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    sub: String,
-    exp: i64,
+    pub sub: String,
+    pub exp: i64,
 }
 
 pub fn encode(config: &Config, claims: &Claims) -> String {

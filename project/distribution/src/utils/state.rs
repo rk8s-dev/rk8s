@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
+use sqlx::{Pool, Sqlite};
 use tokio::sync::RwLock;
-
+use crate::config::Config;
 use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
+use crate::storage::repo_storage::RepoStorage;
 use crate::storage::user_storage::UserStorage;
-use crate::utils::cli::Args;
 
 #[derive(Clone, Debug)]
 pub struct UploadSession {
@@ -11,40 +12,28 @@ pub struct UploadSession {
     pub uploaded: u64, // the last uploaded byte index
 }
 
-#[derive(Clone, Debug)]
-pub struct Config {
-    pub host: String,
-    pub port: u16,
-    pub storge_typ: String,
-    pub root_dir: String,
-    pub registry_url: String,
-    pub db_url: String,
-    pub password_salt: String,
-    pub jwt_secret: String,
-    pub jwt_lifetime_secs: i64,
-}
-
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: Arc<RwLock<HashMap<String, UploadSession>>>,
     pub storage: Arc<dyn Storage>,
     pub user_storage: Arc<UserStorage>,
+    pub repo_storage: Arc<RepoStorage>,
     pub config: Arc<Config>,
 }
 
 impl AppState {
-    pub async fn new(config: Config) -> anyhow::Result<Self> {
+    pub async fn new(config: Config, pool: Arc<Pool<Sqlite>>) -> anyhow::Result<Self> {
         let storage_backend: Arc<dyn Storage + Send + Sync> = match config.storge_typ.as_str() {
             "FILESYSTEM" => Arc::new(FilesystemStorage::new(&config.root_dir)),
             _ => Arc::new(FilesystemStorage::new(&config.root_dir)),
         };
         
-        let db_url = config.db_url.to_string();
         Ok(AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             storage: storage_backend,
             config: Arc::new(config),
-            user_storage: Arc::new(UserStorage::new(&db_url).await?),
+            user_storage: Arc::new(UserStorage::new(pool.clone())),
+            repo_storage: Arc::new(RepoStorage::new(pool)),
         })
     }
 

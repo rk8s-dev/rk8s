@@ -6,6 +6,7 @@ use tokio::{fs::File, io};
 pub mod driver;
 pub mod paths;
 pub mod user_storage;
+pub mod repo_storage;
 
 #[async_trait::async_trait]
 pub trait Storage: Send + Sync {

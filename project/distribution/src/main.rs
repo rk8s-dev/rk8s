@@ -1,10 +1,11 @@
 use std::path::Path;
 use clap::Parser;
 use std::sync::Arc;
+use sqlx::sqlite::SqlitePoolOptions;
 use tokio::signal;
 use utils::cli::Args;
 use utils::state::AppState;
-use crate::utils::state::Config;
+use crate::config::Config;
 
 mod api;
 mod service;
@@ -12,6 +13,7 @@ mod storage;
 mod utils;
 mod error;
 mod domain;
+mod config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,9 +21,13 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = validate_config(&args).await;
 
-    let state = Arc::new(AppState::new(config).await?);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(12)
+        .connect(args.database_url.as_str())
+        .await?;
+    let state = Arc::new(AppState::new(config, Arc::new(pool)).await?);
 
-    let app = api::create_router().with_state(state);
+    let app = api::create_router(state);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", args.host, args.port))
         .await?;

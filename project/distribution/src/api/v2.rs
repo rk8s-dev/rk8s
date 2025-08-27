@@ -7,15 +7,16 @@ use crate::service::manifest::{
     put_manifest_handler,
 };
 use crate::utils::state::AppState;
-use axum::Router;
+use axum::{middleware, Router};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{any, get, post};
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::api::middleware::{authenticate, authorize, resource_exists};
 
-pub fn create_v2_router() -> Router<Arc<AppState>> {
+pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         // Determine support
         .route("/", get(|| async { StatusCode::OK.into_response() }))
@@ -50,6 +51,9 @@ pub fn create_v2_router() -> Router<Arc<AppState>> {
             "/*name/tags/list",
             get(get_tag_list_handler),
         )
+        .layer(middleware::from_fn_with_state(state.clone(), resource_exists))
+        .layer(middleware::from_fn_with_state(state.clone(), authenticate))
+        .layer(middleware::from_fn_with_state(state, authorize))
         // List tags
         // .route("/{*tail}", any(dispatch_handler))
 }

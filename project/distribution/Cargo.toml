@@ -7,6 +7,7 @@ edition = "2024"
 async-trait = "0.1.86"
 axum = "0.8.1"
 axum-extra = { version = "0.10.1", features = ["typed-header"] }
+tower = "0.5.2"
 clap = { version = "4.5.32", features = ["derive", "env"] }
 futures = "0.3.31"
 hex = "0.4.3"
