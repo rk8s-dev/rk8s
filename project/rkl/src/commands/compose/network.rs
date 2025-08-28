@@ -137,10 +137,10 @@ impl NetworkManager {
 
         let mut conf_path = PathBuf::from(STD_CONF_PATH);
         conf_path.push(BRIDGE_CONF);
-        if let Some(parent) = conf_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = conf_path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)?;
         }
 
         // write it to

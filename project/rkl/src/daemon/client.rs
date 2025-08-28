@@ -2,19 +2,22 @@ use anyhow::Result;
 use bincode;
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig as QuinnClientConfig, Endpoint};
-use std::{env, fs, net::SocketAddr, sync::Arc, time::Duration};
+use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time;
 
 use crate::commands::pod;
 use crate::task::TaskRunner;
-use common::{Node, PodTask, RksMessage};
+use chrono::Utc;
+use common::*;
+use get_if_addrs::get_if_addrs;
+use gethostname::gethostname;
 use rustls::DigitallySignedStruct;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig as RustlsClientConfig, RootCertStore, SignatureScheme};
-use serde_yaml;
-
+use std::collections::HashMap;
+use sysinfo::System;
 /// Skip certificate verification
 #[derive(Debug)]
 struct SkipServerVerification;
@@ -58,25 +61,14 @@ impl ServerCertVerifier for SkipServerVerification {
     }
 }
 
-fn load_node_from_yaml(path: &str) -> Result<Node> {
-    let s = fs::read_to_string(path)?;
-    let node: Node = serde_yaml::from_str(&s)?;
-    Ok(node)
-}
-
 /// Run worker loop based on environment variables.
 /// This function will keep reconnecting if errors occur.
 pub async fn run_forever() -> Result<()> {
     //We should give the ipaddr of rks here
     let server_addr: String =
         env::var("RKS_ADDR").unwrap_or_else(|_| "192.168.73.128:50051".to_string());
-    //now we just use a yaml to record the node information
-    //in fact , this should be generate by rkl
-    let node_yaml: String = env::var("NODE_YAML")
-        .unwrap_or_else(|_| "/home/ich/rk8s/project/rkl/src/daemon/test.yaml".to_string());
-
     let server_addr: SocketAddr = server_addr.parse()?;
-    let node: Node = load_node_from_yaml(&node_yaml)?;
+    let node: Node = generate_node();
 
     loop {
         if let Err(e) = run_once(server_addr, node.clone()).await {
@@ -130,20 +122,20 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
     println!("[worker] sent RegisterNode({})", node.metadata.name);
 
     // read ack
-    if let Ok(Ok(mut recv)) = time::timeout(Duration::from_secs(3), connection.accept_uni()).await {
-        let mut buf = vec![0u8; 4096];
-        if let Ok(Some(n)) = recv.read(&mut buf).await {
-            if let Ok(resp) = bincode::deserialize::<RksMessage>(&buf[..n]) {
-                match resp {
-                    RksMessage::Ack => println!("[worker] got register Ack"),
-                    RksMessage::Error(e) => eprintln!("[worker] register error: {e}"),
-                    other => println!("[worker] unexpected register response: {other:?}"),
-                }
-            } else {
-                eprintln!("[worker] failed to parse register response");
-            }
-        }
-    }
+    // if let Ok(Ok(mut recv)) = time::timeout(Duration::from_secs(3), connection.accept_uni()).await {
+    //     let mut buf = vec![0u8; 4096];
+    //     if let Ok(Some(n)) = recv.read(&mut buf).await {
+    //         if let Ok(resp) = bincode::deserialize::<RksMessage>(&buf[..n]) {
+    //             match resp {
+    //                 RksMessage::Ack => println!("[worker] got register Ack"),
+    //                 RksMessage::Error(e) => eprintln!("[worker] register error: {e}"),
+    //                 other => println!("[worker] unexpected register response: {other:?}"),
+    //             }
+    //         } else {
+    //             eprintln!("[worker] failed to parse register response");
+    //         }
+    //     }
+    // }
 
     // heartbeat
     let hb_conn = connection.clone();
@@ -167,27 +159,39 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                 let mut buf = vec![0u8; 4096];
                 match recv.read(&mut buf).await {
                     Ok(Some(n)) => match bincode::deserialize::<RksMessage>(&buf[..n]) {
+                        Ok(RksMessage::Ack) => {
+                            println!("[worker] got register Ack");
+                        }
+                        Ok(RksMessage::Error(e)) => {
+                            eprintln!("[worker] register error: {e}");
+                        }
+                        Ok(RksMessage::SetNetwork(cfg)) => {
+                            eprintln!("[worker] get the network config: {cfg:?}");
+                        }
+                        Ok(RksMessage::UpdateRoutes(_id, routes)) => {
+                            eprintln!("[worker] get the routes: {routes:?}");
+                        }
                         Ok(RksMessage::CreatePod(pod_box)) => {
                             let pod: PodTask = (*pod_box).clone();
 
                             // validate target node
                             let target_opt = pod.spec.nodename.as_deref();
-                            if let Some(target) = target_opt {
-                                if target != node.metadata.name {
-                                    eprintln!(
-                                        "[worker] CreatePod skipped: target={} self={}",
-                                        target, node.metadata.name
-                                    );
-                                    let _ = send_uni(
-                                        &connection,
-                                        &RksMessage::Error(format!(
-                                            "pod {} target node mismatch: target={}, self={}",
-                                            pod.metadata.name, target, node.metadata.name
-                                        )),
-                                    )
-                                    .await;
-                                    continue;
-                                }
+                            if let Some(target) = target_opt
+                                && target != node.metadata.name
+                            {
+                                eprintln!(
+                                    "[worker] CreatePod skipped: target={} self={}",
+                                    target, node.metadata.name
+                                );
+                                let _ = send_uni(
+                                    &connection,
+                                    &RksMessage::Error(format!(
+                                        "pod {} target node mismatch: target={}, self={}",
+                                        pod.metadata.name, target, node.metadata.name
+                                    )),
+                                )
+                                .await;
+                                continue;
                             }
 
                             println!(
@@ -282,4 +286,75 @@ async fn send_uni(conn: &quinn::Connection, msg: &RksMessage) -> Result<()> {
 pub fn init_crypto() {
     CryptoProvider::install_default(rustls::crypto::ring::default_provider())
         .expect("failed to install default CryptoProvider");
+}
+
+pub fn generate_node() -> Node {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    // hostname
+    let hostname = gethostname().to_string_lossy().into_owned();
+
+    // IP addr
+    let mut addresses = vec![];
+    for iface in get_if_addrs().unwrap() {
+        if iface.ip().is_ipv4() && !iface.is_loopback() {
+            addresses.push(NodeAddress {
+                address_type: "InternalIP".to_string(),
+                address: iface.ip().to_string(),
+            });
+            break;
+        }
+    }
+    addresses.push(NodeAddress {
+        address_type: "Hostname".to_string(),
+        address: hostname.clone(),
+    });
+
+    // CPU / memory
+    let total_cpu = sys.cpus().len().to_string();
+    let total_mem = format!("{}Mi", sys.total_memory() / 1024);
+
+    let mut capacity = HashMap::new();
+    capacity.insert("cpu".to_string(), total_cpu.clone());
+    capacity.insert("memory".to_string(), total_mem.clone());
+    capacity.insert("pods".to_string(), "110".to_string());
+
+    let mut allocatable = capacity.clone();
+    allocatable.insert("cpu".to_string(), (sys.cpus().len() - 1).to_string());
+
+    // conditions
+    let now = Utc::now().to_rfc3339();
+    let conditions = vec![
+        NodeCondition {
+            condition_type: "Ready".to_string(),
+            status: "True".to_string(),
+            last_heartbeat_time: Some(now.clone()),
+        },
+        NodeCondition {
+            condition_type: "MemoryPressure".to_string(),
+            status: "False".to_string(),
+            last_heartbeat_time: Some(now),
+        },
+    ];
+
+    Node {
+        api_version: "v1".to_string(),
+        kind: "Node".to_string(),
+        metadata: ObjectMeta {
+            name: hostname,
+            namespace: "default".to_string(),
+            labels: HashMap::new(),
+            annotations: HashMap::new(),
+        },
+        spec: NodeSpec {
+            pod_cidr: "10.244.1.0/24".to_string(),
+        },
+        status: NodeStatus {
+            capacity,
+            allocatable,
+            addresses,
+            conditions,
+        },
+    }
 }

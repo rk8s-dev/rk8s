@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use libcni::ip::route::{self, Route, RouteFilterMask};
@@ -388,4 +389,37 @@ pub async fn add_blackhole_v6_route(dst: Ipv6Network) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Generate IPv4 route for a lease
+pub fn get_route_from_lease(lease: &Lease) -> Option<Route> {
+    if !lease.enable_ipv4 {
+        return None;
+    }
+
+    Some(Route {
+        dst: Some(IpNetwork::V4(lease.subnet)),
+        gateway: Some(IpAddr::V4(lease.attrs.public_ip)),
+        oif_index: None,
+        metric: None,
+        ..Default::default()
+    })
+}
+
+/// Generate IPv6 route for a lease
+pub fn get_v6_route_from_lease(lease: &Lease) -> Option<Route> {
+    if !lease.enable_ipv6 {
+        return None;
+    }
+
+    let subnet_v6 = lease.ipv6_subnet?;
+    let gateway_v6 = lease.attrs.public_ipv6?;
+
+    Some(Route {
+        dst: Some(IpNetwork::V6(subnet_v6)),
+        gateway: Some(IpAddr::V6(gateway_v6)),
+        oif_index: None,
+        metric: None,
+        ..Default::default()
+    })
 }

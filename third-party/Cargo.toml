@@ -41,7 +41,7 @@ dockerfile-parser = "0.9.0"
 dotenvy = "0.15.0"
 env_logger = "0.11.7"
 errno = { version = "0.3.10", optional = true }
-etcd-client = "0.15.0"
+etcd-client = "0.16.1"
 fastrand = "^2.3.0"
 fixedbitset = "0.5.7"
 flate2 = "1.1.1"
@@ -104,6 +104,7 @@ safe-path = "0.1.0"
 semver = "0.11.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.138"
+serde_with = "3"
 serde_yaml = "0.9"
 sha2 = "0.10.8"
 sha256 = "1.6.0"
@@ -131,7 +132,9 @@ which = { version = "4.4.2" }
 tabwriter = "1.4.1"
 moka = { version = "0.12.10", features = ["future"] }
 memmap2 = "0.9.7"
-
+gethostname = "0.4"
+get_if_addrs = "0.5"
+sysinfo = "0.30"
 
 # Local patches - typically git references
 [patch.crates-io]

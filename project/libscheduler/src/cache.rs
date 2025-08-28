@@ -51,13 +51,13 @@ impl Cache {
     }
 
     pub fn remove_pod(&mut self, pod_name: &str) {
-        if let Some(p) = self.pods.get(pod_name) {
-            if let Some(n) = &p.scheduled {
-                let node = self.nodes.get_mut(n);
-                if let Some(node) = node {
-                    node.cpu += p.cpu;
-                    node.memory += p.memory;
-                }
+        if let Some(p) = self.pods.get(pod_name)
+            && let Some(n) = &p.scheduled
+        {
+            let node = self.nodes.get_mut(n);
+            if let Some(node) = node {
+                node.cpu += p.cpu;
+                node.memory += p.memory;
             }
         }
         self.pods.remove(pod_name);
