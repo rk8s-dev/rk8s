@@ -21,13 +21,13 @@ pub trait Storage: Send + Sync {
         digest: &Digest,
         stream: BodyDataStream,
         append: bool,
-    ) -> Result<()>;
+    ) -> Result<u64>;
     async fn write_by_uuid(
         &self,
         uuid: &str,
         stream: BodyDataStream,
         append: bool,
-    ) -> Result<()>;
+    ) -> Result<u64>;
     async fn move_to_digest(&self, session_id: &str, digest: &Digest) -> Result<()>;
     async fn create_path(&self, path: &str) -> Result<PathBuf>;
     async fn link_to_tag(&self, name: &str, tag: &str, digest: &Digest) -> Result<()>;

@@ -9,9 +9,10 @@ use axum_extra::TypedHeader;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use crate::config::Config;
-use crate::error::AppError;
+use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
 use crate::utils::jwt::gen_token;
 use crate::domain::user_model::User;
+use crate::error::AppError::Business;
 use crate::utils::state::{AppState};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -25,7 +26,7 @@ pub async fn create_user(
     Json(req): Json<UserReq>,
 ) -> Result<impl IntoResponse, AppError> {
     match state.user_storage.query_user_by_name(&req.username).await {
-        Ok(_) => Err(AppError::UsernameTaken(req.username)),
+        Ok(_) => Err(BusinessError::UsernameTaken(req.username).into()),
         Err(_) => {
             let password = hash_password(&state.config, &req.password)?;
             let user = User::new(req.username, password);
@@ -34,7 +35,6 @@ pub async fn create_user(
         }
     }
 }
-
 
 #[derive(Serialize)]
 pub struct AuthRes {
@@ -61,7 +61,7 @@ pub(crate) async fn auth(
         // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`
         tokio::task::spawn_blocking(move || check_password(&state.config, &user, auth.password()))
             .await
-            .map_err(|e| AppError::Others(e.to_string()))??;
+            .map_err(|e| InternalError::Others(e.to_string()))??;
     }
     let issued_at = Utc::now().to_rfc3339();
     Ok((
@@ -80,7 +80,7 @@ fn hash_password(config: &Config, password: &str) -> Result<String, AppError> {
         password,
         bcrypt::DEFAULT_COST,
         config.password_salt.as_bytes().try_into().unwrap(),
-    )?.to_string())
+    ).map_to_internal()?.to_string())
 }
 
 fn check_password(config: &Config, user: &User, password: &str) -> Result<(), AppError> {
@@ -88,5 +88,5 @@ fn check_password(config: &Config, user: &User, password: &str) -> Result<(), Ap
     if hash == user.password {
         return Ok(());
     }
-    Err(AppError::InvalidPassword)
+    Err(BusinessError::InvalidPassword.into())
 }

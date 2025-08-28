@@ -14,7 +14,7 @@ use tokio::{
     io::{self, BufWriter},
 };
 use tokio_util::io::StreamReader;
-use crate::error::AppError;
+use crate::error::{AppError, InternalError, MapToAppError, OciError};
 
 pub struct FilesystemStorage {
     path_manager: PathManager,
@@ -34,35 +34,40 @@ type Result<T> = std::result::Result<T, AppError>;
 impl Storage for FilesystemStorage {
     async fn read_by_tag(&self, name: &str, tag: &str) -> Result<File> {
         let path = self.path_manager.clone().manifest_tag_link_path(name, tag);
-        File::open(path).await.map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                AppError::ManifestUnknown(format!("{}:{}", name, tag))
-            } else {
-                AppError::from(e)
+
+        match File::open(path).await {
+            Ok(file) => Ok(file),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Err(OciError::ManifestUnknown(format!("{}:{}", name, tag)).into())
             }
-        })
+            Err(e) => {
+                Err(InternalError::from(e).into())
+            }
+        }
     }
 
     async fn read_by_digest(&self, digest: &Digest) -> Result<File> {
         let path = self.path_manager.clone().blob_data_path(digest);
-        File::open(path).await.map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                AppError::BlobUnknown(digest.to_string())
-            } else {
-                AppError::from(e)
+
+        match File::open(path).await {
+            Ok(file) => Ok(file),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Err(OciError::BlobUnknown(digest.to_string()).into())
             }
-        })
+            Err(e) => Err(InternalError::from(e).into()),
+        }
     }
 
     async fn read_by_uuid(&self, uuid: &str) -> Result<File> {
         let path = self.path_manager.clone().upload_data_path(uuid);
-        File::open(path).await.map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                AppError::BlobUploadUnknown(uuid.to_string())
-            } else {
-                AppError::from(e)
+
+        match File::open(path).await {
+            Ok(file) => Ok(file),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Err(OciError::BlobUploadUnknown(uuid.to_string()).into())
             }
-        })
+            Err(e) => Err(InternalError::from(e).into()),
+        }
     }
 
     async fn write_by_digest(
@@ -70,21 +75,21 @@ impl Storage for FilesystemStorage {
         digest: &Digest,
         stream: BodyDataStream,
         append: bool,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         let body_with_io_error = stream.map_err(io::Error::other);
         let mut body_reader = StreamReader::new(body_with_io_error);
 
         let file_path = self.create_path(&self.path_manager.clone().blob_data_path(digest)).await?;
-        let mut file_writer = if append {
-            let file = OpenOptions::new().create(true).append(true).open(file_path).await?;
-            BufWriter::new(file)
-        } else {
-            let file = File::create(file_path).await?;
-            BufWriter::new(file)
-        };
 
-        tokio::io::copy(&mut body_reader, &mut file_writer).await?;
-        Ok(())
+        let file = if append {
+            OpenOptions::new().create(true).append(true).open(file_path).await
+        } else {
+            File::create(file_path).await
+        }.map_to_internal()?;
+
+        let mut file_writer = BufWriter::new(file);
+
+        io::copy(&mut body_reader, &mut file_writer).await.map_to_internal()
     }
 
     async fn write_by_uuid(
@@ -92,54 +97,60 @@ impl Storage for FilesystemStorage {
         uuid: &str,
         stream: BodyDataStream,
         append: bool,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         let body_with_io_error = stream.map_err(io::Error::other);
         let mut body_reader = StreamReader::new(body_with_io_error);
 
         let file_path = self.create_path(&self.path_manager.clone().upload_data_path(uuid)).await?;
-        let mut file_writer = if append {
-            let file = OpenOptions::new().create(true).append(true).open(file_path).await?;
-            BufWriter::new(file)
-        } else {
-            let file = File::create(file_path).await?;
-            BufWriter::new(file)
-        };
 
-        tokio::io::copy(&mut body_reader, &mut file_writer).await?;
-        Ok(())
+        let file = if append {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(file_path)
+                .await
+        } else {
+            File::create(file_path).await
+        }.map_to_internal()?;
+
+        let mut file_writer = BufWriter::new(file);
+
+        io::copy(&mut body_reader, &mut file_writer).await.map_to_internal()
     }
 
     async fn move_to_digest(&self, session_id: &str, digest: &Digest) -> Result<()> {
         let upload_data_path = self.path_manager.clone().upload_data_path(session_id);
         let blob_data_path = self.path_manager.clone().blob_data_path(digest);
 
-        // 我们需要确保父目录存在
         self.create_path(&blob_data_path).await?;
 
-        rename(upload_data_path, blob_data_path).await?;
+        rename(upload_data_path, blob_data_path).await.map_to_internal()?;
         Ok(())
     }
 
     async fn create_path(&self, path: &str) -> Result<PathBuf> {
         let file_path = std::path::Path::new(path).to_path_buf();
         if let Some(parent) = file_path.parent() {
-            create_dir_all(parent).await?;
+            create_dir_all(parent).await.map_to_internal()?;
         }
         Ok(file_path)
     }
 
     async fn link_to_tag(&self, name: &str, tag: &str, digest: &Digest) -> Result<()> {
         let tag_path = self.create_path(&self.path_manager.clone().manifest_tag_link_path(name, tag)).await?;
-        let digest_path = self.path_manager.clone().blob_data_path(digest);
+        let digest_path_str = self.path_manager.clone().blob_data_path(digest);
+        let digest_path = std::path::Path::new(&digest_path_str);
 
         if symlink_metadata(&tag_path).await.is_ok() {
-            remove_file(&tag_path).await?;
+            remove_file(&tag_path).await.map_to_internal()?;
         }
 
         #[cfg(unix)]
-        tokio::fs::symlink(digest_path, tag_path).await?;
+        let link_result = tokio::fs::symlink(digest_path, tag_path).await;
         #[cfg(windows)]
-        tokio::fs::symlink_file(digest_path, tag_path).await?;
+        let link_result = tokio::fs::symlink_file(digest_path, tag_path).await;
+
+        link_result.map_to_internal()?;
 
         Ok(())
     }
@@ -147,8 +158,18 @@ impl Storage for FilesystemStorage {
     async fn walk_repo_dir(&self, name: &str) -> Result<Vec<String>> {
         let mut entries = vec![];
         let path = self.path_manager.clone().manifest_tags_path(name);
-        let mut read_dir = read_dir(path).await?;
-        while let Some(entry) = read_dir.next_entry().await? {
+
+        let mut read_dir = match read_dir(path).await {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Ok(Vec::new());
+            }
+            Err(e) => {
+                return Err(InternalError::from(e).into());
+            }
+        };
+
+        while let Some(entry) = read_dir.next_entry().await.map_to_internal()? {
             if let Some(file_name) = entry.path().file_name().and_then(|s| s.to_str()) {
                 entries.push(file_name.to_string());
             }
@@ -159,17 +180,25 @@ impl Storage for FilesystemStorage {
 
     async fn delete_by_tag(&self, name: &str, tag: &str) -> Result<()> {
         let tag_path = self.path_manager.clone().manifest_tag_path(name, tag);
-        remove_dir_all(tag_path)
-            .await
-            .map_err(|_| AppError::ManifestUnknown(tag.to_string()))?;
-        Ok(())
+
+        match remove_dir_all(tag_path).await {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Err(OciError::ManifestUnknown(tag.to_string()).into())
+            }
+            Err(e) => Err(InternalError::from(e).into())
+        }
     }
 
     async fn delete_by_digest(&self, digest: &Digest) -> Result<()> {
         let blob_path = self.path_manager.clone().blob_path(digest);
-        remove_dir_all(blob_path)
-            .await
-            .map_err(|_| AppError::ManifestUnknown(digest.to_string()))?;
-        Ok(())
+
+        match remove_dir_all(blob_path).await {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Err(OciError::BlobUnknown(digest.to_string()).into())
+            }
+            Err(e) => Err(InternalError::from(e).into())
+        }
     }
 }

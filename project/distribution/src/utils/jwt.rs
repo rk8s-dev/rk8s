@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use crate::config::Config;
-use crate::error::AppError;
+use crate::error::{AppError, InternalError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
@@ -23,7 +23,7 @@ pub fn decode(config: &Config, token: &str) -> Result<Claims, AppError> {
         token,
         &DecodingKey::from_secret(config.jwt_secret.as_bytes()),
         &Validation::default(),
-    )?.claims)
+    ).map_err(InternalError::Jwt)?.claims)
 }
 
 pub fn gen_token(config: &Config, name: &str) -> String {

@@ -1,4 +1,4 @@
-use crate::api::middleware::{authenticate, authorize};
+use crate::api::middleware::{authenticate, authorize, extract_claims};
 use crate::error::AppError;
 use crate::service::blob::{
     delete_blob_handler, get_blob_handler, get_blob_status_handler, head_blob_handler,
@@ -19,10 +19,20 @@ use std::sync::Arc;
 
 pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
-        .route("/", get(|| async { StatusCode::OK }))
+        .route("/", get(probe))
         .route("/{*tail}", any(dispatch_handler)
             .layer(middleware::from_fn_with_state(state.clone(), authorize))
             .layer(middleware::from_fn_with_state(state, authenticate)))
+}
+
+pub async fn probe(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    match extract_claims(&headers, state.config.clone()) {
+        Ok(_) => Ok((StatusCode::OK, [("Docker-Distribution-API-Version", "registry/2.0")]).into_response()),
+        Err(e) => Err(e),
+    }
 }
 
 async fn dispatch_handler(

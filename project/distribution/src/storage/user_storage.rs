@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use sqlx::SqlitePool;
-use crate::error::AppError;
+use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
 use crate::domain::user_model::User;
 
 #[derive(Debug)]
@@ -19,8 +19,9 @@ impl UserStorage {
         sqlx::query_as::<_, User>("select * from users where username = $1")
             .bind(name)
             .fetch_optional(self.pool.as_ref())
-            .await?
-            .ok_or(AppError::NotFound(format!("user {name}")))
+            .await
+            .map_to_internal()?
+            .ok_or_else(|| AppError::from(BusinessError::ResourceNotFound(format!("user {name}"))))
     }
 
     pub async fn insert_user(&self, user: User) -> Result<(), AppError> {
@@ -29,7 +30,8 @@ impl UserStorage {
             .bind(user.username)
             .bind(user.password)
             .execute(self.pool.as_ref())
-            .await?;
+            .await
+            .map_to_internal()?;
         Ok(())
     }
 }

@@ -11,77 +11,17 @@ use serde_json::json;
 use thiserror::Error;
 use crate::config::Config;
 
+/// The `OciError`.
+/// For a standard error response body. The `AppError` will be into it.
 #[derive(Debug, Serialize, Clone)]
-pub struct OciError {
-    code: ErrorCode,
+pub struct ErrorResponse {
+    code: String,
     message: String,
     detail: serde_json::Value,
 }
 
-impl OciError {
-    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            detail: json!({}),
-        }
-    }
-
-    pub fn with_detail(mut self, detail: serde_json::Value) -> Self {
-        self.detail = detail;
-        self
-    }
-}
-
-impl From<OciError> for ErrorInfo {
-    fn from(val: OciError) -> Self {
-        ErrorInfoBuilder::default()
-            .code(val.code)
-            .message(val.message)
-            .detail(serde_json::to_string_pretty(&val.detail).unwrap())
-            .build()
-            .unwrap()
-    }
-}
-
-impl IntoResponse for OciError {
-    fn into_response(self) -> Response {
-        tracing::error!("Generating OCI error response: {:?}", self);
-
-        let status_code = match self.code {
-            ErrorCode::BlobUnknown
-            | ErrorCode::BlobUploadUnknown
-            | ErrorCode::ManifestUnknown
-            | ErrorCode::NameUnknown => {
-                StatusCode::NOT_FOUND
-            }
-            ErrorCode::BlobUploadInvalid
-            | ErrorCode::DigestInvalid
-            | ErrorCode::ManifestBlobUnknown
-            | ErrorCode::ManifestInvalid
-            | ErrorCode::NameInvalid
-            | ErrorCode::SizeInvalid => {
-                StatusCode::BAD_REQUEST
-            }
-            ErrorCode::Unauthorized => StatusCode::UNAUTHORIZED,
-            ErrorCode::Denied => StatusCode::FORBIDDEN,
-            ErrorCode::Unsupported | ErrorCode::TooManyRequests => {
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-        };
-
-        let error_response_body = ErrorResponseBuilder::default()
-            .errors(vec![self.into()])
-            .build()
-            .unwrap();
-        (status_code, Json(error_response_body)).into_response()
-    }
-}
-
-#[allow(unused_variables)]
 #[derive(Error, Debug)]
-pub enum AppError {
-    // OCI Specific Errors (with context)
+pub enum OciError {
     #[error("Blob unknown: {0}")]
     BlobUnknown(String), // Contains the digest
 
@@ -118,36 +58,73 @@ pub enum AppError {
     #[error("Too many requests")]
     TooManyRequests,
 
-    // --- Auth Errors (that map to OCI errors) ---
     #[error("{0}")]
     Unauthorized(String, Option<Arc<Config>>),
 
     #[error("{0}")]
     Forbidden(String),
+}
 
-    // Business Logic / Non-OCI Errors
-    #[error("username {0} is already taken")]
+impl IntoResponse for OciError {
+    fn into_response(self) -> Response {
+        let (status_code, error_info) = match &self {
+            Self::BlobUnknown(digest) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::BlobUnknown, "blob unknown").with_detail(json!({ "digest": digest }))),
+            Self::BlobUploadInvalid(msg) => (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::BlobUploadInvalid, msg)),
+            Self::BlobUploadUnknown(session_id) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::BlobUploadUnknown, "blob upload unknown").with_detail(json!({ "session_id": session_id }))),
+            Self::DigestInvalid(msg) => (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::DigestInvalid, msg)),
+            Self::ManifestBlobUnknown(digest) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestBlobUnknown, "manifest references unknown blob").with_detail(json!({ "digest": digest }))),
+            Self::ManifestInvalid(msg) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestInvalid, msg)),
+            Self::ManifestUnknown(reference) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestUnknown, "manifest unknown").with_detail(json!({ "reference": reference }))),
+            Self::NameInvalid(name) => (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::NameInvalid, "invalid repository name").with_detail(json!({ "name": name }))),
+            Self::NameUnknown(name) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::NameUnknown, "repository not known to registry").with_detail(json!({ "name": name }))),
+            Self::SizeInvalid(msg) => (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::SizeInvalid, msg)),
+            Self::Unsupported => (StatusCode::METHOD_NOT_ALLOWED, ErrorInfo::new(ErrorCode::Unsupported, "the operation is unsupported")),
+            Self::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, ErrorInfo::new(ErrorCode::TooManyRequests, "too many requests")),
+            Self::Unauthorized(msg, _) => (StatusCode::UNAUTHORIZED, ErrorInfo::new(ErrorCode::Unauthorized, msg)),
+            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, ErrorInfo::new(ErrorCode::Denied, msg)),
+        };
+
+        let body = ErrorResponseBuilder::default().errors(vec![error_info]).build().unwrap();
+        let mut response = (status_code, Json(body)).into_response();
+
+        if let Self::Unauthorized(_, Some(config)) = self {
+            let realm = format!("{}/auth/token", config.registry_url);
+            let challenge = format!(r#"Bearer realm="{}",service="oci-registry",scope="repository:*:*""#, realm);
+            response.headers_mut().insert("Www-Authenticate", challenge.parse().unwrap());
+            response.headers_mut().insert("Docker-Distribution-API-Version", "registry/2.0".parse().unwrap());
+        }
+        response
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum BusinessError {
+    #[error("Username `{0}` is already taken")]
     UsernameTaken(String),
 
-    #[error("invalid password")]
+    #[error("Invalid password provided")]
     InvalidPassword,
 
     #[error("{0} not found")]
-    NotFound(String),
-    #[error("Content-Range header is missing")]
-    ContentRangeMissing,
+    ResourceNotFound(String),
+}
 
-    #[error("Content-Range header is invalid: {0}")]
-    ContentRangeInvalid(String),
+impl IntoResponse for BusinessError {
+    fn into_response(self) -> Response {
+        let (status_code, oci_error_info) = match &self {
+            Self::UsernameTaken(username) => (StatusCode::CONFLICT, ErrorInfo::new(ErrorCode::Denied, "username is already taken").with_detail(json!({ "username": username }))),
+            Self::InvalidPassword => (StatusCode::UNAUTHORIZED, ErrorInfo::new(ErrorCode::Unauthorized, "invalid username or password")),
+            Self::ResourceNotFound(name) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::NameUnknown, "resource not found").with_detail(json!({ "name": name }))),
+        };
 
-    #[error("Range not satisfiable for upload {session_id}")]
-    RangeNotSatisfiable {
-        session_id: String,
-        name: String,
-        current_size: u64,
-    },
+        let body = ErrorResponseBuilder::default().errors(vec![oci_error_info]).build().unwrap();
+        let mut response = (status_code, Json(body)).into_response();
+        response
+    }
+}
 
-    // Internal Errors
+#[derive(Error, Debug)]
+pub enum InternalError {
     #[error("sqlx error: {0}")]
     Sqlx(#[from] sqlx::Error),
 
@@ -166,76 +143,75 @@ pub enum AppError {
     #[error("Axum error: {0}")]
     Axum(#[from] axum::Error),
 
-    #[error("Other: {0}")]
+    #[error("Other error: {0}")]
     Others(String),
+}
+
+impl IntoResponse for InternalError {
+    fn into_response(self) -> Response {
+        let error_info = ErrorInfo::new(ErrorCode::Unsupported, "an internal server error occurred");
+        let body = ErrorResponseBuilder::default().errors(vec![error_info]).build().unwrap();
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum HeaderError {
+    #[error("Content-Range header is missing")]
+    ContentRangeMissing,
+
+    #[error("Content-Range header is invalid: {0}")]
+    ContentRangeInvalid(String),
+
+    #[error("Range not satisfiable for upload {session_id}")]
+    RangeNotSatisfiable {
+        session_id: String,
+        name: String,
+        current_size: u64,
+    },
+}
+
+impl IntoResponse for HeaderError {
+    fn into_response(self) -> Response {
+        let oci_error = match self {
+            Self::ContentRangeMissing => OciError::BlobUploadInvalid("Content-Range header is required".to_string()),
+            Self::ContentRangeInvalid(reason) => OciError::BlobUploadInvalid(format!("Content-Range header is invalid: {}", reason)),
+            Self::RangeNotSatisfiable { session_id, name, current_size } => {
+                return Response::builder()
+                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(LOCATION, format!("/v2/{name}/blobs/uploads/{session_id}"))
+                    .header(RANGE, format!("0-{}", current_size.saturating_sub(1)))
+                    .header("Docker-Upload-UUID", session_id)
+                    .body(Body::empty())
+                    .unwrap();
+            },
+        };
+        oci_error.into_response()
+    }
+}
+
+#[allow(unused_variables)]
+#[derive(Error, Debug)]
+pub enum AppError {
+    #[error(transparent)]
+    OCI(#[from] OciError),
+    #[error(transparent)]
+    Business(#[from] BusinessError),
+    #[error(transparent)]
+    Internal(#[from] InternalError),
+    #[error(transparent)]
+    Header(#[from] HeaderError),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         tracing::error!("Generating response for AppError: {:?}", self);
-
-        if let Self::RangeNotSatisfiable {
-            session_id, name, current_size
-        } = self {
-            return Response::builder()
-                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                .header(LOCATION, format!("/v2/{name}/blobs/uploads/{session_id}"))
-                .header(RANGE, format!("0-{}", current_size.saturating_sub(1)))
-                .header("Docker-Upload-UUID", session_id)
-                .body(Body::empty())
-                .unwrap();
+        match self {
+            Self::OCI(e) => e.into_response(),
+            Self::Business(e) => e.into_response(),
+            Self::Internal(e) => e.into_response(),
+            Self::Header(e) => e.into_response(),
         }
-
-        let (status_code, error_info) = match &self {
-            Self::BlobUnknown(digest) =>
-                (StatusCode::NOT_FOUND, oci_error(ErrorCode::BlobUnknown, "blob unknown", json!({ "digest": digest }))),
-            Self::BlobUploadInvalid(msg) =>
-                (StatusCode::BAD_REQUEST, oci_error(ErrorCode::BlobUploadInvalid, msg, json!({}))),
-            Self::BlobUploadUnknown(session_id) =>
-                (StatusCode::NOT_FOUND, oci_error(ErrorCode::BlobUploadUnknown, "blob upload unknown", json!({ "session_id": session_id }))),
-            Self::DigestInvalid(msg) =>
-                (StatusCode::BAD_REQUEST, oci_error(ErrorCode::DigestInvalid, msg, json!({}))),
-            Self::ManifestBlobUnknown(digest) =>
-                (StatusCode::BAD_REQUEST, oci_error(ErrorCode::ManifestBlobUnknown, "manifest references unknown blob", json!({ "digest": digest }))),
-            Self::ManifestInvalid(msg) =>
-                (StatusCode::NOT_FOUND, oci_error(ErrorCode::ManifestInvalid, msg, json!({}))),
-            Self::ManifestUnknown(reference) =>
-                (StatusCode::NOT_FOUND, oci_error(ErrorCode::ManifestUnknown, "manifest unknown", json!({ "reference": reference }))),
-            Self::NameInvalid(name) =>
-                (StatusCode::BAD_REQUEST, oci_error(ErrorCode::NameInvalid, "invalid repository name", json!({ "name": name }))),
-            Self::NameUnknown(name) =>
-                (StatusCode::NOT_FOUND, oci_error(ErrorCode::NameUnknown, "repository not known to registry", json!({ "name": name }))),
-            Self::SizeInvalid(msg) =>
-                (StatusCode::BAD_REQUEST, oci_error(ErrorCode::SizeInvalid, msg, json!({}))),
-            Self::Unsupported =>
-                (StatusCode::METHOD_NOT_ALLOWED, oci_error(ErrorCode::Unsupported, "operation is unsupported", json!({}))),
-            Self::TooManyRequests =>
-                (StatusCode::TOO_MANY_REQUESTS, oci_error(ErrorCode::TooManyRequests, "too many requests", json!({}))),
-            Self::Unauthorized(msg, _) =>
-                (StatusCode::UNAUTHORIZED, oci_error(ErrorCode::Unauthorized, msg, json!({}))),
-            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, oci_error(ErrorCode::Denied, msg, json!({}))),
-            Self::UsernameTaken(username) =>
-                (StatusCode::CONFLICT, oci_error(ErrorCode::Denied, "username is already taken", json!({ "username": username }))),
-            Self::InvalidPassword =>
-                (StatusCode::BAD_REQUEST, oci_error(ErrorCode::Denied, "invalid password", json!({}))),
-            Self::ContentRangeMissing =>
-                (StatusCode::BAD_REQUEST, oci_error(ErrorCode::BlobUploadInvalid, "Content-Range header is required for chunked upload", json!({}))),
-            Self::ContentRangeInvalid(reason) =>
-                (StatusCode::BAD_REQUEST, oci_error(ErrorCode::BlobUploadInvalid, "Content-Range header is invalid", json!({ "reason": reason }))),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, oci_error(ErrorCode::Unsupported, "an internal server error occurred", json!({}))),
-        };
-
-        let error_response = ErrorResponseBuilder::default().errors(vec![error_info]).build().unwrap();
-
-        if let Self::Unauthorized(_, Some(config)) = self {
-            let realm = format!("{}/auth/token", config.registry_url);
-            let challenge = format!(r#"Bearer realm="{}",service="oci-registry",scope="repository:*:*""#, realm);
-            let mut headers = HeaderMap::new();
-            headers.insert("Www-Authenticate", challenge.parse().unwrap());
-            return (status_code, headers, Json(error_response)).into_response();
-        }
-
-        (status_code, Json(error_response)).into_response()
     }
 }
 
@@ -246,4 +222,55 @@ fn oci_error(code: ErrorCode, message: impl Into<String>, detail: serde_json::Va
         .detail(serde_json::to_string_pretty(&detail).unwrap())
         .build()
         .unwrap()
+}
+
+impl ErrorInfoExt for ErrorInfo {
+    fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        ErrorInfoBuilder::default()
+            .code(code)
+            .message(message.into())
+            .detail(serde_json::to_string_pretty(&json!({})).unwrap()) // Start with an empty JSON object
+            .build()
+            .unwrap()
+    }
+
+    fn with_detail(self, detail: serde_json::Value) -> Self {
+        ErrorInfoBuilder::default()
+            .code(self.code().clone())
+            .message(self.message().clone().unwrap())
+            .detail(serde_json::to_string_pretty(&detail).unwrap())
+            .build()
+            .unwrap()
+    }
+}
+
+pub trait ErrorInfoExt {
+    fn new(code: ErrorCode, message: impl Into<String>) -> Self;
+    fn with_detail(self, detail: serde_json::Value) -> Self;
+}
+
+pub trait MapToAppError<T> {
+    fn map_to_oci(self, oci_error: OciError) -> Result<T, AppError>;
+
+    fn map_to_business(self, business_error: BusinessError) -> Result<T, AppError>;
+
+    fn map_to_internal(self) -> Result<T, AppError>;
+}
+
+impl<T, E> MapToAppError<T> for Result<T, E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+    InternalError: From<E>,
+{
+    fn map_to_oci(self, oci_error: OciError) -> Result<T, AppError> {
+        self.map_err(|_| AppError::OCI(oci_error))
+    }
+
+    fn map_to_business(self, business_error: BusinessError) -> Result<T, AppError> {
+        self.map_err(|_| AppError::Business(business_error))
+    }
+
+    fn map_to_internal(self) -> Result<T, AppError> {
+        self.map_err(|e| AppError::Internal(e.into()))
+    }
 }

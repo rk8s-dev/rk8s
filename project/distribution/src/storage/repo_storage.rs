@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use sqlx::SqlitePool;
 use crate::domain::repo_model::Repo;
-use crate::error::AppError;
+use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
 
 #[derive(Debug)]
 pub struct RepoStorage {
@@ -28,7 +28,8 @@ impl RepoStorage {
             .bind(repo.name)
             .bind(repo.is_public)
             .execute(self.pool.as_ref())
-            .await?;
+            .await
+            .map_to_internal()?;
         Ok(())
     }
 
@@ -36,8 +37,9 @@ impl RepoStorage {
         sqlx::query_as::<_, Repo>("select * from repos where name = $1")
             .bind(name)
             .fetch_optional(self.pool.as_ref())
-            .await?
-            .ok_or(AppError::NotFound(format!("repository {name}")))
+            .await
+            .map_to_internal()?
+            .ok_or_else(|| AppError::from(BusinessError::ResourceNotFound(format!("repository {name}"))))
     }
 
     pub async fn change_visibility(&self, name: &str, is_public: bool) -> Result<(), AppError> {
@@ -46,7 +48,8 @@ impl RepoStorage {
             .bind(is_public)
             .bind(name)
             .execute(self.pool.as_ref())
-            .await?;
+            .await
+            .map_to_internal()?;
         Ok(())
     }
 }
