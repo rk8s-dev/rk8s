@@ -78,6 +78,7 @@ impl IntoResponse for OciError {
     }
 }
 
+#[allow(unused_variables)]
 #[derive(Error, Debug)]
 pub enum AppError {
     // OCI Specific Errors (with context)
@@ -133,7 +134,6 @@ pub enum AppError {
 
     #[error("{0} not found")]
     NotFound(String),
-
     #[error("Content-Range header is missing")]
     ContentRangeMissing,
 
@@ -164,7 +164,10 @@ pub enum AppError {
     Io(#[from] io::Error),
 
     #[error("Axum error: {0}")]
-    AuxmError(#[from] axum::Error),
+    Axum(#[from] axum::Error),
+
+    #[error("Other: {0}")]
+    Others(String),
 }
 
 impl IntoResponse for AppError {

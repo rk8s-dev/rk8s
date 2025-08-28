@@ -1,6 +1,5 @@
 use sqlx::FromRow;
 use uuid::Uuid;
-use crate::utils::validation::is_valid_digest;
 
 #[derive(Debug, Clone, FromRow)]
 pub struct Repo {

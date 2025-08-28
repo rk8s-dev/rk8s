@@ -1,8 +1,8 @@
+use crate::error::AppError;
 use axum::body::BodyDataStream;
 use oci_spec::image::Digest;
 use std::path::PathBuf;
-use tokio::{fs::File, io};
-use crate::error::AppError;
+use tokio::fs::File;
 
 pub mod driver;
 pub mod paths;

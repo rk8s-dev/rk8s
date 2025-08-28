@@ -1,3 +1,5 @@
+use crate::api::middleware::{authenticate, authorize};
+use crate::error::AppError;
 use crate::service::blob::{
     delete_blob_handler, get_blob_handler, get_blob_status_handler, head_blob_handler,
     patch_blob_handler, post_blob_handler, put_blob_handler,
@@ -7,24 +9,20 @@ use crate::service::manifest::{
     put_manifest_handler,
 };
 use crate::utils::state::AppState;
-use axum::{middleware, Router};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, post};
+use axum::routing::{any, get};
+use axum::{middleware, Router};
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::api::middleware::{authenticate, authorize, resource_exists};
-use crate::error::AppError;
 
 pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
-        // Determine support
-        .route("/", get(|| async { StatusCode::OK.into_response() }))
-        .route("/{*tail}", any(dispatch_handler))
-    /*    .layer(middleware::from_fn_with_state(state.clone(), resource_exists))
-        .layer(middleware::from_fn_with_state(state.clone(), authenticate))
-        .layer(middleware::from_fn_with_state(state, authorize))*/
+        .route("/", get(|| async { StatusCode::OK }))
+        .route("/{*tail}", any(dispatch_handler)
+            .layer(middleware::from_fn_with_state(state.clone(), authorize))
+            .layer(middleware::from_fn_with_state(state, authenticate)))
 }
 
 async fn dispatch_handler(

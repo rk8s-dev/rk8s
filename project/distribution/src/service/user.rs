@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use axum::extract::{Query, State};
+use axum::extract::{State};
 use axum::http::StatusCode;
 use axum::Json;
 use axum::response::IntoResponse;
@@ -8,7 +8,6 @@ use axum_extra::headers::authorization::Basic;
 use axum_extra::TypedHeader;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use crate::config::Config;
 use crate::error::AppError;
 use crate::utils::jwt::gen_token;
@@ -36,11 +35,6 @@ pub async fn create_user(
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AuthParams {
-    service: String,
-    scope: Option<String>,
-}
 
 #[derive(Serialize)]
 pub struct AuthRes {
@@ -56,15 +50,19 @@ pub struct AuthRes {
 pub(crate) async fn auth(
     State(state): State<Arc<AppState>>,
     TypedHeader(auth): TypedHeader<Authorization<Basic>>,
-    Query(params): Query<AuthParams>,
 ) -> Result<impl IntoResponse, AppError> {
     let username = auth.username();
     let user = state.user_storage
         .query_user_by_name(username)
         .await?;
-    check_password(&state.config, &user, auth.password())?;
-
-    let token = gen_token(&state.config, &user.name);
+    let token = gen_token(&state.config, &user.username);
+    {
+        let state = state.clone();
+        // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`
+        tokio::task::spawn_blocking(move || check_password(&state.config, &user, auth.password()))
+            .await
+            .map_err(|e| AppError::Others(e.to_string()))??;
+    }
     let issued_at = Utc::now().to_rfc3339();
     Ok((
         StatusCode::OK,

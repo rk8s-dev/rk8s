@@ -1,36 +1,15 @@
-use std::sync::Arc;
-use axum::body::Body;
-use axum::extract::{Path, Request, State};
-use axum::http::Method;
-use axum::middleware::Next;
-use axum::response::IntoResponse;
 use crate::config::Config;
 use crate::domain::repo_model::Repo;
 use crate::error::AppError;
 use crate::utils::jwt::{decode, Claims};
 use crate::utils::state::AppState;
+use axum::extract::{Request, State};
+use axum::http::Method;
+use axum::middleware::Next;
+use axum::response::IntoResponse;
+use std::sync::Arc;
 
-pub async fn resource_exists(
-    State(state): State<Arc<AppState>>,
-    Path((name, _)): Path<(String, String)>,
-    mut req: Request,
-    next: Next,
-) -> Result<impl IntoResponse, AppError> {
-    let repo = state.repo_storage.query_repo_by_name(&name).await;
-    match *req.method() {
-        Method::GET | Method::HEAD | Method::DELETE | Method::PATCH => {
-            if let Ok(repo) = repo {
-                req.extensions_mut().insert(repo);
-            }
-        }
-        Method::POST | Method::PUT => {
-            req.extensions_mut().insert(repo?);
-        }
-        _ => unreachable!(),
-    }
-    Ok(next.run(req).await)
-}
-
+#[tracing::instrument(skip_all)]
 pub async fn authenticate(
     State(state): State<Arc<AppState>>,
     mut req: Request,
@@ -53,34 +32,35 @@ pub async fn authenticate(
 
 pub async fn authorize(
     State(state): State<Arc<AppState>>,
-    Path((name, _)): Path<(String, String)>,
     req: Request,
     next: Next,
 ) -> Result<impl IntoResponse, AppError> {
+    let repo_name = extract_full_repo_name(req.uri().path());
     let claims = req
         .extensions()
         .get::<Claims>();
-    let namespace = name
+    let namespace = repo_name
         .split("/")
-        .next()
-        .unwrap_or(&name);
+        .find(|s| !s.is_empty())
+        .unwrap_or(&repo_name);
     match *req.method() {
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
-            let repo = req
+            if let Some(repo) = req
                 .extensions()
-                .get::<Repo>()
-                .unwrap();
-            if repo.is_public != 1 {
-                let claims = claims.ok_or(AppError::Unauthorized("not authorized".to_string(), Some(state.config.clone())))?;
-                if claims.sub != namespace {
-                    return Err(AppError::Forbidden("unable to read others' private repositories".to_string()));
+                .get::<Repo>() {
+                if repo.is_public != 1 {
+                    let claims = claims.ok_or(AppError::Unauthorized("not authorized".to_string(), Some(state.config.clone())))?;
+                    if claims.sub != namespace {
+                        return Err(AppError::Forbidden("unable to read others' private repositories".to_string()));
+                    }
                 }
             }
         }
         // for write, we cannot write others' all repos.
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE => {
             let claims = claims.unwrap();
+            println!("namespace: {}", namespace);
             if namespace != claims.sub {
                 return Err(AppError::Forbidden("unable to write others' repositories".to_string()));
             }
@@ -100,4 +80,32 @@ fn extract_claims(req: &Request, config: Arc<Config>) -> Result<Claims, AppError
         .ok_or_else(|| AppError::Unauthorized("Missing or malformed Bearer token".to_string(), Some(config_cloned)))
         .map(str::to_string)?;
     decode(&config, &token)
+}
+
+fn extract_full_repo_name(url: &str) -> String {
+    let segments: Vec<&str> = url.split("/").collect();
+    match segments.as_slice() {
+        // tail: /{name}/manifests/{reference}
+        [name @ .., "manifests", _reference] if !name.is_empty() => {
+            name.join("/")
+        }
+        // tail: /{name}/blobs/{digest}
+        [name @ .., "blobs", digest] if !name.is_empty() && *digest != "uploads" => {
+            name.join("/")
+        }
+        // tail: /{name}/blobs/uploads/
+        // tail: /{name}/blobs/uploads/{session_id}
+        [name @ .., "blobs", "uploads", _] if !name.is_empty() => {
+            name.join("/")
+        }
+        // tail: /{name}/tags/list
+        [name @ .., "tags", "list"] if !name.is_empty() => {
+            name.join("/")
+        }
+        // tail: /{name}/referrers/{digest}
+        [name @ .., "referrers", _digest] if !name.is_empty() => {
+            name.join("/")
+        }
+        _ => unreachable!(),
+    }
 }

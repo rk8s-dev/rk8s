@@ -5,14 +5,27 @@ use crate::utils::{
 };
 use axum::response::IntoResponse;
 use axum::{body, body::Body, extract::{Path, Query, Request, State}, http::{header, Response, StatusCode}};
-use futures::StreamExt;
 use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
 use oci_spec::image::ImageManifest;
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::io::AsyncReadExt;
 
-/// GET /v2/<name>/manifests/<reference>
+/// Handles `GET /v2/<name>/manifests/<reference>`.
+///
+/// **Purpose:** Fetches a manifest, which is the "table of contents" for an image.
+///
+/// **Reference:** The `<reference>` path parameter can be either a tag (e.g., "latest")
+/// or a digest (e.g., "sha256:...") of the manifest.
+///
+/// **Behavior according to OCI Distribution Spec:**
+/// - If the `<reference>` is a tag, the server MUST resolve it to a digest and return the
+///   corresponding manifest.
+/// - The response MUST include a `Content-Type` header specifying the manifest's media type.
+/// - A `Docker-Content-Digest` header MUST be returned, containing the actual digest of the
+///   manifest content.
+/// - If the manifest or tag does not exist in the repository, this endpoint MUST return
+///   a `404 Not Found` with a `MANIFEST_UNKNOWN` error code.
 pub async fn get_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
@@ -140,6 +153,7 @@ pub async fn put_manifest_handler(
         state.storage.link_to_tag(&name, &reference, &calculated_digest).await?;
     }
 
+    state.repo_storage.ensure_repo_exists(&name).await?;
     let location = format!("/v2/{name}/manifests/{calculated_digest_str}");
     Ok((
         StatusCode::CREATED,
@@ -197,7 +211,7 @@ pub async fn get_tag_list_handler(
         .name(name)
         .tags(tags_to_return)
         .build()
-        .map_err(|e| AppError::Unsupported)?; // 理论上不应失败
+        .map_err(|_| AppError::Unsupported)?;
 
     let json_body = serde_json::to_string(&tag_list)
         .map_err(|_| AppError::Unsupported)?;
@@ -236,6 +250,7 @@ pub async fn delete_manifest_handler(
     } else {
         state.storage.delete_by_tag(&name, &reference).await?;
     }
+
 
     Ok(StatusCode::ACCEPTED)
 }

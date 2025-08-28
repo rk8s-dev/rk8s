@@ -1,14 +1,17 @@
-use std::path::Path;
+use crate::config::Config;
 use clap::Parser;
-use std::sync::Arc;
 use sqlx::sqlite::SqlitePoolOptions;
+use std::path::Path;
+use std::sync::Arc;
 use tokio::fs::OpenOptions;
 use tokio::signal;
+use tracing::instrument::WithSubscriber;
+use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use utils::cli::Args;
 use utils::state::AppState;
-use crate::config::Config;
 
 mod api;
 mod service;
@@ -21,9 +24,10 @@ mod config;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .with(tracing_subscriber::fmt::layer())
+    tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_span_events(FmtSpan::CLOSE)
         .init();
 
     let args = Args::parse();
@@ -32,6 +36,9 @@ async fn main() -> anyhow::Result<()> {
     let pool = SqlitePoolOptions::new()
         .max_connections(12)
         .connect(args.database_url.as_str())
+        .await?;
+    sqlx::migrate!("./migrations")
+        .run(&pool)
         .await?;
     let state = Arc::new(AppState::new(config, Arc::new(pool)).await);
 
@@ -96,8 +103,8 @@ async fn validate_config(args: &Args) -> Config {
 
     let password_salt = std::env::var("PASSWORD_SALT")
         .unwrap_or_else(|_| {
-            eprintln!("WARNING: PASSWORD_SALT is not set. Use default value: `salt`");
-            "salt".into()
+            eprintln!("WARNING: PASSWORD_SALT is not set. Use default value: `ABCDEFGHIJKLMNOP`");
+            "ABCDEFGHIJKLMNOP".into()
         });
     let jwt_secret = std::env::var("JWT_SECRET")
         .unwrap_or_else(|_| {
@@ -112,7 +119,9 @@ async fn validate_config(args: &Args) -> Config {
         .parse::<i64>()
         .unwrap();
 
-    let db_url = Path::new(&args.database_url);
+    let db_url = Path::new(args.database_url
+        .strip_prefix("sqlite:")
+        .unwrap_or_else(|| &args.database_url));
     if let Some(parent) = db_url.parent() {
         tokio::fs::create_dir_all(parent).await.expect("Failed to create db directory");
     }
