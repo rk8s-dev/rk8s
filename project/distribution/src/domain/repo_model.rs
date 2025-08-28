@@ -10,11 +10,11 @@ pub struct Repo {
 }
 
 impl Repo {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: &str) -> Self {
         let uuid = Uuid::new_v4().to_string();
         Self {
             id: uuid,
-            name,
+            name: name.to_owned(),
             is_public: 1,
         }
     }

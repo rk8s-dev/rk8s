@@ -2,7 +2,10 @@ use std::path::Path;
 use clap::Parser;
 use std::sync::Arc;
 use sqlx::sqlite::SqlitePoolOptions;
+use tokio::fs::OpenOptions;
 use tokio::signal;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use utils::cli::Args;
 use utils::state::AppState;
 use crate::config::Config;
@@ -18,6 +21,11 @@ mod config;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let args = Args::parse();
     let config = validate_config(&args).await;
 
@@ -25,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(12)
         .connect(args.database_url.as_str())
         .await?;
-    let state = Arc::new(AppState::new(config, Arc::new(pool)).await?);
+    let state = Arc::new(AppState::new(config, Arc::new(pool)).await);
 
     let app = api::create_router(state);
 
@@ -71,7 +79,7 @@ async fn validate_config(args: &Args) -> Config {
     let root_dir = Path::new(&args.root);
     match tokio::fs::metadata(root_dir).await {
         Ok(meta) => {
-            if meta.is_dir() {
+            if !meta.is_dir() {
                 validation_errors.push(format!(
                     "OCI_REGISTRY_ROOTDIR `{}` exists but is not a directory",
                     args.root,
@@ -106,13 +114,14 @@ async fn validate_config(args: &Args) -> Config {
 
     let db_url = Path::new(&args.database_url);
     if let Some(parent) = db_url.parent() {
-        if !parent.exists() {
-            validation_errors.push(format!(
-                "The directory for the database `{}` does not exist",
-                parent.display(),
-            ));
-        }
+        tokio::fs::create_dir_all(parent).await.expect("Failed to create db directory");
     }
+    let _ = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(db_url)
+        .await
+        .expect("Failed to create db file");
 
     if !validation_errors.is_empty() {
         eprintln!("{}", validation_errors.join("\n"));

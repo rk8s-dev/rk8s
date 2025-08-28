@@ -1,411 +1,242 @@
+use crate::error::AppError;
 use crate::utils::{
     state::AppState,
     validation::{is_valid_digest, is_valid_name, is_valid_reference},
 };
-use axum::{
-    body::Body,
-    extract::{Path, Query, Request, State},
-    http::{Response, StatusCode, header},
-};
+use axum::response::IntoResponse;
+use axum::{body, body::Body, extract::{Path, Query, Request, State}, http::{header, Response, StatusCode}};
 use futures::StreamExt;
 use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
-use oci_spec::{
-    distribution::{ErrorCode, ErrorInfoBuilder, ErrorResponseBuilder},
-    image::ImageManifest,
-};
-use serde_json::json;
+use oci_spec::image::ImageManifest;
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
-use tokio_util::io::ReaderStream;
+use tokio::io::AsyncReadExt;
 
-pub(crate) async fn get_manifest_handler(
+/// GET /v2/<name>/manifests/<reference>
+pub async fn get_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
-) -> Response<Body> {
+) -> Result<impl IntoResponse, AppError> {
     if !is_valid_name(&name) {
-        let error_info = ErrorInfoBuilder::default()
-            .code(ErrorCode::NameInvalid)
-            .message("Invalid name")
-            .detail(json!({"name": name}).to_string())
-            .build()
-            .unwrap();
-        let error_response = ErrorResponseBuilder::default()
-            .errors(vec![error_info])
-            .build()
-            .unwrap();
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_string(&error_response).unwrap()))
-            .unwrap();
+        return Err(AppError::NameInvalid(name));
     }
     if !is_valid_reference(&reference) {
-        let error_info = ErrorInfoBuilder::default()
-            .code(ErrorCode::Unsupported)
-            .message("Invalid reference")
-            .detail(json!({"reference": reference}).to_string())
-            .build()
-            .unwrap();
-        let error_response = ErrorResponseBuilder::default()
-            .errors(vec![error_info])
-            .build()
-            .unwrap();
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_string(&error_response).unwrap()))
-            .unwrap();
+        return Err(AppError::ManifestInvalid(format!("Invalid reference format: {}", reference)));
     }
 
-    if is_valid_digest(&reference) {
-        // the reference is a digest
-        let digest = oci_digest::from_str(&reference).unwrap();
-        match state.storage.read_by_digest(&digest).await {
-            Ok(file) => {
-                let image_manifest =
-                    ImageManifest::from_reader(file.try_into_std().unwrap()).unwrap();
-                let response = image_manifest.to_string().unwrap();
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(response))
-                    .unwrap()
-            }
-            Err(_) => {
-                let error_info = ErrorInfoBuilder::default()
-                    .code(ErrorCode::ManifestUnknown)
-                    .message("Manifest unknown")
-                    .detail(json!({"name": name, "reference": reference}).to_string())
-                    .build()
-                    .unwrap();
-                let error_response = ErrorResponseBuilder::default()
-                    .errors(vec![error_info])
-                    .build()
-                    .unwrap();
-                Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Body::from(serde_json::to_string(&error_response).unwrap()))
-                    .unwrap()
-            }
-        }
+    let manifest_file = if is_valid_digest(&reference) {
+        let digest = oci_digest::from_str(&reference)
+            .map_err(|_| AppError::DigestInvalid(reference.clone()))?;
+        state.storage.read_by_digest(&digest).await?
     } else {
-        // the reference is a tag
-        match state.storage.read_by_tag(&name, &reference).await {
-            Ok(file) => {
-                let image_manifest =
-                    ImageManifest::from_reader(file.try_into_std().unwrap()).unwrap();
-                let response = image_manifest.to_string().unwrap();
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(response))
-                    .unwrap()
-            }
-            Err(_) => {
-                let error_info = ErrorInfoBuilder::default()
-                    .code(ErrorCode::ManifestUnknown)
-                    .message("Manifest unknown")
-                    .detail(json!({"name": name, "reference": reference}).to_string())
-                    .build()
-                    .unwrap();
-                let error_response = ErrorResponseBuilder::default()
-                    .errors(vec![error_info])
-                    .build()
-                    .unwrap();
-                Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Body::from(serde_json::to_string(&error_response).unwrap()))
-                    .unwrap()
-            }
-        }
-    }
+        state.storage.read_by_tag(&name, &reference).await?
+    };
+
+    let mut buffer = Vec::new();
+    tokio::fs::File::from(manifest_file.into_std().await)
+        .read_to_end(&mut buffer)
+        .await?;
+
+    let manifest: ImageManifest =
+        serde_json::from_slice(&buffer).map_err(|e| AppError::ManifestInvalid(e.to_string()))?;
+
+    let content_type = manifest
+        .media_type()
+        .clone()
+        .map(|mt| mt.to_string())
+        .unwrap_or_else(|| "application/vnd.docker.distribution.manifest.v2+json".to_string());
+
+    let digest = format!("sha256:{}", hex::encode(Sha256::digest(&buffer)));
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_LENGTH, buffer.len())
+        .header("Docker-Content-Digest", digest)
+        .body(body::Body::from(buffer))
+        .unwrap())
 }
 
-pub(crate) async fn head_manifest_handler(
+/// HEAD /v2/<name>/manifests/<reference>
+pub async fn head_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
-) -> Response<Body> {
+) -> Result<impl IntoResponse, AppError> {
     if !is_valid_name(&name) {
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::empty())
-            .unwrap();
+        return Err(AppError::NameInvalid(name));
     }
     if !is_valid_reference(&reference) {
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::empty())
-            .unwrap();
+        return Err(AppError::ManifestInvalid(format!("Invalid reference format: {}", reference)));
     }
 
-    if is_valid_digest(&reference) {
-        // the reference is a digest
-        let digest = oci_digest::from_str(&reference).unwrap();
-        match state.storage.read_by_digest(&digest).await {
-            Ok(file) => {
-                let stream = ReaderStream::new(file);
-                let mut digest = Sha256::new();
-                let mut content_length = 0;
-
-                let mut stream = stream.fuse();
-                while let Some(Ok(chunk)) = stream.next().await {
-                    digest.update(&chunk);
-                    content_length += chunk.len();
-                }
-
-                let digest = digest.finalize();
-                let digest_str = format!("sha256:{}", hex::encode(digest));
-
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_LENGTH, content_length.to_string())
-                    .header("Docker-Content-Digest", digest_str)
-                    .body(Body::empty())
-                    .unwrap()
-            }
-            Err(_) => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap(),
-        }
+    let manifest_file = if is_valid_digest(&reference) {
+        let digest = oci_digest::from_str(&reference)
+            .map_err(|_| AppError::DigestInvalid(reference.clone()))?;
+        state.storage.read_by_digest(&digest).await?
     } else {
-        // the reference is a tag
-        match state.storage.read_by_tag(&name, &reference).await {
-            Ok(file) => {
-                let stream = ReaderStream::new(file);
-                let mut digest = Sha256::new();
-                let mut content_length = 0;
+        state.storage.read_by_tag(&name, &reference).await?
+    };
 
-                let mut stream = stream.fuse();
-                while let Some(Ok(chunk)) = stream.next().await {
-                    digest.update(&chunk);
-                    content_length += chunk.len();
-                }
+    let metadata = manifest_file.metadata().await?;
+    let content_length = metadata.len();
 
-                let digest = digest.finalize();
-                let digest_str = format!("sha256:{}", hex::encode(digest));
+    let digest_str = if is_valid_digest(&reference) {
+        reference
+    } else {
+        let mut buffer = Vec::new();
+        tokio::fs::File::from(manifest_file.into_std().await)
+            .read_to_end(&mut buffer)
+            .await?;
+        format!("sha256:{}", hex::encode(Sha256::digest(&buffer)))
+    };
 
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_LENGTH, content_length.to_string())
-                    .header("Docker-Content-Digest", digest_str)
-                    .body(Body::empty())
-                    .unwrap()
-            }
-            Err(_) => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap(),
-        }
-    }
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/vnd.docker.distribution.manifest.v2+json") // A common default
+        .header(header::CONTENT_LENGTH, content_length)
+        .header("Docker-Content-Digest", digest_str)
+        .body(Body::empty())
+        .unwrap())
 }
 
+/// PUT /v2/<name>/manifests/<reference>
 pub async fn put_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
     request: Request,
-) -> Response<Body> {
+) -> Result<impl IntoResponse, AppError> {
     if !is_valid_name(&name) {
-        let error_info = ErrorInfoBuilder::default()
-            .code(ErrorCode::NameInvalid)
-            .message("Invalid name")
-            .detail(json!({"name": name}).to_string())
-            .build()
-            .unwrap();
-        let error_response = ErrorResponseBuilder::default()
-            .errors(vec![error_info])
-            .build()
-            .unwrap();
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_string(&error_response).unwrap()))
-            .unwrap();
+        return Err(AppError::NameInvalid(name));
     }
     if !is_valid_reference(&reference) {
-        let error_info = ErrorInfoBuilder::default()
-            .code(ErrorCode::Unsupported)
-            .message("Invalid reference")
-            .detail(json!({"reference": reference}).to_string())
-            .build()
-            .unwrap();
-        let error_response = ErrorResponseBuilder::default()
-            .errors(vec![error_info])
-            .build()
-            .unwrap();
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_string(&error_response).unwrap()))
-            .unwrap();
+        return Err(AppError::ManifestInvalid(format!("Invalid reference format: {}", reference)));
     }
 
-    // Save the manifest to the storage
-    let uuid = uuid::Uuid::new_v4().to_string();
-    if (state
-        .storage
-        .write_by_uuid(&uuid, request.into_body().into_data_stream(), false)
-        .await)
-        .is_err()
-    {
-        return Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(axum::body::Body::empty())
-            .unwrap();
+    let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX).await?;
+
+    let calculated_digest_str = format!("sha256:{}", hex::encode(Sha256::digest(&body_bytes)));
+    let calculated_digest = oci_digest::from_str(&calculated_digest_str).unwrap();
+
+    let manifest: ImageManifest = serde_json::from_slice(&body_bytes)
+        .map_err(|e| AppError::ManifestInvalid(e.to_string()))?;
+
+    if is_valid_digest(&reference) && reference != calculated_digest_str {
+        return Err(AppError::DigestInvalid(format!(
+            "Provided digest {} does not match content digest {}",
+            reference, calculated_digest_str
+        )));
     }
 
-    let _digest = oci_digest::from_str(&reference);
-    let digest_str;
-    let is_tag;
+    for descriptor in manifest.layers() {
+        state.storage.read_by_digest(descriptor.digest()).await?;
+    }
+    state.storage.read_by_digest(manifest.config().digest()).await?;
 
-    if is_valid_digest(&reference) {
-        // the reference is a digest
-        is_tag = false;
-        digest_str = reference.clone();
-    } else {
-        // the reference is a tag
-        is_tag = true;
-        let file = state.storage.read_by_uuid(&uuid).await.unwrap();
-        let stream = ReaderStream::new(file);
-        let mut sha2_digest = Sha256::new();
-        let mut stream = stream.fuse();
-        while let Some(Ok(chunk)) = stream.next().await {
-            sha2_digest.update(&chunk);
-        }
 
-        let sha2_digest = sha2_digest.finalize();
-        digest_str = format!("sha256:{}", hex::encode(sha2_digest));
+    let body_stream = Body::from(body_bytes).into_data_stream();
+    state.storage.write_by_digest(&calculated_digest, body_stream, false).await?;
+
+    if !is_valid_digest(&reference) {
+        state.storage.link_to_tag(&name, &reference, &calculated_digest).await?;
     }
 
-    let digest = oci_digest::from_str(&digest_str).unwrap();
-
-    if (state.storage.move_to_digest(&uuid, &digest).await).is_err() {
-        return Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(axum::body::Body::empty())
-            .unwrap();
-    }
-
-    if is_tag && (state.storage.link_to_tag(&name, &reference, &digest).await).is_err() {
-        return Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(axum::body::Body::empty())
-            .unwrap();
-    }
-
-    let location = format!("/v2/{name}/manifests/{digest}");
-
-    Response::builder()
-        .status(StatusCode::CREATED)
-        .header(header::LOCATION, location)
-        .body(Body::empty())
-        .unwrap()
+    let location = format!("/v2/{name}/manifests/{calculated_digest_str}");
+    Ok((
+        StatusCode::CREATED,
+        [(header::LOCATION, location), ("Docker-Content-Digest".parse().unwrap(), calculated_digest_str)],
+        Body::empty(),
+    )
+        .into_response())
 }
 
+/// GET /v2/<name>/tags/list
 pub async fn get_tag_list_handler(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
     Query(params): Query<HashMap<String, String>>,
-) -> Response<Body> {
-    match state.storage.walk_repo_dir(&name).await {
-        Ok(mut tags) => {
-            let has_param_n = params
-                .get("n")
-                .and_then(|value| value.parse::<usize>().ok())
-                .is_some();
-            let has_param_last = params.contains_key("last");
-            let mut need_link = false;
-            let mut n_value = 0;
-            if has_param_n {
-                let n = params.get("n").unwrap().parse::<usize>().unwrap();
-                if has_param_last {
-                    let last = params.get("last").unwrap().parse::<String>().unwrap();
-                    let last_index = tags.iter().position(|x| x == &last).unwrap();
-                    tags = tags.split_off(last_index + 1);
-                }
-                need_link = n > 0 && tags.len() > n;
-                n_value = n;
-                tags.truncate(n);
-            } else if has_param_last {
-                let last = params.get("last").unwrap().parse::<String>().unwrap();
-                let last_index = tags.iter().position(|x| x == &last).unwrap();
-                tags = tags.split_off(last_index + 1);
-            }
-            let tag_list = TagListBuilder::default()
-                .name(&name)
-                .tags(tags)
-                .build()
-                .unwrap();
-
-            let mut response = Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_string(&tag_list).unwrap()))
-                .unwrap();
-
-            if need_link {
-                let next_link = format!(
-                    "{}/v2/{}/tags/list?n={}&last={}",
-                    state.config.registry_url,
-                    name,
-                    n_value,
-                    tag_list.tags().last().unwrap()
-                );
-                let link_header = format!(r#"<{next_link}>; rel="next""#);
-                response.headers_mut().insert(
-                    header::LINK,
-                    header::HeaderValue::from_str(&link_header).unwrap(),
-                );
-            }
-            response
-        }
-        Err(_) => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .unwrap(),
+) -> Result<impl IntoResponse, AppError> {
+    if !is_valid_name(&name) {
+        return Err(AppError::NameInvalid(name));
     }
+
+    let mut all_tags = state.storage.walk_repo_dir(&name).await?;
+
+    if let Some(last_tag) = params.get("last") {
+        if let Some(last_index) = all_tags.iter().position(|t| t == last_tag) {
+            all_tags = all_tags.split_off(last_index + 1);
+        } else {
+            all_tags.clear();
+        }
+    }
+
+    let mut tags_to_return = all_tags;
+    let mut next_link = None;
+
+    if let Some(n_str) = params.get("n") {
+        let n: usize = n_str.parse().map_err(|_| {
+            AppError::Unsupported
+        })?;
+
+        if n > 0 && tags_to_return.len() > n {
+            let last_tag_for_this_page = tags_to_return[n - 1].clone();
+
+            tags_to_return.truncate(n);
+
+            let link = format!(
+                "<{}/v2/{}/tags/list?n={}&last={}>; rel=\"next\"",
+                state.config.registry_url,
+                name,
+                n,
+                last_tag_for_this_page
+            );
+            next_link = Some(link);
+        }
+    }
+
+    let tag_list = TagListBuilder::default()
+        .name(name)
+        .tags(tags_to_return)
+        .build()
+        .map_err(|e| AppError::Unsupported)?; // 理论上不应失败
+
+    let json_body = serde_json::to_string(&tag_list)
+        .map_err(|_| AppError::Unsupported)?;
+
+    let mut response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(body::Body::from(json_body))
+        .unwrap();
+
+    if let Some(link) = next_link {
+        response
+            .headers_mut()
+            .insert(header::LINK, link.parse().unwrap());
+    }
+
+    Ok(response)
 }
 
+/// DELETE /v2/<name>/manifests/<reference>
 pub async fn delete_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
-) -> Response<Body> {
+) -> Result<impl IntoResponse, AppError> {
     if !is_valid_name(&name) {
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .unwrap();
+        return Err(AppError::NameInvalid(name));
     }
     if !is_valid_reference(&reference) {
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .unwrap();
+        return Err(AppError::ManifestInvalid(format!("Invalid reference format: {}", reference)));
     }
+
     if is_valid_digest(&reference) {
-        let digest = oci_digest::from_str(&reference).unwrap();
-        match state.storage.delete_by_digest(&digest).await {
-            Ok(_) => Response::builder()
-                .status(StatusCode::ACCEPTED)
-                .body(Body::empty())
-                .unwrap(),
-            Err(_) => Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(Body::empty())
-                .unwrap(),
-        }
+        let digest = oci_digest::from_str(&reference)
+            .map_err(|_| AppError::DigestInvalid(reference))?;
+        state.storage.delete_by_digest(&digest).await?;
     } else {
-        match state.storage.delete_by_tag(&name, &reference).await {
-            Ok(_) => Response::builder()
-                .status(StatusCode::ACCEPTED)
-                .body(Body::empty())
-                .unwrap(),
-            Err(_) => Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(Body::empty())
-                .unwrap(),
-        }
+        state.storage.delete_by_tag(&name, &reference).await?;
     }
+
+    Ok(StatusCode::ACCEPTED)
 }
+

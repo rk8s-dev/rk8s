@@ -25,13 +25,15 @@ pub async fn create_user(
     State(state): State<Arc<AppState>>,
     Json(req): Json<UserReq>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.user_storage
-        .query_user_by_name(&req.username)
-        .await?;
-    let password = hash_password(&state.config, &req.password)?;
-    let user = User::new(req.username, password);
-    state.user_storage.insert_user(user).await?;
-    Ok(StatusCode::CREATED)
+    match state.user_storage.query_user_by_name(&req.username).await {
+        Ok(_) => Err(AppError::UsernameTaken(req.username)),
+        Err(_) => {
+            let password = hash_password(&state.config, &req.password)?;
+            let user = User::new(req.username, password);
+            state.user_storage.insert_user(user).await?;
+            Ok(StatusCode::CREATED)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

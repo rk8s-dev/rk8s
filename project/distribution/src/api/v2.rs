@@ -10,52 +10,21 @@ use crate::utils::state::AppState;
 use axum::{middleware, Router};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::api::middleware::{authenticate, authorize, resource_exists};
+use crate::error::AppError;
 
 pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         // Determine support
         .route("/", get(|| async { StatusCode::OK.into_response() }))
-        // Manifests API
-        .route(
-            "/*name/manifests/:reference",
-            get(get_manifest_handler)
-                .head(head_manifest_handler)
-                .put(put_manifest_handler)
-                .delete(delete_manifest_handler),
-        )
-        // Blobs API
-        .route(
-            "/*name/blobs/:digest",
-            get(get_blob_handler)
-                .head(head_blob_handler)
-                .delete(delete_blob_handler),
-        )
-        // Blobs Uploads API
-        .route(
-            "/*name/blobs/uploads/",
-            post(post_blob_handler)
-        )
-        .route(
-            "/*name/blobs/uploads/:session_id",
-            get(get_blob_status_handler)
-                .patch(patch_blob_handler)
-                .put(put_blob_handler)
-        )
-        // Tags API
-        .route(
-            "/*name/tags/list",
-            get(get_tag_list_handler),
-        )
-        .layer(middleware::from_fn_with_state(state.clone(), resource_exists))
+        .route("/{*tail}", any(dispatch_handler))
+    /*    .layer(middleware::from_fn_with_state(state.clone(), resource_exists))
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
-        .layer(middleware::from_fn_with_state(state, authorize))
-        // List tags
-        // .route("/{*tail}", any(dispatch_handler))
+        .layer(middleware::from_fn_with_state(state, authorize))*/
 }
 
 async fn dispatch_handler(
@@ -64,7 +33,7 @@ async fn dispatch_handler(
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
     request: Request,
-) -> impl IntoResponse {
+) -> Result<Response, AppError> {
     let method = request.method();
     let segments: Vec<&str> = tail.split('/').collect();
 
@@ -75,23 +44,30 @@ async fn dispatch_handler(
             match *method {
                 // Pull manifests
                 Method::GET => {
-                    get_manifest_handler(State(state), Path((name, reference.to_string()))).await
+                    get_manifest_handler(State(state), Path((name, reference.to_string())))
+                        .await
+                        .map(|res| res.into_response())
                 }
                 // Check if manifest exists in the registry
                 Method::HEAD => {
-                    head_manifest_handler(State(state), Path((name, reference.to_string()))).await
+                    head_manifest_handler(State(state), Path((name, reference.to_string())))
+                        .await
+                        .map(|res| res.into_response())
                 }
                 // Push Manifests
                 Method::PUT => {
                     put_manifest_handler(State(state), Path((name, reference.to_string())), request)
                         .await
+                        .map(|res| res.into_response())
                 }
                 // Delete manifests or tags
                 Method::DELETE => {
-                    delete_manifest_handler(State(state), Path((name, reference.to_string()))).await
+                    delete_manifest_handler(State(state), Path((name, reference.to_string())))
+                        .await
+                        .map(|res| res.into_response())
                 }
                 // Unsupported methods
-                _ => (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response(),
+                _ => Ok((StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response()),
             }
         }
         // tail: /{name}/blobs/{digest}
@@ -100,18 +76,24 @@ async fn dispatch_handler(
             match *method {
                 // Pull blobs
                 Method::GET => {
-                    get_blob_handler(State(state), Path((name, digest.to_string()))).await
+                    get_blob_handler(State(state), Path((name, digest.to_string())))
+                        .await
+                        .map(|res| res.into_response())
                 }
                 // Check if blob exists in the registry
                 Method::HEAD => {
-                    head_blob_handler(State(state), Path((name, digest.to_string()))).await
+                    head_blob_handler(State(state), Path((name, digest.to_string())))
+                        .await
+                        .map(|res| res.into_response())
                 }
                 // Delete blobs
                 Method::DELETE => {
-                    delete_blob_handler(State(state), Path((name, digest.to_string()))).await
+                    delete_blob_handler(State(state), Path((name, digest.to_string())))
+                        .await
+                        .map(|res| res.into_response())
                 }
                 // Unsupported methods
-                _ => (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response(),
+                _ => Ok((StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response()),
             }
         }
         // tail: /{name}/blobs/uploads/
@@ -121,9 +103,11 @@ async fn dispatch_handler(
             let name = name.join("/");
             if *method == Method::POST {
                 // Open a blob upload session
-                post_blob_handler(State(state), Path(name), Query(params), headers, request).await
+                post_blob_handler(State(state), Path(name), Query(params), headers, request)
+                    .await
+                    .map(|res| res.into_response())
             } else {
-                (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response()
+                Ok((StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response())
             }
         }
         // tail: /{name}/blobs/uploads/{session_id}
@@ -141,6 +125,7 @@ async fn dispatch_handler(
                         request,
                     )
                     .await
+                    .map(|res| res.into_response())
                 }
                 // Close a blob upload session
                 Method::PUT => {
@@ -148,18 +133,19 @@ async fn dispatch_handler(
                         State(state),
                         Path((name, session_id.to_string())),
                         Query(params),
-                        headers,
                         request,
                     )
                     .await
+                    .map(|res| res.into_response())
                 }
                 // Get the status of a blob upload session
                 Method::GET => {
                     get_blob_status_handler(State(state), Path((name, session_id.to_string())))
                         .await
+                        .map(|res| res.into_response())
                 }
                 // Unsupported methods
-                _ => (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response(),
+                _ => Ok((StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response()),
             }
         }
         // tail: /{name}/tags/list
@@ -167,11 +153,13 @@ async fn dispatch_handler(
             let name = name.join("/");
             if *method == Method::GET {
                 // List tags
-                get_tag_list_handler(State(state), Path(name), Query(params)).await
+                get_tag_list_handler(State(state), Path(name), Query(params))
+                    .await
+                    .map(|res| res.into_response())
             } else {
-                (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response()
+                Ok((StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response())
             }
         }
-        _ => (StatusCode::NOT_FOUND, "not found").into_response(),
+        _ => Ok((StatusCode::NOT_FOUND, "not found").into_response()),
     }
 }

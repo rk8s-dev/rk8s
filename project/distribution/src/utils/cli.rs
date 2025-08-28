@@ -24,8 +24,6 @@ pub(crate) struct Args {
     pub(crate) url: String,
 
     /// The database URL to connect to
-    /// The format is `sqlite:<path-to-db-file>`
-    /// Example: `sqlite:./data/registry.db`
-    #[arg(long, env = "DATABASE_URL", default_value = "sqlite:registry.db")]
+    #[arg(long, env = "DATABASE_URL", default_value = "db/registry.db")]
     pub(crate) database_url: String,
 }
