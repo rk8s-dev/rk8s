@@ -1,4 +1,3 @@
-use std::rc::Rc;
 
 use crate::{
     cycle_state::CycleState,
@@ -10,14 +9,21 @@ use crate::{
     },
 };
 
-pub struct Fit {
-    pub scoring_strategy: ScoringStrategy,
-}
+pub struct Fit;
 
+const SCORING_STRATEGY_CONFIG_KEY: &str = "ScoringStrategyConfig";
+
+#[derive(Clone)]
 pub enum ScoringStrategy {
     LeastAllocated,
     MostAllocated,
     RequestedToCapacityRatio,
+}
+
+impl Default for ScoringStrategy {
+    fn default() -> Self {
+        Self::LeastAllocated
+    }
 }
 
 impl Plugin for Fit {
@@ -27,7 +33,7 @@ impl Plugin for Fit {
 }
 
 impl EnqueueExtension for Fit {
-    fn events_to_register() -> Vec<ClusterEventWithHint> {
+    fn events_to_register(&self) -> Vec<ClusterEventWithHint> {
         vec![
             ClusterEventWithHint {
                 event: ClusterEvent {
@@ -120,7 +126,7 @@ impl PreFilterPlugin for Fit {
         let pod_requests = pod.spec.resources.clone();
         state.write(
             "PreFilterNodeResourcesFit",
-            Rc::new(PreFilterState { pod_requests }),
+            Box::new(PreFilterState { pod_requests }),
         );
         (PreFilterResult { node_names: vec![] }, Status::default())
     }
@@ -148,7 +154,7 @@ const ERR_REASON_RESOURCES: &str = "node(s) didn't have enough resource(s)";
 impl FilterPlugin for Fit {
     fn filter(&self, state: &mut CycleState, _pod: &PodInfo, node_info: NodeInfo) -> Status {
         let s = state.read::<PreFilterState>("PreFilterNodeResourcesFit");
-        if let Ok(sta) = s {
+        if let Some(sta) = s {
             if !is_fit(&sta.pod_requests, &node_info) {
                 Status::new(Code::Unschedulable, vec![ERR_REASON_RESOURCES.to_string()])
             } else {
@@ -170,7 +176,7 @@ impl PreScorePlugin for Fit {
     fn pre_score(&self, state: &mut CycleState, pod: &PodInfo, _nodes: Vec<NodeInfo>) -> Status {
         let pod_requests = pod.spec.resources.clone();
 
-        state.write(PRE_SCORE_KEY, Rc::new(PreScoreState { pod_requests }));
+        state.write(PRE_SCORE_KEY, Box::new(PreScoreState { pod_requests }));
         Status::default()
     }
 }
@@ -178,32 +184,36 @@ impl PreScorePlugin for Fit {
 impl ScorePlugin for Fit {
     fn score(&self, state: &mut CycleState, _pod: &PodInfo, node_info: NodeInfo) -> (i64, Status) {
         let s = state.read::<PreScoreState>(PRE_SCORE_KEY);
-        match s {
-            Ok(sta) => {
-                // Use least allocated scoring strategy
-                let score = match self.scoring_strategy {
-                    ScoringStrategy::MostAllocated => {
-                        calculate_most_allocated_score(&sta.pod_requests, &node_info)
-                    }
-                    ScoringStrategy::LeastAllocated => {
-                        calculate_least_allocated_score(&sta.pod_requests, &node_info)
-                    }
-                    // now we only have one type two type of resources, so we don't implement RequestedToCapacityRatio scoring algorithm now.
-                    // TODO: calculate_RequestedToCapacityRatio_score
-                    ScoringStrategy::RequestedToCapacityRatio => {
-                        calculate_most_allocated_score(&sta.pod_requests, &node_info)
-                    }
-                };
-                (score, Status::default())
-            }
-            Err(_) => (
+        let strategy = state.read::<ScoringStrategy>(SCORING_STRATEGY_CONFIG_KEY);
+        if strategy.is_none() {
+            return (0, Status::error("error configuring scoring strategy"));
+        }
+        let strategy = strategy.unwrap();
+        if let Some(sta) = s {
+            // Use least allocated scoring strategy
+            let score = match *strategy {
+                ScoringStrategy::MostAllocated => {
+                    calculate_most_allocated_score(&sta.pod_requests, &node_info)
+                }
+                ScoringStrategy::LeastAllocated => {
+                    calculate_least_allocated_score(&sta.pod_requests, &node_info)
+                }
+                // now we only have one type two type of resources, so we don't implement RequestedToCapacityRatio scoring algorithm now.
+                // TODO: calculate_RequestedToCapacityRatio_score
+                ScoringStrategy::RequestedToCapacityRatio => {
+                    calculate_most_allocated_score(&sta.pod_requests, &node_info)
+                }
+            };
+            (score, Status::default())
+        } else {
+            (
                 0,
                 Status::error("NodeResourcesFit scoring error when get pre-score state"),
-            ),
+            )
         }
     }
 
-    fn score_extension() -> Box<dyn ScoreExtension> {
+    fn score_extension(&self) -> Box<dyn ScoreExtension> {
         Box::new(DefaultNormalizeScore {
             max_score: 100,
             reverse: false,

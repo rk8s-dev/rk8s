@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     cycle_state::CycleState,
     models::{NodeInfo, PodInfo, ResourcesRequirements},
@@ -12,6 +10,15 @@ use crate::{
 
 pub struct BalancedAllocation {
     resources: Vec<ResourceName>,
+}
+
+impl Default for BalancedAllocation {
+    fn default() -> Self {
+        Self {
+            // now we don't offer resources config
+            resources: vec![ResourceName::Cpu, ResourceName::Memory],
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -27,7 +34,7 @@ impl Plugin for BalancedAllocation {
 }
 
 impl EnqueueExtension for BalancedAllocation {
-    fn events_to_register() -> Vec<ClusterEventWithHint> {
+    fn events_to_register(&self) -> Vec<ClusterEventWithHint> {
         vec![
             ClusterEventWithHint {
                 event: ClusterEvent {
@@ -47,10 +54,7 @@ impl EnqueueExtension for BalancedAllocation {
     }
 }
 
-fn is_schedulable_after_pod_event(
-    pod: PodInfo,
-    event: EventInner,
-) -> Result<QueueingHint, String> {
+fn is_schedulable_after_pod_event(pod: PodInfo, event: EventInner) -> Result<QueueingHint, String> {
     match event {
         EventInner::Pod(_original, modified) => {
             if modified.is_none() {
@@ -137,13 +141,16 @@ impl PreScorePlugin for BalancedAllocation {
         let pod_requests = pod.spec.resources.clone();
 
         if self.is_best_effort_pod(&pod_requests) {
-            log::trace!("Skipping BalancedAllocation scoring for best-effort pod {:?}", pod);
+            log::trace!(
+                "Skipping BalancedAllocation scoring for best-effort pod {:?}",
+                pod
+            );
             return Status::new(Code::Skip, vec![]);
         }
 
         state.write(
             BALANCED_ALLOCATION_PRE_SCORE_KEY,
-            Rc::new(BalancedAllocationPreScoreState { pod_requests }),
+            Box::new(BalancedAllocationPreScoreState { pod_requests }),
         );
         Status::default()
     }
@@ -159,40 +166,40 @@ impl BalancedAllocation {
         pod_requests: &ResourcesRequirements,
     ) -> Vec<u64> {
         let mut requests = Vec::new();
-        
+
         for resource in &self.resources {
             match resource {
                 ResourceName::Cpu => requests.push(pod_requests.cpu),
                 ResourceName::Memory => requests.push(pod_requests.memory),
             }
         }
-        
+
         requests
     }
 
     fn calculate_node_allocatable_list(&self, node_info: &NodeInfo) -> Vec<u64> {
         let mut allocatable = Vec::new();
-        
+
         for resource in &self.resources {
             match resource {
                 ResourceName::Cpu => allocatable.push(node_info.allocatable.cpu),
                 ResourceName::Memory => allocatable.push(node_info.allocatable.memory),
             }
         }
-        
+
         allocatable
     }
 
     fn calculate_node_requested_list(&self, node_info: &NodeInfo) -> Vec<u64> {
         let mut requested = Vec::new();
-        
+
         for resource in &self.resources {
             match resource {
                 ResourceName::Cpu => requested.push(node_info.requested.cpu),
                 ResourceName::Memory => requested.push(node_info.requested.memory),
             }
         }
-        
+
         requested
     }
 
@@ -209,7 +216,7 @@ impl BalancedAllocation {
             if fraction > 1.0 {
                 fraction = 1.0;
             }
-            
+
             total_fraction += fraction;
             resource_fractions.push(fraction);
         }
@@ -233,47 +240,30 @@ impl BalancedAllocation {
 }
 
 impl ScorePlugin for BalancedAllocation {
-    fn score(&self, state: &mut CycleState, pod: &PodInfo, node_info: NodeInfo) -> (i64, Status) {
+    fn score(&self, state: &mut CycleState, _pod: &PodInfo, node_info: NodeInfo) -> (i64, Status) {
         let s = state.read::<BalancedAllocationPreScoreState>(BALANCED_ALLOCATION_PRE_SCORE_KEY);
-        
-        match s {
-            Ok(sta) => {
-                let pod_requests_list = self.calculate_pod_resource_request_list(&sta.pod_requests);
-                let node_allocatable_list = self.calculate_node_allocatable_list(&node_info);
-                let node_requested_list = self.calculate_node_requested_list(&node_info);
-                let mut total_requested = Vec::new();
-                for i in 0..pod_requests_list.len() {
-                    total_requested.push(node_requested_list[i] + pod_requests_list[i]);
-                }
-                
-                let score = self.balanced_resource_scorer(&total_requested, &node_allocatable_list);
-                
-                (score as i64, Status::default())
+
+        if let Some(sta) = s {
+            let pod_requests_list = self.calculate_pod_resource_request_list(&sta.pod_requests);
+            let node_allocatable_list = self.calculate_node_allocatable_list(&node_info);
+            let node_requested_list = self.calculate_node_requested_list(&node_info);
+            let mut total_requested = Vec::new();
+            for i in 0..pod_requests_list.len() {
+                total_requested.push(node_requested_list[i] + pod_requests_list[i]);
             }
-            Err(_) => {
-                let pod_requests = pod.spec.resources.clone();
-                
-                if self.is_best_effort_pod(&pod_requests) {
-                    return (0, Status::default());
-                }
-                
-                let pod_requests_list = self.calculate_pod_resource_request_list(&pod_requests);
-                let node_allocatable_list = self.calculate_node_allocatable_list(&node_info);
-                let node_requested_list = self.calculate_node_requested_list(&node_info);
-                
-                let mut total_requested = Vec::new();
-                for i in 0..pod_requests_list.len() {
-                    total_requested.push(node_requested_list[i] + pod_requests_list[i]);
-                }
-                
-                let score = self.balanced_resource_scorer(&total_requested, &node_allocatable_list);
-                
-                (score as i64, Status::default())
-            }
+
+            let score = self.balanced_resource_scorer(&total_requested, &node_allocatable_list);
+
+            (score as i64, Status::default())
+        } else {
+            (
+                0,
+                Status::new(Code::Error, vec!["can't read state".to_string()]),
+            )
         }
     }
 
-    fn score_extension() -> Box<dyn ScoreExtension> {
+    fn score_extension(&self) -> Box<dyn ScoreExtension> {
         Box::new(DefaultNormalizeScore {
             max_score: 100,
             reverse: false,

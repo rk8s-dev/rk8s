@@ -1,5 +1,4 @@
 use log;
-use std::rc::Rc;
 
 use crate::{
     cycle_state::CycleState,
@@ -75,7 +74,7 @@ impl PreScorePlugin for TaintToleration {
             .collect();
         state.write(
             PRE_SCORE_KEY,
-            Rc::new(toleration_prefer_no_schedule),
+            Box::new(toleration_prefer_no_schedule),
         );
         Status::default()
     }
@@ -84,7 +83,7 @@ impl PreScorePlugin for TaintToleration {
 impl ScorePlugin for TaintToleration {
     fn score(&self, state: &mut CycleState, _: &PodInfo, node_info: NodeInfo) -> (i64, Status) {
         let s = state.read::<Vec<Toleration>>(PRE_SCORE_KEY);
-        if let Ok(tolerations) = s {
+        if let Some(tolerations) = s {
             let score = node_info
                 .spec
                 .taints
@@ -100,7 +99,7 @@ impl ScorePlugin for TaintToleration {
         }
     }
 
-    fn score_extension() -> Box<dyn ScoreExtension> {
+    fn score_extension(&self) -> Box<dyn ScoreExtension> {
         Box::new(DefaultNormalizeScore {
             max_score: 100,
             reverse: true,
@@ -109,7 +108,7 @@ impl ScorePlugin for TaintToleration {
 }
 
 impl EnqueueExtension for TaintToleration {
-    fn events_to_register() -> Vec<super::ClusterEventWithHint> {
+    fn events_to_register(&self) -> Vec<super::ClusterEventWithHint> {
         vec![
             ClusterEventWithHint {
                 event: ClusterEvent {

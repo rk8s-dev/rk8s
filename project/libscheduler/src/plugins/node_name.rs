@@ -32,7 +32,7 @@ impl FilterPlugin for NodeName {
 }
 
 impl EnqueueExtension for NodeName {
-    fn events_to_register() -> Vec<ClusterEventWithHint> {
+    fn events_to_register(&self) -> Vec<ClusterEventWithHint> {
         // Differ to Kubernetes, we don't have preCheck mechanism now.
         // So directly return event with action type Add.
         vec![ClusterEventWithHint {

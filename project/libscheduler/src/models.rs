@@ -235,6 +235,7 @@ pub struct NodeInfo {
 }
 
 pub type PodNameWithPriority = (u64, String);
+
 pub struct BackOffPod {
     pub pod: PodNameWithPriority,
     pub expire: Instant,
@@ -279,10 +280,6 @@ pub struct Toleration {
     /// When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
     pub effect: Option<TaintEffect>,
     value: String,
-    /// TolerationSeconds represents the period of time the toleration (which must be
-    /// of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
-    /// it is not set, which means tolerate the taint forever (do not evict).
-    toleration_seconds: Option<u64>,
 }
 
 impl Toleration {
@@ -324,7 +321,6 @@ pub struct Taint {
     pub key: TaintKey,
     pub value: String,
     pub effect: TaintEffect,
-    time_added: Instant,
 }
 
 impl Taint {
@@ -332,7 +328,6 @@ impl Taint {
         Self {
             key: key,
             effect: effect,
-            time_added: Instant::now(),
             value: String::new(),
         }
     }

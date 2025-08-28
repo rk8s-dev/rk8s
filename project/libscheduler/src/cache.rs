@@ -29,7 +29,7 @@ impl Cache {
         true
     }
 
-    pub fn assign(&mut self, pod_name: &str, node_name: &str) -> bool {
+    pub fn assume(&mut self, pod_name: &str, node_name: &str) -> bool {
         let pod_info = if let Some(pod) = self.pods.get_mut(pod_name) {
             pod
         } else {
@@ -50,7 +50,7 @@ impl Cache {
         self.pods.insert(pod.name.clone(), pod)
     }
 
-    pub fn remove_pod(&mut self, pod_name: &str) {
+    pub fn remove_pod(&mut self, pod_name: &str) -> Option<PodInfo> {
         if let Some(p) = self.pods.get(pod_name) {
             if let Some(n) = &p.scheduled {
                 let node = self.nodes.get_mut(n);
@@ -60,7 +60,7 @@ impl Cache {
                 }
             }
         }
-        self.pods.remove(pod_name);
+        self.pods.remove(pod_name)
     }
 
     pub fn pop_pod_on_node(&mut self, node_name: &str) -> Vec<PodNameWithPriority> {
@@ -86,6 +86,10 @@ impl Cache {
 
     pub fn get_nodes(&self) -> Vec<NodeInfo> {
         self.nodes.values().cloned().collect()
+    }
+
+    pub fn get_pods(&self) -> HashMap<String, PodInfo> {
+        self.pods.clone()
     }
 
     pub fn get_pod(&self, pod_name: &str) -> Option<PodInfo> {

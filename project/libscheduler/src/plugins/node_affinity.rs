@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use crate::{
     cycle_state::CycleState,
@@ -19,7 +19,7 @@ impl Plugin for NodeAffinity {
 }
 
 impl EnqueueExtension for NodeAffinity {
-    fn events_to_register() -> Vec<super::ClusterEventWithHint> {
+    fn events_to_register(&self) -> Vec<super::ClusterEventWithHint> {
         vec![ClusterEventWithHint {
             event: ClusterEvent {
                 resource: EventResource::Node,
@@ -152,7 +152,7 @@ impl PreFilterPlugin for NodeAffinity {
         let cur_state = get_required_node_affinity(pod);
         state.write(
             "PreFilterNodeAffinity",
-            Rc::new(PreFilterState {
+            Box::new(PreFilterState {
                 required_node_selector_and_affinity: cur_state,
             }),
         );
@@ -168,7 +168,7 @@ const ERR_REASON_POD: &str = "node(s) didn't match Pod's node affinity/selector"
 impl FilterPlugin for NodeAffinity {
     fn filter(&self, state: &mut CycleState, _pod: &PodInfo, node_info: NodeInfo) -> Status {
         let s = state.read::<PreFilterState>("PreFilterNodeAffinity");
-        if let Ok(sta) = s {
+        if let Some(sta) = s {
             if !sta.required_node_selector_and_affinity.matches(&node_info) {
                 Status::new(
                     Code::UnschedulableAndUnresolvable,
@@ -198,7 +198,7 @@ impl PreScorePlugin for NodeAffinity {
         let s = PreScoreState {
             preferred_node_affinity,
         };
-        state.write(PRE_SCORE_KEY, Rc::new(s));
+        state.write(PRE_SCORE_KEY, Box::new(s));
         Status::default()
     }
 }
@@ -219,19 +219,20 @@ fn get_pod_preferred_node_affinity(pod: &PodInfo) -> PreferredSchedulingTerms {
 impl ScorePlugin for NodeAffinity {
     fn score(&self, state: &mut CycleState, _pod: &PodInfo, node_info: NodeInfo) -> (i64, Status) {
         let s = state.read::<PreScoreState>(PRE_SCORE_KEY);
-        match s {
-            Ok(sta) => (
+        if let Some(sta) = s {
+            (
                 sta.preferred_node_affinity.score(&node_info),
                 Status::default(),
-            ),
-            Err(_) => (
+            )
+        } else {
+            (
                 0,
                 Status::error("NodeAffinity scoring error when get pre-score state"),
-            ),
+            )
         }
     }
 
-    fn score_extension() -> Box<dyn ScoreExtension> {
+    fn score_extension(&self) -> Box<dyn ScoreExtension> {
         Box::new(DefaultNormalizeScore {
             max_score: 100,
             reverse: false,
