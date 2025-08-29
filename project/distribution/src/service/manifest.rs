@@ -26,6 +26,7 @@ use tokio::io::AsyncReadExt;
 ///   manifest content.
 /// - If the manifest or tag does not exist in the repository, this endpoint MUST return
 ///   a `404 Not Found` with a `MANIFEST_UNKNOWN` error code.
+#[tracing::instrument(skip(state))]
 pub async fn get_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
@@ -82,6 +83,7 @@ pub async fn get_manifest_handler(
 /// - The response MUST include the same headers as a `GET` request would, particularly
 ///   `Content-Length` and `Docker-Content-Digest`.
 /// - If the manifest or tag does not exist, it MUST return `404 Not Found`.
+#[tracing::instrument(skip(state))]
 pub async fn head_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
@@ -144,6 +146,7 @@ pub async fn head_manifest_handler(
 ///   a `MANIFEST_BLOB_UNKNOWN` error code.
 /// - This endpoint is also the "Create-on-Push" point: if the repository does not exist,
 ///   this operation should create it.
+#[tracing::instrument(skip(state))]
 pub async fn put_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
@@ -205,6 +208,7 @@ pub async fn put_manifest_handler(
 ///   Example: `{"name": "<name>", "tags": ["v1", "v2", "latest"]}`.
 /// - MUST support pagination via the "n" (limit) and "last" (marker) query parameters.
 /// - Pagination links MUST be provided in the `Link` HTTP header.
+#[tracing::instrument(skip(state))]
 pub async fn get_tag_list_handler(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -285,6 +289,7 @@ pub async fn get_tag_list_handler(
 ///   is handled separately by a garbage collection process.
 /// - If the manifest identified by the digest does not exist, the server MUST return a
 ///   `404 Not Found` with a `MANIFEST_UNKNOWN` error code.
+#[tracing::instrument(skip(state))]
 pub async fn delete_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,

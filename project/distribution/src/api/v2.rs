@@ -20,9 +20,9 @@ use std::sync::Arc;
 pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(probe))
-        .route("/{*tail}", any(dispatch_handler)
+        .route("/{*tail}", any(dispatch_handler))
             .layer(middleware::from_fn_with_state(state.clone(), authorize))
-            .layer(middleware::from_fn_with_state(state, authenticate)))
+            .layer(middleware::from_fn_with_state(state, authenticate))
 }
 
 pub async fn probe(

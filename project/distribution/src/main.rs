@@ -3,14 +3,10 @@ use clap::Parser;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::path::Path;
 use std::sync::Arc;
-use axum::{Router, ServiceExt};
-use axum::extract::Request;
 use tokio::fs::OpenOptions;
 use tokio::signal;
-use tower::Layer;
-use tower_http::normalize_path::{NormalizePath, NormalizePathLayer};
-use tracing_subscriber::{fmt, EnvFilter};
 use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::EnvFilter;
 use utils::cli::Args;
 use utils::state::AppState;
 
@@ -42,10 +38,6 @@ async fn main() -> anyhow::Result<()> {
         .run(&pool)
         .await?;
     let state = Arc::new(AppState::new(config, Arc::new(pool)).await);
-
-    // This middleware will normalize path, that is, remove the trailing slash from the path (/v2/ -> /v2).
-    // let app = NormalizePathLayer::trim_trailing_slash()
-    //     .layer(api::create_router(state));
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", args.host, args.port))
         .await?;

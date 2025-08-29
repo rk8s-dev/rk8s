@@ -36,25 +36,35 @@ pub async fn authorize(
     next: Next,
 ) -> Result<impl IntoResponse, AppError> {
     let identifier = extract_repo_identifier(req.uri().path());
+    if identifier.is_none() {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    }
+
+    let identifier = identifier.unwrap();
+    let namespace = identifier
+        .split("/")
+        .find(|s| !s.is_empty())
+        .unwrap_or(&identifier);
+
     let claims = req
         .extensions()
         .get::<Claims>();
-    let namespace = match &identifier {
-        Some(identifier) => identifier.split("/")
-                                    .find(|s| !s.is_empty())
-                                    .unwrap_or(identifier),
-        None => return Ok(StatusCode::NOT_FOUND.into_response()),
-    };
     match *req.method() {
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
-            if let Some(repo) = req
-                .extensions()
-                .get::<Repo>() {
-                if repo.is_public != 1 {
-                    let claims = claims.ok_or(OciError::Unauthorized("not authorized".to_string(), Some(state.config.clone())))?;
-                    if claims.sub != namespace {
-                        return Err(OciError::Forbidden("unable to read others' private repositories".to_string()).into());
+            println!("identifier: {identifier}");
+            if let Ok(repo) = state.repo_storage
+                .query_repo_by_name(&identifier)
+                .await {
+                if repo.is_public == 0 {
+                    match claims {
+                        Some(claims) => if claims.sub != namespace {
+                            return Err(OciError::Forbidden("unable to read others' private repositories".to_string()).into());
+                        }
+                        None => return Err(OciError::Unauthorized(
+                            "unauthorized".to_string(),
+                            Some(state.config.clone())
+                        ).into())
                     }
                 }
             }
@@ -68,7 +78,7 @@ pub async fn authorize(
         }
         _ => unreachable!(),
     }
-    req.extensions_mut().insert(RepoIdentifier(identifier.unwrap()));
+    req.extensions_mut().insert(RepoIdentifier(identifier));
     Ok(next.run(req).await)
 }
 
@@ -84,7 +94,11 @@ pub fn extract_claims(headers: &HeaderMap, config: Arc<Config>) -> Result<Claims
 }
 
 fn extract_repo_identifier(url: &str) -> Option<String> {
-    let segments: Vec<&str> = url.split("/").collect();
+    let segments: Vec<&str> = url
+        .split("/")
+        .filter(|s| !s.is_empty())
+        .collect();
+    println!("{:?}", segments);
     match segments.as_slice() {
         // tail: /{name}/manifests/{reference}
         [name @ .., "manifests", _reference] if !name.is_empty() => {
@@ -95,6 +109,9 @@ fn extract_repo_identifier(url: &str) -> Option<String> {
             Some(name.join("/"))
         }
         // tail: /{name}/blobs/uploads/
+        [name @ .., "blobs", "uploads"] if !name.is_empty() => {
+            Some(name.join("/"))
+        }
         // tail: /{name}/blobs/uploads/{session_id}
         [name @ .., "blobs", "uploads", _] if !name.is_empty() => {
             Some(name.join("/"))

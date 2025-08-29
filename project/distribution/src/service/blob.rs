@@ -25,6 +25,7 @@ use tokio_util::io::ReaderStream;
 ///   user has pull access to the repository before serving the blob.
 /// - If the blob does not exist, the server MUST return `404 Not Found` with a `BLOB_UNKNOWN`
 ///   error code.
+#[tracing::instrument(skip(state))]
 pub async fn get_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((name, digest_str)): Path<(String, String)>,
@@ -63,6 +64,7 @@ pub async fn get_blob_handler(
 /// - If the blob exists, it MUST return `200 OK` with an empty body.
 /// - The response MUST include the same headers as a `GET` request, especially `Content-Length`.
 /// - If the blob does not exist, it MUST return `404 Not Found`.
+#[tracing::instrument(skip(state))]
 pub async fn head_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((name, digest_str)): Path<(String, String)>,
@@ -99,6 +101,7 @@ pub async fn head_blob_handler(
 ///   a `Location` header containing the unique session URL (including a UUID), and a `Docker-Upload-UUID` header.
 /// - **For monolithic upload:** Include the `?digest=` query parameter. The request body contains the
 ///   entire blob content. On success, the server MUST return `201 Created`.
+#[tracing::instrument(skip(state))]
 pub async fn post_blob_handler(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -157,6 +160,7 @@ pub async fn post_blob_handler(
 /// - If a chunk is out of order, the server MUST return `416 Range Not Satisfiable`.
 /// - On success, the server MUST return `202 Accepted` with a `Range` header indicating the
 ///   total number of bytes received so far for the upload.
+#[tracing::instrument(skip(state))]
 pub async fn patch_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((name, session_id)): Path<(String, String)>,
@@ -207,6 +211,7 @@ pub async fn patch_blob_handler(
 /// - The server MUST verify that the digest of the fully assembled blob matches the provided digest.
 /// - On success, the server MUST return `201 Created` with a `Location` header pointing to the
 ///   blob's canonical location by its digest.
+#[tracing::instrument(skip(state))]
 pub async fn put_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((name, session_id)): Path<(String, String)>,
@@ -235,6 +240,7 @@ pub async fn put_blob_handler(
 }
 
 /// GET /v2/<name>/blobs/uploads/<session_id>
+#[tracing::instrument(skip(state))]
 pub async fn get_blob_status_handler(
     State(state): State<Arc<AppState>>,
     Path((name, session_id)): Path<(String, String)>,
@@ -256,6 +262,7 @@ pub async fn get_blob_status_handler(
 }
 
 /// DELETE /v2/<name>/blobs/<digest>
+#[tracing::instrument(skip(state))]
 pub async fn delete_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((_name, digest_str)): Path<(String, String)>,

@@ -1,7 +1,7 @@
 use crate::api::RepoIdentifier;
 use crate::error::AppError;
 use crate::utils::state::AppState;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};

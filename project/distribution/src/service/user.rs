@@ -1,19 +1,18 @@
-use std::sync::Arc;
-use axum::extract::{State};
+use crate::config::Config;
+use crate::domain::user_model::User;
+use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
+use crate::utils::jwt::gen_token;
+use crate::utils::state::AppState;
+use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 use axum::response::IntoResponse;
-use axum_extra::headers::Authorization;
+use axum::Json;
 use axum_extra::headers::authorization::Basic;
+use axum_extra::headers::Authorization;
 use axum_extra::TypedHeader;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use crate::config::Config;
-use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
-use crate::utils::jwt::gen_token;
-use crate::domain::user_model::User;
-use crate::error::AppError::Business;
-use crate::utils::state::{AppState};
+use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserReq {
@@ -47,6 +46,7 @@ pub struct AuthRes {
     issued_at: String,
 }
 
+#[tracing::instrument(skip_all)]
 pub(crate) async fn auth(
     State(state): State<Arc<AppState>>,
     TypedHeader(auth): TypedHeader<Authorization<Basic>>,
