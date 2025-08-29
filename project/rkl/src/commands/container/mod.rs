@@ -6,7 +6,7 @@ use crate::{
         container::config::ContainerConfigBuilder,
         create, delete, exec, list, load_container, start,
     },
-    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
+    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
     rootpath,
     task::{add_cap_net_raw, get_cni},
 };
@@ -14,7 +14,7 @@ use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use common::ContainerSpec;
 use libcontainer::{
-    container::{Container, State, state},
+    container::{Container, ContainerStatus, State, state},
     error::LibcontainerError,
 };
 use liboci_cli::{Create, Delete, List, Start};
@@ -112,9 +112,9 @@ impl ContainerRunner {
 
         let _ = self.create_container()?;
 
-        let id = self.container_id.as_str();
+        let id = self.container_id.clone();
         // See if the container exists
-        match is_container_exist(id, &self.root_path).is_ok() {
+        match is_container_exist(id.as_str(), &self.root_path).is_ok() {
             // exist
             true => {
                 self.start_container(None)?;
@@ -281,9 +281,14 @@ impl ContainerRunner {
         Container::load(self.root_path.clone().join(&self.container_id))
     }
 
-    pub fn start_container(&self, id: Option<String>) -> Result<StartContainerResponse> {
+    pub fn start_container(&mut self, id: Option<String>) -> Result<()> {
         let root_path = self.root_path.clone();
 
+        // check the current container's status, if it's stopped then delete it and create a new one
+        if self.get_container_state()?.status == ContainerStatus::Stopped {
+            delete_container(&self.container_id)?;
+            return self.create();
+        }
         // setup the network
         self.setup_container_network()?;
 
@@ -297,7 +302,7 @@ impl ContainerRunner {
                     root_path,
                 )?;
 
-                Ok(StartContainerResponse {})
+                Ok(())
             }
             Some(id) => {
                 start(
@@ -307,7 +312,7 @@ impl ContainerRunner {
                     root_path,
                 )?;
 
-                Ok(StartContainerResponse {})
+                Ok(())
             }
         }
     }
@@ -363,20 +368,23 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     // create container_config
     runner.build_config()?;
 
-    let id = runner.container_id.as_str();
+    let id = runner.container_id.clone();
     // See if the container exists
-    match is_container_exist(id, &runner.root_path).is_ok() {
+    match is_container_exist(id.as_str(), &runner.root_path).is_ok() {
         // exist
         true => {
             // determine if the container is running
             if runner.load_container()?.can_start() {
                 runner.start_container(None)?;
-                println!("Container: {id} runs successfully!");
             }
             println!(
-                "Container: {id} can not start, status: {}!",
+                "Container: {id} can not start, status: {}! Creating a new one...",
                 runner.load_container()?.status()
             );
+            delete_container(&id)?;
+            let CreateContainerResponse { container_id } = runner.create_container()?;
+            runner.start_container(None)?;
+            println!("Container: {container_id} runs successfully!");
             Ok(())
         }
         // not exist
@@ -446,7 +454,7 @@ pub fn remove_container_network(pid: Pid) -> Result<()> {
     Ok(())
 }
 pub fn start_container(container_id: &str) -> Result<()> {
-    let runner = ContainerRunner::from_container_id(container_id, None)?;
+    let mut runner = ContainerRunner::from_container_id(container_id, None)?;
     runner.start_container(Some(container_id.to_string()))?;
     println!("container {container_id} start successfully");
     Ok(())
