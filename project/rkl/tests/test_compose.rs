@@ -21,7 +21,7 @@ services:
   backend:  
     container_name: backend  
     image: {}  
-    command: ["sleep", "300"]  
+    command: ["sleep", "10"]  
     ports:  
       - "8080:8080"  
     networks:  
@@ -29,7 +29,7 @@ services:
   frontend:  
     container_name: frontend  
     image: {}  
-    command: ["sleep", "300"]  
+    command: ["sleep", "10"]  
     ports:  
       - "80:80"  
     networks:  
