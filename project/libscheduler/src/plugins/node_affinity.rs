@@ -239,3 +239,188 @@ impl ScorePlugin for NodeAffinity {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Affinity, NodeSelectorOperator, NodeSelectorRequirement, PreferredSchedulingTerm, PodSpec, QueuedInfo};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_node_affinity_filter_no_affinity() {
+        let plugin = NodeAffinity;
+        let mut state = CycleState::default();
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec::default(),
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+        let node = NodeInfo::default();
+        
+        let result = plugin.filter(&mut state, &pod, node);
+        assert_eq!(result.code, Code::Success);
+    }
+
+    #[test]
+    fn test_node_affinity_filter_with_node_selector() {
+        let plugin = NodeAffinity;
+        let mut state = CycleState::default();
+        
+        let mut node_selector = HashMap::new();
+        node_selector.insert("disktype".to_string(), "ssd".to_string());
+        
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec {
+                node_selector: node_selector.clone(),
+                ..Default::default()
+            },
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let mut node_labels = HashMap::new();
+        node_labels.insert("disktype".to_string(), "ssd".to_string());
+        let matching_node = NodeInfo {
+            name: "node-1".to_string(),
+            labels: node_labels,
+            ..Default::default()
+        };
+
+        let mut non_matching_labels = HashMap::new();
+        non_matching_labels.insert("disktype".to_string(), "hdd".to_string());
+        let non_matching_node = NodeInfo {
+            name: "node-2".to_string(),
+            labels: non_matching_labels,
+            ..Default::default()
+        };
+
+        let (_pre_filter_result, pre_filter_status) = plugin.pre_filter(
+            &mut state, 
+            &pod, 
+            vec![matching_node.clone(), non_matching_node.clone()]
+        );
+        assert_eq!(pre_filter_status.code, Code::Success);
+
+        let empty_node_selector = NodeSelector::default();
+        assert!(empty_node_selector.matches(&matching_node));
+
+        let result = plugin.filter(&mut state, &pod, matching_node);
+        assert_eq!(result.code, Code::Success);
+
+        let result = plugin.filter(&mut state, &pod, non_matching_node);
+        assert_eq!(result.code, Code::UnschedulableAndUnresolvable);
+    }
+
+    #[test]
+    fn test_node_affinity_pre_filter_skip() {
+        let plugin = NodeAffinity;
+        let mut state = CycleState::default();
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec::default(),
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let (result, status) = plugin.pre_filter(&mut state, &pod, vec![]);
+        assert_eq!(status.code, Code::Skip);
+        assert!(result.node_names.is_empty());
+    }
+
+    #[test]
+    fn test_node_affinity_score_no_preferred_affinity() {
+        let plugin = NodeAffinity;
+        let mut state = CycleState::default();
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec::default(),
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+        let node = NodeInfo::default();
+
+        let status = plugin.pre_score(&mut state, &pod, vec![node.clone()]);
+        assert_eq!(status.code, Code::Skip);
+
+        let (score, status) = plugin.score(&mut state, &pod, node);
+        assert_eq!(status.code, Code::Error);
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn test_node_affinity_score_with_preferred_affinity() {
+        let plugin = NodeAffinity;
+        let mut state = CycleState::default();
+
+        let match_label = NodeSelectorRequirement {
+            key: "zone".to_string(),
+            operator: NodeSelectorOperator::NodeSelectorOpIn,
+            values: vec!["us-west".to_string()],
+        };
+        let preferred_term = PreferredSchedulingTerm {
+            weight: 10,
+            match_label,
+        };
+        let preferred_terms = PreferredSchedulingTerms {
+            terms: vec![preferred_term],
+        };
+
+        let node_affinity = crate::models::NodeAffinity {
+            required_during_scheduling_ignored_during_execution: None,
+            preferred_during_scheduling_ignored_during_execution: Some(preferred_terms),
+        };
+
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec {
+                affinity: Some(Affinity {
+                    node_affinity: Some(node_affinity),
+                }),
+                ..Default::default()
+            },
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let mut matching_labels = HashMap::new();
+        matching_labels.insert("zone".to_string(), "us-west".to_string());
+        let matching_node = NodeInfo {
+            name: "node-1".to_string(),
+            labels: matching_labels,
+            ..Default::default()
+        };
+
+        let mut non_matching_labels = HashMap::new();
+        non_matching_labels.insert("zone".to_string(), "us-east".to_string());
+        let non_matching_node = NodeInfo {
+            name: "node-2".to_string(),
+            labels: non_matching_labels,
+            ..Default::default()
+        };
+
+        let status = plugin.pre_score(&mut state, &pod, vec![matching_node.clone(), non_matching_node.clone()]);
+        assert_eq!(status.code, Code::Success);
+
+        let (score, status) = plugin.score(&mut state, &pod, matching_node);
+
+        assert_eq!(status.code, Code::Success);
+        assert_eq!(score, 10);
+
+        let (score, status) = plugin.score(&mut state, &pod, non_matching_node);
+        assert_eq!(status.code, Code::Success);
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn test_node_affinity_events_to_register() {
+        let plugin = NodeAffinity;
+        let events = plugin.events_to_register();
+        
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert!(matches!(event.event.resource, EventResource::Node));
+        assert!(event.queueing_hint_fn.is_some());
+    }
+}

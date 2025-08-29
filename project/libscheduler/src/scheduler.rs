@@ -457,14 +457,13 @@ impl Scheduler {
                 &pod_info,
                 &passed_prefilter,
             );
-
             let sta = Self::run_pre_score_plugin(
                 &enabled_plugins.pre_score,
                 &mut cycle_state,
                 &pod_info,
                 &filtered,
             );
-            if !matches!(sta.code, Code::Success) {
+            if filtered.is_empty() || !matches!(sta.code, Code::Success) {
                 break_cycle!(push_backoff);
             }
 
@@ -567,6 +566,7 @@ impl Scheduler {
         let mut write_lock = self.cache.write().await;
         (*write_lock).update_node(node.clone());
         drop(write_lock);
+        self.queue.add_count().await;
 
         let read_lock = self.cache.read().await;
         let pod_snapshot = read_lock.get_pods();
@@ -586,189 +586,224 @@ impl Scheduler {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::default;
+#[cfg(test)]
+mod tests {
+    use tokio::time::timeout;
 
-//     use tokio::time::timeout;
+    use super::*;
+    use crate::models::{NodeSpec, PodSpec, QueuedInfo, ResourcesRequirements};
 
-//     use super::*;
-//     use crate::{
-//         algorithms::basic::BasicAlgorithm,
-//         models::{NodeSpec, PodSpec, QueuedInfo, ResourcesRequirements},
-//     };
+    #[test]
+    fn test_plugins_enabled() {
+        let plugins = Plugins::default();
+        let scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
 
-//     #[tokio::test]
-//     async fn test_push_and_next_pod() {
-//         let queue = Arc::new(SchedulingQueue::new());
-//         queue.push("pod1".to_string(), 1).await;
-//         queue.push("pod3".to_string(), 3).await;
-//         queue.push("pod2".to_string(), 2).await;
-//         let (priority, name) = queue.next_pod().await;
-//         assert_eq!(priority, 3);
-//         assert_eq!(name, "pod3");
-//         let (priority, name) = queue.next_pod().await;
-//         assert_eq!(priority, 2);
-//         assert_eq!(name, "pod2");
-//         let (priority, name) = queue.next_pod().await;
-//         assert_eq!(priority, 1);
-//         assert_eq!(name, "pod1");
+        macro_rules! test_plugin {
+            ($plugin: ident) => {{
+                let mut enabled_names = Vec::new();
+                let mut expected_names = Vec::new();
+                for (pl, _) in scheduler.enabled_plugins.$plugin {
+                    enabled_names.push(pl.name().to_string());
+                }
+                for pl in plugins.$plugin.iter() {
+                    expected_names.push(pl.name.clone());
+                }
+                enabled_names.sort();
+                expected_names.sort();
+                assert_eq!(enabled_names, expected_names);
+            }};
+        }
 
-//         let (pod_sx, mut pod_rx) = unbounded_channel();
-//         let cloned_queue = queue.clone();
-//         tokio::spawn(async move {
-//             let pod_with_prioirity = cloned_queue.next_pod().await;
-//             pod_sx.send(pod_with_prioirity).unwrap();
-//         });
-//         queue.push("pod1".to_string(), 1).await;
-//         let res = timeout(Duration::from_secs(5), pod_rx.recv())
-//             .await
-//             .unwrap()
-//             .unwrap();
-//         assert_eq!(res.0, 1);
-//         assert_eq!(res.1, "pod1");
-//     }
+        test_plugin!(pre_enqueue);
+        test_plugin!(pre_filter);
+        test_plugin!(filter);
+        test_plugin!(post_filter);
+        test_plugin!(pre_score);
+        test_plugin!(score);
+        test_plugin!(reserve);
+        test_plugin!(permit);
+        test_plugin!(pre_bind);
+        test_plugin!(bind);
+        test_plugin!(post_bind);
+    }
 
-//     fn make_pod(pod_name: &str, priority: u64) -> PodInfo {
-//         PodInfo {
-//             name: pod_name.to_owned(),
-//             spec: PodSpec {
-//                 resources: ResourcesRequirements { cpu: 1, memory: 1 },
-//                 priority,
-//                 ..Default::default()
-//             },
-//             queued_info: QueuedInfo::default(),
-//             scheduled: None,
-//         }
-//     }
+    #[tokio::test]
+    async fn test_push_and_next_pod() {
+        let queue = Arc::new(SchedulingQueue::new(vec![]));
+        queue.push("pod1".to_string(), 1).await;
+        queue.push("pod3".to_string(), 3).await;
+        queue.push("pod2".to_string(), 2).await;
+        let (priority, name) = queue.next_pod().await;
+        assert_eq!(priority, 3);
+        assert_eq!(name, "pod3");
+        let (priority, name) = queue.next_pod().await;
+        assert_eq!(priority, 2);
+        assert_eq!(name, "pod2");
+        let (priority, name) = queue.next_pod().await;
+        assert_eq!(priority, 1);
+        assert_eq!(name, "pod1");
 
-//     #[tokio::test]
-//     async fn test_push_backoff_and_unschedulable() {
-//         let queue = SchedulingQueue::new();
-//         let pod = PodInfo {
-//             name: "pod".to_owned(),
-//             spec: PodSpec {
-//                 resources: ResourcesRequirements { cpu: 1, memory: 1 },
-//                 priority: 1,
-//                 ..Default::default()
-//             },
-//             queued_info: QueuedInfo {
-//                 attempts: 9,
-//                 ..Default::default()
-//             },
-//             scheduled: None,
-//         };
-//         queue.push_backoff(pod).await;
-//         let unschedulable = queue.unschedulable_queue.lock().await;
-//         assert_eq!(unschedulable.len(), 1);
-//     }
+        let (pod_sx, mut pod_rx) = unbounded_channel();
+        let cloned_queue = queue.clone();
+        tokio::spawn(async move {
+            let pod_with_prioirity = cloned_queue.next_pod().await;
+            pod_sx.send(pod_with_prioirity).unwrap();
+        });
+        queue.push("pod1".to_string(), 1).await;
+        let res = timeout(Duration::from_secs(5), pod_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(res.0, 1);
+        assert_eq!(res.1, "pod1");
+    }
 
-//     #[tokio::test]
-//     async fn test_backoff_queue_flush() {
-//         let queue = SchedulingQueue::new();
-//         let pod = PodInfo {
-//             name: "pod".to_string(),
-//             spec: PodSpec {
-//                 resources: ResourcesRequirements { cpu: 1, memory: 1 },
-//                 priority: 1,
-//                 ..Default::default()
-//             },
-//             queued_info: QueuedInfo::default(),
-//             scheduled: None,
-//         };
-//         queue.run();
-//         queue.push_backoff(pod).await;
-//         let res = timeout(Duration::from_secs(3), queue.next_pod()).await;
-//         assert!(res.is_ok());
-//     }
+    fn make_pod(pod_name: &str, priority: u64) -> PodInfo {
+        PodInfo {
+            name: pod_name.to_owned(),
+            spec: PodSpec {
+                resources: ResourcesRequirements { cpu: 1, memory: 1 },
+                priority,
+                ..Default::default()
+            },
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        }
+    }
 
-//     #[tokio::test]
-//     async fn test_scheduler_update_cache_pod() {
-//         let mut scheduler: Scheduler<BasicAlgorithm> = Scheduler::new();
-//         let pod = make_pod("pod3", 7);
-//         scheduler.update_cache_pod(pod).await;
-//         let cache = scheduler.cache.read().await;
-//         assert!(cache.get_pod("pod3").is_some());
-//     }
+    #[tokio::test]
+    async fn test_push_backoff_and_unschedulable() {
+        let queue = SchedulingQueue::new(vec![]);
+        let pod = PodInfo {
+            name: "pod".to_owned(),
+            spec: PodSpec {
+                resources: ResourcesRequirements { cpu: 1, memory: 1 },
+                priority: 1,
+                ..Default::default()
+            },
+            queued_info: QueuedInfo {
+                attempts: 9,
+                ..Default::default()
+            },
+            scheduled: None,
+        };
+        queue.push_backoff(pod).await;
+        let unschedulable = queue.unschedulable_queue.lock().await;
+        assert_eq!(unschedulable.len(), 1);
+    }
 
-//     #[tokio::test]
-//     async fn test_scheduler_remove_cache_pod() {
-//         let mut scheduler: Scheduler<BasicAlgorithm> = Scheduler::new();
-//         let pod = make_pod("pod4", 8);
-//         scheduler.update_cache_pod(pod).await;
-//         scheduler.remove_cache_pod("pod4").await;
-//         let cache = scheduler.cache.read().await;
-//         assert!(cache.get_pod("pod4").is_none());
-//     }
+    #[tokio::test]
+    async fn test_backoff_queue_flush() {
+        let queue = SchedulingQueue::new(vec![]);
+        let pod = PodInfo {
+            name: "pod".to_string(),
+            spec: PodSpec {
+                resources: ResourcesRequirements { cpu: 1, memory: 1 },
+                priority: 1,
+                ..Default::default()
+            },
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+        queue.run();
+        queue.push_backoff(pod).await;
+        let res = timeout(Duration::from_secs(3), queue.next_pod()).await;
+        assert!(res.is_ok());
+    }
 
-//     #[tokio::test]
-//     async fn test_scheduler_add_and_remove_node() {
-//         let mut scheduler: Scheduler<BasicAlgorithm> = Scheduler::new();
-//         let node = NodeInfo {
-//             name: "node1".to_string(),
-//             cpu: 2,
-//             memory: 10,
-//             spec: NodeSpec::default(),
-//             ..Default::default()
-//         };
-//         scheduler.add_cache_node(node).await;
-//         let cache = scheduler.cache.read().await;
-//         assert!(!cache.get_nodes().is_empty());
-//         drop(cache);
-//         scheduler.remove_cache_node("node1").await;
-//         let cache = scheduler.cache.read().await;
-//         assert!(cache.get_nodes().is_empty());
-//     }
+    #[tokio::test]
+    async fn test_scheduler_update_cache_pod() {
+        let mut scheduler: Scheduler =
+            Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+        let pod = make_pod("pod3", 7);
+        scheduler.update_cache_pod(pod).await;
+        let cache = scheduler.cache.read().await;
+        assert!(cache.get_pod("pod3").is_some());
+    }
 
-//     #[tokio::test]
-//     async fn test_schedule_one_assigns_pod() {
-//         let scheduler: Scheduler<BasicAlgorithm> = Scheduler::new();
-//         let mut cache = scheduler.cache.write().await;
+    #[tokio::test]
+    async fn test_scheduler_remove_cache_pod() {
+        let mut scheduler: Scheduler =
+            Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+        let pod = make_pod("pod4", 8);
+        scheduler.update_cache_pod(pod).await;
+        scheduler.remove_cache_pod("pod4").await;
+        let cache = scheduler.cache.read().await;
+        assert!(cache.get_pod("pod4").is_none());
+    }
 
-//         let node = NodeInfo {
-//             name: "node".to_string(),
-//             cpu: 2,
-//             memory: 10,
-//             spec: NodeSpec::default(),
-//             ..Default::default()
-//         };
-//         cache.update_node(node);
-//         let node = NodeInfo {
-//             name: "node2".to_string(),
-//             cpu: 1,
-//             memory: 8,
-//             spec: NodeSpec::default(),
-//             ..Default::default()
-//         };
-//         cache.update_node(node);
+    #[tokio::test]
+    async fn test_scheduler_add_and_remove_node() {
+        let mut scheduler: Scheduler =
+            Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+        let node = NodeInfo {
+            name: "node1".to_string(),
+            allocatable: ResourcesRequirements { cpu: 2, memory: 10 },
+            requested: ResourcesRequirements { cpu: 0, memory: 0 },
+            spec: NodeSpec::default(),
+            ..Default::default()
+        };
+        scheduler.add_cache_node(node).await;
+        let cache = scheduler.cache.read().await;
+        assert!(!cache.get_nodes().is_empty());
+        drop(cache);
+        scheduler.remove_cache_node("node1").await;
+        let cache = scheduler.cache.read().await;
+        assert!(cache.get_nodes().is_empty());
+    }
 
-//         cache.update_pod(PodInfo {
-//             name: "pod".to_string(),
-//             spec: PodSpec {
-//                 resources: ResourcesRequirements { cpu: 2, memory: 3 },
-//                 priority: 1,
-//                 ..Default::default()
-//             },
-//             queued_info: QueuedInfo {
-//                 attempts: 1,
-//                 ..Default::default()
-//             },
-//             scheduled: None,
-//         });
-//         drop(cache);
+    #[tokio::test]
+    async fn test_schedule_one_assigns_pod() {
+        let scheduler: Scheduler =
+            Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+        let mut cache = scheduler.cache.write().await;
 
-//         scheduler.queue.push("pod".to_string(), 1).await;
-//         let (sx, mut rx) = unbounded_channel();
-//         Scheduler::<BasicAlgorithm>::schedule_one(
-//             scheduler.cache.clone(),
-//             scheduler.queue.clone(),
-//             sx,
-//         )
-//         .await;
-//         let res = rx.recv().await.unwrap();
-//         assert!(res.is_ok());
-//         let assignment = res.unwrap();
-//         assert_eq!(assignment.pod_name, "pod");
-//         assert_eq!(assignment.node_name, "node");
-//     }
-// }
+        let node = NodeInfo {
+            name: "node".to_string(),
+            allocatable: ResourcesRequirements { cpu: 2, memory: 10 },
+            requested: ResourcesRequirements { cpu: 0, memory: 0 },
+            spec: NodeSpec::default(),
+            ..Default::default()
+        };
+        cache.update_node(node);
+        let node = NodeInfo {
+            name: "node2".to_string(),
+            allocatable: ResourcesRequirements { cpu: 1, memory: 8 },
+            requested: ResourcesRequirements { cpu: 0, memory: 0 },
+            spec: NodeSpec::default(),
+            ..Default::default()
+        };
+        cache.update_node(node);
+
+        cache.update_pod(PodInfo {
+            name: "pod".to_string(),
+            spec: PodSpec {
+                resources: ResourcesRequirements { cpu: 1, memory: 3 },
+                priority: 1,
+                ..Default::default()
+            },
+            queued_info: QueuedInfo {
+                attempts: 1,
+                ..Default::default()
+            },
+            scheduled: None,
+        });
+        drop(cache);
+
+        scheduler.queue.push("pod".to_string(), 1).await;
+        let (sx, mut rx) = unbounded_channel();
+        Scheduler::schedule_one(
+            scheduler.enabled_plugins,
+            scheduler.cache.clone(),
+            scheduler.queue.clone(),
+            sx,
+            scheduler.strategy,
+        )
+        .await;
+        let res = rx.recv().await.unwrap();
+        assert!(res.is_ok());
+        let assignment = res.unwrap();
+        assert_eq!(assignment.pod_name, "pod");
+        assert_eq!(assignment.node_name, "node");
+    }
+}

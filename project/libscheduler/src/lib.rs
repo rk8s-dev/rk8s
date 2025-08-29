@@ -1,5 +1,5 @@
 mod cache;
 pub mod models;
 pub mod scheduler;
-mod plugins;
+pub mod plugins;
 mod cycle_state;

@@ -193,3 +193,231 @@ fn is_schedulable_after_pod_toleration_change(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cycle_state::CycleState;
+    use crate::models::{NodeSpec, PodSpec, QueuedInfo, Taint, TaintEffect, TaintKey, Toleration, TolerationOperator};
+
+    #[test]
+    fn test_taint_toleration_filter_no_taints() {
+        let plugin = TaintToleration;
+        let mut state = CycleState::default();
+        
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec::default(),
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let node = NodeInfo {
+            name: "test-node".to_string(),
+            spec: NodeSpec {
+                unschedulable: false,
+                taints: vec![],
+            },
+            ..Default::default()
+        };
+
+        // Should succeed when node has no taints
+        let result = plugin.filter(&mut state, &pod, node);
+        assert_eq!(result.code, Code::Success);
+    }
+
+    #[test]
+    fn test_taint_toleration_filter_with_tolerated_taints() {
+        let plugin = TaintToleration;
+        let mut state = CycleState::default();
+        
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec {
+                tolerations: vec![Toleration {
+                    key: Some(TaintKey::NodeNotReady),
+                    operator: TolerationOperator::Exists,
+                    value: "".to_string(),
+                    effect: Some(TaintEffect::NoSchedule),
+                }],
+                ..Default::default()
+            },
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let node = NodeInfo {
+            name: "test-node".to_string(),
+            spec: NodeSpec {
+                unschedulable: false,
+                taints: vec![Taint {
+                    key: TaintKey::NodeNotReady,
+                    effect: TaintEffect::NoSchedule,
+                    value: "".to_string(),
+                }],
+            },
+            ..Default::default()
+        };
+
+        // Should succeed when pod tolerates node taints
+        let result = plugin.filter(&mut state, &pod, node);
+        assert_eq!(result.code, Code::Success);
+    }
+
+    #[test]
+    fn test_taint_toleration_filter_with_untolerated_taints() {
+        let plugin = TaintToleration;
+        let mut state = CycleState::default();
+        
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec::default(),
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let node = NodeInfo {
+            name: "test-node".to_string(),
+            spec: NodeSpec {
+                unschedulable: false,
+                taints: vec![Taint {
+                    key: TaintKey::NodeNotReady,
+                    effect: TaintEffect::NoSchedule,
+                    value: "".to_string(),
+                }],
+            },
+            ..Default::default()
+        };
+
+        // Should fail when pod doesn't tolerate node taints
+        let result = plugin.filter(&mut state, &pod, node);
+        assert_eq!(result.code, Code::UnschedulableAndUnresolvable);
+        assert!(result.reasons[0].contains("untolerated taint"));
+    }
+
+    #[test]
+    fn test_taint_toleration_pre_score() {
+        let plugin = TaintToleration;
+        let mut state = CycleState::default();
+        
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec {
+                tolerations: vec![Toleration {
+                    key: Some(TaintKey::NodeNotReady),
+                    operator: TolerationOperator::Exists,
+                    value: "".to_string(),
+                    effect: Some(TaintEffect::PreferNoSchedule),
+                }],
+                ..Default::default()
+            },
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let status = plugin.pre_score(&mut state, &pod, vec![]);
+        assert_eq!(status.code, Code::Success);
+
+        // Verify state was written
+        let state_data = state.read::<Vec<Toleration>>(PRE_SCORE_KEY);
+        assert!(state_data.is_some());
+        let state_data = state_data.unwrap();
+        assert_eq!(state_data.len(), 1);
+        assert!(matches!(state_data[0].effect, Some(TaintEffect::PreferNoSchedule)));
+    }
+
+    #[test]
+    fn test_taint_toleration_score_no_prefer_no_schedule_taints() {
+        let plugin = TaintToleration;
+        let mut state = CycleState::default();
+        
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec::default(),
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let node = NodeInfo {
+            name: "test-node".to_string(),
+            spec: NodeSpec {
+                unschedulable: false,
+                taints: vec![],
+            },
+            ..Default::default()
+        };
+
+        // Set up pre-score state
+        state.write(
+            PRE_SCORE_KEY,
+            Box::new(Vec::<Toleration>::new()),
+        );
+
+        let (score, status) = plugin.score(&mut state, &pod, node);
+        assert_eq!(status.code, Code::Success);
+        assert_eq!(score, 0); // No PreferNoSchedule taints to tolerate
+    }
+
+    #[test]
+    fn test_taint_toleration_score_with_prefer_no_schedule_taints() {
+        let plugin = TaintToleration;
+        let mut state = CycleState::default();
+        
+        let pod = PodInfo {
+            name: "test-pod".to_string(),
+            spec: PodSpec::default(),
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        };
+
+        let node = NodeInfo {
+            name: "test-node".to_string(),
+            spec: NodeSpec {
+                unschedulable: false,
+                taints: vec![Taint {
+                    key: TaintKey::NodeNotReady,
+                    effect: TaintEffect::PreferNoSchedule,
+                    value: "".to_string(),
+                }],
+            },
+            ..Default::default()
+        };
+
+        // Set up pre-score state with tolerations
+        state.write(
+            PRE_SCORE_KEY,
+            Box::new(vec![Toleration {
+                key: Some(TaintKey::NodeNotReady),
+                operator: TolerationOperator::Exists,
+                value: "".to_string(),
+                effect: Some(TaintEffect::PreferNoSchedule),
+            }]),
+        );
+
+        let (score, status) = plugin.score(&mut state, &pod, node);
+        assert_eq!(status.code, Code::Success);
+        assert_eq!(score, 1); // Should score 1 for tolerated PreferNoSchedule taint
+    }
+
+    #[test]
+    fn test_taint_toleration_events_to_register() {
+        let plugin = TaintToleration;
+        let events = plugin.events_to_register();
+        
+        assert_eq!(events.len(), 2);
+        
+        let node_event = &events[0];
+        assert!(matches!(node_event.event.resource, EventResource::Node));
+        assert!(node_event.queueing_hint_fn.is_some());
+        
+        let pod_event = &events[1];
+        assert!(matches!(pod_event.event.resource, EventResource::Pod));
+        assert!(pod_event.queueing_hint_fn.is_some());
+    }
+
+    #[test]
+    fn test_taint_toleration_plugin_name() {
+        let plugin = TaintToleration;
+        assert_eq!(plugin.name(), "TaintToleration");
+    }
+}

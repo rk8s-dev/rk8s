@@ -59,6 +59,9 @@ pub struct NodeSelector {
 
 impl NodeSelector {
     pub fn matches(&self, node: &NodeInfo) -> bool {
+        if self.node_selector_terms.is_empty() {
+            return true;
+        }
         self.node_selector_terms.iter().any(|t| t.matches(node))
     }
 }
@@ -167,8 +170,8 @@ impl Default for NodeSelectorOperator {
 
 #[derive(Clone, Default, Debug)]
 pub struct PreferredSchedulingTerm {
-    match_label: NodeSelectorRequirement,
-    weight: i64
+    pub match_label: NodeSelectorRequirement,
+    pub weight: i64
 }
 
 #[derive(Clone, Debug)]
@@ -224,10 +227,6 @@ pub struct NodeSpec {
 #[derive(Clone, Debug, Default)]
 pub struct NodeInfo {
     pub name: String,
-    /// Available CPU resources on the node, measured in millicores.
-    pub cpu: u64,
-    /// Available memory resources on the node, measured in bytes.
-    pub memory: u64,
     pub labels: HashMap<String, String>,
     pub spec: NodeSpec,
     pub requested: ResourcesRequirements,
@@ -261,6 +260,7 @@ impl Ord for BackOffPod {
     }
 }
 
+#[derive(Debug)]
 pub struct Assignment {
     pub pod_name: String,
     pub node_name: String,
@@ -275,11 +275,11 @@ pub struct Toleration {
     pub key: Option<TaintKey>,
     /// Operator represents a key's relationship to the value.
     /// Valid operators are Exists and Equal. Defaults to Equal.
-    operator: TolerationOperator,
+    pub operator: TolerationOperator,
     /// Effect indicates the taint effect to match. None means match all taint effects.
     /// When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
     pub effect: Option<TaintEffect>,
-    value: String,
+    pub value: String,
 }
 
 impl Toleration {

@@ -76,11 +76,11 @@ impl Default for Plugins {
     fn default() -> Self {
         let node_affinity = PluginInfo::with_weight("NodeAffinity", 2);
         let node_name = PluginInfo::new("NodeName");
-        let fit = PluginInfo::with_weight("Fit", 1);
+        let fit = PluginInfo::with_weight("NodeResourcesFit", 1);
         let node_unschedulable = PluginInfo::new("NodeUnschedulable");
         let scheduling_gates = PluginInfo::new("SchedulingGates");
         let taint_toleration = PluginInfo::with_weight("TaintToleration", 3);
-        let balanced_allocation = PluginInfo::with_weight("BalancedAllocation", 1);
+        let balanced_allocation = PluginInfo::with_weight("NodeResourcesBalancedAllocation", 1);
 
         Self {
             pre_enqueue: vec![scheduling_gates.clone()],
@@ -453,7 +453,7 @@ impl Status {
 }
 
 /// Code is the Status code/type which is returned from plugins.
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Code {
     /// Success means that plugin ran correctly and found pod schedulable.
     Success,
