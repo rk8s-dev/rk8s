@@ -1,8 +1,10 @@
 use crate::{
     ContainerCommand,
     commands::{
-        Exec, ExecContainer, container::config::ContainerConfigBuilder, create, delete, exec, list,
-        load_container, start,
+        Exec, ExecContainer,
+        compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
+        container::config::ContainerConfigBuilder,
+        create, delete, exec, list, load_container, start,
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
     rootpath,
@@ -11,7 +13,10 @@ use crate::{
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use common::ContainerSpec;
-use libcontainer::container::{Container, State, state};
+use libcontainer::{
+    container::{Container, State, state},
+    error::LibcontainerError,
+};
 use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
@@ -204,6 +209,7 @@ impl ContainerRunner {
 
     pub fn create_container(&self) -> Result<CreateContainerResponse> {
         let container_id = self.get_container_id()?;
+        // determine if it's in the single mode
 
         //  create oci spec
         let spec = self.create_oci_spec()?;
@@ -251,6 +257,11 @@ impl ContainerRunner {
     }
 
     pub fn setup_container_network(&self) -> Result<()> {
+        // single container status
+        if self.determine_single_status() {
+            setup_network_conf()?;
+        }
+
         let mut cni = get_cni()?;
         let container_pid = self
             .get_container_state()?
@@ -264,6 +275,10 @@ impl ContainerRunner {
         )
         .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))?;
         Ok(())
+    }
+
+    pub fn load_container(&self) -> Result<Container, LibcontainerError> {
+        Container::load(self.root_path.clone().join(&self.container_id))
     }
 
     pub fn start_container(&self, id: Option<String>) -> Result<StartContainerResponse> {
@@ -295,6 +310,12 @@ impl ContainerRunner {
                 Ok(StartContainerResponse {})
             }
         }
+    }
+
+    // due to the compose manager reuse the container manager to uun container
+    // so we can determine the mode by find "compose" in the root_path
+    pub fn determine_single_status(&self) -> bool {
+        !self.root_path.parent().unwrap().ends_with("compose")
     }
 }
 
@@ -347,8 +368,15 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     match is_container_exist(id, &runner.root_path).is_ok() {
         // exist
         true => {
-            runner.start_container(None)?;
-            println!("Container: {id} runs successfully!");
+            // determine if the container is running
+            if runner.load_container()?.can_start() {
+                runner.start_container(None)?;
+                println!("Container: {id} runs successfully!");
+            }
+            println!(
+                "Container: {id} can not start, status: {}!",
+                runner.load_container()?.status()
+            );
             Ok(())
         }
         // not exist
@@ -494,6 +522,24 @@ pub fn print_status(container_id: String, root_path: PathBuf) -> Result<()> {
     writeln!(&mut tab_writer, "ID\tPID\tSTATUS\tBUNDLE\tCREATED\tCREATOR")?;
     write!(&mut tab_writer, "{content}")?;
     tab_writer.flush()?;
+
+    Ok(())
+}
+
+pub fn setup_network_conf() -> Result<()> {
+    let conf = CliNetworkConfig::from_name_bridge("single-net", "single0");
+    let conf_value = serde_json::to_value(conf).expect("Failed to parse network config");
+
+    let mut conf_path = PathBuf::from(STD_CONF_PATH);
+    conf_path.push(BRIDGE_CONF);
+    if let Some(parent) = conf_path.parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    // write it to
+    fs::write(conf_path, serde_json::to_string_pretty(&conf_value)?)?;
 
     Ok(())
 }
