@@ -1,8 +1,10 @@
+#![allow(dead_code)]
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use log::{error, info, warn};
-use rand::seq::SliceRandom;
+use rand::prelude::IndexedRandom;
+use rand::rngs::ThreadRng;
 use serde::{Deserialize, Serialize};
 use std::time::Duration as StdDuration;
 use std::{
@@ -60,7 +62,7 @@ impl LocalManager {
         Ok(config)
     }
 
-    pub async fn acquire_lease(&mut self, attrs: &LeaseAttrs) -> Result<Lease> {
+    pub async fn acquire_lease(&self, attrs: &LeaseAttrs) -> Result<Lease> {
         let config = self.get_network_config().await?;
         for _ in 0..RACE_RETRIES {
             match self
@@ -78,7 +80,7 @@ impl LocalManager {
     }
 
     pub async fn try_acquire_lease(
-        &mut self,
+        &self,
         config: &Config,
         ext_ip: Ipv4Addr,
         attrs: &LeaseAttrs,
@@ -218,7 +220,7 @@ impl LocalManager {
             return Err(anyhow!("out of subnets"));
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng: ThreadRng = rand::rng();
         let chosen_v4 = *available_v4.choose(&mut rng).unwrap();
 
         let chosen_v6 = if config.enable_ipv6 {
@@ -529,7 +531,7 @@ mod tests {
 
         let registry: Arc<dyn Registry + Send + Sync> = Arc::new(xline_registry);
 
-        let mut manager = LocalManager::new(registry.clone(), None, None, 5);
+        let manager = LocalManager::new(registry.clone(), None, None, 5);
 
         let lease_attrs = LeaseAttrs {
             public_ip: "1.3.3.4".parse().unwrap(),

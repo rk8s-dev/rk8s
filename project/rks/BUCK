@@ -35,7 +35,14 @@ rust_binary(
         "//third-party:dotenvy",
         "//third-party:tempfile",
         "//third-party:tokio-util",
+        "//third-party:once_cell",
+        "//third-party:env_logger",
         "//project/libcni:libcni",
+        "//project/common:common",
+    ],
+    linker_flags = [
+        "-lssl",
+        "-lcrypto",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

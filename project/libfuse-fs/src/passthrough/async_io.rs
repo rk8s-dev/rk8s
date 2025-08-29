@@ -2,15 +2,17 @@ use bitflags::bitflags;
 use bytes::Bytes;
 use futures::stream;
 use futures_util::stream::Iter;
+use libc::{off_t, pread, size_t};
 use rfuse3::{Errno, Inode, Result, raw::prelude::*};
 use std::{
     ffi::{CStr, CString, OsStr, OsString},
     fs::File,
-    io::{self, Read, Seek, SeekFrom, Write},
-    mem::{ManuallyDrop, MaybeUninit},
+    io,
+    mem::MaybeUninit,
     num::NonZeroU32,
     os::{
-        fd::{AsRawFd, FromRawFd, RawFd},
+        fd::{AsRawFd, RawFd},
+        raw::c_int,
         unix::ffi::OsStringExt,
     },
     sync::{Arc, atomic::Ordering},
@@ -20,7 +22,7 @@ use std::{
 use vm_memory::{ByteValued, bitmap::BitmapSlice};
 
 use crate::{
-    passthrough::{CURRENT_DIR_CSTR, EMPTY_CSTR, PARENT_DIR_CSTR},
+    passthrough::{CURRENT_DIR_CSTR, EMPTY_CSTR, FileUniqueKey, PARENT_DIR_CSTR, statx::statx},
     util::{convert_stat64_to_file_attr, filetype_from_mode},
 };
 
@@ -301,6 +303,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn do_open(&self, inode: Inode, flags: u32) -> io::Result<(Option<Handle>, OpenOptions)> {
         let file = self.open_inode(inode, flags as i32).await?;
 
+        self.get_or_insert_mmap(&file, flags).await;
         let data = HandleData::new(inode, file, flags);
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
         self.handle_map.insert(handle, data).await;
@@ -367,9 +370,19 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn do_unlink(&self, parent: Inode, name: &CStr, flags: libc::c_int) -> io::Result<()> {
         let data = self.inode_map.get(parent).await?;
         let file = data.get_file()?;
+        let st = statx(&file, Some(name)).ok();
         // Safe because this doesn't modify any memory and we check the return value.
         let res = unsafe { libc::unlinkat(file.as_raw_fd(), name.as_ptr(), flags) };
         if res == 0 {
+            if flags & libc::AT_REMOVEDIR == 0
+                && let Some(st) = st
+                && let Some(btime) = st.btime
+            {
+                let key = FileUniqueKey(st.st.st_ino, btime);
+                self.handle_cache.invalidate(&key).await;
+                self.sliding_mmap_pool.invalidate(&key).await;
+            }
+
             Ok(())
         } else {
             Err(io::Error::last_os_error())
@@ -859,25 +872,72 @@ impl Filesystem for PassthroughFs {
     ) -> Result<ReplyData> {
         let data = self.get_data(fh, inode, libc::O_RDONLY).await?;
         let _guard = data.lock.lock().await;
-        let f = unsafe { File::from_raw_fd(data.borrow_fd().as_raw_fd()) };
-        let mut f = ManuallyDrop::new(f);
-        f.seek(SeekFrom::Start(offset))?;
+        let raw_fd = data.borrow_fd().as_raw_fd();
+
+        let mmap = self
+            .get_or_insert_mmap(&raw_fd, libc::O_RDONLY as u32)
+            .await;
+
         let mut buf = vec![0; size as usize];
-        match f.read(&mut buf) {
-            Ok(bytes_read) => {
-                if bytes_read < size as usize {
-                    buf.truncate(bytes_read); // Adjust the buffer size
+        match mmap {
+            Some(m) => {
+                // Check if we need to slide the window first
+                {
+                    let read_guard = m.read().await;
+                    if read_guard.check_slide(offset, size as usize) {
+                        // Upgrade to write lock for sliding
+                        drop(read_guard);
+                        let mut write_guard = m.write().await;
+                        write_guard.slide_window(offset, size as usize)?;
+                        write_guard.read(offset, size as usize, &mut buf)?;
+                    } else {
+                        read_guard.read(offset, size as usize, &mut buf)?;
+                    }
                 }
+                Ok(ReplyData {
+                    data: Bytes::from(buf),
+                })
             }
-            Err(err) => {
-                error!("read error: {err}");
-                return Err(err.into());
+            None => {
+                let ret = unsafe {
+                    pread(
+                        raw_fd as c_int,
+                        buf.as_mut_ptr() as *mut libc::c_void,
+                        size as size_t,
+                        offset as off_t,
+                    )
+                };
+                if ret >= 0 {
+                    if ret < size as isize {
+                        buf.truncate(ret as usize); // Adjust the buffer size
+                    }
+                } else {
+                    error!("read error: {ret}");
+                    return Err(Errno::from(ret as i32));
+                }
+                Ok(ReplyData {
+                    data: Bytes::from(buf),
+                })
             }
-        };
-        Ok(ReplyData {
-            data: Bytes::from(buf),
-        })
-        //w.wr(&mut *f, size as usize, offset)
+        }
+
+        // let mut buf = vec![0; size as usize];
+        // f.seek(SeekFrom::Start(offset))?;
+        // match f.read(&mut buf) {
+        //     Ok(bytes_read) => {
+        //         if bytes_read < size as usize {
+        //             buf.truncate(bytes_read); // Adjust the buffer size
+        //         }
+        //     }
+        //     Err(err) => {
+        //         error!("read error: {err}");
+        //         return Err(err.into());
+
+        //     }
+        // };
+        // Ok(ReplyData {
+        //     data: Bytes::from(buf),
+        // })
     }
 
     /// write data. Write should return exactly the number of bytes requested except on error. An
@@ -899,34 +959,45 @@ impl Filesystem for PassthroughFs {
         flags: u32,
     ) -> Result<ReplyWrite> {
         let handle_data = self.get_data(fh, inode, libc::O_RDWR).await?;
-        let _guard = handle_data.lock.lock().await;
+        let raw_fd = {
+            let _guard = handle_data.lock.lock().await;
+            handle_data.borrow_fd().as_raw_fd()
+        };
+        let size = data.len();
 
-        // Manually implement File::try_clone() by borrowing fd of data.file instead of dup().
-        // It's safe because the `data` variable's lifetime spans the whole function,
-        // so data.file won't be closed.
-        let f = unsafe { File::from_raw_fd(handle_data.borrow_fd().as_raw_fd()) };
-        let mut f = ManuallyDrop::new(f);
-        self.check_fd_flags(&handle_data, f.as_raw_fd(), flags)
-            .await?; //TODO: deal with this flags. 
+        self.check_fd_flags(&handle_data, raw_fd, flags).await?;
+        let mmap = self.get_or_insert_mmap(&raw_fd, libc::O_RDWR as u32).await;
 
-        // if self.seal_size.load().await {
-        //     let st = stat_fd(&f, None)?;
-        //     self.seal_size_check(Opcode::Write, st.st_size as u64, offset, size as u64, 0)?;
-        // }
-
-        // Cap restored when _killpriv is dropped
-        // let _killpriv =
-        //     if self.killpriv_v2.load(Ordering::Acquire) && (fuse_flags & WRITE_KILL_PRIV != 0) {
-        //         self::drop_cap_fsetid()?
-        //     } else {
-        //         None
-        //     };
-        f.seek(SeekFrom::Start(offset))?;
-        let res = f.write(data)?;
-
-        Ok(ReplyWrite {
-            written: res as u32,
-        })
+        match mmap {
+            Some(m) => {
+                let mut guard = m.write().await;
+                if guard.check_slide(offset, size) {
+                    guard.slide_window(offset, size)?;
+                }
+                let ret = guard.write(offset, data)?;
+                Ok(ReplyWrite {
+                    written: ret as u32,
+                })
+            }
+            None => {
+                let ret = unsafe {
+                    libc::pwrite(
+                        raw_fd as c_int,
+                        data.as_ptr() as *const libc::c_void,
+                        size as size_t,
+                        offset as off_t,
+                    )
+                };
+                if ret >= 0 {
+                    Ok(ReplyWrite {
+                        written: ret as u32,
+                    })
+                } else {
+                    error!("read error: {ret}");
+                    Err(Errno::from(ret as i32))
+                }
+            }
+        }
     }
 
     /// get filesystem statistics.

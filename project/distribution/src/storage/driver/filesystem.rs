@@ -143,10 +143,10 @@ impl Storage for FilesystemStorage {
             .await?;
 
         // Remove the existing symlink if it exists
-        if let Ok(metadata) = symlink_metadata(&tag_path).await {
-            if metadata.file_type().is_symlink() {
-                remove_file(&tag_path).await?;
-            }
+        if let Ok(metadata) = symlink_metadata(&tag_path).await
+            && metadata.file_type().is_symlink()
+        {
+            remove_file(&tag_path).await?;
         }
 
         #[cfg(not(unix))]
@@ -163,10 +163,10 @@ impl Storage for FilesystemStorage {
         let mut read_dir = read_dir(path).await?;
         while let Some(entry) = read_dir.next_entry().await? {
             let path = entry.path();
-            if let Some(file_name) = path.file_name() {
-                if let Some(file_name_str) = file_name.to_str() {
-                    entries.push(file_name_str.to_string());
-                }
+            if let Some(file_name) = path.file_name()
+                && let Some(file_name_str) = file_name.to_str()
+            {
+                entries.push(file_name_str.to_string());
             }
         }
         entries.sort();

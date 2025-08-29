@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::{Context, Result, anyhow, bail};
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use libcni::ip::{
@@ -9,10 +10,12 @@ use netlink_packet_route::AddressFamily;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::LazyLock;
 
+use crate::network::backend::ExternalInterface;
+
 fn is_global_unicast(ip: &Ipv4Addr) -> bool {
     !(ip.is_unspecified()
         || ip.is_loopback()
-        || ip.is_broadcast() // 仅 IPv4
+        || ip.is_broadcast()
         || ip.is_link_local()
         || ip.is_multicast())
 }
@@ -329,4 +332,28 @@ pub static NATIVE_ENDIAN: LazyLock<Endianness> = LazyLock::new(|| {
 
 pub fn natively_little() -> bool {
     *NATIVE_ENDIAN == Endianness::Little
+}
+
+/// Check if the interface configuration is compatible with host-gw backend
+pub fn check_hostgw_compatibility(interface: &ExternalInterface) -> Result<()> {
+    match (interface.ext_addr, interface.iface_addr) {
+        (Some(ext_addr), Some(iface_addr)) => {
+            if ext_addr != iface_addr {
+                return Err(anyhow!(
+                    "Your PublicIP ({}) differs from interface IP ({}), meaning that probably you're on a NAT, which is not supported by host-gw backend",
+                    ext_addr,
+                    iface_addr
+                ));
+            }
+        }
+        (None, _) => {
+            return Err(anyhow!("No external IP address available"));
+        }
+        (_, None) => {
+            return Err(anyhow!("No interface IP address available"));
+        }
+    }
+
+    info!("Host-GW compatibility check passed");
+    Ok(())
 }

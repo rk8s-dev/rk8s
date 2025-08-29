@@ -13,10 +13,11 @@ pub struct UploadSession {
 pub struct AppState {
     pub sessions: Arc<RwLock<HashMap<String, UploadSession>>>,
     pub storage: Arc<dyn Storage>,
+    pub registry: Arc<String>, // Registry URL
 }
 
 impl AppState {
-    pub fn new(storage_type: &str, root: &str) -> Self {
+    pub fn new(storage_type: &str, root: &str, registry: &str) -> Self {
         let storage_backend: Arc<dyn Storage + Send + Sync> = match storage_type {
             "FILESYSTEM" => Arc::new(FilesystemStorage::new(root)),
             _ => Arc::new(FilesystemStorage::new(root)),
@@ -24,6 +25,7 @@ impl AppState {
         AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             storage: storage_backend,
+            registry: Arc::new(registry.to_string()),
         }
     }
 

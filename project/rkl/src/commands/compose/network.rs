@@ -137,10 +137,10 @@ impl NetworkManager {
 
         let mut conf_path = PathBuf::from(STD_CONF_PATH);
         conf_path.push(BRIDGE_CONF);
-        if let Some(parent) = conf_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = conf_path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)?;
         }
 
         // write it to
@@ -176,11 +176,21 @@ impl NetworkManager {
     fn validate(&mut self, spec: &ComposeSpec) -> Result<()> {
         for (srv, srv_spec) in &spec.services {
             // if the srv does not have the network definition then add to the default network
+            let network_name = format!("{}_default", self.project_name);
             if srv_spec.networks.is_empty() {
                 self.network_service
-                    .entry(format!("{}_default", self.project_name))
+                    .entry(network_name.clone())
                     .or_default()
                     .push((srv.clone(), srv_spec.clone()));
+
+                // add to map
+                self.map.insert(
+                    network_name,
+                    NetworkSpec {
+                        external: Option::None,
+                        driver: Some(Bridge),
+                    },
+                );
             }
             for network_name in &srv_spec.networks {
                 if !self.map.contains_key(network_name) {

@@ -1,18 +1,19 @@
 use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
+use futures::executor::block_on;
 use inode_store::{InodeId, InodeStore};
-use lru::LruCache;
+use libc::statx_timestamp;
+use moka::future::Cache;
 use rfuse3::{Errno, raw::reply::ReplyEntry};
 use uuid::Uuid;
 
-use crate::util::convert_stat64_to_file_attr;
+use crate::{passthrough::mmap::SlidingMmapWindow, util::convert_stat64_to_file_attr};
 use mount_fd::MountFds;
 use statx::StatExt;
-use std::io::Result;
-use std::num::NonZero;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::{cmp::min, io::Result};
 use std::{
     collections::{BTreeMap, btree_map},
     ffi::{CStr, CString, OsString},
@@ -40,6 +41,7 @@ mod async_io;
 mod config;
 mod file_handle;
 mod inode_store;
+mod mmap;
 mod mount_fd;
 pub mod newlogfs;
 mod os_compat;
@@ -281,11 +283,11 @@ impl HandleData {
         &self.file
     }
 
-    async fn get_file_mut(&self) -> (MutexGuard<()>, &File) {
+    async fn get_file_mut(&self) -> (MutexGuard<'_, ()>, &File) {
         (self.lock.lock().await, &self.file)
     }
 
-    fn borrow_fd(&self) -> BorrowedFd {
+    fn borrow_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
     }
 
@@ -323,14 +325,14 @@ impl HandleMap {
         // Do not expect poisoned lock here, so safe to unwrap().
         let mut handles = self.handles.write().await;
 
-        if let btree_map::Entry::Occupied(e) = handles.entry(handle) {
-            if e.get().inode == inode {
-                // We don't need to close the file here because that will happen automatically when
-                // the last `Arc` is dropped.
-                e.remove();
+        if let btree_map::Entry::Occupied(e) = handles.entry(handle)
+            && e.get().inode == inode
+        {
+            // We don't need to close the file here because that will happen automatically when
+            // the last `Arc` is dropped.
+            e.remove();
 
-                return Ok(());
-            }
+            return Ok(());
         }
 
         Err(ebadf())
@@ -347,6 +349,9 @@ impl HandleMap {
             .ok_or_else(ebadf)
     }
 }
+
+#[derive(Hash, Eq, PartialEq)]
+struct FileUniqueKey(u64, statx_timestamp);
 
 /// A file system that simply "passes through" all requests it receives to the underlying file
 /// system.
@@ -410,7 +415,9 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     phantom: PhantomData<S>,
 
-    handle_cache: RwLock<LruCache<InodeId, Arc<FileHandle>>>,
+    handle_cache: Cache<FileUniqueKey, Arc<FileHandle>>,
+
+    sliding_mmap_pool: Cache<FileUniqueKey, Arc<RwLock<SlidingMmapWindow>>>,
 }
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
@@ -451,6 +458,15 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             Err(_) => 65536,
         };
 
+        let cache_builder = moka::future::Cache::builder()
+            .max_capacity(cfg.max_mmap_size)
+            .weigher(
+                |_key: &FileUniqueKey, value: &Arc<RwLock<SlidingMmapWindow>>| -> u32 {
+                    let sliding_mmap_window = block_on(value.read());
+                    sliding_mmap_window.window_size() as u32
+                },
+            );
+
         Ok(PassthroughFs {
             inode_map: InodeMap::new(),
             next_inode: AtomicU64::new(ROOT_ID + 1),
@@ -477,7 +493,9 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             phantom: PhantomData,
 
-            handle_cache: RwLock::new(LruCache::new(NonZero::new(fd_limit as usize).unwrap())),
+            handle_cache: moka::future::Cache::new(fd_limit),
+
+            sliding_mmap_pool: cache_builder.build(),
         })
     }
 
@@ -607,14 +625,14 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
         let st = statx::statx(&path_file, None)?;
 
-        let key = InodeId::from_stat(&st);
+        let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
         let handle_arc = {
-            let mut cache = self.handle_cache.write().await;
-            if let Some(h) = cache.get(&key).cloned() {
+            let cache = self.handle_cache.clone();
+            if let Some(h) = cache.get(&key).await {
                 h
             } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
                 let handle_arc = Arc::new(handle_from_fd);
-                cache.put(key, Arc::clone(&handle_arc));
+                cache.insert(key, Arc::clone(&handle_arc)).await;
                 handle_arc
             } else {
                 return Err(Error::new(
@@ -924,18 +942,69 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         new_flags
     }
+
+    async fn get_or_insert_mmap(
+        &self,
+        file: &impl AsRawFd,
+        flags: u32,
+    ) -> Option<Arc<RwLock<SlidingMmapWindow>>> {
+        const MMAP_SIZE_THRESHOLD: u64 = 8 * 1024; // 8KB
+        const MAX_WINDOW_SIZE: u64 = 100 * 1024 * 1024; // 100MB
+
+        // Skip directories and files opened with O_DIRECT (direct I/O)
+        if flags & (libc::O_DIRECTORY as u32) != 0 || flags & (libc::O_DIRECT as u32) != 0 {
+            return None;
+        }
+
+        let st = match statx::statx(file, None) {
+            Ok(st) => st,
+            Err(_) => return None,
+        };
+
+        let file_size = st.st.st_size as u64;
+
+        // Skip files that are too small or too large for mmap
+        if file_size <= MMAP_SIZE_THRESHOLD {
+            return None;
+        }
+
+        let btime = match st.btime {
+            Some(btime) => btime,
+            None => return None, // Skip files without birth time
+        };
+
+        let key = FileUniqueKey(st.st.st_ino, btime);
+
+        if self.sliding_mmap_pool.contains_key(&key) {
+            return self.sliding_mmap_pool.get(&key).await;
+        }
+
+        let window_size = min(file_size, MAX_WINDOW_SIZE);
+
+        let mmap = {
+            let fd = file.as_raw_fd();
+            match SlidingMmapWindow::new(&fd, window_size).await {
+                Ok(mmap) => mmap,
+                Err(_) => return None, // Skip mmap if creation fails
+            }
+        };
+        let mmap = Arc::new(RwLock::new(mmap));
+        self.sliding_mmap_pool.insert(key, mmap.clone()).await;
+        Some(mmap.clone())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
+    use std::{ffi::OsString, path};
 
     use rfuse3::{MountOptions, raw::Session};
     use tokio::signal;
 
     #[tokio::test]
     async fn test_passthrough() {
-        let temp_dir = std::env::temp_dir();
+        // let temp_dir = std::env::temp_dir();
+        let temp_dir = path::PathBuf::from("/home/zine/test");
         let source_dir = temp_dir.join("test_passthrough_fs_src");
         let mount_dir = temp_dir.join("test_passthrough_fs_mnt");
         std::fs::create_dir_all(&source_dir).unwrap();
@@ -954,7 +1023,11 @@ mod tests {
 
         let mut mount_options = MountOptions::default();
         // .allow_other(true)
-        mount_options.force_readdir_plus(true).uid(uid).gid(gid);
+        mount_options
+            .force_readdir_plus(true)
+            .uid(uid)
+            .gid(gid)
+            .allow_other(true);
 
         let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
             Session::new(mount_options)
