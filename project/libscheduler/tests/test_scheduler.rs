@@ -39,9 +39,9 @@ fn make_node(name: &str, cpu: u64, memory: u64) -> NodeInfo {
 #[tokio::test]
 async fn test_scheduler_basic_assign() {
     let mut scheduler = Scheduler::new(ScoringStrategy::MostAllocated, Plugins::default());
-    scheduler.add_cache_node(make_node("node1", 4, 2048)).await;
-    scheduler.add_cache_node(make_node("node2", 2, 1024)).await;
-    scheduler.add_cache_node(make_node("node3", 8, 4096)).await;
+    scheduler.update_cache_node(make_node("node1", 4, 2048)).await;
+    scheduler.update_cache_node(make_node("node2", 2, 1024)).await;
+    scheduler.update_cache_node(make_node("node3", 8, 4096)).await;
 
     scheduler
         .update_cache_pod(make_pod("pod1", 10, 2, 1024))
@@ -84,7 +84,7 @@ async fn test_scheduler_backoff_and_recover() {
     let res = timeout(Duration::from_secs(1), rx.recv()).await;
     assert!(res.is_err() || res.unwrap().is_none());
 
-    scheduler.add_cache_node(make_node("node1", 200, 200)).await;
+    scheduler.update_cache_node(make_node("node1", 200, 200)).await;
 
     let res = timeout(Duration::from_secs(5), rx.recv()).await;
     assert!(res.is_ok());
@@ -96,7 +96,7 @@ async fn test_scheduler_backoff_and_recover() {
 #[tokio::test]
 async fn test_scheduler_priority_scheduling() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
-    scheduler.add_cache_node(make_node("node1", 10, 10000)).await;
+    scheduler.update_cache_node(make_node("node1", 10, 10000)).await;
 
     scheduler.update_cache_pod(make_pod("low-priority", 1, 1, 1000)).await;
     scheduler.update_cache_pod(make_pod("high-priority", 100, 1, 1000)).await;
@@ -119,8 +119,8 @@ async fn test_scheduler_priority_scheduling() {
 #[tokio::test]
 async fn test_scheduler_resource_constraints() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
-    scheduler.add_cache_node(make_node("small-node", 2, 1024)).await;
-    scheduler.add_cache_node(make_node("large-node", 10, 10240)).await;
+    scheduler.update_cache_node(make_node("small-node", 2, 1024)).await;
+    scheduler.update_cache_node(make_node("large-node", 10, 10240)).await;
 
     scheduler.update_cache_pod(make_pod("small-pod", 1, 1, 512)).await;
     scheduler.update_cache_pod(make_pod("large-pod", 10, 8, 8192)).await;
@@ -153,8 +153,8 @@ async fn test_scheduler_node_affinity_required() {
     let mut node2 = make_node("node2", 10, 10000);
     node2.labels.insert("zone".to_string(), "us-east".to_string());
     
-    scheduler.add_cache_node(node1).await;
-    scheduler.add_cache_node(node2).await;
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
 
     let mut pod = make_pod("affinity-pod", 10, 1, 1000);
     pod.spec.affinity = Some(Affinity {
@@ -192,8 +192,8 @@ async fn test_scheduler_node_affinity_preferred() {
     node1.labels.insert("preferred".to_string(), "true".to_string());
     let node2 = make_node("node2", 10, 10000);
     
-    scheduler.add_cache_node(node1).await;
-    scheduler.add_cache_node(node2).await;
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
 
     let mut pod = make_pod("preferred-pod", 10, 1, 1000);
     pod.spec.affinity = Some(Affinity {
@@ -236,8 +236,8 @@ async fn test_scheduler_taint_toleration() {
     }];
     let clean_node = make_node("clean-node", 10, 10000);
     
-    scheduler.add_cache_node(tainted_node).await;
-    scheduler.add_cache_node(clean_node).await;
+    scheduler.update_cache_node(tainted_node).await;
+    scheduler.update_cache_node(clean_node).await;
 
     let mut tolerant_pod = make_pod("tolerant-pod", 10, 1, 1000);
     tolerant_pod.spec.tolerations = vec![Toleration {
@@ -275,8 +275,8 @@ async fn test_scheduler_taint_toleration() {
 async fn test_scheduler_node_name_selector() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
     
-    scheduler.add_cache_node(make_node("target-node", 10, 10000)).await;
-    scheduler.add_cache_node(make_node("other-node", 10, 10000)).await;
+    scheduler.update_cache_node(make_node("target-node", 10, 10000)).await;
+    scheduler.update_cache_node(make_node("other-node", 10, 10000)).await;
 
     let mut pod = make_pod("specific-pod", 10, 1, 1000);
     pod.spec.node_name = Some("target-node".to_string());
@@ -301,8 +301,8 @@ async fn test_scheduler_unschedulable_node() {
     unschedulable_node.spec.unschedulable = true;
     let schedulable_node = make_node("schedulable-node", 10, 10000);
     
-    scheduler.add_cache_node(unschedulable_node).await;
-    scheduler.add_cache_node(schedulable_node).await;
+    scheduler.update_cache_node(unschedulable_node).await;
+    scheduler.update_cache_node(schedulable_node).await;
 
     scheduler.update_cache_pod(make_pod("test-pod", 10, 1, 1000)).await;
 
@@ -319,7 +319,7 @@ async fn test_scheduler_unschedulable_node() {
 #[tokio::test]
 async fn test_scheduler_scheduling_gates() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
-    scheduler.add_cache_node(make_node("node1", 10, 10000)).await;
+    scheduler.update_cache_node(make_node("node1", 10, 10000)).await;
 
     let mut pod_with_gates = make_pod("gated-pod", 10, 1, 1000);
     pod_with_gates.spec.scheduling_gates = vec!["gate1".to_string(), "gate2".to_string()];
@@ -353,8 +353,8 @@ async fn test_scheduler_scoring_strategies() {
         let mut node2 = make_node("node2", 10, 10000);
         node2.requested = ResourcesRequirements { cpu: 2, memory: 2000 };
         
-        scheduler.add_cache_node(node1).await;
-        scheduler.add_cache_node(node2).await;
+        scheduler.update_cache_node(node1).await;
+        scheduler.update_cache_node(node2).await;
         
         scheduler.update_cache_pod(make_pod("test-pod", 10, 1, 1000)).await;
         
@@ -386,8 +386,8 @@ async fn test_scheduler_node_selector() {
     let mut node2 = make_node("node2", 10, 10000);
     node2.labels.insert("env".to_string(), "development".to_string());
     
-    scheduler.add_cache_node(node1).await;
-    scheduler.add_cache_node(node2).await;
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
 
     let mut pod = make_pod("selector-pod", 10, 1, 1000);
     pod.spec.node_selector.insert("env".to_string(), "production".to_string());
@@ -414,9 +414,9 @@ async fn test_scheduler_multiple_nodes_balanced_allocation() {
     node2.requested = ResourcesRequirements { cpu: 10, memory: 50000 };
     let node3 = make_node("node3", 100, 100000);
     
-    scheduler.add_cache_node(node1).await;
-    scheduler.add_cache_node(node2).await;
-    scheduler.add_cache_node(node3).await;
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
+    scheduler.update_cache_node(node3).await;
     
     scheduler.update_cache_pod(make_pod("pod1", 10, 10, 10000)).await;
     
@@ -435,7 +435,7 @@ async fn test_scheduler_multiple_nodes_balanced_allocation() {
 async fn test_scheduler_insufficient_resources() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
     
-    scheduler.add_cache_node(make_node("small-node", 1, 1000)).await;
+    scheduler.update_cache_node(make_node("small-node", 1, 1000)).await;
     
     scheduler.update_cache_pod(make_pod("huge-pod", 10, 100, 100000)).await;
     
@@ -443,7 +443,7 @@ async fn test_scheduler_insufficient_resources() {
     let res = timeout(Duration::from_secs(1), rx.recv()).await;
     assert!(res.is_err() || res.unwrap().is_none());
     
-    scheduler.add_cache_node(make_node("large-node", 200, 200000)).await;
+    scheduler.update_cache_node(make_node("large-node", 200, 200000)).await;
     
     let res = timeout(Duration::from_secs(3), rx.recv())
         .await
@@ -458,7 +458,7 @@ async fn test_scheduler_insufficient_resources() {
 async fn test_scheduler_cache_operations() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
     
-    scheduler.add_cache_node(make_node("node1", 10, 10000)).await;
+    scheduler.update_cache_node(make_node("node1", 10, 10000)).await;
     
     scheduler.update_cache_pod(make_pod("pod1", 10, 1, 1000)).await;
     
@@ -475,7 +475,7 @@ async fn test_scheduler_cache_operations() {
     
     scheduler.remove_cache_node("node1").await;
     
-    scheduler.add_cache_node(make_node("node2", 10, 10000)).await;
+    scheduler.update_cache_node(make_node("node2", 10, 10000)).await;
     scheduler.update_cache_pod(make_pod("pod2", 10, 1, 1000)).await;
     
     let res = timeout(Duration::from_secs(2), rx.recv())
@@ -504,8 +504,8 @@ async fn test_scheduler_complex_scenario() {
     dev_node.labels.insert("env".to_string(), "development".to_string());
     dev_node.labels.insert("zone".to_string(), "us-east".to_string());
     
-    scheduler.add_cache_node(prod_node).await;
-    scheduler.add_cache_node(dev_node).await;
+    scheduler.update_cache_node(prod_node).await;
+    scheduler.update_cache_node(dev_node).await;
     
     let mut critical_pod = make_pod("critical-pod", 100, 5, 5000);
     critical_pod.spec.node_selector.insert("env".to_string(), "production".to_string());

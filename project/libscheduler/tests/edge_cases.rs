@@ -37,7 +37,7 @@ fn make_node(name: &str, cpu: u64, memory: u64) -> NodeInfo {
 async fn test_scheduler_zero_resource_pods() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
     scheduler
-        .add_cache_node(make_node("node1", 10, 10000))
+        .update_cache_node(make_node("node1", 10, 10000))
         .await;
 
     scheduler
@@ -70,7 +70,7 @@ async fn test_scheduler_zero_resource_pods() {
 async fn test_scheduler_exact_resource_match() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
     scheduler
-        .add_cache_node(make_node("exact-node", 100, 1000))
+        .update_cache_node(make_node("exact-node", 100, 1000))
         .await;
 
     scheduler
@@ -105,9 +105,9 @@ async fn test_scheduler_multiple_taints_and_tolerations() {
         },
     ];
 
-    scheduler.add_cache_node(multi_tainted_node).await;
+    scheduler.update_cache_node(multi_tainted_node).await;
     scheduler
-        .add_cache_node(make_node("clean-node", 10, 10000))
+        .update_cache_node(make_node("clean-node", 10, 10000))
         .await;
 
     let mut fully_tolerant_pod = make_pod("fully-tolerant", 10, 1, 1000);
@@ -165,7 +165,7 @@ async fn test_scheduler_node_selector_no_match() {
         .labels
         .insert("env".to_string(), "production".to_string());
 
-    scheduler.add_cache_node(node1).await;
+    scheduler.update_cache_node(node1).await;
 
     let mut pod = make_pod("mismatched-pod", 10, 1, 1000);
     pod.spec
@@ -182,7 +182,7 @@ async fn test_scheduler_node_selector_no_match() {
     matching_node
         .labels
         .insert("env".to_string(), "staging".to_string());
-    scheduler.add_cache_node(matching_node).await;
+    scheduler.update_cache_node(matching_node).await;
 
     let res = timeout(Duration::from_secs(2), rx.recv())
         .await
@@ -221,9 +221,9 @@ async fn test_scheduler_complex_node_affinity() {
         .labels
         .insert("instance-type".to_string(), "m5.large".to_string());
 
-    scheduler.add_cache_node(node1).await;
-    scheduler.add_cache_node(node2).await;
-    scheduler.add_cache_node(node3).await;
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
+    scheduler.update_cache_node(node3).await;
 
     let mut pod = make_pod("complex-affinity", 10, 1, 1000);
     pod.spec.affinity = Some(Affinity {
@@ -279,9 +279,9 @@ async fn test_scheduler_node_affinity_gt_lt_operators() {
         .labels
         .insert("cpu-cores".to_string(), "4".to_string());
 
-    scheduler.add_cache_node(node1).await;
-    scheduler.add_cache_node(node2).await;
-    scheduler.add_cache_node(node3).await;
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
+    scheduler.update_cache_node(node3).await;
 
     let mut pod = make_pod("gt-pod", 10, 1, 1000);
     pod.spec.affinity = Some(Affinity {
@@ -322,7 +322,7 @@ async fn test_scheduler_toleration_exists_operator() {
         effect: TaintEffect::NoSchedule,
     }];
 
-    scheduler.add_cache_node(tainted_node).await;
+    scheduler.update_cache_node(tainted_node).await;
 
     let mut tolerant_pod = make_pod("exists-tolerant", 10, 1, 1000);
     tolerant_pod.spec.tolerations = vec![Toleration {
@@ -348,7 +348,7 @@ async fn test_scheduler_toleration_exists_operator() {
 async fn test_scheduler_high_priority_preemption_order() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
     scheduler
-        .add_cache_node(make_node("node1", 10, 10000))
+        .update_cache_node(make_node("node1", 10, 10000))
         .await;
 
     for i in (1..=100).rev() {
@@ -377,10 +377,10 @@ async fn test_scheduler_node_removal_pod_rescheduling() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
 
     scheduler
-        .add_cache_node(make_node("node1", 10, 10000))
+        .update_cache_node(make_node("node1", 10, 10000))
         .await;
     scheduler
-        .add_cache_node(make_node("node2", 10, 10000))
+        .update_cache_node(make_node("node2", 10, 10000))
         .await;
 
     let mut pod1 = make_pod("pod1", 10, 1, 1000);
@@ -452,8 +452,8 @@ async fn test_scheduler_mixed_scheduling_constraints() {
 
     let regular_node = make_node("regular-node", 10, 10000);
 
-    scheduler.add_cache_node(constrained_node).await;
-    scheduler.add_cache_node(regular_node).await;
+    scheduler.update_cache_node(constrained_node).await;
+    scheduler.update_cache_node(regular_node).await;
 
     let mut constrained_pod = make_pod("constrained-pod", 50, 5, 5000);
     constrained_pod
@@ -513,7 +513,7 @@ async fn test_scheduler_concurrent_modifications() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
 
     scheduler
-        .add_cache_node(make_node("node1", 10, 10000))
+        .update_cache_node(make_node("node1", 10, 10000))
         .await;
 
     let mut rx = scheduler.run();
@@ -524,7 +524,7 @@ async fn test_scheduler_concurrent_modifications() {
             .await;
         if i == 2 {
             scheduler
-                .add_cache_node(make_node("node2", 10, 10000))
+                .update_cache_node(make_node("node2", 10, 10000))
                 .await;
         }
     }
@@ -549,7 +549,7 @@ async fn test_scheduler_invalid_node_name() {
     let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
 
     scheduler
-        .add_cache_node(make_node("real-node", 10, 10000))
+        .update_cache_node(make_node("real-node", 10, 10000))
         .await;
 
     let mut pod = make_pod("invalid-node-pod", 10, 1, 1000);

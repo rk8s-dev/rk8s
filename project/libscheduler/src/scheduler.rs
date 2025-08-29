@@ -486,6 +486,15 @@ impl Scheduler {
         }
     }
 
+    /// Un assume a pod, if the pod is not scheduled, do nothing
+    pub async fn unassume(&mut self, pod_name: &str) {
+        let mut cache_write = self.cache.write().await;
+        let pod = cache_write.unassume(pod_name);
+        if let Some(pod_info) = pod {
+            self.queue.push(pod_info.name, pod_info.spec.priority).await;
+        }
+    }
+
     pub fn run(&self) -> UnboundedReceiver<Result<Assignment, anyhow::Error>> {
         self.queue.run();
         let queue = self.queue.clone();
@@ -530,16 +539,16 @@ impl Scheduler {
         let ori = (*write_lock).update_pod(pod.clone());
         drop(write_lock);
 
-        let read_lock = self.cache.read().await;
-        let pod_snapshot = read_lock.get_pods();
-        self.queue
-            .hint(
-                EventInner::Pod(ori.clone(), Some(pod.clone())),
-                pod_snapshot,
-            )
-            .await;
-
         if pod.scheduled.is_none() {
+            let read_lock = self.cache.read().await;
+            let pod_snapshot = read_lock.get_pods();
+            self.queue
+                .hint(
+                    EventInner::Pod(ori.clone(), Some(pod.clone())),
+                    pod_snapshot,
+                )
+                .await;
+
             if let Some(o) = &ori {
                 if o.scheduled.is_some() {
                     self.enqueue(pod).await;
@@ -562,16 +571,21 @@ impl Scheduler {
             .await;
     }
 
-    pub async fn add_cache_node(&mut self, node: NodeInfo) {
+    pub async fn set_cache_node(&mut self, nodes: Vec<NodeInfo>) {
         let mut write_lock = self.cache.write().await;
-        (*write_lock).update_node(node.clone());
+        write_lock.set_nodes(nodes);
+    }
+
+    pub async fn update_cache_node(&mut self, node: NodeInfo) {
+        let mut write_lock = self.cache.write().await;
+        let ori = (*write_lock).update_node(node.clone());
         drop(write_lock);
         self.queue.add_count().await;
 
         let read_lock = self.cache.read().await;
         let pod_snapshot = read_lock.get_pods();
         self.queue
-            .hint(EventInner::Node(None, node), pod_snapshot)
+            .hint(EventInner::Node(ori, node), pod_snapshot)
             .await;
     }
 
@@ -743,7 +757,7 @@ mod tests {
             spec: NodeSpec::default(),
             ..Default::default()
         };
-        scheduler.add_cache_node(node).await;
+        scheduler.update_cache_node(node).await;
         let cache = scheduler.cache.read().await;
         assert!(!cache.get_nodes().is_empty());
         drop(cache);
