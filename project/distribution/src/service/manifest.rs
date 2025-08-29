@@ -10,7 +10,6 @@ use oci_spec::image::ImageManifest;
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::io::AsyncReadExt;
-use crate::error::AppError::OCI;
 
 /// Handles `GET /v2/<name>/manifests/<reference>`.
 ///
@@ -222,7 +221,7 @@ pub async fn get_tag_list_handler(
             all_tags = all_tags.split_off(last_index + 1);
         } else {
             all_tags.clear();
-            
+
         }
     }
 

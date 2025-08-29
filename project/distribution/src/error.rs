@@ -1,24 +1,14 @@
 use std::io;
 use std::sync::Arc;
 use axum::body::Body;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{StatusCode};
 use axum::http::header::{LOCATION, RANGE};
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use oci_spec::distribution::{ErrorCode, ErrorInfo, ErrorInfoBuilder, ErrorResponseBuilder};
-use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
 use crate::config::Config;
-
-/// The `OciError`.
-/// For a standard error response body. The `AppError` will be into it.
-#[derive(Debug, Serialize, Clone)]
-pub struct ErrorResponse {
-    code: String,
-    message: String,
-    detail: serde_json::Value,
-}
 
 #[derive(Error, Debug)]
 pub enum OciError {
@@ -68,20 +58,40 @@ pub enum OciError {
 impl IntoResponse for OciError {
     fn into_response(self) -> Response {
         let (status_code, error_info) = match &self {
-            Self::BlobUnknown(digest) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::BlobUnknown, "blob unknown").with_detail(json!({ "digest": digest }))),
-            Self::BlobUploadInvalid(msg) => (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::BlobUploadInvalid, msg)),
-            Self::BlobUploadUnknown(session_id) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::BlobUploadUnknown, "blob upload unknown").with_detail(json!({ "session_id": session_id }))),
-            Self::DigestInvalid(msg) => (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::DigestInvalid, msg)),
-            Self::ManifestBlobUnknown(digest) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestBlobUnknown, "manifest references unknown blob").with_detail(json!({ "digest": digest }))),
-            Self::ManifestInvalid(msg) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestInvalid, msg)),
-            Self::ManifestUnknown(reference) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestUnknown, "manifest unknown").with_detail(json!({ "reference": reference }))),
-            Self::NameInvalid(name) => (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::NameInvalid, "invalid repository name").with_detail(json!({ "name": name }))),
-            Self::NameUnknown(name) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::NameUnknown, "repository not known to registry").with_detail(json!({ "name": name }))),
-            Self::SizeInvalid(msg) => (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::SizeInvalid, msg)),
-            Self::Unsupported => (StatusCode::METHOD_NOT_ALLOWED, ErrorInfo::new(ErrorCode::Unsupported, "the operation is unsupported")),
-            Self::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, ErrorInfo::new(ErrorCode::TooManyRequests, "too many requests")),
-            Self::Unauthorized(msg, _) => (StatusCode::UNAUTHORIZED, ErrorInfo::new(ErrorCode::Unauthorized, msg)),
-            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, ErrorInfo::new(ErrorCode::Denied, msg)),
+            Self::BlobUnknown(digest) =>
+                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::BlobUnknown, "blob unknown")
+                    .with_detail(json!({ "digest": digest }))),
+            Self::BlobUploadInvalid(msg) =>
+                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::BlobUploadInvalid, msg)),
+            Self::BlobUploadUnknown(session_id) =>
+                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::BlobUploadUnknown, "blob upload unknown")
+                    .with_detail(json!({ "session_id": session_id }))),
+            Self::DigestInvalid(msg) =>
+                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::DigestInvalid, msg)),
+            Self::ManifestBlobUnknown(digest) =>
+                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestBlobUnknown, "manifest references unknown blob")
+                    .with_detail(json!({ "digest": digest }))),
+            Self::ManifestInvalid(msg) =>
+                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestInvalid, msg)),
+            Self::ManifestUnknown(reference) =>
+                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestUnknown, "manifest unknown")
+                    .with_detail(json!({ "reference": reference }))),
+            Self::NameInvalid(name) =>
+                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::NameInvalid, "invalid repository name")
+                    .with_detail(json!({ "name": name }))),
+            Self::NameUnknown(name) =>
+                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::NameUnknown, "repository not known to registry")
+                    .with_detail(json!({ "name": name }))),
+            Self::SizeInvalid(msg) =>
+                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::SizeInvalid, msg)),
+            Self::Unsupported =>
+                (StatusCode::METHOD_NOT_ALLOWED, ErrorInfo::new(ErrorCode::Unsupported, "the operation is unsupported")),
+            Self::TooManyRequests =>
+                (StatusCode::TOO_MANY_REQUESTS, ErrorInfo::new(ErrorCode::TooManyRequests, "too many requests")),
+            Self::Unauthorized(msg, _) =>
+                (StatusCode::UNAUTHORIZED, ErrorInfo::new(ErrorCode::Unauthorized, msg)),
+            Self::Forbidden(msg) =>
+                (StatusCode::FORBIDDEN, ErrorInfo::new(ErrorCode::Denied, msg)),
         };
 
         let body = ErrorResponseBuilder::default().errors(vec![error_info]).build().unwrap();
@@ -112,14 +122,15 @@ pub enum BusinessError {
 impl IntoResponse for BusinessError {
     fn into_response(self) -> Response {
         let (status_code, oci_error_info) = match &self {
-            Self::UsernameTaken(username) => (StatusCode::CONFLICT, ErrorInfo::new(ErrorCode::Denied, "username is already taken").with_detail(json!({ "username": username }))),
-            Self::InvalidPassword => (StatusCode::UNAUTHORIZED, ErrorInfo::new(ErrorCode::Unauthorized, "invalid username or password")),
-            Self::ResourceNotFound(name) => (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::NameUnknown, "resource not found").with_detail(json!({ "name": name }))),
+            Self::UsernameTaken(username) =>
+                (StatusCode::CONFLICT, ErrorInfo::new(ErrorCode::Denied, "username is already taken").with_detail(json!({ "username": username }))),
+            Self::InvalidPassword =>
+                (StatusCode::UNAUTHORIZED, ErrorInfo::new(ErrorCode::Unauthorized, "invalid username or password")),
+            Self::ResourceNotFound(name) =>
+                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::NameUnknown, "resource not found").with_detail(json!({ "name": name }))),
         };
-
         let body = ErrorResponseBuilder::default().errors(vec![oci_error_info]).build().unwrap();
-        let mut response = (status_code, Json(body)).into_response();
-        response
+        (status_code, Json(body)).into_response()
     }
 }
 
@@ -194,11 +205,14 @@ impl IntoResponse for HeaderError {
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error(transparent)]
-    OCI(#[from] OciError),
+    Oci(#[from] OciError),
+
     #[error(transparent)]
     Business(#[from] BusinessError),
+
     #[error(transparent)]
     Internal(#[from] InternalError),
+
     #[error(transparent)]
     Header(#[from] HeaderError),
 }
@@ -207,21 +221,12 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         tracing::error!("Generating response for AppError: {:?}", self);
         match self {
-            Self::OCI(e) => e.into_response(),
+            Self::Oci(e) => e.into_response(),
             Self::Business(e) => e.into_response(),
             Self::Internal(e) => e.into_response(),
             Self::Header(e) => e.into_response(),
         }
     }
-}
-
-fn oci_error(code: ErrorCode, message: impl Into<String>, detail: serde_json::Value) -> ErrorInfo {
-    ErrorInfoBuilder::default()
-        .code(code)
-        .message(message.into())
-        .detail(serde_json::to_string_pretty(&detail).unwrap())
-        .build()
-        .unwrap()
 }
 
 impl ErrorInfoExt for ErrorInfo {
@@ -263,7 +268,7 @@ where
     InternalError: From<E>,
 {
     fn map_to_oci(self, oci_error: OciError) -> Result<T, AppError> {
-        self.map_err(|_| AppError::OCI(oci_error))
+        self.map_err(|_| AppError::Oci(oci_error))
     }
 
     fn map_to_business(self, business_error: BusinessError) -> Result<T, AppError> {

@@ -1,3 +1,4 @@
+#[allow(unused_variables)]
 #[derive(Clone, Debug)]
 pub struct Config {
     pub host: String,

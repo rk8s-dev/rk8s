@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use sqlx::SqlitePool;
-use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
 use crate::domain::user_model::User;
+use crate::error::{AppError, BusinessError, MapToAppError};
+use sqlx::SqlitePool;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct UserStorage {

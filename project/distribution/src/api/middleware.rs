@@ -8,6 +8,7 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use std::sync::Arc;
+use crate::api::RepoIdentifier;
 
 pub async fn authenticate(
     State(state): State<Arc<AppState>>,
@@ -31,20 +32,19 @@ pub async fn authenticate(
 
 pub async fn authorize(
     State(state): State<Arc<AppState>>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Result<impl IntoResponse, AppError> {
-    let repo_name = extract_full_repo_name(req.uri().path());
+    let identifier = extract_repo_identifier(req.uri().path());
     let claims = req
         .extensions()
         .get::<Claims>();
-    let namespace = match repo_name {
-        Some(ref repo_name) => repo_name.split("/")
+    let namespace = match &identifier {
+        Some(identifier) => identifier.split("/")
                                     .find(|s| !s.is_empty())
-                                    .unwrap_or(repo_name),
-        None => return Ok((StatusCode::NOT_FOUND).into_response()),
+                                    .unwrap_or(identifier),
+        None => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
-
     match *req.method() {
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
@@ -68,6 +68,7 @@ pub async fn authorize(
         }
         _ => unreachable!(),
     }
+    req.extensions_mut().insert(RepoIdentifier(identifier.unwrap()));
     Ok(next.run(req).await)
 }
 
@@ -82,7 +83,7 @@ pub fn extract_claims(headers: &HeaderMap, config: Arc<Config>) -> Result<Claims
     decode(&config, &token)
 }
 
-fn extract_full_repo_name(url: &str) -> Option<String> {
+fn extract_repo_identifier(url: &str) -> Option<String> {
     let segments: Vec<&str> = url.split("/").collect();
     match segments.as_slice() {
         // tail: /{name}/manifests/{reference}
@@ -104,6 +105,10 @@ fn extract_full_repo_name(url: &str) -> Option<String> {
         }
         // tail: /{name}/referrers/{digest}
         [name @ .., "referrers", _digest] if !name.is_empty() => {
+            Some(name.join("/"))
+        }
+        // tail: /{name}/visibility
+        [name @ .., "visibility"] if !name.is_empty() => {
             Some(name.join("/"))
         }
         _ => None,
