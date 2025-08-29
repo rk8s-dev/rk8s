@@ -281,7 +281,7 @@ mod tests {
     fn test_balanced_allocation_pre_score_best_effort_pod() {
         let plugin = BalancedAllocation::default();
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -301,11 +301,14 @@ mod tests {
     fn test_balanced_allocation_pre_score_normal_pod() {
         let plugin = BalancedAllocation::default();
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -316,7 +319,8 @@ mod tests {
         assert_eq!(status.code, Code::Success);
 
         // Verify state was written
-        let state_data = state.read::<BalancedAllocationPreScoreState>(BALANCED_ALLOCATION_PRE_SCORE_KEY);
+        let state_data =
+            state.read::<BalancedAllocationPreScoreState>(BALANCED_ALLOCATION_PRE_SCORE_KEY);
         assert!(state_data.is_some());
         let state_data = state_data.unwrap();
         assert_eq!(state_data.pod_requests.cpu, 1000);
@@ -327,11 +331,14 @@ mod tests {
     fn test_balanced_allocation_score() {
         let plugin = BalancedAllocation::default();
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -340,8 +347,14 @@ mod tests {
 
         let node = NodeInfo {
             name: "test-node".to_string(),
-            allocatable: ResourcesRequirements { cpu: 4000, memory: 8 * 1024 * 1024 * 1024 },
-            requested: ResourcesRequirements { cpu: 2000, memory: 2 * 1024 * 1024 * 1024 },
+            allocatable: ResourcesRequirements {
+                cpu: 4000,
+                memory: 8 * 1024 * 1024 * 1024,
+            },
+            requested: ResourcesRequirements {
+                cpu: 2000,
+                memory: 2 * 1024 * 1024 * 1024,
+            },
             ..Default::default()
         };
 
@@ -349,7 +362,10 @@ mod tests {
         state.write(
             BALANCED_ALLOCATION_PRE_SCORE_KEY,
             Box::new(BalancedAllocationPreScoreState {
-                pod_requests: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                pod_requests: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
             }),
         );
 
@@ -364,7 +380,7 @@ mod tests {
     fn test_balanced_allocation_score_no_state() {
         let plugin = BalancedAllocation::default();
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
@@ -383,12 +399,12 @@ mod tests {
     #[test]
     fn test_balanced_allocation_balanced_resource_scorer() {
         let plugin = BalancedAllocation::default();
-        
+
         // Test with balanced utilization
         let requested = vec![2000, 2 * 1024 * 1024 * 1024]; // CPU: 2000mc, Memory: 2GB
         let allocatable = vec![4000, 8 * 1024 * 1024 * 1024]; // CPU: 4000mc, Memory: 8GB
         let score = plugin.balanced_resource_scorer(&requested, &allocatable);
-        
+
         // Should give high score for balanced utilization
         assert!(score > 50);
         assert!(score <= 100);
@@ -396,7 +412,7 @@ mod tests {
         // Test with unbalanced utilization
         let unbalanced_requested = vec![3500, 1 * 1024 * 1024 * 1024]; // CPU: 3500mc, Memory: 1GB
         let unbalanced_score = plugin.balanced_resource_scorer(&unbalanced_requested, &allocatable);
-        
+
         // Should give lower score for unbalanced utilization
         assert!(unbalanced_score < score);
     }
@@ -404,15 +420,24 @@ mod tests {
     #[test]
     fn test_balanced_allocation_calculate_resource_lists() {
         let plugin = BalancedAllocation::default();
-        
-        let pod_requests = ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 };
+
+        let pod_requests = ResourcesRequirements {
+            cpu: 1000,
+            memory: 1024 * 1024 * 1024,
+        };
         let pod_list = plugin.calculate_pod_resource_request_list(&pod_requests);
         assert_eq!(pod_list, vec![1000, 1024 * 1024 * 1024]);
 
         let node_info = NodeInfo {
             name: "test-node".to_string(),
-            allocatable: ResourcesRequirements { cpu: 4000, memory: 8 * 1024 * 1024 * 1024 },
-            requested: ResourcesRequirements { cpu: 2000, memory: 2 * 1024 * 1024 * 1024 },
+            allocatable: ResourcesRequirements {
+                cpu: 4000,
+                memory: 8 * 1024 * 1024 * 1024,
+            },
+            requested: ResourcesRequirements {
+                cpu: 2000,
+                memory: 2 * 1024 * 1024 * 1024,
+            },
             ..Default::default()
         };
 
@@ -426,11 +451,14 @@ mod tests {
     #[test]
     fn test_balanced_allocation_is_best_effort_pod() {
         let plugin = BalancedAllocation::default();
-        
+
         let best_effort = ResourcesRequirements { cpu: 0, memory: 0 };
         assert!(plugin.is_best_effort_pod(&best_effort));
 
-        let normal_pod = ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 };
+        let normal_pod = ResourcesRequirements {
+            cpu: 1000,
+            memory: 1024 * 1024 * 1024,
+        };
         assert!(!plugin.is_best_effort_pod(&normal_pod));
     }
 
@@ -438,13 +466,13 @@ mod tests {
     fn test_balanced_allocation_events_to_register() {
         let plugin = BalancedAllocation::default();
         let events = plugin.events_to_register();
-        
+
         assert_eq!(events.len(), 2);
-        
+
         let pod_event = &events[0];
         assert!(matches!(pod_event.event.resource, EventResource::Pod));
         assert!(pod_event.queueing_hint_fn.is_some());
-        
+
         let node_event = &events[1];
         assert!(matches!(node_event.event.resource, EventResource::Node));
         assert!(node_event.queueing_hint_fn.is_some());

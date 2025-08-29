@@ -1,10 +1,7 @@
 use crate::{
     cycle_state::CycleState,
     models::{NodeInfo, PodInfo, Taint, TaintEffect, TaintKey},
-    plugins::{
-        FilterPlugin, Plugin,
-        Code, Status,
-    },
+    plugins::{Code, FilterPlugin, Plugin, Status},
 };
 
 pub struct NodeUnschedulable;
@@ -28,10 +25,10 @@ impl FilterPlugin for NodeUnschedulable {
                 return Status::default();
             }
         }
-        return Status::new(
+        Status::new(
             Code::UnschedulableAndUnresolvable,
             vec!["node(s) were unschedulable".to_string()],
-        );
+        )
     }
 }
 
@@ -39,13 +36,15 @@ impl FilterPlugin for NodeUnschedulable {
 mod tests {
     use super::*;
     use crate::cycle_state::CycleState;
-    use crate::models::{NodeSpec, PodSpec, QueuedInfo, TaintEffect, Toleration, TolerationOperator};
+    use crate::models::{
+        NodeSpec, PodSpec, QueuedInfo, TaintEffect, Toleration, TolerationOperator,
+    };
 
     #[test]
     fn test_node_unschedulable_filter_schedulable_node() {
         let plugin = NodeUnschedulable;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
@@ -71,7 +70,7 @@ mod tests {
     fn test_node_unschedulable_filter_unschedulable_node_no_toleration() {
         let plugin = NodeUnschedulable;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
@@ -91,14 +90,18 @@ mod tests {
         // Should fail when node is unschedulable and pod has no toleration
         let result = plugin.filter(&mut state, &pod, node);
         assert_eq!(result.code, Code::UnschedulableAndUnresolvable);
-        assert!(result.reasons.contains(&"node(s) were unschedulable".to_string()));
+        assert!(
+            result
+                .reasons
+                .contains(&"node(s) were unschedulable".to_string())
+        );
     }
 
     #[test]
     fn test_node_unschedulable_filter_unschedulable_node_with_toleration() {
         let plugin = NodeUnschedulable;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -132,7 +135,7 @@ mod tests {
     fn test_node_unschedulable_filter_unschedulable_node_wrong_toleration() {
         let plugin = NodeUnschedulable;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -160,7 +163,11 @@ mod tests {
         // Should fail when node is unschedulable and pod has wrong toleration
         let result = plugin.filter(&mut state, &pod, node);
         assert_eq!(result.code, Code::UnschedulableAndUnresolvable);
-        assert!(result.reasons.contains(&"node(s) were unschedulable".to_string()));
+        assert!(
+            result
+                .reasons
+                .contains(&"node(s) were unschedulable".to_string())
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use libscheduler::models::{
-    Affinity, NodeAffinity, NodeInfo, NodeSelector, NodeSelectorOperator,
-    NodeSelectorRequirement, NodeSelectorTerm, NodeSpec, PodInfo, PodSpec, QueuedInfo,
-    ResourcesRequirements, Taint, TaintEffect, TaintKey, Toleration, TolerationOperator,
+    Affinity, NodeAffinity, NodeInfo, NodeSelector, NodeSelectorOperator, NodeSelectorRequirement,
+    NodeSelectorTerm, NodeSpec, PodInfo, PodSpec, QueuedInfo, ResourcesRequirements, Taint,
+    TaintEffect, TaintKey, Toleration, TolerationOperator,
 };
 use libscheduler::plugins::Plugins;
 use libscheduler::plugins::node_resources_fit::ScoringStrategy;

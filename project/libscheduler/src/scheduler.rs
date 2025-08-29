@@ -234,7 +234,7 @@ impl SchedulingQueue {
                     }
                 })
             });
-        *unschedulable_guard = remain_unschedulable.into();
+        *unschedulable_guard = remain_unschedulable;
         drop(unschedulable_guard);
 
         for bp in backoff_to_active {
@@ -348,15 +348,12 @@ impl Scheduler {
             if state.skip_filter_plugins.contains(pl.name()) {
                 continue;
             }
-            nodes = nodes
-                .into_iter()
-                .filter(|n| {
-                    matches!(
-                        pl.filter(state, pod, n.clone()).code,
-                        Code::Success | Code::Skip
-                    )
-                })
-                .collect();
+            nodes.retain(|n| {
+                matches!(
+                    pl.filter(state, pod, n.clone()).code,
+                    Code::Success | Code::Skip
+                )
+            });
         }
         nodes
     }
@@ -391,12 +388,12 @@ impl Scheduler {
                 .map(|n| pl.score(state, pod, n.clone()).0)
                 .collect();
             let normalizer = pl.score_extension();
-            normalizer.normalize_score(&state, pod, &mut cur_score);
+            normalizer.normalize_score(state, pod, &mut cur_score);
             for i in 0..score.len() {
                 score[i] += cur_score[i] * w;
             }
         }
-        score.into_iter().zip(nodes.clone().into_iter()).collect()
+        score.into_iter().zip(nodes.clone()).collect()
     }
 
     async fn schedule_one(

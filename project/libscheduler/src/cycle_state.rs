@@ -1,4 +1,7 @@
-use std::{any::Any, collections::{HashMap, HashSet}};
+use std::{
+    any::Any,
+    collections::{HashMap, HashSet},
+};
 
 #[derive(Default)]
 pub struct CycleState {

@@ -1,7 +1,8 @@
 use crate::{
     cycle_state::CycleState,
     plugins::{
-        ActionType, ClusterEvent, ClusterEventWithHint, Code, EnqueueExtension, EventResource, FilterPlugin, Plugin, Status
+        ActionType, ClusterEvent, ClusterEventWithHint, Code, EnqueueExtension, EventResource,
+        FilterPlugin, Plugin, Status,
     },
 };
 
@@ -55,7 +56,7 @@ mod tests {
     fn test_node_name_filter_no_node_name_specified() {
         let plugin = NodeName;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -65,7 +66,7 @@ mod tests {
             queued_info: QueuedInfo::default(),
             scheduled: None,
         };
-        
+
         let node = NodeInfo {
             name: "any-node".to_string(),
             ..Default::default()
@@ -80,7 +81,7 @@ mod tests {
     fn test_node_name_filter_matching_node_name() {
         let plugin = NodeName;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -90,7 +91,7 @@ mod tests {
             queued_info: QueuedInfo::default(),
             scheduled: None,
         };
-        
+
         let matching_node = NodeInfo {
             name: "specific-node".to_string(),
             ..Default::default()
@@ -105,7 +106,7 @@ mod tests {
     fn test_node_name_filter_non_matching_node_name() {
         let plugin = NodeName;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -115,7 +116,7 @@ mod tests {
             queued_info: QueuedInfo::default(),
             scheduled: None,
         };
-        
+
         let non_matching_node = NodeInfo {
             name: "different-node".to_string(),
             ..Default::default()
@@ -124,14 +125,18 @@ mod tests {
         // Should fail when node name doesn't match
         let result = plugin.filter(&mut state, &pod, non_matching_node);
         assert_eq!(result.code, Code::UnschedulableAndUnresolvable);
-        assert!(result.reasons.contains(&"node(s) didn't match the requested node name".to_string()));
+        assert!(
+            result
+                .reasons
+                .contains(&"node(s) didn't match the requested node name".to_string())
+        );
     }
 
     #[test]
     fn test_node_name_events_to_register() {
         let plugin = NodeName;
         let events = plugin.events_to_register();
-        
+
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(matches!(event.event.resource, EventResource::Node));

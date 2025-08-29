@@ -33,10 +33,9 @@ pub struct NodeAffinity {
     pub preferred_during_scheduling_ignored_during_execution: Option<PreferredSchedulingTerms>,
 }
 
-
 #[derive(Clone, Default, Debug)]
 pub struct PreferredSchedulingTerms {
-    pub terms: Vec<PreferredSchedulingTerm>
+    pub terms: Vec<PreferredSchedulingTerm>,
 }
 
 impl PreferredSchedulingTerms {
@@ -88,10 +87,10 @@ pub struct NodeSelectorRequirement {
 impl NodeSelectorRequirement {
     pub fn matches(&self, node: &NodeInfo) -> bool {
         match self.operator {
-            NodeSelectorOperator::NodeSelectorOpDoesNotExist => 
-                node.labels.get(&self.key).is_none(),
-            NodeSelectorOperator::NodeSelectorOpExists => 
-                node.labels.get(&self.key).is_some(),
+            NodeSelectorOperator::NodeSelectorOpDoesNotExist => {
+                !node.labels.contains_key(&self.key)
+            }
+            NodeSelectorOperator::NodeSelectorOpExists => node.labels.contains_key(&self.key),
             NodeSelectorOperator::NodeSelectorOpGt => {
                 let label = node.labels.get(&self.key);
                 if let Some(v) = label {
@@ -111,7 +110,7 @@ impl NodeSelectorRequirement {
                 } else {
                     false
                 }
-            },
+            }
             NodeSelectorOperator::NodeSelectorOpLt => {
                 let label = node.labels.get(&self.key);
                 if let Some(v) = label {
@@ -131,7 +130,7 @@ impl NodeSelectorRequirement {
                 } else {
                     false
                 }
-            },
+            }
             NodeSelectorOperator::NodeSelectorOpIn => {
                 let label = node.labels.get(&self.key);
                 if let Some(v) = label {
@@ -139,7 +138,7 @@ impl NodeSelectorRequirement {
                 } else {
                     false
                 }
-            },
+            }
             NodeSelectorOperator::NodeSelectorOpNotIn => {
                 let label = node.labels.get(&self.key);
                 if let Some(v) = label {
@@ -171,7 +170,7 @@ impl Default for NodeSelectorOperator {
 #[derive(Clone, Default, Debug)]
 pub struct PreferredSchedulingTerm {
     pub match_label: NodeSelectorRequirement,
-    pub weight: i64
+    pub weight: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -230,7 +229,7 @@ pub struct NodeInfo {
     pub labels: HashMap<String, String>,
     pub spec: NodeSpec,
     pub requested: ResourcesRequirements,
-    pub allocatable: ResourcesRequirements
+    pub allocatable: ResourcesRequirements,
 }
 
 pub type PodNameWithPriority = (u64, String);
@@ -326,8 +325,8 @@ pub struct Taint {
 impl Taint {
     pub fn new(key: TaintKey, effect: TaintEffect) -> Self {
         Self {
-            key: key,
-            effect: effect,
+            key,
+            effect,
             value: String::new(),
         }
     }

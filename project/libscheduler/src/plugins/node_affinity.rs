@@ -159,7 +159,7 @@ impl PreFilterPlugin for NodeAffinity {
 
         // TODO: match field meta.name
 
-        return (PreFilterResult { node_names: vec![] }, Status::default());
+        (PreFilterResult { node_names: vec![] }, Status::default())
     }
 }
 
@@ -243,7 +243,10 @@ impl ScorePlugin for NodeAffinity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Affinity, NodeSelectorOperator, NodeSelectorRequirement, PreferredSchedulingTerm, PodSpec, QueuedInfo};
+    use crate::models::{
+        Affinity, NodeSelectorOperator, NodeSelectorRequirement, PodSpec, PreferredSchedulingTerm,
+        QueuedInfo,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -257,7 +260,7 @@ mod tests {
             scheduled: None,
         };
         let node = NodeInfo::default();
-        
+
         let result = plugin.filter(&mut state, &pod, node);
         assert_eq!(result.code, Code::Success);
     }
@@ -266,10 +269,10 @@ mod tests {
     fn test_node_affinity_filter_with_node_selector() {
         let plugin = NodeAffinity;
         let mut state = CycleState::default();
-        
+
         let mut node_selector = HashMap::new();
         node_selector.insert("disktype".to_string(), "ssd".to_string());
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -297,9 +300,9 @@ mod tests {
         };
 
         let (_pre_filter_result, pre_filter_status) = plugin.pre_filter(
-            &mut state, 
-            &pod, 
-            vec![matching_node.clone(), non_matching_node.clone()]
+            &mut state,
+            &pod,
+            vec![matching_node.clone(), non_matching_node.clone()],
         );
         assert_eq!(pre_filter_status.code, Code::Success);
 
@@ -400,7 +403,11 @@ mod tests {
             ..Default::default()
         };
 
-        let status = plugin.pre_score(&mut state, &pod, vec![matching_node.clone(), non_matching_node.clone()]);
+        let status = plugin.pre_score(
+            &mut state,
+            &pod,
+            vec![matching_node.clone(), non_matching_node.clone()],
+        );
         assert_eq!(status.code, Code::Success);
 
         let (score, status) = plugin.score(&mut state, &pod, matching_node);
@@ -417,7 +424,7 @@ mod tests {
     fn test_node_affinity_events_to_register() {
         let plugin = NodeAffinity;
         let events = plugin.events_to_register();
-        
+
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert!(matches!(event.event.resource, EventResource::Node));

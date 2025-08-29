@@ -31,13 +31,13 @@ pub async fn run_scheduler_with_xline(
 
     let (_, mut nodes_watch_stream) = client
         .watch(
-            format!("/registry/nodes/"),
+            "/registry/nodes/".to_string(),
             Some(WatchOptions::new().with_prefix()),
         )
         .await?;
     let (_, mut pods_watch_stream) = client
         .watch(
-            format!("/registry/pods/"),
+            "/registry/pods/".to_string(),
             Some(WatchOptions::new().with_prefix()),
         )
         .await?;
@@ -81,7 +81,10 @@ async fn handle_pod_update(
                         }
                         EventType::Delete => {
                             let name = String::from_utf8_lossy(kv.key()).to_string();
-                            scheduler.remove_cache_pod(&name).await;
+                            let node_name = name.split('/').filter(|s| !s.is_empty()).next_back();
+                            if let Some(n) = node_name {
+                                scheduler.remove_cache_pod(n).await;
+                            }
                         }
                     }
                 }
@@ -107,7 +110,10 @@ async fn handle_node_update(
                         }
                         EventType::Delete => {
                             let name = String::from_utf8_lossy(kv.key()).to_string();
-                            scheduler.remove_cache_node(&name).await;
+                            let node_name = name.split('/').filter(|s| !s.is_empty()).next_back();
+                            if let Some(n) = node_name {
+                                scheduler.remove_cache_node(n).await;
+                            }
                         }
                     }
                 }

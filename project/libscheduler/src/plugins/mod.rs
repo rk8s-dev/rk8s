@@ -111,23 +111,29 @@ impl Default for Plugins {
             pre_bind: vec![],
             bind: vec![],
             post_bind: vec![],
-            enqueue_extensions: vec![balanced_allocation.clone(), node_affinity.clone(), node_name.clone(), fit.clone(), taint_toleration.clone()],
+            enqueue_extensions: vec![
+                balanced_allocation.clone(),
+                node_affinity.clone(),
+                node_name.clone(),
+                fit.clone(),
+                taint_toleration.clone(),
+            ],
         }
     }
 }
 
 /// Plugin called before adding pods to active queue.
 /// Should be lightweight (avoid expensive operations like external endpoint calls).
-pub trait PreEnqueuePlugin: Plugin + Send+ Sync {
+pub trait PreEnqueuePlugin: Plugin + Send + Sync {
     fn pre_enqueue(&self, pod: &PodInfo) -> Status;
 }
 
 /// Plugin for sorting pods in the scheduling queue.
 /// Only one queue sort plugin can be enabled at a time.
-/// 
+///
 /// # Note
 /// now it's unimplemented
-pub trait _QueueSortPlugin: Plugin + Send+ Sync {
+pub trait _QueueSortPlugin: Plugin + Send + Sync {
     fn less(&self, a: PodInfo, b: PodInfo) -> Ordering;
 }
 
@@ -138,7 +144,8 @@ pub struct ClusterEventWithHint {
     /// It's called before a Pod gets moved from unschedulableQ to backoffQ or activeQ.
     /// If it returns an error, we'll take the returned QueueingHint as `Queue` at the caller whatever we returned here so that
     /// we can prevent the Pod from being stuck in the unschedulable pod pool.
-    pub queueing_hint_fn: Option<Box<dyn Fn(PodInfo, EventInner) -> Result<QueueingHint, String> + Send + Sync>>,
+    pub queueing_hint_fn:
+        Option<Box<dyn Fn(PodInfo, EventInner) -> Result<QueueingHint, String> + Send + Sync>>,
 }
 
 pub struct ClusterEvent {
@@ -179,11 +186,11 @@ pub enum QueueingHint {
     Queue,
 }
 
-pub trait EnqueueExtension: Plugin + Send+ Sync {
+pub trait EnqueueExtension: Plugin + Send + Sync {
     fn events_to_register(&self) -> Vec<ClusterEventWithHint>;
 }
 
-pub trait PreFilterPlugin: Plugin + Send+ Sync {
+pub trait PreFilterPlugin: Plugin + Send + Sync {
     /// Executes at scheduling cycle start. All plugins must return success or pod is rejected.
     /// Optionally returns filtered nodes to evaluate downstream.
     /// Returns Skip to bypass associated Filter plugin/extensions.
@@ -202,7 +209,7 @@ pub struct PreFilterResult {
 
 /// Evaluates if a node can run a pod. Returns Success, Unschedulable, or Error.
 /// Use provided nodeInfo rather than snapshot (may differ during preemption).
-pub trait FilterPlugin: Plugin + Send+ Sync {
+pub trait FilterPlugin: Plugin + Send + Sync {
     fn filter(&self, state: &mut CycleState, pod: &PodInfo, node_info: NodeInfo) -> Status;
 }
 
@@ -221,7 +228,7 @@ impl NodeToStatus {
 }
 
 /// Executes after scheduling failure in PreFilter/Filter phases.
-pub trait PostFilterPlugin: Plugin + Send+ Sync {
+pub trait PostFilterPlugin: Plugin + Send + Sync {
     /// Returns:
     /// - Unschedulable: pod remains unschedulable
     /// - Success: pod can be made schedulable (optionally with PostFilterResult)
@@ -238,14 +245,14 @@ pub trait PostFilterPlugin: Plugin + Send+ Sync {
 pub struct PostFilterResult;
 
 /// Informational plugin called after filtering phase with list of viable nodes
-pub trait PreScorePlugin: Plugin + Send+ Sync {
+pub trait PreScorePlugin: Plugin + Send + Sync {
     /// Executes with nodes that passed filtering. All must return success or pod is rejected.
     /// Returns Skip to bypass associated Score plugin.
     fn pre_score(&self, state: &mut CycleState, pod: &PodInfo, nodes: Vec<NodeInfo>) -> Status;
 }
 
 /// Plugin that ranks nodes passing the filtering phase
-pub trait ScorePlugin: Plugin + Send+ Sync {
+pub trait ScorePlugin: Plugin + Send + Sync {
     /// Assigns a score to a node (higher = better fit). Must return success.
     fn score(&self, state: &mut CycleState, pod: &PodInfo, node_info: NodeInfo) -> (i64, Status);
 
@@ -288,12 +295,12 @@ impl ScoreExtension for DefaultNormalizeScore {
             let score = node_score;
             *score = self.max_score * (*score) / max;
         }
-        return Status::default();
+        Status::default()
     }
 }
 
 /// Plugin that manages state updates when pods are reserved/unreserved
-pub trait ReservePlugin: Plugin + Send+ Sync {
+pub trait ReservePlugin: Plugin + Send + Sync {
     /// Called when scheduler cache is updated. Failure triggers Unreserve for all plugins.
     fn reserve(&self, state: &mut CycleState, pod: &PodInfo, node_name: &str) -> &Status;
 
@@ -302,7 +309,7 @@ pub trait ReservePlugin: Plugin + Send+ Sync {
 }
 
 /// Plugin called before a pod is scheduled
-pub trait PreBindPlugin: Plugin + Send+ Sync {
+pub trait PreBindPlugin: Plugin + Send + Sync {
     /// Lightweight check before PreBind. Returns:
     /// - Success: plugin will handle this pod
     /// - Skip: no action needed for this pod
@@ -314,20 +321,20 @@ pub trait PreBindPlugin: Plugin + Send+ Sync {
 }
 
 /// Plugin called after a pod is successfully bound to a node
-pub trait PostBindPlugin: Plugin + Send+ Sync {
+pub trait PostBindPlugin: Plugin + Send + Sync {
     /// Executes after successful pod binding. Typically used for cleanup.
     fn post_bind(&self, state: &mut CycleState, pod: &PodInfo, node_name: &str);
 }
 
 /// Plugin that can prevent or delay pod binding
-pub trait PermitPlugin: Plugin + Send+ Sync {
+pub trait PermitPlugin: Plugin + Send + Sync {
     /// Executes before binding. Returns success, wait with timeout, or rejection.
     /// Waiting only occurs if no other plugin rejects the pod.
     fn permit(&self, state: &mut CycleState, pod: &PodInfo, node_name: &str) -> (Status, Duration);
 }
 
 /// Plugin responsible for binding a pod to a node
-pub trait BindPlugin: Plugin + Send+ Sync {
+pub trait BindPlugin: Plugin + Send + Sync {
     /// Executes after all PreBind plugins. Handles pod binding or returns Skip.
     /// First handling plugin skips remaining bind plugins.
     fn bind(&self, state: &mut CycleState, pod: &PodInfo, node_name: &str) -> Status;
@@ -407,7 +414,13 @@ impl Default for Registry {
             pre_bind: vec![],
             bind: vec![],
             post_bind: vec![],
-            enqueue_extensions: vec![balanced_allocation.clone(), node_affinity.clone(), node_name.clone(), fit.clone(), taint_toleration.clone()],
+            enqueue_extensions: vec![
+                balanced_allocation.clone(),
+                node_affinity.clone(),
+                node_name.clone(),
+                fit.clone(),
+                taint_toleration.clone(),
+            ],
         }
     }
 }

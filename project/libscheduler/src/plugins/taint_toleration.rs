@@ -25,9 +25,8 @@ impl FilterPlugin for TaintToleration {
         pod: &PodInfo,
         node_info: NodeInfo,
     ) -> Status {
-        let not_schedule_taints_filter = |t: &&Taint| {
-            return matches!(t.effect, TaintEffect::NoSchedule | TaintEffect::NoExecute);
-        };
+        let not_schedule_taints_filter =
+            |t: &&Taint| matches!(t.effect, TaintEffect::NoSchedule | TaintEffect::NoExecute);
         let untolerated = find_untolerated_taint(
             &node_info.spec.taints,
             &pod.spec.tolerations,
@@ -72,10 +71,7 @@ impl PreScorePlugin for TaintToleration {
             .filter(|t| matches!(t.effect, Some(TaintEffect::PreferNoSchedule) | None))
             .cloned()
             .collect();
-        state.write(
-            PRE_SCORE_KEY,
-            Box::new(toleration_prefer_no_schedule),
-        );
+        state.write(PRE_SCORE_KEY, Box::new(toleration_prefer_no_schedule));
         Status::default()
     }
 }
@@ -90,7 +86,7 @@ impl ScorePlugin for TaintToleration {
                 .iter()
                 .filter(|&t| {
                     matches!(t.effect, TaintEffect::PreferNoSchedule)
-                        && tolerations_tolerate_taint(&tolerations, t)
+                        && tolerations_tolerate_taint(tolerations, t)
                 })
                 .count();
             (score as i64, Status::default())
@@ -142,8 +138,8 @@ fn is_schedulable_after_node_change(
             event
         )),
         EventInner::Node(old, new) => {
-            let was_untolerated = old.is_none() ||
-                find_untolerated_taint(&old.unwrap().spec.taints, &pod.spec.tolerations, |&t| {
+            let was_untolerated = old.is_none()
+                || find_untolerated_taint(&old.unwrap().spec.taints, &pod.spec.tolerations, |&t| {
                     do_not_schedule_taints_filter(t)
                 })
                 .is_some();
@@ -198,13 +194,15 @@ fn is_schedulable_after_pod_toleration_change(
 mod tests {
     use super::*;
     use crate::cycle_state::CycleState;
-    use crate::models::{NodeSpec, PodSpec, QueuedInfo, Taint, TaintEffect, TaintKey, Toleration, TolerationOperator};
+    use crate::models::{
+        NodeSpec, PodSpec, QueuedInfo, Taint, TaintEffect, TaintKey, Toleration, TolerationOperator,
+    };
 
     #[test]
     fn test_taint_toleration_filter_no_taints() {
         let plugin = TaintToleration;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
@@ -230,7 +228,7 @@ mod tests {
     fn test_taint_toleration_filter_with_tolerated_taints() {
         let plugin = TaintToleration;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -268,7 +266,7 @@ mod tests {
     fn test_taint_toleration_filter_with_untolerated_taints() {
         let plugin = TaintToleration;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
@@ -299,7 +297,7 @@ mod tests {
     fn test_taint_toleration_pre_score() {
         let plugin = TaintToleration;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -323,14 +321,17 @@ mod tests {
         assert!(state_data.is_some());
         let state_data = state_data.unwrap();
         assert_eq!(state_data.len(), 1);
-        assert!(matches!(state_data[0].effect, Some(TaintEffect::PreferNoSchedule)));
+        assert!(matches!(
+            state_data[0].effect,
+            Some(TaintEffect::PreferNoSchedule)
+        ));
     }
 
     #[test]
     fn test_taint_toleration_score_no_prefer_no_schedule_taints() {
         let plugin = TaintToleration;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
@@ -348,10 +349,7 @@ mod tests {
         };
 
         // Set up pre-score state
-        state.write(
-            PRE_SCORE_KEY,
-            Box::new(Vec::<Toleration>::new()),
-        );
+        state.write(PRE_SCORE_KEY, Box::new(Vec::<Toleration>::new()));
 
         let (score, status) = plugin.score(&mut state, &pod, node);
         assert_eq!(status.code, Code::Success);
@@ -362,7 +360,7 @@ mod tests {
     fn test_taint_toleration_score_with_prefer_no_schedule_taints() {
         let plugin = TaintToleration;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
@@ -403,13 +401,13 @@ mod tests {
     fn test_taint_toleration_events_to_register() {
         let plugin = TaintToleration;
         let events = plugin.events_to_register();
-        
+
         assert_eq!(events.len(), 2);
-        
+
         let node_event = &events[0];
         assert!(matches!(node_event.event.resource, EventResource::Node));
         assert!(node_event.queueing_hint_fn.is_some());
-        
+
         let pod_event = &events[1];
         assert!(matches!(pod_event.event.resource, EventResource::Pod));
         assert!(pod_event.queueing_hint_fn.is_some());

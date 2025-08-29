@@ -54,18 +54,10 @@ impl Cache {
 
     /// Un assume a pod, if the pod is not scheduled, do nothing.
     pub fn unassume(&mut self, pod_name: &str) -> Option<PodInfo> {
-        let pod_info = if let Some(pod) = self.pods.get_mut(pod_name) {
-            pod
-        } else {
-            return None;
-        };
+        let pod_info = self.pods.get_mut(pod_name)?;
         let node_name_opt = pod_info.scheduled.clone();
         let node = if let Some(node_name) = node_name_opt {
-            if let Some(node) = self.nodes.get_mut(&node_name) {
-                node
-            } else {
-                return None;
-            }
+            self.nodes.get_mut(&node_name)?
         } else {
             return None;
         };

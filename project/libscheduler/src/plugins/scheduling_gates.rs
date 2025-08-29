@@ -1,8 +1,6 @@
 use crate::{
     models::PodInfo,
-    plugins::{
-        Code, Status, Plugin, PreEnqueuePlugin
-    },
+    plugins::{Code, Plugin, PreEnqueuePlugin, Status},
 };
 
 pub struct SchedulingGates;
@@ -15,7 +13,7 @@ impl Plugin for SchedulingGates {
 
 impl PreEnqueuePlugin for SchedulingGates {
     fn pre_enqueue(&self, pod: &PodInfo) -> Status {
-        if pod.spec.scheduling_gates.len() == 0 {
+        if pod.spec.scheduling_gates.is_empty() {
             Status::default()
         } else {
             Status::new(
@@ -37,7 +35,7 @@ mod tests {
     #[test]
     fn test_scheduling_gates_pre_enqueue_no_gates() {
         let plugin = SchedulingGates;
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
@@ -56,7 +54,7 @@ mod tests {
     #[test]
     fn test_scheduling_gates_pre_enqueue_with_gates() {
         let plugin = SchedulingGates;
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {

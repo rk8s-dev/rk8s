@@ -1,4 +1,3 @@
-
 use crate::{
     cycle_state::CycleState,
     models::{NodeInfo, PodInfo, ResourcesRequirements},
@@ -260,11 +259,14 @@ mod tests {
     fn test_node_resources_fit_pre_filter() {
         let plugin = Fit;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -286,11 +288,14 @@ mod tests {
     fn test_node_resources_fit_filter_sufficient_resources() {
         let plugin = Fit;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -299,15 +304,24 @@ mod tests {
 
         let node = NodeInfo {
             name: "test-node".to_string(),
-            allocatable: ResourcesRequirements { cpu: 4000, memory: 8 * 1024 * 1024 * 1024 },
-            requested: ResourcesRequirements { cpu: 2000, memory: 2 * 1024 * 1024 * 1024 },
+            allocatable: ResourcesRequirements {
+                cpu: 4000,
+                memory: 8 * 1024 * 1024 * 1024,
+            },
+            requested: ResourcesRequirements {
+                cpu: 2000,
+                memory: 2 * 1024 * 1024 * 1024,
+            },
             ..Default::default()
         };
 
         state.write(
             "PreFilterNodeResourcesFit",
             Box::new(PreFilterState {
-                pod_requests: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                pod_requests: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
             }),
         );
 
@@ -319,11 +333,14 @@ mod tests {
     fn test_node_resources_fit_filter_insufficient_cpu() {
         let plugin = Fit;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 3000, memory: 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 3000,
+                    memory: 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -332,32 +349,48 @@ mod tests {
 
         let node = NodeInfo {
             name: "test-node".to_string(),
-            allocatable: ResourcesRequirements { cpu: 4000, memory: 8 * 1024 * 1024 * 1024 },
-            requested: ResourcesRequirements { cpu: 2000, memory: 2 * 1024 * 1024 * 1024 },
+            allocatable: ResourcesRequirements {
+                cpu: 4000,
+                memory: 8 * 1024 * 1024 * 1024,
+            },
+            requested: ResourcesRequirements {
+                cpu: 2000,
+                memory: 2 * 1024 * 1024 * 1024,
+            },
             ..Default::default()
         };
 
         state.write(
             "PreFilterNodeResourcesFit",
             Box::new(PreFilterState {
-                pod_requests: ResourcesRequirements { cpu: 3000, memory: 1024 * 1024 * 1024 },
+                pod_requests: ResourcesRequirements {
+                    cpu: 3000,
+                    memory: 1024 * 1024 * 1024,
+                },
             }),
         );
 
         let result = plugin.filter(&mut state, &pod, node);
         assert_eq!(result.code, Code::Unschedulable);
-        assert!(result.reasons.contains(&"node(s) didn't have enough resource(s)".to_string()));
+        assert!(
+            result
+                .reasons
+                .contains(&"node(s) didn't have enough resource(s)".to_string())
+        );
     }
 
     #[test]
     fn test_node_resources_fit_filter_insufficient_memory() {
         let plugin = Fit;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 1000, memory: 6 * 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 6 * 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -366,32 +399,48 @@ mod tests {
 
         let node = NodeInfo {
             name: "test-node".to_string(),
-            allocatable: ResourcesRequirements { cpu: 4000, memory: 8 * 1024 * 1024 * 1024 },
-            requested: ResourcesRequirements { cpu: 2000, memory: 3 * 1024 * 1024 * 1024 },
+            allocatable: ResourcesRequirements {
+                cpu: 4000,
+                memory: 8 * 1024 * 1024 * 1024,
+            },
+            requested: ResourcesRequirements {
+                cpu: 2000,
+                memory: 3 * 1024 * 1024 * 1024,
+            },
             ..Default::default()
         };
 
         state.write(
             "PreFilterNodeResourcesFit",
             Box::new(PreFilterState {
-                pod_requests: ResourcesRequirements { cpu: 1000, memory: 6 * 1024 * 1024 * 1024 },
+                pod_requests: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 6 * 1024 * 1024 * 1024,
+                },
             }),
         );
 
         let result = plugin.filter(&mut state, &pod, node);
         assert_eq!(result.code, Code::Unschedulable);
-        assert!(result.reasons.contains(&"node(s) didn't have enough resource(s)".to_string()));
+        assert!(
+            result
+                .reasons
+                .contains(&"node(s) didn't have enough resource(s)".to_string())
+        );
     }
 
     #[test]
     fn test_node_resources_fit_pre_score() {
         let plugin = Fit;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -413,11 +462,14 @@ mod tests {
     fn test_node_resources_fit_score_least_allocated() {
         let plugin = Fit;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -426,15 +478,24 @@ mod tests {
 
         let node = NodeInfo {
             name: "test-node".to_string(),
-            allocatable: ResourcesRequirements { cpu: 4000, memory: 8 * 1024 * 1024 * 1024 },
-            requested: ResourcesRequirements { cpu: 2000, memory: 2 * 1024 * 1024 * 1024 },
+            allocatable: ResourcesRequirements {
+                cpu: 4000,
+                memory: 8 * 1024 * 1024 * 1024,
+            },
+            requested: ResourcesRequirements {
+                cpu: 2000,
+                memory: 2 * 1024 * 1024 * 1024,
+            },
             ..Default::default()
         };
 
         state.write(
             PRE_SCORE_KEY,
             Box::new(PreScoreState {
-                pod_requests: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                pod_requests: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
             }),
         );
 
@@ -452,11 +513,14 @@ mod tests {
     fn test_node_resources_fit_score_most_allocated() {
         let plugin = Fit;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec {
-                resources: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                resources: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
                 ..Default::default()
             },
             queued_info: QueuedInfo::default(),
@@ -465,15 +529,24 @@ mod tests {
 
         let node = NodeInfo {
             name: "test-node".to_string(),
-            allocatable: ResourcesRequirements { cpu: 4000, memory: 8 * 1024 * 1024 * 1024 },
-            requested: ResourcesRequirements { cpu: 2000, memory: 2 * 1024 * 1024 * 1024 },
+            allocatable: ResourcesRequirements {
+                cpu: 4000,
+                memory: 8 * 1024 * 1024 * 1024,
+            },
+            requested: ResourcesRequirements {
+                cpu: 2000,
+                memory: 2 * 1024 * 1024 * 1024,
+            },
             ..Default::default()
         };
 
         state.write(
             PRE_SCORE_KEY,
             Box::new(PreScoreState {
-                pod_requests: ResourcesRequirements { cpu: 1000, memory: 1024 * 1024 * 1024 },
+                pod_requests: ResourcesRequirements {
+                    cpu: 1000,
+                    memory: 1024 * 1024 * 1024,
+                },
             }),
         );
 
@@ -491,7 +564,7 @@ mod tests {
     fn test_node_resources_fit_score_no_strategy() {
         let plugin = Fit;
         let mut state = CycleState::default();
-        
+
         let pod = PodInfo {
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
@@ -517,13 +590,13 @@ mod tests {
     fn test_node_resources_fit_events_to_register() {
         let plugin = Fit;
         let events = plugin.events_to_register();
-        
+
         assert_eq!(events.len(), 2);
-        
+
         let pod_event = &events[0];
         assert!(matches!(pod_event.event.resource, EventResource::Pod));
         assert!(pod_event.queueing_hint_fn.is_some());
-        
+
         let node_event = &events[1];
         assert!(matches!(node_event.event.resource, EventResource::Node));
         assert!(node_event.queueing_hint_fn.is_some());

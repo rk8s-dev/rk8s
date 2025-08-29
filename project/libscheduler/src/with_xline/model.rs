@@ -144,4 +144,3 @@ pub struct Node {
     pub spec: NodeSpec,
     pub status: NodeStatus,
 }
-
