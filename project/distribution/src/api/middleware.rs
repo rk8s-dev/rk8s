@@ -100,7 +100,7 @@ pub fn extract_claims(headers: &HeaderMap, config: Arc<Config>) -> Result<Claims
         .and_then(|header| header.strip_prefix("Bearer "))
         .ok_or_else(|| OciError::Unauthorized("Missing or malformed Bearer token".to_string(), Some(config_cloned)))
         .map(str::to_string)?;
-    decode(&config, &token)
+    decode(&config.jwt_secret, &token)
 }
 
 fn extract_repo_identifier(url: &str) -> Option<String> {

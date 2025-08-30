@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct UserStorage {
-    pool: Arc<SqlitePool>,
+    pub pool: Arc<SqlitePool>,
 }
 
 impl UserStorage {

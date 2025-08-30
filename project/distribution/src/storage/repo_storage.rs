@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct RepoStorage {
-    pool: Arc<SqlitePool>,
+    pub pool: Arc<SqlitePool>,
 }
 
 impl RepoStorage {
@@ -22,6 +22,7 @@ impl RepoStorage {
         }
         Ok(())
     }
+    
     pub async fn insert_repo(&self, repo: Repo) -> Result<(), AppError> {
         sqlx::query("INSERT INTO repos (id, name, is_public) VALUES ($1, $2, $3)")
             .bind(repo.id)
@@ -40,16 +41,5 @@ impl RepoStorage {
             .await
             .map_to_internal()?
             .ok_or_else(|| BusinessError::BadRequest("repo not found".to_string()).into())
-    }
-
-    pub async fn change_visibility(&self, name: &str, is_public: bool) -> Result<(), AppError> {
-        self.query_repo_by_name(name).await?;
-        sqlx::query("UPDATE repos set is_public = $1 WHERE name = $2")
-            .bind(is_public)
-            .bind(name)
-            .execute(self.pool.as_ref())
-            .await
-            .map_to_internal()?;
-        Ok(())
     }
 }

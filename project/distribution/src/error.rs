@@ -99,7 +99,7 @@ impl IntoResponse for OciError {
 
         if let Self::Unauthorized(_, Some(config)) = self {
             let realm = format!("{}/auth/token", config.registry_url);
-            let challenge = format!(r#"Bearer realm="{}",service="oci-registry",scope="repository:*:*""#, realm);
+            let challenge = format!(r#"Bearer realm="{}",service="oci-registry",scope="repository:*:*", Basic Real="oci registry""#, realm);
             response.headers_mut().insert("Www-Authenticate", challenge.parse().unwrap());
             response.headers_mut().insert("Docker-Distribution-API-Version", "registry/2.0".parse().unwrap());
         }
@@ -195,7 +195,6 @@ impl IntoResponse for HeaderError {
     }
 }
 
-#[allow(unused_variables)]
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error(transparent)]

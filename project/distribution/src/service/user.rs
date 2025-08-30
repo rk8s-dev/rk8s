@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::domain::user_model::User;
 use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
 use crate::utils::jwt::gen_token;
@@ -30,7 +29,7 @@ pub async fn create_user(
     match state.user_storage.query_user_by_name(&req.username).await {
         Ok(_) => Err(BusinessError::Conflict("username is already taken".to_string()).into()),
         Err(_) => {
-            let password = hash_password(&state.config, &req.password)?;
+            let password = hash_password(&state.config.password_salt, &req.password)?;
             let user = User::new(req.username, password);
             state.user_storage.insert_user(user).await?;
             Ok(StatusCode::CREATED)
@@ -59,18 +58,18 @@ pub(crate) async fn auth(
             let user = state.user_storage
                 .query_user_by_name(username)
                 .await?;
-            let token = gen_token(&state.config, &user.username);
+            let token = gen_token(&state.config.password_salt, &user.username);
             {
                 let state = state.clone();
                 // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`
-                tokio::task::spawn_blocking(move || check_password(&state.config, &user, auth.password()))
+                tokio::task::spawn_blocking(move || check_password(&state.config.password_salt, &user, auth.password()))
                     .await
                     .map_err(|e| InternalError::Others(e.to_string()))??;
             }
             token
         }
         None => {
-            gen_token(&state.config, "anonymous")
+            gen_token(&state.config.password_salt, "anonymous")
         }
     };
     Ok(Json(AuthRes {
@@ -81,16 +80,16 @@ pub(crate) async fn auth(
     }))
 }
 
-fn hash_password(config: &Config, password: &str) -> Result<String, AppError> {
+fn hash_password(salt: &str, password: &str) -> Result<String, AppError> {
     Ok(bcrypt::hash_with_salt(
         password,
         bcrypt::DEFAULT_COST,
-        config.password_salt.as_bytes().try_into().unwrap(),
+        salt.as_bytes().try_into().unwrap(),
     ).map_to_internal()?.to_string())
 }
 
-fn check_password(config: &Config, user: &User, password: &str) -> Result<(), AppError> {
-    let hash = hash_password(config, password)?;
+fn check_password(salt: &str, user: &User, password: &str) -> Result<(), AppError> {
+    let hash = hash_password(salt, password)?;
     if hash == user.password {
         return Ok(());
     }
