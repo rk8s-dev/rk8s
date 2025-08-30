@@ -7,36 +7,127 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 use md5;
 use std::sync::Arc;
-use tokio::time::{Duration, sleep};
+use tokio::{
+    sync::Semaphore,
+    time::{Duration, sleep},
+};
+
+/// S3 后端配置选项
+#[derive(Debug, Clone)]
+pub struct S3Config {
+    /// 分段大小（字节），建议 8-64MiB
+    pub part_size: usize,
+    /// 最大并发分段上传数
+    pub max_concurrency: usize,
+    /// 最大重试次数
+    pub max_retries: u32,
+    /// 初始重试延迟（毫秒）
+    pub initial_retry_delay_ms: u64,
+    /// 连接超时时间
+    pub timeout: Duration,
+}
+
+impl Default for S3Config {
+    fn default() -> Self {
+        Self {
+            part_size: 8 * 1024 * 1024, // 8MB
+            max_concurrency: 8,
+            max_retries: 3,
+            initial_retry_delay_ms: 100,
+            timeout: Duration::from_secs(30),
+        }
+    }
+}
 
 #[allow(dead_code)]
 pub struct S3Backend {
     client: Client,
     bucket: String,
-    /// 分段大小（建议 8-64MiB）。
-    part_size: usize,
-    /// 最大并发分段上传数。
-    max_concurrency: usize,
+    config: S3Config,
 }
 
 #[allow(dead_code)]
 impl S3Backend {
     pub async fn new(
         bucket: impl Into<String>,
+        config: S3Config,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let conf = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
         let client = Client::new(&conf);
         Ok(Self {
             client,
             bucket: bucket.into(),
-            part_size: 8 * 1024 * 1024,
-            max_concurrency: 4,
+            config,
         })
     }
 
     fn md5_base64(data: &[u8]) -> String {
         let sum = md5::compute(data);
         B64.encode(sum.0)
+    }
+}
+
+impl S3Backend {
+    async fn execute_with_retry<T, F, Fut, E>(
+        &self,
+        operation: F,
+        operation_name: &'static str,
+    ) -> Result<T, Box<dyn std::error::Error + Send + Sync>>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<T, E>>,
+        E: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
+    {
+        let mut attempt = 0;
+        let max_retries = self.config.max_retries;
+        loop {
+            attempt += 1;
+            match operation().await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    if attempt > max_retries {
+                        return Err(Box::new(std::io::Error::other(format!(
+                            "{operation_name} failed after {max_retries} attempts: {e}"
+                        ))));
+                    }
+
+                    let delay_ms = self.config.initial_retry_delay_ms * 2u64.pow(attempt - 1);
+                    sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn upload_part(
+        &self,
+        client: Client,
+        bucket: String,
+        key: String,
+        upload_id: String,
+        part_number: i32,
+        data: Vec<u8>,
+        semaphore: Arc<Semaphore>,
+    ) -> Result<(i32, Option<String>), Box<dyn std::error::Error + Send + Sync>> {
+        let _permit = semaphore.acquire().await.unwrap();
+        let checksum = Self::md5_base64(&data);
+
+        let operation = || async {
+            client
+                .upload_part()
+                .bucket(&bucket)
+                .key(&key)
+                .upload_id(&upload_id)
+                .part_number(part_number)
+                .content_md5(checksum.clone())
+                .body(data.clone().into())
+                .send()
+                .await
+        };
+
+        self.execute_with_retry(operation, "upload_part")
+            .await
+            .map(|resp| (part_number, resp.e_tag().map(|s| s.to_string())))
     }
 }
 
@@ -48,7 +139,7 @@ impl ObjectBackend for S3Backend {
         data: &[u8],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // 小对象直接 put_object；大对象走 multipart。
-        if data.len() <= self.part_size {
+        if data.len() <= self.config.part_size {
             // 简单重试 3 次。
             let checksum = Self::md5_base64(data);
             let mut attempt = 0;
@@ -82,7 +173,7 @@ impl ObjectBackend for S3Backend {
             .await?;
         let upload_id = create.upload_id().unwrap_or_default().to_string();
         let data_arc = Arc::new(data.to_vec());
-        let sem = Arc::new(tokio::sync::Semaphore::new(self.max_concurrency));
+        let sem = Arc::new(tokio::sync::Semaphore::new(self.config.max_concurrency));
 
         // 并发上传各分片
         let mut parts = Vec::new();
@@ -91,42 +182,24 @@ impl ObjectBackend for S3Backend {
         let mut part_number = 1i32;
 
         while idx < total {
-            let end = (idx + self.part_size).min(total);
+            let end = (idx + self.config.part_size).min(total);
             let chunk_vec = data_arc.as_slice()[idx..end].to_vec();
             let client = self.client.clone();
             let bucket = self.bucket.clone();
             let key = key.to_string();
             let upload_id_cloned = upload_id.clone();
             let pn = part_number;
-            let sem_cloned = sem.clone();
 
-            let fut = async move {
-                // 并发控制
-                let _permit = sem_cloned.acquire_owned().await.unwrap();
-                let mut attempt = 0;
-                let part_md5 = super::s3::S3Backend::md5_base64(&chunk_vec);
-                loop {
-                    attempt += 1;
-                    let resp = client
-                        .upload_part()
-                        .bucket(&bucket)
-                        .key(&key)
-                        .upload_id(&upload_id_cloned)
-                        .part_number(pn)
-                        .content_md5(part_md5.clone())
-                        .body(chunk_vec.clone().into())
-                        .send()
-                        .await;
-                    match resp {
-                        Ok(ok) => break Ok((pn, ok.e_tag().map(|s| s.to_string()))),
-                        Err(_e) if attempt < 3 => {
-                            sleep(Duration::from_millis(100 * attempt)).await;
-                            continue;
-                        }
-                        Err(e) => break Err(e),
-                    }
-                }
-            };
+            let fut = self.upload_part(
+                client,
+                bucket,
+                key,
+                upload_id_cloned,
+                pn,
+                chunk_vec,
+                sem.clone(),
+            );
+
             parts.push(fut);
 
             idx = end;
@@ -136,7 +209,17 @@ impl ObjectBackend for S3Backend {
         // 并发执行（简化：不做限流，后续可换 FuturesUnordered + semaphore 实现）
         let results: Vec<(i32, Option<String>)> = match futures::future::try_join_all(parts).await {
             Ok(v) => v,
-            Err(e) => return Err(Box::new(e)),
+            Err(e) => {
+                self.client
+                    .abort_multipart_upload()
+                    .bucket(self.bucket.clone())
+                    .key(key)
+                    .upload_id(upload_id)
+                    .send()
+                    .await
+                    .unwrap();
+                return Err(e);
+            }
         };
 
         let completed_parts = results
