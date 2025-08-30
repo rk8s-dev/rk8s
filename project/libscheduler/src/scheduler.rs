@@ -308,11 +308,11 @@ impl Scheduler {
         plugins: &Vec<(Arc<dyn PreFilterPlugin>, i64)>,
         state: &mut CycleState,
         pod: &PodInfo,
-        nodes: &Vec<NodeInfo>,
+        nodes: &[NodeInfo],
     ) -> (Vec<NodeInfo>, Status) {
         let mut filtered_set = HashSet::new();
         for (pl, _) in plugins {
-            let (res, sta) = pl.pre_filter(state, pod, nodes.clone());
+            let (res, sta) = pl.pre_filter(state, pod, nodes.to_owned());
             if let Code::Error = sta.code {
                 continue;
             } else if let Code::Skip = sta.code {
@@ -341,9 +341,9 @@ impl Scheduler {
         plugins: &Vec<(Arc<dyn FilterPlugin>, i64)>,
         state: &mut CycleState,
         pod: &PodInfo,
-        nodes: &Vec<NodeInfo>,
+        nodes: &[NodeInfo],
     ) -> Vec<NodeInfo> {
-        let mut nodes = nodes.clone();
+        let mut nodes = nodes.to_owned();
         for (pl, _) in plugins {
             if state.skip_filter_plugins.contains(pl.name()) {
                 continue;
@@ -362,10 +362,10 @@ impl Scheduler {
         plugins: &Vec<(Arc<dyn PreScorePlugin>, i64)>,
         state: &mut CycleState,
         pod: &PodInfo,
-        nodes: &Vec<NodeInfo>,
+        nodes: &[NodeInfo],
     ) -> Status {
         for (pl, _) in plugins {
-            let sta = pl.pre_score(state, pod, nodes.clone());
+            let sta = pl.pre_score(state, pod, nodes.to_owned());
             if let Code::Skip = sta.code {
                 state.skip_score_plugins.insert(pl.name().to_string());
             } else if !matches!(sta.code, Code::Success) {
@@ -379,7 +379,7 @@ impl Scheduler {
         plugins: &Vec<(Arc<dyn ScorePlugin>, i64)>,
         state: &mut CycleState,
         pod: &PodInfo,
-        nodes: &Vec<NodeInfo>,
+        nodes: &[NodeInfo],
     ) -> Vec<(i64, NodeInfo)> {
         let mut score = vec![0_i64; nodes.len()];
         for (pl, w) in plugins {
@@ -393,7 +393,7 @@ impl Scheduler {
                 score[i] += cur_score[i] * w;
             }
         }
-        score.into_iter().zip(nodes.clone()).collect()
+        score.into_iter().zip(nodes.to_owned()).collect()
     }
 
     async fn schedule_one(
@@ -541,7 +541,7 @@ impl Scheduler {
             let pod_snapshot = read_lock.get_pods();
             self.queue
                 .hint(
-                    EventInner::Pod(ori.clone(), Some(pod.clone())),
+                    EventInner::Pod(Box::new(ori.clone()), Box::new(Some(pod.clone()))),
                     pod_snapshot,
                 )
                 .await;
@@ -564,7 +564,10 @@ impl Scheduler {
         let read_lock = self.cache.read().await;
         let pod_snapshot = read_lock.get_pods();
         self.queue
-            .hint(EventInner::Pod(ori.clone(), None), pod_snapshot)
+            .hint(
+                EventInner::Pod(Box::new(ori.clone()), Box::new(None)),
+                pod_snapshot,
+            )
             .await;
     }
 
@@ -582,7 +585,10 @@ impl Scheduler {
         let read_lock = self.cache.read().await;
         let pod_snapshot = read_lock.get_pods();
         self.queue
-            .hint(EventInner::Node(ori, node), pod_snapshot)
+            .hint(
+                EventInner::Node(Box::new(ori), Box::new(node)),
+                pod_snapshot,
+            )
             .await;
     }
 

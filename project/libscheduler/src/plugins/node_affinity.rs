@@ -45,7 +45,7 @@ fn is_schedulable_after_node_change(
 
             let required_node_affinity = get_required_node_affinity(&pod);
             if required_node_affinity.matches(&modeified) {
-                if let Some(old) = original {
+                if let Some(old) = *original {
                     if required_node_affinity.matches(&old) {
                         log::trace!(
                             "node updated, but the pod's NodeAffinity hasn't changed. pod {:?} node {:?}",
@@ -99,14 +99,11 @@ impl RequiredNodeAffinity {
 fn get_required_node_affinity(pod: &PodInfo) -> RequiredNodeAffinity {
     let label_selector = pod.spec.node_selector.clone();
     let mut node_selector = NodeSelector::default();
-    if let Some(affinity) = pod.spec.affinity.clone() {
-        if let Some(node_affinity) = affinity.node_affinity {
-            if let Some(selector) =
-                node_affinity.required_during_scheduling_ignored_during_execution
-            {
-                node_selector = selector;
-            }
-        }
+    if let Some(affinity) = pod.spec.affinity.clone()
+        && let Some(node_affinity) = affinity.node_affinity
+        && let Some(selector) = node_affinity.required_during_scheduling_ignored_during_execution
+    {
+        node_selector = selector;
     }
     RequiredNodeAffinity {
         label_selector,
@@ -204,14 +201,11 @@ impl PreScorePlugin for NodeAffinity {
 }
 
 fn get_pod_preferred_node_affinity(pod: &PodInfo) -> PreferredSchedulingTerms {
-    if let Some(affinity) = pod.spec.affinity.clone() {
-        if let Some(node_affinity) = affinity.node_affinity {
-            if let Some(preferred) =
-                node_affinity.preferred_during_scheduling_ignored_during_execution
-            {
-                return preferred;
-            }
-        }
+    if let Some(affinity) = pod.spec.affinity.clone()
+        && let Some(node_affinity) = affinity.node_affinity
+        && let Some(preferred) = node_affinity.preferred_during_scheduling_ignored_during_execution
+    {
+        return preferred;
     }
     PreferredSchedulingTerms::default()
 }

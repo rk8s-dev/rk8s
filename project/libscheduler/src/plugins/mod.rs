@@ -137,6 +137,9 @@ pub trait _QueueSortPlugin: Plugin + Send + Sync {
     fn less(&self, a: PodInfo, b: PodInfo) -> Ordering;
 }
 
+type QueueingHintFn =
+    Option<Box<dyn Fn(PodInfo, EventInner) -> Result<QueueingHint, String> + Send + Sync>>;
+
 pub struct ClusterEventWithHint {
     pub event: ClusterEvent,
     /// QueueingHintFn returns a hint that signals whether the event can make a Pod,
@@ -144,8 +147,7 @@ pub struct ClusterEventWithHint {
     /// It's called before a Pod gets moved from unschedulableQ to backoffQ or activeQ.
     /// If it returns an error, we'll take the returned QueueingHint as `Queue` at the caller whatever we returned here so that
     /// we can prevent the Pod from being stuck in the unschedulable pod pool.
-    pub queueing_hint_fn:
-        Option<Box<dyn Fn(PodInfo, EventInner) -> Result<QueueingHint, String> + Send + Sync>>,
+    pub queueing_hint_fn: QueueingHintFn,
 }
 
 pub struct ClusterEvent {
@@ -177,8 +179,8 @@ pub enum EventResource {
 /// we use enum.
 #[derive(Debug, Clone)]
 pub enum EventInner {
-    Pod(Option<PodInfo>, Option<PodInfo>),
-    Node(Option<NodeInfo>, NodeInfo),
+    Pod(Box<Option<PodInfo>>, Box<Option<PodInfo>>),
+    Node(Box<Option<NodeInfo>>, Box<NodeInfo>),
 }
 
 pub enum QueueingHint {

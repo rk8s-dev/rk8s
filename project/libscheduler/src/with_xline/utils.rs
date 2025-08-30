@@ -70,11 +70,11 @@ fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
     let mut total_memory = 0;
 
     for container in &pod_task.spec.containers {
-        if let Some(resources) = &container.resources {
-            if let Some(limits) = &resources.limits {
-                total_cpu += parse_cpu(&limits.cpu.clone().unwrap_or_default());
-                total_memory += parse_memory(&limits.memory.clone().unwrap_or_default());
-            }
+        if let Some(resources) = &container.resources
+            && let Some(limits) = &resources.limits
+        {
+            total_cpu += parse_cpu(&limits.cpu.clone().unwrap_or_default());
+            total_memory += parse_memory(&limits.memory.clone().unwrap_or_default());
         }
     }
 
@@ -82,12 +82,11 @@ fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
     let mut init_memory = 0;
 
     for container in &pod_task.spec.init_containers {
-        if let Some(resources) = &container.resources {
-            if let Some(limits) = &resources.limits {
-                init_cpu = init_cpu.max(parse_cpu(&limits.cpu.clone().unwrap_or_default()));
-                init_memory =
-                    init_memory.max(parse_memory(&limits.memory.clone().unwrap_or_default()));
-            }
+        if let Some(resources) = &container.resources
+            && let Some(limits) = &resources.limits
+        {
+            init_cpu = init_cpu.max(parse_cpu(&limits.cpu.clone().unwrap_or_default()));
+            init_memory = init_memory.max(parse_memory(&limits.memory.clone().unwrap_or_default()));
         }
     }
 

@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::{
     cycle_state::CycleState,
     models::{NodeInfo, PodInfo, ResourcesRequirements},
@@ -221,18 +223,18 @@ impl BalancedAllocation {
             resource_fractions.push(fraction);
         }
 
-        let std = if resource_fractions.len() == 2 {
-            (resource_fractions[0] - resource_fractions[1]).abs() / 2.0
-        } else if resource_fractions.len() > 2 {
-            let mean = total_fraction / resource_fractions.len() as f64;
-            let variance = resource_fractions
-                .iter()
-                .map(|&f| (f - mean).powi(2))
-                .sum::<f64>()
-                / resource_fractions.len() as f64;
-            variance.sqrt()
-        } else {
-            0.0
+        let std = match resource_fractions.len().cmp(&2) {
+            Ordering::Equal => (resource_fractions[0] - resource_fractions[1]).abs() / 2.0,
+            Ordering::Greater => {
+                let mean = total_fraction / resource_fractions.len() as f64;
+                let variance = resource_fractions
+                    .iter()
+                    .map(|&f| (f - mean).powi(2))
+                    .sum::<f64>()
+                    / resource_fractions.len() as f64;
+                variance.sqrt()
+            }
+            Ordering::Less => 0.0,
         };
 
         ((1.0 - std) * 100.0) as u64

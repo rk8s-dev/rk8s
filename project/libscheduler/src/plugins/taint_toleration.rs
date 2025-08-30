@@ -45,13 +45,13 @@ impl FilterPlugin for TaintToleration {
     }
 }
 
-fn tolerations_tolerate_taint(tolerations: &Vec<Toleration>, taint: &Taint) -> bool {
+fn tolerations_tolerate_taint(tolerations: &[Toleration], taint: &Taint) -> bool {
     tolerations.iter().any(|to| to.tolerate(taint))
 }
 
 fn find_untolerated_taint<'a>(
-    taints: &'a Vec<Taint>,
-    tolerations: &Vec<Toleration>,
+    taints: &'a [Taint],
+    tolerations: &[Toleration],
     p: impl FnMut(&&Taint) -> bool,
 ) -> Option<&'a Taint> {
     taints

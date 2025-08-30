@@ -68,23 +68,21 @@ async fn handle_pod_update(
     scheduler: &mut Scheduler,
     pod_msg: Result<Option<WatchResponse>, etcd_client::Error>,
 ) {
-    if let Ok(msg) = pod_msg {
-        if let Some(resp) = msg {
-            for e in resp.events() {
-                if let Some(kv) = e.kv() {
-                    match e.event_type() {
-                        EventType::Put => {
-                            let pod_res = get_pod_from_kv(kv);
-                            if let Ok(pod) = pod_res {
-                                scheduler.update_cache_pod(pod).await;
-                            }
+    if let Ok(Some(resp)) = pod_msg {
+        for e in resp.events() {
+            if let Some(kv) = e.kv() {
+                match e.event_type() {
+                    EventType::Put => {
+                        let pod_res = get_pod_from_kv(kv);
+                        if let Ok(pod) = pod_res {
+                            scheduler.update_cache_pod(pod).await;
                         }
-                        EventType::Delete => {
-                            let name = String::from_utf8_lossy(kv.key()).to_string();
-                            let node_name = name.split('/').filter(|s| !s.is_empty()).next_back();
-                            if let Some(n) = node_name {
-                                scheduler.remove_cache_pod(n).await;
-                            }
+                    }
+                    EventType::Delete => {
+                        let name = String::from_utf8_lossy(kv.key()).to_string();
+                        let node_name = name.split('/').filter(|s| !s.is_empty()).next_back();
+                        if let Some(n) = node_name {
+                            scheduler.remove_cache_pod(n).await;
                         }
                     }
                 }
@@ -97,23 +95,21 @@ async fn handle_node_update(
     scheduler: &mut Scheduler,
     node_msg: Result<Option<WatchResponse>, etcd_client::Error>,
 ) {
-    if let Ok(msg) = node_msg {
-        if let Some(resp) = msg {
-            for e in resp.events() {
-                if let Some(kv) = e.kv() {
-                    match e.event_type() {
-                        EventType::Put => {
-                            let node_res = get_node_from_kv(kv);
-                            if let Ok(node) = node_res {
-                                scheduler.update_cache_node(node).await;
-                            }
+    if let Ok(Some(resp)) = node_msg {
+        for e in resp.events() {
+            if let Some(kv) = e.kv() {
+                match e.event_type() {
+                    EventType::Put => {
+                        let node_res = get_node_from_kv(kv);
+                        if let Ok(node) = node_res {
+                            scheduler.update_cache_node(node).await;
                         }
-                        EventType::Delete => {
-                            let name = String::from_utf8_lossy(kv.key()).to_string();
-                            let node_name = name.split('/').filter(|s| !s.is_empty()).next_back();
-                            if let Some(n) = node_name {
-                                scheduler.remove_cache_node(n).await;
-                            }
+                    }
+                    EventType::Delete => {
+                        let name = String::from_utf8_lossy(kv.key()).to_string();
+                        let node_name = name.split('/').filter(|s| !s.is_empty()).next_back();
+                        if let Some(n) = node_name {
+                            scheduler.remove_cache_node(n).await;
                         }
                     }
                 }
