@@ -59,7 +59,7 @@ pub(crate) async fn auth(
         Some(auth) => {
             let username = auth.username();
             let user = state.user_storage.query_user_by_name(username).await?;
-            let token = gen_token(&state.config.password_salt, &user.username);
+            let token = gen_token(&state.config.jwt_secret, &user.username);
             {
                 let state = state.clone();
                 // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`
@@ -71,7 +71,7 @@ pub(crate) async fn auth(
             }
             token
         }
-        None => gen_token(&state.config.password_salt, "anonymous"),
+        None => gen_token(&state.config.jwt_secret, "anonymous"),
     };
     Ok(Json(AuthRes {
         token: token.clone(),

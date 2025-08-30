@@ -35,8 +35,7 @@ pub async fn probe(
         Ok(_) => Ok((
             StatusCode::OK,
             [("Docker-Distribution-API-Version", "registry/2.0")],
-        )
-            .into_response()),
+        ).into_response()),
         Err(e) => Err(e),
     }
 }
