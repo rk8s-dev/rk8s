@@ -21,7 +21,7 @@ impl UserStorage {
             .fetch_optional(self.pool.as_ref())
             .await
             .map_to_internal()?
-            .ok_or_else(|| AppError::from(BusinessError::ResourceNotFound(format!("user {name}"))))
+            .ok_or_else(|| BusinessError::BadRequest("user not found".to_string()).into())
     }
 
     pub async fn insert_user(&self, user: User) -> Result<(), AppError> {

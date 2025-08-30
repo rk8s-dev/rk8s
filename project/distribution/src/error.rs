@@ -109,25 +109,19 @@ impl IntoResponse for OciError {
 
 #[derive(Error, Debug)]
 pub enum BusinessError {
-    #[error("Username `{0}` is already taken")]
-    UsernameTaken(String),
-
-    #[error("Invalid password provided")]
-    InvalidPassword,
-
-    #[error("{0} not found")]
-    ResourceNotFound(String),
+    #[error("{0}")]
+    BadRequest(String),
+    #[error("{0}")]
+    Conflict(String),
 }
 
 impl IntoResponse for BusinessError {
     fn into_response(self) -> Response {
         let (status_code, oci_error_info) = match &self {
-            Self::UsernameTaken(username) =>
-                (StatusCode::CONFLICT, ErrorInfo::new(ErrorCode::Denied, "username is already taken").with_detail(json!({ "username": username }))),
-            Self::InvalidPassword =>
-                (StatusCode::UNAUTHORIZED, ErrorInfo::new(ErrorCode::Unauthorized, "invalid username or password")),
-            Self::ResourceNotFound(name) =>
-                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::NameUnknown, "resource not found").with_detail(json!({ "name": name }))),
+            Self::Conflict(msg) =>
+                (StatusCode::CONFLICT, ErrorInfo::new(ErrorCode::Denied, msg)),
+            Self::BadRequest(msg) =>
+                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::Unsupported, msg))
         };
         let body = ErrorResponseBuilder::default().errors(vec![oci_error_info]).build().unwrap();
         (status_code, Json(body)).into_response()
@@ -219,7 +213,10 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        tracing::error!("Generating response for AppError: {:?}", self);
+        match &self {
+            Self::Internal(_) => tracing::error!("Internal Server Error: {:?}", self),
+            _ => tracing::info!("Generating response from AppError: {:?}", self),
+        }
         match self {
             Self::Oci(e) => e.into_response(),
             Self::Business(e) => e.into_response(),

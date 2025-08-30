@@ -4,3 +4,5 @@ CREATE TABLE users (
     username VARCHAR(255) NOT NULL UNIQUE,
     password TEXT NOT NULL
 );
+
+CREATE INDEX idx_users_username ON users (username);

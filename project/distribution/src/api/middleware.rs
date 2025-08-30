@@ -1,3 +1,5 @@
+use std::io;
+use std::io::Write;
 use crate::config::Config;
 use crate::domain::repo_model::Repo;
 use crate::error::{AppError, OciError};
@@ -52,7 +54,6 @@ pub async fn authorize(
     match *req.method() {
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
-            println!("identifier: {identifier}");
             if let Ok(repo) = state.repo_storage
                 .query_repo_by_name(&identifier)
                 .await {
@@ -71,9 +72,18 @@ pub async fn authorize(
         }
         // for write, we cannot write others' all repos.
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE => {
-            let claims = claims.unwrap();
-            if namespace != claims.sub {
-                return Err(OciError::Forbidden("unable to write others' repositories".to_string()).into());
+            match claims {
+                Some(claims) if claims.sub == "anonymous" => return Err(OciError::Unauthorized(
+                    "unauthorized".to_string(),
+                    Some(state.config.clone())
+                ).into()),
+                Some(claims) => if namespace != claims.sub {
+                    return Err(OciError::Forbidden("unable to write others' repositories".to_string()).into());
+                }
+                None => return Err(OciError::Unauthorized(
+                    "unauthorized".to_string(),
+                    Some(state.config.clone())
+                ).into())
             }
         }
         _ => unreachable!(),
@@ -98,7 +108,6 @@ fn extract_repo_identifier(url: &str) -> Option<String> {
         .split("/")
         .filter(|s| !s.is_empty())
         .collect();
-    println!("{:?}", segments);
     match segments.as_slice() {
         // tail: /{name}/manifests/{reference}
         [name @ .., "manifests", _reference] if !name.is_empty() => {

@@ -39,7 +39,7 @@ impl RepoStorage {
             .fetch_optional(self.pool.as_ref())
             .await
             .map_to_internal()?
-            .ok_or_else(|| AppError::from(BusinessError::ResourceNotFound(format!("repository {name}"))))
+            .ok_or_else(|| BusinessError::BadRequest("repo not found".to_string()).into())
     }
 
     pub async fn change_visibility(&self, name: &str, is_public: bool) -> Result<(), AppError> {

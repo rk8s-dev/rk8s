@@ -5,8 +5,9 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::fs::OpenOptions;
 use tokio::signal;
-use tracing_subscriber::fmt::format::FmtSpan;
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::format::FmtSpan;
 use utils::cli::Args;
 use utils::state::AppState;
 
@@ -23,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
@@ -37,13 +38,16 @@ async fn main() -> anyhow::Result<()> {
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await?;
+
     let state = Arc::new(AppState::new(config, Arc::new(pool)).await);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", args.host, args.port))
         .await?;
-    println!("listening on {}", listener.local_addr()?);
 
-    let app = api::create_router(state);
+    tracing::info!("listening on {}", listener.local_addr()?);
+
+    let app = api::create_router(state)
+        .layer(TraceLayer::new_for_http());
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -73,7 +77,7 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 
-    println!("Shutting down...");
+    tracing::info!("Shutting down...");
 }
 
 async fn validate_config(args: &Args) -> Config {
@@ -97,19 +101,26 @@ async fn validate_config(args: &Args) -> Config {
         }
     }
 
-    let password_salt = std::env::var("PASSWORD_SALT")
-        .unwrap_or_else(|_| {
-            eprintln!("WARNING: PASSWORD_SALT is not set. Use default value: `ABCDEFGHIJKLMNOP`");
-            "ABCDEFGHIJKLMNOP".into()
-        });
+    let password_salt = match std::env::var("PASSWORD_SALT") {
+        Ok(salt) => {
+            if salt.len() != 16 {
+                validation_errors.push("PASSWORD_SALT must be 16 characters long".to_string());
+            }
+            salt
+        }
+        Err(_) => {
+            tracing::warn!("WARNING: PASSWORD_SALT is not set. Use default value: `ABCDEFGHIJKLMNOP`");
+            "AAAAAAAAAAAAAAAA".into()
+        }
+    };
     let jwt_secret = std::env::var("JWT_SECRET")
         .unwrap_or_else(|_| {
-            eprintln!("WARNING: JWT_SECRET is not set. Use default value: `secret`");
+            tracing::warn!("WARNING: JWT_SECRET is not set. Use default value: `secret`");
             "secret".into()
     });
     let jwt_lifetime_secs = std::env::var("JWT_LIFETIME_SECONDS")
         .unwrap_or_else(|_| {
-            eprintln!("WARNING: JWT_LIFETIME_SECONDS is not set. Use default value: 3600");
+            tracing::warn!("WARNING: JWT_LIFETIME_SECONDS is not set. Use default value: 3600");
             "3600".into()
         })
         .parse::<i64>()
@@ -129,7 +140,7 @@ async fn validate_config(args: &Args) -> Config {
         .expect("Failed to create db file");
 
     if !validation_errors.is_empty() {
-        eprintln!("{}", validation_errors.join("\n"));
+        tracing::error!("{}", validation_errors.join("\n"));
         std::process::exit(1);
     }
 

@@ -1,5 +1,5 @@
 use crate::api::RepoIdentifier;
-use crate::error::AppError;
+use crate::error::{AppError, BusinessError};
 use crate::utils::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -19,20 +19,16 @@ pub async fn change_visibility(
     Extension(identifier): Extension<RepoIdentifier>,
     Json(body): Json<ChangeVisReq>,
 ) -> Result<impl IntoResponse, AppError> {
-    println!("{name}");
     if !name.ends_with("visibility") {
-        return Ok((StatusCode::BAD_REQUEST, "path must end with `visibility`").into_response())
+        return Err(BusinessError::BadRequest("path must end with `visibility`".to_string()).into())
     }
-    Ok(match body.visibility.as_str() {
+    match body.visibility.as_str() {
         "public" | "private" => {
             state.repo_storage.change_visibility(&identifier.0, body.visibility == "public").await?;
-            (
+            Ok((
                 StatusCode::OK,
-            ).into_response()
+            ))
         }
-        _ => (
-            StatusCode::BAD_REQUEST,
-            "`visibility` must be private or public"
-        ).into_response()
-    })
+        _ => Err(BusinessError::BadRequest("visibility must be `public` or `private`".to_string()).into())
+    }
 }

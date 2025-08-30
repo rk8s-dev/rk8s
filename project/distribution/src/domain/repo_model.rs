@@ -14,7 +14,7 @@ impl Repo {
         Self {
             id: uuid,
             name: name.to_owned(),
-            is_public: 1,
+            is_public: 0,
         }
     }
 }

@@ -4,28 +4,27 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.99"
 async-trait = "0.1.86"
 axum = "0.8.1"
 axum-extra = { version = "0.10.1", features = ["typed-header"] }
-tower = "0.5.2"
-tower-http = { version = "0.6.6", features = ["normalize-path"] }
+bcrypt = "0.17.1"
 clap = { version = "4.5.32", features = ["derive", "env"] }
+chrono = "0.4"
+dotenvy = "0.15.7"
 futures = "0.3.31"
 hex = "0.4.3"
+jsonwebtoken = "9.3.1"
 oci-spec = "0.8.0"
 regex = "1.11.1"
 serde = "1.0.217"
 serde_json = "1.0.138"
 sha2 = "0.10.8"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate"]}
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = { version = "0.7.13", features = ["io"] }
-uuid = { version = "1.13.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate"]}
-bcrypt = "0.17.1"
-anyhow = "1.0.99"
-dotenvy = "0.15.7"
-thiserror = "2.0.16"
+thiserror = "2.0.12"
+tower-http = { version = "0.6.6", features = ["trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "time", "fmt"] }
-jsonwebtoken = "9.3.1"
-chrono = "0.4.41"
+uuid = { version = "1.13.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
