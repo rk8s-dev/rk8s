@@ -1,4 +1,4 @@
-use crate::error::{AppError, InternalError};
+use crate::error::{AppError, OciError};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,7 @@ pub fn decode(secret: &str, token: &str) -> Result<Claims, AppError> {
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::default(),
     )
-    .map_err(InternalError::Jwt)?
+    .map_err(|e| OciError::Unauthorized(e.to_string(), None))?
     .claims)
 }
 

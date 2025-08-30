@@ -3,25 +3,48 @@ use crate::error::{AppError, BusinessError, MapToAppError};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-#[derive(Debug)]
-pub struct RepoStorage {
-    pub pool: Arc<SqlitePool>,
-}
+type Result<T> = std::result::Result<T, AppError>;
 
-impl RepoStorage {
-    pub fn new(pool: Arc<SqlitePool>) -> Self {
-        Self { pool }
-    }
+#[async_trait::async_trait]
+pub trait RepoStorage: Send + Sync {
+    async fn query_repo_by_name(&self, name: &str) -> Result<Repo>;
 
-    pub async fn ensure_repo_exists(&self, name: &str) -> Result<(), AppError> {
+    async fn create_repo(&self, repo: Repo) -> Result<()>;
+
+    async fn ensure_repo_exists(&self, name: &str) -> Result<()> {
         if self.query_repo_by_name(name).await.is_err() {
             let repo = Repo::new(name);
-            self.insert_repo(repo).await?;
+            self.create_repo(repo).await?;
         }
         Ok(())
     }
 
-    pub async fn insert_repo(&self, repo: Repo) -> Result<(), AppError> {
+    async fn change_visibility(&self, name: &str, is_public: bool) -> Result<()>;
+}
+
+#[derive(Debug)]
+pub struct SqliteRepoStorage {
+    pub pool: Arc<SqlitePool>,
+}
+
+impl SqliteRepoStorage {
+    pub fn new(pool: Arc<SqlitePool>) -> SqliteRepoStorage {
+        SqliteRepoStorage { pool }
+    }
+}
+
+#[async_trait::async_trait]
+impl RepoStorage for SqliteRepoStorage {
+    async fn query_repo_by_name(&self, name: &str) -> Result<Repo> {
+        sqlx::query_as::<_, Repo>("select * from repos where name = $1")
+            .bind(name)
+            .fetch_optional(self.pool.as_ref())
+            .await
+            .map_to_internal()?
+            .ok_or_else(|| BusinessError::BadRequest("repo not found".to_string()).into())
+    }
+
+    async fn create_repo(&self, repo: Repo) -> Result<()> {
         sqlx::query("INSERT INTO repos (id, name, is_public) VALUES ($1, $2, $3)")
             .bind(repo.id)
             .bind(repo.name)
@@ -32,12 +55,21 @@ impl RepoStorage {
         Ok(())
     }
 
-    pub async fn query_repo_by_name(&self, name: &str) -> Result<Repo, AppError> {
-        sqlx::query_as::<_, Repo>("select * from repos where name = $1")
-            .bind(name)
-            .fetch_optional(self.pool.as_ref())
-            .await
-            .map_to_internal()?
-            .ok_or_else(|| BusinessError::BadRequest("repo not found".to_string()).into())
+    async fn change_visibility(&self, name: &str, is_public: bool) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE repos SET is_public = ?, updated_at = datetime('now') WHERE name = ?",
+        )
+        .bind(is_public)
+        .bind(name)
+        .execute(&*self.pool)
+        .await
+        .map_to_internal()?;
+        match result.rows_affected() {
+            0 => Err(BusinessError::BadRequest(
+                format!("repository `{name}` not found").to_string(),
+            )
+            .into()),
+            _ => Ok(()),
+        }
     }
 }

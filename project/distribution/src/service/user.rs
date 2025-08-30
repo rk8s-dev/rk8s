@@ -34,7 +34,7 @@ pub async fn create_user(
         Err(_) => {
             let password = hash_password(&state.config.password_salt, &req.password)?;
             let user = User::new(req.username, password);
-            state.user_storage.insert_user(user).await?;
+            state.user_storage.create_user(user).await?;
             Ok(StatusCode::CREATED)
         }
     }

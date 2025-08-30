@@ -1,6 +1,5 @@
 use crate::api::RepoIdentifier;
 use crate::config::Config;
-use crate::domain::repo_model::Repo;
 use crate::error::{AppError, OciError};
 use crate::utils::jwt::{Claims, decode};
 use crate::utils::state::AppState;
@@ -8,8 +7,6 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use std::io;
-use std::io::Write;
 use std::sync::Arc;
 
 pub async fn authenticate(
@@ -52,7 +49,9 @@ pub async fn authorize(
     match *req.method() {
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
-            if let Ok(repo) = state.repo_storage.query_repo_by_name(&identifier).await && repo.is_public == 0 {
+            if let Ok(repo) = state.repo_storage.query_repo_by_name(&identifier).await
+                && repo.is_public == 0
+            {
                 match claims {
                     Some(claims) => {
                         if claims.sub != namespace {

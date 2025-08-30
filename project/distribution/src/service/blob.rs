@@ -125,7 +125,7 @@ pub async fn post_blob_handler(
             .write_by_digest(&digest, request.into_body().into_data_stream(), false)
             .await?;
 
-        let location = format!("/v2/{}/blobs/{}", name, digest);
+        let location = format!("/v2/{name}/blobs/{digest}");
         Ok(Response::builder()
             .status(StatusCode::CREATED)
             .header(LOCATION, location)
@@ -231,7 +231,7 @@ pub async fn put_blob_handler(
     state.storage.move_to_digest(&session_id, &digest).await?;
     state.close_session(&session_id).await;
 
-    let location = format!("/v2/{}/blobs/{}", name, digest);
+    let location = format!("/v2/{name}/blobs/{digest}");
     Ok(Response::builder()
         .status(StatusCode::CREATED)
         .header(LOCATION, location)
@@ -305,7 +305,9 @@ fn parse_content_range(headers: &HeaderMap) -> Result<(u64, u64), AppError> {
             .into());
         }
 
-        if let Some(content_length) = content_length && content_length != (end - start + 1) {
+        if let Some(content_length) = content_length
+            && content_length != (end - start + 1)
+        {
             return Err(OciError::SizeInvalid(
                 "Content-Length does not match Content-Range".to_string(),
             )

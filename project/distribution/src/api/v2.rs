@@ -15,8 +15,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use axum::{Router, middleware};
 use std::collections::HashMap;
-use std::io;
-use std::io::Write;
 use std::sync::Arc;
 
 pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
@@ -35,7 +33,8 @@ pub async fn probe(
         Ok(_) => Ok((
             StatusCode::OK,
             [("Docker-Distribution-API-Version", "registry/2.0")],
-        ).into_response()),
+        )
+            .into_response()),
         Err(e) => Err(e),
     }
 }

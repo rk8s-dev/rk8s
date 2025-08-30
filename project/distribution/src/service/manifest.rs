@@ -40,7 +40,7 @@ pub async fn get_manifest_handler(
     }
     if !is_valid_reference(&reference) {
         return Err(
-            OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into(),
+            OciError::ManifestInvalid(format!("Invalid reference format: {reference}")).into(),
         );
     }
 
@@ -98,7 +98,7 @@ pub async fn head_manifest_handler(
     }
     if !is_valid_reference(&reference) {
         return Err(
-            OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into(),
+            OciError::ManifestInvalid(format!("Invalid reference format: {reference}")).into(),
         );
     }
 
@@ -162,7 +162,7 @@ pub async fn put_manifest_handler(
     }
     if !is_valid_reference(&reference) {
         return Err(
-            OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into(),
+            OciError::ManifestInvalid(format!("Invalid reference format: {reference}")).into(),
         );
     }
 
@@ -178,8 +178,7 @@ pub async fn put_manifest_handler(
 
     if is_valid_digest(&reference) && reference != calculated_digest_str {
         return Err(OciError::DigestInvalid(format!(
-            "Provided digest {} does not match content digest {}",
-            reference, calculated_digest_str
+            "Provided digest {reference} does not match content digest {calculated_digest_str}",
         ))
         .into());
     }
@@ -312,7 +311,7 @@ pub async fn delete_manifest_handler(
     }
     if !is_valid_reference(&reference) {
         return Err(
-            OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into(),
+            OciError::ManifestInvalid(format!("Invalid reference format: {reference}")).into(),
         );
     }
 

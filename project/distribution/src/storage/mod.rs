@@ -11,6 +11,7 @@ pub mod user_storage;
 
 type Result<T> = std::result::Result<T, AppError>;
 
+#[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait Storage: Send + Sync {
     async fn read_by_tag(&self, name: &str, tag: &str) -> Result<File>;

@@ -10,6 +10,7 @@ use std::io;
 use std::sync::Arc;
 use thiserror::Error;
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum OciError {
     #[error("Blob unknown: {0}")]
@@ -134,8 +135,7 @@ impl IntoResponse for OciError {
         if let Self::Unauthorized(_, Some(config)) = self {
             let realm = format!("{}/auth/token", config.registry_url);
             let challenge = format!(
-                r#"Bearer realm="{}",service="oci-registry",scope="repository:*:*", Basic Real="oci registry""#,
-                realm
+                r#"Bearer realm="{realm}",service="oci-registry",scope="repository:*:*", Basic Real="oci registry""#,
             );
             response
                 .headers_mut()
@@ -185,9 +185,6 @@ pub enum InternalError {
     #[error("Bcrypt error: {0}")]
     Bcrypt(#[from] bcrypt::BcryptError),
 
-    #[error("jwt error: {0}")]
-    Jwt(#[from] jsonwebtoken::errors::Error),
-
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
@@ -210,6 +207,7 @@ impl IntoResponse for InternalError {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum HeaderError {
     #[error("Content-Range header is missing")]
@@ -233,7 +231,7 @@ impl IntoResponse for HeaderError {
                 OciError::BlobUploadInvalid("Content-Range header is required".to_string())
             }
             Self::ContentRangeInvalid(reason) => {
-                OciError::BlobUploadInvalid(format!("Content-Range header is invalid: {}", reason))
+                OciError::BlobUploadInvalid(format!("Content-Range header is invalid: {reason}"))
             }
             Self::RangeNotSatisfiable {
                 session_id,
@@ -308,6 +306,7 @@ pub trait ErrorInfoExt {
     fn with_detail(self, detail: serde_json::Value) -> Self;
 }
 
+#[allow(dead_code)]
 pub trait MapToAppError<T> {
     fn map_to_oci(self, oci_error: OciError) -> Result<T, AppError>;
 

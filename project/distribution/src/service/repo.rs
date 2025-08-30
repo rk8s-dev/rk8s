@@ -1,11 +1,10 @@
 use crate::api::RepoIdentifier;
-use crate::error::{AppError, BusinessError, MapToAppError};
+use crate::error::{AppError, BusinessError};
 use crate::utils::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
-use chrono::Utc;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -21,18 +20,16 @@ pub async fn change_visibility(
     Json(body): Json<ChangeVisReq>,
 ) -> Result<impl IntoResponse, AppError> {
     if !name.ends_with("visibility") {
-        return Err(BusinessError::BadRequest("path must end with `visibility`".to_string()).into());
+        return Err(
+            BusinessError::BadRequest("path must end with `visibility`".to_string()).into(),
+        );
     }
     match body.visibility.as_str() {
         "public" | "private" => {
-            state.repo_storage.query_repo_by_name(&identifier.0).await?;
-            sqlx::query("UPDATE repos set is_public = $1, updated_at = $2 WHERE name = $3")
-                .bind(body.visibility == "public")
-                .bind(Utc::now().format("%Y-%m-%d %H:%M:%S").to_string())
-                .bind(&identifier.0)
-                .execute(state.repo_storage.pool.as_ref())
-                .await
-                .map_to_internal()?;
+            state
+                .repo_storage
+                .change_visibility(&identifier.0, body.visibility == "public")
+                .await?;
             Ok(StatusCode::OK)
         }
         _ => Err(

@@ -38,7 +38,7 @@ impl Storage for FilesystemStorage {
         match File::open(path).await {
             Ok(file) => Ok(file),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Err(OciError::ManifestUnknown(format!("{}:{}", name, tag)).into())
+                Err(OciError::ManifestUnknown(format!("{name}:{tag}")).into())
             }
             Err(e) => Err(InternalError::from(e).into()),
         }
