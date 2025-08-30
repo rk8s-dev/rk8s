@@ -6,8 +6,8 @@ use tokio::fs::File;
 
 pub mod driver;
 pub mod paths;
-pub mod user_storage;
 pub mod repo_storage;
+pub mod user_storage;
 
 type Result<T> = std::result::Result<T, AppError>;
 
@@ -22,12 +22,7 @@ pub trait Storage: Send + Sync {
         stream: BodyDataStream,
         append: bool,
     ) -> Result<u64>;
-    async fn write_by_uuid(
-        &self,
-        uuid: &str,
-        stream: BodyDataStream,
-        append: bool,
-    ) -> Result<u64>;
+    async fn write_by_uuid(&self, uuid: &str, stream: BodyDataStream, append: bool) -> Result<u64>;
     async fn move_to_digest(&self, session_id: &str, digest: &Digest) -> Result<()>;
     async fn create_path(&self, path: &str) -> Result<PathBuf>;
     async fn link_to_tag(&self, name: &str, tag: &str, digest: &Digest) -> Result<()>;

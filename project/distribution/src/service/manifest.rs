@@ -4,9 +4,14 @@ use crate::utils::{
     validation::{is_valid_digest, is_valid_name, is_valid_reference},
 };
 use axum::response::IntoResponse;
-use axum::{body, body::Body, extract::{Path, Query, Request, State}, http::{header, Response, StatusCode}};
-use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
+use axum::{
+    body,
+    body::Body,
+    extract::{Path, Query, Request, State},
+    http::{Response, StatusCode, header},
+};
 use oci_spec::image::ImageManifest;
+use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::io::AsyncReadExt;
@@ -34,7 +39,9 @@ pub async fn get_manifest_handler(
         return Err(OciError::NameInvalid(name).into());
     }
     if !is_valid_reference(&reference) {
-        return Err(OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into());
+        return Err(
+            OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into(),
+        );
     }
 
     let manifest_file = if is_valid_digest(&reference) {
@@ -90,7 +97,9 @@ pub async fn head_manifest_handler(
         return Err(OciError::NameInvalid(name).into());
     }
     if !is_valid_reference(&reference) {
-        return Err(OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into());
+        return Err(
+            OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into(),
+        );
     }
 
     let manifest_file = if is_valid_digest(&reference) {
@@ -101,10 +110,7 @@ pub async fn head_manifest_handler(
         state.storage.read_by_tag(&name, &reference).await?
     };
 
-    let metadata = manifest_file
-        .metadata()
-        .await
-        .map_to_internal()?;
+    let metadata = manifest_file.metadata().await.map_to_internal()?;
     let content_length = metadata.len();
 
     let digest_str = if is_valid_digest(&reference) {
@@ -120,13 +126,15 @@ pub async fn head_manifest_handler(
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/vnd.docker.distribution.manifest.v2+json") // A common default
+        .header(
+            header::CONTENT_TYPE,
+            "application/vnd.docker.distribution.manifest.v2+json",
+        ) // A common default
         .header(header::CONTENT_LENGTH, content_length)
         .header("Docker-Content-Digest", digest_str)
         .body(Body::empty())
         .unwrap())
 }
-
 
 /// Handles `PUT /v2/<name>/manifests/<reference>`.
 ///
@@ -153,7 +161,9 @@ pub async fn put_manifest_handler(
         return Err(OciError::NameInvalid(name).into());
     }
     if !is_valid_reference(&reference) {
-        return Err(OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into());
+        return Err(
+            OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into(),
+        );
     }
 
     let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
@@ -170,27 +180,42 @@ pub async fn put_manifest_handler(
         return Err(OciError::DigestInvalid(format!(
             "Provided digest {} does not match content digest {}",
             reference, calculated_digest_str
-        )).into());
+        ))
+        .into());
     }
 
     for descriptor in manifest.layers() {
         state.storage.read_by_digest(descriptor.digest()).await?;
     }
-    state.storage.read_by_digest(manifest.config().digest()).await?;
-
+    state
+        .storage
+        .read_by_digest(manifest.config().digest())
+        .await?;
 
     let body_stream = Body::from(body_bytes).into_data_stream();
-    state.storage.write_by_digest(&calculated_digest, body_stream, false).await?;
+    state
+        .storage
+        .write_by_digest(&calculated_digest, body_stream, false)
+        .await?;
 
     if !is_valid_digest(&reference) {
-        state.storage.link_to_tag(&name, &reference, &calculated_digest).await?;
+        state
+            .storage
+            .link_to_tag(&name, &reference, &calculated_digest)
+            .await?;
     }
 
     state.repo_storage.ensure_repo_exists(&name).await?;
     let location = format!("/v2/{name}/manifests/{calculated_digest_str}");
     Ok((
         StatusCode::CREATED,
-        [(header::LOCATION, location), ("Docker-Content-Digest".parse().unwrap(), calculated_digest_str)],
+        [
+            (header::LOCATION, location),
+            (
+                "Docker-Content-Digest".parse().unwrap(),
+                calculated_digest_str,
+            ),
+        ],
         Body::empty(),
     )
         .into_response())
@@ -221,7 +246,6 @@ pub async fn get_tag_list_handler(
             all_tags = all_tags.split_off(last_index + 1);
         } else {
             all_tags.clear();
-
         }
     }
 
@@ -229,9 +253,7 @@ pub async fn get_tag_list_handler(
     let mut next_link = None;
 
     if let Some(n_str) = params.get("n") {
-        let n: usize = n_str.parse().map_err(|_| {
-            OciError::Unsupported
-        })?;
+        let n: usize = n_str.parse().map_err(|_| OciError::Unsupported)?;
 
         if n > 0 && tags_to_return.len() > n {
             let last_tag_for_this_page = tags_to_return[n - 1].clone();
@@ -240,10 +262,7 @@ pub async fn get_tag_list_handler(
 
             let link = format!(
                 "<{}/v2/{}/tags/list?n={}&last={}>; rel=\"next\"",
-                state.config.registry_url,
-                name,
-                n,
-                last_tag_for_this_page
+                state.config.registry_url, name, n, last_tag_for_this_page
             );
             next_link = Some(link);
         }
@@ -255,8 +274,7 @@ pub async fn get_tag_list_handler(
         .build()
         .map_err(|_| OciError::Unsupported)?;
 
-    let json_body = serde_json::to_string(&tag_list)
-        .map_err(|_| OciError::Unsupported)?;
+    let json_body = serde_json::to_string(&tag_list).map_err(|_| OciError::Unsupported)?;
 
     let mut response = Response::builder()
         .status(StatusCode::OK)
@@ -293,12 +311,14 @@ pub async fn delete_manifest_handler(
         return Err(OciError::NameInvalid(name).into());
     }
     if !is_valid_reference(&reference) {
-        return Err(OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into());
+        return Err(
+            OciError::ManifestInvalid(format!("Invalid reference format: {}", reference)).into(),
+        );
     }
 
     if is_valid_digest(&reference) {
-        let digest = oci_digest::from_str(&reference)
-            .map_err(|_| OciError::DigestInvalid(reference))?;
+        let digest =
+            oci_digest::from_str(&reference).map_err(|_| OciError::DigestInvalid(reference))?;
         state.storage.delete_by_digest(&digest).await?;
     } else {
         state.storage.delete_by_tag(&name, &reference).await?;
@@ -306,4 +326,3 @@ pub async fn delete_manifest_handler(
 
     Ok(StatusCode::ACCEPTED)
 }
-

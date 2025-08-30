@@ -1,10 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
-use sqlx::{Pool, Sqlite};
-use tokio::sync::RwLock;
 use crate::config::Config;
-use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
 use crate::storage::repo_storage::RepoStorage;
 use crate::storage::user_storage::UserStorage;
+use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
+use sqlx::{Pool, Sqlite};
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
 pub struct UploadSession {
@@ -26,7 +26,7 @@ impl AppState {
             "FILESYSTEM" => Arc::new(FilesystemStorage::new(&config.root_dir)),
             _ => Arc::new(FilesystemStorage::new(&config.root_dir)),
         };
-        
+
         AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             storage: storage_backend,
@@ -44,12 +44,7 @@ impl AppState {
     pub async fn create_session(&self) -> String {
         let mut sessions = self.sessions.write().await;
         let session_id = uuid::Uuid::new_v4().to_string();
-        sessions.insert(
-            session_id.clone(),
-            UploadSession {
-                uploaded: 0,
-            },
-        );
+        sessions.insert(session_id.clone(), UploadSession { uploaded: 0 });
         session_id
     }
 

@@ -2,13 +2,13 @@ use crate::domain::user_model::User;
 use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
 use crate::utils::jwt::gen_token;
 use crate::utils::state::AppState;
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
-use axum_extra::headers::authorization::Basic;
-use axum_extra::headers::Authorization;
 use axum_extra::TypedHeader;
+use axum_extra::headers::Authorization;
+use axum_extra::headers::authorization::Basic;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -24,7 +24,10 @@ pub async fn create_user(
     Json(req): Json<UserReq>,
 ) -> Result<impl IntoResponse, AppError> {
     if req.username == "anonymous" {
-        return Err(BusinessError::BadRequest("`anonymous` is a reserved username, please change another one".to_string()).into())
+        return Err(BusinessError::BadRequest(
+            "`anonymous` is a reserved username, please change another one".to_string(),
+        )
+        .into());
     }
     match state.user_storage.query_user_by_name(&req.username).await {
         Ok(_) => Err(BusinessError::Conflict("username is already taken".to_string()).into()),
@@ -55,22 +58,20 @@ pub(crate) async fn auth(
     let token = match auth {
         Some(auth) => {
             let username = auth.username();
-            let user = state.user_storage
-                .query_user_by_name(username)
-                .await?;
+            let user = state.user_storage.query_user_by_name(username).await?;
             let token = gen_token(&state.config.password_salt, &user.username);
             {
                 let state = state.clone();
                 // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`
-                tokio::task::spawn_blocking(move || check_password(&state.config.password_salt, &user, auth.password()))
-                    .await
-                    .map_err(|e| InternalError::Others(e.to_string()))??;
+                tokio::task::spawn_blocking(move || {
+                    check_password(&state.config.password_salt, &user, auth.password())
+                })
+                .await
+                .map_err(|e| InternalError::Others(e.to_string()))??;
             }
             token
         }
-        None => {
-            gen_token(&state.config.password_salt, "anonymous")
-        }
+        None => gen_token(&state.config.password_salt, "anonymous"),
     };
     Ok(Json(AuthRes {
         token: token.clone(),
@@ -85,7 +86,9 @@ fn hash_password(salt: &str, password: &str) -> Result<String, AppError> {
         password,
         bcrypt::DEFAULT_COST,
         salt.as_bytes().try_into().unwrap(),
-    ).map_to_internal()?.to_string())
+    )
+    .map_to_internal()?
+    .to_string())
 }
 
 fn check_password(salt: &str, user: &User, password: &str) -> Result<(), AppError> {

@@ -1,14 +1,14 @@
-use std::io;
-use std::sync::Arc;
-use axum::body::Body;
-use axum::http::{StatusCode};
-use axum::http::header::{LOCATION, RANGE};
+use crate::config::Config;
 use axum::Json;
+use axum::body::Body;
+use axum::http::StatusCode;
+use axum::http::header::{LOCATION, RANGE};
 use axum::response::{IntoResponse, Response};
 use oci_spec::distribution::{ErrorCode, ErrorInfo, ErrorInfoBuilder, ErrorResponseBuilder};
 use serde_json::json;
+use std::io;
+use std::sync::Arc;
 use thiserror::Error;
-use crate::config::Config;
 
 #[derive(Error, Debug)]
 pub enum OciError {
@@ -58,50 +58,92 @@ pub enum OciError {
 impl IntoResponse for OciError {
     fn into_response(self) -> Response {
         let (status_code, error_info) = match &self {
-            Self::BlobUnknown(digest) =>
-                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::BlobUnknown, "blob unknown")
-                    .with_detail(json!({ "digest": digest }))),
-            Self::BlobUploadInvalid(msg) =>
-                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::BlobUploadInvalid, msg)),
-            Self::BlobUploadUnknown(session_id) =>
-                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::BlobUploadUnknown, "blob upload unknown")
-                    .with_detail(json!({ "session_id": session_id }))),
-            Self::DigestInvalid(msg) =>
-                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::DigestInvalid, msg)),
-            Self::ManifestBlobUnknown(digest) =>
-                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestBlobUnknown, "manifest references unknown blob")
-                    .with_detail(json!({ "digest": digest }))),
-            Self::ManifestInvalid(msg) =>
-                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestInvalid, msg)),
-            Self::ManifestUnknown(reference) =>
-                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::ManifestUnknown, "manifest unknown")
-                    .with_detail(json!({ "reference": reference }))),
-            Self::NameInvalid(name) =>
-                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::NameInvalid, "invalid repository name")
-                    .with_detail(json!({ "name": name }))),
-            Self::NameUnknown(name) =>
-                (StatusCode::NOT_FOUND, ErrorInfo::new(ErrorCode::NameUnknown, "repository not known to registry")
-                    .with_detail(json!({ "name": name }))),
-            Self::SizeInvalid(msg) =>
-                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::SizeInvalid, msg)),
-            Self::Unsupported =>
-                (StatusCode::METHOD_NOT_ALLOWED, ErrorInfo::new(ErrorCode::Unsupported, "the operation is unsupported")),
-            Self::TooManyRequests =>
-                (StatusCode::TOO_MANY_REQUESTS, ErrorInfo::new(ErrorCode::TooManyRequests, "too many requests")),
-            Self::Unauthorized(msg, _) =>
-                (StatusCode::UNAUTHORIZED, ErrorInfo::new(ErrorCode::Unauthorized, msg)),
-            Self::Forbidden(msg) =>
-                (StatusCode::FORBIDDEN, ErrorInfo::new(ErrorCode::Denied, msg)),
+            Self::BlobUnknown(digest) => (
+                StatusCode::NOT_FOUND,
+                ErrorInfo::new(ErrorCode::BlobUnknown, "blob unknown")
+                    .with_detail(json!({ "digest": digest })),
+            ),
+            Self::BlobUploadInvalid(msg) => (
+                StatusCode::BAD_REQUEST,
+                ErrorInfo::new(ErrorCode::BlobUploadInvalid, msg),
+            ),
+            Self::BlobUploadUnknown(session_id) => (
+                StatusCode::NOT_FOUND,
+                ErrorInfo::new(ErrorCode::BlobUploadUnknown, "blob upload unknown")
+                    .with_detail(json!({ "session_id": session_id })),
+            ),
+            Self::DigestInvalid(msg) => (
+                StatusCode::BAD_REQUEST,
+                ErrorInfo::new(ErrorCode::DigestInvalid, msg),
+            ),
+            Self::ManifestBlobUnknown(digest) => (
+                StatusCode::NOT_FOUND,
+                ErrorInfo::new(
+                    ErrorCode::ManifestBlobUnknown,
+                    "manifest references unknown blob",
+                )
+                .with_detail(json!({ "digest": digest })),
+            ),
+            Self::ManifestInvalid(msg) => (
+                StatusCode::NOT_FOUND,
+                ErrorInfo::new(ErrorCode::ManifestInvalid, msg),
+            ),
+            Self::ManifestUnknown(reference) => (
+                StatusCode::NOT_FOUND,
+                ErrorInfo::new(ErrorCode::ManifestUnknown, "manifest unknown")
+                    .with_detail(json!({ "reference": reference })),
+            ),
+            Self::NameInvalid(name) => (
+                StatusCode::BAD_REQUEST,
+                ErrorInfo::new(ErrorCode::NameInvalid, "invalid repository name")
+                    .with_detail(json!({ "name": name })),
+            ),
+            Self::NameUnknown(name) => (
+                StatusCode::NOT_FOUND,
+                ErrorInfo::new(ErrorCode::NameUnknown, "repository not known to registry")
+                    .with_detail(json!({ "name": name })),
+            ),
+            Self::SizeInvalid(msg) => (
+                StatusCode::BAD_REQUEST,
+                ErrorInfo::new(ErrorCode::SizeInvalid, msg),
+            ),
+            Self::Unsupported => (
+                StatusCode::METHOD_NOT_ALLOWED,
+                ErrorInfo::new(ErrorCode::Unsupported, "the operation is unsupported"),
+            ),
+            Self::TooManyRequests => (
+                StatusCode::TOO_MANY_REQUESTS,
+                ErrorInfo::new(ErrorCode::TooManyRequests, "too many requests"),
+            ),
+            Self::Unauthorized(msg, _) => (
+                StatusCode::UNAUTHORIZED,
+                ErrorInfo::new(ErrorCode::Unauthorized, msg),
+            ),
+            Self::Forbidden(msg) => (
+                StatusCode::FORBIDDEN,
+                ErrorInfo::new(ErrorCode::Denied, msg),
+            ),
         };
 
-        let body = ErrorResponseBuilder::default().errors(vec![error_info]).build().unwrap();
+        let body = ErrorResponseBuilder::default()
+            .errors(vec![error_info])
+            .build()
+            .unwrap();
         let mut response = (status_code, Json(body)).into_response();
 
         if let Self::Unauthorized(_, Some(config)) = self {
             let realm = format!("{}/auth/token", config.registry_url);
-            let challenge = format!(r#"Bearer realm="{}",service="oci-registry",scope="repository:*:*", Basic Real="oci registry""#, realm);
-            response.headers_mut().insert("Www-Authenticate", challenge.parse().unwrap());
-            response.headers_mut().insert("Docker-Distribution-API-Version", "registry/2.0".parse().unwrap());
+            let challenge = format!(
+                r#"Bearer realm="{}",service="oci-registry",scope="repository:*:*", Basic Real="oci registry""#,
+                realm
+            );
+            response
+                .headers_mut()
+                .insert("Www-Authenticate", challenge.parse().unwrap());
+            response.headers_mut().insert(
+                "Docker-Distribution-API-Version",
+                "registry/2.0".parse().unwrap(),
+            );
         }
         response
     }
@@ -118,12 +160,16 @@ pub enum BusinessError {
 impl IntoResponse for BusinessError {
     fn into_response(self) -> Response {
         let (status_code, oci_error_info) = match &self {
-            Self::Conflict(msg) =>
-                (StatusCode::CONFLICT, ErrorInfo::new(ErrorCode::Denied, msg)),
-            Self::BadRequest(msg) =>
-                (StatusCode::BAD_REQUEST, ErrorInfo::new(ErrorCode::Unsupported, msg))
+            Self::Conflict(msg) => (StatusCode::CONFLICT, ErrorInfo::new(ErrorCode::Denied, msg)),
+            Self::BadRequest(msg) => (
+                StatusCode::BAD_REQUEST,
+                ErrorInfo::new(ErrorCode::Unsupported, msg),
+            ),
         };
-        let body = ErrorResponseBuilder::default().errors(vec![oci_error_info]).build().unwrap();
+        let body = ErrorResponseBuilder::default()
+            .errors(vec![oci_error_info])
+            .build()
+            .unwrap();
         (status_code, Json(body)).into_response()
     }
 }
@@ -154,8 +200,12 @@ pub enum InternalError {
 
 impl IntoResponse for InternalError {
     fn into_response(self) -> Response {
-        let error_info = ErrorInfo::new(ErrorCode::Unsupported, "an internal server error occurred");
-        let body = ErrorResponseBuilder::default().errors(vec![error_info]).build().unwrap();
+        let error_info =
+            ErrorInfo::new(ErrorCode::Unsupported, "an internal server error occurred");
+        let body = ErrorResponseBuilder::default()
+            .errors(vec![error_info])
+            .build()
+            .unwrap();
         (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
     }
 }
@@ -179,9 +229,17 @@ pub enum HeaderError {
 impl IntoResponse for HeaderError {
     fn into_response(self) -> Response {
         let oci_error = match self {
-            Self::ContentRangeMissing => OciError::BlobUploadInvalid("Content-Range header is required".to_string()),
-            Self::ContentRangeInvalid(reason) => OciError::BlobUploadInvalid(format!("Content-Range header is invalid: {}", reason)),
-            Self::RangeNotSatisfiable { session_id, name, current_size } => {
+            Self::ContentRangeMissing => {
+                OciError::BlobUploadInvalid("Content-Range header is required".to_string())
+            }
+            Self::ContentRangeInvalid(reason) => {
+                OciError::BlobUploadInvalid(format!("Content-Range header is invalid: {}", reason))
+            }
+            Self::RangeNotSatisfiable {
+                session_id,
+                name,
+                current_size,
+            } => {
                 return Response::builder()
                     .status(StatusCode::RANGE_NOT_SATISFIABLE)
                     .header(LOCATION, format!("/v2/{name}/blobs/uploads/{session_id}"))
@@ -189,7 +247,7 @@ impl IntoResponse for HeaderError {
                     .header("Docker-Upload-UUID", session_id)
                     .body(Body::empty())
                     .unwrap();
-            },
+            }
         };
         oci_error.into_response()
     }

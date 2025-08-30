@@ -1,8 +1,7 @@
+use crate::error::{AppError, InternalError};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use crate::config::Config;
-use crate::error::{AppError, InternalError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
@@ -15,7 +14,8 @@ pub fn encode(secret: &str, claims: &Claims) -> String {
         &Header::default(),
         claims,
         &EncodingKey::from_secret(secret.as_bytes()),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 pub fn decode(secret: &str, token: &str) -> Result<Claims, AppError> {
@@ -23,7 +23,9 @@ pub fn decode(secret: &str, token: &str) -> Result<Claims, AppError> {
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::default(),
-    ).map_err(InternalError::Jwt)?.claims)
+    )
+    .map_err(InternalError::Jwt)?
+    .claims)
 }
 
 pub fn gen_token(secret: &str, name: &str) -> String {
@@ -33,7 +35,7 @@ pub fn gen_token(secret: &str, name: &str) -> String {
         .unwrap();
     let claims = Claims {
         sub: name.to_string(),
-        exp: (Utc::now() + Duration::seconds(lifetime_seconds)).timestamp()
+        exp: (Utc::now() + Duration::seconds(lifetime_seconds)).timestamp(),
     };
     encode(secret, &claims)
 }

@@ -5,9 +5,9 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
+use chrono::Utc;
 use serde::Deserialize;
 use std::sync::Arc;
-use chrono::Utc;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChangeVisReq {
@@ -21,7 +21,7 @@ pub async fn change_visibility(
     Json(body): Json<ChangeVisReq>,
 ) -> Result<impl IntoResponse, AppError> {
     if !name.ends_with("visibility") {
-        return Err(BusinessError::BadRequest("path must end with `visibility`".to_string()).into())
+        return Err(BusinessError::BadRequest("path must end with `visibility`".to_string()).into());
     }
     match body.visibility.as_str() {
         "public" | "private" => {
@@ -33,10 +33,11 @@ pub async fn change_visibility(
                 .execute(state.repo_storage.pool.as_ref())
                 .await
                 .map_to_internal()?;
-            Ok((
-                StatusCode::OK,
-            ))
+            Ok(StatusCode::OK)
         }
-        _ => Err(BusinessError::BadRequest("visibility must be `public` or `private`".to_string()).into())
+        _ => Err(
+            BusinessError::BadRequest("visibility must be `public` or `private`".to_string())
+                .into(),
+        ),
     }
 }

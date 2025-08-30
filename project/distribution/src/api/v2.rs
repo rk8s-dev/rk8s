@@ -13,7 +13,7 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
-use axum::{middleware, Router};
+use axum::{Router, middleware};
 use std::collections::HashMap;
 use std::io;
 use std::io::Write;
@@ -23,8 +23,8 @@ pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(probe))
         .route("/{*tail}", any(dispatch_handler))
-            .layer(middleware::from_fn_with_state(state.clone(), authorize))
-            .layer(middleware::from_fn_with_state(state, authenticate))
+        .layer(middleware::from_fn_with_state(state.clone(), authorize))
+        .layer(middleware::from_fn_with_state(state, authenticate))
 }
 
 pub async fn probe(
@@ -32,7 +32,11 @@ pub async fn probe(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     match extract_claims(&headers, state.config.clone()) {
-        Ok(_) => Ok((StatusCode::OK, [("Docker-Distribution-API-Version", "registry/2.0")]).into_response()),
+        Ok(_) => Ok((
+            StatusCode::OK,
+            [("Docker-Distribution-API-Version", "registry/2.0")],
+        )
+            .into_response()),
         Err(e) => Err(e),
     }
 }
@@ -86,17 +90,13 @@ async fn dispatch_handler(
             let name = name.join("/");
             match *method {
                 // Pull blobs
-                Method::GET => {
-                    get_blob_handler(State(state), Path((name, digest.to_string())))
-                        .await
-                        .map(|res| res.into_response())
-                }
+                Method::GET => get_blob_handler(State(state), Path((name, digest.to_string())))
+                    .await
+                    .map(|res| res.into_response()),
                 // Check if blob exists in the registry
-                Method::HEAD => {
-                    head_blob_handler(State(state), Path((name, digest.to_string())))
-                        .await
-                        .map(|res| res.into_response())
-                }
+                Method::HEAD => head_blob_handler(State(state), Path((name, digest.to_string())))
+                    .await
+                    .map(|res| res.into_response()),
                 // Delete blobs
                 Method::DELETE => {
                     delete_blob_handler(State(state), Path((name, digest.to_string())))
@@ -128,27 +128,23 @@ async fn dispatch_handler(
             let name = name.join("/");
             match *method {
                 // Push a blob in chunks
-                Method::PATCH => {
-                    patch_blob_handler(
-                        State(state),
-                        Path((name, session_id.to_string())),
-                        headers,
-                        request,
-                    )
-                    .await
-                    .map(|res| res.into_response())
-                }
+                Method::PATCH => patch_blob_handler(
+                    State(state),
+                    Path((name, session_id.to_string())),
+                    headers,
+                    request,
+                )
+                .await
+                .map(|res| res.into_response()),
                 // Close a blob upload session
-                Method::PUT => {
-                    put_blob_handler(
-                        State(state),
-                        Path((name, session_id.to_string())),
-                        Query(params),
-                        request,
-                    )
-                    .await
-                    .map(|res| res.into_response())
-                }
+                Method::PUT => put_blob_handler(
+                    State(state),
+                    Path((name, session_id.to_string())),
+                    Query(params),
+                    request,
+                )
+                .await
+                .map(|res| res.into_response()),
                 // Get the status of a blob upload session
                 Method::GET => {
                     get_blob_status_handler(State(state), Path((name, session_id.to_string())))

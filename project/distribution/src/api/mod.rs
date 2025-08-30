@@ -1,15 +1,15 @@
-pub mod v2;
 pub mod middleware;
+pub mod v2;
 
 use std::sync::Arc;
 
-use axum::Router;
-use axum::routing::{get, post, put};
 use crate::api::middleware::{authenticate, authorize};
 use crate::api::v2::probe;
 use crate::service::repo::change_visibility;
 use crate::service::user::{auth, create_user};
 use crate::utils::state::AppState;
+use axum::Router;
+use axum::routing::{get, post, put};
 
 #[derive(Debug, Clone)]
 pub struct RepoIdentifier(pub String);
@@ -25,9 +25,13 @@ pub fn create_router(state: Arc<AppState>) -> Router<()> {
 }
 
 fn user_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/users", post(create_user))
-        .route("/{*tail}", put(change_visibility)
-            .layer(axum::middleware::from_fn_with_state(state.clone(), authorize))
-            .layer(axum::middleware::from_fn_with_state(state, authenticate)))
+    Router::new().route("/users", post(create_user)).route(
+        "/{*tail}",
+        put(change_visibility)
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                authorize,
+            ))
+            .layer(axum::middleware::from_fn_with_state(state, authenticate)),
+    )
 }

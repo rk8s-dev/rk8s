@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::storage::Storage;
 use crate::storage::paths::PathManager;
 
+use crate::error::{AppError, InternalError, MapToAppError, OciError};
 use axum::body::BodyDataStream;
 use futures::TryStreamExt;
 use oci_spec::image::Digest;
@@ -14,7 +15,6 @@ use tokio::{
     io::{self, BufWriter},
 };
 use tokio_util::io::StreamReader;
-use crate::error::{AppError, InternalError, MapToAppError, OciError};
 
 pub struct FilesystemStorage {
     path_manager: PathManager,
@@ -40,9 +40,7 @@ impl Storage for FilesystemStorage {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 Err(OciError::ManifestUnknown(format!("{}:{}", name, tag)).into())
             }
-            Err(e) => {
-                Err(InternalError::from(e).into())
-            }
+            Err(e) => Err(InternalError::from(e).into()),
         }
     }
 
@@ -79,29 +77,9 @@ impl Storage for FilesystemStorage {
         let body_with_io_error = stream.map_err(io::Error::other);
         let mut body_reader = StreamReader::new(body_with_io_error);
 
-        let file_path = self.create_path(&self.path_manager.clone().blob_data_path(digest)).await?;
-
-        let file = if append {
-            OpenOptions::new().create(true).append(true).open(file_path).await
-        } else {
-            File::create(file_path).await
-        }.map_to_internal()?;
-
-        let mut file_writer = BufWriter::new(file);
-
-        io::copy(&mut body_reader, &mut file_writer).await.map_to_internal()
-    }
-
-    async fn write_by_uuid(
-        &self,
-        uuid: &str,
-        stream: BodyDataStream,
-        append: bool,
-    ) -> Result<u64> {
-        let body_with_io_error = stream.map_err(io::Error::other);
-        let mut body_reader = StreamReader::new(body_with_io_error);
-
-        let file_path = self.create_path(&self.path_manager.clone().upload_data_path(uuid)).await?;
+        let file_path = self
+            .create_path(&self.path_manager.clone().blob_data_path(digest))
+            .await?;
 
         let file = if append {
             OpenOptions::new()
@@ -111,11 +89,40 @@ impl Storage for FilesystemStorage {
                 .await
         } else {
             File::create(file_path).await
-        }.map_to_internal()?;
+        }
+        .map_to_internal()?;
 
         let mut file_writer = BufWriter::new(file);
 
-        io::copy(&mut body_reader, &mut file_writer).await.map_to_internal()
+        io::copy(&mut body_reader, &mut file_writer)
+            .await
+            .map_to_internal()
+    }
+
+    async fn write_by_uuid(&self, uuid: &str, stream: BodyDataStream, append: bool) -> Result<u64> {
+        let body_with_io_error = stream.map_err(io::Error::other);
+        let mut body_reader = StreamReader::new(body_with_io_error);
+
+        let file_path = self
+            .create_path(&self.path_manager.clone().upload_data_path(uuid))
+            .await?;
+
+        let file = if append {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(file_path)
+                .await
+        } else {
+            File::create(file_path).await
+        }
+        .map_to_internal()?;
+
+        let mut file_writer = BufWriter::new(file);
+
+        io::copy(&mut body_reader, &mut file_writer)
+            .await
+            .map_to_internal()
     }
 
     async fn move_to_digest(&self, session_id: &str, digest: &Digest) -> Result<()> {
@@ -124,7 +131,9 @@ impl Storage for FilesystemStorage {
 
         self.create_path(&blob_data_path).await?;
 
-        rename(upload_data_path, blob_data_path).await.map_to_internal()?;
+        rename(upload_data_path, blob_data_path)
+            .await
+            .map_to_internal()?;
         Ok(())
     }
 
@@ -137,7 +146,9 @@ impl Storage for FilesystemStorage {
     }
 
     async fn link_to_tag(&self, name: &str, tag: &str, digest: &Digest) -> Result<()> {
-        let tag_path = self.create_path(&self.path_manager.clone().manifest_tag_link_path(name, tag)).await?;
+        let tag_path = self
+            .create_path(&self.path_manager.clone().manifest_tag_link_path(name, tag))
+            .await?;
         let digest_path_str = self.path_manager.clone().blob_data_path(digest);
         let digest_path = std::path::Path::new(&digest_path_str);
 
@@ -186,7 +197,7 @@ impl Storage for FilesystemStorage {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 Err(OciError::ManifestUnknown(tag.to_string()).into())
             }
-            Err(e) => Err(InternalError::from(e).into())
+            Err(e) => Err(InternalError::from(e).into()),
         }
     }
 
@@ -198,7 +209,7 @@ impl Storage for FilesystemStorage {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 Err(OciError::BlobUnknown(digest.to_string()).into())
             }
-            Err(e) => Err(InternalError::from(e).into())
+            Err(e) => Err(InternalError::from(e).into()),
         }
     }
 }

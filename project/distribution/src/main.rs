@@ -12,19 +12,21 @@ use utils::cli::Args;
 use utils::state::AppState;
 
 mod api;
+mod config;
+mod domain;
+mod error;
 mod service;
 mod storage;
 mod utils;
-mod error;
-mod domain;
-mod config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
+        )
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
@@ -35,19 +37,15 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(12)
         .connect(args.database_url.as_str())
         .await?;
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
 
     let state = Arc::new(AppState::new(config, Arc::new(pool)).await);
 
-    let listener = tokio::net::TcpListener::bind(format!("{}:{}", args.host, args.port))
-        .await?;
+    let listener = tokio::net::TcpListener::bind(format!("{}:{}", args.host, args.port)).await?;
 
     tracing::info!("listening on {}", listener.local_addr()?);
 
-    let app = api::create_router(state)
-        .layer(TraceLayer::new_for_http());
+    let app = api::create_router(state).layer(TraceLayer::new_for_http());
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -93,12 +91,10 @@ async fn validate_config(args: &Args) -> Config {
                 ));
             }
         }
-        Err(_) => {
-            validation_errors.push(format!(
-                "OCI_REGISTRY_ROOTDIR `{}` does not exist.",
-                args.root,
-            ))
-        }
+        Err(_) => validation_errors.push(format!(
+            "OCI_REGISTRY_ROOTDIR `{}` does not exist.",
+            args.root,
+        )),
     }
 
     let password_salt = match std::env::var("PASSWORD_SALT") {
@@ -109,14 +105,15 @@ async fn validate_config(args: &Args) -> Config {
             salt
         }
         Err(_) => {
-            tracing::warn!("WARNING: PASSWORD_SALT is not set. Use default value: `ABCDEFGHIJKLMNOP`");
+            tracing::warn!(
+                "WARNING: PASSWORD_SALT is not set. Use default value: `ABCDEFGHIJKLMNOP`"
+            );
             "AAAAAAAAAAAAAAAA".into()
         }
     };
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| {
-            tracing::warn!("WARNING: JWT_SECRET is not set. Use default value: `secret`");
-            "secret".into()
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
+        tracing::warn!("WARNING: JWT_SECRET is not set. Use default value: `secret`");
+        "secret".into()
     });
     let jwt_lifetime_secs = std::env::var("JWT_LIFETIME_SECONDS")
         .unwrap_or_else(|_| {
@@ -126,11 +123,15 @@ async fn validate_config(args: &Args) -> Config {
         .parse::<i64>()
         .unwrap();
 
-    let db_url = Path::new(args.database_url
-        .strip_prefix("sqlite:")
-        .unwrap_or_else(|| &args.database_url));
+    let db_url = Path::new(
+        args.database_url
+            .strip_prefix("sqlite:")
+            .unwrap_or_else(|| &args.database_url),
+    );
     if let Some(parent) = db_url.parent() {
-        tokio::fs::create_dir_all(parent).await.expect("Failed to create db directory");
+        tokio::fs::create_dir_all(parent)
+            .await
+            .expect("Failed to create db directory");
     }
     let _ = OpenOptions::new()
         .create(true)

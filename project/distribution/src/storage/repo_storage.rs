@@ -10,9 +10,7 @@ pub struct RepoStorage {
 
 impl RepoStorage {
     pub fn new(pool: Arc<SqlitePool>) -> Self {
-        Self {
-            pool,
-        }
+        Self { pool }
     }
 
     pub async fn ensure_repo_exists(&self, name: &str) -> Result<(), AppError> {
@@ -22,7 +20,7 @@ impl RepoStorage {
         }
         Ok(())
     }
-    
+
     pub async fn insert_repo(&self, repo: Repo) -> Result<(), AppError> {
         sqlx::query("INSERT INTO repos (id, name, is_public) VALUES ($1, $2, $3)")
             .bind(repo.id)

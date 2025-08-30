@@ -9,10 +9,8 @@ pub struct UserStorage {
 }
 
 impl UserStorage {
-    pub fn new(pool: Arc<SqlitePool>) -> Self { 
-        Self {
-            pool,
-        }
+    pub fn new(pool: Arc<SqlitePool>) -> Self {
+        Self { pool }
     }
 
     pub async fn query_user_by_name(&self, name: &str) -> Result<User, AppError> {
