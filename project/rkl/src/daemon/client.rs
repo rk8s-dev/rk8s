@@ -236,7 +236,7 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                         }
                         Ok(RksMessage::DeletePod(name)) => {
                             println!("[worker] DeletePod {name}");
-                            match pod::delete_pod(&name) {
+                            match pod::standalone::delete_pod(&name) {
                                 Ok(_) => {
                                     let _ = send_uni(&connection, &RksMessage::Ack).await;
                                 }

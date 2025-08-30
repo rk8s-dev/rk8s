@@ -100,7 +100,7 @@ async fn stop_removed_pods(state: Arc<State>, pods: &Vec<PodTask>) -> Result<(),
             let hs = calculate_hash(p);
             !pods_hash.contains(&hs)
         })
-        .map(|p| pod::delete_pod(&p.metadata.name))
+        .map(|p| pod::standalone::delete_pod(&p.metadata.name))
         .filter(|r| r.is_err())
         .collect();
     if !del_err_vec.is_empty() {
