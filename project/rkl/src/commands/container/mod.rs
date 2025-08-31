@@ -173,10 +173,10 @@ impl ContainerRunner {
         let namespaces = get_default_namespaces();
 
         let mut linux: LinuxBuilder = LinuxBuilder::default().namespaces(namespaces);
-        if let Some(x) = &config.linux {
-            if let Some(r) = &x.resources {
-                linux = linux.resources(r);
-            }
+        if let Some(x) = &config.linux
+            && let Some(r) = &x.resources
+        {
+            linux = linux.resources(r);
         }
         let linux = linux.build()?;
         spec.set_linux(Some(linux));

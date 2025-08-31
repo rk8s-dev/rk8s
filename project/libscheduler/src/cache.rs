@@ -19,17 +19,23 @@ impl Cache {
         }
     }
 
+    pub fn set_nodes(&mut self, nodes: Vec<NodeInfo>) {
+        for n in nodes {
+            self.nodes.insert(n.name.clone(), n);
+        }
+    }
+
     pub fn add_fail(&mut self, pod_name: &str) -> bool {
         if !self.pods.contains_key(pod_name) {
             return false;
         }
         self.pods
             .entry(pod_name.to_string())
-            .and_modify(|p| p.attempts += 1);
+            .and_modify(|p| p.queued_info.attempts += 1);
         true
     }
 
-    pub fn assign(&mut self, pod_name: &str, node_name: &str) -> bool {
+    pub fn assume(&mut self, pod_name: &str, node_name: &str) -> bool {
         let pod_info = if let Some(pod) = self.pods.get_mut(pod_name) {
             pod
         } else {
@@ -41,26 +47,41 @@ impl Cache {
             return false;
         };
         pod_info.scheduled = Some(node_name.to_owned());
-        node.cpu -= pod_info.cpu;
-        node.memory -= pod_info.memory;
+        node.requested.cpu += pod_info.spec.resources.cpu;
+        node.requested.memory += pod_info.spec.resources.memory;
         true
+    }
+
+    /// Un assume a pod, if the pod is not scheduled, do nothing.
+    pub fn unassume(&mut self, pod_name: &str) -> Option<PodInfo> {
+        let pod_info = self.pods.get_mut(pod_name)?;
+        let node_name_opt = pod_info.scheduled.clone();
+        let node = if let Some(node_name) = node_name_opt {
+            self.nodes.get_mut(&node_name)?
+        } else {
+            return None;
+        };
+        pod_info.scheduled = None;
+        node.requested.cpu -= pod_info.spec.resources.cpu;
+        node.requested.memory -= pod_info.spec.resources.memory;
+        Some(pod_info.clone())
     }
 
     pub fn update_pod(&mut self, pod: PodInfo) -> Option<PodInfo> {
         self.pods.insert(pod.name.clone(), pod)
     }
 
-    pub fn remove_pod(&mut self, pod_name: &str) {
-        if let Some(p) = self.pods.get(pod_name) {
-            if let Some(n) = &p.scheduled {
-                let node = self.nodes.get_mut(n);
-                if let Some(node) = node {
-                    node.cpu += p.cpu;
-                    node.memory += p.memory;
-                }
+    pub fn remove_pod(&mut self, pod_name: &str) -> Option<PodInfo> {
+        if let Some(p) = self.pods.get(pod_name)
+            && let Some(n) = &p.scheduled
+        {
+            let node = self.nodes.get_mut(n);
+            if let Some(node) = node {
+                node.requested.cpu -= p.spec.resources.cpu;
+                node.requested.memory -= p.spec.resources.memory;
             }
         }
-        self.pods.remove(pod_name);
+        self.pods.remove(pod_name)
     }
 
     pub fn pop_pod_on_node(&mut self, node_name: &str) -> Vec<PodNameWithPriority> {
@@ -70,14 +91,14 @@ impl Cache {
             .filter(|p| matches!(&p.scheduled, Some(name) if name == node_name))
             .for_each(|p| {
                 p.scheduled = None;
-                p.attempts = 0;
-                res.push((p.priority, p.name.clone()));
+                p.queued_info.attempts = 0;
+                res.push((p.spec.priority, p.name.clone()));
             });
         res
     }
 
-    pub fn update_node(&mut self, node: NodeInfo) {
-        self.nodes.insert(node.name.clone(), node);
+    pub fn update_node(&mut self, node: NodeInfo) -> Option<NodeInfo> {
+        self.nodes.insert(node.name.clone(), node)
     }
 
     pub fn remove_node(&mut self, node_name: &str) {
@@ -86,6 +107,10 @@ impl Cache {
 
     pub fn get_nodes(&self) -> Vec<NodeInfo> {
         self.nodes.values().cloned().collect()
+    }
+
+    pub fn get_pods(&self) -> HashMap<String, PodInfo> {
+        self.pods.clone()
     }
 
     pub fn get_pod(&self, pod_name: &str) -> Option<PodInfo> {

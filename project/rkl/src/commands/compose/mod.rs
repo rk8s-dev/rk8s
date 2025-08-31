@@ -247,10 +247,10 @@ impl ComposeManager {
         };
 
         list(list_arg, target_path).map_err(|e| {
-            if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
-                if io_err.kind() == std::io::ErrorKind::NotFound {
-                    return anyhow!("There is no running compose application");
-                }
+            if let Some(io_err) = e.downcast_ref::<std::io::Error>()
+                && io_err.kind() == std::io::ErrorKind::NotFound
+            {
+                return anyhow!("There is no running compose application");
             }
             // Fallback for other errors, ensuring all list errors are handled consistently
             anyhow!("Failed to list compose containers: {}", e)

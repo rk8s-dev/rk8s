@@ -274,22 +274,22 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
 
                             // validate target node
                             let target_opt = pod.spec.nodename.as_deref();
-                            if let Some(target) = target_opt {
-                                if target != node.metadata.name {
-                                    eprintln!(
-                                        "[worker] CreatePod skipped: target={} self={}",
-                                        target, node.metadata.name
-                                    );
-                                    let _ = send_uni(
-                                        &connection,
-                                        &RksMessage::Error(format!(
-                                            "pod {} target node mismatch: target={}, self={}",
-                                            pod.metadata.name, target, node.metadata.name
-                                        )),
-                                    )
-                                    .await;
-                                    continue;
-                                }
+                            if let Some(target) = target_opt
+                                && target != node.metadata.name
+                            {
+                                eprintln!(
+                                    "[worker] CreatePod skipped: target={} self={}",
+                                    target, node.metadata.name
+                                );
+                                let _ = send_uni(
+                                    &connection,
+                                    &RksMessage::Error(format!(
+                                        "pod {} target node mismatch: target={}, self={}",
+                                        pod.metadata.name, target, node.metadata.name
+                                    )),
+                                )
+                                .await;
+                                continue;
                             }
 
                             println!(

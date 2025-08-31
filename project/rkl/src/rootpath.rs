@@ -37,12 +37,12 @@ pub fn determine(root_path: Option<PathBuf>) -> Result<PathBuf> {
         return Ok(path);
     }
 
-    if let Ok(path) = std::env::var("HOME") {
-        if let Ok(resolved) = fs::canonicalize(path) {
-            let run_dir = resolved.join(".youki/run");
-            if create_dir_all_with_mode(&run_dir, uid, Mode::S_IRWXU).is_ok() {
-                return Ok(run_dir);
-            }
+    if let Ok(path) = std::env::var("HOME")
+        && let Ok(resolved) = fs::canonicalize(path)
+    {
+        let run_dir = resolved.join(".youki/run");
+        if create_dir_all_with_mode(&run_dir, uid, Mode::S_IRWXU).is_ok() {
+            return Ok(run_dir);
         }
     }
 
