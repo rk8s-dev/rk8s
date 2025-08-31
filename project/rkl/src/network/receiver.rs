@@ -1,14 +1,12 @@
 use anyhow::Result;
-use log::{info, warn, error};
-use std::sync::Arc;
-use std::path::Path;
-use tokio::sync::{Mutex, mpsc};
-use quinn::{ClientConfig, Endpoint, ServerConfig};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use serde::{Serialize, Deserialize};
+use log::{error, info, warn};
+use quinn::{ClientConfig, Endpoint};
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{Mutex, mpsc};
 
 use crate::network::{
     config::NetworkConfig,
@@ -62,10 +60,8 @@ impl NetworkReceiver {
     pub async fn init_quic_client(&mut self) -> Result<()> {
         info!("Initializing QUIC client for node: {}", self.node_id);
 
-        // Create client configuration with insecure transport for local testing
-        // In production, this should use proper TLS certificates
-        let mut client_config = ClientConfig::with_native_roots()?;
-        client_config.alpn_protocols = vec![b"rk8s-network".to_vec()];
+        // Create client configuration with platform verifier
+        let client_config = ClientConfig::with_platform_verifier();
 
         let mut endpoint = Endpoint::client("[::]:0".parse()?)?;
         endpoint.set_default_client_config(client_config);
@@ -77,11 +73,11 @@ impl NetworkReceiver {
 
     /// Handle received network configuration from rks
     /// This includes both subnet.env and route configurations
-    pub async fn handle_network_config(
-        &self,
-        config: NetworkConfigMessage,
-    ) -> Result<()> {
-        info!("Received network configuration from rks for node: {}", self.node_id);
+    pub async fn handle_network_config(&self, config: NetworkConfigMessage) -> Result<()> {
+        info!(
+            "Received network configuration from rks for node: {}",
+            self.node_id
+        );
 
         match config {
             NetworkConfigMessage::SubnetConfig {
@@ -115,14 +111,20 @@ impl NetworkReceiver {
             }
         }
 
-        info!("Network configuration applied successfully for node: {}", self.node_id);
+        info!(
+            "Network configuration applied successfully for node: {}",
+            self.node_id
+        );
         Ok(())
     }
 
     /// Start the network receiver service
     /// This will listen for network configurations from rks
     pub async fn start_service(&mut self) -> Result<()> {
-        info!("Starting network receiver service for node: {}", self.node_id);
+        info!(
+            "Starting network receiver service for node: {}",
+            self.node_id
+        );
 
         // Initialize QUIC client if not already done
         if self.quic_endpoint.is_none() {
@@ -136,11 +138,14 @@ impl NetworkReceiver {
         if let Some(rks_endpoint) = self.rks_endpoint {
             let endpoint = self.quic_endpoint.as_ref().unwrap().clone();
             let node_id = self.node_id.clone();
-            
+
             // Spawn QUIC communication task
             tokio::spawn(async move {
-                if let Err(e) = Self::quic_communication_loop(endpoint, rks_endpoint, node_id, shutdown_rx).await {
-                    error!("QUIC communication loop failed: {}", e);
+                if let Err(e) =
+                    Self::quic_communication_loop(endpoint, rks_endpoint, node_id, shutdown_rx)
+                        .await
+                {
+                    error!("QUIC communication loop failed: {e}");
                 }
             });
         } else {
@@ -148,26 +153,28 @@ impl NetworkReceiver {
         }
 
         // Start route checking task
-        let route_manager = self.route_manager.clone();
-        let (route_shutdown_tx, route_shutdown_rx) = mpsc::channel(1);
+        let (route_shutdown_tx, mut route_shutdown_rx) = mpsc::channel(1);
         self.route_shutdown_tx = Some(route_shutdown_tx);
-        
+
         // Store the route shutdown sender for proper cleanup
         let node_id_clone = self.node_id.clone();
         tokio::spawn(async move {
-            info!("Route monitoring task started for node: {}", node_id_clone);
+            info!("Route monitoring task started for node: {node_id_clone}");
             tokio::select! {
                 _ = route_shutdown_rx.recv() => {
-                    info!("Route monitoring task shutting down for node: {}", node_id_clone);
+                    info!("Route monitoring task shutting down for node: {node_id_clone}");
                 }
                 _ = tokio::time::sleep(Duration::from_secs(3600)) => {
                     // Heartbeat every hour
-                    info!("Route monitoring heartbeat for node: {}", node_id_clone);
+                    info!("Route monitoring heartbeat for node: {node_id_clone}");
                 }
             }
         });
 
-        info!("Network receiver service started for node: {}", self.node_id);
+        info!(
+            "Network receiver service started for node: {}",
+            self.node_id
+        );
         Ok(())
     }
 
@@ -178,18 +185,18 @@ impl NetworkReceiver {
         node_id: String,
         mut shutdown_rx: mpsc::Receiver<()>,
     ) -> Result<()> {
-        info!("Starting QUIC communication loop for node: {}", node_id);
+        info!("Starting QUIC communication loop for node: {node_id}");
 
         loop {
             tokio::select! {
                 _ = shutdown_rx.recv() => {
-                    info!("QUIC communication loop shutting down for node: {}", node_id);
+                    info!("QUIC communication loop shutting down for node: {node_id}");
                     break;
                 }
                 _ = tokio::time::sleep(Duration::from_secs(30)) => {
                     // Attempt to connect to RKS and receive configuration
                     if let Err(e) = Self::attempt_rks_connection(&endpoint, rks_endpoint, &node_id).await {
-                        warn!("Failed to connect to RKS: {}", e);
+                        warn!("Failed to connect to RKS: {e}");
                     }
                 }
             }
@@ -204,12 +211,13 @@ impl NetworkReceiver {
         rks_endpoint: SocketAddr,
         node_id: &str,
     ) -> Result<()> {
-        info!("Attempting to connect to RKS at {} for node: {}", rks_endpoint, node_id);
+        info!("Attempting to connect to RKS at {rks_endpoint} for node: {node_id}");
 
         // Connect to RKS
-        let connection = endpoint.connect(rks_endpoint, "rks")?
+        let connection = endpoint
+            .connect(rks_endpoint, "rks")?
             .await
-            .map_err(|e| anyhow::anyhow!("Connection failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Connection failed: {e}"))?;
 
         info!("Connected to RKS successfully");
 
@@ -224,23 +232,21 @@ impl NetworkReceiver {
 
         let registration_data = bincode::serialize(&registration)?;
         send_stream.write_all(&registration_data).await?;
-        send_stream.finish().await?;
+        send_stream.finish()?;
 
         info!("Sent node registration to RKS");
 
         // Listen for network configuration messages
-        let mut buffer = Vec::new();
-        recv_stream.read_to_end(&mut buffer).await?;
+        let buffer = recv_stream.read_to_end(1024 * 1024).await?;
 
         if !buffer.is_empty() {
             match bincode::deserialize::<RksMessage>(&buffer) {
                 Ok(message) => {
-                    info!("Received message from RKS: {:?}", message);
-                    // TODO: Process the received network configuration
+                    info!("Received message from RKS: {message:?}");
                     // This would involve calling handle_network_config with the received data
                 }
                 Err(e) => {
-                    warn!("Failed to deserialize message from RKS: {}", e);
+                    warn!("Failed to deserialize message from RKS: {e}");
                 }
             }
         }
@@ -250,12 +256,15 @@ impl NetworkReceiver {
 
     /// Stop the network receiver service
     pub async fn stop_service(&mut self) -> Result<()> {
-        info!("Stopping network receiver service for node: {}", self.node_id);
-        
+        info!(
+            "Stopping network receiver service for node: {}",
+            self.node_id
+        );
+
         // Send shutdown signal to QUIC communication loop
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
             if let Err(e) = shutdown_tx.send(()).await {
-                warn!("Failed to send QUIC shutdown signal: {}", e);
+                warn!("Failed to send QUIC shutdown signal: {e}");
             } else {
                 info!("QUIC shutdown signal sent successfully");
             }
@@ -264,7 +273,7 @@ impl NetworkReceiver {
         // Send shutdown signal to route monitoring task
         if let Some(route_shutdown_tx) = self.route_shutdown_tx.take() {
             if let Err(e) = route_shutdown_tx.send(()).await {
-                warn!("Failed to send route monitoring shutdown signal: {}", e);
+                warn!("Failed to send route monitoring shutdown signal: {e}");
             } else {
                 info!("Route monitoring shutdown signal sent successfully");
             }
@@ -277,7 +286,7 @@ impl NetworkReceiver {
         if let Some(endpoint) = self.quic_endpoint.take() {
             info!("Closing QUIC endpoint...");
             endpoint.close(0u32.into(), b"Service shutdown");
-            
+
             // Wait for the endpoint to close gracefully with a timeout
             tokio::select! {
                 _ = endpoint.wait_idle() => {
@@ -289,7 +298,10 @@ impl NetworkReceiver {
             }
         }
 
-        info!("Network receiver service stopped for node: {}", self.node_id);
+        info!(
+            "Network receiver service stopped for node: {}",
+            self.node_id
+        );
         Ok(())
     }
 
@@ -305,13 +317,6 @@ impl NetworkReceiver {
 
     /// Check if the service is healthy and responding
     pub async fn health_check(&self) -> Result<()> {
-        // Check if QUIC endpoint is active
-        if let Some(endpoint) = &self.quic_endpoint {
-            if endpoint.is_closed() {
-                return Err(anyhow::anyhow!("QUIC endpoint is closed"));
-            }
-        }
-
         // Check if subnet file path is accessible
         let subnet_path = Path::new(&self.subnet_receiver.subnet_file_path);
         if let Some(parent) = subnet_path.parent() {
@@ -323,18 +328,18 @@ impl NetworkReceiver {
             }
         }
 
-        info!("Network receiver health check passed for node: {}", self.node_id);
+        info!(
+            "Network receiver health check passed for node: {}",
+            self.node_id
+        );
         Ok(())
     }
 
     /// Get service status information
     pub async fn get_status(&self) -> NetworkServiceStatus {
-        let quic_connected = self.quic_endpoint.as_ref()
-            .map(|e| !e.is_closed())
-            .unwrap_or(false);
-
+        let quic_connected = self.quic_endpoint.is_some();
         let rks_endpoint_configured = self.rks_endpoint.is_some();
-        
+
         let route_count = self.route_manager.lock().await.get_routes().len();
         let v6_route_count = self.route_manager.lock().await.get_v6_routes().len();
 
@@ -390,9 +395,7 @@ pub enum NetworkConfigMessage {
         mtu: u32,
     },
     /// Route configuration only
-    RouteConfig {
-        routes: Vec<RouteConfig>,
-    },
+    RouteConfig { routes: Vec<RouteConfig> },
     /// Full network configuration (subnet + routes)
     FullConfig {
         network_config: NetworkConfig,
@@ -459,12 +462,8 @@ impl NetworkReceiverBuilder {
             .node_id
             .ok_or_else(|| anyhow::anyhow!("Node ID is required"))?;
 
-        let mut receiver = NetworkReceiver::new(
-            subnet_file_path,
-            link_index,
-            backend_type,
-            node_id,
-        );
+        let mut receiver =
+            NetworkReceiver::new(subnet_file_path, link_index, backend_type, node_id);
 
         if let Some(endpoint) = self.rks_endpoint {
             receiver = receiver.with_rks_endpoint(endpoint);
@@ -557,18 +556,18 @@ impl NetworkService {
 
     /// Gracefully shutdown the service with timeout
     pub async fn shutdown_with_timeout(&self, timeout: Duration) -> Result<()> {
-        info!("Initiating graceful shutdown with timeout: {:?}", timeout);
-        
+        info!("Initiating graceful shutdown with timeout: {timeout:?}");
+
         tokio::select! {
             result = self.stop() => {
                 match result {
                     Ok(_) => info!("Service stopped gracefully"),
-                    Err(e) => error!("Error during graceful shutdown: {}", e),
+                    Err(ref e) => error!("Error during graceful shutdown: {e}"),
                 }
                 result
             }
             _ = tokio::time::sleep(timeout) => {
-                error!("Service shutdown timed out after {:?}, forcing stop", timeout);
+                error!("Service shutdown timed out after {timeout:?}, forcing stop");
                 Err(anyhow::anyhow!("Shutdown timeout exceeded"))
             }
         }
@@ -617,12 +616,12 @@ mod tests {
             .unwrap();
 
         let service = NetworkService::new(receiver);
-        
+
         assert!(!service.is_running().await);
-        
+
         service.start().await.unwrap();
         assert!(service.is_running().await);
-        
+
         service.stop().await.unwrap();
         assert!(!service.is_running().await);
     }

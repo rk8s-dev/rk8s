@@ -1,13 +1,13 @@
 use anyhow::Result;
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
-use std::net::IpAddr;
-use tempfile::tempdir;
 use rkl::network::{
     config::{NetworkConfig, parse_network_config, validate_network_config},
     receiver::{NetworkConfigMessage, NetworkReceiver, NetworkReceiverBuilder, NetworkService},
-    route::{RouteConfig, RouteManager, NetworkLease, route_equal},
-    subnet::{SubnetReceiver, parse_subnet_key, make_subnet_key, write_subnet_file},
+    route::{NetworkLease, RouteConfig, RouteManager, route_equal},
+    subnet::{SubnetReceiver, make_subnet_key, parse_subnet_key, write_subnet_file},
 };
+use std::net::IpAddr;
+use tempfile::tempdir;
 
 /// Test network configuration parsing and validation functionality
 /// Verifies that JSON network configuration can be parsed correctly and validated
@@ -51,10 +51,10 @@ async fn test_subnet_key_operations() -> Result<()> {
     // Test subnet key generation
     let ipv4: Ipv4Network = "10.244.1.0/24".parse()?;
     let ipv6: Ipv6Network = "fc00::/64".parse()?;
-    
+
     let key_ipv4_only = make_subnet_key(&ipv4, None);
     assert_eq!(key_ipv4_only, "10.244.1.0-24");
-    
+
     let key_dual = make_subnet_key(&ipv4, Some(&ipv6));
     assert_eq!(key_dual, "10.244.1.0-24&fc00::-64");
 
@@ -79,7 +79,14 @@ async fn test_subnet_file_writing() -> Result<()> {
     let ipv4_subnet: Ipv4Network = "10.244.1.0/24".parse()?;
     let ipv6_subnet: Ipv6Network = "fc00::1:0/112".parse()?;
 
-    write_subnet_file(&file_path, &config, true, Some(ipv4_subnet), Some(ipv6_subnet), 1500)?;
+    write_subnet_file(
+        &file_path,
+        &config,
+        true,
+        Some(ipv4_subnet),
+        Some(ipv6_subnet),
+        1500,
+    )?;
 
     let contents = std::fs::read_to_string(&file_path)?;
     assert!(contents.contains("RKL_NETWORK=10.244.0.0/16"));
@@ -110,12 +117,21 @@ async fn test_route_manager() -> Result<()> {
 
     // Test IPv4 route generation
     let ipv4_route = manager.get_route_for_lease(&lease).unwrap();
-    assert_eq!(ipv4_route.destination, IpNetwork::V4("10.244.1.0/24".parse()?));
-    assert_eq!(ipv4_route.gateway, Some(IpAddr::V4("192.168.1.100".parse()?)));
+    assert_eq!(
+        ipv4_route.destination,
+        IpNetwork::V4("10.244.1.0/24".parse()?)
+    );
+    assert_eq!(
+        ipv4_route.gateway,
+        Some(IpAddr::V4("192.168.1.100".parse()?))
+    );
 
     // Test IPv6 route generation
     let ipv6_route = manager.get_v6_route_for_lease(&lease).unwrap();
-    assert_eq!(ipv6_route.destination, IpNetwork::V6("fc00::1:0/112".parse()?));
+    assert_eq!(
+        ipv6_route.destination,
+        IpNetwork::V6("fc00::1:0/112".parse()?)
+    );
     assert_eq!(ipv6_route.gateway, Some(IpAddr::V6("fc00::100".parse()?)));
 
     Ok(())
@@ -174,7 +190,7 @@ async fn test_network_receiver_builder() -> Result<()> {
 async fn test_subnet_receiver() -> Result<()> {
     let dir = tempdir()?;
     let file_path = dir.path().join("subnet.env");
-    
+
     let receiver = SubnetReceiver::new(file_path.to_string_lossy().to_string());
 
     let config = NetworkConfig {
@@ -184,13 +200,9 @@ async fn test_subnet_receiver() -> Result<()> {
         ..Default::default()
     };
 
-    receiver.handle_subnet_config(
-        &config,
-        true,
-        Some("10.244.1.0/24".parse()?),
-        None,
-        1500
-    ).await?;
+    receiver
+        .handle_subnet_config(&config, true, Some("10.244.1.0/24".parse()?), None, 1500)
+        .await?;
 
     // Verify that the subnet file was created
     assert!(file_path.exists());

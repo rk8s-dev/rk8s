@@ -8,18 +8,6 @@ use tokio::{
     time::{Duration, sleep},
 };
 
-// Platform-specific imports for actual route manipulation
-#[cfg(target_os = "linux")]
-use {
-    netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST},
-    netlink_packet_route::{
-        RouteMessage, RtnlMessage, AddressFamily as NetlinkAddressFamily, 
-        route::{RouteHeader, RouteType, Nla as RouteNla}
-    },
-    netlink_sys::{AsyncSocket, SocketAddr as NetlinkSocketAddr, protocols::NETLINK_ROUTE},
-    futures::stream::StreamExt,
-};
-
 // Custom enums for cross-platform compatibility
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AddressFamily {
@@ -31,27 +19,17 @@ pub enum AddressFamily {
 impl From<AddressFamily> for u8 {
     fn from(family: AddressFamily) -> u8 {
         match family {
-            AddressFamily::Inet => 2,    // AF_INET
-            AddressFamily::Inet6 => 10,  // AF_INET6  
-            AddressFamily::Unspec => 0,  // AF_UNSPEC
+            AddressFamily::Inet => 2,   // AF_INET
+            AddressFamily::Inet6 => 10, // AF_INET6
+            AddressFamily::Unspec => 0, // AF_UNSPEC
         }
     }
 }
 
 #[cfg(target_os = "linux")]
-impl From<AddressFamily> for NetlinkAddressFamily {
-    fn from(family: AddressFamily) -> NetlinkAddressFamily {
-        match family {
-            AddressFamily::Inet => NetlinkAddressFamily::Inet,
-            AddressFamily::Inet6 => NetlinkAddressFamily::Inet6,
-            AddressFamily::Unspec => NetlinkAddressFamily::Unspec,
-        }
-    }
-}
-
 /// Lease information for route generation
 /// This is a simplified version that will be received from rks
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NetworkLease {
     pub enable_ipv4: bool,
     pub enable_ipv6: bool,
@@ -62,7 +40,7 @@ pub struct NetworkLease {
 }
 
 /// Route configuration structure received from rks
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RouteConfig {
     pub destination: IpNetwork,
     pub gateway: Option<IpAddr>,
@@ -158,7 +136,7 @@ impl RouteManager {
             "Adding route: {:?} via {:?} dev {:?} ({})",
             route.destination, route.gateway, route.interface_index, self.backend_type
         );
-        
+
         let family = match route.destination {
             IpNetwork::V4(_) => AddressFamily::Inet,
             IpNetwork::V6(_) => AddressFamily::Inet6,
@@ -167,15 +145,15 @@ impl RouteManager {
         // Perform actual route addition
         match self.add_system_route(route).await {
             Ok(_) => {
-                info!("Successfully added route: {:?}", route);
+                info!("Successfully added route: {route:?}");
                 self.add_to_route_list(route.clone(), family);
             }
             Err(e) => {
-                error!("Failed to add route {:?}: {}", route, e);
+                error!("Failed to add route {route:?}: {e}");
                 return Err(e);
             }
         }
-        
+
         Ok(())
     }
 
@@ -191,7 +169,7 @@ impl RouteManager {
             "Removing route: {:?} via {:?} dev {:?} ({})",
             route.destination, route.gateway, route.interface_index, self.backend_type
         );
-        
+
         let family = match route.destination {
             IpNetwork::V4(_) => AddressFamily::Inet,
             IpNetwork::V6(_) => AddressFamily::Inet6,
@@ -200,15 +178,15 @@ impl RouteManager {
         // Perform actual route deletion
         match self.delete_system_route(route).await {
             Ok(_) => {
-                info!("Successfully deleted route: {:?}", route);
+                info!("Successfully deleted route: {route:?}");
                 self.remove_from_route_list(route, family);
             }
             Err(e) => {
-                error!("Failed to delete route {:?}: {}", route, e);
+                error!("Failed to delete route {route:?}: {e}");
                 return Err(e);
             }
         }
-        
+
         Ok(())
     }
 
@@ -266,36 +244,36 @@ impl RouteManager {
     #[cfg(target_os = "linux")]
     async fn add_system_route(&self, route: &RouteConfig) -> Result<()> {
         use std::process::Command;
-        
+
         // For now, use 'ip route' command as a fallback
         // In production, this should use the netlink API directly
         let dest_str = route.destination.to_string();
         let mut cmd = Command::new("ip");
         cmd.arg("route").arg("add").arg(&dest_str);
-        
+
         if let Some(gateway) = route.gateway {
             cmd.arg("via").arg(gateway.to_string());
         }
-        
+
         if let Some(interface_index) = route.interface_index {
             // Convert interface index to interface name
-            cmd.arg("dev").arg(format!("eth{}", interface_index));
+            cmd.arg("dev").arg(format!("eth{interface_index}"));
         }
-        
+
         if let Some(metric) = route.metric {
             cmd.arg("metric").arg(metric.to_string());
         }
-        
+
         let output = cmd.output()?;
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // Ignore "File exists" errors as the route might already exist
             if !stderr.contains("File exists") {
-                return Err(anyhow::anyhow!("Failed to add route: {}", stderr));
+                return Err(anyhow::anyhow!("Failed to add route: {stderr}"));
             }
         }
-        
+
         info!("Route added successfully via 'ip route' command");
         Ok(())
     }
@@ -304,32 +282,32 @@ impl RouteManager {
     #[cfg(target_os = "linux")]
     async fn delete_system_route(&self, route: &RouteConfig) -> Result<()> {
         use std::process::Command;
-        
+
         // For now, use 'ip route' command as a fallback
         // In production, this should use the netlink API directly
         let dest_str = route.destination.to_string();
         let mut cmd = Command::new("ip");
         cmd.arg("route").arg("del").arg(&dest_str);
-        
+
         if let Some(gateway) = route.gateway {
             cmd.arg("via").arg(gateway.to_string());
         }
-        
+
         if let Some(interface_index) = route.interface_index {
             // Convert interface index to interface name
-            cmd.arg("dev").arg(format!("eth{}", interface_index));
+            cmd.arg("dev").arg(format!("eth{interface_index}"));
         }
-        
+
         let output = cmd.output()?;
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // Ignore "No such process" errors as the route might not exist
             if !stderr.contains("No such process") && !stderr.contains("Cannot find device") {
-                return Err(anyhow::anyhow!("Failed to delete route: {}", stderr));
+                return Err(anyhow::anyhow!("Failed to delete route: {stderr}"));
             }
         }
-        
+
         info!("Route deleted successfully via 'ip route' command");
         Ok(())
     }
@@ -337,14 +315,14 @@ impl RouteManager {
     /// Stub for non-Linux platforms
     #[cfg(not(target_os = "linux"))]
     async fn add_system_route(&self, route: &RouteConfig) -> Result<()> {
-        warn!("Route addition not implemented for this platform: {:?}", route);
+        warn!("Route addition not implemented for this platform: {route:?}");
         Ok(())
     }
 
     /// Stub for non-Linux platforms
     #[cfg(not(target_os = "linux"))]
     async fn delete_system_route(&self, route: &RouteConfig) -> Result<()> {
-        warn!("Route deletion not implemented for this platform: {:?}", route);
+        warn!("Route deletion not implemented for this platform: {route:?}");
         Ok(())
     }
 
@@ -372,12 +350,14 @@ impl RouteManager {
         routes: &[RouteConfig],
         _family: AddressFamily,
     ) -> Result<()> {
-        // TODO: Implement actual route list fetching and comparison
         // For now, just log the operation
         for route in routes {
-            info!("Checking route: {:?} -> {:?}", route.destination, route.gateway);
+            info!(
+                "Checking route: {:?} -> {:?}",
+                route.destination, route.gateway
+            );
         }
-        
+
         warn!("Route checking not yet implemented");
         Ok(())
     }
@@ -450,24 +430,24 @@ pub fn route_equal(a: &RouteConfig, b: &RouteConfig) -> bool {
 #[cfg(target_os = "linux")]
 pub async fn add_blackhole_v4_route(dst: Ipv4Network) -> Result<()> {
     use std::process::Command;
-    
+
     info!("Adding blackhole route for {dst}");
-    
+
     let mut cmd = Command::new("ip");
     cmd.arg("route")
-       .arg("add")
-       .arg("blackhole")
-       .arg(dst.to_string());
-    
+        .arg("add")
+        .arg("blackhole")
+        .arg(dst.to_string());
+
     let output = cmd.output()?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stderr.contains("File exists") {
             return Err(anyhow::anyhow!("Failed to add blackhole route: {}", stderr));
         }
     }
-    
+
     info!("Blackhole route added successfully for {dst}");
     Ok(())
 }
@@ -476,25 +456,28 @@ pub async fn add_blackhole_v4_route(dst: Ipv4Network) -> Result<()> {
 #[cfg(target_os = "linux")]
 pub async fn add_blackhole_v6_route(dst: Ipv6Network) -> Result<()> {
     use std::process::Command;
-    
+
     info!("Adding blackhole route for {dst}");
-    
+
     let mut cmd = Command::new("ip");
     cmd.arg("-6")
-       .arg("route")
-       .arg("add")
-       .arg("blackhole")
-       .arg(dst.to_string());
-    
+        .arg("route")
+        .arg("add")
+        .arg("blackhole")
+        .arg(dst.to_string());
+
     let output = cmd.output()?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stderr.contains("File exists") {
-            return Err(anyhow::anyhow!("Failed to add IPv6 blackhole route: {}", stderr));
+            return Err(anyhow::anyhow!(
+                "Failed to add IPv6 blackhole route: {}",
+                stderr
+            ));
         }
     }
-    
+
     info!("IPv6 blackhole route added successfully for {dst}");
     Ok(())
 }
@@ -528,23 +511,23 @@ impl RouteReceiver {
     /// This function will be called when rks sends route configuration
     pub async fn handle_route_config(&self, routes: Vec<RouteConfig>) -> Result<()> {
         info!("Received {} route configurations from rks", routes.len());
-        
+
         let mut manager = self.route_manager.lock().await;
-        
+
         for route in routes {
             match route.destination {
                 IpNetwork::V4(_) => {
                     if let Err(e) = manager.add_route(&route).await {
-                        error!("Failed to add IPv4 route {:?}: {}", route, e);
+                        error!("Failed to add IPv4 route {route:?}: {e}");
                     } else {
-                        info!("Successfully added IPv4 route: {:?}", route);
+                        info!("Successfully added IPv4 route: {route:?}");
                     }
                 }
                 IpNetwork::V6(_) => {
                     if let Err(e) = manager.add_route(&route).await {
-                        error!("Failed to add IPv6 route {:?}: {}", route, e);
+                        error!("Failed to add IPv6 route {route:?}: {e}");
                     } else {
-                        info!("Successfully added IPv6 route: {:?}", route);
+                        info!("Successfully added IPv6 route: {route:?}");
                     }
                 }
             }
@@ -567,14 +550,14 @@ impl RouteReceiver {
     /// Remove specific routes
     pub async fn remove_routes(&self, routes: Vec<RouteConfig>) -> Result<()> {
         info!("Removing {} route configurations", routes.len());
-        
+
         let mut manager = self.route_manager.lock().await;
-        
+
         for route in routes {
             if let Err(e) = manager.delete_route(&route).await {
-                error!("Failed to remove route {:?}: {}", route, e);
+                error!("Failed to remove route {route:?}: {e}");
             } else {
-                info!("Successfully removed route: {:?}", route);
+                info!("Successfully removed route: {route:?}");
             }
         }
 
@@ -656,7 +639,7 @@ mod tests {
     #[test]
     fn test_route_manager_lease_routes() {
         let manager = RouteManager::new(1, "hostgw".to_string());
-        
+
         let lease = NetworkLease {
             enable_ipv4: true,
             enable_ipv6: true,
@@ -668,16 +651,25 @@ mod tests {
 
         let ipv4_route = manager.get_route_for_lease(&lease);
         assert!(ipv4_route.is_some());
-        
+
         let route = ipv4_route.unwrap();
-        assert_eq!(route.destination, IpNetwork::V4("10.0.1.0/24".parse().unwrap()));
-        assert_eq!(route.gateway, Some(IpAddr::V4("192.168.1.1".parse().unwrap())));
+        assert_eq!(
+            route.destination,
+            IpNetwork::V4("10.0.1.0/24".parse().unwrap())
+        );
+        assert_eq!(
+            route.gateway,
+            Some(IpAddr::V4("192.168.1.1".parse().unwrap()))
+        );
 
         let ipv6_route = manager.get_v6_route_for_lease(&lease);
         assert!(ipv6_route.is_some());
-        
+
         let route = ipv6_route.unwrap();
-        assert_eq!(route.destination, IpNetwork::V6("fc00::/64".parse().unwrap()));
+        assert_eq!(
+            route.destination,
+            IpNetwork::V6("fc00::/64".parse().unwrap())
+        );
         assert_eq!(route.gateway, Some(IpAddr::V6("fc00::1".parse().unwrap())));
     }
 }

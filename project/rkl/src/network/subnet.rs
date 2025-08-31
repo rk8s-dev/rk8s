@@ -172,7 +172,6 @@ pub fn read_ip6_cidrs_from_subnet_file(path: &str, cidr_key: &str) -> Vec<Ipv6Ne
 
 /// Subnet configuration receiver
 /// This will be called when receiving subnet.env configuration from rks
-/// TODO: This will be integrated with QUIC communication from rks
 pub struct SubnetReceiver {
     pub subnet_file_path: String,
 }
@@ -193,24 +192,19 @@ impl SubnetReceiver {
         mtu: u32,
     ) -> Result<()> {
         info!(
-            "Received subnet configuration from rks: IPv4={:?}, IPv6={:?}, MTU={}, IP_MASQ={}",
-            sn4, sn6, mtu, ip_masq
+            "Received subnet configuration from rks: IPv4={sn4:?}, IPv6={sn6:?}, MTU={mtu}, IP_MASQ={ip_masq}"
         );
-        
+
         // Validate the configuration before applying
         self.validate_subnet_config(config, sn4, sn6)?;
-        
-        // Write the configuration to file
-        write_subnet_file(
-            &self.subnet_file_path,
-            config,
-            ip_masq,
-            sn4,
-            sn6,
-            mtu,
-        )?;
 
-        info!("Subnet configuration applied successfully to: {}", self.subnet_file_path);
+        // Write the configuration to file
+        write_subnet_file(&self.subnet_file_path, config, ip_masq, sn4, sn6, mtu)?;
+
+        info!(
+            "Subnet configuration applied successfully to: {}",
+            self.subnet_file_path
+        );
         Ok(())
     }
 
@@ -232,11 +226,15 @@ impl SubnetReceiver {
         sn6: Option<Ipv6Network>,
     ) -> Result<()> {
         if config.enable_ipv4 && sn4.is_none() {
-            return Err(anyhow::anyhow!("IPv4 is enabled but no IPv4 subnet provided"));
+            return Err(anyhow::anyhow!(
+                "IPv4 is enabled but no IPv4 subnet provided"
+            ));
         }
 
         if config.enable_ipv6 && sn6.is_none() {
-            return Err(anyhow::anyhow!("IPv6 is enabled but no IPv6 subnet provided"));
+            return Err(anyhow::anyhow!(
+                "IPv6 is enabled but no IPv6 subnet provided"
+            ));
         }
 
         if let Some(network) = config.network {
@@ -289,7 +287,10 @@ impl SubnetReceiver {
     pub fn clear_config(&self) -> Result<()> {
         if Path::new(&self.subnet_file_path).exists() {
             fs::remove_file(&self.subnet_file_path)?;
-            info!("Cleared subnet configuration file: {}", self.subnet_file_path);
+            info!(
+                "Cleared subnet configuration file: {}",
+                self.subnet_file_path
+            );
         }
         Ok(())
     }
@@ -344,9 +345,9 @@ mod tests {
         };
 
         let subnet: Ipv4Network = "10.0.1.0/24".parse().unwrap();
-        
+
         write_subnet_file(&file_path, &config, true, Some(subnet), None, 1500).unwrap();
-        
+
         let contents = fs::read_to_string(&file_path).unwrap();
         assert!(contents.contains("RKL_NETWORK=10.0.0.0/16"));
         assert!(contents.contains("RKL_SUBNET=10.0.1.0/24"));

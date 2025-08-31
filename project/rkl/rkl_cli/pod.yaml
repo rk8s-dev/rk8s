@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: simple-container-task
+  labels:
+    app: my-app
+    bundle: /home/r2cn/Codes/rk8s-zh/project/test/bundles/pause
+spec:
+  nodename: worker2
+  containers:
+    - name: main-container1
+      image: /home/r2cn/Codes/rk8s-zh/project/test/bundles/busybox
+      args:
+        - "dd"
+        - "if=/dev/zero"
+        - "of=/dev/null"
+      ports:
+        - containerPort: 80
+      resources:
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
