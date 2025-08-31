@@ -246,11 +246,11 @@ async fn handle_connection(
                             let conn_clone = conn.clone();
                             tokio::spawn(async move {
                                 while let Some(msg) = msg_rx.recv().await {
-                                    if let Ok(mut stream) = conn_clone.open_uni().await {
-                                        if let Ok(data) = bincode::serialize(&msg) {
-                                            let _ = stream.write_all(&data).await;
-                                            let _ = stream.finish();
-                                        }
+                                    if let Ok(mut stream) = conn_clone.open_uni().await
+                                        && let Ok(data) = bincode::serialize(&msg)
+                                    {
+                                        let _ = stream.write_all(&data).await;
+                                        let _ = stream.finish();
                                     }
                                 }
                             });
