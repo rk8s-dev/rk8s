@@ -6,10 +6,11 @@ use crate::{
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
     rootpath,
-    task::{ContainerSpec, add_cap_net_raw, get_cni},
+    task::{add_cap_net_raw, get_cni},
 };
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
+use common::ContainerSpec;
 use libcontainer::container::{Container, State, state};
 use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
@@ -172,10 +173,10 @@ impl ContainerRunner {
         let namespaces = get_default_namespaces();
 
         let mut linux: LinuxBuilder = LinuxBuilder::default().namespaces(namespaces);
-        if let Some(x) = &config.linux {
-            if let Some(r) = &x.resources {
-                linux = linux.resources(r);
-            }
+        if let Some(x) = &config.linux
+            && let Some(r) = &x.resources
+        {
+            linux = linux.resources(r);
         }
         let linux = linux.build()?;
         spec.set_linux(Some(linux));

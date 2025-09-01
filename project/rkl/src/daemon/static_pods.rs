@@ -8,8 +8,9 @@ use tracing::{error, warn};
 use futures::FutureExt;
 use tokio::time::sleep;
 
+use crate::commands::pod;
 use crate::task::TaskRunner;
-use crate::{commands::pod, task::PodTask};
+use common::PodTask;
 
 use crate::daemon::sync_loop::{Event, State, WithEvent};
 

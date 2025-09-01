@@ -7,9 +7,9 @@ use std::{
     time::Duration,
 };
 
-use crate::common::get_pod_config;
+use crate::test_common::get_pod_config;
 
-mod common;
+mod test_common;
 
 #[tokio::test]
 #[serial]

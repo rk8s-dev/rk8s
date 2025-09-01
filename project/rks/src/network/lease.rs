@@ -37,6 +37,9 @@ pub struct LeaseAttrs {
 
     #[serde(rename = "BackendV6Data", skip_serializing_if = "Option::is_none")]
     pub backend_v6_data: Option<JsonValue>,
+
+    #[serde(rename = "Node")]
+    pub node_id: String,
 }
 
 impl Default for LeaseAttrs {
@@ -47,6 +50,7 @@ impl Default for LeaseAttrs {
             backend_type: String::new(),
             backend_data: None,
             backend_v6_data: None,
+            node_id: String::new(),
         }
     }
 }

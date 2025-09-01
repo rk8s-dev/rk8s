@@ -1,18 +1,19 @@
 use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
+use futures::executor::block_on;
 use inode_store::{InodeId, InodeStore};
 use libc::statx_timestamp;
 use moka::future::Cache;
 use rfuse3::{Errno, raw::reply::ReplyEntry};
 use uuid::Uuid;
 
-use crate::util::convert_stat64_to_file_attr;
+use crate::{passthrough::mmap::SlidingMmapWindow, util::convert_stat64_to_file_attr};
 use mount_fd::MountFds;
 use statx::StatExt;
-use std::io::Result;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::{cmp::min, io::Result};
 use std::{
     collections::{BTreeMap, btree_map},
     ffi::{CStr, CString, OsString},
@@ -40,6 +41,7 @@ mod async_io;
 mod config;
 mod file_handle;
 mod inode_store;
+mod mmap;
 mod mount_fd;
 pub mod newlogfs;
 mod os_compat;
@@ -281,11 +283,11 @@ impl HandleData {
         &self.file
     }
 
-    async fn get_file_mut(&self) -> (MutexGuard<()>, &File) {
+    async fn get_file_mut(&self) -> (MutexGuard<'_, ()>, &File) {
         (self.lock.lock().await, &self.file)
     }
 
-    fn borrow_fd(&self) -> BorrowedFd {
+    fn borrow_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
     }
 
@@ -415,7 +417,7 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     handle_cache: Cache<FileUniqueKey, Arc<FileHandle>>,
 
-    mmap_pool: Cache<FileUniqueKey, Arc<memmap2::Mmap>>,
+    sliding_mmap_pool: Cache<FileUniqueKey, Arc<RwLock<SlidingMmapWindow>>>,
 }
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
@@ -456,6 +458,15 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             Err(_) => 65536,
         };
 
+        let cache_builder = moka::future::Cache::builder()
+            .max_capacity(cfg.max_mmap_size)
+            .weigher(
+                |_key: &FileUniqueKey, value: &Arc<RwLock<SlidingMmapWindow>>| -> u32 {
+                    let sliding_mmap_window = block_on(value.read());
+                    sliding_mmap_window.window_size() as u32
+                },
+            );
+
         Ok(PassthroughFs {
             inode_map: InodeMap::new(),
             next_inode: AtomicU64::new(ROOT_ID + 1),
@@ -484,7 +495,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             handle_cache: moka::future::Cache::new(fd_limit),
 
-            mmap_pool: moka::future::Cache::new(1024),
+            sliding_mmap_pool: cache_builder.build(),
         })
     }
 
@@ -931,6 +942,56 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         new_flags
     }
+
+    async fn get_or_insert_mmap(
+        &self,
+        file: &impl AsRawFd,
+        flags: u32,
+    ) -> Option<Arc<RwLock<SlidingMmapWindow>>> {
+        const MMAP_SIZE_THRESHOLD: u64 = 8 * 1024; // 8KB
+        const MAX_WINDOW_SIZE: u64 = 100 * 1024 * 1024; // 100MB
+
+        // Skip directories and files opened with O_DIRECT (direct I/O)
+        if flags & (libc::O_DIRECTORY as u32) != 0 || flags & (libc::O_DIRECT as u32) != 0 {
+            return None;
+        }
+
+        let st = match statx::statx(file, None) {
+            Ok(st) => st,
+            Err(_) => return None,
+        };
+
+        let file_size = st.st.st_size as u64;
+
+        // Skip files that are too small or too large for mmap
+        if file_size <= MMAP_SIZE_THRESHOLD {
+            return None;
+        }
+
+        let btime = match st.btime {
+            Some(btime) => btime,
+            None => return None, // Skip files without birth time
+        };
+
+        let key = FileUniqueKey(st.st.st_ino, btime);
+
+        if self.sliding_mmap_pool.contains_key(&key) {
+            return self.sliding_mmap_pool.get(&key).await;
+        }
+
+        let window_size = min(file_size, MAX_WINDOW_SIZE);
+
+        let mmap = {
+            let fd = file.as_raw_fd();
+            match SlidingMmapWindow::new(&fd, window_size).await {
+                Ok(mmap) => mmap,
+                Err(_) => return None, // Skip mmap if creation fails
+            }
+        };
+        let mmap = Arc::new(RwLock::new(mmap));
+        self.sliding_mmap_pool.insert(key, mmap.clone()).await;
+        Some(mmap.clone())
+    }
 }
 
 #[cfg(test)]
@@ -942,7 +1003,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_passthrough() {
-        let temp_dir = std::env::temp_dir();
+        // let temp_dir = std::env::temp_dir();
+        let temp_dir = path::PathBuf::from("/home/zine/test");
         let source_dir = temp_dir.join("test_passthrough_fs_src");
         let mount_dir = temp_dir.join("test_passthrough_fs_mnt");
         std::fs::create_dir_all(&source_dir).unwrap();

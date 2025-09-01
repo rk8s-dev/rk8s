@@ -19,6 +19,8 @@ rust_library(
         "//third-party:ipnetwork",
         "//third-party:bitflags",
         "//third-party:libc",
+        "//third-party:serde",
+        "//third-party:serde_with",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

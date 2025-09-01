@@ -13,13 +13,17 @@ use netlink_packet_route::{
     route::{RouteAddress, RouteAttribute, RouteMessage, RouteType},
 };
 use rtnetlink::RouteMessageBuilder;
+use serde::{Deserialize, Serialize};
+use serde_with::{FromInto, serde_as};
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[serde_as]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Route {
     pub dst: Option<IpNetwork>,
     pub oif_index: Option<u32>,
     pub gateway: Option<IpAddr>,
     pub src: Option<IpAddr>,
+    #[serde_as(as = "Option<FromInto<u8>>")]
     pub route_type: Option<RouteType>,
     pub metric: Option<u32>,
 }

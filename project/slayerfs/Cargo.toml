@@ -1,0 +1,16 @@
+[package]
+name = "slayerfs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "time", "net"] }
+async-trait = "0.1"
+aws-config = { version = "1" }
+aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
+base64 = "0.21"
+md5 = "0.7"
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
