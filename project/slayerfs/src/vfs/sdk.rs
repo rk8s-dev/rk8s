@@ -8,16 +8,16 @@
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
 use crate::meta::{InMemoryMetaStore, MetaStore};
-use crate::vfs::fs::{DirEntry, FileAttr, Fs};
+use crate::vfs::fs::{DirEntry, FileAttr, VFS};
 
 /// SDK 客户端（泛型后端）。
 pub struct Client<S: BlockStore, M: MetaStore> {
-    fs: Fs<S, M>,
+    fs: VFS<S, M>,
 }
 
 impl<S: BlockStore, M: MetaStore> Client<S, M> {
     pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Self {
-        let fs = Fs::new(layout, store, meta).await;
+        let fs = VFS::new(layout, store, meta).await;
         Self { fs }
     }
 
