@@ -237,28 +237,26 @@ impl SubnetReceiver {
             ));
         }
 
-        if let Some(network) = config.network {
-            if let Some(subnet) = sn4 {
-                if !network.contains(subnet.network()) {
-                    return Err(anyhow::anyhow!(
-                        "IPv4 subnet {} is not within network {}",
-                        subnet,
-                        network
-                    ));
-                }
-            }
+        if let Some(network) = config.network
+            && let Some(subnet) = sn4
+            && !network.contains(subnet.network())
+        {
+            return Err(anyhow::anyhow!(
+                "IPv4 subnet {} is not within network {}",
+                subnet,
+                network
+            ));
         }
 
-        if let Some(network) = config.ipv6_network {
-            if let Some(subnet) = sn6 {
-                if !network.contains(subnet.network()) {
-                    return Err(anyhow::anyhow!(
-                        "IPv6 subnet {} is not within network {}",
-                        subnet,
-                        network
-                    ));
-                }
-            }
+        if let Some(network) = config.ipv6_network
+            && let Some(subnet) = sn6
+            && !network.contains(subnet.network())
+        {
+            return Err(anyhow::anyhow!(
+                "IPv6 subnet {} is not within network {}",
+                subnet,
+                network
+            ));
         }
 
         Ok(())

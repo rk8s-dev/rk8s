@@ -195,19 +195,19 @@ impl RouteManager {
         debug!("Synchronizing routes for {} leases", leases.len());
 
         for lease in leases {
-            if let Some(route) = self.get_route_for_lease(lease) {
-                if let Err(e) = self.add_route(&route).await {
-                    warn!("Failed to add IPv4 route for lease {}: {}", lease.subnet, e);
-                }
+            if let Some(route) = self.get_route_for_lease(lease)
+                && let Err(e) = self.add_route(&route).await
+            {
+                warn!("Failed to add IPv4 route for lease {}: {}", lease.subnet, e);
             }
 
-            if let Some(route_v6) = self.get_v6_route_for_lease(lease) {
-                if let Err(e) = self.add_v6_route(&route_v6).await {
-                    warn!(
-                        "Failed to add IPv6 route for lease {:?}: {}",
-                        lease.ipv6_subnet, e
-                    );
-                }
+            if let Some(route_v6) = self.get_v6_route_for_lease(lease)
+                && let Err(e) = self.add_v6_route(&route_v6).await
+            {
+                warn!(
+                    "Failed to add IPv6 route for lease {:?}: {}",
+                    lease.ipv6_subnet, e
+                );
             }
         }
         Ok(())
@@ -218,22 +218,22 @@ impl RouteManager {
         debug!("Cleaning up routes for {} leases", leases.len());
 
         for lease in leases {
-            if let Some(route) = self.get_route_for_lease(lease) {
-                if let Err(e) = self.delete_route(&route).await {
-                    warn!(
-                        "Failed to remove IPv4 route for lease {}: {}",
-                        lease.subnet, e
-                    );
-                }
+            if let Some(route) = self.get_route_for_lease(lease)
+                && let Err(e) = self.delete_route(&route).await
+            {
+                warn!(
+                    "Failed to remove IPv4 route for lease {}: {}",
+                    lease.subnet, e
+                );
             }
 
-            if let Some(route_v6) = self.get_v6_route_for_lease(lease) {
-                if let Err(e) = self.delete_route(&route_v6).await {
-                    warn!(
-                        "Failed to remove IPv6 route for lease {:?}: {}",
-                        lease.ipv6_subnet, e
-                    );
-                }
+            if let Some(route_v6) = self.get_v6_route_for_lease(lease)
+                && let Err(e) = self.delete_route(&route_v6).await
+            {
+                warn!(
+                    "Failed to remove IPv6 route for lease {:?}: {}",
+                    lease.ipv6_subnet, e
+                );
             }
         }
 

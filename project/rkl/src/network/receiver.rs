@@ -61,7 +61,7 @@ impl NetworkReceiver {
         info!("Initializing QUIC client for node: {}", self.node_id);
 
         // Create client configuration with platform verifier
-        let client_config = ClientConfig::with_platform_verifier();
+        let client_config = ClientConfig::try_with_platform_verifier()?;
 
         let mut endpoint = Endpoint::client("[::]:0".parse()?)?;
         endpoint.set_default_client_config(client_config);
@@ -319,13 +319,13 @@ impl NetworkReceiver {
     pub async fn health_check(&self) -> Result<()> {
         // Check if subnet file path is accessible
         let subnet_path = Path::new(&self.subnet_receiver.subnet_file_path);
-        if let Some(parent) = subnet_path.parent() {
-            if !parent.exists() {
-                return Err(anyhow::anyhow!(
-                    "Subnet configuration directory does not exist: {}",
-                    parent.display()
-                ));
-            }
+        if let Some(parent) = subnet_path.parent()
+            && !parent.exists()
+        {
+            return Err(anyhow::anyhow!(
+                "Subnet configuration directory does not exist: {}",
+                parent.display()
+            ));
         }
 
         info!(
