@@ -3,7 +3,6 @@ use crate::protocol::{PodTask, RksMessage};
 use anyhow::Result;
 use quinn::Connection;
 use std::sync::Arc;
-use tokio::sync::broadcast;
 
 pub async fn watch_create(pod_task: &PodTask, conn: &Connection, node_id: &str) -> Result<()> {
     if pod_task.nodename == node_id {
@@ -22,46 +21,27 @@ pub async fn watch_create(pod_task: &PodTask, conn: &Connection, node_id: &str) 
 }
 
 pub async fn user_create(
-    mut pod_task: Box<PodTask>,
+    pod_task: Box<PodTask>,
     xline_store: &Arc<XlineStore>,
     conn: &Connection,
-    tx: &broadcast::Sender<RksMessage>,
+    
 ) -> Result<()> {
-    if let Ok(nodes) = xline_store.list_nodes().await
-        && let Some((node_name, _)) = nodes.first()
-    {
-        pod_task.nodename = node_name.clone();
-        let pod_yaml = match serde_yaml::to_string(&pod_task) {
-            Ok(yaml) => yaml,
-            Err(e) => {
-                eprintln!("[user dispatch] Failed to serialize pod task: {e}");
-                let response = RksMessage::Error(format!("Serialization error: {e}"));
-                let data = bincode::serialize(&response).unwrap_or_else(|_| vec![]);
-                if let Ok(mut stream) = conn.open_uni().await {
-                    stream.write_all(&data).await?;
-                    stream.finish()?;
-                }
-                return Ok(());
-            }
-        };
+    let node_name = pod_task.nodename.clone();
+    let pod_name = pod_task.metadata.name.clone();
+    let yaml = serde_yaml::to_string(&*pod_task)?;
+    xline_store.insert_pod_yaml(&pod_name, &yaml).await?;
 
-        xline_store
-            .insert_pod_yaml(&pod_task.metadata.name, &pod_yaml)
-            .await?;
+    println!(
+        "[user_create] created pod {} on node {} (written to xline)",
+        pod_name, node_name
+    );
 
-        println!(
-            "[user dispatch] created pod: {}, assigned to node: {}",
-            pod_task.metadata.name, node_name
-        );
-
-        let _ = tx.send(RksMessage::CreatePod(pod_task.clone()));
-
-        let response = RksMessage::Ack;
-        let data = bincode::serialize(&response)?;
-        if let Ok(mut stream) = conn.open_uni().await {
-            stream.write_all(&data).await?;
-            stream.finish()?;
-        }
+    // ACK
+    let response = RksMessage::Ack;
+    let data = bincode::serialize(&response)?;
+    if let Ok(mut stream) = conn.open_uni().await {
+        stream.write_all(&data).await?;
+        stream.finish()?;
     }
     Ok(())
 }
