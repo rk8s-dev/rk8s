@@ -11,6 +11,10 @@ aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
 base64 = "0.21"
 md5 = "0.7"
 futures = "0.3"
+rfuse3 = { version = "0.0.3", features = ["tokio-runtime","unprivileged"]}
+futures-util = "0.3.31"
+libc = "0.2.175"
+bytes = "1"
 
 [dev-dependencies]
 tempfile = "3"
