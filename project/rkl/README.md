@@ -311,6 +311,7 @@ services:
   frontend:
     container_name: front
     image: ./project/test/bundles/busybox
+    command: ["sleep", "300"]
     ports:
       - "80:80"
 

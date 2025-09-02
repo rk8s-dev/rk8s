@@ -34,7 +34,7 @@ where
 #[serial]
 fn test_container_create_start_and_delete() {
     let config = get_container_config(
-        vec!["sleep".to_string(), "100".to_string()],
+        vec!["sleep".to_string(), "10".to_string()],
         "test-container",
     );
     try_create_container(config, false);
@@ -58,7 +58,7 @@ fn test_container_create_start_and_delete() {
 #[serial]
 fn test_container_run() {
     let config = get_container_config(
-        vec!["sleep".to_string(), "100".to_string()],
+        vec!["sleep".to_string(), "10".to_string()],
         "test-container-run",
     );
     try_create_container(config, true);
@@ -75,7 +75,7 @@ fn test_container_run() {
 #[serial]
 fn test_container_cpu_and_memory_limit() {
     let mut config = get_container_config(
-        vec!["sleep".to_string(), "100".to_string()],
+        vec!["sleep".to_string(), "10".to_string()],
         "test-container-resources",
     );
     config.resources = Some(ContainerRes {
