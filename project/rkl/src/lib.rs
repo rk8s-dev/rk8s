@@ -5,6 +5,7 @@ pub mod bundle;
 pub mod commands;
 mod cri;
 pub mod daemon;
+pub mod network;
 mod rootpath;
 pub mod task;
 
