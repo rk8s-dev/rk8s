@@ -41,17 +41,13 @@
 - **配置文件**: my-bridge.conf
 ```json
 {
-  "cniVersion": "0.3.1",
+  "cniVersion": "1.0.0",
   "name": "my-bridge",
-  "type": "bridge",
+  "type": "libbridge",
   "bridge": "br0",
   "isGateway": true,
   "mtu": 1500,
   "vlan": 100,
-  "vlanTrunk": [
-    { "minID": 10, "maxID": 20 },
-    { "id": 30 }
-  ]
 }
 ```
 - **命令行操作**
@@ -120,17 +116,13 @@ The `Bridge` struct is a representation of a virtual network bridge, with method
 - **Configuration**: my-bridge.conf
 ```json
 {
-  "cniVersion": "0.3.1",
+  "cniVersion": "1.0.0",
   "name": "my-bridge",
-  "type": "bridge",
+  "type": "libbridge",
   "bridge": "br0",
   "isGateway": true,
   "mtu": 1500,
   "vlan": 100,
-  "vlanTrunk": [
-    { "minID": 10, "maxID": 20 },
-    { "id": 30 }
-  ]
 }
 ```
 - **Shell**

@@ -296,7 +296,7 @@ pub struct ExecContainer {
     #[clap(value_parser = clap::builder::NonEmptyStringValueParser::new(), required = true)]
     pub container_id: String,
 
-    #[clap(required = false)]
+    #[clap(short = 'p', long, required = false)]
     pub root_path: Option<String>,
 
     /// Command that should be executed in the container

@@ -92,10 +92,10 @@ services:
       - libra-net
     volumes:
       - ./tmp/mount/dir:/app/data
-      - ./data:/app/data2
 
   frontend:
     container_name: front
+    command: ["sleep", "300"]
     image: ./project/test/bundles/busybox
     ports:
       - "80:80"
@@ -168,6 +168,7 @@ cargo build -p rkl
 2. **Set up networking:**
 ```bash
 cargo build -p libbridge
+sudo mkdir -p /opt/cni/bin
 sudo mv target/debug/libbridge /opt/cni/bin/
 ```
 
