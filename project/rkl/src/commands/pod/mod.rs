@@ -158,37 +158,42 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
             std::process::exit(exit_code);
         }
         PodCommand::Daemon => start_daemon(),
-        PodCommand::List { .. } => pod_list(),
+        PodCommand::List { cluster } => pod_list(cluster),
     }
 }
 
-fn pod_list() -> Result<()> {
+fn pod_list(addr: Option<String>) -> Result<()> {
+    let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(cluster::list_pod())
-}
-
-fn pod_delete(pod_name: &str, cluster: bool) -> Result<()> {
-    let is_cluster: bool = env::var("RKL_POD_CLUSTER")
-        .unwrap_or("false".to_string())
-        .parse()?;
-    match cluster || is_cluster {
-        false => standalone::delete_pod(pod_name),
-        true => {
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(cluster::delete_pod(pod_name))
-        }
+    match addr {
+        Some(rks_addr) => rt.block_on(cluster::list_pod(rks_addr.as_str())),
+        None => match env_addr {
+            Some(rks_addr) => rt.block_on(cluster::list_pod(rks_addr.as_str())),
+            None => Err(anyhow!("no rks address configuration find")),
+        },
     }
 }
 
-fn pod_create(pod_yaml: &str, cluster: bool) -> Result<()> {
-    let is_cluster: bool = env::var("RKL_POD_CLUSTER")
-        .unwrap_or("false".to_string())
-        .parse()?;
-    match cluster || is_cluster {
-        false => standalone::create_pod(pod_yaml),
-        true => {
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(cluster::create_pod(pod_yaml))
-        }
+fn pod_delete(pod_name: &str, addr: Option<String>) -> Result<()> {
+    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rt = tokio::runtime::Runtime::new()?;
+    match addr {
+        Some(rks_addr) => rt.block_on(cluster::delete_pod(pod_name, rks_addr.as_str())),
+        None => match env_addr {
+            Some(rks_addr) => rt.block_on(cluster::delete_pod(pod_name, rks_addr.as_str())),
+            None => standalone::delete_pod(pod_name),
+        },
+    }
+}
+
+fn pod_create(pod_yaml: &str, addr: Option<String>) -> Result<()> {
+    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rt = tokio::runtime::Runtime::new()?;
+    match addr {
+        Some(rks_addr) => rt.block_on(cluster::create_pod(pod_yaml, rks_addr.as_str())),
+        None => match env_addr {
+            Some(rks_addr) => rt.block_on(cluster::create_pod(pod_yaml, rks_addr.as_str())),
+            None => standalone::create_pod(pod_yaml),
+        },
     }
 }

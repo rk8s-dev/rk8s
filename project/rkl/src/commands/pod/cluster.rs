@@ -8,7 +8,6 @@ use quinn::Connection;
 use quinn::Endpoint;
 use quinn::crypto::rustls::QuicClientConfig;
 use rustls::crypto::CryptoProvider;
-use std::env;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -21,6 +20,7 @@ use tracing::debug;
 use crate::daemon::client::SkipServerVerification;
 use rustls::{ClientConfig as RustlsClientConfig, RootCertStore};
 
+#[allow(dead_code)]
 const DEFAULT_RKS_ADDR: &str = "127.0.0.1:50051";
 
 pub struct UserQUICClient {
@@ -101,9 +101,8 @@ impl UserQUICClient {
     }
 }
 
-pub async fn delete_pod(pod_name: &str) -> Result<()> {
-    let server_addr = env::var("RKS_ADDR").unwrap_or(DEFAULT_RKS_ADDR.to_string());
-    let cli = UserQUICClient::from(server_addr).await?;
+pub async fn delete_pod(pod_name: &str, addr: &str) -> Result<()> {
+    let cli = UserQUICClient::from(addr).await?;
     cli.send_uni(&RksMessage::DeletePod(pod_name.to_string()))
         .await?;
     let _ = cli.wait_response().await?;
@@ -111,21 +110,18 @@ pub async fn delete_pod(pod_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn create_pod(pod_yaml: &str) -> Result<()> {
-    let server_addr = env::var("RKS_ADDR").unwrap_or(DEFAULT_RKS_ADDR.to_string());
-    let cli = UserQUICClient::from(server_addr).await.unwrap();
-    let task = pod_task_from_path(pod_yaml)
-        .map_err(|e| anyhow!("Invalid pod yaml: {}", e))
-        .unwrap();
+pub async fn create_pod(pod_yaml: &str, addr: &str) -> Result<()> {
+    let cli = UserQUICClient::from(addr).await.unwrap();
+    let task = pod_task_from_path(pod_yaml).map_err(|e| anyhow!("invalid pod yaml: {}", e))?;
     let pod_name = task.metadata.name.clone();
     cli.send_uni(&RksMessage::CreatePod(task)).await?;
+    let _ = cli.wait_response().await?;
     println!("pod {pod_name} created");
     Ok(())
 }
 
-pub async fn list_pod() -> Result<()> {
-    let server_addr = env::var("RKS_ADDR").unwrap_or(DEFAULT_RKS_ADDR.to_string());
-    let cli = UserQUICClient::from(server_addr).await.unwrap();
+pub async fn list_pod(addr: &str) -> Result<()> {
+    let cli = UserQUICClient::from(addr).await?;
     cli.send_uni(&RksMessage::ListPod).await?;
 
     match cli.wait_response().await? {

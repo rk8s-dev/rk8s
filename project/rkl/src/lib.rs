@@ -1,4 +1,3 @@
-use clap::ArgAction::SetTrue;
 use clap::{Args, Subcommand};
 
 pub mod bundle;
@@ -108,8 +107,8 @@ pub enum PodCommand {
         #[arg(value_name = "POD_YAML")]
         pod_yaml: String,
 
-        #[arg(long, action = SetTrue)]
-        cluster: bool,
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
     },
     #[command(about = "Start a pod with a pod-name using rkl start pod-name")]
     Start {
@@ -122,8 +121,8 @@ pub enum PodCommand {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
 
-        #[arg(long, action = SetTrue)]
-        cluster: bool,
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
     },
 
     #[command(about = "Get the state of a pod using rkl state pod-name")]
@@ -137,8 +136,8 @@ pub enum PodCommand {
 
     #[command(about = "List all of pods")]
     List {
-        #[arg(long, required = true, action = SetTrue)]
-        cluster: bool,
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
     },
 
     // Run as a daemon process.
