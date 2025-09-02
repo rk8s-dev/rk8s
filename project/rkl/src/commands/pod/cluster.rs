@@ -108,6 +108,7 @@ pub async fn delete_pod(pod_name: &str) -> Result<()> {
     let cli = UserQUICClient::from(server_addr).await?;
     cli.send_uni(&RksMessage::DeletePod(pod_name.to_string()))
         .await?;
+    let _ = cli.wait_response().await?;
     println!("pod {pod_name} deleted");
     Ok(())
 }
