@@ -10,8 +10,12 @@ use quinn::crypto::rustls::QuicClientConfig;
 use rustls::crypto::CryptoProvider;
 use std::env;
 use std::fs::File;
+use std::io;
+use std::io::Write;
 use std::{sync::Arc, time::Duration};
+use tabwriter::TabWriter;
 use tokio::time;
+use tracing::debug;
 
 /// Skip certificate verification
 use crate::daemon::client::SkipServerVerification;
@@ -65,8 +69,8 @@ impl UserQUICClient {
         Ok(cli)
     }
 
-    pub async fn wait_response(&self) -> Result<()> {
-        let resp = match self.conn.accept_uni().await {
+    pub async fn wait_response(&self) -> Result<RksMessage> {
+        match self.conn.accept_uni().await {
             core::result::Result::Ok(mut recv_stream) => {
                 let mut buf = vec![0u8; 4096];
                 match recv_stream.read(&mut buf).await {
@@ -74,18 +78,20 @@ impl UserQUICClient {
                         if let core::result::Result::Ok(msg) =
                             bincode::deserialize::<RksMessage>(&buf[..n])
                         {
-                            println!("Get From Server: {:?}", msg)
+                            debug!("Get From Server: {:?}", msg);
+                            return Ok(msg);
                         }
+                        return Err(anyhow!("Empty response"));
                     }
-                    core::result::Result::Ok(None) => {}
-                    Err(e) => println!("read response error: {e}"),
+
+                    core::result::Result::Ok(None) => return Err(anyhow!("Empty response")),
+                    Err(e) => return Err(anyhow!("read response error: {}", e)),
                 }
             }
             Err(e) => {
-                println!("connection error: {e}");
+                return Err(anyhow!("connection error: {e}"));
             }
-        };
-        Ok(resp)
+        }
     }
 
     pub async fn send_uni(&self, msg: &RksMessage) -> Result<()> {
@@ -102,10 +108,7 @@ pub async fn delete_pod(pod_name: &str) -> Result<()> {
     let cli = UserQUICClient::from(server_addr).await?;
     cli.send_uni(&RksMessage::DeletePod(pod_name.to_string()))
         .await?;
-    // get response
-    cli.wait_response().await?;
-
-    println!("cluster delete the pod");
+    println!("pod {pod_name} deleted");
     Ok(())
 }
 
@@ -115,24 +118,35 @@ pub async fn create_pod(pod_yaml: &str) -> Result<()> {
     let task = pod_task_from_path(pod_yaml)
         .map_err(|e| anyhow!("Invalid pod yaml: {}", e))
         .unwrap();
-
+    let pod_name = (*task).metadata.name.clone();
     cli.send_uni(&RksMessage::CreatePod(task)).await?;
-
-    // get response
-    cli.wait_response().await?;
-
-    time::sleep(Duration::from_secs(10)).await;
-    println!("cluster create the pod");
+    println!("pod {pod_name} created");
     Ok(())
 }
 
 pub async fn list_pod() -> Result<()> {
-    println!("cluster list the pod");
-    todo!()
+    let server_addr = env::var("RKS_ADDR").unwrap_or(DEFAULT_RKS_ADDR.to_string());
+    let cli = UserQUICClient::from(server_addr).await.unwrap();
+    cli.send_uni(&RksMessage::ListPod).await?;
+
+    match cli.wait_response().await? {
+        RksMessage::ListPodRes(res) => list_print(res),
+        msg => Err(anyhow!("unexpected response {:?} ", msg)),
+    }
 }
 
 pub fn pod_task_from_path(pod_yaml: &str) -> Result<Box<PodTask>> {
     let pod_file = File::open(pod_yaml)?;
     let task: PodTask = serde_yaml::from_reader(pod_file)?;
     Ok(Box::new(task))
+}
+
+fn list_print(pod_list: Vec<String>) -> Result<()> {
+    let mut tab_writer = TabWriter::new(io::stdout());
+    writeln!(&mut tab_writer, "NAME\tREADY\tSTATUS\tRESTARTS\tAGE")?;
+    for pod in pod_list {
+        let _ = writeln!(&mut tab_writer, "{}", pod);
+    }
+    tab_writer.flush()?;
+    Ok(())
 }

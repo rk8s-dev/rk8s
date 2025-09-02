@@ -89,6 +89,8 @@ pub enum RksMessage {
     //request
     CreatePod(Box<PodTask>),
     DeletePod(String),
+    ListPod,
+
     GetNodeCount,
     RegisterNode(Box<Node>),
     UserRequest(String),
@@ -100,6 +102,7 @@ pub enum RksMessage {
     Ack,
     Error(String),
     NodeCount(usize),
+    ListPodRes(Vec<String>),
 }
 
 /// Node spec

@@ -409,6 +409,16 @@ pub async fn dispatch_user(
             delete::user_delete(pod_name, xline_store, conn, tx).await?;
         }
 
+        RksMessage::ListPod => {
+            let pods = xline_store.list_pods().await?;
+            println!("[user dispatch] list current pod: {:?}", pods);
+            let res = bincode::serialize(&RksMessage::ListPodRes(pods))?;
+            if let Ok(mut stream) = conn.open_uni().await {
+                stream.write_all(&res).await?;
+                stream.finish()?;
+            }
+        }
+
         RksMessage::GetNodeCount => {
             let count = xline_store.list_nodes().await?.len();
             println!("[user dispatch] node count: {count}");
