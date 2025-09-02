@@ -2,6 +2,7 @@
 
 use crate::cadapter::client::ObjectBackend;
 use async_trait::async_trait;
+use aws_config::Region;
 use aws_sdk_s3::Client;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -26,6 +27,8 @@ pub struct S3Config {
     pub initial_retry_delay_ms: u64,
     /// 连接超时时间
     pub timeout: Duration,
+    /// endpoint url
+    pub endpoint_url: String,
 }
 
 impl Default for S3Config {
@@ -36,6 +39,7 @@ impl Default for S3Config {
             max_retries: 3,
             initial_retry_delay_ms: 100,
             timeout: Duration::from_secs(30),
+            endpoint_url: "http://127.0.0.1:9000/".to_string(),
         }
     }
 }
@@ -70,14 +74,15 @@ pub struct S3Backend {
 impl S3Backend {
     pub async fn new(
         bucket: impl Into<String>,
+        region: impl Into<String>,
         config: S3Config,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let conf = aws_config::ConfigLoader::default()
             .credentials_provider(
                 aws_config::environment::EnvironmentVariableCredentialsProvider::new(),
             )
-            .region("zh-cn")
-            .endpoint_url("http://127.0.0.1:9000/")
+            .region(Region::new(region.into()))
+            .endpoint_url(config.endpoint_url.clone())
             .load()
             .await;
         let client = Client::new(&conf);
@@ -386,7 +391,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_s3_backend() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let backend = S3Backend::new("main", S3Config::default()).await?;
+        let backend = S3Backend::new("main", "zh", S3Config::default()).await?;
         let data_1 = Vec::from("hello");
         backend.put_object("test_0", &data_1).await?;
 
