@@ -63,7 +63,7 @@ fn get_subnet_file_path() -> String {
 
 /// Skip certificate verification
 #[derive(Debug)]
-struct SkipServerVerification;
+pub struct SkipServerVerification;
 
 impl ServerCertVerifier for SkipServerVerification {
     fn verify_server_cert(
@@ -150,7 +150,7 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
         .set_certificate_verifier(Arc::new(SkipServerVerification));
 
     let quic_crypto = QuicClientConfig::try_from(tls)?;
-    let client_cfg = QuinnClientConfig::new(Arc::new(quic_crypto));
+    let client_cfg: QuinnClientConfig = QuinnClientConfig::new(Arc::new(quic_crypto));
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())?;
     endpoint.set_default_client_config(client_cfg);
 
@@ -273,7 +273,7 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                             let pod: PodTask = (*pod_box).clone();
 
                             // validate target node
-                            let target_opt = pod.spec.nodename.as_deref();
+                            let target_opt = pod.spec.node_name.as_deref();
                             if let Some(target) = target_opt
                                 && target != node.metadata.name
                             {

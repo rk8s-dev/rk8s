@@ -163,7 +163,8 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
 }
 
 fn pod_list() -> Result<()> {
-    cluster::list_pod()
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(cluster::list_pod())
 }
 
 fn pod_delete(pod_name: &str, cluster: bool) -> Result<()> {
@@ -172,7 +173,10 @@ fn pod_delete(pod_name: &str, cluster: bool) -> Result<()> {
         .parse()?;
     match cluster || is_cluster {
         false => standalone::delete_pod(pod_name),
-        true => cluster::delete_pod(pod_name),
+        true => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(cluster::delete_pod(pod_name))
+        }
     }
 }
 
@@ -182,6 +186,9 @@ fn pod_create(pod_yaml: &str, cluster: bool) -> Result<()> {
         .parse()?;
     match cluster || is_cluster {
         false => standalone::create_pod(pod_yaml),
-        true => cluster::create_pod(pod_yaml),
+        true => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(cluster::create_pod(pod_yaml))
+        }
     }
 }
