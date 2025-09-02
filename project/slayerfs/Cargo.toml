@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "time", "net"] }
+tokio = { version = "1", features = [
+    "fs",
+    "io-util",
+    "macros",
+    "rt",
+    "time",
+    "net",
+] }
 async-trait = "0.1"
 aws-config = { version = "1" }
 aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
@@ -12,6 +19,10 @@ base64 = "0.21"
 md5 = "0.7"
 futures = "0.3"
 bytes = "1.10.1"
+moka = { version = "0.12.10", features = ["future"] }
+sha2 = "0.10.9"
+hex = "0.4.3"
+dirs = "6.0.0"
 
 [dev-dependencies]
 tempfile = "3"
