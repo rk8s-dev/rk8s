@@ -81,16 +81,14 @@ impl UserQUICClient {
                             debug!("Get From Server: {:?}", msg);
                             return Ok(msg);
                         }
-                        return Err(anyhow!("Empty response"));
+                        Err(anyhow!("Empty response"))
                     }
 
-                    core::result::Result::Ok(None) => return Err(anyhow!("Empty response")),
-                    Err(e) => return Err(anyhow!("read response error: {}", e)),
+                    core::result::Result::Ok(None) => Err(anyhow!("Empty response")),
+                    Err(e) => Err(anyhow!("read response error: {}", e)),
                 }
             }
-            Err(e) => {
-                return Err(anyhow!("connection error: {e}"));
-            }
+            Err(e) => Err(anyhow!("connection error: {e}")),
         }
     }
 
@@ -119,7 +117,7 @@ pub async fn create_pod(pod_yaml: &str) -> Result<()> {
     let task = pod_task_from_path(pod_yaml)
         .map_err(|e| anyhow!("Invalid pod yaml: {}", e))
         .unwrap();
-    let pod_name = (*task).metadata.name.clone();
+    let pod_name = task.metadata.name.clone();
     cli.send_uni(&RksMessage::CreatePod(task)).await?;
     println!("pod {pod_name} created");
     Ok(())
