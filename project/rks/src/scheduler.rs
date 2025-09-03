@@ -48,7 +48,7 @@ impl Scheduler {
     pub async fn run(mut self) {
         tokio::spawn(async move {
             loop {
-                // if get an assigmnent from the scheduler, then modify the pod spec 's node_name and save to xline store
+                // if get an assignment from the scheduler, then modify the pod spec 's node_name and save to xline store
                 if let Some(Ok(assignment)) = self.assignment_rx.recv().await
                     && let Ok(Some(pod_yaml)) =
                         self.xline_store.get_pod_yaml(&assignment.pod_name).await
@@ -59,9 +59,9 @@ impl Scheduler {
                             serde_yaml::to_string(&pod_task)
                         });
 
-                    if yaml.is_ok() {
+                    if let Ok(yaml_string) = yaml {
                         let _ = self.xline_store
-                            .insert_pod_yaml(&assignment.pod_name, &yaml.unwrap())
+                            .insert_pod_yaml(&assignment.pod_name, &yaml_string)
                             .await;
                     }
                 }
