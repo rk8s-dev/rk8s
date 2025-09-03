@@ -6,7 +6,7 @@ mod protocol;
 mod server;
 mod scheduler;
 
-use crate::{api:: xlinestore::XlineStore, scheduler::Scheduler};
+use crate::{api::xlinestore::XlineStore, scheduler::Scheduler};
 use crate::network::init;
 use crate::protocol::config::load_config;
 use anyhow::Context;
