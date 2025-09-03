@@ -127,6 +127,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             annotations: HashMap::new(),
         },
         spec: XlinePodSpec {
+            nodename: None,
             containers: vec![ContainerSpec {
                 name: "app".to_string(),
                 image: "nginx:latest".to_string(),
@@ -136,7 +137,6 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             }],
             init_containers: vec![],
         },
-        nodename: "".to_string(),
     }
 }
 
@@ -482,7 +482,7 @@ async fn test_scheduler_with_xline_existing_assignment() {
         .expect("Failed to put node");
 
     let mut assigned_pod = create_test_pod("already-assigned", Some("1"), Some("1Gi"));
-    assigned_pod.nodename = "existing-node".to_string();
+    assigned_pod.spec.nodename = Some("existing-node".to_string());
     etcd_client
         .put_pod(&assigned_pod)
         .await

@@ -37,6 +37,7 @@ rust_binary(
         "//third-party:tokio-util",
         "//third-party:once_cell",
         "//third-party:env_logger",
+        "//third-party:serial_test",
         "//project/libcni:libcni",
         "//project/common:common",
         "//project/libscheduler:libscheduler"
