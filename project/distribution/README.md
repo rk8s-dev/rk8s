@@ -34,6 +34,9 @@ JWT_SECRET="secret"
 
 # JWT token lifetime in seconds
 JWT_LIFETIME_SECONDS=3600
+
+# Log level
+RUST_LOG="info"
 ```
 
 **Important**: For production environments, `PASSWORD_SALT` and `JWT_SECRET` must be protected.

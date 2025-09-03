@@ -126,7 +126,7 @@ async fn validate_config(args: &Args) -> Config {
     let db_url = Path::new(
         args.database_url
             .strip_prefix("sqlite:")
-            .unwrap_or_else(|| &args.database_url),
+            .expect("Database url must be started with `sqlite:`")
     );
     if let Some(parent) = db_url.parent() {
         tokio::fs::create_dir_all(parent)

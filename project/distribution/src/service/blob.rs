@@ -150,7 +150,7 @@ pub async fn post_blob_handler(
 ///
 /// **Behavior according to OCI Distribution Spec:**
 /// - The request body contains the raw binary data of the chunk.
-/// - The request MUST include `Content-Length` and `Content-Range` headers.
+/// - The request should include `Content-Length` and `Content-Range` headers or include `Transfer-Encoding: chunked`.
 /// - The server MUST validate that the `Content-Range` is sequential and contiguous with previously
 ///   uploaded chunks for the session.
 /// - If a chunk is out of order, the server MUST return `416 Range Not Satisfiable`.
@@ -240,7 +240,16 @@ pub async fn put_blob_handler(
         .unwrap())
 }
 
-/// GET /v2/<name>/blobs/uploads/<session_id>
+/// Handles `GET /v2/<name>/blobs/uploads/<session_id>`.
+///
+/// **Purpose:** Retrieves the status of a blob upload session.
+///
+/// **Behavior according to OCI Distribution Spec:**
+/// - This endpoint is used to query the progress of an upload.
+/// - If the upload session is found, the server MUST return `204 No Content`.
+/// - The response MUST include a `Range` header indicating the total number of bytes received so far.
+/// - The `Location` header should point to the upload URL.
+/// - If the upload session is not known, the server MUST return `404 Not Found`.
 pub async fn get_blob_status_handler(
     State(state): State<Arc<AppState>>,
     Path((name, session_id)): Path<(String, String)>,
@@ -261,7 +270,16 @@ pub async fn get_blob_status_handler(
     }
 }
 
-/// DELETE /v2/<name>/blobs/<digest>
+/// Handles `DELETE /v2/<name>/blobs/<digest>`.
+///
+/// **Purpose:** Deletes a blob from the registry.
+///
+/// **Behavior according to OCI Distribution Spec:**
+/// - The blob to be deleted is identified by its digest in the URL path.
+/// - The server MUST validate that the digest format is correct.
+/// - On successful acceptance of the delete request, the server MUST return `202 Accepted`.
+/// - This response indicates that the deletion request has been received but the blob may not be
+///   immediately removed (e.g., pending garbage collection).
 pub async fn delete_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((_name, digest_str)): Path<(String, String)>,

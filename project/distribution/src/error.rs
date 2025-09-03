@@ -270,7 +270,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match &self {
             Self::Internal(_) => tracing::error!("Internal Server Error: {:?}", self),
-            _ => tracing::info!("Generating response from AppError: {:?}", self),
+            _ => tracing::debug!("Generating response from AppError: {:?}", self),
         }
         match self {
             Self::Oci(e) => e.into_response(),
