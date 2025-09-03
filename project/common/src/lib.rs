@@ -28,7 +28,8 @@ fn default_namespace() -> String {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
-    pub nodename: Option<String>,
+    #[serde(default)]
+    pub node_name: Option<String>,
     #[serde(default)]
     pub containers: Vec<ContainerSpec>,
     #[serde(default)]
@@ -88,6 +89,8 @@ pub enum RksMessage {
     //request
     CreatePod(Box<PodTask>),
     DeletePod(String),
+    ListPod,
+
     GetNodeCount,
     RegisterNode(Box<Node>),
     UserRequest(String),
@@ -99,6 +102,7 @@ pub enum RksMessage {
     Ack,
     Error(String),
     NodeCount(usize),
+    ListPodRes(Vec<String>),
 }
 
 /// Node spec

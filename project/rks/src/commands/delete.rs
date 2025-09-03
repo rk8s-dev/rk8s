@@ -17,7 +17,7 @@ pub async fn watch_delete(
             if let Ok(Some(pod_yaml)) = xline_store.get_pod_yaml(&p).await {
                 let pod_task: PodTask = serde_yaml::from_str(&pod_yaml)
                     .map_err(|e| anyhow::anyhow!("Failed to parse pod_yaml: {}", e))?;
-                if pod_task.spec.nodename.as_deref() == Some(node_id)
+                if pod_task.spec.node_name.as_deref() == Some(node_id)
                     && pod_task.metadata.name == pod_name
                 {
                     let data = bincode::serialize(&msg)?;
