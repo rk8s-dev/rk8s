@@ -1,10 +1,10 @@
 use crate::config::Config;
-use crate::storage::repo_storage::{RepoStorage, SqliteRepoStorage};
-use crate::storage::user_storage::{SqliteUserStorage, UserStorage};
 use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
 use sqlx::{Pool, Sqlite};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
+use crate::domain::repo::{RepoRepository, SqliteRepoRepository};
+use crate::domain::user::{SqliteUserRepository, UserRepository};
 
 #[derive(Clone, Debug)]
 pub struct UploadSession {
@@ -15,8 +15,8 @@ pub struct UploadSession {
 pub struct AppState {
     pub sessions: Arc<RwLock<HashMap<String, UploadSession>>>,
     pub storage: Arc<dyn Storage>,
-    pub user_storage: Arc<dyn UserStorage>,
-    pub repo_storage: Arc<dyn RepoStorage>,
+    pub user_storage: Arc<dyn UserRepository>,
+    pub repo_storage: Arc<dyn RepoRepository>,
     pub config: Arc<Config>,
 }
 
@@ -31,8 +31,8 @@ impl AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             storage: storage_backend,
             config: Arc::new(config),
-            user_storage: Arc::new(SqliteUserStorage::new(pool.clone())),
-            repo_storage: Arc::new(SqliteRepoStorage::new(pool)),
+            user_storage: Arc::new(SqliteUserRepository::new(pool.clone())),
+            repo_storage: Arc::new(SqliteRepoRepository::new(pool)),
         }
     }
 

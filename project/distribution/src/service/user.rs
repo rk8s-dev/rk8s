@@ -1,4 +1,3 @@
-use crate::domain::user_model::User;
 use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
 use crate::utils::jwt::gen_token;
 use crate::utils::state::AppState;
@@ -12,6 +11,7 @@ use axum_extra::headers::authorization::Basic;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use crate::domain::user::User;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserReq {

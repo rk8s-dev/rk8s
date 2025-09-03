@@ -1,30 +1,30 @@
-use crate::domain::user_model::User;
 use crate::error::{AppError, BusinessError, MapToAppError};
 use sqlx::SqlitePool;
 use std::sync::Arc;
+use crate::domain::user::User;
 
 type Result<T> = std::result::Result<T, AppError>;
 
 #[async_trait::async_trait]
-pub trait UserStorage: Send + Sync {
+pub trait UserRepository: Send + Sync {
     async fn query_user_by_name(&self, name: &str) -> Result<User>;
 
     async fn create_user(&self, user: User) -> Result<()>;
 }
 
 #[derive(Debug)]
-pub struct SqliteUserStorage {
+pub struct SqliteUserRepository {
     pub pool: Arc<SqlitePool>,
 }
 
-impl SqliteUserStorage {
+impl SqliteUserRepository {
     pub fn new(pool: Arc<SqlitePool>) -> Self {
         Self { pool }
     }
 }
 
 #[async_trait::async_trait]
-impl UserStorage for SqliteUserStorage {
+impl UserRepository for SqliteUserRepository {
     async fn query_user_by_name(&self, name: &str) -> Result<User> {
         sqlx::query_as::<_, User>("select * from users where username = $1")
             .bind(name)

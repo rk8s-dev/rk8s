@@ -1,12 +1,12 @@
-use crate::domain::repo_model::Repo;
 use crate::error::{AppError, BusinessError, MapToAppError};
 use sqlx::SqlitePool;
 use std::sync::Arc;
+use crate::domain::repo::Repo;
 
 type Result<T> = std::result::Result<T, AppError>;
 
 #[async_trait::async_trait]
-pub trait RepoStorage: Send + Sync {
+pub trait RepoRepository: Send + Sync {
     async fn query_repo_by_name(&self, name: &str) -> Result<Repo>;
 
     async fn create_repo(&self, repo: Repo) -> Result<()>;
@@ -23,18 +23,18 @@ pub trait RepoStorage: Send + Sync {
 }
 
 #[derive(Debug)]
-pub struct SqliteRepoStorage {
+pub struct SqliteRepoRepository {
     pub pool: Arc<SqlitePool>,
 }
 
-impl SqliteRepoStorage {
-    pub fn new(pool: Arc<SqlitePool>) -> SqliteRepoStorage {
-        SqliteRepoStorage { pool }
+impl SqliteRepoRepository {
+    pub fn new(pool: Arc<SqlitePool>) -> SqliteRepoRepository {
+        SqliteRepoRepository { pool }
     }
 }
 
 #[async_trait::async_trait]
-impl RepoStorage for SqliteRepoStorage {
+impl RepoRepository for SqliteRepoRepository {
     async fn query_repo_by_name(&self, name: &str) -> Result<Repo> {
         sqlx::query_as::<_, Repo>("select * from repos where name = $1")
             .bind(name)

@@ -1,2 +1,2 @@
-pub mod repo_model;
-pub mod user_model;
+pub mod user;
+pub mod repo;
