@@ -2,6 +2,7 @@ use clap::Parser;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow, bail};
 use libcontainer::container::Container;
@@ -296,7 +297,7 @@ pub struct ExecContainer {
     #[clap(value_parser = clap::builder::NonEmptyStringValueParser::new(), required = true)]
     pub container_id: String,
 
-    #[clap(required = false)]
+    #[clap(short = 'p', long, required = false)]
     pub root_path: Option<String>,
 
     /// Command that should be executed in the container
@@ -381,9 +382,9 @@ impl From<ExecContainer> for Exec {
 
 fn parse_env<T, U>(s: &str) -> Result<(T, U), Box<dyn Error + Send + Sync + 'static>>
 where
-    T: std::str::FromStr,
+    T: FromStr,
     T::Err: Error + Send + Sync + 'static,
-    U: std::str::FromStr,
+    U: FromStr,
     U::Err: Error + Send + Sync + 'static,
 {
     let pos = s
@@ -394,9 +395,9 @@ where
 
 fn parse_user<T, U>(s: &str) -> Result<(T, Option<U>), Box<dyn Error + Send + Sync + 'static>>
 where
-    T: std::str::FromStr,
+    T: FromStr,
     T::Err: Error + Send + Sync + 'static,
-    U: std::str::FromStr,
+    U: FromStr,
     U::Err: Error + Send + Sync + 'static,
 {
     if let Some(pos) = s.find(':') {

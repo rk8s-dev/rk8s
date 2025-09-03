@@ -4,6 +4,7 @@ pub mod bundle;
 pub mod commands;
 mod cri;
 pub mod daemon;
+pub mod network;
 mod rootpath;
 pub mod task;
 
@@ -105,6 +106,9 @@ pub enum PodCommand {
     Create {
         #[arg(value_name = "POD_YAML")]
         pod_yaml: String,
+
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
     },
     #[command(about = "Start a pod with a pod-name using rkl start pod-name")]
     Start {
@@ -116,13 +120,26 @@ pub enum PodCommand {
     Delete {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
+
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
     },
+
     #[command(about = "Get the state of a pod using rkl state pod-name")]
     State {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
     },
+
+    #[command(about = "Execute a command inside a specific container of a pod")]
     Exec(Box<commands::ExecPod>),
+
+    #[command(about = "List all of pods")]
+    List {
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
+    },
+
     // Run as a daemon process.
     // For convenient, I won't remove cli part now.
     #[command(

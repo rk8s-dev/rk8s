@@ -1,16 +1,53 @@
-//! rustfs backend adapter (placeholder)
-//!
-//! Implement backend-specific logic to talk to rustfs. This file should expose
-//! the same signatures expected by `client` but implement them against rustfs.
+//! rustfs 适配器的最小占位实现：同样用本地目录模拟对象存储。
+
+use crate::cadapter::client::ObjectBackend;
+use async_trait::async_trait;
+use std::path::{Path, PathBuf};
+use tokio::{fs, io::AsyncWriteExt};
 
 #[allow(dead_code)]
-pub async fn put(_key: &str, _data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: implement rustfs upload
-    Ok(())
+pub struct RustfsLikeBackend {
+    root: PathBuf,
 }
 
 #[allow(dead_code)]
-pub async fn get(_key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-    // TODO: implement rustfs download
-    Ok(None)
+impl RustfsLikeBackend {
+    pub fn new<P: AsRef<Path>>(root: P) -> Self {
+        Self {
+            root: root.as_ref().to_path_buf(),
+        }
+    }
+    fn path_for(&self, key: &str) -> PathBuf {
+        self.root.join(key)
+    }
+}
+
+#[async_trait]
+impl ObjectBackend for RustfsLikeBackend {
+    async fn put_object(
+        &self,
+        key: &str,
+        data: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let path = self.path_for(key);
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).await?;
+        }
+        let mut f = fs::File::create(path).await?;
+        f.write_all(data).await?;
+        f.flush().await?;
+        Ok(())
+    }
+
+    async fn get_object(
+        &self,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+        let path = self.path_for(key);
+        match fs::read(path).await {
+            Ok(buf) => Ok(Some(buf)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(Box::new(e)),
+        }
+    }
 }

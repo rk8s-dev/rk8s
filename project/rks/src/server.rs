@@ -154,7 +154,7 @@ async fn watch_pods(
         if let Ok(Some(pod_yaml)) = xline_store.get_pod_yaml(&pod_name).await {
             let pod_task: PodTask = serde_yaml::from_str(&pod_yaml)
                 .map_err(|e| anyhow::anyhow!("Failed to parse pod_yaml: {}", e))?;
-            if pod_task.spec.nodename.as_deref() == Some(&node_id) {
+            if pod_task.spec.node_name.as_deref() == Some(&node_id) {
                 let msg = RksMessage::CreatePod(Box::new(pod_task.clone()));
                 let data = bincode::serialize(&msg)?;
                 if let Ok(mut stream) = conn.open_uni().await {
@@ -178,7 +178,9 @@ async fn watch_pods(
                 create::watch_create(&pod_task, conn, &node_id).await?;
             }
             RksMessage::DeletePod(pod_name) => {
-                delete::watch_delete(pod_name, conn, xline_store, &node_id).await?;
+                delete::watch_delete(pod_name, conn, xline_store, &node_id)
+                    .await
+                    .unwrap();
             }
             _ => {}
         }
@@ -246,11 +248,11 @@ async fn handle_connection(
                             let conn_clone = conn.clone();
                             tokio::spawn(async move {
                                 while let Some(msg) = msg_rx.recv().await {
-                                    if let Ok(mut stream) = conn_clone.open_uni().await {
-                                        if let Ok(data) = bincode::serialize(&msg) {
-                                            let _ = stream.write_all(&data).await;
-                                            let _ = stream.finish();
-                                        }
+                                    if let Ok(mut stream) = conn_clone.open_uni().await
+                                        && let Ok(data) = bincode::serialize(&msg)
+                                    {
+                                        let _ = stream.write_all(&data).await;
+                                        let _ = stream.finish();
                                     }
                                 }
                             });
@@ -405,6 +407,16 @@ pub async fn dispatch_user(
 
         RksMessage::DeletePod(pod_name) => {
             delete::user_delete(pod_name, xline_store, conn, tx).await?;
+        }
+
+        RksMessage::ListPod => {
+            let pods = xline_store.list_pods().await?;
+            println!("[user dispatch] list current pod: {:?}", pods);
+            let res = bincode::serialize(&RksMessage::ListPodRes(pods))?;
+            if let Ok(mut stream) = conn.open_uni().await {
+                stream.write_all(&res).await?;
+                stream.finish()?;
+            }
         }
 
         RksMessage::GetNodeCount => {

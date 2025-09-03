@@ -152,7 +152,10 @@ impl Storage for FilesystemStorage {
         let digest_path_str = self.path_manager.clone().blob_data_path(digest);
         let digest_path = std::path::Path::new(&digest_path_str);
 
-        if symlink_metadata(&tag_path).await.is_ok() {
+        // Remove the existing symlink if it exists
+        if let Ok(metadata) = symlink_metadata(&tag_path).await
+            && metadata.file_type().is_symlink()
+        {
             remove_file(&tag_path).await.map_to_internal()?;
         }
 
@@ -181,8 +184,11 @@ impl Storage for FilesystemStorage {
         };
 
         while let Some(entry) = read_dir.next_entry().await.map_to_internal()? {
-            if let Some(file_name) = entry.path().file_name().and_then(|s| s.to_str()) {
-                entries.push(file_name.to_string());
+            let path = entry.path();
+            if let Some(file_name) = path.file_name()
+                && let Some(file_name_str) = file_name.to_str()
+            {
+                entries.push(file_name_str.to_string());
             }
         }
         entries.sort();

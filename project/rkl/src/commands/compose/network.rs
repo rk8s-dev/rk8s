@@ -15,11 +15,11 @@ use anyhow::Result;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-const CNI_VERSION: &str = "1.0.0";
-const STD_CONF_PATH: &str = "/etc/cni/net.d";
+pub const CNI_VERSION: &str = "1.0.0";
+pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
 
-const BRIDGE_PLUGIN_NAME: &str = "libbridge";
-const BRIDGE_CONF: &str = "bridge.conf";
+pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
+pub const BRIDGE_CONF: &str = "bridge.conf";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliNetworkConfig {
@@ -137,10 +137,10 @@ impl NetworkManager {
 
         let mut conf_path = PathBuf::from(STD_CONF_PATH);
         conf_path.push(BRIDGE_CONF);
-        if let Some(parent) = conf_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = conf_path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)?;
         }
 
         // write it to
