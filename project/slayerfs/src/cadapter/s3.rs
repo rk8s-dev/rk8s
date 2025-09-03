@@ -320,12 +320,23 @@ impl ObjectBackend for S3Backend {
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
         // check meta cache
         if let Some(meta) = self.meta_cache.get(key).await {
-            // local file exists
-            if tokio::fs::metadata(&meta.file_path).await.is_ok() {
+            let remote_head = self
+                .client
+                .head_object()
+                .bucket(&self.bucket)
+                .key(key)
+                .send()
+                .await?;
+            let remote_etag = remote_head.e_tag().unwrap().to_string();
+            let local_meta = meta.e_tag;
+            if remote_etag == local_meta {
                 let data = tokio::fs::read(&meta.file_path).await?;
                 return Ok(Some(data));
             } else {
                 self.meta_cache.invalidate(key).await;
+                tokio::spawn(async {
+                    let _ = tokio::fs::remove_file(meta.file_path).await;
+                });
             }
         }
 
@@ -390,6 +401,7 @@ mod tests {
     };
 
     #[tokio::test]
+    // before run this function, please set env AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
     async fn test_s3_backend() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let backend = S3Backend::new("main", "zh", S3Config::default()).await?;
         let data_1 = Vec::from("hello");
