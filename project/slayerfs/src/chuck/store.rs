@@ -3,10 +3,14 @@
 use super::chunk::ChunkLayout;
 use crate::cadapter::client::{ObjectBackend, ObjectClient};
 use async_trait::async_trait;
-use std::collections::HashMap;
+use libc::{KEYCTL_CAPS0_CAPABILITIES, SYS_remap_file_pages};
+use moka::{Entry, ops::compute::Op};
+use std::{collections::HashMap, io::SeekFrom, path::PathBuf};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 /// 抽象块存储接口（后续可由 cadapter/S3 等实现）。
 #[async_trait]
+// ensure offset_in_block + data.len() <= block_size
 pub trait BlockStore {
     async fn write_block_range(
         &mut self,
@@ -94,14 +98,24 @@ impl BlockStore for InMemoryBlockStore {
     }
 }
 
+#[derive(Clone, Debug)]
+struct CacheItem {
+    file_path: PathBuf,
+    etag: String,
+}
+
 /// 通过 cadapter::client 后端实现的 BlockStore（键空间：chunks/{chunk_id}/{block_index}）。
 pub struct ObjectBlockStore<B: ObjectBackend> {
     client: ObjectClient<B>,
+    block_cache: moka::future::Cache<String, CacheItem>,
 }
 
 impl<B: ObjectBackend> ObjectBlockStore<B> {
     pub fn new(client: ObjectClient<B>) -> Self {
-        Self { client }
+        Self {
+            client,
+            block_cache: moka::future::Cache::new(10_000),
+        }
     }
 
     fn key_for(chunk_id: i64, block_index: u32) -> String {
@@ -150,19 +164,74 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         layout: ChunkLayout,
     ) -> Vec<u8> {
         let key = Self::key_for(chunk_id, block_index);
-        let data = self.client.get_object(&key).await.ok().flatten();
-        if let Some(buf) = data {
-            let start = offset_in_block as usize;
-            let end = (start + len).min(buf.len());
-            let mut out = vec![0u8; len];
-            if end > start {
-                out[..(end - start)].copy_from_slice(&buf[start..end]);
-            }
-            out
-        } else {
-            let _ = layout; // 抑制未使用
-            vec![0u8; len]
-        }
+        let start = offset_in_block as usize;
+        let end = start + len;
+        let mut buf = vec![0u8; len];
+        let entry = self.block_cache.entry(key.clone());
+        entry
+            .and_compute_with(async |item| match item {
+                Some(e) => {
+                    let local_etag = e.value().etag.clone();
+                    let remote_etag = self.client.get_etag(&key).await.unwrap();
+                    let file_path_str = e.value().file_path.clone();
+                    let file_path = dirs::cache_dir().unwrap().join(file_path_str);
+                    let mut file = tokio::fs::File::open(file_path.clone()).await.unwrap();
+                    if local_etag == remote_etag {
+                        file.read_exact(&mut buf).await.unwrap();
+                    } else {
+                        let file_path = dirs::cache_dir().unwrap().join(key.clone());
+                        let object = self
+                            .client
+                            .get_object(&key)
+                            .await
+                            .unwrap()
+                            .expect("failed to read block form s3");
+                        buf.copy_from_slice(&object[start..end]);
+                        tokio::spawn(async move {
+                            let mut open_option = tokio::fs::OpenOptions::new();
+                            let mut file = open_option
+                                .write(true)
+                                .create(true)
+                                .open(file_path)
+                                .await
+                                .unwrap();
+                            let _ = file.seek(SeekFrom::Start(0)).await;
+                            let _ = file.write_all(&object).await;
+                        });
+                    }
+                    Op::Put(CacheItem {
+                        file_path,
+                        etag: remote_etag,
+                    })
+                }
+                None => {
+                    let file_path = dirs::cache_dir().unwrap().join(key.clone());
+                    let object = self
+                        .client
+                        .get_object(&key)
+                        .await
+                        .unwrap()
+                        .expect("failed to read block form s3");
+                    let etag = self.client.get_etag(&key).await.unwrap();
+                    buf.copy_from_slice(&object[start..end]);
+                    let file_path_clone = file_path.clone();
+                    tokio::spawn(async move {
+                        let mut open_option = tokio::fs::OpenOptions::new();
+                        let mut file = open_option
+                            .write(true)
+                            .create(true)
+                            .open(file_path_clone)
+                            .await
+                            .unwrap();
+                        let _ = file.seek(SeekFrom::Start(0)).await;
+                        let _ = file.write_all(&object).await;
+                    });
+                    Op::Put(CacheItem { file_path, etag })
+                }
+            })
+            .await;
+        let _ = layout;
+        buf
     }
 }
 
