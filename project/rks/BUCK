@@ -39,6 +39,7 @@ rust_binary(
         "//third-party:env_logger",
         "//project/libcni:libcni",
         "//project/common:common",
+        "//project/libscheduler:libscheduler"
     ],
     linker_flags = [
         "-lssl",

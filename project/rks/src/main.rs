@@ -4,13 +4,15 @@ mod commands;
 mod network;
 mod protocol;
 mod server;
+mod scheduler;
 
-use crate::api::xlinestore::XlineStore;
+use crate::{api:: xlinestore::XlineStore, scheduler::Scheduler};
 use crate::network::init;
 use crate::protocol::config::load_config;
 use anyhow::Context;
 use clap::Parser;
 use cli::{Cli, Commands};
+use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use log::error;
 use server::serve;
 use std::sync::Arc;
@@ -39,6 +41,16 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             let local_manager = Arc::new(sm.clone());
+
+            let scheduler = Scheduler::try_new(
+                &endpoints,
+                xline_store.clone(),
+                ScoringStrategy::LeastAllocated,
+                Plugins::default(),
+            )
+            .await
+            .context("Failed to create Scheduler")?;
+            scheduler.run().await;
             serve(cfg.addr, xline_store, local_manager).await?;
         }
     }

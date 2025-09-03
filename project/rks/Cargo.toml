@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 common = { path = "../common" }
 libcni = { path = "../libcni" }
+libscheduler = { path = "../libscheduler" }
 tokio = { version = "1.44", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.5.32", features = ["derive"] }
