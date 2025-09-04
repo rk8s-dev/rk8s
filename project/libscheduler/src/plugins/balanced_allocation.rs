@@ -60,18 +60,14 @@ fn is_schedulable_after_pod_event(pod: PodInfo, event: EventInner) -> Result<Que
     match event {
         EventInner::Pod(_original, modified) => {
             if modified.is_none() {
-                log::trace!(
-                    "pod was deleted, may make unscheduled pod schedulable. pod {:?}",
-                    pod
-                );
+                log::trace!("pod was deleted, may make unscheduled pod schedulable. pod {pod:?}");
                 Ok(QueueingHint::Queue)
             } else {
                 Ok(QueueingHint::Skip)
             }
         }
         _ => Err(format!(
-            "event inner {:?} not match event resource pod",
-            event
+            "event inner {event:?} not match event resource pod"
         )),
     }
 }
@@ -86,31 +82,24 @@ fn is_schedulable_after_node_change(
             if is_fit(&pod_requests, &modified) {
                 if original.is_none() {
                     log::trace!(
-                        "node was added and fits pod resource requests. pod {:?} node {:?}",
-                        pod,
-                        modified
+                        "node was added and fits pod resource requests. pod {pod:?} node {modified:?}"
                     );
                     Ok(QueueingHint::Queue)
                 } else {
                     log::trace!(
-                        "node was updated and fits pod resource requests. pod {:?} node {:?}",
-                        pod,
-                        modified
+                        "node was updated and fits pod resource requests. pod {pod:?} node {modified:?}"
                     );
                     Ok(QueueingHint::Queue)
                 }
             } else {
                 log::trace!(
-                    "node was created or updated, but doesn't have enough resources. pod {:?} node {:?}",
-                    pod,
-                    modified
+                    "node was created or updated, but doesn't have enough resources. pod {pod:?} node {modified:?}"
                 );
                 Ok(QueueingHint::Skip)
             }
         }
         _ => Err(format!(
-            "event inner {:?} not match event resource node",
-            event
+            "event inner {event:?} not match event resource node"
         )),
     }
 }
@@ -143,10 +132,7 @@ impl PreScorePlugin for BalancedAllocation {
         let pod_requests = pod.spec.resources.clone();
 
         if self.is_best_effort_pod(&pod_requests) {
-            log::trace!(
-                "Skipping BalancedAllocation scoring for best-effort pod {:?}",
-                pod
-            );
+            log::trace!("Skipping BalancedAllocation scoring for best-effort pod {pod:?}");
             return Status::new(Code::Skip, vec![]);
         }
 

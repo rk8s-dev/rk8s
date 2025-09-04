@@ -9,6 +9,7 @@ rust_library(
       "//third-party:etcd-client",
       "//third-party:serde",
       "//third-party:serde_yaml",
+      "//third-party:serial_test",
       "//third-party:tokio",
       "//third-party:uuid",
       "//third-party:log",
