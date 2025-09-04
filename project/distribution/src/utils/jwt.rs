@@ -24,7 +24,10 @@ pub fn decode(secret: &str, token: &str) -> Result<Claims, AppError> {
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::default(),
     )
-    .map_err(|e| OciError::Unauthorized(e.to_string(), None))?
+    .map_err(|e| OciError::Unauthorized {
+        msg: e.to_string(),
+        auth_url: None,
+    })?
     .claims)
 }
 

@@ -1,4 +1,3 @@
-use crate::domain::user::User;
 use crate::error::{AppError, BusinessError, MapToAppError};
 
 pub mod blob;

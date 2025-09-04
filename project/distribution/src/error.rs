@@ -1,4 +1,3 @@
-use crate::config::Config;
 use axum::Json;
 use axum::body::Body;
 use axum::http::StatusCode;
@@ -7,7 +6,6 @@ use axum::response::{IntoResponse, Response};
 use oci_spec::distribution::{ErrorCode, ErrorInfo, ErrorInfoBuilder, ErrorResponseBuilder};
 use serde_json::json;
 use std::io;
-use std::sync::Arc;
 use thiserror::Error;
 
 #[allow(dead_code)]
@@ -49,8 +47,11 @@ pub enum OciError {
     #[error("Too many requests")]
     TooManyRequests,
 
-    #[error("{0}")]
-    Unauthorized(String, Option<Arc<Config>>),
+    #[error("{msg}")]
+    Unauthorized {
+        msg: String,
+        auth_url: Option<String>,
+    },
 
     #[error("{0}")]
     Forbidden(String),
@@ -116,7 +117,7 @@ impl IntoResponse for OciError {
                 StatusCode::TOO_MANY_REQUESTS,
                 ErrorInfo::new(ErrorCode::TooManyRequests, "too many requests"),
             ),
-            Self::Unauthorized(msg, _) => (
+            Self::Unauthorized { msg, .. } => (
                 StatusCode::UNAUTHORIZED,
                 ErrorInfo::new(ErrorCode::Unauthorized, msg),
             ),
@@ -132,8 +133,10 @@ impl IntoResponse for OciError {
             .unwrap();
         let mut response = (status_code, Json(body)).into_response();
 
-        if let Self::Unauthorized(_, Some(config)) = self {
-            let realm = format!("{}/auth/token", config.registry_url);
+        if let Self::Unauthorized { auth_url, .. } = self
+            && let Some(auth_url) = auth_url
+        {
+            let realm = format!("{auth_url}/auth/token");
             let challenge = format!(
                 r#"Bearer realm="{realm}",service="oci-registry",scope="repository:*:*", Basic Realm="oci registry""#,
             );

@@ -1,16 +1,11 @@
 use crate::api::{AuthHeader, RepoIdentifier, extract_claims};
 use crate::error::{AppError, OciError};
-use crate::service::check_password;
-use crate::utils::jwt::{Claims, decode};
+use crate::utils::jwt::Claims;
 use crate::utils::state::AppState;
-use axum::extract::{OptionalFromRequestParts, Request, State};
-use axum::http::request::Parts;
+use axum::extract::{Request, State};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use axum_extra::TypedHeader;
-use axum_extra::headers::Authorization;
-use axum_extra::headers::authorization::{Basic, Bearer};
 use std::sync::Arc;
 
 pub async fn authenticate(
@@ -19,7 +14,14 @@ pub async fn authenticate(
     mut req: Request,
     next: Next,
 ) -> Result<impl IntoResponse, AppError> {
-    let claims = extract_claims(auth, &state).await;
+    let claims = extract_claims(
+        auth,
+        &state.config.jwt_secret,
+        &state.config.password_salt,
+        state.user_storage.as_ref(),
+        &state.config.registry_url,
+    )
+    .await;
     match *req.method() {
         Method::GET | Method::HEAD => {
             if let Ok(claims) = claims {
@@ -68,10 +70,10 @@ pub async fn authorize(
                         }
                     }
                     None => {
-                        return Err(OciError::Unauthorized(
-                            "unauthorized".to_string(),
-                            Some(state.config.clone()),
-                        )
+                        return Err(OciError::Unauthorized {
+                            msg: "unauthorized".to_string(),
+                            auth_url: Some(state.config.registry_url.clone()),
+                        }
                         .into());
                     }
                 }
@@ -80,10 +82,10 @@ pub async fn authorize(
         // for write, we cannot write others' all repos.
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE => match claims {
             Some(claims) if claims.sub == "anonymous" => {
-                return Err(OciError::Unauthorized(
-                    "unauthorized".to_string(),
-                    Some(state.config.clone()),
-                )
+                return Err(OciError::Unauthorized {
+                    msg: "unauthorized".to_string(),
+                    auth_url: Some(state.config.registry_url.clone()),
+                }
                 .into());
             }
             Some(claims) => {
@@ -95,10 +97,10 @@ pub async fn authorize(
                 }
             }
             None => {
-                return Err(OciError::Unauthorized(
-                    "unauthorized".to_string(),
-                    Some(state.config.clone()),
-                )
+                return Err(OciError::Unauthorized {
+                    msg: "unauthorized".to_string(),
+                    auth_url: Some(state.config.registry_url.clone()),
+                }
                 .into());
             }
         },

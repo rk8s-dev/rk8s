@@ -45,8 +45,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("listening on {}", listener.local_addr()?);
 
-    let app = api::create_router(state);
-    // .layer(TraceLayer::new_for_http());
+    let app = api::create_router(state).layer(TraceLayer::new_for_http());
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;

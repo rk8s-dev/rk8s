@@ -30,7 +30,15 @@ pub async fn probe(
     State(state): State<Arc<AppState>>,
     auth: Option<AuthHeader>,
 ) -> Result<impl IntoResponse, AppError> {
-    match extract_claims(auth, &state).await {
+    match extract_claims(
+        auth,
+        &state.config.jwt_secret,
+        &state.config.password_salt,
+        state.user_storage.as_ref(),
+        &state.config.registry_url,
+    )
+    .await
+    {
         Ok(_) => Ok((
             StatusCode::OK,
             [("Docker-Distribution-API-Version", "registry/2.0")],

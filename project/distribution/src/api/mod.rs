@@ -3,7 +3,7 @@ pub mod v2;
 
 use crate::api::middleware::{authenticate, authorize};
 use crate::api::v2::probe;
-use crate::config::Config;
+use crate::domain::user::UserRepository;
 use crate::error::{AppError, OciError};
 use crate::service::check_password;
 use crate::service::repo::change_visibility;
@@ -75,30 +75,29 @@ where
     }
 }
 
-async fn extract_claims(auth: Option<AuthHeader>, state: &AppState) -> Result<Claims, AppError> {
+async fn extract_claims(
+    auth: Option<AuthHeader>,
+    jwt_secret: &str,
+    password_salt: &str,
+    user_storage: &dyn UserRepository,
+    auth_url: &str,
+) -> Result<Claims, AppError> {
     match auth {
         Some(auth) => match auth {
-            AuthHeader::Bearer(bearer) => decode(&state.config.jwt_secret, bearer.token()),
+            AuthHeader::Bearer(bearer) => decode(jwt_secret, bearer.token()),
             AuthHeader::Basic(basic) => {
-                let user = state
-                    .user_storage
-                    .query_user_by_name(basic.username())
-                    .await?;
-                check_password(
-                    &state.config.password_salt,
-                    &user.password,
-                    basic.password(),
-                )?;
+                let user = user_storage.query_user_by_name(basic.username()).await?;
+                check_password(password_salt, &user.password, basic.password())?;
                 Ok(Claims {
                     sub: basic.username().to_string(),
                     exp: 0,
                 })
             }
         },
-        None => Err(OciError::Unauthorized(
-            "Missing `authorization` header or invalid `authorization` header".to_string(),
-            Some(state.config.clone()),
-        )
+        None => Err(OciError::Unauthorized {
+            msg: "Missing `authorization` header or invalid `authorization` header".to_string(),
+            auth_url: Some(auth_url.to_string()),
+        }
         .into()),
     }
 }
