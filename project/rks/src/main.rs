@@ -3,12 +3,12 @@ mod cli;
 mod commands;
 mod network;
 mod protocol;
-mod server;
 mod scheduler;
+mod server;
 
-use crate::{api::xlinestore::XlineStore, scheduler::Scheduler};
 use crate::network::init;
 use crate::protocol::config::load_config;
+use crate::{api::xlinestore::XlineStore, scheduler::Scheduler};
 use anyhow::Context;
 use clap::Parser;
 use cli::{Cli, Commands};

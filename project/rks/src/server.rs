@@ -411,7 +411,7 @@ pub async fn dispatch_user(
 
         RksMessage::ListPod => {
             let pods = xline_store.list_pods().await?;
-            println!("[user dispatch] list current pod: {:?}", pods);
+            println!("[user dispatch] list current pod: {pods:?}");
             let res = bincode::serialize(&RksMessage::ListPodRes(pods))?;
             if let Ok(mut stream) = conn.open_uni().await {
                 stream.write_all(&res).await?;

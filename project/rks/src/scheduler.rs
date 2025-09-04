@@ -7,6 +7,7 @@ use libscheduler::{
     plugins::{Plugins, node_resources_fit::ScoringStrategy},
     with_xline::run_scheduler_with_xline,
 };
+use log::{debug, error};
 use tokio::sync::mpsc;
 
 use crate::api::xlinestore::XlineStore;
@@ -24,13 +25,9 @@ impl Scheduler {
         plugins: Plugins,
     ) -> Result<Self> {
         let (_unassume_tx, unassume_rx) = mpsc::unbounded_channel();
-        let assignment_rx = run_scheduler_with_xline(
-            xline_endpoints,
-            scoring_strategy,
-            plugins,
-            unassume_rx,
-        )
-        .await?;
+        let assignment_rx =
+            run_scheduler_with_xline(xline_endpoints, scoring_strategy, plugins, unassume_rx)
+                .await?;
 
         Ok(Self {
             assignment_rx,
@@ -46,6 +43,7 @@ impl Scheduler {
     ///
     /// Returns immediately after spawning the background task.
     pub async fn run(mut self) {
+        debug!("Scheduler is running");
         tokio::spawn(async move {
             loop {
                 // if get an assignment from the scheduler, then modify the pod spec 's node_name and save to xline store
@@ -53,16 +51,31 @@ impl Scheduler {
                     && let Ok(Some(pod_yaml)) =
                         self.xline_store.get_pod_yaml(&assignment.pod_name).await
                 {
+                    debug!(
+                        "Received assignment for pod {}: node {}",
+                        assignment.pod_name, assignment.node_name
+                    );
                     let yaml =
                         serde_yaml::from_str::<PodTask>(&pod_yaml).and_then(|mut pod_task| {
-                            pod_task.spec.nodename = Some(assignment.node_name);
+                            pod_task.spec.node_name = Some(assignment.node_name);
                             serde_yaml::to_string(&pod_task)
                         });
 
                     if let Ok(yaml_string) = yaml {
-                        let _ = self.xline_store
+                        debug!(
+                            "Updating pod {} with new node assignment in xline store",
+                            assignment.pod_name
+                        );
+                        if let Err(e) = self
+                            .xline_store
                             .insert_pod_yaml(&assignment.pod_name, &yaml_string)
-                            .await;
+                            .await
+                        {
+                            error!(
+                                "Failed to update pod {} in xline store: {e:?}",
+                                assignment.pod_name
+                            );
+                        }
                     }
                 }
             }

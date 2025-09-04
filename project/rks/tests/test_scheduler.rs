@@ -1,9 +1,9 @@
-use serial_test::serial;
 use common::{
     ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec, NodeStatus,
     ObjectMeta, PodSpec, PodTask, Resource,
 };
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
+use serial_test::serial;
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
@@ -13,15 +13,15 @@ use rks::{api::xlinestore::XlineStore, scheduler::Scheduler};
 // Get xline endpoints from config
 fn get_xline_endpoints() -> Vec<String> {
     let config_path = std::env::var("TEST_CONFIG_PATH").unwrap_or_else(|_| {
-    format!(
-    "{}/tests/config.yaml",
-    std::env::var("CARGO_MANIFEST_DIR").unwrap()
-    )
+        format!(
+            "{}/tests/config.yaml",
+            std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        )
     });
 
     match load_config(&config_path) {
-    Ok(config) => config.xline_config.endpoints,
-    Err(_) => vec!["127.0.0.1:2379".to_string()], // fallback
+        Ok(config) => config.xline_config.endpoints,
+        Err(_) => vec!["127.0.0.1:2379".to_string()], // fallback
     }
 }
 
@@ -104,7 +104,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             annotations: HashMap::new(),
         },
         spec: PodSpec {
-            nodename: None,
+            node_name: None,
             containers: vec![ContainerSpec {
                 name: "app".to_string(),
                 image: "nginx:latest".to_string(),
@@ -125,8 +125,13 @@ async fn run_scheduler(xline_store: Arc<XlineStore>) -> Result<()> {
     let scoring_strategy = ScoringStrategy::LeastAllocated;
     let plugins = Plugins::default();
 
-    let scheduler =
-        Scheduler::try_new(&endpoints_str, xline_store.clone(), scoring_strategy, plugins).await?;
+    let scheduler = Scheduler::try_new(
+        &endpoints_str,
+        xline_store.clone(),
+        scoring_strategy,
+        plugins,
+    )
+    .await?;
 
     // Start the scheduler in the background
     scheduler.run().await;
@@ -229,7 +234,7 @@ async fn test_pod_assignment_one() -> Result<()> {
 
     if let Some(yaml) = final_pod_yaml {
         let final_pod = serde_yaml::from_str::<PodTask>(&yaml)?;
-        assert!(final_pod.spec.nodename.is_some());
+        assert!(final_pod.spec.node_name.is_some());
     }
 
     // Clean up
@@ -285,7 +290,7 @@ async fn test_xline_pod_assignment_multiply() -> Result<()> {
 
         if let Some(yaml) = final_pod_yaml {
             let final_pod = serde_yaml::from_str::<PodTask>(&yaml)?;
-            assert!(final_pod.spec.nodename.is_some());
+            assert!(final_pod.spec.node_name.is_some());
         }
     }
     cleanup().await?;
@@ -328,7 +333,7 @@ async fn test_no_pod_assignment_when_no_nodes() -> Result<()> {
 
     if let Some(yaml) = final_pod_yaml {
         let final_pod = serde_yaml::from_str::<PodTask>(&yaml)?;
-        assert!(final_pod.spec.nodename.is_none());
+        assert!(final_pod.spec.node_name.is_none());
     }
 
     // Clean up

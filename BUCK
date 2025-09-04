@@ -13,6 +13,7 @@ rust_binary(
         "root//project/libfuse-fs:libfuse-fs",
         "root//project/libipam:libipam",
         "root//project/libnetwork:libnetwork",
+        "root//project/libscheduler:libscheduler",
         "root//project/rkb:rkb",
         "root//project/rks:rks",
         "root//project/rkl:rkl_bin",
