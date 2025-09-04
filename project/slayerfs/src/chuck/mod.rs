@@ -14,6 +14,7 @@
 
 #![allow(unused_imports)]
 
+pub mod cache;
 pub mod chunk;
 pub mod reader;
 pub mod slice;
