@@ -2,7 +2,7 @@ use anyhow::Result;
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use rkl::network::{
     config::{NetworkConfig, parse_network_config, validate_network_config},
-    receiver::{NetworkConfigMessage, NetworkReceiver, NetworkReceiverBuilder, NetworkService},
+    receiver::{NetworkConfigMessage, NetworkReceiverBuilder, NetworkService},
     route::{NetworkLease, RouteConfig, RouteManager, route_equal},
     subnet::{SubnetReceiver, make_subnet_key, parse_subnet_key, write_subnet_file},
 };
