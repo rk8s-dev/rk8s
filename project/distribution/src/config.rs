@@ -3,7 +3,7 @@
 pub struct Config {
     pub host: String,
     pub port: u16,
-    pub storge_typ: String,
+    pub storge_type: String,
     pub root_dir: String,
     pub registry_url: String,
     pub db_url: String,

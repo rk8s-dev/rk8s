@@ -22,7 +22,7 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(config: Config, pool: Arc<Pool<Sqlite>>) -> Self {
-        let storage_backend: Arc<dyn Storage + Send + Sync> = match config.storge_typ.as_str() {
+        let storage_backend: Arc<dyn Storage + Send + Sync> = match config.storge_type.as_str() {
             "FILESYSTEM" => Arc::new(FilesystemStorage::new(&config.root_dir)),
             _ => Arc::new(FilesystemStorage::new(&config.root_dir)),
         };

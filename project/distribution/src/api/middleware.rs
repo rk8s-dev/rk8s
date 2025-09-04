@@ -1,45 +1,25 @@
-use crate::api::RepoIdentifier;
-use crate::config::Config;
+use crate::api::{AuthHeader, RepoIdentifier, extract_claims};
 use crate::error::{AppError, OciError};
 use crate::service::check_password;
-use crate::utils::jwt::{decode, Claims};
+use crate::utils::jwt::{Claims, decode};
 use crate::utils::state::AppState;
-use axum::extract::{Request, State};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::extract::{OptionalFromRequestParts, Request, State};
+use axum::http::request::Parts;
+use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use axum_extra::headers::authorization::Basic;
-use axum_extra::headers::Authorization;
 use axum_extra::TypedHeader;
+use axum_extra::headers::Authorization;
+use axum_extra::headers::authorization::{Basic, Bearer};
 use std::sync::Arc;
 
 pub async fn authenticate(
     State(state): State<Arc<AppState>>,
-    basic: Option<TypedHeader<Authorization<Basic>>>,
+    auth: Option<AuthHeader>,
     mut req: Request,
     next: Next,
 ) -> Result<impl IntoResponse, AppError> {
-    let claims = match extract_claims(req.headers(), state.config.clone()) {
-        x @ Ok(_) => x,
-        x @ Err(_) => match basic {
-            Some(basic) => {
-                let user = state
-                    .user_storage
-                    .query_user_by_name(basic.username())
-                    .await?;
-                check_password(
-                    &state.config.password_salt,
-                    &user.password,
-                    basic.password(),
-                )?;
-                Ok(Claims {
-                    sub: basic.username().to_string(),
-                    exp: 0,
-                })
-            }
-            None => x,
-        },
-    };
+    let claims = extract_claims(auth, &state).await;
     match *req.method() {
         Method::GET | Method::HEAD => {
             if let Ok(claims) = claims {
@@ -54,6 +34,7 @@ pub async fn authenticate(
     Ok(next.run(req).await)
 }
 
+#[tracing::instrument(skip_all)]
 pub async fn authorize(
     State(state): State<Arc<AppState>>,
     mut req: Request,
@@ -125,22 +106,6 @@ pub async fn authorize(
     }
     req.extensions_mut().insert(RepoIdentifier(identifier));
     Ok(next.run(req).await)
-}
-
-pub fn extract_claims(headers: &HeaderMap, config: Arc<Config>) -> Result<Claims, AppError> {
-    let config_cloned = config.clone();
-    let token = headers
-        .get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            OciError::Unauthorized(
-                "Missing or malformed Bearer token".to_string(),
-                Some(config_cloned),
-            )
-        })
-        .map(str::to_string)?;
-    decode(&config.jwt_secret, &token)
 }
 
 fn extract_repo_identifier(url: &str) -> Option<String> {
