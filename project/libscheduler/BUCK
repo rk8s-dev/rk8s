@@ -15,6 +15,7 @@ rust_library(
       "//third-party:uuid",
       "//third-party:log",
       "//third-party:bitflags",
+      "//project/common:common",
     ],
     env = {
         "CARGO_PKG_AUTHORS": "r2cn-dev team",

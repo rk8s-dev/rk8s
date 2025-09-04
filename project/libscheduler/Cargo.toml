@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+common = { path = "../common" }
 anyhow = "1.0.98"
 bitflags = "2.9.2"
 etcd-client = "0.16.1"
