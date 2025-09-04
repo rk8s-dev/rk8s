@@ -1,7 +1,7 @@
+use crate::domain::repo::Repo;
 use crate::error::{AppError, BusinessError, MapToAppError};
 use sqlx::SqlitePool;
 use std::sync::Arc;
-use crate::domain::repo::Repo;
 
 type Result<T> = std::result::Result<T, AppError>;
 

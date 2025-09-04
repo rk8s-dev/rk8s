@@ -1,20 +1,45 @@
 use crate::api::RepoIdentifier;
 use crate::config::Config;
 use crate::error::{AppError, OciError};
-use crate::utils::jwt::{Claims, decode};
+use crate::service::check_password;
+use crate::utils::jwt::{decode, Claims};
 use crate::utils::state::AppState;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
+use axum_extra::headers::authorization::Basic;
+use axum_extra::headers::Authorization;
+use axum_extra::TypedHeader;
 use std::sync::Arc;
 
 pub async fn authenticate(
     State(state): State<Arc<AppState>>,
+    basic: Option<TypedHeader<Authorization<Basic>>>,
     mut req: Request,
     next: Next,
 ) -> Result<impl IntoResponse, AppError> {
-    let claims = extract_claims(req.headers(), state.config.clone());
+    let claims = match extract_claims(req.headers(), state.config.clone()) {
+        x @ Ok(_) => x,
+        x @ Err(_) => match basic {
+            Some(basic) => {
+                let user = state
+                    .user_storage
+                    .query_user_by_name(basic.username())
+                    .await?;
+                check_password(
+                    &state.config.password_salt,
+                    &user.password,
+                    basic.password(),
+                )?;
+                Ok(Claims {
+                    sub: basic.username().to_string(),
+                    exp: 0,
+                })
+            }
+            None => x,
+        },
+    };
     match *req.method() {
         Method::GET | Method::HEAD => {
             if let Ok(claims) = claims {

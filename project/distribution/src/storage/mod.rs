@@ -25,6 +25,8 @@ pub trait Storage: Send + Sync {
         append: bool,
     ) -> Result<u64>;
 
+    async fn exists_by_digest(&self, digest: &Digest) -> Result<bool>;
+
     async fn write_by_uuid(&self, uuid: &str, stream: BodyDataStream, append: bool) -> Result<u64>;
 
     async fn move_to_digest(&self, session_id: &str, digest: &Digest) -> Result<()>;

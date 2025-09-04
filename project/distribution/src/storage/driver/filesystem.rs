@@ -7,6 +7,7 @@ use crate::error::{AppError, InternalError, MapToAppError, OciError};
 use axum::body::BodyDataStream;
 use futures::TryStreamExt;
 use oci_spec::image::Digest;
+use tokio::fs::metadata;
 use tokio::{
     fs::{
         File, OpenOptions, create_dir_all, read_dir, remove_dir_all, remove_file, rename,
@@ -97,6 +98,15 @@ impl Storage for FilesystemStorage {
         io::copy(&mut body_reader, &mut file_writer)
             .await
             .map_to_internal()
+    }
+
+    async fn exists_by_digest(&self, digest: &Digest) -> crate::storage::Result<bool> {
+        let path = self.path_manager.clone().blob_data_path(digest);
+        match metadata(path).await {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(InternalError::from(e).into()),
+        }
     }
 
     async fn write_by_uuid(&self, uuid: &str, stream: BodyDataStream, append: bool) -> Result<u64> {

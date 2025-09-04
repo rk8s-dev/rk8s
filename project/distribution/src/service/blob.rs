@@ -102,6 +102,30 @@ pub async fn post_blob_handler(
         return Err(OciError::NameInvalid(name).into());
     }
 
+    if let Some(mount_digest_str) = params.get("mount") {
+        let digest = oci_digest::from_str(mount_digest_str)
+            .map_err(|_| OciError::DigestInvalid(mount_digest_str.clone()))?;
+
+        if state.storage.exists_by_digest(&digest).await? {
+            let location = format!("/v2/{name}/blobs/{digest}");
+            return Ok(Response::builder()
+                .status(StatusCode::CREATED)
+                .header(LOCATION, location)
+                .header("Docker-Content-Digest", digest.to_string())
+                .body(Body::empty())
+                .unwrap());
+        }
+
+        let session_id = state.create_session().await;
+        let location = format!("/v2/{name}/blobs/uploads/{session_id}");
+        return Ok(Response::builder()
+            .status(StatusCode::ACCEPTED)
+            .header(LOCATION, location)
+            .header("Docker-Upload-UUID", &session_id)
+            .body(Body::empty())
+            .unwrap());
+    }
+
     if let Some(digest_str) = params.get("digest") {
         let content_length = headers
             .get(header::CONTENT_LENGTH)
@@ -126,22 +150,22 @@ pub async fn post_blob_handler(
             .await?;
 
         let location = format!("/v2/{name}/blobs/{digest}");
-        Ok(Response::builder()
+        return Ok(Response::builder()
             .status(StatusCode::CREATED)
             .header(LOCATION, location)
             .header("Docker-Content-Digest", digest.to_string())
             .body(Body::empty())
-            .unwrap())
-    } else {
-        let session_id = state.create_session().await;
-        let location = format!("/v2/{name}/blobs/uploads/{session_id}");
-        Ok(Response::builder()
-            .status(StatusCode::ACCEPTED)
-            .header(LOCATION, location)
-            .header("Docker-Upload-UUID", session_id)
-            .body(Body::empty())
-            .unwrap())
+            .unwrap());
     }
+
+    let session_id = state.create_session().await;
+    let location = format!("/v2/{name}/blobs/uploads/{session_id}");
+    Ok(Response::builder()
+        .status(StatusCode::ACCEPTED)
+        .header(LOCATION, location)
+        .header("Docker-Upload-UUID", session_id)
+        .body(Body::empty())
+        .unwrap())
 }
 
 /// Handles `PATCH /v2/<name>/blobs/uploads/<session_id>`.

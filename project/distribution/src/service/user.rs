@@ -1,4 +1,6 @@
-use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
+use crate::domain::user::User;
+use crate::error::{AppError, BusinessError, InternalError};
+use crate::service::{check_password, hash_password};
 use crate::utils::jwt::gen_token;
 use crate::utils::state::AppState;
 use axum::Json;
@@ -11,7 +13,6 @@ use axum_extra::headers::authorization::Basic;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use crate::domain::user::User;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserReq {
@@ -64,7 +65,7 @@ pub(crate) async fn auth(
                 let state = state.clone();
                 // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`
                 tokio::task::spawn_blocking(move || {
-                    check_password(&state.config.password_salt, &user, auth.password())
+                    check_password(&state.config.password_salt, &user.password, auth.password())
                 })
                 .await
                 .map_err(|e| InternalError::Others(e.to_string()))??;
@@ -79,22 +80,4 @@ pub(crate) async fn auth(
         expires_in: state.config.jwt_lifetime_secs,
         issued_at: Utc::now().to_rfc3339(),
     }))
-}
-
-fn hash_password(salt: &str, password: &str) -> Result<String, AppError> {
-    Ok(bcrypt::hash_with_salt(
-        password,
-        bcrypt::DEFAULT_COST,
-        salt.as_bytes().try_into().unwrap(),
-    )
-    .map_to_internal()?
-    .to_string())
-}
-
-fn check_password(salt: &str, user: &User, password: &str) -> Result<(), AppError> {
-    let hash = hash_password(salt, password)?;
-    if hash == user.password {
-        return Ok(());
-    }
-    Err(BusinessError::BadRequest("invalid password".to_string()).into())
 }

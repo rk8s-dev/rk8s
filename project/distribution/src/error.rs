@@ -135,7 +135,7 @@ impl IntoResponse for OciError {
         if let Self::Unauthorized(_, Some(config)) = self {
             let realm = format!("{}/auth/token", config.registry_url);
             let challenge = format!(
-                r#"Bearer realm="{realm}",service="oci-registry",scope="repository:*:*", Basic Real="oci registry""#,
+                r#"Bearer realm="{realm}",service="oci-registry",scope="repository:*:*", Basic Realm="oci registry""#,
             );
             response
                 .headers_mut()
