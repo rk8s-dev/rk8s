@@ -1,0 +1,6 @@
+cargo_env = true
+env = { OPT_LEVEL = "0" }
+rustc_flags = ["-lstatic=sqlite3", "-Lnative=$(location :libsqlite3-sys-0.30.1-build-script-run[out_dir])"]
+
+[buildscript.run]
+env = { OPT_LEVEL = "0" }
