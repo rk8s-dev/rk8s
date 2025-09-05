@@ -109,7 +109,7 @@ impl ServerCertVerifier for SkipServerVerification {
 pub async fn run_forever() -> Result<()> {
     //We should give the ipaddr of rks here
     let server_addr: String =
-        env::var("RKS_ADDR").unwrap_or_else(|_| "192.168.73.128:50051".to_string());
+        env::var("RKS_ADDRESS").unwrap_or_else(|_| "192.168.73.128:50051".to_string());
     let server_addr: SocketAddr = server_addr.parse()?;
 
     let node: Node = if let Ok(node_yaml) = env::var("NODE_YAML") {
