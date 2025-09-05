@@ -221,12 +221,14 @@ RKL provides two different ways to manage the pod lifecycle:
 
 The daemon supports two operational modes:
 
-1. Local Mode - Monitors static Pod configuration files
-2. Cluster Mode - Communicates with RKS control plane for distributed scheduling
+1. Local Mode: Monitors static Pod configuration files
+2. Cluster Mode: Communicates with RKS control plane for distributed scheduling
+
+**note**: cluster mode needs to specify `RKS_ADDRESS` environment variable. 
 
 **start daemon**
 ```bash
-$ rkl pod daemon
+$ RKS_ADDRESS=127.0.0.1:50051 rkl pod daemon
 ```
 
 **In local mode**, RKL runs as a background process that monitors changes to the `pod.yaml` file in the `/etc/rk8s/manifests` directory. When the file content changes, RKL automatically updates the current state of the pod to match the specification in `pod.yaml`.
@@ -244,7 +246,7 @@ When `--cluster` parameter or `RKS_ADDRESS` environment variable is specified or
 #### cluster
 Firstly, to connect with **RKS**, we can either set `RKS_ADDRESS` environment variable nor set it by using `--cluster` parameter.  
 
-After checking `--cluster` parameter firstly, rkl will try to get `RKS_ADDRESS` environment variable. **If both of them are not provided, then rkl will be running under the standalone mode**. The following is usage example:
+After checking `--cluster` parameter firstly, RKl will try to get `RKS_ADDRESS` environment variable. **If both of them are not provided, then RKl will be running under the standalone mode**. The following is usage the example:
 
 **pod create**
 
