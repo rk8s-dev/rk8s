@@ -10,7 +10,7 @@ By following the CRI(Container Runtime Interface) provided by kubernetes, it imp
 2. **Pod** - Group multiple containers that are sharing the same namespace and lifestyle. Kubernetes-Pod-Like 
 3. **Compose** - Run multi-container applications use Docker-Compose-style definitions. 
 
-Specifically, we provides two kinds of running mode while rkl is under the Pod workload:
+Specifically, we provides two kinds of running mode while RKL runs under the Pod workload:
 - Standalone
 - Cluster
 
