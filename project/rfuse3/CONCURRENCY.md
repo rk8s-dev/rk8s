@@ -44,12 +44,6 @@ FUSE_INIT 前内核与用户态尚未协商好参数（如最大写入 `max_writ
 ### 错误计数回收的重要性
 对包括参数解析失败、结构体截断等“早期失败”路径必须进行 `inflight -= 1`，否则 dispatch 永远认为高水位，造成“永久阻塞”或“实际没有任务仍然背压”现象，因此专门补丁确保所有 return 之前都减计数并 notify。
 
-### 为什么暂未将 inline opcode 计入 inflight
-保持“已迁移 opcode = 并发+背压管理”这一简单不变量，便于调试。后续一旦绝大多数 opcode 迁移，可以：
-1. 直接迁移剩余 opcode；或
-2. 在 inline 分支进入前 inflight++ / 结束后 inflight--。
-选项 (1) 统一模型更清晰。
-
 ## Kernel 交互与约束
 | 方面 | 内核 / 协商字段 | 用户态对应 | 备注 |
 |------|----------------|-----------|------|
@@ -93,9 +87,6 @@ FUSE_INIT 前内核与用户态尚未协商好参数（如最大写入 `max_writ
 | 零拷贝 | WorkItem.data 类型替换 | 需要保证生命周期跨 worker 安全 |
 
 ## FAQ
-Q: 为什么不直接把所有 opcode 一次性迁移？
-A: 渐进迁移便于快速验证核心并发/背压路径正确性，减少初始 diff 风险；同时允许针对高频 opcode 优先优化。
-
 Q: 背压是否可能导致内核侧“看起来空闲”但用户态阻塞？
 A: 会，但这是设计上主动限速。当用户态资源（内存/线程）处于高水位，宁愿让内核阻塞请求（内核已有上界控制）也不希望用户态复制与排队过多 payload。
 
@@ -126,13 +117,13 @@ Workers
 DispatchCtx (Arc 共享给每个 worker task)
   ├─ fs: Arc<FS>
   ├─ resp: UnboundedSender<FuseData>
-  ├─ inflight / inflight_notify (回调减计数 & 唤醒)
 
 WorkItem
   ├─ unique
   ├─ opcode (u32, 直接来自内核 header)
   ├─ in_header: InHeaderLite (避免 move 原始 header)
   └─ data: Vec<u8>  (请求体拷贝)
+  └─ _inflight_guard: InflightGuard (自动管理计数，一个请求对应一个计数)
 ```
 
 ## 生命周期
@@ -156,19 +147,7 @@ WorkItem
 - 通知：`async_notify::Notify`，在减计数后 `notify()`；阻塞端循环 `while inflight >= max_background { notified().await }`。
 
 ## 已迁移的 opcode
-- FUSE_LOOKUP
-- FUSE_GETATTR
-- FUSE_OPEN
-- FUSE_READ
-- FUSE_WRITE
-- FUSE_READDIR
-
-## 未迁移且仍走 inline 的 opcode（部分列举）
-DESTROY / FORGET / SETATTR / READLINK / SYMLINK / MKNOD / MKDIR / UNLINK / RMDIR / RENAME / LINK / STATFS / RELEASE / FSYNC / (XATTR 相关) / FLUSH / OPENDIR / RELEASEDIR / FSYNCDIR / ACCESS / CREATE / INTERRUPT / BMAP / POLL / NOTIFY_REPLY / BATCH_FORGET / FALLOCATE / READDIRPLUS / RENAME2 / LSEEK / COPY_FILE_RANGE 等。
-
-这些如果也应受背压限制，有两种方案：
-1. 直接迁移到 worker（推荐，统一语义）。
-2. 在 inline 分支手动包裹 inflight++ / -- （目前未做，以免混杂两种路径）。
+​	所有已实现的opcode都已迁移过去。FS应该在启动的时候就设置好使用单线程模式还是多worker模式，不能使用混杂模式。
 
 ## 线程安全 & 同步
 - FS 需要 `Send + Sync + 'static`，因此在 `Session` 泛型约束中已经添加。
@@ -204,11 +183,11 @@ session.mount(fs, mount_point).await?;
 ```
 
 ## 待办清单
-- [ ] 迁移剩余耗时 opcode（WRITE 已迁，接下来建议：SETATTR / FSYNC / RELEASE / CREATE 等）
+- [x] 迁移剩余耗时 opcode（WRITE 已迁，接下来建议：SETATTR / FSYNC / RELEASE / CREATE 等）
 - [ ] interrupt 支持
 - [ ] per-inode 串行（可选）
 - [ ] WorkItem 零拷贝优化
-- [ ] Inline opcode 统一纳入 inflight 或全部迁移
+- [x] Inline opcode 统一纳入 inflight 或全部迁移
 - [ ] 指标/监控：当前 in_flight，高水位阻塞次数
 
 ## 风险与测试建议
