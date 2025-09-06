@@ -25,7 +25,9 @@ async-notify = "0.3"
 async-io = { version = "2.3.1" }
 async-process = { version = "2.1.0" }
 axum = "0.8.1"
+axum-extra = { version = "0.10.1", features = ["typed-header"] }
 aws-lc-sys = "0.29.0"
+bcrypt = "0.17.1"
 bitflags = "2.9.0"
 bincode = "1.3.3"
 bytes = "1.10.1"
@@ -34,7 +36,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "serde",
 ] }
-clap = { version = "4.5.32", features = ["derive"] }
+clap = { version = "4.5.32", features = ["derive", "env"] }
 cni-plugin = { version = "0.2.1", features = ["with-smol"] }
 context = "3.0.0"
 dockerfile-parser = "0.9.0"
@@ -53,6 +55,7 @@ http-body = "0.4.5"
 hyper = "0.14.27"
 idna_adapter = "=1.2.0"
 ipnetwork = "0.17.0"
+jsonwebtoken = "9.3.1"
 lazy_static = "1.5.0"
 libbpf-sys = { version = "1.5.0", optional = true }
 libc = "0.2.171"
@@ -109,15 +112,17 @@ serde_yaml = "0.9"
 sha2 = "0.10.8"
 sha256 = "1.6.0"
 slab = "0.4.9"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate"]}
 tar = "0.4.44"
 tempfile = "3.19.1"
 thiserror = "2.0.12"
 tokio = { version = "1.44.0", features = ["full"] }
 tokio-util = { version = "0.7.13", features = ["io"] }
 tonic = "0.13"
+tower-http = { version = "0.6.6", features = ["trace"] }
 tracing = { version = "0.1.41", features = ["attributes"] }
 tracing-journald = "0.3.1"
-tracing-subscriber = { version = "0.3.19", features = ["json", "env-filter"] }
+tracing-subscriber = { version = "0.3.19", features = ["json", "env-filter", "time", "fmt"] }
 trait-make = "0.1"
 uuid = { version = "1.15.1", features = [
     "v4",

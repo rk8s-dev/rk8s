@@ -21,8 +21,3 @@ pub fn is_valid_tag(tag: &str) -> bool {
 pub fn is_valid_reference(reference: &str) -> bool {
     is_valid_digest(reference) || is_valid_tag(reference)
 }
-
-pub fn is_valid_range(range: &str) -> bool {
-    let re = Regex::new(r"^[0-9]+-[0-9]+$").unwrap();
-    re.is_match(range)
-}
