@@ -13,6 +13,8 @@ pub trait ObjectBackend: Send + Sync {
         &self,
         key: &str,
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>>;
+    async fn get_etag(&self, key: &str)
+    -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 pub struct ObjectClient<B: ObjectBackend> {
@@ -37,5 +39,12 @@ impl<B: ObjectBackend> ObjectClient<B> {
         key: &str,
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
         self.backend.get_object(key).await
+    }
+
+    pub async fn get_etag(
+        &self,
+        key: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        self.backend.get_etag(key).await
     }
 }

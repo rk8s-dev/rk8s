@@ -15,6 +15,10 @@ rfuse3 = { version = "0.0.3", features = ["tokio-runtime","unprivileged"]}
 futures-util = "0.3.31"
 libc = "0.2.175"
 bytes = "1"
+moka = { version = "0.12.10", features = ["future"] }
+dirs = "6.0.0"
+sha2 = "0.10.9"
+hex = "0.4.3"
 
 [dev-dependencies]
 tempfile = "3"
