@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 common = { path = "../common" }
 libcni = { path = "../libcni" }
+libscheduler = { path = "../libscheduler" }
 tokio = { version = "1.44", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.5.32", features = ["derive"] }
@@ -37,3 +38,6 @@ tempfile = "3.20.0"
 tokio-util = "0.7.0"
 env_logger = "0.11.0"
 once_cell = "1.21.0"
+
+[dev-dependencies]
+serial_test = "3.2.0"

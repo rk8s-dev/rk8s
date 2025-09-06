@@ -4,13 +4,13 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use etcd_client::{Client, DeleteOptions};
-use libscheduler::plugins::Plugins;
-use libscheduler::plugins::node_resources_fit::ScoringStrategy;
-use libscheduler::with_xline::model::{
+use common::{
     ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec as XlineNodeSpec,
     NodeStatus, ObjectMeta, PodSpec as XlinePodSpec, PodTask, Resource,
 };
+use etcd_client::{Client, DeleteOptions};
+use libscheduler::plugins::Plugins;
+use libscheduler::plugins::node_resources_fit::ScoringStrategy;
 use libscheduler::with_xline::run_scheduler_with_xline;
 
 const ETCD_ENDPOINTS: &[&str] = &["127.0.0.1:2379"];
@@ -127,6 +127,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             annotations: HashMap::new(),
         },
         spec: XlinePodSpec {
+            node_name: None,
             containers: vec![ContainerSpec {
                 name: "app".to_string(),
                 image: "nginx:latest".to_string(),
@@ -136,7 +137,6 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             }],
             init_containers: vec![],
         },
-        nodename: "".to_string(),
     }
 }
 
@@ -482,7 +482,7 @@ async fn test_scheduler_with_xline_existing_assignment() {
         .expect("Failed to put node");
 
     let mut assigned_pod = create_test_pod("already-assigned", Some("1"), Some("1Gi"));
-    assigned_pod.nodename = "existing-node".to_string();
+    assigned_pod.spec.node_name = Some("existing-node".to_string());
     etcd_client
         .put_pod(&assigned_pod)
         .await

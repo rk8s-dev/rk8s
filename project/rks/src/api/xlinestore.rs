@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use common::Node;
 use etcd_client::{Client, GetOptions, PutOptions};
@@ -91,10 +92,11 @@ impl XlineStore {
         client.delete(key, None).await?;
         Ok(())
     }
-    // pub async fn delete_node(&self, node_name: &str) -> Result<()> {
-    //     let key = format!("/registry/nodes/{}", node_name);
-    //     let mut client = self.client.write().await;
-    //     client.delete(key, None).await?;
-    //     Ok(())
-    // }
+
+    pub async fn delete_node(&self, node_name: &str) -> Result<()> {
+        let key = format!("/registry/nodes/{node_name}");
+        let mut client = self.client.write().await;
+        client.delete(key, None).await?;
+        Ok(())
+    }
 }

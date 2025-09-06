@@ -26,6 +26,9 @@ fn default_namespace() -> String {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PodSpec {
+    //if pod is distributed to a node ,then this field should be filled with node-id
+    #[serde(default)]
+    pub nodename: Option<String>,
     #[serde(default)]
     pub containers: Vec<ContainerSpec>,
     #[serde(default)]
@@ -78,8 +81,6 @@ pub struct PodTask {
     pub kind: String,
     pub metadata: ObjectMeta,
     pub spec: PodSpec,
-    //if pod is distributed to a node ,then this field should be filled with node-id
-    pub nodename: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
