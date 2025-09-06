@@ -61,7 +61,7 @@ impl NetworkReceiver {
         info!("Initializing QUIC client for node: {}", self.node_id);
 
         // Create client configuration with platform verifier
-        let client_config = ClientConfig::try_with_platform_verifier()?;
+        let client_config = ClientConfig::with_platform_verifier();
 
         let mut endpoint = Endpoint::client("[::]:0".parse()?)?;
         endpoint.set_default_client_config(client_config);
