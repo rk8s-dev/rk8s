@@ -187,11 +187,22 @@ sudo rkl container list
 sudo rkl container exec single-container-test /bin/sh
 ```
 
-**Pod Management:**
+**Pod Management(Standalone):**
 ```bash
 sudo rkl pod run pod.yaml
 sudo rkl pod state simple-container-task
 sudo rkl pod exec simple-container-task container-name /bin/sh
+```
+**Pod Management(Cluster):**
+```bash
+# Create pod via RKS control plane  
+sudo rkl pod create pod.yaml --cluster 127.0.0.1:50051  
+  
+# List pods from RKS  
+RKS_ADDRESS=127.0.0.1:50051 sudo rkl pod list  
+  
+# Delete pod via RKS  
+sudo rkl pod delete simple-container-task --cluster 127.0.0.1:50051
 ```
 
 **Compose Applications:**
@@ -203,7 +214,8 @@ sudo rkl compose down
 
 **Daemon Mode:**
 ```bash
-sudo rkl pod daemon  # Monitors /etc/rk8s/manifests/
+export RKL_ADDRESS=127.0.0.1:50051
+sudo rkl pod daemon  # Monitors /etc/rk8s/manifests/ and acts as work node of rks
 ```
 
 ## Key Features

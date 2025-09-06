@@ -10,6 +10,13 @@ By following the CRI(Container Runtime Interface) provided by kubernetes, it imp
 2. **Pod** - Group multiple containers that are sharing the same namespace and lifestyle. Kubernetes-Pod-Like 
 3. **Compose** - Run multi-container applications use Docker-Compose-style definitions. 
 
+Specifically, we provides two kinds of running mode while RKL runs under the Pod workload:
+- Standalone
+- Cluster
+
+the usage details refers to [here](#pod).
+
+
 ## Directory Structure
 
 ```bash
@@ -206,13 +213,70 @@ Commands:
 Options:
   -h, --help  Print help
 ```
+
 RKL provides two different ways to manage the pod lifecycle:
 - **CLI**
 - **Daemon**
 ### Daemon Mode
-In daemon mode, RKL runs as a background process that monitors changes to the `pod.yaml` file in the `/etc/rk8s/manifests` directory. When the file content changes, RKL automatically updates the current state of the pod to match the specification in `pod.yaml`.
+
+The daemon supports two operational modes:
+
+1. Local Mode: Monitors static Pod configuration files
+2. Cluster Mode: Communicates with RKS control plane for distributed scheduling
+
+**note**: cluster mode needs to specify `RKS_ADDRESS` environment variable. 
+
+**start daemon**
+```bash
+$ RKS_ADDRESS=127.0.0.1:50051 rkl pod daemon
+```
+
+**In local mode**, RKL runs as a background process that monitors changes to the `pod.yaml` file in the `/etc/rk8s/manifests` directory. When the file content changes, RKL automatically updates the current state of the pod to match the specification in `pod.yaml`.
+
+**In cluster mode**, RKL acts as a **worker node** communicating with the RKS(Control Plane):
+- Once daemon starts, RKL will register node information with RKS automatically
+- Then daemon establish persistent QUIC connection with RKS, waiting to receive `create` and `delete` pod request to execute
+- Additionally, RKL sends heartbeats every 5 seconds to maintain connection
+
 ### CLI Mode
+Currently, when RKL is running under the pod workload, we can switch different running mode by using `--cluster` parameter.
+
+When `--cluster` parameter or `RKS_ADDRESS` environment variable is specified or, then RKL will switch to `CLUSTER` mode which will send pod-related request to **RKS**.(If both of them is set, RKL use the `--cluster` one)
+
+#### cluster
+Firstly, to connect with **RKS**, we can either set `RKS_ADDRESS` environment variable nor set it by using `--cluster` parameter.  
+
+After checking `--cluster` parameter firstly, RKl will try to get `RKS_ADDRESS` environment variable. **If both of them are not provided, then RKl will be running under the standalone mode**. The following is usage the example:
+
+**pod create**
+
+```bash
+$ rkl pod create pod.yaml --cluster 127.0.0.1:50051
+RKL connected to RKS at 127.0.0.1:50051
+```
+
+**pod list**
+
+```bash
+$ RKS_ADDRESS=127.0.0.1:50051 rkl pod list
+RKL connected to RKS at 127.0.0.1:50051
+NAME  READY  STATUS  RESTARTS  AGE
+test-pod1
+test-pod3
+```
+
+**pod delete**
+
+```bash
+$ rkl pod delete test-pod1 --cluster 127.0.0.1:50051
+RKL connected to RKS at 127.0.0.1:50051
+pod test-pod1 deleted
+
+```
+
+#### standalone
 **Run a new pod and check it's state**
+
 ```bash
 $ rkl pod run pod.yml 
 $ rkl pod state simple-container-task
