@@ -6,6 +6,7 @@ rust_binary(
     crate_root = "src/main.rs",
     edition = "2024",
     deps = [
+        "//third-party:netlink-packet-route",
         "//third-party:anyhow",
         "//third-party:chrono",
         "//third-party:tabwriter",
@@ -36,7 +37,6 @@ rust_binary(
         "//third-party:quinn",
         "//third-party:bincode",
         "//third-party:gethostname",
-        "//third-party:get_if_addrs",
         "//third-party:sysinfo",
         "//project/libcgroups:libcgroups",
         "//project/libcontainer:libcontainer",
@@ -64,6 +64,7 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2024",
     deps = [
+        "//third-party:netlink-packet-route",
         "//third-party:anyhow",
         "//third-party:protobuf",
         "//third-party:chrono",

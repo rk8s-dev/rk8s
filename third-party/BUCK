@@ -6811,6 +6811,28 @@ cargo.rust_library(
     deps = [":serde-1.0.219"],
 )
 
+alias(
+    name = "iptables",
+    actual = ":iptables-0.6.0",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "iptables-0.6.0",
+    srcs = [
+        "vendor/iptables-0.6.0/src/error.rs",
+        "vendor/iptables-0.6.0/src/lib.rs",
+    ],
+    crate = "iptables",
+    crate_root = "vendor/iptables-0.6.0/src/lib.rs",
+    edition = "2024",
+    visibility = [],
+    deps = [
+        ":lazy_static-1.5.0",
+        ":regex-1.11.1",
+    ],
+)
+
 cargo.rust_library(
     name = "is_terminal_polyfill-1.70.1",
     srcs = ["vendor/is_terminal_polyfill-1.70.1/src/lib.rs"],
@@ -23387,6 +23409,43 @@ cargo.rust_library(
 )
 
 cargo.rust_library(
+    name = "scc-2.4.0",
+    srcs = [
+        "vendor/scc-2.4.0/README.md",
+        "vendor/scc-2.4.0/src/bag.rs",
+        "vendor/scc-2.4.0/src/equivalent.rs",
+        "vendor/scc-2.4.0/src/exit_guard.rs",
+        "vendor/scc-2.4.0/src/hash_cache.rs",
+        "vendor/scc-2.4.0/src/hash_index.rs",
+        "vendor/scc-2.4.0/src/hash_map.rs",
+        "vendor/scc-2.4.0/src/hash_set.rs",
+        "vendor/scc-2.4.0/src/hash_table.rs",
+        "vendor/scc-2.4.0/src/hash_table/bucket.rs",
+        "vendor/scc-2.4.0/src/hash_table/bucket_array.rs",
+        "vendor/scc-2.4.0/src/lib.rs",
+        "vendor/scc-2.4.0/src/linked_list.rs",
+        "vendor/scc-2.4.0/src/queue.rs",
+        "vendor/scc-2.4.0/src/serde.rs",
+        "vendor/scc-2.4.0/src/stack.rs",
+        "vendor/scc-2.4.0/src/tests.rs",
+        "vendor/scc-2.4.0/src/tests/correctness.rs",
+        "vendor/scc-2.4.0/src/tests/model.rs",
+        "vendor/scc-2.4.0/src/tests/performance.rs",
+        "vendor/scc-2.4.0/src/tree_index.rs",
+        "vendor/scc-2.4.0/src/tree_index/internal_node.rs",
+        "vendor/scc-2.4.0/src/tree_index/leaf.rs",
+        "vendor/scc-2.4.0/src/tree_index/leaf_node.rs",
+        "vendor/scc-2.4.0/src/tree_index/node.rs",
+        "vendor/scc-2.4.0/src/wait_queue.rs",
+    ],
+    crate = "scc",
+    crate_root = "vendor/scc-2.4.0/src/lib.rs",
+    edition = "2021",
+    visibility = [],
+    deps = [":sdd-3.0.10"],
+)
+
+cargo.rust_library(
     name = "schannel-0.1.27",
     srcs = [
         "vendor/schannel-0.1.27/src/alpn_list.rs",
@@ -23418,6 +23477,33 @@ cargo.rust_library(
     crate = "scopeguard",
     crate_root = "vendor/scopeguard-1.2.0/src/lib.rs",
     edition = "2015",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "sdd-3.0.10",
+    srcs = [
+        "vendor/sdd-3.0.10/README.md",
+        "vendor/sdd-3.0.10/src/atomic_owned.rs",
+        "vendor/sdd-3.0.10/src/atomic_shared.rs",
+        "vendor/sdd-3.0.10/src/collectible.rs",
+        "vendor/sdd-3.0.10/src/collector.rs",
+        "vendor/sdd-3.0.10/src/epoch.rs",
+        "vendor/sdd-3.0.10/src/exit_guard.rs",
+        "vendor/sdd-3.0.10/src/guard.rs",
+        "vendor/sdd-3.0.10/src/lib.rs",
+        "vendor/sdd-3.0.10/src/owned.rs",
+        "vendor/sdd-3.0.10/src/ptr.rs",
+        "vendor/sdd-3.0.10/src/ref_counted.rs",
+        "vendor/sdd-3.0.10/src/shared.rs",
+        "vendor/sdd-3.0.10/src/tag.rs",
+        "vendor/sdd-3.0.10/src/tests.rs",
+        "vendor/sdd-3.0.10/src/tests/correctness.rs",
+        "vendor/sdd-3.0.10/src/tests/model.rs",
+    ],
+    crate = "sdd",
+    crate_root = "vendor/sdd-3.0.10/src/lib.rs",
+    edition = "2021",
     visibility = [],
 )
 
@@ -24100,6 +24186,62 @@ cargo.rust_library(
         ":ryu-1.0.20",
         ":serde-1.0.219",
         ":unsafe-libyaml-0.2.11",
+    ],
+)
+
+alias(
+    name = "serial_test",
+    actual = ":serial_test-3.2.0",
+    visibility = ["PUBLIC"],
+)
+
+cargo.rust_library(
+    name = "serial_test-3.2.0",
+    srcs = [
+        "vendor/serial_test-3.2.0/src/code_lock.rs",
+        "vendor/serial_test-3.2.0/src/file_lock.rs",
+        "vendor/serial_test-3.2.0/src/lib.rs",
+        "vendor/serial_test-3.2.0/src/parallel_code_lock.rs",
+        "vendor/serial_test-3.2.0/src/parallel_file_lock.rs",
+        "vendor/serial_test-3.2.0/src/rwlock.rs",
+        "vendor/serial_test-3.2.0/src/serial_code_lock.rs",
+        "vendor/serial_test-3.2.0/src/serial_file_lock.rs",
+    ],
+    crate = "serial_test",
+    crate_root = "vendor/serial_test-3.2.0/src/lib.rs",
+    edition = "2018",
+    features = [
+        "async",
+        "default",
+        "logging",
+    ],
+    visibility = [],
+    deps = [
+        ":futures-0.3.31",
+        ":log-0.4.27",
+        ":once_cell-1.21.3",
+        ":parking_lot-0.12.3",
+        ":scc-2.4.0",
+        ":serial_test_derive-3.2.0",
+    ],
+)
+
+cargo.rust_library(
+    name = "serial_test_derive-3.2.0",
+    srcs = ["vendor/serial_test_derive-3.2.0/src/lib.rs"],
+    crate = "serial_test_derive",
+    crate_root = "vendor/serial_test_derive-3.2.0/src/lib.rs",
+    edition = "2018",
+    features = [
+        "async",
+        "default",
+    ],
+    proc_macro = True,
+    visibility = [],
+    deps = [
+        ":proc-macro2-1.0.94",
+        ":quote-1.0.40",
+        ":syn-2.0.100",
     ],
 )
 
