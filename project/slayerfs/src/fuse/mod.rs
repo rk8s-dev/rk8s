@@ -68,7 +68,7 @@ mod mount_tests {
         let handle = match mount_vfs_unprivileged(fs, &mnt_path).await {
             Ok(h) => h,
             Err(e) => {
-                eprintln!("skip fuse test: mount failed: {}", e);
+                eprintln!("skip fuse test: mount failed: {e}");
                 return;
             }
         };
@@ -101,7 +101,7 @@ mod mount_tests {
 
         // 主动卸载并等待结束
         if let Err(e) = handle.unmount().await {
-            eprintln!("unmount error: {}", e);
+            eprintln!("unmount error: {e}");
         }
     }
 }

@@ -725,7 +725,7 @@ mod tests {
 
         tokio::select! {
             Some(watch_result) = rx.recv() => {
-                println!("Received watch event: {:?}", watch_result);
+                println!("Received watch event: {watch_result:?}");
                 assert!(!watch_result.is_empty());
             }
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {

@@ -59,7 +59,7 @@ impl ObjectBackend for RustfsLikeBackend {
         match fs::metadata(path).await {
             Ok(metadata) => {
                 let modified = metadata.modified()?;
-                Ok(format!("{:?}", modified))
+                Ok(format!("{modified:?}"))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("".to_string()),
             Err(e) => Err(Box::new(e)),

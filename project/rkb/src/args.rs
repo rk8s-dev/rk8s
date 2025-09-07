@@ -1,5 +1,24 @@
-use clap::Parser;
+use crate::{exec_main, mount_main};
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+
+#[derive(Parser, Debug)]
+#[command(name = "rkb", about = "A simple container image builder")]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    Build(BuildArgs),
+    #[command(hide = true)]
+    Mount(mount_main::MountArgs),
+    #[command(hide = true)]
+    Exec(exec_main::ExecArgs),
+    #[command(hide = true)]
+    Cleanup(exec_main::CleanupArgs),
+}
 
 #[derive(Parser, Debug)]
 pub struct BuildArgs {

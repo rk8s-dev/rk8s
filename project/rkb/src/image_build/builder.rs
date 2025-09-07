@@ -1,24 +1,20 @@
-use std::{collections::HashMap, path::PathBuf};
-
-use anyhow::{Context, Result};
-
-use dockerfile_parser::Dockerfile;
-
+use super::executor::Executor;
 use crate::{
+    compressor::tar_gz_compressor::TarGzCompressor,
     oci_spec::{
         builder::OCIBuilder, config::OciImageConfig, index::OciImageIndex,
         manifest::OciImageManifest,
     },
-    overlayfs::mount_config::MountConfig,
+    overlayfs::MountConfig,
 };
-
-use super::{config::BuildConfig, executor::Executor};
+use anyhow::{Context, Result};
+use dockerfile_parser::Dockerfile;
+use std::{collections::HashMap, path::PathBuf};
 
 pub struct Builder {
     pub dockerfile: Dockerfile,
     pub mount_config: MountConfig,
     pub image_output_dir: PathBuf,
-    pub build_config: BuildConfig,
 }
 
 impl Builder {
@@ -27,7 +23,6 @@ impl Builder {
             dockerfile,
             mount_config: MountConfig::default(),
             image_output_dir: PathBuf::default(),
-            build_config: BuildConfig::default(),
         }
     }
 
@@ -38,11 +33,6 @@ impl Builder {
 
     pub fn image_output_dir(mut self, image_output_dir: PathBuf) -> Self {
         self.image_output_dir = image_output_dir;
-        self
-    }
-
-    pub fn config(mut self, build_config: BuildConfig) -> Self {
-        self.build_config = build_config;
         self
     }
 
@@ -58,18 +48,18 @@ impl Builder {
 
     pub fn build_image(&self) -> Result<()> {
         let global_args = self.parse_global_args();
-        let mut executor = Executor::new(self.image_output_dir.clone())
-            .stage_executor_config(self.build_config.clone(), &global_args);
+        let mut executor = Executor::new(self.image_output_dir.clone(), Box::new(TarGzCompressor))
+            .stage_executor_config(&global_args);
         executor.execute_stages(&self.dockerfile.stages().stages)?;
 
-        // by now, the layers should be in `image_output_dir/blobs/sha256`
+        // By now, the layers should be in `image_output_dir/blobs/sha256`
         // construct the image metadata
 
-        // TODO: add `executor.image_config` to OciImageConfig
+        // TODO: Add `executor.image_config` to OciImageConfig
         let config = executor
             .image_config
             .get_oci_image_config()
-            .with_context(|| "Failed to get OCI image config")?;
+            .context("Failed to get OCI image config")?;
         let image_config = OciImageConfig::default()
             .config(config)
             .and_then(|config| {
@@ -99,7 +89,7 @@ impl Builder {
 
         oci_builder
             .build()
-            .with_context(|| "Failed to build OCI metadata")?;
+            .context("Failed to build OCI metadata")?;
 
         Ok(())
     }

@@ -3,18 +3,15 @@ pub mod config;
 pub mod executor;
 pub mod stage_executor;
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use dockerfile_parser::Dockerfile;
 use rand::{Rng, distr::Alphanumeric};
 
-use crate::build_arg::BuildArgs;
+use crate::args::BuildArgs;
 use builder::Builder;
-use config::BuildConfig;
 
 fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
     let dockerfile_path = dockerfile_path.as_ref().to_path_buf();
@@ -26,10 +23,6 @@ fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
 }
 
 pub fn build_image(build_args: &BuildArgs) -> Result<()> {
-    let build_config = BuildConfig::default()
-        .verbose(build_args.verbose)
-        .libfuse(build_args.libfuse);
-
     if let Some(dockerfile_path) = build_args.file.as_ref() {
         let dockerfile = parse_dockerfile(dockerfile_path)?;
 
@@ -49,7 +42,7 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
 
         let image_output_dir = PathBuf::from(format!("{output_dir}/{tag}"));
 
-        if fs::metadata(&image_output_dir).is_ok() {
+        if image_output_dir.exists() {
             fs::remove_dir_all(&image_output_dir).with_context(|| {
                 format!(
                     "Failed to remove existing directory: {}",
@@ -64,9 +57,8 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
             )
         })?;
 
-        let image_builder = Builder::new(dockerfile)
-            .config(build_config)
-            .image_output_dir(image_output_dir);
+        let image_builder = Builder::new(dockerfile).image_output_dir(image_output_dir);
+
         image_builder.build_image()?;
     }
 
@@ -170,7 +162,7 @@ mod tests {
                                 }
                             }
                         }
-                        println!("commands: {commands:?}");
+                        tracing::debug!("commands: {commands:?}");
                     }
                 }
             }

@@ -2,24 +2,6 @@ use anyhow::{Context, Result};
 use oci_spec::image::{Config, ConfigBuilder};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Default)]
-pub struct BuildConfig {
-    pub libfuse: bool,
-    pub verbose: bool,
-}
-
-impl BuildConfig {
-    pub fn libfuse(mut self, libfuse: bool) -> Self {
-        self.libfuse = libfuse;
-        self
-    }
-
-    pub fn verbose(mut self, verbose: bool) -> Self {
-        self.verbose = verbose;
-        self
-    }
-}
-
 /// Image config is used in config.json.
 ///
 /// Currently not exhaustive, only some simple fields.
@@ -74,24 +56,16 @@ impl ImageConfig {
             config = config.cmd(cmd.clone());
         }
 
-        config
-            .build()
-            .with_context(|| "Failed to build OCI image config")
+        config.build().context("Failed to build OCI image config")
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct StageExecutorConfig {
-    pub build_config: BuildConfig,
     pub global_args: HashMap<String, Option<String>>,
 }
 
 impl StageExecutorConfig {
-    pub fn build_config(mut self, build_config: BuildConfig) -> Self {
-        self.build_config = build_config;
-        self
-    }
-
     pub fn global_args(mut self, global_args: &HashMap<String, Option<String>>) -> Self {
         self.global_args = global_args.clone();
         self

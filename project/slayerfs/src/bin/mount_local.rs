@@ -49,10 +49,7 @@ async fn main() {
             std::process::exit(1);
         }
 
-        println!(
-            "Mounting SlayerFS at {} (backend: {})...",
-            mount_point, data_dir
-        );
+        println!("Mounting SlayerFS at {mount_point} (backend: {data_dir})...");
         println!("Press Ctrl+C to unmount and exit.");
         let handle = match mount_vfs_unprivileged(fs, std::path::Path::new(&mount_point)).await {
             Ok(h) => h,

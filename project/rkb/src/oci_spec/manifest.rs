@@ -1,9 +1,8 @@
-use std::str::FromStr;
-
 use anyhow::{Context, Result};
 use oci_spec::image::{
     DescriptorBuilder, ImageManifest, ImageManifestBuilder, MediaType, SCHEMA_VERSION, Sha256Digest,
 };
+use std::str::FromStr;
 
 pub struct OciImageManifest {
     pub image_manifest_builder: ImageManifestBuilder,
@@ -19,7 +18,7 @@ impl OciImageManifest {
                     .with_context(|| format!("Invalid digest format: {config_sha256sum}"))?,
             )
             .build()
-            .with_context(|| "Failed to build config descriptor")?;
+            .context("Failed to build config descriptor")?;
 
         self.image_manifest_builder = self.image_manifest_builder.config(config);
 
@@ -51,7 +50,7 @@ impl OciImageManifest {
     pub fn build(self) -> Result<ImageManifest> {
         self.image_manifest_builder
             .build()
-            .with_context(|| "Failed to build image manifest")
+            .context("Failed to build image manifest")
     }
 }
 

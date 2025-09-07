@@ -398,7 +398,7 @@ mod tests {
         assert!(score <= 100);
 
         // Test with unbalanced utilization
-        let unbalanced_requested = vec![3500, 1 * 1024 * 1024 * 1024]; // CPU: 3500mc, Memory: 1GB
+        let unbalanced_requested = vec![3500, 1024 * 1024 * 1024]; // CPU: 3500mc, Memory: 1GB
         let unbalanced_score = plugin.balanced_resource_scorer(&unbalanced_requested, &allocatable);
 
         // Should give lower score for unbalanced utilization

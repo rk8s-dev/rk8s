@@ -40,13 +40,13 @@ impl EtcdTestClient {
     }
 
     async fn delete_node(&mut self, node_name: &str) -> Result<(), anyhow::Error> {
-        let key = format!("/registry/nodes/{}", node_name);
+        let key = format!("/registry/nodes/{node_name}");
         self.client.delete(key, None).await?;
         Ok(())
     }
 
     async fn delete_pod(&mut self, pod_name: &str) -> Result<(), anyhow::Error> {
-        let key = format!("/registry/pods/{}", pod_name);
+        let key = format!("/registry/pods/{pod_name}");
         self.client.delete(key, None).await?;
         Ok(())
     }
