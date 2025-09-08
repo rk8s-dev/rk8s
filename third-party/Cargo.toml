@@ -89,7 +89,7 @@ nix = { version = "0.29.0", features = [
 oci-distribution = "0.11.0"
 oci-spec = { version = "~0.7.1", features = ["runtime"] }
 once_cell = "1.21.2"
-openssl = { version = "0.10.71", features = ["vendored"] }
+openssl = "0.10.71"
 prctl = "1.0.0"
 procfs = "0.17.0"
 prost = "0.13.5"
