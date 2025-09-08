@@ -189,12 +189,12 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
         let mut file = match tokio::fs::File::open(file_path.clone()).await {
             Ok(file) => file,
             Err(e) => {
-                panic!("failed to open cache file: {}", e);
+                panic!("failed to open cache file: {e}");
             }
         };
 
         if let Err(e) = file.seek(SeekFrom::Start(start as u64)).await {
-            panic!("failed to seek in cache file: {}", e);
+            panic!("failed to seek in cache file: {e}");
         }
 
         match file.read_exact(buf).await {
@@ -207,7 +207,7 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
                     .await;
             }
             Err(e) => {
-                panic!("failed to read from cache file: {}", e);
+                panic!("failed to read from cache file: {e}");
             }
         }
     }

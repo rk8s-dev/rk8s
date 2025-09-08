@@ -1,13 +1,10 @@
 use std::{fs, path::PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use oci_spec::image::OciLayoutBuilder;
 use sha256::try_digest;
 
-use super::{
-    oci_image_config::OciImageConfig, oci_image_index::OciImageIndex,
-    oci_image_manifest::OciImageManifest,
-};
+use super::{config::OciImageConfig, index::OciImageIndex, manifest::OciImageManifest};
 
 /// Currently only supports single manifest
 ///
@@ -45,13 +42,10 @@ impl OCIBuilder {
     pub fn build(mut self) -> Result<()> {
         let layer_dir = self.image_dir.join("blobs/sha256");
         if !layer_dir.exists() {
-            return Err(anyhow::anyhow!(
-                "Layer path does not exist: {}",
-                layer_dir.display()
-            ));
+            bail!("Image directory does not exist: {}", layer_dir.display());
         }
 
-        println!("Generating OCI image layout...");
+        tracing::info!("Generating OCI image layout...");
         let image_config = self.oci_image_config.build()?;
         let image_config_path = layer_dir.join("config.json");
         image_config
@@ -83,7 +77,7 @@ impl OCIBuilder {
             )
         })?;
 
-        println!("Generating OCI image manifest...");
+        tracing::info!("Generating OCI image manifest...");
         self.oci_image_manifest = self
             .oci_image_manifest
             .config(image_config_sha256sum, image_config_metadata.len())
@@ -120,7 +114,7 @@ impl OCIBuilder {
                 )
             })?;
 
-        println!("Generating OCI image index...");
+        tracing::info!("Generating OCI image index...");
         self.oci_image_index = self
             .oci_image_index
             .manifests(vec![(
@@ -139,11 +133,11 @@ impl OCIBuilder {
                 )
             })?;
 
-        println!("Generating OCI layout...");
+        tracing::info!("Generating OCI layout...");
         let oci_layout = OciLayoutBuilder::default()
             .image_layout_version("1.0.0".to_string())
             .build()
-            .with_context(|| "Failed to build OCI layout")?;
+            .context("Failed to build OCI layout")?;
         let oci_layout_path = self.image_dir.join("oci-layout");
         oci_layout
             .to_file_pretty(&oci_layout_path)

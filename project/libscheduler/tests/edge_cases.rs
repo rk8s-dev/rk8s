@@ -353,7 +353,7 @@ async fn test_scheduler_high_priority_preemption_order() {
 
     for i in (1..=100).rev() {
         scheduler
-            .update_cache_pod(make_pod(&format!("pod-{}", i), i, 1, 100))
+            .update_cache_pod(make_pod(&format!("pod-{i}"), i, 1, 100))
             .await;
     }
 
@@ -520,7 +520,7 @@ async fn test_scheduler_concurrent_modifications() {
 
     for i in 0..5 {
         scheduler
-            .update_cache_pod(make_pod(&format!("pod-{}", i), 10, 1, 1000))
+            .update_cache_pod(make_pod(&format!("pod-{i}"), 10, 1, 1000))
             .await;
         if i == 2 {
             scheduler

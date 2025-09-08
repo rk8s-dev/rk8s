@@ -1,21 +1,12 @@
-use std::{collections::HashMap, env, ffi::CString, fs, path::PathBuf};
-
-use crate::{
-    chroot::{exec_copy_in_subprocess, exec_run_in_subprocess},
-    overlayfs::copy_dir,
-};
-
+use super::{config::ImageConfig, config::StageExecutorConfig};
+use crate::{exec_main::Task, overlayfs::MountConfig, registry::pull_or_get_image, run::exec_task};
+use anyhow::{Context, Result, bail};
 use dockerfile_parser::{
     ArgInstruction, BreakableStringComponent, CmdInstruction, CopyInstruction,
     EntrypointInstruction, EnvInstruction, FromInstruction, Instruction, LabelInstruction,
     RunInstruction, ShellOrExecExpr, Stage,
 };
-
-use crate::{overlayfs::mount_config::MountConfig, registry::pull_image::pull_image};
-
-use super::{image_config::ImageConfig, stage_executor_config::StageExecutorConfig};
-
-use anyhow::{Context, Result, anyhow};
+use std::{collections::HashMap, env, path::PathBuf};
 
 /// StageExecutor bundles up what we need to know when executing one stage of a
 /// (possibly multi-stage) build.
@@ -64,13 +55,13 @@ impl<'m> StageExecutor<'m> {
         Ok(())
     }
 
-    /// TODO: when parsing values, check if they are in the args map
+    /// TODO: When parsing values, check if they are in the args map
     fn execute_instruction(
         &mut self,
         instruction: &Instruction,
         config: &StageExecutorConfig,
     ) -> Result<()> {
-        println!("Executing instruction: {instruction:?}");
+        tracing::info!("Executing instruction: {instruction:?}");
         match instruction {
             Instruction::From(from_instruction) => {
                 self.execute_from_instruction(from_instruction)?;
@@ -97,44 +88,34 @@ impl<'m> StageExecutor<'m> {
                 self.execute_env_instruction(env_instruction)?;
             }
             Instruction::Misc(misc_instruction) => {
-                return Err(anyhow!(format!(
-                    "MiscInstruction not implemented: {:?}",
-                    misc_instruction
-                )));
+                bail!("Unsupported instruction: {misc_instruction:?}");
             }
         }
         Ok(())
     }
 
-    /// TODO: in actual scenarios, the pulled image is a compressed file with multiple layers,
-    /// we need to decompress it according to OCI specification.
     fn execute_from_instruction(&mut self, from_instruction: &FromInstruction) -> Result<()> {
-        let from_flags = &from_instruction.flags;
+        let _from_flags = &from_instruction.flags;
         let image_parsed = &from_instruction.image_parsed;
 
-        // pull the image from the registry
-        let image_path = pull_image(from_flags, image_parsed)?;
+        // TODO: Handle from_flags
+        let img_ref = format!("{image_parsed}");
+        let rt = tokio::runtime::Runtime::new()?;
+
+        let image = rt.block_on(async { pull_or_get_image(&img_ref).await })?;
 
         // add image alias mapping
         if let Some(alias) = &from_instruction.alias {
             self.image_aliases
-                .insert(alias.content.clone(), image_path.clone());
+                .insert(alias.content.clone(), img_ref.clone());
         }
 
-        // add the image to the mount config
+        for layer in image.layers.iter() {
+            self.mount_config.lower_dir.push(layer.clone());
+        }
 
         // mount config should be unintialized
         self.mount_config.init()?;
-
-        // by now, we just simply copy the content to the upper directory
-        // TODO: remove this
-        let ubuntu_base = "/home/yu/layers/lower";
-        let src = fs::canonicalize(ubuntu_base)
-            .with_context(|| format!("Failed to canonicalize {ubuntu_base}"))?;
-        copy_dir(src, self.mount_config.overlay.join("lower"))?;
-        self.mount_config
-            .lower_dir
-            .push(self.mount_config.overlay.join("lower/lower"));
 
         Ok(())
     }
@@ -164,32 +145,44 @@ impl<'m> StageExecutor<'m> {
         let mut commands = vec![];
         match &run_instruction.expr {
             ShellOrExecExpr::Exec(exec_expr) => {
-                commands = exec_expr.as_str_vec();
+                commands = exec_expr
+                    .as_str_vec()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
             }
             ShellOrExecExpr::Shell(shell_expr) => {
-                commands.extend(vec!["/bin/sh", "-c"]);
+                commands.extend(vec!["/bin/bash".to_owned(), "-c".to_owned()]);
                 for component in shell_expr.components.iter() {
                     match component {
                         BreakableStringComponent::Comment(_) => {}
                         BreakableStringComponent::String(spanned_string) => {
-                            commands.push(spanned_string.content.as_str());
+                            commands.push(spanned_string.content.as_str().to_owned());
                         }
                     }
                 }
             }
         }
 
-        let envp: Vec<CString> = self
+        let envp: Vec<String> = self
             .image_config
             .envp
             .iter()
-            .map(|(k, v)| CString::new(format!("{k}={v}")).unwrap())
+            .map(|(k, v)| format!("{k}={v}"))
             .collect();
 
         self.mount_config.prepare()?;
-        exec_run_in_subprocess(self.mount_config, &commands, &envp)?;
-        self.mount_config.finish()?;
 
+        let mount_config = self.mount_config.clone();
+        exec_task(
+            mount_config,
+            Task::Run {
+                command: commands,
+                envp,
+            },
+        )?;
+
+        self.mount_config.finish()?;
         Ok(())
     }
 
@@ -260,9 +253,9 @@ impl<'m> StageExecutor<'m> {
         _config: &StageExecutorConfig,
     ) -> Result<()> {
         let flags = &copy_instruction.flags;
-        // TODO: add flags support
+        // TODO: Add flags support
         if !flags.is_empty() {
-            return Err(anyhow!("Flags are not supported in COPY instruction"));
+            bail!("Flags are not supported in COPY instruction");
         }
 
         self.mount_config.prepare()?;
@@ -283,9 +276,19 @@ impl<'m> StageExecutor<'m> {
             .map(|s| current_dir.join(&s.content))
             .collect();
 
-        exec_copy_in_subprocess(self.mount_config, &src, dest)?;
-        self.mount_config.finish()?;
+        let mount_config = self.mount_config.clone();
+        exec_task(
+            mount_config,
+            Task::Copy {
+                src: src
+                    .into_iter()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .collect(),
+                dest: dest.to_string_lossy().into_owned(),
+            },
+        )?;
 
+        self.mount_config.finish()?;
         Ok(())
     }
 

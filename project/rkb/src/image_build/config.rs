@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-
 use anyhow::{Context, Result};
 use oci_spec::image::{Config, ConfigBuilder};
+use std::collections::HashMap;
 
 /// Image config is used in config.json.
 ///
@@ -57,8 +56,18 @@ impl ImageConfig {
             config = config.cmd(cmd.clone());
         }
 
-        config
-            .build()
-            .with_context(|| "Failed to build OCI image config")
+        config.build().context("Failed to build OCI image config")
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StageExecutorConfig {
+    pub global_args: HashMap<String, Option<String>>,
+}
+
+impl StageExecutorConfig {
+    pub fn global_args(mut self, global_args: &HashMap<String, Option<String>>) -> Self {
+        self.global_args = global_args.clone();
+        self
     }
 }

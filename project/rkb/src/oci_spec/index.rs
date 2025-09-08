@@ -1,9 +1,8 @@
-use std::{collections::HashMap, str::FromStr};
-
 use anyhow::{Context, Result};
 use oci_spec::image::{
     DescriptorBuilder, ImageIndex, ImageIndexBuilder, MediaType, SCHEMA_VERSION, Sha256Digest,
 };
+use std::{collections::HashMap, str::FromStr};
 
 pub struct OciImageIndex {
     pub image_index_builder: ImageIndexBuilder,
@@ -43,7 +42,7 @@ impl OciImageIndex {
     pub fn build(self) -> Result<ImageIndex> {
         self.image_index_builder
             .build()
-            .with_context(|| "Failed to build image index")
+            .context("Failed to build image index")
     }
 }
 

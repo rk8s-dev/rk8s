@@ -382,7 +382,7 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_ok(), "Expected success, got error: {:?}", result);
+        assert!(result.is_ok(), "Expected success, got error: {result:?}");
         let iface = result.unwrap();
         println!("get the interface : {iface:?}");
         assert!(

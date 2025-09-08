@@ -2,17 +2,51 @@
 
 An implementation of `docker build` in Rust.
 
+## Architecture
+
+```mermaid
+flowchart TD
+  subgraph CLI
+    A[CLI: rkb]
+    A --> B[main]
+  end
+
+  subgraph Parse & dispatch
+    B -->|build| CmdBuild[Commands::Build]
+    B -->|mount| CmdMount[Commands::Mount]
+    B -->|exec| CmdExec[Commands::Exec]
+    B -->|cleanup| CmdCleanup[Commands::Cleanup]
+  end
+
+  subgraph Build
+    CmdBuild --> Builder[builder::Builder]
+    Builder --> Executor[executor::Executor]
+    Executor --> StageExec[stage_executor::StageExecutor]
+    StageExec --> Registry[registry::pull_or_get_image]
+    StageExec --> MountCfg[overlayfs::MountConfig]
+    Executor --> Compressor[compressor::LayerCompressor]
+    Executor --> OCIBuilder[oci_spec::OCIBuilder]
+  end
+
+  subgraph Mount & run
+    CmdMount --> MountMain[mount_main::main]
+    MountMain --> OverlayFS[libfuse_fs::overlayfs::mount_fs]
+    CmdExec --> ExecTask[run::exec_task]
+    ExecTask -->|spawn mount| MountMain
+    ExecTask -->|spawn exec| ExecProcess[exec_main::chroot & exec]
+    ExecTask -->|spawn cleanup| ExecProcess
+    CmdCleanup -->|ns switch & unmount| ExecProcess
+  end
+
+  StageExec --> ExecTask
+  MountCfg --> OverlayFS
+  Registry -->| lower_dir| MountCfg
+```
+
 ## Quick Start
 
 The following operations are based on Ubuntu 24.04.
 
-### Prepare base image
-
-By now, rkb doesn't support pulling image from registry, so we need to prepare an Ubuntu filesystem as the base image. When rkb executes `FROM` instruction, it simply uses the given filesystem.
-
-Extract `ubuntu-latest.tar` to a directory, e.g. `/home/yu/layers`. The result should be a `lower` directory.(root privilege may be required)
-
-Replace line 112 in [src/build/stage_executor.rs](./src/build/stage_executor.rs#L112) with this directory.
 
 ### Build simple image
 
@@ -173,8 +207,6 @@ Usage: rkb [OPTIONS]
 Options:
   -f, --file <FILE>       Dockerfile or Containerfile
   -t, --tag <IMAGE NAME>  Name of the resulting image
-  -d, --debug             Turn debugging information on
-  -l, --lib-fuse          Use libfuse-rs or linux mount
   -o, --output-dir <DIR>  Output directory for the image
   -h, --help              Print help
 ```
@@ -185,7 +217,7 @@ Options:
 
 | Feature         | Status |
 |-----------------|--------|
-| lib-fuse        | ❌     |
+| lib-fuse        | ✅     |
 | Cross-platform  | ❌     |
 
 ### Supported Dockerfile instructions
