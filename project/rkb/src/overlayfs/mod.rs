@@ -119,13 +119,13 @@ impl OverlayGuard {
 
 impl Drop for OverlayGuard {
     fn drop(&mut self) {
-        if self.overlay_dir.exists() {
-            if let Err(e) = std::fs::remove_dir_all(&self.overlay_dir) {
-                tracing::error!(
-                    "Failed to remove overlay directory {}: {e}",
-                    self.overlay_dir.display()
-                );
-            }
+        if self.overlay_dir.exists()
+            && let Err(e) = std::fs::remove_dir_all(&self.overlay_dir)
+        {
+            tracing::error!(
+                "Failed to remove overlay directory {}: {e}",
+                self.overlay_dir.display()
+            );
         }
     }
 }
