@@ -1,5 +1,4 @@
 use crate::{
-    ContainerCommand,
     commands::{
         Exec, ExecContainer,
         compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
@@ -12,6 +11,7 @@ use crate::{
 };
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
+use clap::Subcommand;
 use common::ContainerSpec;
 use libcontainer::{
     container::{Container, ContainerStatus, State, state},
@@ -31,6 +31,49 @@ use tabwriter::TabWriter;
 use tracing::debug;
 
 pub mod config;
+
+#[derive(Subcommand)]
+pub enum ContainerCommand {
+    #[command(about = "Run a single container from a YAML file using rkl run container.yaml")]
+    Run {
+        #[arg(value_name = "CONTAINER_YAML")]
+        container_yaml: String,
+    },
+    #[command(about = "Create a Container from a YAML file using rkl create container.yaml")]
+    Create {
+        #[arg(value_name = "CONTAINER_YAML")]
+        container_yaml: String,
+    },
+    #[command(about = "Start a Container with a Container-name using rkl start container-name")]
+    Start {
+        #[arg(value_name = "CONTAINER_NAME")]
+        container_name: String,
+    },
+
+    #[command(about = "Delete a Container with a Container-name using rkl delete container-name")]
+    Delete {
+        #[arg(value_name = "CONTAINER_NAME")]
+        container_name: String,
+    },
+    #[command(about = "Get the state of a container using rkl state container-name")]
+    State {
+        #[arg(value_name = "CONTAINER_NAME")]
+        container_name: String,
+    },
+
+    #[command(about = "List the current running container")]
+    List {
+        /// Only display container IDs default is false
+        #[arg(long, short)]
+        quiet: Option<bool>,
+
+        /// Specify the format (default or table)
+        #[arg(long, short)]
+        format: Option<String>,
+    },
+
+    Exec(Box<ExecContainer>),
+}
 
 pub struct ContainerRunner {
     spec: ContainerSpec,

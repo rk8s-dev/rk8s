@@ -37,6 +37,7 @@ use tokio::fs;
 /// bundle_path
 /// └── rootfs
 /// ```
+#[allow(dead_code)]
 pub async fn convert_image_to_bundle<P: AsRef<Path>>(
     image_path: P,
     bundle_path: P,
@@ -55,6 +56,7 @@ pub async fn convert_image_to_bundle<P: AsRef<Path>>(
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn extract_layers<P: AsRef<Path>>(
     image_path: P,
     bundle_path: &P,
@@ -163,6 +165,7 @@ async fn decompress_gzip_to_tar<P: AsRef<Path>>(
     .with_context(|| "Failed to spawn blocking task")?
 }
 
+#[allow(dead_code)]
 async fn extract_tar_gz<P: AsRef<Path>>(tar_gz_path: P, extract_dir: P) -> anyhow::Result<()> {
     let tar_gz_path = tar_gz_path.as_ref().to_path_buf();
     let extract_dir = extract_dir.as_ref().to_path_buf();
@@ -184,6 +187,7 @@ async fn extract_tar_gz<P: AsRef<Path>>(tar_gz_path: P, extract_dir: P) -> anyho
     .with_context(|| "Failed to spawn blocking task for tar extraction")?
 }
 
+#[allow(dead_code)]
 async fn mount_and_copy_bundle<P: AsRef<Path>>(
     bundle_path: P,
     layers: &Vec<PathBuf>,
