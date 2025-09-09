@@ -1,5 +1,11 @@
-use slayerfs::vfs;
+mod cadapter;
+mod chuck;
+mod daemon;
+mod fuse;
+mod meta;
+mod vfs;
 
+use crate::vfs::demo;
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let mut args = std::env::args().skip(1);
@@ -12,7 +18,7 @@ async fn main() {
                     std::process::exit(2);
                 }
             };
-            match vfs::demo::e2e_localfs_demo(dir).await {
+            match demo::e2e_localfs_demo(dir).await {
                 Ok(()) => println!("demo-localfs: OK"),
                 Err(e) => {
                     eprintln!("demo-localfs failed: {e}");

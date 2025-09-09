@@ -13,6 +13,7 @@ use crate::meta::MetaStore;
 use crate::vfs::fs::VFS;
 
 /// Build default mount options for SlayerFS.
+#[allow(dead_code)]
 fn default_mount_options() -> MountOptions {
     let mut mo = MountOptions::default();
     mo.fs_name("slayerfs");
@@ -22,6 +23,7 @@ fn default_mount_options() -> MountOptions {
 
 /// Mount a VFS instance to the given empty directory using unprivileged mode when available.
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub async fn mount_vfs_unprivileged<S, M>(
     fs: VFS<S, M>,
     mount_point: impl AsRef<Path>,

@@ -99,6 +99,8 @@ struct Namespace {
 /// - 错误返回暂以 `String` 描述，后续建议改为枚举并映射标准 errno。
 /// - 不实现权限/时间戳/硬链接等高级语义；`FileAttr` 仅包含 kind 与 size。
 /// - unlink/rmdir 目前仅调整命名空间与 size，真实块/切片的 GC 由后续实现负责。
+#[allow(unused)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct VFS<S: BlockStore, M: MetaStore> {
     layout: ChunkLayout,
     store: tokio::sync::Mutex<S>,
@@ -107,7 +109,7 @@ pub struct VFS<S: BlockStore, M: MetaStore> {
     ns: Mutex<Namespace>, // 简单内存命名空间（节点+查找表）
     root: i64,
 }
-
+#[allow(dead_code)]
 impl<S: BlockStore, M: MetaStore> VFS<S, M> {
     /// 公开根 inode（便于 FUSE 处理 `.`/`..` 等）
     pub fn root_ino(&self) -> i64 {

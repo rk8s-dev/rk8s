@@ -15,12 +15,14 @@ pub const DEFAULT_BLOCK_SIZE: u32 = 4 * 1024 * 1024;
 
 /// 使用默认布局：返回文件偏移所在的 chunk 序号（从 0 开始）。
 #[inline]
+#[allow(dead_code)]
 pub fn chunk_index_of(file_offset: u64) -> u64 {
     file_offset / DEFAULT_CHUNK_SIZE
 }
 
 /// 使用默认布局：返回文件偏移在其 chunk 内的偏移量。
 #[inline]
+#[allow(dead_code)]
 pub fn within_chunk_offset(file_offset: u64) -> u64 {
     file_offset % DEFAULT_CHUNK_SIZE
 }
@@ -74,6 +76,7 @@ impl ChunkLayout {
 
     /// 返回给定 chunk 索引对应的文件级字节范围 [start, end)（end 为开区间）。
     #[inline]
+    #[allow(dead_code)]
     pub fn chunk_byte_range(&self, chunk_index: u64) -> (u64, u64) {
         let start = chunk_index * self.chunk_size;
         let end = start + self.chunk_size;
@@ -124,21 +127,26 @@ impl ChunkMeta {
 
 /// 简单的内存索引：维护每个 chunk 下已提交的 slice 数量（示例用）。
 #[derive(Default)]
+#[allow(dead_code)]
 pub struct InMemoryChunkIndex {
     map: HashMap<ChunkKey, usize>,
 }
 
+#[allow(dead_code)]
 impl InMemoryChunkIndex {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
         }
     }
 
+    #[allow(dead_code)]
     pub fn incr_slice_count(&mut self, key: ChunkKey) {
         *self.map.entry(key).or_insert(0) += 1;
     }
 
+    #[allow(dead_code)]
     pub fn get_slice_count(&self, key: &ChunkKey) -> usize {
         self.map.get(key).copied().unwrap_or(0)
     }
