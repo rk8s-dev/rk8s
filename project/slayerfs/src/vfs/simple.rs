@@ -13,6 +13,7 @@ pub struct SimpleVfs<S: BlockStore, M: MetaStore> {
     meta: M,
 }
 
+#[allow(unused)]
 impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
     pub fn new(layout: ChunkLayout, store: S, meta: M) -> Self {
         Self {

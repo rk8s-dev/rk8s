@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 
 /// 错误类型（最小实现，后续可细化）
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum MetaError {
     InodeNotFound(i64),
     Internal(String),
@@ -44,6 +45,7 @@ impl std::error::Error for MetaError {}
 
 /// Inode 元数据（最小集）
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct InodeMeta {
     pub ino: i64,
     pub size: u64,
@@ -65,22 +67,27 @@ pub trait MetaTxn: Send {
     async fn record_slice(&mut self, ino: i64, slice: SliceDesc) -> Result<(), MetaError>;
     async fn update_inode_size(&mut self, ino: i64, new_size: u64) -> Result<(), MetaError>;
     async fn commit(self: Box<Self>) -> Result<(), MetaError>;
+    #[allow(dead_code)]
     async fn rollback(self: Box<Self>);
 }
 
 // ================= In-memory 实现 =================
 
 #[derive(Default, Clone)]
+#[allow(dead_code)]
 struct State {
     next_ino: i64,
     inodes: HashMap<i64, InodeMeta>,
 }
 
+#[allow(dead_code)]
 pub struct InMemoryMetaStore {
     inner: Arc<Mutex<State>>,
 }
 
+#[allow(dead_code)]
 impl InMemoryMetaStore {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(State::default())),
@@ -112,11 +119,13 @@ impl MetaStore for InMemoryMetaStore {
     }
 }
 
+#[allow(dead_code)]
 enum Op {
     RecordSlice { ino: i64, slice: SliceDesc },
     UpdateSize { ino: i64, size: u64 },
 }
 
+#[allow(dead_code)]
 struct InMemoryTxn {
     store: Arc<Mutex<State>>,
     staged: Vec<Op>,

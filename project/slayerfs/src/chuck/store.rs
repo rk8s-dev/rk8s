@@ -36,21 +36,26 @@ pub trait BlockStore {
     ) -> Vec<u8>;
 }
 
+#[allow(dead_code)]
 type BlockKey = (i64 /*chunk_id*/, u32 /*block_index*/);
 
 /// 简单内存实现：用于本地开发/测试。
 #[derive(Default)]
+#[allow(dead_code)]
 pub struct InMemoryBlockStore {
     map: HashMap<BlockKey, Vec<u8>>, // 每个块固定大小
 }
 
+#[allow(dead_code)]
 impl InMemoryBlockStore {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
         }
     }
 
+    #[allow(dead_code)]
     fn ensure_block(&mut self, key: BlockKey, block_size: usize) -> &mut Vec<u8> {
         let entry = self.map.entry(key).or_insert_with(|| vec![0u8; block_size]);
         if entry.len() < block_size {
