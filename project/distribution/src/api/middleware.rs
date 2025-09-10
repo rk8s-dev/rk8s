@@ -36,7 +36,6 @@ pub async fn authenticate(
     Ok(next.run(req).await)
 }
 
-#[tracing::instrument(skip_all)]
 pub async fn authorize(
     State(state): State<Arc<AppState>>,
     mut req: Request,
