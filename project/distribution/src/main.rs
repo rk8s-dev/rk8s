@@ -1,9 +1,8 @@
 use crate::config::Config;
 use clap::Parser;
+use sqlx::postgres::PgPoolOptions;
 use std::path::Path;
 use std::sync::Arc;
-use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
 use tokio::fs::OpenOptions;
 use tokio::signal;
 use tower_http::trace::TraceLayer;

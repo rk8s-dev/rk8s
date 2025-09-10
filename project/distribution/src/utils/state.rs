@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::domain::repo::{PgRepoRepository, RepoRepository};
 use crate::domain::user::{PgUserRepository, UserRepository};
 use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
-use sqlx::{PgPool, Pool};
+use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 

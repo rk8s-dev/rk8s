@@ -56,14 +56,13 @@ impl RepoRepository for PgRepoRepository {
     }
 
     async fn change_visibility(&self, name: &str, is_public: bool) -> Result<()> {
-        let result = sqlx::query(
-            "UPDATE repos SET is_public = $1, updated_at = NOW() WHERE name = $2",
-        )
-        .bind(is_public)
-        .bind(name)
-        .execute(&*self.pool)
-        .await
-        .map_to_internal()?;
+        let result =
+            sqlx::query("UPDATE repos SET is_public = $1, updated_at = NOW() WHERE name = $2")
+                .bind(is_public)
+                .bind(name)
+                .execute(&*self.pool)
+                .await
+                .map_to_internal()?;
         match result.rows_affected() {
             0 => Err(BusinessError::BadRequest(
                 format!("repository `{name}` not found").to_string(),

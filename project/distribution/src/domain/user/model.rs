@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx::FromRow;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, FromRow, Default)]
 pub struct User {
     pub id: Uuid,
