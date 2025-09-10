@@ -1,14 +1,22 @@
+// src/main.rs
+
 use clap::{Parser, Subcommand};
-use rkl::{
-    ComposeCommand, ContainerCommand, PodCommand,
-    commands::{compose::compose_execute, container::container_execute, pod::pod_execute},
-};
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
+
+mod bundle;
+mod commands;
+mod cri;
+mod daemon;
+mod network;
+mod rootpath;
+mod task;
+
+use commands::{compose::ComposeCommand, container::ContainerCommand, pod::PodCommand};
+use commands::{compose::compose_execute, container::container_execute, pod::pod_execute};
 
 #[derive(Parser)]
 #[command(name = "rkl")]
 #[command(
-    about = "A simple container runtime", 
+    about = "A simple container runtime",
     long_about = None,
     override_usage = "rkl <workload> <command> [OPTIONS]",
 )]
@@ -18,7 +26,7 @@ struct Cli {
 }
 
 impl Cli {
-    pub fn run(self) -> Result<(), anyhow::Error> {
+    fn run(self) -> Result<(), anyhow::Error> {
         match self.workload {
             Workload::Pod(cmd) => pod_execute(cmd),
             Workload::Container(cmd) => container_execute(cmd),
@@ -27,7 +35,6 @@ impl Cli {
     }
 }
 
-/// define the 3 state for the run command "container" "pod" "compose"
 #[derive(Subcommand)]
 enum Workload {
     #[command(subcommand, about = "Operations related to pods", alias = "p")]
@@ -45,11 +52,12 @@ enum Workload {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    let subscriber = FmtSubscriber::builder()
-        .with_env_filter(EnvFilter::from_default_env())
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .finish();
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
     let cli = Cli::parse();
     cli.run()
         .inspect_err(|err| eprintln!("Failed to run: {err}"))
