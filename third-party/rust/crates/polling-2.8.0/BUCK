@@ -32,12 +32,12 @@ cargo.rust_library(
     ],
     rustc_flags = ["@$(location :polling-2.8.0-build-script-run[rustc_flags])"],
     named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if-1.0.0:cfg-if-1.0.0",
+        "cfg_if": "//third-party/rust/crates/cfg-if-1.0.3:cfg-if-1.0.3",
     },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/libc-0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
     ],
 )
 
@@ -68,7 +68,7 @@ cargo.rust_binary(
         "std",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/autocfg-1.4.0:autocfg-1.4.0"],
+    deps = ["//third-party/rust/crates/autocfg-1.5.0:autocfg-1.5.0"],
 )
 
 buildscript_run(

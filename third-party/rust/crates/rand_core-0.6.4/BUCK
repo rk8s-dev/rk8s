@@ -31,5 +31,5 @@ cargo.rust_library(
         "std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/getrandom-0.2.15:getrandom-0.2.15"],
+    deps = ["//third-party/rust/crates/getrandom-0.2.16:getrandom-0.2.16"],
 )

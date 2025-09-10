@@ -50,15 +50,15 @@ cargo.rust_library(
     ],
     named_deps = {
         "pin_project_lite": "//third-party/rust/crates/pin-project-lite-0.2.16:pin-project-lite-0.2.16",
-        "signal_hook_registry": "//third-party/rust/crates/signal-hook-registry-1.4.2:signal-hook-registry-1.4.2",
+        "signal_hook_registry": "//third-party/rust/crates/signal-hook-registry-1.4.6:signal-hook-registry-1.4.6",
         "tokio_macros": "//third-party/rust/crates/tokio-macros-2.5.0:tokio-macros-2.5.0",
     },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes-1.10.1:bytes-1.10.1",
         "//third-party/rust/crates/libc-0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/mio-1.0.3:mio-1.0.3",
-        "//third-party/rust/crates/parking_lot-0.12.3:parking_lot-0.12.3",
+        "//third-party/rust/crates/mio-1.0.4:mio-1.0.4",
+        "//third-party/rust/crates/parking_lot-0.12.4:parking_lot-0.12.4",
         "//third-party/rust/crates/socket2-0.6.0:socket2-0.6.0",
     ],
 )

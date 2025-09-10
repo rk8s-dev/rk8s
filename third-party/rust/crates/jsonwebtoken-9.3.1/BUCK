@@ -37,7 +37,7 @@ cargo.rust_library(
         "//third-party/rust/crates/pem-3.0.5:pem-3.0.5",
         "//third-party/rust/crates/ring-0.17.14:ring-0.17.14",
         "//third-party/rust/crates/serde-1.0.219:serde-1.0.219",
-        "//third-party/rust/crates/serde_json-1.0.140:serde_json-1.0.140",
+        "//third-party/rust/crates/serde_json-1.0.143:serde_json-1.0.143",
         "//third-party/rust/crates/simple_asn1-0.6.3:simple_asn1-0.6.3",
     ],
 )

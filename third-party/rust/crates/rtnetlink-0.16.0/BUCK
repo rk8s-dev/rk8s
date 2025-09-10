@@ -40,7 +40,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-0.3.31:futures-0.3.31",
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
         "//third-party/rust/crates/nix-0.29.0:nix-0.29.0",
         "//third-party/rust/crates/thiserror-1.0.69:thiserror-1.0.69",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",

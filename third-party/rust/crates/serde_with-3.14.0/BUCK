@@ -32,12 +32,12 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
-        "chrono_0_4": "//third-party/rust/crates/chrono-0.4.41:chrono-0.4.41",
+        "chrono_0_4": "//third-party/rust/crates/chrono-0.4.42:chrono-0.4.42",
         "indexmap_1": "//third-party/rust/crates/indexmap-1.9.3:indexmap-1.9.3",
-        "indexmap_2": "//third-party/rust/crates/indexmap-2.7.1:indexmap-2.7.1",
+        "indexmap_2": "//third-party/rust/crates/indexmap-2.11.1:indexmap-2.11.1",
         "schemars_0_9": "//third-party/rust/crates/schemars-0.9.0:schemars-0.9.0",
         "schemars_1": "//third-party/rust/crates/schemars-1.0.4:schemars-1.0.4",
-        "time_0_3": "//third-party/rust/crates/time-0.3.41:time-0.3.41",
+        "time_0_3": "//third-party/rust/crates/time-0.3.43:time-0.3.43",
     },
     visibility = ["PUBLIC"],
     deps = [
@@ -45,7 +45,7 @@ cargo.rust_library(
         "//third-party/rust/crates/hex-0.4.3:hex-0.4.3",
         "//third-party/rust/crates/serde-1.0.219:serde-1.0.219",
         "//third-party/rust/crates/serde_derive-1.0.219:serde_derive-1.0.219",
-        "//third-party/rust/crates/serde_json-1.0.140:serde_json-1.0.140",
+        "//third-party/rust/crates/serde_json-1.0.143:serde_json-1.0.143",
         "//third-party/rust/crates/serde_with_macros-3.14.0:serde_with_macros-3.14.0",
     ],
 )

@@ -30,11 +30,11 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
-        "tracing_core": "//third-party/rust/crates/tracing-core-0.1.33:tracing-core-0.1.33",
+        "tracing_core": "//third-party/rust/crates/tracing-core-0.1.34:tracing-core-0.1.34",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
         "//third-party/rust/crates/once_cell-1.21.3:once_cell-1.21.3",
     ],
 )

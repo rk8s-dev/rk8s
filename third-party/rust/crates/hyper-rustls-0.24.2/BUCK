@@ -46,7 +46,7 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/http-0.2.12:http-0.2.12",
         "//third-party/rust/crates/hyper-0.14.32:hyper-0.14.32",
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
         "//third-party/rust/crates/rustls-0.21.12:rustls-0.21.12",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
     ],

@@ -33,8 +33,8 @@ cargo.rust_library(
         "//third-party/rust/crates/anyhow-1.0.99:anyhow-1.0.99",
         "//third-party/rust/crates/once_cell-1.21.3:once_cell-1.21.3",
         "//third-party/rust/crates/protobuf-3.2.0:protobuf-3.2.0",
-        "//third-party/rust/crates/regex-1.11.1:regex-1.11.1",
-        "//third-party/rust/crates/tempfile-3.20.0:tempfile-3.20.0",
+        "//third-party/rust/crates/regex-1.11.2:regex-1.11.2",
+        "//third-party/rust/crates/tempfile-3.22.0:tempfile-3.22.0",
         "//third-party/rust/crates/thiserror-1.0.69:thiserror-1.0.69",
     ],
 )

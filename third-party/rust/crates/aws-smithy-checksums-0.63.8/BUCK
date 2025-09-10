@@ -39,7 +39,7 @@ cargo.rust_library(
         "//third-party/rust/crates/hex-0.4.3:hex-0.4.3",
         "//third-party/rust/crates/http-0.2.12:http-0.2.12",
         "//third-party/rust/crates/sha1-0.10.6:sha1-0.10.6",
-        "//third-party/rust/crates/sha2-0.10.8:sha2-0.10.8",
+        "//third-party/rust/crates/sha2-0.10.9:sha2-0.10.9",
         "//third-party/rust/crates/tracing-0.1.41:tracing-0.1.41",
     ],
 )

@@ -38,7 +38,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
         "//third-party/rust/crates/ring-0.17.14:ring-0.17.14",
         "//third-party/rust/crates/sct-0.7.1:sct-0.7.1",
     ],

@@ -55,7 +55,7 @@ cargo.rust_binary(
     },
     features = ["default"],
     visibility = [],
-    deps = ["//third-party/rust/crates/autocfg-1.4.0:autocfg-1.4.0"],
+    deps = ["//third-party/rust/crates/autocfg-1.5.0:autocfg-1.5.0"],
 )
 
 buildscript_run(

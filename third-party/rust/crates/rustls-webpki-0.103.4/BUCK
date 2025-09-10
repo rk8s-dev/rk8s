@@ -32,7 +32,7 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
-        "aws_lc_rs": "//third-party/rust/crates/aws-lc-rs-1.13.3:aws-lc-rs-1.13.3",
+        "aws_lc_rs": "//third-party/rust/crates/aws-lc-rs-1.14.0:aws-lc-rs-1.14.0",
         "pki_types": "//third-party/rust/crates/rustls-pki-types-1.12.0:rustls-pki-types-1.12.0",
     },
     visibility = ["PUBLIC"],

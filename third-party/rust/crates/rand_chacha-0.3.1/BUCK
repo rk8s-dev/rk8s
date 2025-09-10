@@ -27,7 +27,7 @@ cargo.rust_library(
     },
     features = ["std"],
     named_deps = {
-        "ppv_lite86": "//third-party/rust/crates/ppv-lite86-0.2.20:ppv-lite86-0.2.20",
+        "ppv_lite86": "//third-party/rust/crates/ppv-lite86-0.2.21:ppv-lite86-0.2.21",
     },
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/rand_core-0.6.4:rand_core-0.6.4"],

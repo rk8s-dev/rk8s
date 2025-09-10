@@ -44,7 +44,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/fastrand-1.9.0:fastrand-1.9.0",
-        "//third-party/rust/crates/memchr-2.7.4:memchr-2.7.4",
+        "//third-party/rust/crates/memchr-2.7.5:memchr-2.7.5",
         "//third-party/rust/crates/parking-2.2.1:parking-2.2.1",
     ],
 )

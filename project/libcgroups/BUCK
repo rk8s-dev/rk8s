@@ -32,7 +32,7 @@ cargo.rust_library(
         "v2",
     ],
     named_deps = {
-        "oci_spec": "//third-party/rust/crates/oci-spec-0.8.1:oci-spec-0.8.1",
+        "oci_spec": "//third-party/rust/crates/oci-spec-0.8.2:oci-spec-0.8.2",
     },
     visibility = ["PUBLIC"],
     deps = [
@@ -40,7 +40,7 @@ cargo.rust_library(
         "//third-party/rust/crates/nix-0.29.0:nix-0.29.0",
         "//third-party/rust/crates/procfs-0.17.0:procfs-0.17.0",
         "//third-party/rust/crates/serde-1.0.219:serde-1.0.219",
-        "//third-party/rust/crates/thiserror-2.0.12:thiserror-2.0.12",
+        "//third-party/rust/crates/thiserror-2.0.16:thiserror-2.0.16",
         "//third-party/rust/crates/tracing-0.1.41:tracing-0.1.41",
     ],
 )

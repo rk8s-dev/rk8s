@@ -32,12 +32,12 @@ cargo.rust_library(
     deps = [
         "//project/common:common",
         "//third-party/rust/crates/anyhow-1.0.99:anyhow-1.0.99",
-        "//third-party/rust/crates/bitflags-2.9.2:bitflags-2.9.2",
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
+        "//third-party/rust/crates/bitflags-2.9.4:bitflags-2.9.4",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
         "//third-party/rust/crates/serde-1.0.219:serde-1.0.219",
         "//third-party/rust/crates/serde_yaml-0.9.34+deprecated:serde_yaml-0.9.34+deprecated",
         "//third-party/rust/crates/serial_test-3.2.0:serial_test-3.2.0",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
-        "//third-party/rust/crates/uuid-1.18.0:uuid-1.18.0",
+        "//third-party/rust/crates/uuid-1.18.1:uuid-1.18.1",
     ],
 )

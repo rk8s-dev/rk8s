@@ -32,9 +32,9 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/anyhow-1.0.99:anyhow-1.0.99",
         "//third-party/rust/crates/indexmap-1.9.3:indexmap-1.9.3",
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
         "//third-party/rust/crates/protobuf-3.2.0:protobuf-3.2.0",
-        "//third-party/rust/crates/tempfile-3.20.0:tempfile-3.20.0",
+        "//third-party/rust/crates/tempfile-3.22.0:tempfile-3.22.0",
         "//third-party/rust/crates/thiserror-1.0.69:thiserror-1.0.69",
         "//third-party/rust/crates/which-4.4.2:which-4.4.2",
     ],

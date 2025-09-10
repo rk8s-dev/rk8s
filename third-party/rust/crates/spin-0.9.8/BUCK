@@ -37,7 +37,7 @@ cargo.rust_library(
         "spin_mutex",
     ],
     named_deps = {
-        "lock_api_crate": "//third-party/rust/crates/lock_api-0.4.12:lock_api-0.4.12",
+        "lock_api_crate": "//third-party/rust/crates/lock_api-0.4.13:lock_api-0.4.13",
     },
     visibility = ["PUBLIC"],
 )

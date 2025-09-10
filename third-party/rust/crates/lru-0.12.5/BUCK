@@ -30,5 +30,5 @@ cargo.rust_library(
         "hashbrown",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/hashbrown-0.15.2:hashbrown-0.15.2"],
+    deps = ["//third-party/rust/crates/hashbrown-0.15.5:hashbrown-0.15.5"],
 )

@@ -47,11 +47,11 @@ cargo.rust_library(
     ],
     rustc_flags = ["@$(location :nix-0.29.0-build-script-run[rustc_flags])"],
     named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if-1.0.0:cfg-if-1.0.0",
+        "cfg_if": "//third-party/rust/crates/cfg-if-1.0.3:cfg-if-1.0.3",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags-2.9.2:bitflags-2.9.2",
+        "//third-party/rust/crates/bitflags-2.9.4:bitflags-2.9.4",
         "//third-party/rust/crates/libc-0.2.175:libc-0.2.175",
         "//third-party/rust/crates/memoffset-0.9.1:memoffset-0.9.1",
     ],

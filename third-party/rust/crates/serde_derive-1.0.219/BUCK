@@ -28,11 +28,11 @@ cargo.rust_library(
     features = ["default"],
     proc_macro = True,
     named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2-1.0.94:proc-macro2-1.0.94",
+        "proc_macro2": "//third-party/rust/crates/proc-macro2-1.0.101:proc-macro2-1.0.101",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote-1.0.39:quote-1.0.39",
-        "//third-party/rust/crates/syn-2.0.99:syn-2.0.99",
+        "//third-party/rust/crates/quote-1.0.40:quote-1.0.40",
+        "//third-party/rust/crates/syn-2.0.106:syn-2.0.106",
     ],
 )

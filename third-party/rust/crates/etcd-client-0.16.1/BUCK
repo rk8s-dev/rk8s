@@ -33,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/http-1.2.0:http-1.2.0",
+        "//third-party/rust/crates/http-1.3.1:http-1.3.1",
         "//third-party/rust/crates/prost-0.13.5:prost-0.13.5",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
         "//third-party/rust/crates/tonic-0.13.1:tonic-0.13.1",

@@ -37,9 +37,9 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags-2.9.2:bitflags-2.9.2",
-        "//third-party/rust/crates/chrono-0.4.41:chrono-0.4.41",
-        "//third-party/rust/crates/flate2-1.1.1:flate2-1.1.1",
+        "//third-party/rust/crates/bitflags-2.9.4:bitflags-2.9.4",
+        "//third-party/rust/crates/chrono-0.4.42:chrono-0.4.42",
+        "//third-party/rust/crates/flate2-1.1.2:flate2-1.1.2",
         "//third-party/rust/crates/hex-0.4.3:hex-0.4.3",
         "//third-party/rust/crates/rustix-0.38.44:rustix-0.38.44",
     ],

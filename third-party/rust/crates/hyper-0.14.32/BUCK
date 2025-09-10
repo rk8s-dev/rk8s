@@ -53,7 +53,7 @@ cargo.rust_library(
         "//third-party/rust/crates/httparse-1.10.1:httparse-1.10.1",
         "//third-party/rust/crates/httpdate-1.0.3:httpdate-1.0.3",
         "//third-party/rust/crates/itoa-1.0.15:itoa-1.0.15",
-        "//third-party/rust/crates/socket2-0.5.8:socket2-0.5.8",
+        "//third-party/rust/crates/socket2-0.5.10:socket2-0.5.10",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
         "//third-party/rust/crates/tracing-0.1.41:tracing-0.1.41",
         "//third-party/rust/crates/want-0.3.1:want-0.3.1",

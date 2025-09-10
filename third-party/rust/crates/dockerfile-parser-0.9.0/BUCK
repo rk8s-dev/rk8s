@@ -29,9 +29,9 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/enquote-1.1.0:enquote-1.1.0",
         "//third-party/rust/crates/lazy_static-1.5.0:lazy_static-1.5.0",
-        "//third-party/rust/crates/pest-2.8.0:pest-2.8.0",
-        "//third-party/rust/crates/pest_derive-2.8.0:pest_derive-2.8.0",
-        "//third-party/rust/crates/regex-1.11.1:regex-1.11.1",
+        "//third-party/rust/crates/pest-2.8.1:pest-2.8.1",
+        "//third-party/rust/crates/pest_derive-2.8.1:pest_derive-2.8.1",
+        "//third-party/rust/crates/regex-1.11.2:regex-1.11.2",
         "//third-party/rust/crates/snafu-0.6.10:snafu-0.6.10",
     ],
 )

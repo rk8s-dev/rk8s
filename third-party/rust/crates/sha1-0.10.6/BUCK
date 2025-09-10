@@ -30,7 +30,7 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if-1.0.0:cfg-if-1.0.0",
+        "cfg_if": "//third-party/rust/crates/cfg-if-1.0.3:cfg-if-1.0.3",
     },
     visibility = ["PUBLIC"],
     deps = [

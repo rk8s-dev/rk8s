@@ -35,7 +35,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/env_logger-0.8.4:env_logger-0.8.4",
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
         "//third-party/rust/crates/rand-0.8.5:rand-0.8.5",
     ],
 )

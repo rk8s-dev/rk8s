@@ -28,7 +28,7 @@ cargo.rust_library(
     features = ["regex"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
-        "//third-party/rust/crates/regex-1.11.1:regex-1.11.1",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
+        "//third-party/rust/crates/regex-1.11.2:regex-1.11.2",
     ],
 )

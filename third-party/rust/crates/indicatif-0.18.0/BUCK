@@ -30,7 +30,7 @@ cargo.rust_library(
         "unicode-width",
     ],
     named_deps = {
-        "portable_atomic": "//third-party/rust/crates/portable-atomic-1.11.0:portable-atomic-1.11.0",
+        "portable_atomic": "//third-party/rust/crates/portable-atomic-1.11.1:portable-atomic-1.11.1",
         "unicode_width": "//third-party/rust/crates/unicode-width-0.2.1:unicode-width-0.2.1",
         "unit_prefix": "//third-party/rust/crates/unit-prefix-0.5.1:unit-prefix-0.5.1",
     },

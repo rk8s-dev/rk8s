@@ -45,7 +45,7 @@ cargo.rust_library(
         "//third-party/rust/crates/lazy_static-1.5.0:lazy_static-1.5.0",
         "//third-party/rust/crates/libm-0.2.15:libm-0.2.15",
         "//third-party/rust/crates/rand-0.8.5:rand-0.8.5",
-        "//third-party/rust/crates/smallvec-1.14.0:smallvec-1.14.0",
+        "//third-party/rust/crates/smallvec-1.15.1:smallvec-1.15.1",
         "//third-party/rust/crates/zeroize-1.8.1:zeroize-1.8.1",
     ],
 )

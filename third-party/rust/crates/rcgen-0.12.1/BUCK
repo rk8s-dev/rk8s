@@ -34,7 +34,7 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/pem-3.0.5:pem-3.0.5",
         "//third-party/rust/crates/ring-0.17.14:ring-0.17.14",
-        "//third-party/rust/crates/time-0.3.41:time-0.3.41",
+        "//third-party/rust/crates/time-0.3.43:time-0.3.43",
         "//third-party/rust/crates/yasna-0.5.2:yasna-0.5.2",
     ],
 )

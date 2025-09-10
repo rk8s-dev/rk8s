@@ -26,9 +26,9 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
-        "async_trait": "//third-party/rust/crates/async-trait-0.1.88:async-trait-0.1.88",
-        "aws_config": "//third-party/rust/crates/aws-config-1.8.5:aws-config-1.8.5",
-        "aws_sdk_s3": "//third-party/rust/crates/aws-sdk-s3-1.103.0:aws-sdk-s3-1.103.0",
+        "async_trait": "//third-party/rust/crates/async-trait-0.1.89:async-trait-0.1.89",
+        "aws_config": "//third-party/rust/crates/aws-config-1.8.6:aws-config-1.8.6",
+        "aws_sdk_s3": "//third-party/rust/crates/aws-sdk-s3-1.105.0:aws-sdk-s3-1.105.0",
         "futures_util": "//third-party/rust/crates/futures-util-0.3.31:futures-util-0.3.31",
     },
     visibility = ["PUBLIC"],
@@ -42,7 +42,7 @@ cargo.rust_binary(
         "//third-party/rust/crates/md5-0.7.0:md5-0.7.0",
         "//third-party/rust/crates/moka-0.12.10:moka-0.12.10",
         "//third-party/rust/crates/rfuse3-0.0.3:rfuse3-0.0.3",
-        "//third-party/rust/crates/sha2-0.10.8:sha2-0.10.8",
+        "//third-party/rust/crates/sha2-0.10.9:sha2-0.10.9",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
     ],
 )
@@ -70,9 +70,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
-        "async_trait": "//third-party/rust/crates/async-trait-0.1.88:async-trait-0.1.88",
-        "aws_config": "//third-party/rust/crates/aws-config-1.8.5:aws-config-1.8.5",
-        "aws_sdk_s3": "//third-party/rust/crates/aws-sdk-s3-1.103.0:aws-sdk-s3-1.103.0",
+        "async_trait": "//third-party/rust/crates/async-trait-0.1.89:async-trait-0.1.89",
+        "aws_config": "//third-party/rust/crates/aws-config-1.8.6:aws-config-1.8.6",
+        "aws_sdk_s3": "//third-party/rust/crates/aws-sdk-s3-1.105.0:aws-sdk-s3-1.105.0",
         "futures_util": "//third-party/rust/crates/futures-util-0.3.31:futures-util-0.3.31",
     },
     visibility = ["PUBLIC"],
@@ -86,7 +86,7 @@ cargo.rust_library(
         "//third-party/rust/crates/md5-0.7.0:md5-0.7.0",
         "//third-party/rust/crates/moka-0.12.10:moka-0.12.10",
         "//third-party/rust/crates/rfuse3-0.0.3:rfuse3-0.0.3",
-        "//third-party/rust/crates/sha2-0.10.8:sha2-0.10.8",
+        "//third-party/rust/crates/sha2-0.10.9:sha2-0.10.9",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
     ],
 )

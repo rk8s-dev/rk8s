@@ -26,5 +26,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/hashbrown-0.15.2:hashbrown-0.15.2"],
+    deps = ["//third-party/rust/crates/hashbrown-0.15.5:hashbrown-0.15.5"],
 )

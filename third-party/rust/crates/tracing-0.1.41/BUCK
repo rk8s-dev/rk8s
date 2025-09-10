@@ -34,9 +34,9 @@ cargo.rust_library(
     ],
     named_deps = {
         "pin_project_lite": "//third-party/rust/crates/pin-project-lite-0.2.16:pin-project-lite-0.2.16",
-        "tracing_attributes": "//third-party/rust/crates/tracing-attributes-0.1.28:tracing-attributes-0.1.28",
-        "tracing_core": "//third-party/rust/crates/tracing-core-0.1.33:tracing-core-0.1.33",
+        "tracing_attributes": "//third-party/rust/crates/tracing-attributes-0.1.30:tracing-attributes-0.1.30",
+        "tracing_core": "//third-party/rust/crates/tracing-core-0.1.34:tracing-core-0.1.34",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/log-0.4.27:log-0.4.27"],
+    deps = ["//third-party/rust/crates/log-0.4.28:log-0.4.28"],
 )

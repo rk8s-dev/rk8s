@@ -32,14 +32,14 @@ cargo.rust_library(
         "transport",
     ],
     named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2-1.0.94:proc-macro2-1.0.94",
+        "proc_macro2": "//third-party/rust/crates/proc-macro2-1.0.101:proc-macro2-1.0.101",
         "prost_build": "//third-party/rust/crates/prost-build-0.13.5:prost-build-0.13.5",
         "prost_types": "//third-party/rust/crates/prost-types-0.13.5:prost-types-0.13.5",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/prettyplease-0.2.31:prettyplease-0.2.31",
-        "//third-party/rust/crates/quote-1.0.39:quote-1.0.39",
-        "//third-party/rust/crates/syn-2.0.99:syn-2.0.99",
+        "//third-party/rust/crates/prettyplease-0.2.37:prettyplease-0.2.37",
+        "//third-party/rust/crates/quote-1.0.40:quote-1.0.40",
+        "//third-party/rust/crates/syn-2.0.106:syn-2.0.106",
     ],
 )

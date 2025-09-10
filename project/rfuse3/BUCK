@@ -43,7 +43,7 @@ cargo.rust_library(
         "//third-party/rust/crates/libc-0.2.175:libc-0.2.175",
         "//third-party/rust/crates/nix-0.29.0:nix-0.29.0",
         "//third-party/rust/crates/serde-1.0.219:serde-1.0.219",
-        "//third-party/rust/crates/slab-0.4.9:slab-0.4.9",
+        "//third-party/rust/crates/slab-0.4.11:slab-0.4.11",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
         "//third-party/rust/crates/tracing-0.1.41:tracing-0.1.41",
         "//third-party/rust/crates/which-4.4.2:which-4.4.2",

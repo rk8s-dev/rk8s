@@ -41,11 +41,11 @@ cargo.rust_library(
         "@$(location :ring-0.17.14-build-script-run[rustc_flags])",
     ],
     named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if-1.0.0:cfg-if-1.0.0",
+        "cfg_if": "//third-party/rust/crates/cfg-if-1.0.3:cfg-if-1.0.3",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/getrandom-0.2.15:getrandom-0.2.15",
+        "//third-party/rust/crates/getrandom-0.2.16:getrandom-0.2.16",
         "//third-party/rust/crates/untrusted-0.9.0:untrusted-0.9.0",
     ],
 )
@@ -81,7 +81,7 @@ cargo.rust_binary(
         "wasm32_unknown_unknown_js",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc-1.2.16:cc-1.2.16"],
+    deps = ["//third-party/rust/crates/cc-1.2.36:cc-1.2.36"],
 )
 
 buildscript_run(

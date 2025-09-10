@@ -31,13 +31,13 @@ cargo.rust_library(
         "tokio",
     ],
     named_deps = {
-        "async_trait": "//third-party/rust/crates/async-trait-0.1.88:async-trait-0.1.88",
+        "async_trait": "//third-party/rust/crates/async-trait-0.1.89:async-trait-0.1.89",
     },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes-1.10.1:bytes-1.10.1",
         "//third-party/rust/crates/hex-0.4.3:hex-0.4.3",
-        "//third-party/rust/crates/sha2-0.10.8:sha2-0.10.8",
+        "//third-party/rust/crates/sha2-0.10.9:sha2-0.10.9",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
     ],
 )

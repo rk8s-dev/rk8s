@@ -38,11 +38,11 @@ cargo.rust_library(
     ],
     rustc_flags = ["@$(location :syn-1.0.109-build-script-run[rustc_flags])"],
     named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2-1.0.94:proc-macro2-1.0.94",
-        "unicode_ident": "//third-party/rust/crates/unicode-ident-1.0.18:unicode-ident-1.0.18",
+        "proc_macro2": "//third-party/rust/crates/proc-macro2-1.0.101:proc-macro2-1.0.101",
+        "unicode_ident": "//third-party/rust/crates/unicode-ident-1.0.19:unicode-ident-1.0.19",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/quote-1.0.39:quote-1.0.39"],
+    deps = ["//third-party/rust/crates/quote-1.0.40:quote-1.0.40"],
 )
 
 cargo.rust_binary(

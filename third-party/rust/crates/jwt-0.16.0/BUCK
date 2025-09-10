@@ -34,7 +34,7 @@ cargo.rust_library(
         "//third-party/rust/crates/digest-0.10.7:digest-0.10.7",
         "//third-party/rust/crates/hmac-0.12.1:hmac-0.12.1",
         "//third-party/rust/crates/serde-1.0.219:serde-1.0.219",
-        "//third-party/rust/crates/serde_json-1.0.140:serde_json-1.0.140",
-        "//third-party/rust/crates/sha2-0.10.8:sha2-0.10.8",
+        "//third-party/rust/crates/serde_json-1.0.143:serde_json-1.0.143",
+        "//third-party/rust/crates/sha2-0.10.9:sha2-0.10.9",
     ],
 )

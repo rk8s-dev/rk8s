@@ -26,13 +26,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
-        "hyper_util": "//third-party/rust/crates/hyper-util-0.1.10:hyper-util-0.1.10",
+        "hyper_util": "//third-party/rust/crates/hyper-util-0.1.16:hyper-util-0.1.16",
         "pin_project_lite": "//third-party/rust/crates/pin-project-lite-0.2.16:pin-project-lite-0.2.16",
         "tower_service": "//third-party/rust/crates/tower-service-0.3.3:tower-service-0.3.3",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/hyper-1.6.0:hyper-1.6.0",
+        "//third-party/rust/crates/hyper-1.7.0:hyper-1.7.0",
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
     ],
 )

@@ -44,12 +44,12 @@ cargo.rust_library(
     ],
     rustc_flags = ["@$(location :rustix-0.38.44-build-script-run[rustc_flags])"],
     named_deps = {
-        "libc_errno": "//third-party/rust/crates/errno-0.3.12:errno-0.3.12",
+        "libc_errno": "//third-party/rust/crates/errno-0.3.14:errno-0.3.14",
         "linux_raw_sys": "//third-party/rust/crates/linux-raw-sys-0.4.15:linux-raw-sys-0.4.15",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags-2.9.2:bitflags-2.9.2",
+        "//third-party/rust/crates/bitflags-2.9.4:bitflags-2.9.4",
         "//third-party/rust/crates/libc-0.2.175:libc-0.2.175",
     ],
 )

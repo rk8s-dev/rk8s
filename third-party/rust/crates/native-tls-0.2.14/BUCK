@@ -29,12 +29,12 @@ cargo.rust_library(
     rustc_flags = ["@$(location :native-tls-0.2.14-build-script-run[rustc_flags])"],
     named_deps = {
         "openssl_probe": "//third-party/rust/crates/openssl-probe-0.1.6:openssl-probe-0.1.6",
-        "openssl_sys": "//third-party/rust/crates/openssl-sys-0.9.106:openssl-sys-0.9.106",
+        "openssl_sys": "//third-party/rust/crates/openssl-sys-0.9.109:openssl-sys-0.9.109",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log-0.4.27:log-0.4.27",
-        "//third-party/rust/crates/openssl-0.10.71:openssl-0.10.71",
+        "//third-party/rust/crates/log-0.4.28:log-0.4.28",
+        "//third-party/rust/crates/openssl-0.10.73:openssl-0.10.73",
     ],
 )
 
