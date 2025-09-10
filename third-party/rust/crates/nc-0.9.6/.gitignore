@@ -1,0 +1,5 @@
+/target
+/Cargo.lock
+/src/__pycache__/
+**/*.rs.bk
+*.swp

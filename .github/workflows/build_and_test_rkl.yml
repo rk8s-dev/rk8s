@@ -24,8 +24,6 @@ jobs:
 
       - name: Setup test environment
         run: |
-          reindeer --third-party-dir third-party vendor
-          reindeer --third-party-dir third-party buckify
           buck2 build //project/libbridge:libbridge
           buck2 build //project/libipam:libipam
 

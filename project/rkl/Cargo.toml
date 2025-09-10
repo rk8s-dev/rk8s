@@ -2,6 +2,9 @@
 name = "rkl"
 version = "0.1.0"
 edition = "2024"
+authors = ["rk8s-dev team"]
+description = "Implementation of CRI interface functionality based on Youki"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rkl"
 
 [lib]
 name = "rkl"

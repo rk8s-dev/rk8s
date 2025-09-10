@@ -9,6 +9,8 @@ license = "MIT"
 description = "FUSE user-space library async version implementation."
 rust-version = "1.77"
 exclude = ["BUCK"]
+authors = ["rk8s-dev team"]
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rfuse3"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

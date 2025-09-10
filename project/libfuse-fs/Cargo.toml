@@ -2,7 +2,7 @@
 name = "libfuse-fs"
 version = "0.1.4"
 edition = "2024"
-description = "fuse filesystem library"
+description = "FUSE Filesystem Library"
 homepage = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
 documentation = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"

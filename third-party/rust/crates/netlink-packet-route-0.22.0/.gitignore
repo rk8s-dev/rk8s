@@ -1,0 +1,6 @@
+Cargo.lock
+target
+vendor/
+tags
+
+*.swp
