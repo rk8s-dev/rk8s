@@ -58,7 +58,7 @@ pub async fn authorize(
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
             if let Ok(repo) = state.repo_storage.query_repo_by_name(&identifier).await
-                && repo.is_public == 0
+                && !repo.is_public
             {
                 match claims {
                     Some(claims) => {

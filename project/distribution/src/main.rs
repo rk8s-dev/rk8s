@@ -1,8 +1,9 @@
 use crate::config::Config;
 use clap::Parser;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::path::Path;
 use std::sync::Arc;
+use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use tokio::fs::OpenOptions;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
@@ -33,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = validate_config(&args).await;
 
-    let pool = SqlitePoolOptions::new()
+    let pool = PgPoolOptions::new()
         .max_connections(12)
         .connect(args.database_url.as_str())
         .await?;
@@ -125,8 +126,8 @@ async fn validate_config(args: &Args) -> Config {
 
     let db_url = Path::new(
         args.database_url
-            .strip_prefix("sqlite:")
-            .expect("Database url must be started with `sqlite:`"),
+            .strip_prefix("postgres:")
+            .expect("Database url must be started with `postgres:`"),
     );
     if let Some(parent) = db_url.parent() {
         tokio::fs::create_dir_all(parent)

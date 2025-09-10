@@ -1,6 +1,6 @@
 use crate::domain::repo::Repo;
 use crate::error::{AppError, BusinessError, MapToAppError};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, AppError>;
@@ -23,18 +23,18 @@ pub trait RepoRepository: Send + Sync {
 }
 
 #[derive(Debug)]
-pub struct SqliteRepoRepository {
-    pub pool: Arc<SqlitePool>,
+pub struct PgRepoRepository {
+    pub pool: Arc<PgPool>,
 }
 
-impl SqliteRepoRepository {
-    pub fn new(pool: Arc<SqlitePool>) -> SqliteRepoRepository {
-        SqliteRepoRepository { pool }
+impl PgRepoRepository {
+    pub fn new(pool: Arc<PgPool>) -> PgRepoRepository {
+        PgRepoRepository { pool }
     }
 }
 
 #[async_trait::async_trait]
-impl RepoRepository for SqliteRepoRepository {
+impl RepoRepository for PgRepoRepository {
     async fn query_repo_by_name(&self, name: &str) -> Result<Repo> {
         sqlx::query_as::<_, Repo>("select * from repos where name = $1")
             .bind(name)
@@ -57,7 +57,7 @@ impl RepoRepository for SqliteRepoRepository {
 
     async fn change_visibility(&self, name: &str, is_public: bool) -> Result<()> {
         let result = sqlx::query(
-            "UPDATE repos SET is_public = ?, updated_at = datetime('now') WHERE name = ?",
+            "UPDATE repos SET is_public = $1, updated_at = NOW() WHERE name = $2",
         )
         .bind(is_public)
         .bind(name)

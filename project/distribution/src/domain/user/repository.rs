@@ -1,6 +1,6 @@
 use crate::domain::user::User;
 use crate::error::{AppError, BusinessError, MapToAppError};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, AppError>;
@@ -13,18 +13,18 @@ pub trait UserRepository: Send + Sync {
 }
 
 #[derive(Debug)]
-pub struct SqliteUserRepository {
-    pub pool: Arc<SqlitePool>,
+pub struct PgUserRepository {
+    pub pool: Arc<PgPool>,
 }
 
-impl SqliteUserRepository {
-    pub fn new(pool: Arc<SqlitePool>) -> Self {
+impl PgUserRepository {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
 }
 
 #[async_trait::async_trait]
-impl UserRepository for SqliteUserRepository {
+impl UserRepository for PgUserRepository {
     async fn query_user_by_name(&self, name: &str) -> Result<User> {
         sqlx::query_as::<_, User>("select * from users where username = $1")
             .bind(name)

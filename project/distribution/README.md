@@ -21,7 +21,7 @@ OCI_REGISTRY_STORAGE=FILESYSTEM
 OCI_REGISTRY_ROOTDIR=/var/lib/registry
 
 # Database URL for storing user and repository metadata
-DATABASE_URL="sqlite:db/registry.db"
+DATABASE_URL="postgres://postgres:password@localhost:5432/postgres"
 
 # --- Security Configuration ---
 # A random, secret string used for salting passwords with 16 characters long.
@@ -209,5 +209,3 @@ Lastly, run the tests:
 ```bash
 ./conformance.test
 ```
-
-hint: you must create the user in database before starting these tests.

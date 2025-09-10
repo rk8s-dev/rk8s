@@ -1,8 +1,8 @@
 use crate::config::Config;
-use crate::domain::repo::{RepoRepository, SqliteRepoRepository};
-use crate::domain::user::{SqliteUserRepository, UserRepository};
+use crate::domain::repo::{PgRepoRepository, RepoRepository};
+use crate::domain::user::{PgUserRepository, UserRepository};
 use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
-use sqlx::{Pool, Sqlite};
+use sqlx::{PgPool, Pool};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -21,7 +21,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub async fn new(config: Config, pool: Arc<Pool<Sqlite>>) -> Self {
+    pub async fn new(config: Config, pool: Arc<PgPool>) -> Self {
         let storage_backend: Arc<dyn Storage + Send + Sync> = match config.storge_type.as_str() {
             "FILESYSTEM" => Arc::new(FilesystemStorage::new(&config.root_dir)),
             _ => Arc::new(FilesystemStorage::new(&config.root_dir)),
@@ -31,8 +31,8 @@ impl AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             storage: storage_backend,
             config: Arc::new(config),
-            user_storage: Arc::new(SqliteUserRepository::new(pool.clone())),
-            repo_storage: Arc::new(SqliteRepoRepository::new(pool)),
+            user_storage: Arc::new(PgUserRepository::new(pool.clone())),
+            repo_storage: Arc::new(PgRepoRepository::new(pool)),
         }
     }
 
