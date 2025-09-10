@@ -192,7 +192,7 @@ impl ContainerRunner {
     pub fn build_config(&mut self) -> Result<()> {
         let config = self
             .config_builder
-            .from_container_spec(self.spec.clone())?
+            .container_spec(self.spec.clone())?
             .clone()
             .build();
 

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::{Result, anyhow};
 use common::ExternalInterface;
 use ipnetwork::{Ipv4Network, Ipv6Network};

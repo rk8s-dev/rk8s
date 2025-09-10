@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use libcni::ip::route::{self, Route, RouteFilterMask};

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::fs;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::Path;
