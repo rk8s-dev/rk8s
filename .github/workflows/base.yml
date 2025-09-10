@@ -64,10 +64,7 @@ jobs:
           submodules: recursive
 
       - name: Build with Buck2
-        run: |
-          reindeer --third-party-dir third-party vendor
-          reindeer --third-party-dir third-party buckify
-          buck2 build //project/...
+        run: buck2 build //project/...
 
   test:
     name: Buck2 Test
