@@ -120,7 +120,7 @@ serial_test = "3.2.0"
 sha2 = "0.10.8"
 sha256 = "1.6.0"
 slab = "0.4.9"
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate"]}
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "macros", "migrate", "chrono", "uuid"]}
 tar = "0.4.44"
 tempfile = "3.19.1"
 thiserror = "2.0.12"
