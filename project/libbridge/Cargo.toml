@@ -2,6 +2,9 @@
 name = "libbridge"
 version = "0.1.0"
 edition = "2024"
+authors = ["rk8s-dev team"]
+description = "CNI Plugin Bridge Network Configuration"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libbridge"
 
 [dependencies]
 libcni = { path = "../libcni" }
