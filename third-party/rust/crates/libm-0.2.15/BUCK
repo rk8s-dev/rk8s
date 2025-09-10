@@ -68,14 +68,14 @@ buildscript_run(
     package_name = "libm",
     buildscript_rule = ":libm-0.2.15-build-script-build",
     env = {
-        "CARGO_MANIFEST_DIR": ".",
-        "OPT_LEVEL": "0",
         "CARGO_CFG_TARGET_ARCH": "x86_64",
         "CARGO_CFG_TARGET_ENV": "gnu",
         "CARGO_CFG_TARGET_FAMILY": "unix",
         "CARGO_CFG_TARGET_OS": "linux",
-        "TARGET": "x86_64-unknown-linux-gnu",
         "CARGO_CFG_TARGET_VENDOR": "unknown",
+        "CARGO_MANIFEST_DIR": ".",
+        "OPT_LEVEL": "0",
+        "TARGET": "x86_64-unknown-linux-gnu",
     },
     features = [
         "arch",
