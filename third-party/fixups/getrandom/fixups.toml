@@ -1,5 +1,0 @@
-extra_srcs = [
-    "README.md"
-]
-
-[buildscript.run]

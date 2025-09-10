@@ -1,4 +1,0 @@
-rustc_flags = ["--cfg=osslconf=\"OPENSSL_NO_IDEA\"", "--cfg=osslconf=\"OPENSSL_NO_SSL3_METHOD\""]
-
-[buildscript.run]
-env = { DEP_OPENSSL_VERSION_NUMBER = "30013000" }

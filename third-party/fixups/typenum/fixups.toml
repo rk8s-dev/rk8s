@@ -1,5 +1,0 @@
-# See https://github.com/paholg/typenum/pull/147. "This allows for building
-# without using Cargo, such as with Bazel."
-features = ["force_unix_path_separator"]
-
-[buildscript.run]
