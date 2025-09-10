@@ -1,0 +1,43 @@
+{
+    "ociVersion": "0.5.0-dev",
+    "process": {
+        "terminal": true,
+        "user": {
+            "uid": 1,
+            "gid": 1,
+            "username": "ContainerUser"
+        },
+        "args": [
+            "cmd"
+        ],
+        "env": [
+            "PATH=C:\\Windows\\system32;C:\\Windows;"
+        ],
+        "cwd": "C:\\"
+    },
+    "root": {
+        "path": ""
+    },
+    "hostname": "slartibartfast",
+    "mounts": [
+    ],
+    "hooks": {
+    },
+    "linux": {
+    },
+    "windows": {
+        "layerFolders": null,
+        "resources": {
+            "cpu": {
+                "shares": 2
+            }
+        },
+        "network": {
+            "networkNamespace": "1124faf5-e1d3-43fe-b758-8e99e5b7fa02"
+        }
+    },
+    "annotations": {
+        "com.example.key1": "value1",
+        "com.example.key2": "value2"
+    }
+}
