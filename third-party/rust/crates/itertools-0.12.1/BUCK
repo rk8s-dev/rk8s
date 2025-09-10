@@ -25,11 +25,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "default",
-        "use_alloc",
-        "use_std",
-    ],
+    features = ["use_alloc"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/either-1.15.0:either-1.15.0"],
 )

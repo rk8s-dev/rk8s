@@ -1,7 +1,0 @@
-filters:
-  .*:
-    reviewers:
-    - oci-spec-rs-reviewers
-    approvers:
-    - oci-spec-rs-approvers
-    - youki-maintainers

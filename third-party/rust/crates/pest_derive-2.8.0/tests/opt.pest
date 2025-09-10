@@ -1,8 +1,0 @@
-expr = {
-  SOI ~
-  #prefix=(STAR)? ~ #suffix=DOT?
-  ~ EOI
-}
-
-STAR={"*"}
-DOT={"."}
