@@ -143,7 +143,6 @@ async fn validate_config(args: &Args) -> Config {
         std::process::exit(1);
     }
 
-
     Config {
         host: args.host.clone(),
         port: args.port,
