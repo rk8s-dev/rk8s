@@ -1,4 +1,0 @@
-extra_srcs = [
-    "src/proto/google/protobuf/*.proto",
-    "src/proto//rustproto.proto",
-]

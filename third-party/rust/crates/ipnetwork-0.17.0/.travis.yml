@@ -1,0 +1,17 @@
+language: rust
+rust:
+  - stable
+  - beta
+  - nightly
+env:
+  global:
+    - secure: gokQ7xIWwmAuEUW3IyS5B/pbZxdFSSDBto5beJ+4ACGcRMDqJ/eCPf1ekSVXME4TWM46uUCjxcdUjYhIhQ6sG4zfWck4u45qRJ5JbIoTvR+ykxhN1j3Zi5x9ptP3ALDbHn2i3v6t9xohORfQpz3dVND5c7thbYDyKP2ZR1sez5c=
+    - FEATURES: default
+
+script:
+  - cargo build --verbose --no-default-features
+  - cargo test --verbose --no-default-features
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo build --release --verbose
+  - cargo doc --verbose

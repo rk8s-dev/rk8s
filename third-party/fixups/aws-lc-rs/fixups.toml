@@ -1,2 +1,0 @@
-[buildscript.run]
-env = { "DEP_AWS_LC_0_29_0_INCLUDE" = "$(location :aws-lc-sys-0.29.0-build-script-main-run[out_dir])/include" }

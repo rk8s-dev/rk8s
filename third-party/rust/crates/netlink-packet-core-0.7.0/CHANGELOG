@@ -1,0 +1,37 @@
+# Changelog
+## [0.7.0] - 2023-07-09
+### Breaking changes
+ - `NetlinkPayload::Ack` removed and replaced by `NetlinkPayload::Error` where
+    `ErrorMessage.code` is set to None. (52732b3)
+
+### New features
+ - Derive `Default` for `ErrorMessage`. (3514766)
+
+### Bug fixes
+ - N/A
+
+## [0.6.0] - 2023-06-26
+### Breaking changes
+ - `NetlinkPayload::Done` changed to `NetlinkPayload::Done(DoneMessage)`.
+   (0c75fb5)
+
+### New features
+ - Support full done message. (0c75fb5)
+
+### Bug fixes
+ - N/A
+
+## [0.5.0] - 2023-01-28
+### Breaking changes
+ - All public struct and enum are marked as `non_exhaustive`. Please check
+   https://doc.rust-lang.org/reference/attributes/type_system.html for more
+   detail. (53a4c4e)
+
+ - Removed the reexport `netlink-packet-core::utils`, please use
+   `netlink_packet_utils` directly. (a76010a)
+
+### New features
+ - N/A
+
+### Bug fixes
+ - N/A

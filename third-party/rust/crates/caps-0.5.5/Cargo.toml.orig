@@ -1,0 +1,34 @@
+[package]
+name = "caps"
+version = "0.5.5"
+edition = "2018"
+authors = ["Luca Bruno <lucab@lucabruno.net>"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/lucab/caps-rs"
+documentation = "https://docs.rs/caps"
+description = "A pure-Rust library to work with Linux capabilities"
+keywords = ["Linux", "capabilities", "POSIX", "getcap", "setcap"]
+exclude = [
+".gitignore",
+".travis.yml",
+]
+
+[dependencies]
+libc = "^0.2"
+thiserror = "^1.0"
+serde = { version = "^1.0", features = ["derive"], optional = true}
+
+[features]
+serde_support = ["serde"]
+
+[dev-dependencies]
+serde_json = "^1.0"
+
+[package.metadata.release]
+publish = false
+push = false
+post-release-commit-message = "cargo: development version bump"
+pre-release-commit-message = "cargo: caps release {{version}}"
+sign-commit = true
+sign-tag = true
+tag-message = "caps {{version}}"

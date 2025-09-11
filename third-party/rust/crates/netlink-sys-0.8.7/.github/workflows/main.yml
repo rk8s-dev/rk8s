@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+jobs:
+  ci:
+    name: CI (stable)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust Stable
+        run: |
+          rustup override set stable
+          rustup update stable
+
+      - name: Test with default feature
+        run: cargo test
+
+      - name: Test with mio feature
+        run: cargo test --features mio_socket
+
+      - name: Test with tokio feature
+        run: cargo test --features tokio_socket
+
+      - name: Test with smol_socket feature
+        run: cargo test --features smol_socket

@@ -1,0 +1,7 @@
+doc
+.*.swp
+tags
+target
+build
+Cargo.lock
+*~

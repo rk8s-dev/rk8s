@@ -2,6 +2,9 @@
 name = "common"
 version = "0.1.0"
 edition = "2024"
+authors = ["rk8s-dev team"]
+description = "Pod and Node definitions for rk8s"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/common"
 
 [lib]
 name = "common"

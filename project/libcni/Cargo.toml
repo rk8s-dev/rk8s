@@ -2,6 +2,9 @@
 name = "libcni"
 version = "0.1.0"
 edition = "2024"
+authors = ["rk8s-dev team"]
+description = "A Library For CNI-Plugins"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libcni"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

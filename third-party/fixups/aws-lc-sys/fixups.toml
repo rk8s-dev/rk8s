@@ -1,5 +1,0 @@
-cargo_env = true
-env = { OPT_LEVEL = "3" }
-
-[buildscript.run]
-env = { OPT_LEVEL = "3" }
