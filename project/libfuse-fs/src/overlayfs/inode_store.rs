@@ -97,19 +97,19 @@ impl InodeStore {
             self.path_mapping.remove(&path);
         }
 
-        if old_nlink == 1 {
-            if let Some(inode_data) = self.inodes.remove(&inode) {
-                if inode_data.lookups.load(Ordering::Relaxed) > 0 {
-                    trace!(
-                        "InodeStore: inode {inode} unlinked but still in use, moving to deleted map."
-                    );
-                    self.deleted.insert(inode, inode_data);
-                    return None;
-                } else {
-                    trace!("InodeStore: inode {inode} permanently removed (nlink=0, lookups=0).");
-                    self.nlinks.remove(&inode);
-                    return Some(inode_data);
-                }
+        if old_nlink == 1
+            && let Some(inode_data) = self.inodes.remove(&inode)
+        {
+            if inode_data.lookups.load(Ordering::Relaxed) > 0 {
+                trace!(
+                    "InodeStore: inode {inode} unlinked but still in use, moving to deleted map."
+                );
+                self.deleted.insert(inode, inode_data);
+                return None;
+            } else {
+                trace!("InodeStore: inode {inode} permanently removed (nlink=0, lookups=0).");
+                self.nlinks.remove(&inode);
+                return Some(inode_data);
             }
         }
 
