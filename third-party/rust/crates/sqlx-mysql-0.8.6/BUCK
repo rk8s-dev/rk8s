@@ -27,10 +27,12 @@ cargo.rust_library(
     },
     features = [
         "any",
+        "chrono",
         "json",
         "migrate",
         "offline",
         "serde",
+        "uuid",
     ],
     named_deps = {
         "futures_channel": "//third-party/rust/crates/futures-channel-0.3.31:futures-channel-0.3.31",
@@ -49,6 +51,7 @@ cargo.rust_library(
         "//third-party/rust/crates/bitflags-2.9.4:bitflags-2.9.4",
         "//third-party/rust/crates/byteorder-1.5.0:byteorder-1.5.0",
         "//third-party/rust/crates/bytes-1.10.1:bytes-1.10.1",
+        "//third-party/rust/crates/chrono-0.4.42:chrono-0.4.42",
         "//third-party/rust/crates/crc-3.3.0:crc-3.3.0",
         "//third-party/rust/crates/digest-0.10.7:digest-0.10.7",
         "//third-party/rust/crates/dotenvy-0.15.7:dotenvy-0.15.7",
@@ -69,6 +72,7 @@ cargo.rust_library(
         "//third-party/rust/crates/stringprep-0.1.5:stringprep-0.1.5",
         "//third-party/rust/crates/thiserror-2.0.16:thiserror-2.0.16",
         "//third-party/rust/crates/tracing-0.1.41:tracing-0.1.41",
+        "//third-party/rust/crates/uuid-1.18.1:uuid-1.18.1",
         "//third-party/rust/crates/whoami-1.6.1:whoami-1.6.1",
     ],
 )

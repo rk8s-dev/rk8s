@@ -1,5 +1,3 @@
----
-
 # Distribution
 
 A lite implementation of the OCI Distribution Spec in Rust, with added support for user management and authentication.

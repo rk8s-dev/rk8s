@@ -28,12 +28,15 @@ cargo.rust_library(
     features = [
         "_rt-tokio",
         "_tls-rustls-ring-webpki",
+        "chrono",
         "default",
         "derive",
         "json",
         "macros",
         "migrate",
+        "postgres",
         "sqlite",
+        "uuid",
     ],
     proc_macro = True,
     named_deps = {

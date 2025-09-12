@@ -28,10 +28,12 @@ cargo.rust_library(
     features = [
         "any",
         "bundled",
+        "chrono",
         "json",
         "migrate",
         "offline",
         "serde",
+        "uuid",
     ],
     named_deps = {
         "futures_channel": "//third-party/rust/crates/futures-channel-0.3.31:futures-channel-0.3.31",
@@ -46,6 +48,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/atoi-2.0.0:atoi-2.0.0",
+        "//third-party/rust/crates/chrono-0.4.42:chrono-0.4.42",
         "//third-party/rust/crates/flume-0.11.1:flume-0.11.1",
         "//third-party/rust/crates/log-0.4.28:log-0.4.28",
         "//third-party/rust/crates/serde-1.0.219:serde-1.0.219",
@@ -53,5 +56,6 @@ cargo.rust_library(
         "//third-party/rust/crates/thiserror-2.0.16:thiserror-2.0.16",
         "//third-party/rust/crates/tracing-0.1.41:tracing-0.1.41",
         "//third-party/rust/crates/url-2.5.7:url-2.5.7",
+        "//third-party/rust/crates/uuid-1.18.1:uuid-1.18.1",
     ],
 )

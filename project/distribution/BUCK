@@ -19,10 +19,10 @@ cargo.rust_binary(
         "CARGO_PKG_DESCRIPTION": "A lite implementation of the OCI Distribution Spec in Rust",
         "CARGO_PKG_NAME": "distribution",
         "CARGO_PKG_REPOSITORY": "https://github.com/r2cn-dev/rk8s/tree/main/project/distribution",
-        "CARGO_PKG_VERSION": "0.1.0",
+        "CARGO_PKG_VERSION": "0.1.1",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
