@@ -36,7 +36,6 @@ pub async fn authenticate(
     Ok(next.run(req).await)
 }
 
-#[tracing::instrument(skip_all)]
 pub async fn authorize(
     State(state): State<Arc<AppState>>,
     mut req: Request,
@@ -58,7 +57,7 @@ pub async fn authorize(
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
             if let Ok(repo) = state.repo_storage.query_repo_by_name(&identifier).await
-                && repo.is_public == 0
+                && !repo.is_public
             {
                 match claims {
                     Some(claims) => {

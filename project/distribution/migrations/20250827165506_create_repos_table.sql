@@ -1,10 +1,20 @@
 -- Add migration script here
+
 CREATE TABLE repos (
-    id CHAR(32) PRIMARY KEY NOT NULL,
+    id UUID PRIMARY KEY NOT NULL DEFAULT uuid_generate_v4(),
+
     name VARCHAR(255) NOT NULL UNIQUE,
-    is_public INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+
+    is_public BOOLEAN NOT NULL DEFAULT FALSE,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_repos_name ON repos (name);
+CREATE INDEX IF NOT EXISTS idx_repos_name ON repos (name);
+
+DROP TRIGGER IF EXISTS set_timestamp ON repos;
+CREATE TRIGGER set_timestamp
+    BEFORE UPDATE ON repos
+    FOR EACH ROW
+EXECUTE PROCEDURE trigger_set_timestamp();

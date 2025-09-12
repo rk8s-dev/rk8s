@@ -30,6 +30,7 @@ cargo.rust_library(
         "_tls-rustls",
         "_tls-rustls-ring-webpki",
         "any",
+        "chrono",
         "crc",
         "default",
         "json",
@@ -41,6 +42,7 @@ cargo.rust_library(
         "sha2",
         "tokio",
         "tokio-stream",
+        "uuid",
         "webpki-roots",
     ],
     named_deps = {
@@ -58,6 +60,7 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/base64-0.22.1:base64-0.22.1",
         "//third-party/rust/crates/bytes-1.10.1:bytes-1.10.1",
+        "//third-party/rust/crates/chrono-0.4.42:chrono-0.4.42",
         "//third-party/rust/crates/crc-3.3.0:crc-3.3.0",
         "//third-party/rust/crates/either-1.15.0:either-1.15.0",
         "//third-party/rust/crates/hashbrown-0.15.5:hashbrown-0.15.5",
@@ -75,5 +78,6 @@ cargo.rust_library(
         "//third-party/rust/crates/tokio-1.47.1:tokio-1.47.1",
         "//third-party/rust/crates/tracing-0.1.41:tracing-0.1.41",
         "//third-party/rust/crates/url-2.5.7:url-2.5.7",
+        "//third-party/rust/crates/uuid-1.18.1:uuid-1.18.1",
     ],
 )

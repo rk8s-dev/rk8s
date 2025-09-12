@@ -1,10 +1,23 @@
--- Add migration script here
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+    RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TABLE users (
-    id CHAR(32) PRIMARY KEY NOT NULL,
+    id UUID PRIMARY KEY NOT NULL DEFAULT uuid_generate_v4(),
     username VARCHAR(255) NOT NULL UNIQUE,
     password TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_users_username ON users (username);
+DROP TRIGGER IF EXISTS set_timestamp ON users;
+CREATE TRIGGER set_timestamp
+    BEFORE UPDATE ON users
+    FOR EACH ROW
+EXECUTE PROCEDURE trigger_set_timestamp();

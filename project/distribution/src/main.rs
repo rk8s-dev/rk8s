@@ -1,9 +1,8 @@
 use crate::config::Config;
 use clap::Parser;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::postgres::PgPoolOptions;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::fs::OpenOptions;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
@@ -33,9 +32,9 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = validate_config(&args).await;
 
-    let pool = SqlitePoolOptions::new()
+    let pool = PgPoolOptions::new()
         .max_connections(12)
-        .connect(args.database_url.as_str())
+        .connect(&config.db_url)
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
 
@@ -123,23 +122,22 @@ async fn validate_config(args: &Args) -> Config {
         .parse::<i64>()
         .unwrap();
 
-    let db_url = Path::new(
-        args.database_url
-            .strip_prefix("sqlite:")
-            .expect("Database url must be started with `sqlite:`"),
-    );
-    if let Some(parent) = db_url.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .expect("Failed to create db directory");
-    }
-    let _ = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(db_url)
-        .await
-        .expect("Failed to create db file");
-
+    let db_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            let db_password = match std::env::var("POSTGRES_PASSWORD") {
+                Ok(password) => password,
+                Err(_) => {
+                    validation_errors.push("POSTGRES_PASSWORD is not set".into());
+                    "".into()
+                }
+            };
+            format!(
+                "postgres://{}:{}@{}:{}/{}",
+                args.db_user, db_password, args.db_host, args.db_port, args.db_name
+            )
+        }
+    };
     if !validation_errors.is_empty() {
         tracing::error!("{}", validation_errors.join("\n"));
         std::process::exit(1);
@@ -151,7 +149,7 @@ async fn validate_config(args: &Args) -> Config {
         storge_type: args.storage.clone(),
         root_dir: args.root.clone(),
         registry_url: args.url.clone(),
-        db_url: args.database_url.clone(),
+        db_url,
         jwt_secret,
         password_salt,
         jwt_lifetime_secs,
