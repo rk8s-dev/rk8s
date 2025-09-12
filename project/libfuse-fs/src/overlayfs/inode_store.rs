@@ -72,7 +72,7 @@ impl InodeStore {
             .insert(node.path.read().await.clone(), inode);
         self.nlinks
             .entry(inode)
-            .or_insert_with(|| Arc::new(AtomicU64::new(1)))
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
             .fetch_add(1, Ordering::Relaxed);
         self.inodes.entry(inode).or_insert(node);
     }
@@ -91,48 +91,29 @@ impl InodeStore {
         inode: Inode,
         path_removed: Option<String>,
     ) -> Option<Arc<OverlayInode>> {
-        let last_link = self
-            .nlinks
-            .get(&inode)
-            .unwrap()
-            .fetch_sub(1, Ordering::Relaxed);
-        let removed = if last_link == 1 {
-            match self.inodes.remove(&inode) {
-                Some(v) => {
-                    // Refcount is not 0, we have to delay the removal.
-                    if v.lookups.load(Ordering::Relaxed) > 0 {
-                        trace!(
-                            "InodeStore:remove_inode: inode {inode} is still in use, delaying removal."
-                        );
-                        self.deleted.insert(inode, v.clone());
-                        return None;
-                    }
-                    Some(v)
-                }
-                None => {
-                    // If the inode is not in hash, it must be in deleted_inodes.
-                    match self.deleted.get(&inode) {
-                        Some(v) => {
-                            // Refcount is 0, the inode can be removed now.
-                            if v.lookups.load(Ordering::Relaxed) == 0 {
-                                self.deleted.remove(&inode)
-                            } else {
-                                // Refcount is not 0, the inode will be removed later.
-                                None
-                            }
-                        }
-                        None => None,
-                    }
-                }
-            }
-        } else {
-            None
-        };
+        let old_nlink = self.nlinks.get(&inode)?.fetch_sub(1, Ordering::Relaxed);
 
         if let Some(path) = path_removed {
             self.path_mapping.remove(&path);
         }
-        removed
+
+        if old_nlink == 1 {
+            if let Some(inode_data) = self.inodes.remove(&inode) {
+                if inode_data.lookups.load(Ordering::Relaxed) > 0 {
+                    trace!(
+                        "InodeStore: inode {inode} unlinked but still in use, moving to deleted map."
+                    );
+                    self.deleted.insert(inode, inode_data);
+                    return None;
+                } else {
+                    trace!("InodeStore: inode {inode} permanently removed (nlink=0, lookups=0).");
+                    self.nlinks.remove(&inode);
+                    return Some(inode_data);
+                }
+            }
+        }
+
+        None
     }
 
     // As a debug function, print all inode numbers in hash table.
