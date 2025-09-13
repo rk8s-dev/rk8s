@@ -193,8 +193,7 @@ impl RealInode {
             }
             Err(e) => {
                 let ioerror: std::io::Error = e.into();
-                if 
-                let Some(raw_error) = ioerror.raw_os_error()
+                if let Some(raw_error) = ioerror.raw_os_error()
                     && (raw_error == libc::ENOENT || raw_error == libc::ENAMETOOLONG)
                 {
                     return Ok(None);
