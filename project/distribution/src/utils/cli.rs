@@ -36,7 +36,15 @@ pub(crate) struct Args {
     )]
     pub(crate) url: String,
 
-    /// The database URL to connect to
-    #[arg(long, env = "DATABASE_URL", default_value = "sqlite:db/registry.db")]
-    pub(crate) database_url: String,
+    #[arg(long, env = "POSTGRES_HOST", default_value = "localhost")]
+    pub(crate) db_host: String,
+
+    #[arg(long, env = "POSTGRES_PORT", default_value_t = 5432)]
+    pub(crate) db_port: u16,
+
+    #[arg(long, env = "POSTGRES_USER", default_value = "postgres")]
+    pub(crate) db_user: String,
+
+    #[arg(long, env = "POSTGRES_DB", default_value = "postgres")]
+    pub(crate) db_name: String,
 }

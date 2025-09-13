@@ -1,8 +1,10 @@
+use crate::commands::ExecPod;
 use crate::commands::pod::standalone::{exec_pod, start_pod, state_pod};
+use crate::daemon;
 use crate::rootpath;
 use crate::task::TaskRunner;
-use crate::{PodCommand, daemon};
 use anyhow::{Result, anyhow};
+use clap::Subcommand;
 use daemonize::Daemonize;
 use std::env;
 use std::fs::{self, File};
@@ -14,6 +16,59 @@ use tracing::info;
 
 pub mod cluster;
 pub mod standalone;
+
+#[derive(Subcommand)]
+pub enum PodCommand {
+    #[command(about = "Run a pod from a YAML file using rkl run pod.yaml")]
+    Run {
+        #[arg(value_name = "POD_YAML")]
+        pod_yaml: String,
+    },
+    #[command(about = "Create a pod from a YAML file using rkl create pod.yaml")]
+    Create {
+        #[arg(value_name = "POD_YAML")]
+        pod_yaml: String,
+
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
+    },
+    #[command(about = "Start a pod with a pod-name using rkl start pod-name")]
+    Start {
+        #[arg(value_name = "POD_NAME")]
+        pod_name: String,
+    },
+
+    #[command(about = "Delete a pod with a pod-name using rkl delete pod-name")]
+    Delete {
+        #[arg(value_name = "POD_NAME")]
+        pod_name: String,
+
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
+    },
+
+    #[command(about = "Get the state of a pod using rkl state pod-name")]
+    State {
+        #[arg(value_name = "POD_NAME")]
+        pod_name: String,
+    },
+
+    #[command(about = "Execute a command inside a specific container of a pod")]
+    Exec(Box<ExecPod>),
+
+    #[command(about = "List all of pods")]
+    List {
+        #[arg(long, value_name = "RKS_ADDRESS", required = false)]
+        cluster: Option<String>,
+    },
+
+    // Run as a daemon process.
+    // For convenient, I won't remove cli part now.
+    #[command(
+        about = "Set rkl on daemon mod monitoring the pod.yaml in '/etc/rk8s/manifests' directory"
+    )]
+    Daemon,
+}
 
 // store infomation of pod
 #[derive(Debug)]
@@ -118,6 +173,7 @@ pub fn run_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
     run_pod_from_taskrunner(task_runner)
 }
 
+#[allow(dead_code)]
 pub fn set_daemonize() -> Result<(), anyhow::Error> {
     let log_path = PathBuf::from("/var/log/rk8s/");
     if !log_path.exists() {

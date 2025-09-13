@@ -164,14 +164,6 @@ impl NetworkManager {
         self.allocate_interface()
     }
 
-    pub fn is_default(&self) -> bool {
-        self.is_default
-    }
-
-    pub fn write_network_config(&self) -> Result<()> {
-        Ok(())
-    }
-
     /// validate the correctness and initialize  the service_mapping
     fn validate(&mut self, spec: &ComposeSpec) -> Result<()> {
         for (srv, srv_spec) in &spec.services {

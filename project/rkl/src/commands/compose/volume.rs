@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -27,7 +26,7 @@ impl Default for VolumeManager {
 
 pub struct VolumeManager {
     // storage the key-value <volume_name>:<specific_path>
-    pub volumes: HashMap<String, String>,
+    // pub volumes: HashMap<String, String>,
 }
 
 impl VolumeManager {
@@ -88,8 +87,6 @@ impl VolumeManager {
         Ok(())
     }
     pub fn new() -> Self {
-        Self {
-            volumes: HashMap::new(),
-        }
+        Self {}
     }
 }

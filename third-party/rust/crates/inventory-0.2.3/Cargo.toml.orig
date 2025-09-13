@@ -1,0 +1,22 @@
+[package]
+name = "inventory"
+version = "0.2.3" # remember to update html_root_url
+authors = ["David Tolnay <dtolnay@gmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "Typed distributed plugin registration"
+repository = "https://github.com/dtolnay/inventory"
+documentation = "https://docs.rs/inventory"
+readme = "README.md"
+edition = "2018"
+rust-version = "1.37"
+
+[dependencies]
+ctor = "0.1"
+ghost = "0.1.4"
+
+[dev-dependencies]
+rustversion = "1.0"
+trybuild = "1.0"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]

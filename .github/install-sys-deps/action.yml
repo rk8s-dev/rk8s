@@ -30,5 +30,4 @@ runs:
       with:
         path: |
           /home/runner/.cargo/bin/buck2
-          /home/runner/.cargo/bin/reindeer
         key: buck2-binary

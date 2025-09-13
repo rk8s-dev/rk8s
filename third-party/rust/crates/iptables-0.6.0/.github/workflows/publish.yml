@@ -1,0 +1,26 @@
+name: Publish to Crates.io
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo login ${{ secrets.CRATES_IO_TOKEN }}
+      - run: cargo package
+      - run: cargo publish
+  release:
+    runs-on: ubuntu-latest
+    needs: [publish]
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: create release
+        run: gh release create "${{ github.ref_name }}" -t "${{ github.ref_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

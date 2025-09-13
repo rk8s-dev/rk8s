@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::{Context, Result};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use serde::{Deserialize, Serialize};

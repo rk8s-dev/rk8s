@@ -203,6 +203,7 @@ pub fn exec(args: Exec, root_path: PathBuf) -> Result<i32> {
     }
 }
 
+#[allow(dead_code)]
 /// exec cmd implements
 #[derive(Debug, Clone)]
 pub struct Exec {
@@ -297,12 +298,12 @@ pub struct ExecContainer {
     #[clap(value_parser = clap::builder::NonEmptyStringValueParser::new(), required = true)]
     pub container_id: String,
 
-    #[clap(short = 'p', long, required = false)]
-    pub root_path: Option<String>,
-
     /// Command that should be executed in the container
     #[clap(required = false)]
     pub command: Vec<String>,
+
+    #[clap(long, required = false)]
+    pub root_path: Option<String>,
 
     #[clap(flatten)]
     pub base: ExecBase,

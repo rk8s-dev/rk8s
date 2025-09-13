@@ -1,0 +1,65 @@
+[advisories]
+ignore = [
+    # a chrono issue, this is just a test dependency
+    "RUSTSEC-2020-0071",
+]
+
+[licenses]
+confidence-threshold = 1.0
+copyleft = "deny"
+unlicensed = "deny"
+allow-osi-fsf-free = "both"
+default = "deny"
+
+# List of explictly allowed licenses
+# See https://spdx.org/licenses/ for list of possible licenses
+# [possible values: any SPDX 3.11 short identifier (+ optional exception)].
+allow = [
+    "LicenseRef-ring",
+    "LicenseRef-webpki",
+    "LicenseRef-rustls-webpki",
+    "MPL-2.0",
+    "Unicode-DFS-2016",
+]
+
+deny = [
+    "AGPL-3.0",
+    "WTFPL",
+]
+
+[[licenses.clarify]]
+name = "ring"
+expression = "LicenseRef-ring"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 },
+]
+
+[[licenses.clarify]]
+name = "webpki"
+expression = "LicenseRef-webpki"
+license-files = [
+    { path = "LICENSE", hash = 0x001c7e6c },
+]
+
+[[licenses.clarify]]
+name = "rustls-webpki"
+expression = "LicenseRef-rustls-webpki"
+license-files = [
+    { path = "LICENSE", hash = 0x001c7e6c },
+]
+
+[[licenses.clarify]]
+name = "encoding_rs"
+version = "*"
+expression = "(Apache-2.0 OR MIT) AND BSD-3-Clause"
+license-files = [
+    { path = "COPYRIGHT", hash = 0x39f8ad31 }
+]
+
+[bans]
+multiple-versions = "allow"
+skip = [
+]
+
+skip-tree = [
+]

@@ -1,7 +1,10 @@
 [package]
 name = "distribution"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
+authors = ["rk8s-dev team"]
+description = "A lite implementation of the OCI Distribution Spec in Rust"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/distribution"
 
 [dependencies]
 anyhow = "1.0.99"
@@ -20,7 +23,7 @@ regex = "1.11.1"
 serde = "1.0.217"
 serde_json = "1.0.138"
 sha2 = "0.10.8"
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate"]}
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "postgres", "macros", "migrate", "chrono", "uuid"]}
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = { version = "0.7.13", features = ["io"] }
 thiserror = "2.0.12"

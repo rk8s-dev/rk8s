@@ -2,6 +2,9 @@
 name = "libipam"
 version = "0.1.0"
 edition = "2024"
+authors = ["rk8s-dev team"]
+description = "CNI Plugin IPAM"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libipam"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

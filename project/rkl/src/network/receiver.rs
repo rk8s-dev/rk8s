@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use libcni::ip::route::Route;
 use log::{error, info, warn};
