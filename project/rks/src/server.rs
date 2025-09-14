@@ -8,19 +8,16 @@ use crate::network::{
 };
 use anyhow::{Context, Result};
 use common::{NodeNetworkConfig, PodTask, RksMessage};
+use futures_util::StreamExt;
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use libcni::ip::route::Route;
+use log::{error, info, warn};
 use quinn::{Connection, Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify, mpsc};
-use log::{info, warn, error};
-use rcgen;
-use serde_yaml;
-use etcd_client;
-use futures_util::StreamExt;
 
 #[derive(Clone)]
 pub struct WorkerSession {
@@ -34,6 +31,7 @@ pub struct NodeRegistry {
     inner: Mutex<HashMap<String, Arc<WorkerSession>>>,
 }
 
+#[allow(unused)]
 impl NodeRegistry {
     pub async fn register(&self, node_id: String, session: Arc<WorkerSession>) {
         let mut inner = self.inner.lock().await;
@@ -108,28 +106,23 @@ pub async fn serve(
         let node_registry = node_registry.clone();
 
         match connecting {
-            Some(connecting) => {
-                match connecting.await {
-                    Ok(conn) => {
-                        let remote_addr = conn.remote_address().to_string();
-                        info!("[server] connection accepted: addr={remote_addr}");
+            Some(connecting) => match connecting.await {
+                Ok(conn) => {
+                    let remote_addr = conn.remote_address().to_string();
+                    info!("[server] connection accepted: addr={remote_addr}");
 
-                        tokio::spawn(async move {
-                            if let Err(e) = handle_connection(
-                                conn,
-                                xline_store,
-                                local_manager,
-                                node_registry,
-                            ).await {
-                                error!("[server] handle_connection error: {e:?}");
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        error!("Connection failed: {}", e);
-                    }
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            handle_connection(conn, xline_store, local_manager, node_registry).await
+                        {
+                            error!("[server] handle_connection error: {e:?}");
+                        }
+                    });
                 }
-            }
+                Err(e) => {
+                    error!("Connection failed: {}", e);
+                }
+            },
             None => break,
         }
     }
@@ -180,15 +173,15 @@ async fn watch_pods(
                         etcd_client::EventType::Put => {
                             if let Some(kv) = event.kv() {
                                 let pod_yaml = String::from_utf8_lossy(kv.value()).to_string();
-                                if let Ok(pod_task) = serde_yaml::from_str::<PodTask>(&pod_yaml) {
-                                    if pod_task.spec.nodename.as_deref() == Some(&node_id) {
-                                        let msg = RksMessage::CreatePod(Box::new(pod_task));
-                                        let data = bincode::serialize(&msg)?;
-                                        if let Ok(mut stream) = conn.open_uni().await {
-                                            stream.write_all(&data).await?;
-                                            stream.finish()?;
-                                            info!("[watch_pods] sent new pod to worker");
-                                        }
+                                if let Ok(pod_task) = serde_yaml::from_str::<PodTask>(&pod_yaml)
+                                    && pod_task.spec.nodename.as_deref() == Some(&node_id)
+                                {
+                                    let msg = RksMessage::CreatePod(Box::new(pod_task));
+                                    let data = bincode::serialize(&msg)?;
+                                    if let Ok(mut stream) = conn.open_uni().await {
+                                        stream.write_all(&data).await?;
+                                        stream.finish()?;
+                                        info!("[watch_pods] sent new pod to worker");
                                     }
                                 }
                             }
@@ -340,7 +333,9 @@ async fn handle_connection(
 
         let node_id_for_watch = node_id_clone.clone();
         tokio::spawn(async move {
-            if let Err(e) = watch_pods(&xline_store_clone, &conn_clone, Some(node_id_for_watch)).await {
+            if let Err(e) =
+                watch_pods(&xline_store_clone, &conn_clone, Some(node_id_for_watch)).await
+            {
                 error!("Watch pods error: {}", e);
             }
         });
@@ -372,10 +367,10 @@ async fn handle_connection(
                                 if let Err(e) = dispatch_worker(msg.clone(), &conn).await {
                                     error!("Error dispatching worker message: {}", e);
                                 }
-                            } else {
-                                if let Err(e) = dispatch_user(msg.clone(), &xline_store, &conn).await {
-                                    error!("Error dispatching user message: {}", e);
-                                }
+                            } else if let Err(e) =
+                                dispatch_user(msg.clone(), &xline_store, &conn).await
+                            {
+                                error!("Error dispatching user message: {}", e);
                             }
                         }
                     }
@@ -504,4 +499,3 @@ pub fn build_node_network_config(
         subnet_env: contents,
     })
 }
-

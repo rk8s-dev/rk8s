@@ -1,3 +1,4 @@
+#![allow(unused)]
 use anyhow::Result;
 use etcd_client::{Client, GetOptions, PutOptions, WatchOptions, WatchStream, Watcher};
 use std::sync::Arc;
@@ -159,7 +160,9 @@ impl XlineStore {
 
         let key = "/coreos.com/network/config";
         let mut client = self.client.write().await;
-        client.put(key, config_json, Some(PutOptions::new())).await?;
+        client
+            .put(key, config_json, Some(PutOptions::new()))
+            .await?;
         Ok(())
     }
 

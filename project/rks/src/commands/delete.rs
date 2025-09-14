@@ -1,9 +1,9 @@
+#![allow(unused)]
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use common::{PodTask, RksMessage};
 use quinn::Connection;
 use std::sync::Arc;
-
 
 pub async fn watch_delete(
     pod_name: String,
@@ -12,7 +12,7 @@ pub async fn watch_delete(
     node_id: &str,
 ) -> Result<()> {
     let msg = RksMessage::DeletePod(pod_name.clone());
-    
+
     if let Ok(pods) = xline_store.list_pods().await {
         for p in pods {
             if let Ok(Some(pod_yaml)) = xline_store.get_pod_yaml(&p).await {
@@ -42,7 +42,7 @@ pub async fn user_delete(
     conn: &Connection,
 ) -> Result<()> {
     xline_store.delete_pod(&pod_name).await?;
-    println!("[user_delete] deleted pod {} (written to xline)",pod_name);
+    println!("[user_delete] deleted pod {} (written to xline)", pod_name);
 
     let response = RksMessage::Ack;
     let data = bincode::serialize(&response)?;

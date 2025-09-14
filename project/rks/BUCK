@@ -13,6 +13,7 @@ rust_binary(
         "//third-party:serde_yaml",
         "//third-party:bincode",
         "//third-party:futures",
+        "//third-party:futures-util",
         "//third-party:anyhow",
         "//third-party:rcgen",
         "//third-party:etcd-client",

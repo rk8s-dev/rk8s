@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use common::{PodTask, RksMessage};
@@ -23,7 +24,7 @@ pub async fn watch_create(pod_task: &PodTask, conn: &Connection, node_id: &str) 
 
 /// Handle user-requested pod creation, store pod in Xline
 pub async fn user_create(
-    mut pod_task: Box<PodTask>,
+    pod_task: Box<PodTask>,
     xline_store: &Arc<XlineStore>,
     conn: &Connection,
 ) -> Result<()> {
