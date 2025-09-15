@@ -18,8 +18,10 @@ apt-get install -y \
   zstd \
   clang \
   lld \
-  protobuf-compiler
-
+  protobuf-compiler \
+  seccomp \
+  libseccomp-dev 
+  
 ## Install rustup and common components
 curl https://sh.rustup.rs -sSf | sh -s -- -y
 source /root/.cargo/env
