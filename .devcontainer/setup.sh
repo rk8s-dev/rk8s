@@ -17,15 +17,16 @@ apt-get install -y \
   ca-certificates \
   zstd \
   clang \
-  lld
+  lld \
+  protobuf-compiler
 
 ## Install rustup and common components
 curl https://sh.rustup.rs -sSf | sh -s -- -y
 source /root/.cargo/env
 
 ## Install Buck2
-wget https://github.com/facebook/buck2/releases/download/latest/buck2-x86_64-unknown-linux-musl.zst
-zstd -d /home/buck2-x86_64-unknown-linux-musl.zst
-mv /home/buck2-x86_64-unknown-linux-musl /home/buck2
+wget https://github.com/facebook/buck2/releases/download/latest/buck2-x86_64-unknown-linux-gnu.zst
+zstd -d /home/buck2-x86_64-unknown-linux-gnu.zst
+mv /home/buck2-x86_64-unknown-linux-gnu /home/buck2
 chmod +x /home/buck2
 mv /home/buck2 /usr/local/bin/buck2
