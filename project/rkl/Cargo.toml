@@ -2,6 +2,9 @@
 name = "rkl"
 version = "0.1.0"
 edition = "2024"
+authors = ["rk8s-dev team"]
+description = "Implementation of CRI interface functionality based on Youki"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rkl"
 
 [lib]
 name = "rkl"
@@ -22,6 +25,7 @@ tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "full"] }
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.3", features = ["v4"] }
 nix = { version = "0.29.0", features = ["fs", "mount"] }
+libcni = { path = "../libcni" }
 anyhow = "1.0.98"
 protobuf = "=3.2.0"
 liboci-cli = "0.5.1"
@@ -48,8 +52,13 @@ bincode = "1.3"
 quinn = { version = "0.11.8" }
 rustls = "0.23"
 gethostname = "0.4"
-get_if_addrs = "0.5"
 sysinfo = "0.30"
+ipnetwork = "0.17"
+log = "0.4"
+lazy_static = "1.4"
+regex = "1.0"
+dotenvy = "0.15"
+netlink-packet-route = "0.22.0"
 
 [dev-dependencies]
 tempfile = "3"

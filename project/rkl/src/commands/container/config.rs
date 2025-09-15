@@ -61,7 +61,7 @@ impl Default for ContainerConfigBuilder {
 }
 
 impl ContainerConfigBuilder {
-    pub fn from_container_spec(&mut self, spec: ContainerSpec) -> Result<&mut Self> {
+    pub fn container_spec(&mut self, spec: ContainerSpec) -> Result<&mut Self> {
         let metadata = Some(ContainerMetadata {
             name: spec.name.clone(),
             attempt: 0,

@@ -1,17 +1,22 @@
 use crate::{
-    ContainerCommand,
     commands::{
-        Exec, ExecContainer, container::config::ContainerConfigBuilder, create, delete, exec, list,
-        load_container, start,
+        Exec, ExecContainer,
+        compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
+        container::config::ContainerConfigBuilder,
+        create, delete, exec, list, load_container, start,
     },
-    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, StartContainerResponse},
+    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
     rootpath,
     task::{add_cap_net_raw, get_cni},
 };
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
+use clap::Subcommand;
 use common::ContainerSpec;
-use libcontainer::container::{Container, State, state};
+use libcontainer::{
+    container::{Container, ContainerStatus, State, state},
+    error::LibcontainerError,
+};
 use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
@@ -26,6 +31,49 @@ use tabwriter::TabWriter;
 use tracing::debug;
 
 pub mod config;
+
+#[derive(Subcommand)]
+pub enum ContainerCommand {
+    #[command(about = "Run a single container from a YAML file using rkl run container.yaml")]
+    Run {
+        #[arg(value_name = "CONTAINER_YAML")]
+        container_yaml: String,
+    },
+    #[command(about = "Create a Container from a YAML file using rkl create container.yaml")]
+    Create {
+        #[arg(value_name = "CONTAINER_YAML")]
+        container_yaml: String,
+    },
+    #[command(about = "Start a Container with a Container-name using rkl start container-name")]
+    Start {
+        #[arg(value_name = "CONTAINER_NAME")]
+        container_name: String,
+    },
+
+    #[command(about = "Delete a Container with a Container-name using rkl delete container-name")]
+    Delete {
+        #[arg(value_name = "CONTAINER_NAME")]
+        container_name: String,
+    },
+    #[command(about = "Get the state of a container using rkl state container-name")]
+    State {
+        #[arg(value_name = "CONTAINER_NAME")]
+        container_name: String,
+    },
+
+    #[command(about = "List the current running container")]
+    List {
+        /// Only display container IDs default is false
+        #[arg(long, short)]
+        quiet: Option<bool>,
+
+        /// Specify the format (default or table)
+        #[arg(long, short)]
+        format: Option<String>,
+    },
+
+    Exec(Box<ExecContainer>),
+}
 
 pub struct ContainerRunner {
     spec: ContainerSpec,
@@ -107,9 +155,9 @@ impl ContainerRunner {
 
         let _ = self.create_container()?;
 
-        let id = self.container_id.as_str();
+        let id = self.container_id.clone();
         // See if the container exists
-        match is_container_exist(id, &self.root_path).is_ok() {
+        match is_container_exist(id.as_str(), &self.root_path).is_ok() {
             // exist
             true => {
                 self.start_container(None)?;
@@ -144,7 +192,7 @@ impl ContainerRunner {
     pub fn build_config(&mut self) -> Result<()> {
         let config = self
             .config_builder
-            .from_container_spec(self.spec.clone())?
+            .container_spec(self.spec.clone())?
             .clone()
             .build();
 
@@ -204,6 +252,7 @@ impl ContainerRunner {
 
     pub fn create_container(&self) -> Result<CreateContainerResponse> {
         let container_id = self.get_container_id()?;
+        // determine if it's in the single mode
 
         //  create oci spec
         let spec = self.create_oci_spec()?;
@@ -251,6 +300,11 @@ impl ContainerRunner {
     }
 
     pub fn setup_container_network(&self) -> Result<()> {
+        // single container status
+        if self.determine_single_status() {
+            setup_network_conf()?;
+        }
+
         let mut cni = get_cni()?;
         let container_pid = self
             .get_container_state()?
@@ -266,9 +320,18 @@ impl ContainerRunner {
         Ok(())
     }
 
-    pub fn start_container(&self, id: Option<String>) -> Result<StartContainerResponse> {
+    pub fn load_container(&self) -> Result<Container, LibcontainerError> {
+        Container::load(self.root_path.clone().join(&self.container_id))
+    }
+
+    pub fn start_container(&mut self, id: Option<String>) -> Result<()> {
         let root_path = self.root_path.clone();
 
+        // check the current container's status, if it's stopped then delete it and create a new one
+        if self.get_container_state()?.status == ContainerStatus::Stopped {
+            delete_container(&self.container_id)?;
+            return self.create();
+        }
         // setup the network
         self.setup_container_network()?;
 
@@ -282,7 +345,7 @@ impl ContainerRunner {
                     root_path,
                 )?;
 
-                Ok(StartContainerResponse {})
+                Ok(())
             }
             Some(id) => {
                 start(
@@ -292,9 +355,15 @@ impl ContainerRunner {
                     root_path,
                 )?;
 
-                Ok(StartContainerResponse {})
+                Ok(())
             }
         }
+    }
+
+    // due to the compose manager reuse the container manager to uun container
+    // so we can determine the mode by find "compose" in the root_path
+    pub fn determine_single_status(&self) -> bool {
+        !self.root_path.parent().unwrap().ends_with("compose")
     }
 }
 
@@ -342,13 +411,23 @@ pub fn run_container(path: &str) -> Result<(), anyhow::Error> {
     // create container_config
     runner.build_config()?;
 
-    let id = runner.container_id.as_str();
+    let id = runner.container_id.clone();
     // See if the container exists
-    match is_container_exist(id, &runner.root_path).is_ok() {
+    match is_container_exist(id.as_str(), &runner.root_path).is_ok() {
         // exist
         true => {
+            // determine if the container is running
+            if runner.load_container()?.can_start() {
+                runner.start_container(None)?;
+            }
+            println!(
+                "Container: {id} can not start, status: {}! Creating a new one...",
+                runner.load_container()?.status()
+            );
+            delete_container(&id)?;
+            let CreateContainerResponse { container_id } = runner.create_container()?;
             runner.start_container(None)?;
-            println!("Container: {id} runs successfully!");
+            println!("Container: {container_id} runs successfully!");
             Ok(())
         }
         // not exist
@@ -418,7 +497,7 @@ pub fn remove_container_network(pid: Pid) -> Result<()> {
     Ok(())
 }
 pub fn start_container(container_id: &str) -> Result<()> {
-    let runner = ContainerRunner::from_container_id(container_id, None)?;
+    let mut runner = ContainerRunner::from_container_id(container_id, None)?;
     runner.start_container(Some(container_id.to_string()))?;
     println!("container {container_id} start successfully");
     Ok(())
@@ -494,6 +573,24 @@ pub fn print_status(container_id: String, root_path: PathBuf) -> Result<()> {
     writeln!(&mut tab_writer, "ID\tPID\tSTATUS\tBUNDLE\tCREATED\tCREATOR")?;
     write!(&mut tab_writer, "{content}")?;
     tab_writer.flush()?;
+
+    Ok(())
+}
+
+pub fn setup_network_conf() -> Result<()> {
+    let conf = CliNetworkConfig::from_name_bridge("single-net", "single0");
+    let conf_value = serde_json::to_value(conf).expect("Failed to parse network config");
+
+    let mut conf_path = PathBuf::from(STD_CONF_PATH);
+    conf_path.push(BRIDGE_CONF);
+    if let Some(parent) = conf_path.parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    // write it to
+    fs::write(conf_path, serde_json::to_string_pretty(&conf_value)?)?;
 
     Ok(())
 }

@@ -1,31 +1,38 @@
+use crate::config::Config;
+use crate::domain::repo::{PgRepoRepository, RepoRepository};
+use crate::domain::user::{PgUserRepository, UserRepository};
+use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
+use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
-use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
-
 #[derive(Clone, Debug)]
 pub struct UploadSession {
-    pub length: u64,
-    pub uploaded: u64, // the last uploaded byte index
+    pub uploaded: u64, // the total bytes uploaded
 }
 
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: Arc<RwLock<HashMap<String, UploadSession>>>,
     pub storage: Arc<dyn Storage>,
-    pub registry: Arc<String>, // Registry URL
+    pub user_storage: Arc<dyn UserRepository>,
+    pub repo_storage: Arc<dyn RepoRepository>,
+    pub config: Arc<Config>,
 }
 
 impl AppState {
-    pub fn new(storage_type: &str, root: &str, registry: &str) -> Self {
-        let storage_backend: Arc<dyn Storage + Send + Sync> = match storage_type {
-            "FILESYSTEM" => Arc::new(FilesystemStorage::new(root)),
-            _ => Arc::new(FilesystemStorage::new(root)),
+    pub async fn new(config: Config, pool: Arc<PgPool>) -> Self {
+        let storage_backend: Arc<dyn Storage + Send + Sync> = match config.storge_type.as_str() {
+            "FILESYSTEM" => Arc::new(FilesystemStorage::new(&config.root_dir)),
+            _ => Arc::new(FilesystemStorage::new(&config.root_dir)),
         };
+
         AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             storage: storage_backend,
-            registry: Arc::new(registry.to_string()),
+            config: Arc::new(config),
+            user_storage: Arc::new(PgUserRepository::new(pool.clone())),
+            repo_storage: Arc::new(PgRepoRepository::new(pool)),
         }
     }
 
@@ -34,17 +41,11 @@ impl AppState {
         sessions.get(id).cloned()
     }
 
-    pub async fn create_session(&self) -> Result<String, String> {
+    pub async fn create_session(&self) -> String {
         let mut sessions = self.sessions.write().await;
         let session_id = uuid::Uuid::new_v4().to_string();
-        sessions.insert(
-            session_id.clone(),
-            UploadSession {
-                length: 0,
-                uploaded: 0,
-            },
-        );
-        Ok(session_id)
+        sessions.insert(session_id.clone(), UploadSession { uploaded: 0 });
+        session_id
     }
 
     pub async fn close_session(&self, id: &str) {
@@ -52,15 +53,13 @@ impl AppState {
         sessions.remove(id);
     }
 
-    pub async fn update_session(&self, id: &str, length: u64) {
+    pub async fn update_session(&self, id: &str, chunk_length: u64) -> Option<u64> {
         let mut sessions = self.sessions.write().await;
         if let Some(session) = sessions.get_mut(id) {
-            session.length += length;
-            if session.uploaded == 0 {
-                session.uploaded += length - 1;
-            } else {
-                session.uploaded += length;
-            }
+            session.uploaded += chunk_length;
+            Some(session.uploaded)
+        } else {
+            None
         }
     }
 }

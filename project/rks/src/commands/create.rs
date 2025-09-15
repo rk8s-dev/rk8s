@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 /// Send a pod creation message to a specific worker node
 pub async fn watch_create(pod_task: &PodTask, conn: &Connection, node_id: &str) -> Result<()> {
-    if pod_task.spec.nodename.as_deref() == Some(node_id) {
+    if pod_task.spec.node_name.as_deref() == Some(node_id) {
         let msg = RksMessage::CreatePod(Box::new(pod_task.clone()));
         let data = bincode::serialize(&msg)?;
         if let Ok(mut stream) = conn.open_uni().await {
@@ -28,20 +28,6 @@ pub async fn user_create(
     xline_store: &Arc<XlineStore>,
     conn: &Connection,
 ) -> Result<()> {
-    // Ensure pod has a node assigned
-    let node_name = match &pod_task.spec.nodename {
-        Some(name) => name.clone(),
-        None => {
-            let response = RksMessage::Error("Pod does not have a node assigned".to_string());
-            let data = bincode::serialize(&response)?;
-            if let Ok(mut stream) = conn.open_uni().await {
-                stream.write_all(&data).await?;
-                stream.finish()?;
-            }
-            return Ok(());
-        }
-    };
-
     // Serialize pod to YAML
     let pod_yaml = match serde_yaml::to_string(&pod_task) {
         Ok(yaml) => yaml,
@@ -63,8 +49,8 @@ pub async fn user_create(
         .await?;
 
     println!(
-        "[user_create] created pod {} on node {} (written to Xline)",
-        pod_task.metadata.name, node_name
+        "[user_create] created pod {} (written to Xline)",
+        pod_task.metadata.name
     );
 
     // Send ACK to user

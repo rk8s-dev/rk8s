@@ -384,7 +384,7 @@ async fn test_scheduler_scheduling_gates() {
 
 #[tokio::test]
 async fn test_scheduler_scoring_strategies() {
-    for strategy in vec![
+    for strategy in [
         ScoringStrategy::LeastAllocated,
         ScoringStrategy::MostAllocated,
     ] {

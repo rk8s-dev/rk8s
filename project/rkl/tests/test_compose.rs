@@ -21,7 +21,7 @@ services:
   backend:  
     container_name: backend  
     image: {}  
-    command: ["sleep", "300"]  
+    command: ["sleep", "10"]  
     ports:  
       - "8080:8080"  
     networks:  
@@ -29,7 +29,7 @@ services:
   frontend:  
     container_name: frontend  
     image: {}  
-    command: ["sleep", "300"]  
+    command: ["sleep", "10"]  
     ports:  
       - "80:80"  
     networks:  
@@ -107,7 +107,7 @@ fn test_compose_duplicate_project() {
 
     // Try to create the same project again
     let res = create_compose_helper(&compose_config, "test-duplicate");
-    assert!(!res.is_err());
+    assert!(res.is_ok());
 
     // Cleanup
 
@@ -128,13 +128,10 @@ fn create_compose_helper(compose_config: &str, project_name: &str) -> Result<(),
     file.write_all(compose_config.as_bytes())?;
 
     // Clean up existing compose project
-    let path_str = format!("/run/youki/compose/{}", project_name);
+    let path_str = format!("/run/youki/compose/{project_name}");
     let compose_dir = Path::new(&path_str);
     if compose_dir.exists() {
-        println!(
-            "project {} already exists, deleting it to create a new one",
-            project_name
-        );
+        println!("project {project_name} already exists, deleting it to create a new one");
         std::fs::remove_dir_all(compose_dir)?;
     }
 

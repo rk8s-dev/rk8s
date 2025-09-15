@@ -1,5 +1,5 @@
 use crate::raw::abi::fuse_in_header;
-
+use crate::raw::session::WorkItem;
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 /// Request data
 pub struct Request {
@@ -20,6 +20,17 @@ impl From<&fuse_in_header> for Request {
             uid: header.uid,
             gid: header.gid,
             pid: header.pid,
+        }
+    }
+}
+
+impl From<&WorkItem> for Request {
+    fn from(item: &WorkItem) -> Self {
+        Self {
+            unique: item.unique,
+            uid: item.in_header.uid,
+            gid: item.in_header.gid,
+            pid: item.in_header.pid,
         }
     }
 }

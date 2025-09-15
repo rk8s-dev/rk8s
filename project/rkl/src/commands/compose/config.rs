@@ -86,6 +86,4 @@ impl ConfigManager {
             })
             .collect()
     }
-
-    pub fn validate(&mut self) {}
 }

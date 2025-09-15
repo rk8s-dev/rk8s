@@ -8,16 +8,17 @@
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
 use crate::meta::{InMemoryMetaStore, MetaStore};
-use crate::vfs::fs::{DirEntry, FileAttr, Fs};
+use crate::vfs::fs::{DirEntry, FileAttr, VFS};
 
 /// SDK 客户端（泛型后端）。
 pub struct Client<S: BlockStore, M: MetaStore> {
-    fs: Fs<S, M>,
+    fs: VFS<S, M>,
 }
 
+#[allow(unused)]
 impl<S: BlockStore, M: MetaStore> Client<S, M> {
     pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Self {
-        let fs = Fs::new(layout, store, meta).await;
+        let fs = VFS::new(layout, store, meta).await;
         Self { fs }
     }
 
@@ -80,9 +81,12 @@ use crate::cadapter::localfs::LocalFsBackend;
 use crate::chuck::store::ObjectBlockStore;
 use std::path::Path;
 
+#[allow(dead_code)]
 pub type LocalClient = Client<ObjectBlockStore<LocalFsBackend>, InMemoryMetaStore>;
 
+#[allow(dead_code)]
 impl LocalClient {
+    #[allow(dead_code)]
     pub async fn new_local<P: AsRef<Path>>(root: P, layout: ChunkLayout) -> Self {
         let client = ObjectClient::new(LocalFsBackend::new(root));
         let store = ObjectBlockStore::new(client);

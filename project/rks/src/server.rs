@@ -1,13 +1,11 @@
 use crate::api::xlinestore::XlineStore;
 use crate::commands::{create, delete};
-use crate::network::{
-    self,
-    backend::route,
-    lease::{Lease, LeaseAttrs, LeaseWatchResult},
-    manager::LocalManager,
-};
+use crate::network::{self, backend::route, lease::LeaseWatchResult, manager::LocalManager};
 use anyhow::{Context, Result};
-use common::{NodeNetworkConfig, PodTask, RksMessage};
+use common::{
+    NodeNetworkConfig, PodTask, RksMessage,
+    lease::{Lease, LeaseAttrs},
+};
 use futures_util::StreamExt;
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use libcni::ip::route::Route;
@@ -149,7 +147,7 @@ async fn watch_pods(
     // Send snapshot to the worker
     for (pod_name, pod_yaml) in pods {
         if let Ok(pod_task) = serde_yaml::from_str::<PodTask>(&pod_yaml) {
-            if pod_task.spec.nodename.as_deref() == Some(&node_id) {
+            if pod_task.spec.node_name.as_deref() == Some(&node_id) {
                 let msg = RksMessage::CreatePod(Box::new(pod_task));
                 let data = bincode::serialize(&msg)?;
                 if let Ok(mut stream) = conn.open_uni().await {
@@ -174,7 +172,7 @@ async fn watch_pods(
                             if let Some(kv) = event.kv() {
                                 let pod_yaml = String::from_utf8_lossy(kv.value()).to_string();
                                 if let Ok(pod_task) = serde_yaml::from_str::<PodTask>(&pod_yaml)
-                                    && pod_task.spec.nodename.as_deref() == Some(&node_id)
+                                    && pod_task.spec.node_name.as_deref() == Some(&node_id)
                                 {
                                     let msg = RksMessage::CreatePod(Box::new(pod_task));
                                     let data = bincode::serialize(&msg)?;
@@ -419,6 +417,17 @@ pub async fn dispatch_user(
         RksMessage::DeletePod(pod_name) => {
             delete::user_delete(pod_name, xline_store, conn).await?;
         }
+
+        RksMessage::ListPod => {
+            let pods = xline_store.list_pods().await?;
+            println!("[user dispatch] list current pod: {pods:?}");
+            let res = bincode::serialize(&RksMessage::ListPodRes(pods))?;
+            if let Ok(mut stream) = conn.open_uni().await {
+                stream.write_all(&res).await?;
+                stream.finish()?;
+            }
+        }
+
         RksMessage::GetNodeCount => {
             info!("[user dispatch] GetNodeCount received");
         }

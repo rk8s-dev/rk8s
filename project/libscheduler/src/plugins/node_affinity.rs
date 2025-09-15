@@ -36,8 +36,7 @@ fn is_schedulable_after_node_change(
 ) -> Result<QueueingHint, String> {
     match event {
         EventInner::Pod(_, _) => Err(format!(
-            "event inner {:?} not match event resource node",
-            event
+            "event inner {event:?} not match event resource node"
         )),
         EventInner::Node(original, modeified) => {
             // Differ to kubernetes, we don't have scheduler-enforced affinity now
@@ -48,32 +47,24 @@ fn is_schedulable_after_node_change(
                 if let Some(old) = *original {
                     if required_node_affinity.matches(&old) {
                         log::trace!(
-                            "node updated, but the pod's NodeAffinity hasn't changed. pod {:?} node {:?}",
-                            pod,
-                            modeified
+                            "node updated, but the pod's NodeAffinity hasn't changed. pod {pod:?} node {modeified:?}"
                         );
                         Ok(QueueingHint::Skip)
                     } else {
                         log::trace!(
-                            "node was updated and the pod's NodeAffinity changed to matched. pod {:?} node {:?}",
-                            pod,
-                            modeified
+                            "node was updated and the pod's NodeAffinity changed to matched. pod {pod:?} node {modeified:?}"
                         );
                         Ok(QueueingHint::Queue)
                     }
                 } else {
                     log::trace!(
-                        "node was created, and matches with the pod's NodeAffinity. pod {:?} node {:?}",
-                        pod,
-                        modeified
+                        "node was created, and matches with the pod's NodeAffinity. pod {pod:?} node {modeified:?}"
                     );
                     Ok(QueueingHint::Queue)
                 }
             } else {
                 log::trace!(
-                    "node was created or updated, but the pod's NodeAffinity doesn't match. pod {:?} node {:?}",
-                    pod,
-                    modeified
+                    "node was created or updated, but the pod's NodeAffinity doesn't match. pod {pod:?} node {modeified:?}"
                 );
                 Ok(QueueingHint::Skip)
             }

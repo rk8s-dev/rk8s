@@ -195,4 +195,18 @@ impl ObjectBackend for S3Backend {
             }
         }
     }
+
+    async fn get_etag(
+        &self,
+        key: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let resp = self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await?;
+        Ok(resp.e_tag().unwrap().to_string())
+    }
 }

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
+use common::lease::{EventType, Lease, LeaseAttrs};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use log::{error, info, warn};
 use rand::prelude::IndexedRandom;
@@ -23,7 +24,7 @@ use tonic::Code;
 use crate::network::{
     config::{self, Config},
     ip::{next_ipv4_network, next_ipv6_network},
-    lease::{EventType, Lease, LeaseAttrs, LeaseWatchResult},
+    lease::LeaseWatchResult,
     registry::{Registry, XlineRegistryError},
     subnet,
 };
@@ -552,13 +553,13 @@ mod tests {
             .get_network_config()
             .await
             .expect("get config failed");
-        println!("Parsed config: {:?}", config);
+        println!("Parsed config: {config:?}");
 
         let lease = manager
             .acquire_lease(&lease_attrs)
             .await
             .expect("acquire lease failed");
-        println!("Lease acquired: {:?}", lease);
+        println!("Lease acquired: {lease:?}");
 
         let mut lease2 = lease.clone();
         manager

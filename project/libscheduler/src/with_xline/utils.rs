@@ -2,10 +2,8 @@ use std::collections::HashMap;
 
 use etcd_client::{Client, GetOptions, KeyValue};
 
-use crate::{
-    models::{NodeInfo, NodeSpec, PodInfo, PodSpec, QueuedInfo, ResourcesRequirements},
-    with_xline::model::{Node, PodTask},
-};
+use crate::models::{NodeInfo, NodeSpec, PodInfo, PodSpec, QueuedInfo, ResourcesRequirements};
+use common::{Node, PodTask};
 
 pub async fn get_pod(
     client: &mut Client,
@@ -101,11 +99,7 @@ fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
         priority: 0,
         scheduling_gates: Vec::new(),
         tolerations: Vec::new(),
-        node_name: if pod_task.nodename.is_empty() {
-            None
-        } else {
-            Some(pod_task.nodename.clone())
-        },
+        node_name: pod_task.spec.node_name.clone(),
         node_selector: HashMap::new(),
         affinity: None,
     };
@@ -114,11 +108,7 @@ fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
         name: pod_task.metadata.name,
         spec,
         queued_info: QueuedInfo::default(),
-        scheduled: if pod_task.nodename.is_empty() {
-            None
-        } else {
-            Some(pod_task.nodename)
-        },
+        scheduled: pod_task.spec.node_name.clone(),
     }
 }
 

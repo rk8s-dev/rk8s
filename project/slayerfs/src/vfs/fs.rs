@@ -99,16 +99,95 @@ struct Namespace {
 /// - 错误返回暂以 `String` 描述，后续建议改为枚举并映射标准 errno。
 /// - 不实现权限/时间戳/硬链接等高级语义；`FileAttr` 仅包含 kind 与 size。
 /// - unlink/rmdir 目前仅调整命名空间与 size，真实块/切片的 GC 由后续实现负责。
-pub struct Fs<S: BlockStore, M: MetaStore> {
+#[allow(unused)]
+#[allow(clippy::upper_case_acronyms)]
+pub struct VFS<S: BlockStore, M: MetaStore> {
     layout: ChunkLayout,
-    store: S,
+    store: tokio::sync::Mutex<S>,
     meta: M,
     base: i64,
     ns: Mutex<Namespace>, // 简单内存命名空间（节点+查找表）
     root: i64,
 }
+#[allow(dead_code)]
+impl<S: BlockStore, M: MetaStore> VFS<S, M> {
+    /// 公开根 inode（便于 FUSE 处理 `.`/`..` 等）
+    pub fn root_ino(&self) -> i64 {
+        self.root
+    }
 
-impl<S: BlockStore, M: MetaStore> Fs<S, M> {
+    /// 获取给定 inode 的父目录 inode；根的父视为根自身。
+    pub fn parent_of(&self, ino: i64) -> Option<i64> {
+        let ns = self.ns.lock().unwrap();
+        let vnode = ns.nodes.get(&ino)?;
+        Some(vnode.parent.unwrap_or(self.root))
+    }
+
+    /// 由 inode 还原绝对路径（用于 FUSE open/read 等）
+    pub fn path_of(&self, ino: i64) -> Option<String> {
+        let ns = self.ns.lock().unwrap();
+        let mut cur = ino;
+        let mut parts: Vec<String> = Vec::new();
+        loop {
+            let vnode = ns.nodes.get(&cur)?;
+            if vnode.parent.is_none() {
+                // 根
+                break;
+            }
+            parts.push(vnode.name.clone());
+            cur = vnode.parent?;
+        }
+        if parts.is_empty() {
+            return Some("/".into());
+        }
+        parts.reverse();
+        let mut out = String::from("/");
+        out.push_str(&parts.join("/"));
+        Some(out)
+    }
+
+    /// 在父目录下按基名查找子项 inode；父必须是目录
+    pub fn child_of<'a>(&self, parent: i64, name: impl Into<&'a str>) -> Option<i64> {
+        let name = name.into();
+        let ns = self.ns.lock().unwrap();
+        let p = ns.nodes.get(&parent)?;
+        if p.kind != FileType::Dir {
+            return None;
+        }
+        p.children.get(name).cloned()
+    }
+
+    /// 按 inode 返回属性（kind 来自命名空间，size 来自 MetaStore）
+    pub async fn stat_ino(&self, ino: i64) -> Option<FileAttr> {
+        let kind = { self.ns.lock().unwrap().nodes.get(&ino).map(|v| v.kind)? };
+        let size = self
+            .meta
+            .get_inode_meta(ino)
+            .await
+            .map(|m| m.size)
+            .unwrap_or(0);
+        Some(FileAttr { ino, size, kind })
+    }
+
+    /// 按 inode 列目录项；非目录或不存在返回 None
+    pub fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
+        let ns = self.ns.lock().unwrap();
+        let vnode = ns.nodes.get(&ino)?;
+        if vnode.kind != FileType::Dir {
+            return None;
+        }
+        let mut out = Vec::with_capacity(vnode.children.len());
+        for (name, &child_ino) in &vnode.children {
+            let child = ns.nodes.get(&child_ino)?;
+            out.push(DirEntry {
+                name: name.clone(),
+                ino: child_ino,
+                kind: child.kind,
+            });
+        }
+        Some(out)
+    }
+
     /// 创建 VFS，自动分配根目录 inode。
     /// 构造 VFS 实例：
     /// - 分配并注册根目录 inode（/）。
@@ -131,7 +210,7 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
         let ns = Namespace { nodes, lookup };
         Self {
             layout,
-            store,
+            store: tokio::sync::Mutex::new(store),
             meta,
             base,
             ns: Mutex::new(ns),
@@ -459,7 +538,7 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
     /// 写入：将文件偏移-长度映射为若干 Chunk 写。
     /// - 分片写入每个相关块；写完后一次性更新 size。
     /// - 返回写入的字节数；当前未保证跨多块的强原子性（后续可引入更细粒度事务）。
-    pub async fn write(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
+    pub async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
         let path = Self::norm_path(path);
         let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }
             .ok_or_else(|| "not found".to_string())?;
@@ -467,7 +546,8 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
         let mut cursor = 0usize;
         for sp in spans {
             let cid = self.chunk_id_for(ino, sp.chunk_index);
-            let mut w = ChunkWriter::new(self.layout, cid, &mut self.store);
+            let mut guard = self.store.lock().await;
+            let mut w = ChunkWriter::new(self.layout, cid, &mut *guard);
             let take = sp.len;
             let buf = &data[cursor..cursor + take];
             let _slice = w.write(sp.offset_in_chunk, buf).await;
@@ -497,8 +577,10 @@ impl<S: BlockStore, M: MetaStore> Fs<S, M> {
         let mut out = Vec::with_capacity(len);
         for sp in spans {
             let cid = self.chunk_id_for(ino, sp.chunk_index);
-            let r = ChunkReader::new(self.layout, cid, &self.store);
+            let guard = self.store.lock().await;
+            let r = ChunkReader::new(self.layout, cid, &*guard);
             let part = r.read(sp.offset_in_chunk, sp.len).await;
+            drop(guard);
             out.extend(part);
         }
         Ok(out)
@@ -520,7 +602,7 @@ mod tests {
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
         let store = ObjectBlockStore::new(client);
         let meta = InMemoryMetaStore::new();
-        let mut fs = Fs::new(layout, store, meta).await;
+        let fs = VFS::new(layout, store, meta).await;
 
         fs.mkdir_p("/a/b").await.expect("mkdir_p");
         fs.create_file("/a/b/hello.txt").await.expect("create");
@@ -557,7 +639,7 @@ mod tests {
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
         let store = ObjectBlockStore::new(client);
         let meta = InMemoryMetaStore::new();
-        let fs = Fs::new(layout, store, meta).await;
+        let fs = VFS::new(layout, store, meta).await;
 
         fs.mkdir_p("/a/b").await.unwrap();
         fs.create_file("/a/b/t.txt").await.unwrap();

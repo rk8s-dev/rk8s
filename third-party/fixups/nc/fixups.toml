@@ -1,5 +1,0 @@
-extra_srcs = [
-    "src/restore/*.s",
-]
-
-[buildscript.run]

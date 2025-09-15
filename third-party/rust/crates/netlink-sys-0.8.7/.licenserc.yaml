@@ -1,0 +1,17 @@
+header:
+  license:
+    content: |
+      SPDX-License-Identifier: MIT
+  paths-ignore:
+    - 'target'
+    - '**/*.toml'
+    - '**/*.lock'
+    - '**/*.yml'
+    - '**/*.md'
+    - 'CHANGELOG'
+    - 'LICENSE-MIT'
+    - '.gitignore'
+    - '.packit.yaml'
+    - 'fedora/*.spec'
+
+  comment: on-failure

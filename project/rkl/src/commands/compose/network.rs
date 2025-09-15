@@ -15,11 +15,11 @@ use anyhow::Result;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-const CNI_VERSION: &str = "1.0.0";
-const STD_CONF_PATH: &str = "/etc/cni/net.d";
+pub const CNI_VERSION: &str = "1.0.0";
+pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
 
-const BRIDGE_PLUGIN_NAME: &str = "libbridge";
-const BRIDGE_CONF: &str = "bridge.conf";
+pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
+pub const BRIDGE_CONF: &str = "bridge.conf";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliNetworkConfig {
@@ -162,14 +162,6 @@ impl NetworkManager {
 
         // allocate the bridge interface
         self.allocate_interface()
-    }
-
-    pub fn is_default(&self) -> bool {
-        self.is_default
-    }
-
-    pub fn write_network_config(&self) -> Result<()> {
-        Ok(())
     }
 
     /// validate the correctness and initialize  the service_mapping

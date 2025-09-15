@@ -48,4 +48,19 @@ impl ObjectBackend for LocalFsBackend {
             Err(e) => Err(Box::new(e)),
         }
     }
+
+    async fn get_etag(
+        &self,
+        key: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let path = self.path_for(key);
+        match fs::metadata(path).await {
+            Ok(metadata) => {
+                let modified = metadata.modified()?;
+                Ok(format!("{modified:?}"))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("".to_string()),
+            Err(e) => Err(Box::new(e)),
+        }
+    }
 }

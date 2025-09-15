@@ -2,25 +2,66 @@ use anyhow::Result;
 use bincode;
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig as QuinnClientConfig, Endpoint};
-use std::{env, net::SocketAddr, sync::Arc, time::Duration};
+use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tokio::time;
 
 use crate::commands::pod;
+use crate::network::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
+use crate::network::{
+    config::{NetworkConfig, validate_network_config},
+    receiver::{NetworkConfigMessage, NetworkReceiver},
+};
 use crate::task::TaskRunner;
 use chrono::Utc;
 use common::*;
-use get_if_addrs::get_if_addrs;
 use gethostname::gethostname;
+use ipnetwork::Ipv4Network;
 use rustls::DigitallySignedStruct;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig as RustlsClientConfig, RootCertStore, SignatureScheme};
 use std::collections::HashMap;
+
 use sysinfo::System;
+
+fn get_subnet_file_path() -> String {
+    if let Ok(path) = env::var("SUBNET_FILE_PATH") {
+        println!("Using custom subnet file path: {path}");
+        return path;
+    }
+
+    let cni_path = "/etc/cni/net.d/subnet.env";
+    if Path::new("/etc/cni/net.d").exists()
+        && fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(cni_path)
+            .is_ok()
+    {
+        println!("Using CNI standard path: {cni_path}");
+        return cni_path.to_string();
+    }
+
+    if let Ok(home) = env::var("HOME") {
+        let user_dir = format!("{home}/.rkl");
+        let user_path = format!("{user_dir}/subnet.env");
+
+        if fs::create_dir_all(&user_dir).is_ok() {
+            println!("Using user directory: {user_path}");
+            return user_path;
+        }
+    }
+
+    let default_path = "/tmp/subnet.env";
+    println!("Using default temporary path: {default_path}");
+    default_path.to_string()
+}
+
 /// Skip certificate verification
 #[derive(Debug)]
-struct SkipServerVerification;
+pub struct SkipServerVerification;
 
 impl ServerCertVerifier for SkipServerVerification {
     fn verify_server_cert(
@@ -66,9 +107,26 @@ impl ServerCertVerifier for SkipServerVerification {
 pub async fn run_forever() -> Result<()> {
     //We should give the ipaddr of rks here
     let server_addr: String =
-        env::var("RKS_ADDR").unwrap_or_else(|_| "192.168.73.128:50051".to_string());
+        env::var("RKS_ADDRESS").unwrap_or_else(|_| "192.168.73.128:50051".to_string());
     let server_addr: SocketAddr = server_addr.parse()?;
-    let node: Node = generate_node();
+
+    let ext_iface = lookup_ext_iface(
+        None,
+        None,
+        None,
+        IPStack::Ipv4,
+        PublicIPOpts {
+            public_ip: None,
+            public_ipv6: None,
+        },
+    )
+    .await?;
+
+    let node: Node = if let Ok(node_yaml) = env::var("NODE_YAML") {
+        load_node_from_yaml(&node_yaml)?
+    } else {
+        generate_node(&ext_iface).await?
+    };
 
     loop {
         if let Err(e) = run_once(server_addr, node.clone()).await {
@@ -80,11 +138,19 @@ pub async fn run_forever() -> Result<()> {
     }
 }
 
+fn load_node_from_yaml(yaml_path: &str) -> Result<Node> {
+    use std::fs;
+    let yaml_content = fs::read_to_string(yaml_path)?;
+    let node: Node = serde_yaml::from_str(&yaml_content)?;
+    Ok(node)
+}
+
 /// Single connection lifecycle:
 /// 1. Establish QUIC connection
 /// 2. Register node
 /// 3. Start heartbeat loop
 /// 4. Handle CreatePod/DeletePod messages
+/// 5. Handle Network Configuration
 pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
     // Skip certificate verification
     let mut tls = RustlsClientConfig::builder()
@@ -94,9 +160,25 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
         .set_certificate_verifier(Arc::new(SkipServerVerification));
 
     let quic_crypto = QuicClientConfig::try_from(tls)?;
-    let client_cfg = QuinnClientConfig::new(Arc::new(quic_crypto));
+    let client_cfg: QuinnClientConfig = QuinnClientConfig::new(Arc::new(quic_crypto));
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())?;
     endpoint.set_default_client_config(client_cfg);
+
+    let subnet_file_path = get_subnet_file_path();
+    let link_index = env::var("LINK_INDEX")
+        .unwrap_or_else(|_| "1".to_string())
+        .parse::<u32>()
+        .unwrap_or(1);
+    let backend_type = env::var("BACKEND_TYPE").unwrap_or_else(|_| "hostgw".to_string());
+
+    let network_receiver = NetworkReceiver::new(
+        subnet_file_path,
+        link_index,
+        backend_type,
+        node.metadata.name.clone(),
+    );
+
+    println!("Network receiver created for node: {}", node.metadata.name);
 
     // establish connection with retry
     let connection = loop {
@@ -152,7 +234,7 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
         }
     });
 
-    //Main receive loop: handle CreatePod/DeletePod...
+    //Main receive loop: handle CreatePod/DeletePod/Network...
     loop {
         match connection.accept_uni().await {
             Ok(mut recv) => {
@@ -166,16 +248,41 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                             eprintln!("[worker] register error: {e}");
                         }
                         Ok(RksMessage::SetNetwork(cfg)) => {
-                            eprintln!("[worker] get the network config: {cfg:?}");
+                            println!("[worker] received network config: {cfg:?}");
+
+                            if let Err(e) = handle_network_config(&network_receiver, &cfg).await {
+                                eprintln!("[worker] failed to apply network config: {e}");
+                                let _ = send_uni(
+                                    &connection,
+                                    &RksMessage::Error(format!("network config failed: {e}")),
+                                )
+                                .await;
+                            } else {
+                                println!("[worker] network config applied successfully");
+                                let _ = send_uni(&connection, &RksMessage::Ack).await;
+                            }
                         }
                         Ok(RksMessage::UpdateRoutes(_id, routes)) => {
-                            eprintln!("[worker] get the routes: {routes:?}");
+                            println!("[worker] received routes update: {routes:?}");
+                            let route_msg = NetworkConfigMessage::Route { routes };
+                            if let Err(e) = network_receiver.handle_network_config(route_msg).await
+                            {
+                                eprintln!("[worker] failed to apply routes: {e}");
+                                let _ = send_uni(
+                                    &connection,
+                                    &RksMessage::Error(format!("routes update failed: {e}")),
+                                )
+                                .await;
+                            } else {
+                                println!("[worker] routes applied successfully");
+                                let _ = send_uni(&connection, &RksMessage::Ack).await;
+                            }
                         }
                         Ok(RksMessage::CreatePod(pod_box)) => {
                             let pod: PodTask = (*pod_box).clone();
 
                             // validate target node
-                            let target_opt = pod.spec.nodename.as_deref();
+                            let target_opt = pod.spec.node_name.as_deref();
                             if let Some(target) = target_opt
                                 && target != node.metadata.name
                             {
@@ -236,7 +343,7 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                         }
                         Ok(RksMessage::DeletePod(name)) => {
                             println!("[worker] DeletePod {name}");
-                            match pod::delete_pod(&name) {
+                            match pod::standalone::delete_pod(&name) {
                                 Ok(_) => {
                                     let _ = send_uni(&connection, &RksMessage::Ack).await;
                                 }
@@ -274,6 +381,64 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
     }
 }
 
+async fn handle_network_config(
+    network_receiver: &NetworkReceiver,
+    node_cfg: &NodeNetworkConfig,
+) -> Result<()> {
+    println!(
+        "[worker] Processing network configuration for node: {}",
+        node_cfg.node_id
+    );
+
+    let mut network = None;
+    let mut subnet = None;
+    let mut ip_masq = true;
+    let mut mtu = 1500;
+
+    for line in node_cfg.subnet_env.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            match key {
+                "RKL_NETWORK" => network = Some(value.parse::<Ipv4Network>()?),
+                "RKL_SUBNET" => subnet = Some(value.parse::<Ipv4Network>()?),
+                "RKL_MTU" => mtu = value.parse().unwrap_or(1500),
+                "RKL_IPMASQ" => ip_masq = value.parse().unwrap_or(true),
+                _ => {}
+            }
+        }
+    }
+
+    let mut cfg = NetworkConfig {
+        enable_ipv4: true,
+        enable_ipv6: false,
+        enable_nftables: false,
+        network,
+        ipv6_network: None,
+        subnet_min: None,
+        subnet_max: None,
+        ipv6_subnet_min: None,
+        ipv6_subnet_max: None,
+        subnet_len: 24,
+        ipv6_subnet_len: 64,
+        backend_type: env::var("BACKEND_TYPE").unwrap_or_else(|_| "hostgw".to_string()),
+        backend: None,
+    };
+
+    validate_network_config(&mut cfg)?;
+
+    let config_msg = NetworkConfigMessage::SubnetConfig {
+        network_config: cfg,
+        ip_masq,
+        ipv4_subnet: subnet,
+        ipv6_subnet: None,
+        mtu,
+    };
+
+    network_receiver.handle_network_config(config_msg).await?;
+
+    println!("[worker] Network configuration processed successfully");
+    Ok(())
+}
+
 /// Send a message over a unidirectional stream
 async fn send_uni(conn: &quinn::Connection, msg: &RksMessage) -> Result<()> {
     let mut uni = conn.open_uni().await?;
@@ -288,7 +453,7 @@ pub fn init_crypto() {
         .expect("failed to install default CryptoProvider");
 }
 
-pub fn generate_node() -> Node {
+pub async fn generate_node(ext_iface: &ExternalInterface) -> Result<Node> {
     let mut sys = System::new_all();
     sys.refresh_all();
 
@@ -297,14 +462,12 @@ pub fn generate_node() -> Node {
 
     // IP addr
     let mut addresses = vec![];
-    for iface in get_if_addrs().unwrap() {
-        if iface.ip().is_ipv4() && !iface.is_loopback() {
-            addresses.push(NodeAddress {
-                address_type: "InternalIP".to_string(),
-                address: iface.ip().to_string(),
-            });
-            break;
-        }
+
+    if let Some(ip) = ext_iface.iface_addr {
+        addresses.push(NodeAddress {
+            address_type: "InternalIP".to_string(),
+            address: ip.to_string(),
+        });
     }
     addresses.push(NodeAddress {
         address_type: "Hostname".to_string(),
@@ -338,7 +501,7 @@ pub fn generate_node() -> Node {
         },
     ];
 
-    Node {
+    Ok(Node {
         api_version: "v1".to_string(),
         kind: "Node".to_string(),
         metadata: ObjectMeta {
@@ -356,5 +519,5 @@ pub fn generate_node() -> Node {
             addresses,
             conditions,
         },
-    }
+    })
 }

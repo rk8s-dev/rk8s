@@ -1,11 +1,12 @@
 use anyhow::{Result, anyhow};
+use common::ExternalInterface;
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use libcni::ip::route::{self, Interface};
 use log::info;
 use regex::Regex;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use crate::network::{backend::ExternalInterface, iface};
+use crate::network::iface;
 pub trait AddIP<N> {
     fn add(self, n: N) -> Self;
 }
@@ -368,7 +369,7 @@ mod tests {
     async fn test_ifcanreach_gateway_should_succeed() {
         use std::net::IpAddr;
 
-        let reach_ip: IpAddr = "192.168.110.2".parse().unwrap();
+        let reach_ip: IpAddr = "192.168.239.128".parse().unwrap();
 
         let result = lookup_ext_iface(
             None,
@@ -382,8 +383,9 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_ok(), "Expected success, got error: {:?}", result);
+        assert!(result.is_ok(), "Expected success, got error: {result:?}");
         let iface = result.unwrap();
+        println!("get the interface : {iface:?}");
         assert!(
             !iface.iface.name.is_empty(),
             "Interface name should not be empty"

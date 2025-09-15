@@ -3,14 +3,16 @@ mod cli;
 mod commands;
 mod network;
 mod protocol;
+mod scheduler;
 mod server;
 
-use crate::api::xlinestore::XlineStore;
 use crate::network::init;
 use crate::protocol::config::load_config;
+use crate::{api::xlinestore::XlineStore, scheduler::Scheduler};
 use anyhow::Context;
 use clap::Parser;
 use cli::{Cli, Commands};
+use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use log::error;
 use server::serve;
 use std::sync::Arc;
@@ -32,6 +34,9 @@ async fn main() -> anyhow::Result<()> {
             let xline_config = cfg.xline_config;
             let endpoints: Vec<&str> = xline_config.endpoints.iter().map(|s| s.as_str()).collect();
             let xline_store = Arc::new(XlineStore::new(&endpoints).await?);
+            xline_store
+                .insert_network_config(&xline_config.prefix, &cfg.network_config)
+                .await?;
             println!("[rks] listening on {}", cfg.addr);
             let sm = match init::new_subnet_manager(xline_config.clone()).await {
                 Ok(m) => m,
@@ -41,6 +46,16 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             let local_manager = Arc::new(sm.clone());
+
+            let scheduler = Scheduler::try_new(
+                &endpoints,
+                xline_store.clone(),
+                ScoringStrategy::LeastAllocated,
+                Plugins::default(),
+            )
+            .await
+            .context("Failed to create Scheduler")?;
+            scheduler.run().await;
             serve(cfg.addr, xline_store, local_manager).await?;
         }
     }

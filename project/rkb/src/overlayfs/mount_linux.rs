@@ -1,9 +1,10 @@
-use super::mount_config::MountConfig;
+use super::MountManager;
+use super::config::MountConfig;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use nix::mount::{MsFlags, mount, umount};
+use nix::mount::{MsFlags, mount};
 use nix::sched::{CloneFlags, unshare};
 use std::os::unix::fs::symlink;
 
@@ -153,44 +154,4 @@ pub fn mount_linux(config: &MountConfig) -> Result<MountManager> {
     }
 
     Ok(mount_manager)
-}
-
-/// Manages the mountpoints created by the mount_linux function.
-///
-/// When the MountManager is dropped, it will unmount all mountpoints.
-#[derive(Default)]
-pub struct MountManager {
-    mountpoints: Vec<PathBuf>,
-}
-
-impl MountManager {
-    pub fn add_mountpoint(&mut self, mountpoint: PathBuf) {
-        self.mountpoints.push(mountpoint);
-    }
-
-    pub fn umount_all(&mut self) -> Result<()> {
-        let mut errors = Vec::new();
-        for mountpoint in self.mountpoints.drain(..).rev() {
-            match umount(&mountpoint) {
-                Ok(_) => {
-                    println!("Unmounted {}", mountpoint.display());
-                }
-                Err(e) => {
-                    errors.push(anyhow!("Failed to unmount {}: {}", mountpoint.display(), e));
-                }
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(anyhow!("Failed to unmount some mountpoints: {:?}", errors))
-        }
-    }
-}
-
-impl Drop for MountManager {
-    fn drop(&mut self) {
-        let _ = self.umount_all();
-    }
 }

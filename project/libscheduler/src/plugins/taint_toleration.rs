@@ -134,8 +134,7 @@ fn is_schedulable_after_node_change(
 ) -> Result<QueueingHint, String> {
     match event {
         EventInner::Pod(_, _) => Err(format!(
-            "event inner {:?} not match event resource node",
-            event
+            "event inner {event:?} not match event resource node"
         )),
         EventInner::Node(old, new) => {
             let was_untolerated = old.is_none()
@@ -150,16 +149,12 @@ fn is_schedulable_after_node_change(
                 .is_some();
             if was_untolerated && !is_untolerated {
                 log::trace!(
-                    "node was created or updated, and this may make the Pod rejected by TaintToleration plugin in the previous scheduling cycle schedulable. node {:?}, pod: {:?}",
-                    new,
-                    pod
+                    "node was created or updated, and this may make the Pod rejected by TaintToleration plugin in the previous scheduling cycle schedulable. node {new:?}, pod: {pod:?}"
                 );
                 Ok(QueueingHint::Queue)
             } else {
                 log::trace!(
-                    "node was created or updated, but it doesn't change the TaintToleration plugin's decision node {:?}, pod: {:?}",
-                    new,
-                    pod
+                    "node was created or updated, but it doesn't change the TaintToleration plugin's decision node {new:?}, pod: {pod:?}"
                 );
                 Ok(QueueingHint::Skip)
             }
@@ -173,14 +168,12 @@ fn is_schedulable_after_pod_toleration_change(
 ) -> Result<QueueingHint, String> {
     match event {
         EventInner::Node(_, _) => Err(format!(
-            "event inner {:?} not match event resource pod",
-            event
+            "event inner {event:?} not match event resource pod"
         )),
         EventInner::Pod(_old, new) => {
             if new.is_some() && new.unwrap().name == pod.name {
                 log::trace!(
-                    "a new toleration is added for the unschedulable Pod, and it may make it schedulable. pod {:?}",
-                    pod
+                    "a new toleration is added for the unschedulable Pod, and it may make it schedulable. pod {pod:?}"
                 );
                 Ok(QueueingHint::Queue)
             } else {

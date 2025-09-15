@@ -1,17 +1,17 @@
 use std::{
     env::{self},
-    fs::{self, File, read_dir, remove_dir_all, remove_file},
+    fs::{self, File},
     path::{Path, PathBuf},
 };
 
 use anyhow::{Ok, Result, anyhow};
+use clap::Subcommand;
 use libcontainer::container::State;
 use liboci_cli::{Delete, List};
 use serde_json::json;
 use tracing::debug;
 
 use crate::{
-    ComposeCommand, DownArgs, PsArgs, UpArgs,
     commands::{
         compose::{
             config::ConfigManager, network::NetworkManager, spec::ComposeSpec,
@@ -20,7 +20,7 @@ use crate::{
         container::{ContainerRunner, remove_container},
         delete, list,
     },
-    rootpath::{self},
+    rootpath,
 };
 use common::{ContainerSpec, Port};
 type ComposeAction = Box<dyn FnOnce(&mut ComposeManager) -> Result<()>>;
@@ -28,9 +28,50 @@ type ComposeAction = Box<dyn FnOnce(&mut ComposeManager) -> Result<()>>;
 // pub mod config;
 pub mod config;
 pub mod network;
-pub mod service;
 pub mod spec;
 pub mod volume;
+
+use clap::Args;
+
+// Common Args shared by commands
+#[derive(Args)]
+pub struct PsArgs {
+    #[arg(long = "project-name", short, value_name = "PROJECT_NAME")]
+    pub project_name: Option<String>,
+
+    #[arg(short = 'f', value_name = "COMPOSE_YAML")]
+    pub compose_yaml: Option<String>,
+}
+
+#[derive(Args)]
+pub struct DownArgs {
+    #[arg(long = "project-name", short, value_name = "PROJECT_NAME")]
+    pub project_name: Option<String>,
+
+    #[arg(short = 'f', value_name = "COMPOSE_YAML")]
+    pub compose_yaml: Option<String>,
+}
+
+#[derive(Args)]
+pub struct UpArgs {
+    #[arg(value_name = "COMPOSE_YAML")]
+    pub compose_yaml: Option<String>,
+
+    #[arg(long = "project-name", value_name = "PROJECT_NAME")]
+    pub project_name: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum ComposeCommand {
+    #[command(about = "Start a compose application from a compose yaml")]
+    Up(UpArgs),
+
+    #[command(about = "stop and delete all the containers in the compose application")]
+    Down(DownArgs),
+
+    #[command(about = "List all the containers' state in compose application")]
+    Ps(PsArgs),
+}
 
 pub struct ComposeManager {
     /// the path to store the basic info of compose application
@@ -282,35 +323,6 @@ pub fn parse_spec(path: PathBuf) -> Result<ComposeSpec> {
         )
     })?;
     Ok(spec)
-}
-
-/// delete all the file and dir in the target_dir
-pub fn clear_dir<P: AsRef<Path>>(dir: P) -> Result<()> {
-    for entry in read_dir(&dir)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            remove_dir_all(&path).map_err(|e| {
-                anyhow!(
-                    "failed to delete the {}: {}",
-                    path.file_name()
-                        .and_then(|os_str| os_str.to_str())
-                        .unwrap_or("unknown"),
-                    e
-                )
-            })?;
-        } else {
-            remove_file(&path).map_err(|e| {
-                anyhow!(
-                    "failed to remove the file {}: {}",
-                    path.file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("unknown"),
-                    e
-                )
-            })?;
-        }
-    }
-    Ok(())
 }
 
 // map the compose-style port to k8s-container-style ports

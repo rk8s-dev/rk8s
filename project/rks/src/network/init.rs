@@ -330,7 +330,7 @@ mod tests {
 
     fn write_subnet_file(content: &str) -> NamedTempFile {
         let mut file = NamedTempFile::new().expect("Failed to create temp file");
-        write!(file, "{}", content).expect("Failed to write to temp file");
+        write!(file, "{content}").expect("Failed to write to temp file");
         file
     }
 

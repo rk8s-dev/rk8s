@@ -1,2 +1,0 @@
-[buildscript.run]
-env = { DEP_OPENSSL_VERSION_NUMBER = "30013000" }
