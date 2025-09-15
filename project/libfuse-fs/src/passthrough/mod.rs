@@ -3,17 +3,21 @@ use file_handle::{FileHandle, OpenableFileHandle};
 
 use futures::executor::block_on;
 use inode_store::{InodeId, InodeStore};
-use libc::statx_timestamp;
+use libc::{self, statx_timestamp};
+
 use moka::future::Cache;
 use rfuse3::{Errno, raw::reply::ReplyEntry};
 use uuid::Uuid;
 
-use crate::{passthrough::mmap::SlidingMmapWindow, util::convert_stat64_to_file_attr};
+use crate::passthrough::mmap::{MmapCachedValue, MmapChunkKey};
+use crate::util::convert_stat64_to_file_attr;
 use mount_fd::MountFds;
 use statx::StatExt;
+use std::cmp;
+use std::io::Result;
 use std::ops::DerefMut;
+
 use std::sync::atomic::{AtomicBool, AtomicU32};
-use std::{cmp::min, io::Result};
 use std::{
     collections::{BTreeMap, btree_map},
     ffi::{CStr, CString, OsString},
@@ -33,6 +37,7 @@ use util::{
     UniqueInodeGenerator, ebadf, is_dir, openat, reopen_fd_through_proc, stat_fd,
     validate_path_component,
 };
+
 use vm_memory::bitmap::BitmapSlice;
 
 use nix::sys::resource::{Resource, getrlimit};
@@ -417,7 +422,7 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
 
     handle_cache: Cache<FileUniqueKey, Arc<FileHandle>>,
 
-    sliding_mmap_pool: Cache<FileUniqueKey, Arc<RwLock<SlidingMmapWindow>>>,
+    mmap_chunks: Cache<MmapChunkKey, Arc<RwLock<mmap::MmapCachedValue>>>,
 }
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
@@ -458,14 +463,18 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             Err(_) => 65536,
         };
 
-        let cache_builder = moka::future::Cache::builder()
+        let mmap_cache_builder = Cache::builder()
             .max_capacity(cfg.max_mmap_size)
             .weigher(
-                |_key: &FileUniqueKey, value: &Arc<RwLock<SlidingMmapWindow>>| -> u32 {
-                    let sliding_mmap_window = block_on(value.read());
-                    sliding_mmap_window.window_size() as u32
+                |_key: &MmapChunkKey, value: &Arc<RwLock<mmap::MmapCachedValue>>| -> u32 {
+                    let guard = block_on(value.read());
+                    match &*guard {
+                        MmapCachedValue::Mmap(mmap) => mmap.len() as u32,
+                        MmapCachedValue::MmapMut(mmap_mut) => mmap_mut.len() as u32,
+                    }
                 },
-            );
+            )
+            .time_to_idle(Duration::from_millis(60));
 
         Ok(PassthroughFs {
             inode_map: InodeMap::new(),
@@ -495,7 +504,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             handle_cache: moka::future::Cache::new(fd_limit),
 
-            sliding_mmap_pool: cache_builder.build(),
+            mmap_chunks: mmap_cache_builder.build(),
         })
     }
 
@@ -943,54 +952,203 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         new_flags
     }
 
-    async fn get_or_insert_mmap(
+    async fn get_mmap(
         &self,
-        file: &impl AsRawFd,
-        flags: u32,
-    ) -> Option<Arc<RwLock<SlidingMmapWindow>>> {
-        const MMAP_SIZE_THRESHOLD: u64 = 8 * 1024; // 8KB
-        const MAX_WINDOW_SIZE: u64 = 100 * 1024 * 1024; // 100MB
-
-        // Skip directories and files opened with O_DIRECT (direct I/O)
-        if flags & (libc::O_DIRECTORY as u32) != 0 || flags & (libc::O_DIRECT as u32) != 0 {
-            return None;
-        }
-
-        let st = match statx::statx(file, None) {
-            Ok(st) => st,
-            Err(_) => return None,
-        };
-
-        let file_size = st.st.st_size as u64;
-
-        // Skip files that are too small or too large for mmap
-        if file_size <= MMAP_SIZE_THRESHOLD {
-            return None;
-        }
-
-        let btime = match st.btime {
-            Some(btime) => btime,
-            None => return None, // Skip files without birth time
-        };
-
-        let key = FileUniqueKey(st.st.st_ino, btime);
-
-        if self.sliding_mmap_pool.contains_key(&key) {
-            return self.sliding_mmap_pool.get(&key).await;
-        }
-
-        let window_size = min(file_size, MAX_WINDOW_SIZE);
-
-        let mmap = {
-            let fd = file.as_raw_fd();
-            match SlidingMmapWindow::new(&fd, window_size).await {
-                Ok(mmap) => mmap,
-                Err(_) => return None, // Skip mmap if creation fails
+        inode: Inode,
+        offset: u64,
+        file: &File,
+    ) -> Option<Arc<RwLock<mmap::MmapCachedValue>>> {
+        let key = MmapChunkKey::new(inode, offset);
+        let ret = self
+            .mmap_chunks
+            .entry(key)
+            .or_try_insert_with(async {
+                let mmap = mmap::create_mmap(offset, file).await;
+                match mmap {
+                    Ok(v) => Ok(v),
+                    Err(e) => Err(Arc::new(e)),
+                }
+            })
+            .await;
+        match ret {
+            Ok(v) => Some(v.value().clone()),
+            Err(e) => {
+                error!("Failed to create mmap: {}", e);
+                None
             }
-        };
-        let mmap = Arc::new(RwLock::new(mmap));
-        self.sliding_mmap_pool.insert(key, mmap.clone()).await;
-        Some(mmap.clone())
+        }
+    }
+
+    async fn read_from_mmap(
+        &self,
+        inode: Inode,
+        offset: u64,
+        size: u64,
+        file: &File,
+        buf: &mut [u8],
+    ) -> Result<usize> {
+        // check the buf size
+        if buf.len() < size as usize {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Buffer too small: {} < {}", buf.len(), size),
+            ));
+        }
+
+        let file_size = file.metadata()?.len();
+
+        // check the offset
+        if offset >= file_size {
+            return Ok(0); // offset exceeds file size, return 0 bytes read
+        }
+
+        // compute the maximum readable length
+        let max_readable = file_size - offset;
+        let actual_size = cmp::min(size, max_readable) as usize;
+
+        let mut len = actual_size;
+        let mut current_offset = offset;
+        let mut buf_offset = 0;
+
+        while len > 0 {
+            let chunk = self.get_mmap(inode, current_offset, file).await;
+            let chunk = match chunk {
+                Some(chunk) => chunk,
+                None => {
+                    return Err(std::io::Error::other("Failed to get mmap chunk"));
+                }
+            };
+
+            let chunk_guard = chunk.read().await;
+            match &*chunk_guard {
+                MmapCachedValue::Mmap(mmap) => {
+                    let chunk_len = mmap.len();
+
+                    // compute the start offset within the chunk
+                    let chunk_start_offset =
+                        mmap::align_down(current_offset, mmap::get_effective_page_size(file_size));
+                    let copy_start = (current_offset - chunk_start_offset) as usize;
+
+                    // ensure we don't read beyond the chunk boundary
+                    let remaining_in_chunk = chunk_len - copy_start;
+                    let copy_len = cmp::min(len, remaining_in_chunk);
+
+                    // ensure we don't read beyond the buffer boundary
+                    let copy_len = cmp::min(copy_len, buf.len() - buf_offset);
+
+                    if copy_len == 0 {
+                        break; // no more data to read
+                    }
+
+                    // execute data copy
+                    buf[buf_offset..buf_offset + copy_len]
+                        .copy_from_slice(&mmap[copy_start..copy_start + copy_len]);
+
+                    buf_offset += copy_len;
+                    len -= copy_len;
+                    current_offset += copy_len as u64;
+                }
+                MmapCachedValue::MmapMut(mmap_mut) => {
+                    let chunk_len = mmap_mut.len();
+
+                    // compute the start offset within the chunk
+                    let chunk_start_offset =
+                        mmap::align_down(current_offset, mmap::get_effective_page_size(file_size));
+                    let copy_start = (current_offset - chunk_start_offset) as usize;
+
+                    // ensure we don't read beyond the chunk boundary
+                    let remaining_in_chunk = chunk_len - copy_start;
+                    let copy_len = cmp::min(len, remaining_in_chunk);
+
+                    // ensure we don't read beyond the buffer boundary
+                    let copy_len = cmp::min(copy_len, buf.len() - buf_offset);
+
+                    if copy_len == 0 {
+                        break; // no more data to read
+                    }
+
+                    // execute data copy
+                    buf[buf_offset..buf_offset + copy_len]
+                        .copy_from_slice(&mmap_mut[copy_start..copy_start + copy_len]);
+
+                    buf_offset += copy_len;
+                    len -= copy_len;
+                    current_offset += copy_len as u64;
+                }
+            }
+        }
+        Ok(buf_offset)
+    }
+
+    async fn write_to_mmap(
+        &self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+        file: &File,
+    ) -> Result<usize> {
+        let file_size = file.metadata()?.len();
+        let len = data.len();
+
+        // 如果需要扩展文件大小
+        if offset + len as u64 > file_size {
+            let raw_fd = file.as_raw_fd();
+            unsafe {
+                libc::ftruncate(raw_fd, (offset + len as u64) as i64);
+            }
+        }
+
+        let mut remaining = len;
+        let mut current_offset = offset;
+        let mut data_offset = 0;
+
+        while remaining > 0 {
+            let chunk = self.get_mmap(inode, current_offset, file).await;
+            let chunk = match chunk {
+                Some(chunk) => chunk,
+                None => {
+                    return Err(std::io::Error::other("Failed to get mmap chunk"));
+                }
+            };
+
+            let mut chunk_guard = chunk.write().await;
+            match &mut *chunk_guard {
+                MmapCachedValue::Mmap(_) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Cannot write to read-only mmap",
+                    ));
+                }
+                MmapCachedValue::MmapMut(mmap_mut) => {
+                    let chunk_len = mmap_mut.len();
+
+                    // 计算在当前chunk中的起始位置
+                    let chunk_start_offset =
+                        mmap::align_down(current_offset, mmap::get_effective_page_size(file_size));
+                    let copy_start = (current_offset - chunk_start_offset) as usize;
+
+                    // 确保不会写入超出chunk边界
+                    let remaining_in_chunk = chunk_len - copy_start;
+                    let copy_len = cmp::min(remaining, remaining_in_chunk);
+
+                    // 确保不会写入超出数据边界
+                    let copy_len = cmp::min(copy_len, data.len() - data_offset);
+
+                    if copy_len == 0 {
+                        break; // 没有更多数据可写入
+                    }
+
+                    // 执行数据拷贝
+                    mmap_mut[copy_start..copy_start + copy_len]
+                        .copy_from_slice(&data[data_offset..data_offset + copy_len]);
+
+                    data_offset += copy_len;
+                    remaining -= copy_len;
+                    current_offset += copy_len as u64;
+                }
+            }
+        }
+        Ok(data_offset)
     }
 }
 
