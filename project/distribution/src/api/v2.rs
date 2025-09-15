@@ -14,9 +14,10 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
-use axum::{Router, middleware};
+use axum::{Router, middleware, Extension};
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::utils::jwt::Claims;
 
 pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
@@ -52,6 +53,7 @@ async fn dispatch_handler(
     State(state): State<Arc<AppState>>,
     Path(tail): Path<String>,
     Query(params): Query<HashMap<String, String>>,
+    Extension(claims): Extension<Claims>,
     headers: HeaderMap,
     request: Request,
 ) -> Result<Response, AppError> {
@@ -77,7 +79,7 @@ async fn dispatch_handler(
                 }
                 // Push Manifests
                 Method::PUT => {
-                    put_manifest_handler(State(state), Path((name, reference.to_string())), request)
+                    put_manifest_handler(State(state), Path((name, reference.to_string())), Extension(claims), request)
                         .await
                         .map(|res| res.into_response())
                 }

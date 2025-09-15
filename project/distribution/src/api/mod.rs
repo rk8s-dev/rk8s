@@ -5,9 +5,8 @@ use crate::api::middleware::{authenticate, authorize};
 use crate::api::v2::probe;
 use crate::domain::user::UserRepository;
 use crate::error::{AppError, OciError};
-use crate::service::auth::oauth_callback;
+use crate::service::auth::{auth, oauth_callback};
 use crate::service::repo::change_visibility;
-use crate::service::user::auth;
 use crate::utils::jwt::{Claims, decode};
 use crate::utils::password::check_password;
 use crate::utils::state::AppState;
@@ -19,9 +18,6 @@ use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::{Basic, Bearer};
 use std::sync::Arc;
-
-#[derive(Debug, Clone)]
-pub struct RepoIdentifier(pub String);
 
 pub fn create_router(state: Arc<AppState>) -> Router<()> {
     // we need to handle both /v2 and /v2/

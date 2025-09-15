@@ -4,17 +4,15 @@ use crate::utils::{
     validation::{is_valid_digest, is_valid_name, is_valid_reference},
 };
 use axum::response::IntoResponse;
-use axum::{
-    body,
-    body::Body,
-    extract::{Path, Query, Request, State},
-    http::{Response, StatusCode, header},
-};
+use axum::{body, body::Body, extract::{Path, Query, Request, State}, http::{Response, StatusCode, header}, Extension};
 use oci_spec::image::ImageManifest;
 use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::io::AsyncReadExt;
+use tokio::task::id;
+use crate::utils::jwt::Claims;
+use crate::utils::repo_identifier::identifier_from_full_name;
 
 /// Handles `GET /v2/<name>/manifests/<reference>`.
 ///
@@ -155,6 +153,7 @@ pub async fn head_manifest_handler(
 pub async fn put_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
+    Extension(claims): Extension<Claims>,
     request: Request,
 ) -> Result<impl IntoResponse, AppError> {
     if !is_valid_name(&name) {
@@ -204,7 +203,8 @@ pub async fn put_manifest_handler(
             .await?;
     }
 
-    state.repo_storage.ensure_repo_exists(&name).await?;
+    let identifier = identifier_from_full_name(&name);
+    state.repo_storage.ensure_repo_exists(&identifier).await?;
     let location = format!("/v2/{name}/manifests/{calculated_digest_str}");
     Ok((
         StatusCode::CREATED,

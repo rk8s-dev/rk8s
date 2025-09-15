@@ -1,4 +1,4 @@
-use crate::api::{AuthHeader, RepoIdentifier, extract_claims};
+use crate::api::{AuthHeader, extract_claims};
 use crate::error::{AppError, OciError};
 use crate::utils::jwt::Claims;
 use crate::utils::state::AppState;
@@ -7,6 +7,7 @@ use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use std::sync::Arc;
+use crate::utils::repo_identifier::identifier_from_full_name;
 
 pub async fn authenticate(
     State(state): State<Arc<AppState>>,
@@ -40,27 +41,24 @@ pub async fn authorize(
     mut req: Request,
     next: Next,
 ) -> Result<impl IntoResponse, AppError> {
-    let identifier = extract_repo_identifier(req.uri().path());
+    let identifier = extract_full_repo_name(req.uri().path());
     if identifier.is_none() {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
-
-    let identifier = identifier.unwrap();
-    let namespace = identifier
-        .split("/")
-        .find(|s| !s.is_empty())
-        .unwrap_or(&identifier);
-
+    
+    let identifier = identifier_from_full_name(identifier.unwrap());
+    let namespace = &identifier.namespace;
+    
     let claims = req.extensions().get::<Claims>();
     match *req.method() {
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
-            if let Ok(repo) = state.repo_storage.query_repo_by_name(&identifier).await
+            if let Ok(repo) = state.repo_storage.query_repo_by_identifier(&identifier).await
                 && !repo.is_public
             {
                 match claims {
                     Some(claims) => {
-                        if claims.sub != namespace {
+                        if claims.sub != *namespace {
                             return Err(OciError::Forbidden(
                                 "unable to read others' private repositories".to_string(),
                             )
@@ -87,7 +85,7 @@ pub async fn authorize(
                 .into());
             }
             Some(claims) => {
-                if namespace != claims.sub {
+                if *namespace != claims.sub {
                     return Err(OciError::Forbidden(
                         "unable to write others' repositories".to_string(),
                     )
@@ -104,11 +102,11 @@ pub async fn authorize(
         },
         _ => unreachable!(),
     }
-    req.extensions_mut().insert(RepoIdentifier(identifier));
+    req.extensions_mut().insert(identifier);
     Ok(next.run(req).await)
 }
 
-fn extract_repo_identifier(url: &str) -> Option<String> {
+fn extract_full_repo_name(url: &str) -> Option<String> {
     let segments: Vec<&str> = url.split("/").filter(|s| !s.is_empty()).collect();
     match segments.as_slice() {
         // tail: /{name}/manifests/{reference}

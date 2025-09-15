@@ -2,6 +2,7 @@
 
 CREATE TABLE repos (
     id UUID PRIMARY KEY NOT NULL DEFAULT uuid_generate_v4(),
+    github_id BIGINT NOT NULL REFERENCES users (github_id) ON DELETE CASCADE,
 
     name VARCHAR(255) NOT NULL UNIQUE,
 

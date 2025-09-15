@@ -1,4 +1,3 @@
-use crate::api::RepoIdentifier;
 use crate::error::{AppError, BusinessError};
 use crate::utils::state::AppState;
 use axum::extract::{Path, State};
@@ -7,6 +6,7 @@ use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use serde::Deserialize;
 use std::sync::Arc;
+use crate::utils::repo_identifier::RepoIdentifier;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChangeVisReq {
@@ -28,7 +28,7 @@ pub async fn change_visibility(
         "public" | "private" => {
             state
                 .repo_storage
-                .change_visibility(&identifier.0, body.visibility == "public")
+                .change_visibility(&identifier, body.visibility == "public")
                 .await?;
             Ok(StatusCode::OK)
         }
