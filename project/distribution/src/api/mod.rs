@@ -5,15 +5,16 @@ use crate::api::middleware::{authenticate, authorize};
 use crate::api::v2::probe;
 use crate::domain::user::UserRepository;
 use crate::error::{AppError, OciError};
-use crate::service::check_password;
+use crate::service::auth::oauth_callback;
 use crate::service::repo::change_visibility;
-use crate::service::user::{auth, create_user};
+use crate::service::user::auth;
 use crate::utils::jwt::{Claims, decode};
+use crate::utils::password::check_password;
 use crate::utils::state::AppState;
 use axum::Router;
 use axum::extract::OptionalFromRequestParts;
 use axum::http::request::Parts;
-use axum::routing::{get, post, put};
+use axum::routing::{get, put};
 use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::{Basic, Bearer};
@@ -33,15 +34,17 @@ pub fn create_router(state: Arc<AppState>) -> Router<()> {
 }
 
 fn user_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
-    Router::new().route("/users", post(create_user)).route(
-        "/{*tail}",
-        put(change_visibility)
-            .layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                authorize,
-            ))
-            .layer(axum::middleware::from_fn_with_state(state, authenticate)),
-    )
+    Router::new()
+        .route("/auth/{provider}/callback", get(oauth_callback))
+        .route(
+            "/{*tail}",
+            put(change_visibility)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    authorize,
+                ))
+                .layer(axum::middleware::from_fn_with_state(state, authenticate)),
+        )
 }
 
 pub enum AuthHeader {
@@ -78,7 +81,6 @@ where
 async fn extract_claims(
     auth: Option<AuthHeader>,
     jwt_secret: &str,
-    password_salt: &str,
     user_storage: &dyn UserRepository,
     auth_url: &str,
 ) -> Result<Claims, AppError> {
@@ -87,7 +89,7 @@ async fn extract_claims(
             AuthHeader::Bearer(bearer) => decode(jwt_secret, bearer.token()),
             AuthHeader::Basic(basic) => {
                 let user = user_storage.query_user_by_name(basic.username()).await?;
-                check_password(password_salt, &user.password, basic.password())?;
+                check_password(&user.salt, &user.password, basic.password())?;
                 Ok(Claims {
                     sub: basic.username().to_string(),
                     exp: 0,

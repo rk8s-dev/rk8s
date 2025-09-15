@@ -6,18 +6,22 @@ use uuid::Uuid;
 #[derive(Debug, Clone, FromRow, Default)]
 pub struct User {
     pub id: Uuid,
+    pub github_id: i64,
     pub username: String,
     pub password: String,
+    pub salt: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl User {
-    pub fn new(username: String, password: String) -> Self {
+    pub fn new(github_id: i64, username: String, password: String, salt: String) -> Self {
         User {
             id: Uuid::new_v4(),
+            github_id,
             username,
             password,
+            salt,
             ..Default::default()
         }
     }

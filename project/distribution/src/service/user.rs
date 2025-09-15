@@ -1,45 +1,16 @@
-use crate::domain::user::User;
-use crate::error::{AppError, BusinessError, InternalError};
-use crate::service::{check_password, hash_password};
+use crate::error::{AppError, InternalError};
 use crate::utils::jwt::gen_token;
+use crate::utils::password::check_password;
 use crate::utils::state::AppState;
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Basic;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::sync::Arc;
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UserReq {
-    username: String,
-    password: String,
-}
-
-pub async fn create_user(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<UserReq>,
-) -> Result<impl IntoResponse, AppError> {
-    if req.username == "anonymous" {
-        return Err(BusinessError::BadRequest(
-            "`anonymous` is a reserved username, please change another one".to_string(),
-        )
-        .into());
-    }
-    match state.user_storage.query_user_by_name(&req.username).await {
-        Ok(_) => Err(BusinessError::Conflict("username is already taken".to_string()).into()),
-        Err(_) => {
-            let password = hash_password(&state.config.password_salt, &req.password)?;
-            let user = User::new(req.username, password);
-            state.user_storage.create_user(user).await?;
-            Ok(StatusCode::CREATED)
-        }
-    }
-}
 
 #[derive(Serialize)]
 pub struct AuthRes {
@@ -62,10 +33,9 @@ pub(crate) async fn auth(
             let user = state.user_storage.query_user_by_name(username).await?;
             let token = gen_token(&state.config.jwt_secret, &user.username);
             {
-                let state = state.clone();
                 // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`
                 tokio::task::spawn_blocking(move || {
-                    check_password(&state.config.password_salt, &user.password, auth.password())
+                    check_password(&user.salt, &user.password, auth.password())
                 })
                 .await
                 .map_err(|e| InternalError::Others(e.to_string()))??;

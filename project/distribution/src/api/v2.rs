@@ -33,7 +33,6 @@ pub async fn probe(
     match extract_claims(
         auth,
         &state.config.jwt_secret,
-        &state.config.password_salt,
         state.user_storage.as_ref(),
         &state.config.registry_url,
     )
