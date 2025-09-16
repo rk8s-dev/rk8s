@@ -50,9 +50,9 @@ pub fn align_down(value: u64, alignment: u64) -> u64 {
 /// get effective page size (considering huge pages)
 pub fn get_effective_page_size(file_size: u64) -> u64 {
     if file_size >= HUGE_PAGE_LIMIT {
-        2 * 1024 * 1024 // 2MB大页
+        2 * 1024 * 1024 // 2MB huge page
     } else {
-        get_page_size().unwrap_or(4096) as u64 // 默认4KB页面
+        get_page_size().unwrap_or(4096) as u64 // default 4KB page
     }
 }
 

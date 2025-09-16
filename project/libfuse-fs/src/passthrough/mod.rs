@@ -1093,8 +1093,10 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // If the file needs to be extended, do so
         if offset + len as u64 > file_size {
             let raw_fd = file.as_raw_fd();
-            unsafe {
-                libc::ftruncate(raw_fd, (offset + len as u64) as i64);
+            let res = unsafe { libc::ftruncate(raw_fd, (offset + len as u64) as i64) };
+
+            if res < 0 {
+                return Err(std::io::Error::other("error to ftruncate"));
             }
         }
 
