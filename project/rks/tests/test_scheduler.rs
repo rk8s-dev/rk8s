@@ -155,7 +155,7 @@ async fn cleanup() -> Result<()> {
     }
 
     let node_names = store.list_nodes().await?;
-    for (node_name, _) in node_names {
+    for node_name in node_names {
         if node_name.contains("scheduler-test") {
             store.delete_node(&node_name).await?;
         }

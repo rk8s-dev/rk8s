@@ -39,7 +39,7 @@ cargo.rust_library(
     rustc_flags = [
         "-Lnative=$(location :libsqlite3-sys-0.30.1-build-script-run[out_dir])",
         "-lstatic=sqlite3",
-        "@$(location :libsqlite3-sys-0.30.1-build-script-run[rustc_flags])"
+        "@$(location :libsqlite3-sys-0.30.1-build-script-run[rustc_flags])",
     ],
     visibility = ["PUBLIC"],
 )

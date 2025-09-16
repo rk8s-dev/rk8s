@@ -28,6 +28,7 @@ cargo.rust_binary(
     named_deps = {
         "async_trait": "//third-party/rust/crates/async-trait/0.1.89:async-trait-0.1.89",
         "etcd_client": "//third-party/rust/crates/etcd-client/0.16.1:etcd-client-0.16.1",
+        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
         "native_tls": "//third-party/rust/crates/native-tls/0.2.14:native-tls-0.2.14",
         "netlink_packet_route": "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route-0.22.0",
         "tokio_util": "//third-party/rust/crates/tokio-util/0.7.16:tokio-util-0.7.16",
@@ -61,6 +62,7 @@ cargo.rust_binary(
         "//third-party/rust/crates/serde_yaml/0.9.34+deprecated:serde_yaml-0.9.34+deprecated",
         "//third-party/rust/crates/tempfile/3.22.0:tempfile-3.22.0",
         "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
+        "//third-party/rust/crates/time/0.3.43:time-0.3.43",
         "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
         "//third-party/rust/crates/tonic/0.13.1:tonic-0.13.1",
     ],
@@ -91,6 +93,7 @@ cargo.rust_library(
     named_deps = {
         "async_trait": "//third-party/rust/crates/async-trait/0.1.89:async-trait-0.1.89",
         "etcd_client": "//third-party/rust/crates/etcd-client/0.16.1:etcd-client-0.16.1",
+        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
         "native_tls": "//third-party/rust/crates/native-tls/0.2.14:native-tls-0.2.14",
         "netlink_packet_route": "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route-0.22.0",
         "tokio_util": "//third-party/rust/crates/tokio-util/0.7.16:tokio-util-0.7.16",
@@ -124,6 +127,7 @@ cargo.rust_library(
         "//third-party/rust/crates/serde_yaml/0.9.34+deprecated:serde_yaml-0.9.34+deprecated",
         "//third-party/rust/crates/tempfile/3.22.0:tempfile-3.22.0",
         "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
+        "//third-party/rust/crates/time/0.3.43:time-0.3.43",
         "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
         "//third-party/rust/crates/tonic/0.13.1:tonic-0.13.1",
     ],
