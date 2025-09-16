@@ -1,4 +1,3 @@
-#![allow(unused)]
 use anyhow::Result;
 use etcd_client::{Client, GetOptions, PutOptions, WatchOptions, WatchStream, Watcher};
 use std::sync::Arc;
@@ -14,6 +13,7 @@ pub struct XlineStore {
     client: Arc<RwLock<Client>>,
 }
 
+#[allow(unused)]
 impl XlineStore {
     /// Create a new XlineStore instance by connecting to the given endpoints.
     pub async fn new(endpoints: &[&str]) -> Result<Self> {

@@ -1,10 +1,10 @@
-#![allow(unused)]
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use common::{PodTask, RksMessage};
 use quinn::Connection;
 use std::sync::Arc;
 
+#[allow(unused)]
 pub async fn watch_delete(
     pod_name: String,
     conn: &Connection,

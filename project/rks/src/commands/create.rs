@@ -1,4 +1,3 @@
-#![allow(unused)]
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use common::{PodTask, RksMessage};
@@ -6,6 +5,7 @@ use quinn::Connection;
 use std::sync::Arc;
 
 /// Send a pod creation message to a specific worker node
+#[allow(unused)]
 pub async fn watch_create(pod_task: &PodTask, conn: &Connection, node_id: &str) -> Result<()> {
     if pod_task.spec.node_name.as_deref() == Some(node_id) {
         let msg = RksMessage::CreatePod(Box::new(pod_task.clone()));
