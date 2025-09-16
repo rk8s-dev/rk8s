@@ -2,7 +2,7 @@ use rks::api::xlinestore::XlineStore;
 use rks::protocol::config::load_config;
 use std::sync::Arc;
 
-fn load_store() -> Arc<XlineStore> {
+async fn load_store() -> Arc<XlineStore> {
     let config_path = std::env::var("TEST_CONFIG_PATH").unwrap_or_else(|_| {
         format!(
             "{}/tests/config.yaml",
@@ -16,16 +16,16 @@ fn load_store() -> Arc<XlineStore> {
         .iter()
         .map(|s| s.as_str())
         .collect();
-    Arc::new(tokio::runtime::Handle::current().block_on(async {
+    Arc::new(
         XlineStore::new(&endpoints)
             .await
-            .expect("connect xline failed")
-    }))
+            .expect("connect xline failed"),
+    )
 }
 
 #[tokio::test]
 async fn test_xline_rw() {
-    let store = load_store();
+    let store = load_store().await;
 
     // Generate unique pod name
     let pod_name = format!(

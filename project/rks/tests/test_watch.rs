@@ -2,10 +2,11 @@ use etcd_client::EventType;
 use futures::StreamExt;
 use rks::api::xlinestore::XlineStore;
 use rks::protocol::config::load_config;
+use serial_test::serial;
 use std::sync::Arc;
 use tokio::time::{Duration, sleep, timeout};
 
-fn load_store() -> Arc<XlineStore> {
+async fn load_store() -> Arc<XlineStore> {
     let config_path = std::env::var("TEST_CONFIG_PATH").unwrap_or_else(|_| {
         format!(
             "{}/tests/config.yaml",
@@ -19,16 +20,17 @@ fn load_store() -> Arc<XlineStore> {
         .iter()
         .map(|s| s.as_str())
         .collect();
-    Arc::new(tokio::runtime::Handle::current().block_on(async {
+    Arc::new(
         XlineStore::new(&endpoints)
             .await
-            .expect("connect xline failed")
-    }))
+            .expect("connect xline failed"),
+    )
 }
 
 #[tokio::test]
+#[serial]
 async fn test_watch_pods_create_update_delete() {
-    let store = load_store();
+    let store = load_store().await;
 
     let (_items, rev) = store.pods_snapshot_with_rev().await.unwrap();
     let (_watcher, mut stream) = store.watch_pods(rev + 1).await.unwrap();
@@ -78,8 +80,9 @@ async fn test_watch_pods_create_update_delete() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_watch_pods_multiple_updates_order() {
-    let store = load_store();
+    let store = load_store().await;
     let (_items, rev) = store.pods_snapshot_with_rev().await.unwrap();
     let (_watcher, mut stream) = store.watch_pods(rev + 1).await.unwrap();
 
@@ -121,8 +124,9 @@ async fn test_watch_pods_multiple_updates_order() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_watch_from_stale_revision() {
-    let store = load_store();
+    let store = load_store().await;
     let result = store.watch_pods(1).await;
     assert!(
         result.is_err(),
@@ -131,8 +135,9 @@ async fn test_watch_from_stale_revision() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_watch_cancel() {
-    let store = load_store();
+    let store = load_store().await;
     let (_items, rev) = store.pods_snapshot_with_rev().await.unwrap();
     let (watcher, mut stream) = store.watch_pods(rev + 1).await.unwrap();
 
@@ -156,9 +161,9 @@ async fn test_watch_cancel() {
 }
 
 #[tokio::test]
-#[ignore]
+#[serial]
 async fn test_watch_reconnect_manual() {
-    let store = load_store();
+    let store = load_store().await;
     let (_items, rev) = store.pods_snapshot_with_rev().await.unwrap();
     let (_watcher, mut stream) = store.watch_pods(rev + 1).await.unwrap();
 
@@ -179,8 +184,9 @@ async fn test_watch_reconnect_manual() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_watch_backpressure() {
-    let store = load_store();
+    let store = load_store().await;
     let (_items, rev) = store.pods_snapshot_with_rev().await.unwrap();
     let (_watcher, mut stream) = store.watch_pods(rev + 1).await.unwrap();
 
@@ -214,8 +220,9 @@ async fn test_watch_backpressure() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_watch_multiple_resources() {
-    let store = load_store();
+    let store = load_store().await;
     let (_items, rev) = store.pods_snapshot_with_rev().await.unwrap();
 
     let (_watcher1, mut stream1) = store.watch_pods(rev + 1).await.unwrap();
