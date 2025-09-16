@@ -71,7 +71,6 @@ pub async fn list_visible_repos(
         .into_iter()
         .map(RepoView::from)
         .collect::<Vec<_>>();
-    println!("{:#?}", repos);
     Ok(Json(json!({
         "data": repos,
     })))

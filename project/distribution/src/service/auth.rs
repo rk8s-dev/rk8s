@@ -10,12 +10,12 @@ use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Basic;
 use chrono::Utc;
+use rand::{Rng, SeedableRng};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use rand::{Rng, SeedableRng};
 
 #[derive(Deserialize)]
 pub struct OAuthCallbackParams {

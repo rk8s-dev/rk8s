@@ -22,7 +22,10 @@ pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(probe))
         .route("/{*tail}", any(dispatch_handler))
-        .layer(middleware::from_fn_with_state(state.clone(), authorize_repository_access))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            authorize_repository_access,
+        ))
         .layer(middleware::from_fn_with_state(state, populate_oci_claims))
 }
 

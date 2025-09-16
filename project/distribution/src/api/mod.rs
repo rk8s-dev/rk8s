@@ -1,7 +1,9 @@
 pub mod middleware;
 pub mod v2;
 
-use crate::api::middleware::{authorize_repository_access, populate_oci_claims, require_authentication};
+use crate::api::middleware::{
+    authorize_repository_access, populate_oci_claims, require_authentication,
+};
 use crate::api::v2::probe;
 use crate::domain::user::UserRepository;
 use crate::error::{AppError, OciError};
@@ -42,18 +44,25 @@ fn custom_v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
 fn v1_router_with_auth(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
-        .route("/repo", get(list_visible_repos)
-            .layer(axum::middleware::from_fn_with_state(
+        .route(
+            "/repo",
+            get(list_visible_repos).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 require_authentication,
-            )))
-        .route("/{*tail}", put(change_visibility)
-            .layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                authorize_repository_access,
-            ))
-            .layer(axum::middleware::from_fn_with_state(state, populate_oci_claims)))
-        
+            )),
+        )
+        .route(
+            "/{*tail}",
+            put(change_visibility)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    authorize_repository_access,
+                ))
+                .layer(axum::middleware::from_fn_with_state(
+                    state,
+                    populate_oci_claims,
+                )),
+        )
 }
 
 #[cfg(debug_assertions)]

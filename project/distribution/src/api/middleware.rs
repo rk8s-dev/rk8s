@@ -20,7 +20,8 @@ pub async fn require_authentication(
         &state.config.jwt_secret,
         state.user_storage.as_ref(),
         &state.config.registry_url,
-    ).await?;
+    )
+    .await?;
     req.extensions_mut().insert(claims);
     Ok(next.run(req).await)
 }

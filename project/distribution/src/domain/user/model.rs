@@ -15,7 +15,12 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(github_id: i64, username: impl Into<String>, password: impl Into<String>, salt: impl Into<String>) -> Self {
+    pub fn new(
+        github_id: i64,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        salt: impl Into<String>,
+    ) -> Self {
         User {
             id: Uuid::new_v4(),
             github_id,
