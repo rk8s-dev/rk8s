@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
+use rand::{Rng, SeedableRng};
 
 #[derive(Deserialize)]
 pub struct OAuthCallbackParams {
@@ -177,4 +178,25 @@ pub(crate) async fn auth(
         expires_in: state.config.jwt_lifetime_secs,
         issued_at: Utc::now().to_rfc3339(),
     }))
+}
+
+#[cfg(debug_assertions)]
+#[derive(Deserialize)]
+pub struct CreateUserRequest {
+    username: String,
+    password: String,
+}
+
+#[cfg(debug_assertions)]
+pub async fn create_user(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateUserRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let mut rng = rand::rngs::StdRng::from_os_rng();
+
+    let salt = gen_salt();
+    let password = hash_password(&salt, &req.password)?;
+    let user = User::new(rng.random(), req.username, password, salt);
+    state.user_storage.create_user(user).await?;
+    Ok(StatusCode::CREATED)
 }

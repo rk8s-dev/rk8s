@@ -6,6 +6,7 @@ set -euo pipefail
 # --- Configuration ---
 REGISTRY_HOST="127.0.0.1:8968"
 API_URL="http://127.0.0.1:8968/api/v1"
+DEBUG_URL="http://127.0.0.1:8968/debug"
 AUTH_URL="http://127.0.0.1:8968/auth/token"
 BASE_IMAGE="hello-world"
 
@@ -73,12 +74,12 @@ USER_B_PASS="P@ssw0rdB-$TIMESTAMP"
 
 # Register User A
 info "Registering User A: '$USER_A_NAME'..."
-curl -s -f -X POST -H "Content-Type: application/json" -d "{\"username\": \"$USER_A_NAME\", \"password\": \"$USER_A_PASS\"}" "$API_URL/users" > /dev/null || fail "Failed to register User A."
+curl -s -f -X POST -H "Content-Type: application/json" -d "{\"username\": \"$USER_A_NAME\", \"password\": \"$USER_A_PASS\"}" "$DEBUG_URL/users" > /dev/null || fail "Failed to register User A."
 success "User A registered."
 
 # Register User B
 info "Registering User B: '$USER_B_NAME'..."
-curl -s -f -X POST -H "Content-Type: application/json" -d "{\"username\": \"$USER_B_NAME\", \"password\": \"$USER_B_PASS\"}" "$API_URL/users" > /dev/null || fail "Failed to register User B."
+curl -s -f -X POST -H "Content-Type: application/json" -d "{\"username\": \"$USER_B_NAME\", \"password\": \"$USER_B_PASS\"}" "$DEBUG_URL/users" > /dev/null || fail "Failed to register User B."
 success "User B registered."
 
 
