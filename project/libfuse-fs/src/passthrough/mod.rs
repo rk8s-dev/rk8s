@@ -1090,7 +1090,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let file_size = file.metadata()?.len();
         let len = data.len();
 
-        // 如果需要扩展文件大小
+        // If the file needs to be extended, do so
         if offset + len as u64 > file_size {
             let raw_fd = file.as_raw_fd();
             unsafe {
@@ -1122,23 +1122,23 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 MmapCachedValue::MmapMut(mmap_mut) => {
                     let chunk_len = mmap_mut.len();
 
-                    // 计算在当前chunk中的起始位置
+                    // Calculate the start position of the current chunk
                     let chunk_start_offset =
                         mmap::align_down(current_offset, mmap::get_effective_page_size(file_size));
                     let copy_start = (current_offset - chunk_start_offset) as usize;
 
-                    // 确保不会写入超出chunk边界
+                    // Ensure we don't write beyond the chunk boundary
                     let remaining_in_chunk = chunk_len - copy_start;
                     let copy_len = cmp::min(remaining, remaining_in_chunk);
 
-                    // 确保不会写入超出数据边界
+                    // Ensure we don't write beyond the data boundary
                     let copy_len = cmp::min(copy_len, data.len() - data_offset);
 
                     if copy_len == 0 {
-                        break; // 没有更多数据可写入
+                        break; // No more data to write
                     }
 
-                    // 执行数据拷贝
+                    // Perform data copy
                     mmap_mut[copy_start..copy_start + copy_len]
                         .copy_from_slice(&data[data_offset..data_offset + copy_len]);
 
