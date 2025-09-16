@@ -2,10 +2,7 @@ use rks::api::xlinestore::XlineStore;
 use rks::protocol::config::load_config;
 use std::sync::Arc;
 
-#[tokio::test]
-async fn test_xline_rw() {
-    // let config =
-    //     load_config("/home/ich/rk8s/project/rks/tests/config.yaml").expect("Failed to load config");
+async fn load_store() -> Arc<XlineStore> {
     let config_path = std::env::var("TEST_CONFIG_PATH").unwrap_or_else(|_| {
         format!(
             "{}/tests/config.yaml",
@@ -19,27 +16,47 @@ async fn test_xline_rw() {
         .iter()
         .map(|s| s.as_str())
         .collect();
-    let store = Arc::new(
+    Arc::new(
         XlineStore::new(&endpoints)
             .await
-            .expect("Failed to connect Xline"),
+            .expect("connect xline failed"),
+    )
+}
+
+#[tokio::test]
+async fn test_xline_rw() {
+    let store = load_store().await;
+
+    // Generate unique pod name
+    let pod_name = format!(
+        "pod-test-{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap()
+    );
+    let pod_yaml = format!(
+        "apiVersion: v1\nkind: Pod\nmetadata:\n name: {}\n",
+        pod_name
     );
 
-    let _node_list = store.list_nodes().await.expect("List nodes failed");
-
-    // Pod YAML
-    let pod_name = "pod-test";
-    let pod_yaml = "apiVersion: v1\nkind: Pod\nmetadata:\n  name: pod-test\n";
+    // Insert Pod YAML
     store
-        .insert_pod_yaml(pod_name, pod_yaml)
+        .insert_pod_yaml(&pod_name, &pod_yaml)
         .await
         .expect("Insert pod yaml failed");
+
+    // Fetch and verify
     let fetched = store
-        .get_pod_yaml(pod_name)
+        .get_pod_yaml(&pod_name)
         .await
         .expect("Get pod yaml failed");
-    assert_eq!(fetched.as_deref(), Some(pod_yaml));
+    assert_eq!(fetched.as_deref(), Some(pod_yaml.as_str()));
 
+    // List pods and check presence
     let pods = store.list_pods().await.expect("List pods failed");
-    assert!(pods.contains(&pod_name.to_string()));
+    assert!(pods.contains(&pod_name));
+
+    // Clean up
+    store
+        .delete_pod(&pod_name)
+        .await
+        .expect("Delete pod failed");
 }

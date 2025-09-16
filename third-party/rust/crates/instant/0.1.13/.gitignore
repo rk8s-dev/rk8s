@@ -1,0 +1,12 @@
+*.swp
+*.swo
+*.so
+*.rlib
+*.dSYM
+*.dylib
+cargo.lock
+Cargo.lock
+target
+.idea
+wasm-pack.log
+bin

@@ -29,36 +29,83 @@ pub async fn run_scheduler_with_xline(
         scheduler.update_cache_pod(p).await;
     }
 
-    let (_, mut nodes_watch_stream) = client
-        .watch(
-            "/registry/nodes/".to_string(),
-            Some(WatchOptions::new().with_prefix()),
-        )
-        .await?;
-    let (_, mut pods_watch_stream) = client
-        .watch(
-            "/registry/pods/".to_string(),
-            Some(WatchOptions::new().with_prefix()),
-        )
-        .await?;
-
     let rx = scheduler.run();
     tokio::spawn(async move {
-        loop {
-            select! {
-                pod_msg = pods_watch_stream.message() => {
-                    handle_pod_update(&mut scheduler, pod_msg).await;
-                }
-                node_msg = nodes_watch_stream.message() => {
-                    handle_node_update(&mut scheduler, node_msg).await;
+        let mut since: i64 = 0;
+        let mut backoff = std::time::Duration::from_millis(100);
+        let max_backoff = std::time::Duration::from_secs(5);
 
+        loop {
+            let watch_opts = WatchOptions::new().with_prefix().with_start_revision(since);
+            // Watch nodes in Xline
+            let (mut _node_watcher, mut nodes_watch_stream) = match client
+                .watch("/registry/nodes/".to_string(), Some(watch_opts.clone()))
+                .await
+            {
+                Ok(w) => w,
+                Err(_e) => {
+                    tokio::time::sleep(backoff).await;
+                    backoff = std::cmp::min(backoff * 2, max_backoff);
+                    continue;
                 }
-                to_unassume = unassume_rx.recv() => {
-                    if let Some(name) = to_unassume {
-                        scheduler.unassume(&name).await;
+            };
+            // Watch pods in Xline
+            let (mut _pod_watcher, mut pods_watch_stream) = match client
+                .watch("/registry/pods/".to_string(), Some(watch_opts.clone()))
+                .await
+            {
+                Ok(w) => w,
+                Err(_e) => {
+                    tokio::time::sleep(backoff).await;
+                    backoff = std::cmp::min(backoff * 2, max_backoff);
+                    continue;
+                }
+            };
+
+            backoff = std::time::Duration::from_millis(100); // reset backoff
+
+            loop {
+                select! {
+                    pod_msg = pods_watch_stream.message() => {
+                        match pod_msg {
+                            Ok(Some(resp)) => {
+                                since = resp.header().map(|h| h.revision()).unwrap_or(since);
+                                handle_pod_update(&mut scheduler, Ok(Some(resp))).await;
+                            }
+                            // If stream loses connection , exit the loop and reconnect
+                            Ok(None) => {
+                                break;
+                            }
+                            Err(_e) => {
+                                break;
+                            }
+                        }
+                    }
+
+                    node_msg = nodes_watch_stream.message() => {
+                        match node_msg {
+                            Ok(Some(resp)) => {
+                                since = resp.header().map(|h| h.revision()).unwrap_or(since);
+                                handle_node_update(&mut scheduler, Ok(Some(resp))).await;
+                            }
+                            Ok(None) => {
+                                break;
+                            }
+                            Err(_e) => {
+                                break;
+                            }
+                        }
+                    }
+
+                    to_unassume = unassume_rx.recv() => {
+                        if let Some(name) = to_unassume {
+                            scheduler.unassume(&name).await;
+                        }
                     }
                 }
             }
+            tokio::time::sleep(backoff).await;
+            backoff = std::cmp::min(backoff * 2, max_backoff);
         }
     });
     Ok(rx)
