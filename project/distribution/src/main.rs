@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::config::{validate_config};
+use crate::config::validate_config;
 use clap::Parser;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;

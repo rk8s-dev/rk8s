@@ -1,12 +1,12 @@
 pub mod middleware;
 pub mod v2;
 
-use crate::api::middleware::{authenticate, authorize};
+use crate::api::middleware::{authorize_repository_access, populate_oci_claims, require_authentication};
 use crate::api::v2::probe;
 use crate::domain::user::UserRepository;
 use crate::error::{AppError, OciError};
 use crate::service::auth::{auth, oauth_callback};
-use crate::service::repo::change_visibility;
+use crate::service::repo::{change_visibility, list_visible_repos};
 use crate::utils::jwt::{Claims, decode};
 use crate::utils::password::check_password;
 use crate::utils::state::AppState;
@@ -24,23 +24,31 @@ pub fn create_router(state: Arc<AppState>) -> Router<()> {
     Router::new()
         .route("/v2/", get(probe))
         .nest("/v2", v2::create_v2_router(state.clone()))
-        .nest("/api/v1", user_router(state.clone()))
+        .nest("/api/v1", custom_v1_router(state.clone()))
         .route("/auth/token", get(auth))
         .with_state(state)
 }
 
-fn user_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
+fn custom_v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/auth/{provider}/callback", get(oauth_callback))
-        .route(
-            "/{*tail}",
-            put(change_visibility)
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    authorize,
-                ))
-                .layer(axum::middleware::from_fn_with_state(state, authenticate)),
-        )
+        .merge(v1_router_with_auth(state))
+}
+
+fn v1_router_with_auth(state: Arc<AppState>) -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/repo", get(list_visible_repos)
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                require_authentication,
+            )))
+        .route("/{*tail}", put(change_visibility)
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                authorize_repository_access,
+            ))
+            .layer(axum::middleware::from_fn_with_state(state, populate_oci_claims)))
+        
 }
 
 pub enum AuthHeader {

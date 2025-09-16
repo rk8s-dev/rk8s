@@ -1,27 +1,26 @@
 use crate::domain::user::User;
 use crate::error::{AppError, BusinessError, InternalError, MapToAppError};
+use crate::utils::jwt::gen_token;
 use crate::utils::password::{check_password, gen_password, gen_salt, hash_password};
 use crate::utils::state::AppState;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
+use axum_extra::TypedHeader;
+use axum_extra::headers::Authorization;
+use axum_extra::headers::authorization::Basic;
+use chrono::Utc;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use axum_extra::headers::Authorization;
-use axum_extra::headers::authorization::Basic;
-use axum_extra::TypedHeader;
-use chrono::Utc;
-use crate::utils::jwt::gen_token;
 
 #[derive(Deserialize)]
 pub struct OAuthCallbackParams {
     code: String,
 }
 
-#[tracing::instrument(skip_all)]
 pub async fn oauth_callback(
     State(state): State<Arc<AppState>>,
     Path(provider): Path<String>,
@@ -47,25 +46,36 @@ pub async fn oauth_callback(
                 .query_user_by_github_id(user_info.id)
                 .await
             {
-                Ok(_) => Ok((
-                    StatusCode::OK,
-                    Json(json!({
-                        "msg": "The user has been registered",
-                    })),
-                )),
+                Ok(user) => {
+                    let pat = gen_token(
+                        state.config.jwt_lifetime_secs,
+                        &state.config.jwt_secret,
+                        &user.username,
+                    );
+                    Ok((
+                        StatusCode::OK,
+                        Json(json!({
+                            "pat": pat,
+                        })),
+                    ))
+                }
                 Err(_) => {
                     let salt = gen_salt();
                     let original_password = gen_password();
                     let hashed = hash_password(&salt, &original_password)?;
 
+                    let pat = gen_token(
+                        state.config.jwt_lifetime_secs,
+                        &state.config.jwt_secret,
+                        &user_info.login,
+                    );
+                    let res = Json(json!({
+                        "pat": pat,
+                    }));
+
                     let user = User::new(user_info.id, user_info.login, hashed, salt);
                     state.user_storage.create_user(user).await?;
-                    Ok((
-                        StatusCode::CREATED,
-                        Json(json!({
-                            "pat": original_password,
-                        })),
-                    ))
+                    Ok((StatusCode::CREATED, res))
                 }
             }
         }
@@ -84,7 +94,6 @@ pub struct RequestAccessTokenRes {
     scope: String,
 }
 
-#[tracing::instrument(skip_all)]
 async fn request_access_token(
     code: &str,
     client_id: &str,
@@ -111,7 +120,6 @@ pub struct UserInfo {
     id: i64,
 }
 
-#[tracing::instrument(skip_all)]
 async fn request_user_info(access_token: &str) -> Result<UserInfo, reqwest::Error> {
     let client = reqwest::Client::new();
     let res = client
@@ -142,18 +150,26 @@ pub(crate) async fn auth(
         Some(auth) => {
             let username = auth.username();
             let user = state.user_storage.query_user_by_name(username).await?;
-            let token = gen_token(state.config.jwt_lifetime_secs, &state.config.jwt_secret, &user.username);
+            let token = gen_token(
+                state.config.jwt_lifetime_secs,
+                &state.config.jwt_secret,
+                &user.username,
+            );
             {
                 // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`.
                 tokio::task::spawn_blocking(move || {
                     check_password(&user.salt, &user.password, auth.password())
                 })
-                    .await
-                    .map_err(|e| InternalError::Others(e.to_string()))??;
+                .await
+                .map_err(|e| InternalError::Others(e.to_string()))??;
             }
             token
         }
-        None => gen_token(state.config.jwt_lifetime_secs, &state.config.jwt_secret, "anonymous"),
+        None => gen_token(
+            state.config.jwt_lifetime_secs,
+            &state.config.jwt_secret,
+            "anonymous",
+        ),
     };
     Ok(Json(AuthRes {
         token: token.clone(),

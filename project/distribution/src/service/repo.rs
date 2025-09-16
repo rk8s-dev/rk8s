@@ -1,12 +1,15 @@
+use crate::domain::repo::Repo;
 use crate::error::{AppError, BusinessError};
+use crate::utils::jwt::Claims;
+use crate::utils::repo_identifier::RepoIdentifier;
 use crate::utils::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::Arc;
-use crate::utils::repo_identifier::RepoIdentifier;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChangeVisReq {
@@ -37,4 +40,39 @@ pub async fn change_visibility(
                 .into(),
         ),
     }
+}
+
+#[derive(Serialize, Debug)]
+struct RepoView {
+    namespace: String,
+    name: String,
+    is_public: bool,
+}
+
+impl From<Repo> for RepoView {
+    fn from(value: Repo) -> Self {
+        Self {
+            namespace: value.namespace,
+            name: value.name,
+            is_public: value.is_public,
+        }
+    }
+}
+
+pub async fn list_visible_repos(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
+) -> Result<impl IntoResponse, AppError> {
+    let namespace = claims.sub;
+    let repos = state
+        .repo_storage
+        .query_all_visible_repos(&namespace)
+        .await?
+        .into_iter()
+        .map(RepoView::from)
+        .collect::<Vec<_>>();
+    println!("{:#?}", repos);
+    Ok(Json(json!({
+        "data": repos,
+    })))
 }

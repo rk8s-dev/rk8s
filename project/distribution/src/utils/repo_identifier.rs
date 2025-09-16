@@ -6,9 +6,12 @@ pub struct RepoIdentifier {
 
 impl RepoIdentifier {
     pub fn new(namespace: impl Into<String>, name: impl Into<String>) -> RepoIdentifier {
-        RepoIdentifier { namespace: namespace.into(), name: name.into() }
+        RepoIdentifier {
+            namespace: namespace.into(),
+            name: name.into(),
+        }
     }
-    
+
     pub fn full_name(&self) -> String {
         format!("{}/{}", self.namespace, self.name)
     }
@@ -21,4 +24,3 @@ pub fn identifier_from_full_name(full_name: impl AsRef<str>) -> RepoIdentifier {
         .map(|(namespace, name)| RepoIdentifier::new(namespace, name))
         .unwrap_or_else(|| RepoIdentifier::new(full_name, full_name))
 }
-

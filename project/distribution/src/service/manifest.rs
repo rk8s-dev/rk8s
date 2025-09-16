@@ -1,18 +1,21 @@
 use crate::error::{AppError, MapToAppError, OciError};
+use crate::utils::repo_identifier::identifier_from_full_name;
 use crate::utils::{
     state::AppState,
     validation::{is_valid_digest, is_valid_name, is_valid_reference},
 };
 use axum::response::IntoResponse;
-use axum::{body, body::Body, extract::{Path, Query, Request, State}, http::{Response, StatusCode, header}, Extension};
+use axum::{
+    body,
+    body::Body,
+    extract::{Path, Query, Request, State},
+    http::{Response, StatusCode, header},
+};
 use oci_spec::image::ImageManifest;
 use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::io::AsyncReadExt;
-use tokio::task::id;
-use crate::utils::jwt::Claims;
-use crate::utils::repo_identifier::identifier_from_full_name;
 
 /// Handles `GET /v2/<name>/manifests/<reference>`.
 ///
@@ -153,7 +156,6 @@ pub async fn head_manifest_handler(
 pub async fn put_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
-    Extension(claims): Extension<Claims>,
     request: Request,
 ) -> Result<impl IntoResponse, AppError> {
     if !is_valid_name(&name) {

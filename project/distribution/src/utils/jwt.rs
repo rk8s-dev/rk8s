@@ -31,11 +31,7 @@ pub fn decode(secret: impl AsRef<str>, token: impl AsRef<str>) -> Result<Claims,
     .claims)
 }
 
-pub fn gen_token(
-    lifetime_secs: i64,
-    secret: impl AsRef<str>, 
-    id: impl AsRef<str>,
-) -> String {
+pub fn gen_token(lifetime_secs: i64, secret: impl AsRef<str>, id: impl AsRef<str>) -> String {
     let claims = Claims {
         sub: id.as_ref().to_string(),
         exp: (Utc::now() + Duration::seconds(lifetime_secs)).timestamp(),

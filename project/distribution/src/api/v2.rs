@@ -1,4 +1,4 @@
-use crate::api::middleware::{authenticate, authorize};
+use crate::api::middleware::{authorize_repository_access, populate_oci_claims};
 use crate::api::{AuthHeader, extract_claims};
 use crate::error::AppError;
 use crate::service::blob::{
@@ -14,17 +14,16 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
-use axum::{Router, middleware, Extension};
+use axum::{Router, middleware};
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::utils::jwt::Claims;
 
 pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(probe))
         .route("/{*tail}", any(dispatch_handler))
-        .layer(middleware::from_fn_with_state(state.clone(), authorize))
-        .layer(middleware::from_fn_with_state(state, authenticate))
+        .layer(middleware::from_fn_with_state(state.clone(), authorize_repository_access))
+        .layer(middleware::from_fn_with_state(state, populate_oci_claims))
 }
 
 pub async fn probe(
@@ -53,7 +52,6 @@ async fn dispatch_handler(
     State(state): State<Arc<AppState>>,
     Path(tail): Path<String>,
     Query(params): Query<HashMap<String, String>>,
-    Extension(claims): Extension<Claims>,
     headers: HeaderMap,
     request: Request,
 ) -> Result<Response, AppError> {
@@ -79,7 +77,7 @@ async fn dispatch_handler(
                 }
                 // Push Manifests
                 Method::PUT => {
-                    put_manifest_handler(State(state), Path((name, reference.to_string())), Extension(claims), request)
+                    put_manifest_handler(State(state), Path((name, reference.to_string())), request)
                         .await
                         .map(|res| res.into_response())
                 }

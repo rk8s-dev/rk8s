@@ -1,15 +1,31 @@
 use crate::api::{AuthHeader, extract_claims};
 use crate::error::{AppError, OciError};
 use crate::utils::jwt::Claims;
+use crate::utils::repo_identifier::identifier_from_full_name;
 use crate::utils::state::AppState;
 use axum::extract::{Request, State};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use std::sync::Arc;
-use crate::utils::repo_identifier::identifier_from_full_name;
 
-pub async fn authenticate(
+pub async fn require_authentication(
+    State(state): State<Arc<AppState>>,
+    auth: Option<AuthHeader>,
+    mut req: Request,
+    next: Next,
+) -> Result<impl IntoResponse, AppError> {
+    let claims = extract_claims(
+        auth,
+        &state.config.jwt_secret,
+        state.user_storage.as_ref(),
+        &state.config.registry_url,
+    ).await?;
+    req.extensions_mut().insert(claims);
+    Ok(next.run(req).await)
+}
+
+pub async fn populate_oci_claims(
     State(state): State<Arc<AppState>>,
     auth: Option<AuthHeader>,
     mut req: Request,
@@ -36,7 +52,7 @@ pub async fn authenticate(
     Ok(next.run(req).await)
 }
 
-pub async fn authorize(
+pub async fn authorize_repository_access(
     State(state): State<Arc<AppState>>,
     mut req: Request,
     next: Next,
@@ -45,15 +61,18 @@ pub async fn authorize(
     if identifier.is_none() {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
-    
+
     let identifier = identifier_from_full_name(identifier.unwrap());
     let namespace = &identifier.namespace;
-    
+
     let claims = req.extensions().get::<Claims>();
     match *req.method() {
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
-            if let Ok(repo) = state.repo_storage.query_repo_by_identifier(&identifier).await
+            if let Ok(repo) = state
+                .repo_storage
+                .query_repo_by_identifier(&identifier)
+                .await
                 && !repo.is_public
             {
                 match claims {
