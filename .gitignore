@@ -2,6 +2,7 @@
 .idea
 .vscode
 .zed
+.buckal
 
 # Mac
 .DS_Store
