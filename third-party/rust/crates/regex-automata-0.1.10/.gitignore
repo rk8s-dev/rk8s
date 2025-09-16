@@ -1,7 +1,0 @@
-/target
-/examples/target
-/regex-automata-debug/target
-tags
-/Cargo.lock
-/examples/Cargo.lock
-BREADCRUMBS
