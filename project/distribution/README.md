@@ -28,17 +28,17 @@ OCI_REGISTRY_ROOTDIR=/var/lib/registry
 # Provide the full URL for local development
 DATABASE_URL="postgres://postgres:password@localhost:5432/postgres"
 
-# --- Security Configuration ---
-# A random, secret string used for salting passwords with 16 characters long.
-# Generate a secure random string for production use.
-PASSWORD_SALT="AAAAAAAAAAAAAAAA"
-
 # A secret key for signing JWT tokens.
 # Generate a secure random string for production use.
 JWT_SECRET="secret"
 
 # JWT token lifetime in seconds
 JWT_LIFETIME_SECONDS=3600
+
+# GitHub OAuth Configuration (optional)
+# Required for GitHub OAuth authentication
+# GITHUB_CLIENT_ID="your_github_client_id"
+# GITHUB_CLIENT_SECRET="your_github_client_secret"
 
 # Log level
 RUST_LOG="info"
@@ -66,7 +66,7 @@ OCI_REGISTRY_URL=0.0.0.0
 OCI_REGISTRY_PORT=8968
 
 # Public URL accessible by clients
-OCI_REGISTRY_PUBLIC_URL=http://127.0.0.1:${APP_PORT}
+OCI_REGISTRY_PUBLIC_URL=http://127.0.0.1:8968
 
 # Storage path inside the container
 OCI_REGISTRY_STORAGE=FILESYSTEM
@@ -81,15 +81,19 @@ POSTGRES_PASSWORD=password
 POSTGRES_DB=postgres
 
 # --- Security Configuration ---
-PASSWORD_SALT="AAAAAAAAAAAAAAAA"
 JWT_SECRET="secret"
 JWT_LIFETIME_SECONDS=3600
+
+# GitHub OAuth Configuration (optional)
+# Required for GitHub OAuth authentication
+# GITHUB_CLIENT_ID="your_github_client_id"
+# GITHUB_CLIENT_SECRET="your_github_client_secret"
 
 # Log level
 RUST_LOG="info"
 ```
 
-**Security Note**: For production environments, `PASSWORD_SALT`, `JWT_SECRET`, and `POSTGRES_PASSWORD` must be protected and set to secure random values.
+**Security Note**: For production environments, `JWT_SECRET`, `POSTGRES_PASSWORD`, `GITHUB_CLIENT_ID`, and `GITHUB_CLIENT_SECRET` must be protected and set to secure values. Generate secure random strings for JWT_SECRET and obtain GitHub OAuth credentials from your GitHub application settings.
 
 ## Quick Start
 
@@ -138,9 +142,11 @@ This registry extends the OCI specification with a user management and authentic
 
 ### 1. User Registration
 
-To push images to private repositories, you must first create a user.
+#### Debug Mode Registration (Development Only)
 
-*   **Endpoint**: `POST /api/v1/users`
+For development purposes, you can create users directly via the debug API (only available when compiled with debug assertions):
+
+*   **Endpoint**: `POST /debug/users`
 *   **Request Body**:
     ```json
     {
@@ -150,12 +156,26 @@ To push images to private repositories, you must first create a user.
     ```
 *   **Response**: `201 Created` on success.
 
+#### OAuth Registration (GitHub)
+
+The registry supports OAuth authentication through GitHub. To use this feature, you must configure GitHub OAuth credentials in your environment variables.
+
+*   **Endpoint**: `GET /api/v1/auth/github/callback?code=<oauth_code>`
+*   **Purpose**: Handle GitHub OAuth callback and create/authenticate users
+*   **Prerequisites**: Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` environment variables
+*   **Response**: Returns a Personal Access Token (PAT)
+    ```json
+    {
+      "pat": "ey..."
+    }
+    ```
+
 ### 2. Authentication
 
 The registry uses JWT for authenticating API requests. To obtain a token, use the Docker-compatible `/auth/token` endpoint with HTTP Basic Authentication.
 
 *   **Endpoint**: `GET /auth/token`
-*   **Authentication**: HTTP Basic Auth (use the username and password you just registered).
+*   **Authentication**: HTTP Basic Auth (use the username and password you registered).
 *   **Example using curl**:
     ```bash
     curl -u "myuser:mypassword" "http://127.0.0.1:8968/auth/token"
@@ -166,26 +186,46 @@ The registry uses JWT for authenticating API requests. To obtain a token, use th
       "token": "ey...",
       "access_token": "ey...",
       "expires_in": 3600,
-      "issued_at": "2025-08-29T..."
+      "issued_at": "2025-09-17T..."
     }
     ```
 This token should be used as a Bearer token for subsequent requests to the OCI API (e.g., `docker login`).
 
-### 3. Repository Visibility
+### 3. Repository Management
 
-Repositories can be either `public` (readable by anyone) or `private` (readable only by authenticated users, writable by owner - *authorization logic may vary*).
+#### List Visible Repositories
 
-You can change a repository's visibility using a dedicated API endpoint.
+List all repositories visible to the authenticated user:
+
+*   **Endpoint**: `GET /api/v1/repo`
+*   **Authentication**: Bearer Token (JWT from `/auth/token` endpoint)
+*   **Response**: 
+    ```json
+    {
+      "data": [
+        {
+          "namespace": "myuser",
+          "name": "myrepo",
+          "is_public": true
+        }
+      ]
+    }
+    ```
+
+#### Change Repository Visibility
+
+Repositories can be either `public` (readable by anyone) or `private` (readable only by authenticated users, writable by owner).
 
 *   **Endpoint**: `PUT /api/v1/<namespace>/<repo>/visibility`
 *   **Authentication**: Bearer Token (using the JWT from the `/auth/token` endpoint).
 *   **Request Body**:
     ```json
     {
-        "visibility": "private" //  The `visibility` field can be either `"public"` or `"private"`.
+        "visibility": "private"
     }
     ```   
 *   **Response**: `200 OK` on success.
+*   **Note**: The `visibility` field can be either `"public"` or `"private"`.
 
 ## Command-Line Options
 

@@ -16,7 +16,10 @@ use tokio::time::timeout;
 
 #[derive(Debug, Parser)]
 pub struct LoginArgs {
-    url: String,
+    /// URL of the distribution server (optional if only one server is configured)
+    url: Option<String>,
+    /// Github OAuth app client id (required for first login to this server)
+    client_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
@@ -28,13 +31,19 @@ pub struct LoginConfig {
 pub struct LoginEntry {
     pub pat: String,
     pub url: String,
+    pub client_id: String,
 }
 
 impl LoginEntry {
-    pub fn new(pat: impl Into<String>, url: impl Into<String>) -> Self {
+    pub fn new(
+        pat: impl Into<String>,
+        url: impl Into<String>,
+        client_id: impl Into<String>,
+    ) -> Self {
         Self {
             pat: pat.into(),
             url: url.into(),
+            client_id: client_id.into(),
         }
     }
 }
@@ -85,11 +94,15 @@ impl LoginConfig {
         })
     }
 
-    pub fn login(pat: impl Into<String>, url: impl Into<String>) -> anyhow::Result<()> {
+    pub fn login(
+        pat: impl Into<String>,
+        url: impl Into<String>,
+        client_id: impl Into<String>,
+    ) -> anyhow::Result<()> {
         let mut config = Self::load()?;
 
         let url = url.into();
-        let entry = LoginEntry::new(pat, &url);
+        let entry = LoginEntry::new(pat, &url, client_id);
         if let Some((idx, _)) = config
             .entries
             .iter()
@@ -112,10 +125,27 @@ impl LoginConfig {
 }
 
 pub async fn login(args: LoginArgs) -> anyhow::Result<()> {
+    let config = LoginConfig::load()?;
+
+    let url = match args.url {
+        Some(ref url) => url,
+        None => &config.single_entry()?.url,
+    };
+
+    let client_id = match args.client_id {
+        Some(ref id) => id,
+        None => {
+            &config
+                .find_entry_by_url(url)
+                .with_context(|| "Please set the github oauth client id")?
+                .client_id
+        }
+    };
+
     let (tx, rx) = oneshot::channel();
     let state = AppState {
         oneshot: Mutex::new(Some(tx)),
-        url: args.url.clone(),
+        url: url.to_string(),
     };
 
     tokio::spawn(async move {
@@ -130,7 +160,9 @@ pub async fn login(args: LoginArgs) -> anyhow::Result<()> {
         Ok::<_, anyhow::Error>(())
     });
 
-    let auth_url = "https://github.com/login/oauth/authorize?client_id=Ov23liWfNNbVkVKkxOGr&scope=read:user&redirect_uri=http://localhost:8969/";
+    let auth_url = format!(
+        "https://github.com/login/oauth/authorize?client_id={client_id}&scope=read:user&redirect_uri=http://localhost:8969/",
+    );
     match opener::open(auth_url) {
         Ok(_) => {
             println!("Please complete authorization in the opened browser.");
@@ -140,7 +172,7 @@ pub async fn login(args: LoginArgs) -> anyhow::Result<()> {
 
     let rx = timeout(Duration::from_secs(60), rx);
     let res = rx.await???;
-    LoginConfig::login(&res.pat, args.url)?;
+    LoginConfig::login(&res.pat, url, client_id)?;
     println!("Logged in successfully!");
     Ok(())
 }

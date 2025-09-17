@@ -18,11 +18,11 @@ pub enum Commands {
     Exec(exec_main::ExecArgs),
     #[command(hide = true)]
     Cleanup(exec_main::CleanupArgs),
-    /// login to distribution server
+    /// Login to distribution server
     Login(login_main::LoginArgs),
-    /// logout from distribution server
+    /// Logout from distribution server
     Logout(logout_main::LogoutArgs),
-    /// list information
+    /// List and manage repositories
     Repo(repo_main::RepoArgs),
 }
 

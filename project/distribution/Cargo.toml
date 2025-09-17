@@ -10,7 +10,6 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/distribution"
 anyhow = "1.0.99"
 async-trait = "0.1.86"
 axum = "0.8.1"
-axum-macros = "0.5.0"
 axum-extra = { version = "0.10.1", features = ["typed-header"] }
 bcrypt = "0.17.1"
 clap = { version = "4.5.32", features = ["derive", "env"] }

@@ -12,7 +12,8 @@ use std::str::FromStr;
 
 #[derive(Parser, Debug)]
 pub struct RepoArgs {
-    /// Url of the distribution server.
+    /// URL of the distribution server (optional if only one entry exists)
+    #[arg(long)]
     url: Option<String>,
     #[clap(subcommand)]
     sub: RepoSubArgs,
