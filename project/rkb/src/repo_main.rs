@@ -103,7 +103,7 @@ async fn handle_repo_list(entry: &LoginEntry) -> anyhow::Result<()> {
         ]);
     });
 
-    println!("{}", table);
+    println!("{table}");
     Ok(())
 }
 
@@ -131,17 +131,13 @@ pub async fn client_with_authentication(pat: impl AsRef<str>) -> anyhow::Result<
         .build()?)
 }
 
-
 pub async fn send_and_handle_unexpected(builder: RequestBuilder) -> anyhow::Result<Response> {
     let res = builder.send().await?;
     match res.status() {
         StatusCode::OK => Ok(res),
-        StatusCode::INTERNAL_SERVER_ERROR => Err(anyhow::anyhow!("a internal error occurred")),
-        StatusCode::NOT_FOUND => Err(anyhow::anyhow!("request url {} not found", res.url())),
+        StatusCode::INTERNAL_SERVER_ERROR => anyhow::bail!("a internal error occurred"),
+        StatusCode::NOT_FOUND => anyhow::bail!("request url {} not found", res.url()),
         StatusCode::UNAUTHORIZED => anyhow::bail!("Please log in again."),
-        _ => Err(anyhow::anyhow!(
-            "request failed with error: {}",
-            res.text().await?
-        )),
+        _ => anyhow::bail!("request failed with error: {}", res.text().await?),
     }
 }

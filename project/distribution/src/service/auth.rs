@@ -86,7 +86,7 @@ pub async fn oauth_callback(
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
-pub struct RequestAccessTokenRes {
+pub struct RequestAccessTokenResponse {
     #[serde(rename = "access_token")]
     access_token: String,
     #[serde(rename = "token_type")]
@@ -99,7 +99,7 @@ async fn request_access_token(
     code: &str,
     client_id: &str,
     client_secret: &str,
-) -> Result<RequestAccessTokenRes, reqwest::Error> {
+) -> Result<RequestAccessTokenResponse, reqwest::Error> {
     let mut params = HashMap::new();
     params.insert("code", code);
     params.insert("client_id", client_id);
@@ -133,7 +133,7 @@ async fn request_user_info(access_token: &str) -> Result<UserInfo, reqwest::Erro
 }
 
 #[derive(Serialize)]
-pub struct AuthRes {
+pub struct AuthResponse {
     token: String,
     #[serde(rename = "access_token")]
     access_token: String,
@@ -172,7 +172,7 @@ pub(crate) async fn auth(
             "anonymous",
         ),
     };
-    Ok(Json(AuthRes {
+    Ok(Json(AuthResponse {
         token: token.clone(),
         access_token: token,
         expires_in: state.config.jwt_lifetime_secs,

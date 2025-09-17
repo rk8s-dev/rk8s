@@ -12,7 +12,7 @@ use serde_json::json;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ChangeVisReq {
+pub struct ChangeVisibilityRequest {
     visibility: String,
 }
 
@@ -20,7 +20,7 @@ pub async fn change_visibility(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
     Extension(identifier): Extension<RepoIdentifier>,
-    Json(body): Json<ChangeVisReq>,
+    Json(body): Json<ChangeVisibilityRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if !name.ends_with("visibility") {
         return Err(

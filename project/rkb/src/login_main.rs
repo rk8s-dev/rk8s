@@ -4,16 +4,15 @@ use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use clap::Parser;
-use directories::ProjectDirs;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use tokio::fs;
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Sender;
+use tokio::time::timeout;
 
 #[derive(Debug, Parser)]
 pub struct LoginArgs {
@@ -25,7 +24,7 @@ pub struct LoginConfig {
     pub entries: Vec<LoginEntry>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
 pub struct LoginEntry {
     pub pat: String,
     pub url: String,
@@ -71,7 +70,7 @@ impl LoginConfig {
             format!(
                 "failed to load config file `{}.{}`",
                 Self::APP_NAME,
-                Self::CONFIG_NAME
+                Self::CONFIG_NAME,
             )
         })
     }
@@ -81,7 +80,7 @@ impl LoginConfig {
             format!(
                 "failed to store config file `{}.{}`",
                 Self::APP_NAME,
-                Self::CONFIG_NAME
+                Self::CONFIG_NAME,
             )
         })
     }
@@ -95,7 +94,7 @@ impl LoginConfig {
             .entries
             .iter()
             .enumerate()
-            .find(|(idx, entry)| entry.url == url)
+            .find(|(_, entry)| entry.url == url)
         {
             config.entries.remove(idx);
         }
@@ -134,12 +133,13 @@ pub async fn login(args: LoginArgs) -> anyhow::Result<()> {
     let auth_url = "https://github.com/login/oauth/authorize?client_id=Ov23liWfNNbVkVKkxOGr&scope=read:user&redirect_uri=http://localhost:8969/";
     match opener::open(auth_url) {
         Ok(_) => {
-            println!("Please complete authorization in the opened browser");
+            println!("Please complete authorization in the opened browser.");
         }
         x @ Err(_) => return x.with_context(|| "Could not open url"),
     }
 
-    let res = rx.await??;
+    let rx = timeout(Duration::from_secs(60), rx);
+    let res = rx.await???;
     LoginConfig::login(&res.pat, args.url)?;
     println!("Logged in successfully!");
     Ok(())
