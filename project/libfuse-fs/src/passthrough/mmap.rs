@@ -109,8 +109,7 @@ pub async fn create_mmap(
 
     let flags = unsafe { fcntl(file.as_raw_fd(), libc::F_GETFL) };
     if flags == -1 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(std::io::Error::other(
             "Failed to get file access mode with fcntl",
         ));
     }
