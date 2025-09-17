@@ -303,7 +303,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn do_open(&self, inode: Inode, flags: u32) -> io::Result<(Option<Handle>, OpenOptions)> {
         let file = self.open_inode(inode, flags as i32).await?;
 
-        self.get_or_insert_mmap(&file, flags).await;
         let data = HandleData::new(inode, file, flags);
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
         self.handle_map.insert(handle, data).await;
@@ -380,7 +379,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             {
                 let key = FileUniqueKey(st.st.st_ino, btime);
                 self.handle_cache.invalidate(&key).await;
-                self.sliding_mmap_pool.invalidate(&key).await;
             }
 
             Ok(())
@@ -874,31 +872,19 @@ impl Filesystem for PassthroughFs {
         let _guard = data.lock.lock().await;
         let raw_fd = data.borrow_fd().as_raw_fd();
 
-        let mmap = self
-            .get_or_insert_mmap(&raw_fd, libc::O_RDONLY as u32)
-            .await;
-
         let mut buf = vec![0; size as usize];
-        match mmap {
-            Some(m) => {
-                // Check if we need to slide the window first
-                {
-                    let read_guard = m.read().await;
-                    if read_guard.check_slide(offset, size as usize) {
-                        // Upgrade to write lock for sliding
-                        drop(read_guard);
-                        let mut write_guard = m.write().await;
-                        write_guard.slide_window(offset, size as usize)?;
-                        write_guard.read(offset, size as usize, &mut buf)?;
-                    } else {
-                        read_guard.read(offset, size as usize, &mut buf)?;
-                    }
+        let file = &data.file;
+
+        match self
+            .read_from_mmap(inode, offset, size as u64, file, buf.as_mut_slice())
+            .await
+        {
+            Ok(bytes_read) => {
+                if bytes_read < size as usize {
+                    buf.truncate(bytes_read); // Adjust the buffer size for EOF
                 }
-                Ok(ReplyData {
-                    data: Bytes::from(buf),
-                })
             }
-            None => {
+            Err(_) => {
                 let ret = unsafe {
                     pread(
                         raw_fd as c_int,
@@ -908,36 +894,20 @@ impl Filesystem for PassthroughFs {
                     )
                 };
                 if ret >= 0 {
-                    if ret < size as isize {
-                        buf.truncate(ret as usize); // Adjust the buffer size
+                    let bytes_read = ret as usize;
+                    if bytes_read < size as usize {
+                        buf.truncate(bytes_read); // Adjust the buffer size
                     }
                 } else {
                     error!("read error: {ret}");
                     return Err(Errno::from(ret as i32));
                 }
-                Ok(ReplyData {
-                    data: Bytes::from(buf),
-                })
             }
         }
 
-        // let mut buf = vec![0; size as usize];
-        // f.seek(SeekFrom::Start(offset))?;
-        // match f.read(&mut buf) {
-        //     Ok(bytes_read) => {
-        //         if bytes_read < size as usize {
-        //             buf.truncate(bytes_read); // Adjust the buffer size
-        //         }
-        //     }
-        //     Err(err) => {
-        //         error!("read error: {err}");
-        //         return Err(err.into());
-
-        //     }
-        // };
-        // Ok(ReplyData {
-        //     data: Bytes::from(buf),
-        // })
+        Ok(ReplyData {
+            data: Bytes::from(buf),
+        })
     }
 
     /// write data. Write should return exactly the number of bytes requested except on error. An
@@ -959,27 +929,18 @@ impl Filesystem for PassthroughFs {
         flags: u32,
     ) -> Result<ReplyWrite> {
         let handle_data = self.get_data(fh, inode, libc::O_RDWR).await?;
+        let file = &handle_data.file;
         let raw_fd = {
             let _guard = handle_data.lock.lock().await;
             handle_data.borrow_fd().as_raw_fd()
         };
-        let size = data.len();
 
-        self.check_fd_flags(&handle_data, raw_fd, flags).await?;
-        let mmap = self.get_or_insert_mmap(&raw_fd, libc::O_RDWR as u32).await;
+        let ret = match self.write_to_mmap(inode, offset, data, file).await {
+            Ok(ret) => ret as isize,
+            Err(_) => {
+                let size = data.len();
 
-        match mmap {
-            Some(m) => {
-                let mut guard = m.write().await;
-                if guard.check_slide(offset, size) {
-                    guard.slide_window(offset, size)?;
-                }
-                let ret = guard.write(offset, data)?;
-                Ok(ReplyWrite {
-                    written: ret as u32,
-                })
-            }
-            None => {
+                self.check_fd_flags(&handle_data, raw_fd, flags).await?;
                 let ret = unsafe {
                     libc::pwrite(
                         raw_fd as c_int,
@@ -989,15 +950,17 @@ impl Filesystem for PassthroughFs {
                     )
                 };
                 if ret >= 0 {
-                    Ok(ReplyWrite {
-                        written: ret as u32,
-                    })
+                    ret
                 } else {
-                    error!("read error: {ret}");
-                    Err(Errno::from(ret as i32))
+                    error!("write error: {ret}");
+                    return Err(Errno::from(ret as i32));
                 }
             }
-        }
+        };
+
+        Ok(ReplyWrite {
+            written: ret as u32,
+        })
     }
 
     /// get filesystem statistics.
