@@ -1,4 +1,6 @@
 use crate::api::xlinestore::XlineStore;
+use crate::commands::create::watch_create;
+use crate::commands::delete::watch_delete;
 use crate::commands::{create, delete};
 use crate::network::{self, backend::route, lease::LeaseWatchResult, manager::LocalManager};
 use anyhow::{Context, Result};
@@ -163,45 +165,42 @@ async fn watch_pods(
 
     // Start watching for changes
     let (mut watcher, mut stream) = xline_store.watch_pods(rev + 1).await?;
+    info!("[watch_pods] start watching pods from revision {}", rev + 1);
+
     while let Some(resp) = stream.next().await {
         match resp {
             Ok(resp) => {
+                // info!("[watch_pods] got response: {:?}", resp);
+
                 for event in resp.events() {
                     match event.event_type() {
                         etcd_client::EventType::Put => {
                             if let Some(kv) = event.kv() {
-                                let pod_yaml = String::from_utf8_lossy(kv.value()).to_string();
-                                if let Ok(pod_task) = serde_yaml::from_str::<PodTask>(&pod_yaml)
-                                    && pod_task.spec.node_name.as_deref() == Some(&node_id)
-                                {
-                                    let msg = RksMessage::CreatePod(Box::new(pod_task));
-                                    let data = bincode::serialize(&msg)?;
-                                    if let Ok(mut stream) = conn.open_uni().await {
-                                        stream.write_all(&data).await?;
-                                        stream.finish()?;
-                                        info!("[watch_pods] sent new pod to worker");
-                                    }
-                                }
+                                watch_create(
+                                    String::from_utf8_lossy(kv.value()).to_string(),
+                                    conn,
+                                    &node_id,
+                                )
+                                .await?;
                             }
                         }
                         etcd_client::EventType::Delete => {
                             if let Some(kv) = event.prev_kv() {
-                                let pod_name = String::from_utf8_lossy(kv.key())
-                                    .replace("/registry/pods/", "");
-                                let msg = RksMessage::DeletePod(pod_name.clone());
-                                let data = bincode::serialize(&msg)?;
-                                if let Ok(mut stream) = conn.open_uni().await {
-                                    stream.write_all(&data).await?;
-                                    stream.finish()?;
-                                    info!("[watch_pods] sent delete pod to worker: {}", pod_name);
-                                }
+                                watch_delete(
+                                    String::from_utf8_lossy(kv.key())
+                                        .replace("/registry/pods/", ""),
+                                    String::from_utf8_lossy(kv.value()).to_string(),
+                                    conn,
+                                    &node_id,
+                                )
+                                .await?;
                             }
                         }
                     }
                 }
             }
             Err(e) => {
-                error!("Watch error: {}", e);
+                error!("[watch_pods] Watch error: {}", e);
                 break;
             }
         }
@@ -223,11 +222,11 @@ async fn handle_connection(
     let mut is_worker = false;
     let mut node_id = None;
     let node_registry_clone = node_registry.clone();
-
-    // Initial handshake
+    // initial handshake to classify connection (RegisterNode or UserRequest)
     if let Ok(mut recv) = conn.accept_uni().await {
         match recv.read(&mut buf).await {
             Ok(Some(n)) => {
+                info!("[server] received raw data: {:?}", &buf[..n]);
                 if let Ok(msg) = bincode::deserialize::<RksMessage>(&buf[..n]) {
                     match msg {
                         RksMessage::RegisterNode(node) => {
@@ -238,19 +237,18 @@ async fn handle_connection(
                             }
                             is_worker = true;
                             node_id = Some(id.clone());
-
                             let ip = conn.remote_address().ip().to_string();
                             let node_yaml = serde_yaml::to_string(&*node)?;
                             xline_store.insert_node_yaml(&id, &node_yaml).await?;
                             info!("[server] registered worker node: {id}, ip: {ip}");
 
                             let config = local_manager.get_network_config().await?;
+                            info!("[server] get the network config : {config:?}");
+
                             let (public_ip, public_ipv6) = match conn.remote_address().ip() {
                                 IpAddr::V4(v4) => (v4, None),
                                 IpAddr::V6(v6) => (Ipv4Addr::new(0, 0, 0, 0), Some(v6)),
                             };
-
-                            // Acquire lease for this worker
                             let lease_attrs = LeaseAttrs {
                                 public_ip,
                                 public_ipv6,
@@ -259,9 +257,12 @@ async fn handle_connection(
                                 ..Default::default()
                             };
                             let lease = local_manager.acquire_lease(&lease_attrs).await?;
+                            info!("[server] racquire worker node lease : {lease:?}");
+                            let subnet = lease.subnet;
+                            let ipv6_subnet = lease.ipv6_subnet;
 
-                            // Create worker session
                             let (msg_tx, mut msg_rx) = mpsc::channel::<RksMessage>(32);
+
                             let conn_clone = conn.clone();
                             tokio::spawn(async move {
                                 while let Some(msg) = msg_rx.recv().await {
@@ -273,7 +274,6 @@ async fn handle_connection(
                                     }
                                 }
                             });
-
                             let cancel_notify = Arc::new(Notify::new());
                             let my_lease = Arc::new(Mutex::new(lease));
                             let session = Arc::new(WorkerSession {
@@ -283,7 +283,6 @@ async fn handle_connection(
                             });
                             node_registry.register(id.clone(), session.clone()).await;
 
-                            // Send Ack
                             let response = RksMessage::Ack;
                             let data = bincode::serialize(&response)?;
                             if let Ok(mut stream) = conn.open_uni().await {
@@ -291,56 +290,53 @@ async fn handle_connection(
                                 stream.finish()?;
                             }
 
-                            // Send network config
                             let node_net_config = build_node_network_config(
                                 id.clone(),
                                 &config,
                                 false,
-                                Some(my_lease.lock().await.subnet),
-                                my_lease.lock().await.ipv6_subnet,
+                                Some(subnet),
+                                ipv6_subnet,
                             )?;
                             let msg = RksMessage::SetNetwork(Box::new(node_net_config));
                             if let Some(worker) = node_registry_clone.get(&id).await {
-                                let _ = worker.tx.try_send(msg);
+                                if let Err(e) = worker.tx.try_send(msg) {
+                                    error!("Failed to enqueue message for {id}: {e:?}");
+                                }
+                            } else {
+                                error!("No active worker for {id}");
                             }
                         }
                         RksMessage::UserRequest(_) => {
                             is_worker = false;
-                            let response = RksMessage::Ack;
-                            let data = bincode::serialize(&response)?;
-                            if let Ok(mut stream) = conn.open_uni().await {
-                                stream.write_all(&data).await?;
-                                stream.finish()?;
-                            }
+                            info!("[server] user connection established");
                         }
-                        _ => return Ok(()),
+                        _ => {
+                            error!("[server] invalid initial message, closing connection");
+                            return Ok(());
+                        }
                     }
+                } else {
+                    error!("[server] deserialize failed: {:?}", &buf[..n]);
                 }
             }
-            _ => return Ok(()),
+            Ok(None) => error!("[server] stream closed"),
+            Err(e) => error!("[server] read error: {e:?}"),
         }
     }
 
-    // Spawn pod watcher for workers
+    // start watching pods if this is a registered worker node
     if is_worker && node_id.is_some() {
         let xline_store_clone = xline_store.clone();
         let conn_clone = conn.clone();
         let node_id_clone = node_id.clone().unwrap();
         let node_registry_clone = node_registry.clone();
         let local_manager_clone = local_manager.clone();
-
-        let node_id_for_watch = node_id_clone.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                watch_pods(&xline_store_clone, &conn_clone, Some(node_id_for_watch)).await
-            {
-                error!("Watch pods error: {}", e);
-            }
+            let _ = watch_pods(&xline_store_clone, &conn_clone, node_id).await;
         });
 
-        let node_id_for_lease = node_id_clone.clone();
         tokio::spawn(async move {
-            if let Some(worker_session) = node_registry_clone.get(&node_id_for_lease).await {
+            if let Some(worker_session) = node_registry_clone.get(&node_id_clone).await {
                 let my_lease_clone = worker_session.lease.clone();
                 let cancel_notify_clone = worker_session.cancel_notify.clone();
                 if let Err(e) = local_manager_clone
@@ -349,26 +345,27 @@ async fn handle_connection(
                 {
                     error!("[server] complete_lease error for node={node_id_clone}: {e:?}");
                 }
+            } else {
+                error!("[server] no active worker session for node={node_id_clone}");
             }
         });
     }
 
-    // Main read loop
+    // Main loop: accept uni-directional streams for ongoing communication
     loop {
         match conn.accept_uni().await {
-            Ok(mut recv) => {
+            Ok(mut recv_stream) => {
+                info!("[server] stream accepted: {}", recv_stream.id());
+                let xline_store = xline_store.clone();
+
                 let mut buf = vec![0u8; 4096];
-                match recv.read(&mut buf).await {
+                match recv_stream.read(&mut buf).await {
                     Ok(Some(n)) => {
                         if let Ok(msg) = bincode::deserialize::<RksMessage>(&buf[..n]) {
                             if is_worker {
-                                if let Err(e) = dispatch_worker(msg.clone(), &conn).await {
-                                    error!("Error dispatching worker message: {}", e);
-                                }
-                            } else if let Err(e) =
-                                dispatch_user(msg.clone(), &xline_store, &conn).await
-                            {
-                                error!("Error dispatching user message: {}", e);
+                                let _ = dispatch_worker(msg.clone(), &conn).await;
+                            } else {
+                                let _ = dispatch_user(msg.clone(), &xline_store, &conn).await;
                             }
                         }
                     }
@@ -377,19 +374,20 @@ async fn handle_connection(
                 }
             }
             Err(e) => {
-                error!("[server] connection error: {e}");
+                info!("[server] connection error: {e}");
                 break;
             }
         }
     }
+
     Ok(())
 }
 
 /// Dispatch worker-originated messages
 async fn dispatch_worker(msg: RksMessage, conn: &Connection) -> Result<()> {
     match msg {
-        RksMessage::Heartbeat(_node_id) => {
-            info!("[worker dispatch] heartbeat received");
+        RksMessage::Heartbeat(node_id) => {
+            info!("[worker dispatch] receive heartbeat from node: {node_id}");
             let response = RksMessage::Ack;
             let data = bincode::serialize(&response)?;
             if let Ok(mut stream) = conn.open_uni().await {
@@ -420,7 +418,7 @@ pub async fn dispatch_user(
 
         RksMessage::ListPod => {
             let pods = xline_store.list_pods().await?;
-            println!("[user dispatch] list current pod: {pods:?}");
+            info!("[user dispatch] list current pod: {pods:?}");
             let res = bincode::serialize(&RksMessage::ListPodRes(pods))?;
             if let Ok(mut stream) = conn.open_uni().await {
                 stream.write_all(&res).await?;

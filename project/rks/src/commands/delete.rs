@@ -1,36 +1,31 @@
+#![allow(unused)]
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
+use clap::builder::Str;
 use common::{PodTask, RksMessage};
+use log::info;
 use quinn::Connection;
 use std::sync::Arc;
-
-#[allow(unused)]
 pub async fn watch_delete(
     pod_name: String,
+    pod_yaml: String,
     conn: &Connection,
-    xline_store: &Arc<XlineStore>,
     node_id: &str,
 ) -> Result<()> {
-    let msg = RksMessage::DeletePod(pod_name.clone());
+    if let Ok(pod_task) = serde_yaml::from_str::<PodTask>(&pod_yaml)
+        && pod_task.spec.node_name.as_deref() == Some(node_id)
+    {
+        info!(
+            "[watch_pods] DELETE pod_name={} for node={}",
+            pod_name, node_id
+        );
 
-    if let Ok(pods) = xline_store.list_pods().await {
-        for p in pods {
-            if let Ok(Some(pod_yaml)) = xline_store.get_pod_yaml(&p).await {
-                let pod_task: PodTask = serde_yaml::from_str(&pod_yaml)
-                    .map_err(|e| anyhow::anyhow!("Failed to parse pod_yaml: {}", e))?;
-                if pod_task.spec.node_name.as_deref() == Some(node_id)
-                    && pod_task.metadata.name == pod_name
-                {
-                    let data = bincode::serialize(&msg)?;
-                    if let Ok(mut stream) = conn.open_uni().await {
-                        stream.write_all(&data).await?;
-                        stream.finish()?;
-                    }
-                    let _ = xline_store.delete_pod(&pod_name).await;
-                    println!("[user dispatch] deleted pod: {pod_name}");
-                    break;
-                }
-            }
+        let msg = RksMessage::DeletePod(pod_name.clone());
+        let data = bincode::serialize(&msg)?;
+        if let Ok(mut stream) = conn.open_uni().await {
+            stream.write_all(&data).await?;
+            stream.finish()?;
+            info!("[watch_pods] sent delete pod to worker {}", node_id);
         }
     }
     Ok(())

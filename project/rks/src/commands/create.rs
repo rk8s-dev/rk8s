@@ -1,22 +1,27 @@
+#![allow(unused)]
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
+use clap::builder::Str;
 use common::{PodTask, RksMessage};
+use log::info;
 use quinn::Connection;
 use std::sync::Arc;
 
 /// Send a pod creation message to a specific worker node
-#[allow(unused)]
-pub async fn watch_create(pod_task: &PodTask, conn: &Connection, node_id: &str) -> Result<()> {
-    if pod_task.spec.node_name.as_deref() == Some(node_id) {
-        let msg = RksMessage::CreatePod(Box::new(pod_task.clone()));
+pub async fn watch_create(pod_yaml: String, conn: &Connection, node_id: &str) -> Result<()> {
+    if let Ok(pod_task) = serde_yaml::from_str::<PodTask>(&pod_yaml)
+        && pod_task.spec.node_name.as_deref() == Some(node_id)
+    {
+        info!(
+            "[watch_pods] PUT matched node={} pod_name={:?}",
+            node_id, pod_task.metadata.name
+        );
+
+        let msg = RksMessage::CreatePod(Box::new(pod_task));
         let data = bincode::serialize(&msg)?;
         if let Ok(mut stream) = conn.open_uni().await {
             stream.write_all(&data).await?;
             stream.finish()?;
-            println!(
-                "[watch_create] sent CreatePod for pod: {} to node: {}",
-                pod_task.metadata.name, node_id
-            );
         }
     }
     Ok(())
