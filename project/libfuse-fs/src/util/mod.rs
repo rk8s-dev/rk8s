@@ -1,3 +1,5 @@
+pub mod open_options;
+
 use std::{fmt::Display, path::PathBuf};
 
 use libc::stat64;

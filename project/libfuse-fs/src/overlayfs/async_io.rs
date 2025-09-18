@@ -1,6 +1,10 @@
-use crate::overlayfs::AtomicU64;
+use super::Inode;
+use super::OverlayFs;
+use super::utils;
 use crate::overlayfs::HandleData;
 use crate::overlayfs::RealHandle;
+use crate::overlayfs::{AtomicU64, CachePolicy};
+use crate::util::open_options::OpenOptions;
 use futures::stream::Iter;
 use rfuse3::raw::prelude::*;
 use rfuse3::*;
@@ -12,9 +16,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::vec::IntoIter;
 
-use super::Inode;
-use super::OverlayFs;
-use super::utils;
 impl Filesystem for OverlayFs {
     /// initialize filesystem. Called before any other filesystem method.
     async fn init(&self, _req: Request) -> Result<ReplyInit> {
@@ -835,12 +836,20 @@ impl Filesystem for OverlayFs {
         let entry = self.do_lookup(req, parent, name.to_str().unwrap()).await?;
         let fh = final_handle
             .ok_or_else(|| std::io::Error::new(ErrorKind::NotFound, "Handle not found"))?;
+
+        let mut opts = OpenOptions::empty();
+        match self.config.cache_policy {
+            CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
+            CachePolicy::Auto => opts |= OpenOptions::DIRECT_IO,
+            CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
+        }
+
         Ok(ReplyCreated {
             ttl: entry.ttl,
             attr: entry.attr,
             generation: entry.generation,
             fh,
-            flags: flags.try_into().unwrap(),
+            flags: opts.bits(),
         })
     }
 

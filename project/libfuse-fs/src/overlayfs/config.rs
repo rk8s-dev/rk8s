@@ -16,6 +16,7 @@ pub struct Config {
     pub killpriv_v2: bool,
     pub no_readdir: bool,
     pub perfile_dax: bool,
+    pub cache_policy: CachePolicy,
 }
 
 impl Clone for CachePolicy {
