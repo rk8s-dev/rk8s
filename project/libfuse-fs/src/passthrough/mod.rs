@@ -973,7 +973,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         match ret {
             Ok(v) => Some(v.value().clone()),
             Err(e) => {
-                error!("Failed to create mmap: {}", e);
+                error!("Failed to create mmap: {e}");
                 None
             }
         }

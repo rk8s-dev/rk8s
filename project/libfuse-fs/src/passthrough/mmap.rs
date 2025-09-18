@@ -78,7 +78,7 @@ pub async fn create_mmap(
     if offset >= file_size {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("Offset {} exceeds file size {}", offset, file_size),
+            format!("Offset {offset} exceeds file size {file_size}"),
         ));
     }
 
@@ -158,7 +158,7 @@ pub async fn create_mmap(
             };
             Err(std::io::Error::new(
                 error_kind,
-                format!("Failed to create mmap: {}", e),
+                format!("Failed to create mmap: {e}"),
             ))
         }
     }

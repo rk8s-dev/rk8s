@@ -1,4 +1,4 @@
-use bitflags::bitflags;
+use crate::util::open_options::OpenOptions;
 use bytes::Bytes;
 use futures::stream;
 use futures_util::stream::Iter;
@@ -30,38 +30,6 @@ use super::{
     Handle, HandleData, PassthroughFs, config::CachePolicy, os_compat::LinuxDirent64, util::*,
 };
 use std::vec::IntoIter;
-// Flags use by the OPEN request/reply.
-/// Bypass page cache for this open file.
-const FOPEN_DIRECT_IO: u32 = 1;
-
-/// Don't invalidate the data cache on open.
-const FOPEN_KEEP_CACHE: u32 = 2;
-
-/// The file is not seekable.
-const FOPEN_NONSEEKABLE: u32 = 4;
-
-/// allow caching this directory
-const FOPEN_CACHE_DIR: u32 = 8;
-
-/// the file is stream-like (no file position at all)
-const FOPEN_STREAM: u32 = 16;
-
-bitflags! {
-    /// Options controlling the behavior of files opened by the server in response
-    /// to an open or create request.
-    pub struct OpenOptions: u32 {
-        /// Bypass page cache for this open file.
-        const DIRECT_IO = FOPEN_DIRECT_IO;
-        /// Don't invalidate the data cache on open.
-        const KEEP_CACHE = FOPEN_KEEP_CACHE;
-        /// The file is not seekable.
-        const NONSEEKABLE = FOPEN_NONSEEKABLE;
-        /// allow caching this directory
-        const CACHE_DIR = FOPEN_CACHE_DIR;
-        /// the file is stream-like (no file position at all)
-        const STREAM = FOPEN_STREAM;
-    }
-}
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn open_inode(&self, inode: Inode, flags: i32) -> io::Result<File> {
