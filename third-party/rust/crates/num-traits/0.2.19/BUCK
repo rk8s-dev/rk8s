@@ -27,6 +27,7 @@ cargo.rust_library(
         "OUT_DIR": "$(location :num-traits-0.2.19-build-script-run[out_dir])",
     },
     features = [
+        "default",
         "i128",
         "libm",
         "std",
@@ -59,6 +60,7 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "default",
         "i128",
         "libm",
         "std",
@@ -72,6 +74,7 @@ buildscript_run(
     package_name = "num-traits",
     buildscript_rule = ":num-traits-0.2.19-build-script-build",
     features = [
+        "default",
         "i128",
         "libm",
         "std",
