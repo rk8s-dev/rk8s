@@ -1,4 +1,5 @@
 use crate::error::{AppError, MapToAppError, OciError};
+use crate::utils::repo_identifier::identifier_from_full_name;
 use crate::utils::{
     state::AppState,
     validation::{is_valid_digest, is_valid_name, is_valid_reference},
@@ -204,7 +205,8 @@ pub async fn put_manifest_handler(
             .await?;
     }
 
-    state.repo_storage.ensure_repo_exists(&name).await?;
+    let identifier = identifier_from_full_name(&name);
+    state.repo_storage.ensure_repo_exists(&identifier).await?;
     let location = format!("/v2/{name}/manifests/{calculated_digest_str}");
     Ok((
         StatusCode::CREATED,

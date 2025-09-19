@@ -1,0 +1,41 @@
+on:
+  push:
+  pull_request:
+      types: [opened, reopened]
+  schedule:
+    - cron: '00 15 * * 1'
+
+name: Audit
+
+jobs:
+  check:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Setup Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-audit
+
+      - name: Install Cargo Audit
+        run: cargo install cargo-audit --locked
+        shell: bash
+
+      - name: Run Audit
+        run: cargo audit

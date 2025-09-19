@@ -31,3 +31,5 @@ tower-http = { version = "0.6.6", features = ["trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "time", "fmt"] }
 uuid = { version = "1.13.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
+reqwest = { version = "0.12.23", features = ["json"] }
+rand = "0.9.2"

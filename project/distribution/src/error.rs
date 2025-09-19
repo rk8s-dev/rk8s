@@ -194,6 +194,9 @@ pub enum InternalError {
     #[error("Axum error: {0}")]
     Axum(#[from] axum::Error),
 
+    #[error("Reqwest error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+
     #[error("Other error: {0}")]
     Others(String),
 }

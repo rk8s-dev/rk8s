@@ -43,6 +43,9 @@ cargo.rust_library(
         "Win32_System_LibraryLoader",
         "Win32_System_Threading",
         "Win32_System_WindowsProgramming",
+        "Win32_UI",
+        "Win32_UI_Shell",
+        "Win32_UI_WindowsAndMessaging",
         "default",
     ],
     named_deps = {

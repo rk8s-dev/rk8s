@@ -9,19 +9,19 @@ pub struct Claims {
     pub exp: i64,
 }
 
-pub fn encode(secret: &str, claims: &Claims) -> String {
+pub fn encode(secret: impl AsRef<str>, claims: &Claims) -> String {
     jsonwebtoken::encode(
         &Header::default(),
         claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
+        &EncodingKey::from_secret(secret.as_ref().as_bytes()),
     )
     .unwrap()
 }
 
-pub fn decode(secret: &str, token: &str) -> Result<Claims, AppError> {
+pub fn decode(secret: impl AsRef<str>, token: impl AsRef<str>) -> Result<Claims, AppError> {
     Ok(jsonwebtoken::decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
+        token.as_ref(),
+        &DecodingKey::from_secret(secret.as_ref().as_bytes()),
         &Validation::default(),
     )
     .map_err(|e| OciError::Unauthorized {
@@ -31,14 +31,10 @@ pub fn decode(secret: &str, token: &str) -> Result<Claims, AppError> {
     .claims)
 }
 
-pub fn gen_token(secret: &str, name: &str) -> String {
-    let lifetime_seconds = std::env::var("JWT_LIFETIME_SECONDS")
-        .unwrap_or("3600".into())
-        .parse::<i64>()
-        .unwrap();
+pub fn gen_token(lifetime_secs: i64, secret: impl AsRef<str>, id: impl AsRef<str>) -> String {
     let claims = Claims {
-        sub: name.to_string(),
-        exp: (Utc::now() + Duration::seconds(lifetime_seconds)).timestamp(),
+        sub: id.as_ref().to_string(),
+        exp: (Utc::now() + Duration::seconds(lifetime_secs)).timestamp(),
     };
     encode(secret, &claims)
 }

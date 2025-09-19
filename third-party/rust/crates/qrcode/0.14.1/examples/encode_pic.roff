@@ -1,0 +1,16 @@
+.\" To convert this file to pdf use:
+.\" groff -Tpdf -P-p14.5c,14.5c -p encode_pic.roff > encode_pic.pdf
+.
+.po -1i
+.vs 0
+.
+.\" For most flexibility include the QR-Code using copy
+.\" and define your preferred picture scale, e.g.:
+.PS
+# To make the QR-Code smaller make scale a larger number
+# To make the QR-Code bigger make scale a smaller number
+scale=2.54*2
+# To generate encode_pic.pic run: cargo run --example encode_pic > encode_pic.pic
+copy "encode_pic.pic"
+.PE
+.ex

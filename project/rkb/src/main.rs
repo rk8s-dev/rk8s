@@ -3,10 +3,14 @@ pub mod compressor;
 pub mod config;
 pub mod exec_main;
 pub mod image_build;
+pub mod login_main;
+mod logout_main;
 pub mod mount_main;
 pub mod oci_spec;
 pub mod overlayfs;
 pub mod registry;
+mod repo_main;
+mod rt;
 pub mod run;
 
 use crate::args::{Cli, Commands};
@@ -40,6 +44,24 @@ fn main() -> Result<()> {
         Commands::Cleanup(cleanup_args) => {
             if let Err(e) = exec_main::cleanup(cleanup_args) {
                 tracing::debug!("Cleanup failed: {e:?}");
+                return Err(e);
+            }
+        }
+        Commands::Login(login_args) => {
+            if let Err(e) = login_main::login(login_args) {
+                tracing::debug!("Login failed: {e:?}");
+                return Err(e);
+            }
+        }
+        Commands::Logout(logout_args) => {
+            if let Err(e) = logout_main::logout(logout_args) {
+                tracing::debug!("Logout failed: {e:?}");
+                return Err(e);
+            }
+        }
+        Commands::Repo(repo_args) => {
+            if let Err(e) = repo_main::main(repo_args) {
+                tracing::debug!("list failed: {e:?}");
                 return Err(e);
             }
         }

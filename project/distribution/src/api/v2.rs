@@ -1,4 +1,4 @@
-use crate::api::middleware::{authenticate, authorize};
+use crate::api::middleware::{authorize_repository_access, populate_oci_claims};
 use crate::api::{AuthHeader, extract_claims};
 use crate::error::AppError;
 use crate::service::blob::{
@@ -22,8 +22,11 @@ pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(probe))
         .route("/{*tail}", any(dispatch_handler))
-        .layer(middleware::from_fn_with_state(state.clone(), authorize))
-        .layer(middleware::from_fn_with_state(state, authenticate))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            authorize_repository_access,
+        ))
+        .layer(middleware::from_fn_with_state(state, populate_oci_claims))
 }
 
 pub async fn probe(
@@ -33,7 +36,6 @@ pub async fn probe(
     match extract_claims(
         auth,
         &state.config.jwt_secret,
-        &state.config.password_salt,
         state.user_storage.as_ref(),
         &state.config.registry_url,
     )

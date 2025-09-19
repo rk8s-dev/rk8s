@@ -1,6 +1,6 @@
 # rkb
 
-An implementation of `docker build` in Rust.
+A container image builder and registry management tool implemented in Rust, similar to `docker build` functionality with additional support for interacting with distribution servers.
 
 ## Architecture
 
@@ -16,6 +16,9 @@ flowchart TD
     B -->|mount| CmdMount[Commands::Mount]
     B -->|exec| CmdExec[Commands::Exec]
     B -->|cleanup| CmdCleanup[Commands::Cleanup]
+    B -->|login| CmdLogin[Commands::Login]
+    B -->|logout| CmdLogout[Commands::Logout]
+    B -->|repo| CmdRepo[Commands::Repo]
   end
 
   subgraph Build
@@ -38,9 +41,21 @@ flowchart TD
     CmdCleanup -->|ns switch & unmount| ExecProcess
   end
 
+  subgraph Registry Management
+    CmdLogin --> LoginMain[login_main::login]
+    LoginMain --> OAuth[GitHub OAuth Flow]
+    LoginMain --> Config[LoginConfig::store]
+    CmdLogout --> LogoutMain[logout_main::logout]
+    LogoutMain --> Config
+    CmdRepo --> RepoMain[repo_main::main]
+    RepoMain --> AuthClient[client_with_authentication]
+    RepoMain --> RepoAPI[Distribution Server API]
+  end
+
   StageExec --> ExecTask
   MountCfg --> OverlayFS
   Registry -->| lower_dir| MountCfg
+  Config --> AuthClient
 ```
 
 ## Quick Start
@@ -86,7 +101,7 @@ mkdir -p output
 Start rkb (root privilege is required).
 
 ```sh
-sudo ../target/debug/rkb -f example-Dockerfile -t image1 -o output
+sudo ../target/debug/rkb build -f example-Dockerfile -t image1 -o output
 ```
 
 ### Example result
@@ -199,26 +214,149 @@ Then, convert `image1` into an OCI bundle.
 sudo umoci unpack --image image1:latest bundle
 ```
 
+## Registry Management
+
+### Login to Distribution Server
+
+First, login to your distribution server using GitHub OAuth:
+
+```sh
+# First time login (both URL and client ID required)
+rkb login https://your-distribution-server.com your-github-oauth-client-id
+
+# Re-login when PAT expires (client ID will be reused from config)
+rkb login https://your-distribution-server.com
+
+# If only one server is configured, you can omit the URL too
+rkb login
+```
+
+This will open a browser for GitHub OAuth authentication and store the credentials locally. The client ID is required only for the first login to a server - it will be saved and reused for subsequent logins. If you have only one server configured, you can omit both URL and client ID for re-login.
+
+### List Repositories
+
+List all repositories on the distribution server:
+
+```sh
+rkb repo list
+```
+
+Or specify a server URL if you have multiple servers configured:
+
+```sh
+rkb repo --url https://your-distribution-server.com list
+```
+
+### Manage Repository Visibility
+
+Change repository visibility between public and private. Note that the repository name must be the full name including namespace:
+
+```sh
+rkb repo vis mine/hello-world public
+rkb repo vis mine/hello-world private
+```
+
+Or with a specific server:
+
+```sh
+rkb repo --url https://your-distribution-server.com vis mine/hello-world public
+```
+
+### Logout
+
+Logout from the distribution server:
+
+```sh
+rkb logout
+```
+
+Or logout from a specific server:
+
+```sh
+rkb logout https://your-distribution-server.com
+```
+
 ## rkb usage
 
 ```sh
-Usage: rkb [OPTIONS]
+Usage: rkb <COMMAND>
+
+Commands:
+  build   Build a container image from Dockerfile
+  login   Login to distribution server
+  logout  Logout from distribution server
+  repo    List and manage repositories
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### Build Command
+
+```sh
+Usage: rkb build [OPTIONS]
 
 Options:
   -f, --file <FILE>       Dockerfile or Containerfile
   -t, --tag <IMAGE NAME>  Name of the resulting image
+  -v, --verbose           Turn verbose logging on
+  -l, --libfuse           Use libfuse-rs or linux mount
   -o, --output-dir <DIR>  Output directory for the image
   -h, --help              Print help
+```
+
+### Registry Management Commands
+
+#### Login
+```sh
+Usage: rkb login [URL] [CLIENT_ID]
+
+Arguments:
+  [URL]         URL of the distribution server (optional if only one server is configured)
+  [CLIENT_ID]   GitHub OAuth application client ID (required for first login to this server)
+
+Options:
+  -h, --help  Print help
+```
+
+#### Logout
+```sh
+Usage: rkb logout [URL]
+
+Arguments:
+  [URL]  URL of the distribution server (optional if only one entry exists)
+
+Options:
+  -h, --help  Print help
+```
+
+#### Repository Management
+```sh
+Usage: rkb repo [OPTIONS] <COMMAND>
+
+Commands:
+  list                    List all repositories
+  vis <NAME> <VISIBILITY> Change repository visibility
+
+Options:
+      --url <URL>  URL of the distribution server (optional if only one entry exists)
+  -h, --help       Print help
 ```
 
 ## TODOs
 
 ### Supported features
 
-| Feature         | Status |
-|-----------------|--------|
-| lib-fuse        | ✅     |
-| Cross-platform  | ❌     |
+| Feature                    | Status |
+|----------------------------|--------|
+| Image building             | ✅     |
+| lib-fuse integration       | ✅     |
+| Registry authentication    | ✅     |
+| Repository management      | ✅     |
+| GitHub OAuth login         | ✅     |
+| Multi-server support       | ✅     |
+| Cross-platform             | ❌     |
 
 ### Supported Dockerfile instructions
 

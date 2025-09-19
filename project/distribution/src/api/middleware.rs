@@ -1,6 +1,7 @@
-use crate::api::{AuthHeader, RepoIdentifier, extract_claims};
+use crate::api::{AuthHeader, extract_claims};
 use crate::error::{AppError, OciError};
 use crate::utils::jwt::Claims;
+use crate::utils::repo_identifier::identifier_from_full_name;
 use crate::utils::state::AppState;
 use axum::extract::{Request, State};
 use axum::http::{Method, StatusCode};
@@ -8,7 +9,7 @@ use axum::middleware::Next;
 use axum::response::IntoResponse;
 use std::sync::Arc;
 
-pub async fn authenticate(
+pub async fn require_authentication(
     State(state): State<Arc<AppState>>,
     auth: Option<AuthHeader>,
     mut req: Request,
@@ -17,7 +18,23 @@ pub async fn authenticate(
     let claims = extract_claims(
         auth,
         &state.config.jwt_secret,
-        &state.config.password_salt,
+        state.user_storage.as_ref(),
+        &state.config.registry_url,
+    )
+    .await?;
+    req.extensions_mut().insert(claims);
+    Ok(next.run(req).await)
+}
+
+pub async fn populate_oci_claims(
+    State(state): State<Arc<AppState>>,
+    auth: Option<AuthHeader>,
+    mut req: Request,
+    next: Next,
+) -> Result<impl IntoResponse, AppError> {
+    let claims = extract_claims(
+        auth,
+        &state.config.jwt_secret,
         state.user_storage.as_ref(),
         &state.config.registry_url,
     )
@@ -36,32 +53,32 @@ pub async fn authenticate(
     Ok(next.run(req).await)
 }
 
-pub async fn authorize(
+pub async fn authorize_repository_access(
     State(state): State<Arc<AppState>>,
     mut req: Request,
     next: Next,
 ) -> Result<impl IntoResponse, AppError> {
-    let identifier = extract_repo_identifier(req.uri().path());
+    let identifier = extract_full_repo_name(req.uri().path());
     if identifier.is_none() {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
-    let identifier = identifier.unwrap();
-    let namespace = identifier
-        .split("/")
-        .find(|s| !s.is_empty())
-        .unwrap_or(&identifier);
+    let identifier = identifier_from_full_name(identifier.unwrap());
+    let namespace = &identifier.namespace;
 
     let claims = req.extensions().get::<Claims>();
     match *req.method() {
         // for read, we can read other's public repos.
         Method::GET | Method::HEAD => {
-            if let Ok(repo) = state.repo_storage.query_repo_by_name(&identifier).await
+            if let Ok(repo) = state
+                .repo_storage
+                .query_repo_by_identifier(&identifier)
+                .await
                 && !repo.is_public
             {
                 match claims {
                     Some(claims) => {
-                        if claims.sub != namespace {
+                        if claims.sub != *namespace {
                             return Err(OciError::Forbidden(
                                 "unable to read others' private repositories".to_string(),
                             )
@@ -88,7 +105,7 @@ pub async fn authorize(
                 .into());
             }
             Some(claims) => {
-                if namespace != claims.sub {
+                if *namespace != claims.sub {
                     return Err(OciError::Forbidden(
                         "unable to write others' repositories".to_string(),
                     )
@@ -105,11 +122,11 @@ pub async fn authorize(
         },
         _ => unreachable!(),
     }
-    req.extensions_mut().insert(RepoIdentifier(identifier));
+    req.extensions_mut().insert(identifier);
     Ok(next.run(req).await)
 }
 
-fn extract_repo_identifier(url: &str) -> Option<String> {
+fn extract_full_repo_name(url: &str) -> Option<String> {
     let segments: Vec<&str> = url.split("/").filter(|s| !s.is_empty()).collect();
     match segments.as_slice() {
         // tail: /{name}/manifests/{reference}

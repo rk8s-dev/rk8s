@@ -6,6 +6,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, FromRow, Default)]
 pub struct Repo {
     pub id: Uuid,
+    pub namespace: String,
     pub name: String,
     pub is_public: bool,
     pub created_at: DateTime<Utc>,
@@ -13,10 +14,11 @@ pub struct Repo {
 }
 
 impl Repo {
-    pub fn new(name: &str) -> Self {
+    pub fn new(namespace: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: Uuid::new_v4(),
-            name: name.to_owned(),
+            namespace: namespace.into(),
+            name: name.into(),
             is_public: false,
             ..Default::default()
         }
