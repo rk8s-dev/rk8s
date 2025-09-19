@@ -58,11 +58,11 @@ pub async fn serve(
     xline_store: Arc<XlineStore>,
     local_manager: Arc<LocalManager>,
 ) -> anyhow::Result<()> {
-    info!("Starting server with address: {}", addr);
+    info!("Starting server with address: {addr}");
 
     // Create QUIC endpoint and server certificate
     let endpoint = make_server_endpoint(addr.parse()?).await?;
-    info!("QUIC server listening on {}", addr);
+    info!("QUIC server listening on {addr}");
 
     let node_registry = Arc::new(NodeRegistry::default());
 
@@ -120,7 +120,7 @@ pub async fn serve(
                     });
                 }
                 Err(e) => {
-                    error!("Connection failed: {}", e);
+                    error!("Connection failed: {e}");
                 }
             },
             None => break,
@@ -155,11 +155,11 @@ async fn watch_pods(
                 if let Ok(mut stream) = conn.open_uni().await {
                     stream.write_all(&data).await?;
                     stream.finish()?;
-                    info!("[watch_pods] sent existing pod to worker: {}", pod_name);
+                    info!("[watch_pods] sent existing pod to worker: {pod_name}");
                 }
             }
         } else {
-            error!("Failed to parse pod YAML: {}", pod_yaml);
+            error!("Failed to parse pod YAML: {pod_yaml}");
         }
     }
 
@@ -200,7 +200,7 @@ async fn watch_pods(
                 }
             }
             Err(e) => {
-                error!("[watch_pods] Watch error: {}", e);
+                error!("[watch_pods] Watch error: {e}");
                 break;
             }
         }

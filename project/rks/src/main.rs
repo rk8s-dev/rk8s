@@ -1,6 +1,7 @@
 mod api;
 mod cli;
 mod commands;
+mod dns;
 mod network;
 mod protocol;
 mod scheduler;
