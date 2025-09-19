@@ -7,7 +7,7 @@ use crate::api::middleware::{
 use crate::api::v2::probe;
 use crate::domain::user::UserRepository;
 use crate::error::{AppError, OciError};
-use crate::service::auth::{auth, oauth_callback};
+use crate::service::auth::{auth, client_id, oauth_callback};
 use crate::service::repo::{change_visibility, list_visible_repos};
 use crate::utils::jwt::{Claims, decode};
 use crate::utils::password::check_password;
@@ -39,6 +39,7 @@ pub fn create_router(state: Arc<AppState>) -> Router<()> {
 fn custom_v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/auth/{provider}/callback", post(oauth_callback))
+        .route("/auth/{provider}/client_id", get(client_id))
         .merge(v1_router_with_auth(state))
 }
 
@@ -107,9 +108,9 @@ where
 
 async fn extract_claims(
     auth: Option<AuthHeader>,
-    jwt_secret: &str,
+    jwt_secret: impl AsRef<str>,
     user_storage: &dyn UserRepository,
-    auth_url: &str,
+    auth_url: impl AsRef<str>,
 ) -> Result<Claims, AppError> {
     match auth {
         Some(auth) => match auth {
@@ -125,7 +126,7 @@ async fn extract_claims(
         },
         None => Err(OciError::Unauthorized {
             msg: "Missing `authorization` header or invalid `authorization` header".to_string(),
-            auth_url: Some(auth_url.to_string()),
+            auth_url: Some(auth_url.as_ref().to_string()),
         }
         .into()),
     }

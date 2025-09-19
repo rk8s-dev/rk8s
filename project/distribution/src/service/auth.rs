@@ -45,7 +45,7 @@ pub async fn oauth_callback(
                         &state.config.jwt_secret,
                         &user.username,
                     );
-                    tracing::error!("pat: {pat}");
+
                     Ok((
                         StatusCode::OK,
                         Json(json!({
@@ -67,7 +67,6 @@ pub async fn oauth_callback(
                         "pat": pat,
                     }));
 
-                    tracing::error!("pat: {pat}");
                     let user = User::new(user_info.id, user_info.login, hashed, salt);
                     state.user_storage.create_user(user).await?;
                     Ok((StatusCode::CREATED, res))
@@ -172,6 +171,18 @@ pub(crate) async fn auth(
         expires_in: state.config.jwt_lifetime_secs,
         issued_at: Utc::now().to_rfc3339(),
     }))
+}
+
+pub async fn client_id(
+    State(state): State<Arc<AppState>>,
+    Path(path): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    match path.as_str() {
+        "github" => Ok(Json(json!({
+            "client_id": state.config.github_client_id,
+        }))),
+        _ => Err(BusinessError::BadRequest("Only support github provider".to_string()).into()),
+    }
 }
 
 #[cfg(debug_assertions)]

@@ -36,15 +36,19 @@ pub(crate) struct Args {
     )]
     pub(crate) url: String,
 
+    /// Database host
     #[arg(long, env = "POSTGRES_HOST", default_value = "localhost")]
     pub(crate) db_host: String,
 
+    /// Database port
     #[arg(long, env = "POSTGRES_PORT", default_value_t = 5432)]
     pub(crate) db_port: u16,
 
+    /// Database user
     #[arg(long, env = "POSTGRES_USER", default_value = "postgres")]
     pub(crate) db_user: String,
 
+    /// Database name
     #[arg(long, env = "POSTGRES_DB", default_value = "postgres")]
     pub(crate) db_name: String,
 }
