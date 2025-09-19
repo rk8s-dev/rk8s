@@ -7,7 +7,7 @@ use crate::api::middleware::{
 use crate::api::v2::probe;
 use crate::domain::user::UserRepository;
 use crate::error::{AppError, OciError};
-use crate::service::auth::{auth, create_user, oauth_callback};
+use crate::service::auth::{auth, oauth_callback};
 use crate::service::repo::{change_visibility, list_visible_repos};
 use crate::utils::jwt::{Claims, decode};
 use crate::utils::password::check_password;
@@ -38,7 +38,7 @@ pub fn create_router(state: Arc<AppState>) -> Router<()> {
 
 fn custom_v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
-        .route("/auth/{provider}/callback", get(oauth_callback))
+        .route("/auth/{provider}/callback", post(oauth_callback))
         .merge(v1_router_with_auth(state))
 }
 
@@ -67,6 +67,8 @@ fn v1_router_with_auth(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
 #[cfg(debug_assertions)]
 fn debug_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
+    use crate::service::auth::create_user;
+
     Router::new()
         .route("/users", post(create_user))
         .with_state(state)

@@ -4,13 +4,12 @@ use crate::utils::jwt::gen_token;
 use crate::utils::password::{check_password, gen_password, gen_salt, hash_password};
 use crate::utils::state::AppState;
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Basic;
 use chrono::Utc;
-use rand::{Rng, SeedableRng};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -18,26 +17,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
-pub struct OAuthCallbackParams {
-    code: String,
+pub struct OAuthCallbackRequest {
+    access_token: String,
+    token_type: String,
+    scope: String,
 }
 
 pub async fn oauth_callback(
     State(state): State<Arc<AppState>>,
     Path(provider): Path<String>,
-    Query(params): Query<OAuthCallbackParams>,
+    Json(req): Json<OAuthCallbackRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     match provider.as_str() {
         "github" => {
-            let req = request_access_token(
-                &params.code,
-                &state.config.github_client_id,
-                &state.config.github_client_secret,
-            )
-            .await
-            .map_to_internal()?;
-            tracing::error!("{:#?}", req);
-
             let user_info = request_user_info(&req.access_token)
                 .await
                 .map_to_internal()?;
@@ -53,6 +45,7 @@ pub async fn oauth_callback(
                         &state.config.jwt_secret,
                         &user.username,
                     );
+                    tracing::error!("pat: {pat}");
                     Ok((
                         StatusCode::OK,
                         Json(json!({
@@ -74,6 +67,7 @@ pub async fn oauth_callback(
                         "pat": pat,
                     }));
 
+                    tracing::error!("pat: {pat}");
                     let user = User::new(user_info.id, user_info.login, hashed, salt);
                     state.user_storage.create_user(user).await?;
                     Ok((StatusCode::CREATED, res))
@@ -192,6 +186,8 @@ pub async fn create_user(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    use rand::{Rng, SeedableRng};
+
     let mut rng = rand::rngs::StdRng::from_os_rng();
 
     let salt = gen_salt();

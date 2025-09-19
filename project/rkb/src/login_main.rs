@@ -110,7 +110,6 @@ impl LoginConfig {
         }
 
         config.entries.push(entry);
-        println!("{:#?}", config.entries);
         config.store()
     }
 
