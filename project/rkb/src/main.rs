@@ -10,6 +10,7 @@ pub mod oci_spec;
 pub mod overlayfs;
 pub mod registry;
 mod repo_main;
+mod rt;
 pub mod run;
 
 use crate::args::{Cli, Commands};
@@ -17,8 +18,7 @@ use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::prelude::*;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_thread_ids(true))
         .with(tracing_subscriber::EnvFilter::from_default_env())
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Login(login_args) => {
-            if let Err(e) = login_main::login(login_args).await {
+            if let Err(e) = login_main::login(login_args) {
                 tracing::debug!("Login failed: {e:?}");
                 return Err(e);
             }
@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Repo(repo_args) => {
-            if let Err(e) = repo_main::main(repo_args).await {
+            if let Err(e) = repo_main::main(repo_args) {
                 tracing::debug!("list failed: {e:?}");
                 return Err(e);
             }

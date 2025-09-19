@@ -1,4 +1,5 @@
-use crate::login_main::{LoginEntry, with_resolved_entry};
+use crate::login_main::{LoginEntry, assert_not_sudo, with_resolved_entry};
+use crate::rt::block_on;
 use axum::http::StatusCode;
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
@@ -69,18 +70,21 @@ struct RepoView {
     is_public: bool,
 }
 
-pub async fn main(args: RepoArgs) -> anyhow::Result<()> {
-    with_resolved_entry(args.url, move |entry| {
-        Box::pin(async move {
-            match args.sub {
-                RepoSubArgs::List => handle_repo_list(entry).await,
-                RepoSubArgs::Vis { name, visibility } => {
-                    handle_repo_visibility(entry, name, visibility).await
+pub fn main(args: RepoArgs) -> anyhow::Result<()> {
+    assert_not_sudo("repo")?;
+    block_on(async move {
+        with_resolved_entry(args.url, move |entry| {
+            Box::pin(async move {
+                match args.sub {
+                    RepoSubArgs::List => handle_repo_list(entry).await,
+                    RepoSubArgs::Vis { name, visibility } => {
+                        handle_repo_visibility(entry, name, visibility).await
+                    }
                 }
-            }
+            })
         })
-    })
-    .await
+        .await
+    })?
 }
 
 async fn handle_repo_list(entry: &LoginEntry) -> anyhow::Result<()> {

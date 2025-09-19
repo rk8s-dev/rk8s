@@ -1,18 +1,14 @@
+use crate::rt::block_on;
 use anyhow::Context;
-use axum::Router;
-use axum::extract::{Query, State};
-use axum::response::IntoResponse;
-use axum::routing::get;
 use clap::Parser;
-use reqwest::StatusCode;
+use qrcode::QrCode;
+use qrcode::render::unicode;
+use reqwest::Client;
+use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde_json::json;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::oneshot;
-use tokio::sync::oneshot::Sender;
-use tokio::time::timeout;
 
 #[derive(Debug, Parser)]
 pub struct LoginArgs {
@@ -74,6 +70,7 @@ impl LoginConfig {
         f(self.single_entry()?)
     }
 
+    /// Note: if load the config with sudo, it will load from `/root/.config/rk8s/rkb.toml`, which may not be expected.
     pub fn load() -> anyhow::Result<Self> {
         confy::load::<Self>(Self::APP_NAME, Self::CONFIG_NAME).with_context(|| {
             format!(
@@ -113,6 +110,7 @@ impl LoginConfig {
         }
 
         config.entries.push(entry);
+        println!("{:#?}", config.entries);
         config.store()
     }
 
@@ -124,7 +122,8 @@ impl LoginConfig {
     }
 }
 
-pub async fn login(args: LoginArgs) -> anyhow::Result<()> {
+pub fn login(args: LoginArgs) -> anyhow::Result<()> {
+    assert_not_sudo("login")?;
     let config = LoginConfig::load()?;
 
     let url = match args.url {
@@ -142,84 +141,167 @@ pub async fn login(args: LoginArgs) -> anyhow::Result<()> {
         }
     };
 
-    let (tx, rx) = oneshot::channel();
-    let state = AppState {
-        oneshot: Mutex::new(Some(tx)),
-        url: url.to_string(),
-    };
+    block_on(async move {
+        let oauth = OAuthFlow::new(client_id)?;
+        let res = oauth.request_token().await?;
 
-    tokio::spawn(async move {
-        let router = local_callback_server(state);
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:8969")
+        let req_url = format!("http://{url}/api/v1/auth/github/callback");
+        let res = Client::new()
+            .post(req_url)
+            .json(&res)
+            .send()
+            .await?
+            .json::<CallbackResponse>()
             .await
-            .with_context(|| "Failed to listen local callback server")?;
+            .with_context(|| "Failed to deserialize")?;
 
-        axum::serve(listener, router)
-            .await
-            .with_context(|| "Failed to start local callback server")?;
-        Ok::<_, anyhow::Error>(())
-    });
-
-    let auth_url = format!(
-        "https://github.com/login/oauth/authorize?client_id={client_id}&scope=read:user&redirect_uri=http://localhost:8969/",
-    );
-    match opener::open(auth_url) {
-        Ok(_) => {
-            println!("Please complete authorization in the opened browser.");
-        }
-        x @ Err(_) => return x.with_context(|| "Could not open url"),
-    }
-
-    let rx = timeout(Duration::from_secs(60), rx);
-    let res = rx.await???;
-    LoginConfig::login(&res.pat, url, client_id)?;
-    println!("Logged in successfully!");
-    Ok(())
+        LoginConfig::login(res.pat, url, client_id)?;
+        println!("Logged in successfully!");
+        Ok(())
+    })?
 }
 
-struct AppState {
-    oneshot: Mutex<Option<Sender<anyhow::Result<LoginResponse>>>>,
-    url: String,
-}
-
-fn local_callback_server(state: AppState) -> Router {
-    Router::new()
-        .route("/", get(request_token))
-        .with_state(Arc::new(state))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LoginResponse {
+#[derive(Deserialize)]
+struct CallbackResponse {
     pat: String,
 }
 
-async fn request_token(
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<HashMap<String, String>>,
-) -> impl IntoResponse {
-    let code = &params["code"];
-    match reqwest::get(format!(
-        "http://{}/api/v1/auth/github/callback?code={code}",
-        state.url
-    ))
-    .await
-    {
-        Ok(res) => {
-            let oneshot = state.oneshot.lock().unwrap().take().unwrap();
-            let res = res
-                .json()
+#[derive(Default)]
+struct OAuthFlow {
+    client: Option<Client>,
+    client_id: String,
+}
+
+#[derive(Deserialize)]
+struct RequestCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    interval: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PollTokenResponse {
+    Ok(PollTokenOk),
+    Err {
+        error: PollTokenErrorKind,
+        error_description: String,
+        interval: Option<u64>,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+struct PollTokenOk {
+    access_token: String,
+    token_type: String,
+    scope: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PollTokenErrorKind {
+    AuthorizationPending,
+    SlowDown,
+    ExpiredToken,
+    UnsupportedGrantType,
+    IncorrectClientCredentials,
+    IncorrectDeviceCode,
+    AccessDenied,
+    DeviceFlowDisabled,
+}
+
+impl OAuthFlow {
+    pub fn new(client_id: impl Into<String>) -> anyhow::Result<Self> {
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "application/json".parse()?);
+
+        Ok(Self {
+            client: Some(Client::builder().default_headers(headers).build()?),
+            client_id: client_id.into(),
+        })
+    }
+
+    fn client_ref(&self) -> &Client {
+        self.client.as_ref().unwrap()
+    }
+
+    fn display_qr_and_code(uri: impl AsRef<str>, user_code: impl AsRef<str>) {
+        let code = QrCode::new(uri.as_ref().as_bytes()).unwrap();
+        let image = code.render::<unicode::Dense1x2>().build();
+
+        println!("Scan the QR code below with your phone to open the authentication page:");
+        println!("{image}");
+        println!("Or visit this URL in your browser: {}", uri.as_ref());
+        println!("Your one-time code is: {}", user_code.as_ref());
+    }
+
+    async fn request_code(&self) -> anyhow::Result<RequestCodeResponse> {
+        let url = "https://github.com/login/device/code";
+        let scope = "read:user";
+
+        self.client_ref()
+            .post(url)
+            .form(&json!({
+                "client_id": self.client_id,
+                "scope": scope,
+            }))
+            .send()
+            .await?
+            .json()
+            .await
+            .with_context(|| "Failed to deserialize response, maybe you set a invalid client id?")
+    }
+
+    async fn poll_token(
+        &self,
+        interval: u64,
+        device_code: impl AsRef<str>,
+    ) -> anyhow::Result<PollTokenOk> {
+        let url = "https://github.com/login/oauth/access_token";
+
+        let mut sleep_secs = interval;
+        loop {
+            tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
+
+            let res = self
+                .client_ref()
+                .post(url)
+                .form(&json!({
+                    "client_id": self.client_id,
+                    "device_code": device_code.as_ref(),
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                }))
+                .send()
+                .await?
+                .json::<PollTokenResponse>()
                 .await
-                .with_context(|| "Failed to parse json from response");
-            oneshot.send(res).unwrap();
-        }
-        Err(e) => {
-            let oneshot = state.oneshot.lock().unwrap().take().unwrap();
-            oneshot
-                .send(Err(anyhow::anyhow!("Failed to request token: {e}")))
-                .unwrap();
+                .with_context(|| "Failed to deserialize response")?;
+
+            match res {
+                PollTokenResponse::Ok(res) => return Ok(res),
+                PollTokenResponse::Err {
+                    error,
+                    error_description,
+                    interval,
+                    ..
+                } => match error {
+                    PollTokenErrorKind::AuthorizationPending => {}
+                    PollTokenErrorKind::SlowDown => {
+                        let interval = interval.unwrap();
+                        sleep_secs = interval;
+                    }
+                    _ => anyhow::bail!("{error_description}"),
+                },
+            }
         }
     }
-    StatusCode::OK
+
+    pub async fn request_token(&self) -> anyhow::Result<PollTokenOk> {
+        let res = self.request_code().await?;
+        Self::display_qr_and_code(res.verification_uri, res.user_code);
+        self.poll_token(res.interval, res.device_code).await
+    }
 }
 
 pub async fn with_resolved_entry<F, R>(url: Option<impl AsRef<str>>, f: F) -> anyhow::Result<R>
@@ -234,4 +316,11 @@ where
     };
 
     f(entry).await
+}
+
+pub fn assert_not_sudo(name: impl AsRef<str>) -> anyhow::Result<()> {
+    if nix::unistd::getuid().is_root() {
+        anyhow::bail!("`rkb {}` should not be run with sudo", name.as_ref())
+    }
+    Ok(())
 }
