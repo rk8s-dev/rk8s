@@ -72,10 +72,10 @@ impl ConfigFile {
                 };
 
                 let mut disable_check = false;
-                if let Some(check) = ncmaps.get("disableCheck") {
-                    if let Some(check_bool) = check.as_bool() {
-                        disable_check = check_bool;
-                    }
+                if let Some(check) = ncmaps.get("disableCheck")
+                    && let Some(check_bool) = check.as_bool()
+                {
+                    disable_check = check_bool;
                 }
 
                 let mut ncflist = NetworkConfigList::default();

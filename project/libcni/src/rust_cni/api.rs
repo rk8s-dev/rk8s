@@ -136,11 +136,12 @@ impl CNIConfig {
         };
 
         let path = Path::new(&cache_dir).join(netname);
-        if !path.exists() {
-            if let Err(e) = std::fs::create_dir_all(&path) {
-                warn!("Failed to create cache directory {}: {}", path.display(), e);
-            }
+        if !path.exists()
+            && let Err(e) = std::fs::create_dir_all(&path)
+        {
+            warn!("Failed to create cache directory {}: {}", path.display(), e);
         }
+
         path
     }
 
@@ -310,10 +311,10 @@ impl CNI for CNIConfig {
         }
 
         // Cache the final result
-        if let Some(result) = &prev_result {
-            if let Err(e) = self.cache_network_result(&net.name, &rt, result.as_ref()) {
-                warn!("Failed to cache network result: {e}");
-            }
+        if let Some(result) = &prev_result
+            && let Err(e) = self.cache_network_result(&net.name, &rt, result.as_ref())
+        {
+            warn!("Failed to cache network result: {e}");
         }
 
         debug!("Successfully added network list: {}", net.name);
@@ -697,19 +698,19 @@ impl CNI for CNIConfig {
                 // Parse version info
                 match serde_json::from_slice::<serde_json::Value>(&version_bytes) {
                     Ok(version_info) => {
-                        if let Some(supported_versions) = version_info.get("supportedVersions") {
-                            if let Some(versions_array) = supported_versions.as_array() {
-                                let versions: Vec<String> = versions_array
-                                    .iter()
-                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                    .collect();
+                        if let Some(supported_versions) = version_info.get("supportedVersions")
+                            && let Some(versions_array) = supported_versions.as_array()
+                        {
+                            let versions: Vec<String> = versions_array
+                                .iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect();
 
-                                debug!(
-                                    "Plugin {} supports versions: {:?}",
-                                    net.network._type, versions
-                                );
-                                return Ok(versions);
-                            }
+                            debug!(
+                                "Plugin {} supports versions: {:?}",
+                                net.network._type, versions
+                            );
+                            return Ok(versions);
                         }
 
                         warn!(

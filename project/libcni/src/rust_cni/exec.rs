@@ -133,13 +133,12 @@ impl Exec for RawExec {
         }
 
         // Check for error in stdout (CNI returns errors in JSON format)
-        if let Ok(json_value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-            if let Some(error_code) = json_value.get("code") {
-                if error_code.as_u64().is_some() {
-                    let msg = String::from_utf8_lossy(&output.stdout).to_string();
-                    return Err(Box::new(CNIError::ExecuteError(msg)));
-                }
-            }
+        if let Ok(json_value) = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            && let Some(error_code) = json_value.get("code")
+            && error_code.as_u64().is_some()
+        {
+            let msg = String::from_utf8_lossy(&output.stdout).to_string();
+            return Err(Box::new(CNIError::ExecuteError(msg)));
         }
 
         debug!("CNI plugin execution successful");
