@@ -1,4 +1,5 @@
-use crate::{exec_main::Task, overlayfs::MountConfig};
+use crate::commands::exec::Task;
+use crate::overlayfs::MountConfig;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use ipc_channel::ipc::{IpcOneShotServer, IpcSender};

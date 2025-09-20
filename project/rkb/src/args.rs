@@ -1,6 +1,5 @@
-use crate::{exec_main, login_main, logout_main, mount_main, repo_main};
+use crate::commands::{build, exec, login, logout, mount, repo};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(name = "rkb", about = "A simple container image builder")]
@@ -11,41 +10,18 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    Build(BuildArgs),
+    /// Build a container image from Dockerfile
+    Build(build::BuildArgs),
     #[command(hide = true)]
-    Mount(mount_main::MountArgs),
+    Mount(mount::MountArgs),
     #[command(hide = true)]
-    Exec(exec_main::ExecArgs),
+    Exec(exec::ExecArgs),
     #[command(hide = true)]
-    Cleanup(exec_main::CleanupArgs),
+    Cleanup(exec::CleanupArgs),
     /// Login to distribution server
-    Login(login_main::LoginArgs),
+    Login(login::LoginArgs),
     /// Logout from distribution server
-    Logout(logout_main::LogoutArgs),
+    Logout(logout::LogoutArgs),
     /// List and manage repositories
-    Repo(repo_main::RepoArgs),
-}
-
-#[derive(Parser, Debug)]
-pub struct BuildArgs {
-    /// Dockerfile or Containerfile
-    #[arg(short, long, value_name = "FILE")]
-    pub file: Option<PathBuf>,
-
-    /// Name of the resulting image
-    #[arg(short, long, value_name = "IMAGE NAME")]
-    pub tag: Option<String>,
-
-    /// Turn verbose logging on
-    #[arg(short, long)]
-    pub verbose: bool,
-
-    /// Use libfuse-rs or linux mount
-    #[arg(short, long)]
-    pub libfuse: bool,
-
-    /// Output directory for the image
-    #[arg(short, long, value_name = "DIR")]
-    pub output_dir: Option<String>,
-    // TODO: Add registry info
+    Repo(repo::RepoArgs),
 }
