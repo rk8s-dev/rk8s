@@ -637,29 +637,45 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
         let handle_arc = {
             let cache = self.handle_cache.clone();
-            if let Some(h) = cache.get(&key).await {
-                h
-            } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
-                let handle_arc = Arc::new(handle_from_fd);
-                cache.insert(key, Arc::clone(&handle_arc)).await;
-                handle_arc
+
+            // Check if cached handle is valid
+            let cached_handle_valid = if let Some(h) = cache.get(&key).await {
+                if let Ok(openable) = self.to_openable_handle(Arc::clone(&h)) {
+                    // Test if the handle is still valid by attempting to open with O_PATH
+                    match openable.open(libc::O_PATH) {
+                        Ok(_) => Some(h), // Valid handle found
+                        Err(_) => {
+                            // Invalid handle, remove from cache
+                            cache.invalidate(&key).await;
+                            None
+                        }
+                    }
+                } else {
+                    // Cannot convert to openable, remove from cache
+                    cache.invalidate(&key).await;
+                    None
+                }
             } else {
-                return Err(Error::new(
-                    io::ErrorKind::NotFound,
-                    "Failed to create file handle",
-                ));
+                None // No cached handle found
+            };
+
+            // Use cached handle if valid, otherwise create new one
+            if let Some(valid_handle) = cached_handle_valid {
+                valid_handle
+            } else {
+                // Create new handle and cache it
+                if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
+                    let handle_arc = Arc::new(handle_from_fd);
+                    cache.insert(key, Arc::clone(&handle_arc)).await;
+                    handle_arc
+                } else {
+                    return Err(Error::new(
+                        io::ErrorKind::NotFound,
+                        "Failed to create file handle",
+                    ));
+                }
             }
         };
-
-        // let handle = {
-        //     if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
-        //         handle_from_fd
-        //     } else {
-        //         return Err(Error::new(io::ErrorKind::NotFound, "File not found"));
-        //     }
-        // };
-        // let handle_arc = Arc::new(handle);
-
         Ok((handle_arc, st))
     }
 
@@ -1199,5 +1215,58 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+    #[tokio::test]
+    #[ignore]
+    async fn test_fuse() {
+        let temp_dir = std::path::PathBuf::from("/tmp");
+        let source_dir = temp_dir.join("hello");
+        let mount_dir = temp_dir.join("mount");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&mount_dir).unwrap();
+
+        let fs = super::new_passthroughfs_layer(source_dir.to_str().unwrap())
+            .await
+            .unwrap();
+
+        let mount_path = OsString::from(mount_dir.to_str().unwrap());
+
+        let uid = unsafe { libc::getuid() };
+        let gid = unsafe { libc::getgid() };
+
+        let not_unprivileged = true;
+
+        let mut mount_options = MountOptions::default();
+        // .allow_other(true)
+        mount_options
+            .force_readdir_plus(true)
+            .uid(uid)
+            .gid(gid)
+            .allow_other(true);
+
+        let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
+            Session::new(mount_options)
+                .mount_with_unprivileged(fs, mount_path)
+                .await
+                .unwrap()
+        } else {
+            Session::new(mount_options)
+                .mount(fs, mount_path)
+                .await
+                .unwrap()
+        };
+
+        let handle = &mut mount_handle;
+
+        tokio::select! {
+        res = handle => {
+            std::fs::remove_dir_all(&source_dir).unwrap();
+            std::fs::remove_dir_all(&mount_dir).unwrap();
+            res.unwrap();
+        },
+            _ = tokio::signal::ctrl_c() => {
+                mount_handle.unmount().await.unwrap()
+            }
+        }
     }
 }
