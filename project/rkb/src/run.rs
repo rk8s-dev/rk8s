@@ -1,4 +1,5 @@
-use crate::{exec_main::Task, overlayfs::MountConfig};
+use crate::exec::Task;
+use crate::overlayfs::MountConfig;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use ipc_channel::ipc::{IpcOneShotServer, IpcSender};
@@ -30,7 +31,7 @@ pub fn exec_task(mount_config: MountConfig, task: Task) -> Result<()> {
     let (_, msg) = child_server
         .accept()
         .context("Failed to accept connection on child server")?;
-    assert!(msg == "ready");
+    assert_eq!(msg, "ready");
 
     let mount_pid = mount_process.id();
     let task_json = serde_json::to_string(&task).context("Failed to serialize task to json")?;

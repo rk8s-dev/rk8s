@@ -1,5 +1,6 @@
 use super::{config::ImageConfig, config::StageExecutorConfig};
-use crate::{exec_main::Task, overlayfs::MountConfig, registry::pull_or_get_image, run::exec_task};
+use crate::exec::Task;
+use crate::{overlayfs::MountConfig, registry::pull_or_get_image, run::exec_task};
 use anyhow::{Context, Result, bail};
 use dockerfile_parser::{
     ArgInstruction, BreakableStringComponent, CmdInstruction, CopyInstruction,

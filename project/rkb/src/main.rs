@@ -1,17 +1,18 @@
 pub mod args;
+pub mod build;
 pub mod compressor;
 pub mod config;
-pub mod exec_main;
-pub mod image_build;
-pub mod login_main;
-mod logout_main;
-pub mod mount_main;
+pub mod exec;
+pub mod login;
+pub mod logout;
+pub mod mount;
 pub mod oci_spec;
 pub mod overlayfs;
 pub mod registry;
-mod repo_main;
-mod rt;
+pub mod repo;
+pub mod rt;
 pub mod run;
+pub mod utils;
 
 use crate::args::{Cli, Commands};
 use anyhow::Result;
@@ -24,47 +25,14 @@ fn main() -> Result<()> {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let cli = Cli::parse();
+
     match cli.command {
-        Commands::Build(build_args) => {
-            image_build::build_image(&build_args)?;
-            tracing::info!("Successfully built image");
-        }
-        Commands::Mount(mount_args) => {
-            if let Err(e) = mount_main::main(mount_args) {
-                tracing::debug!("Mount failed: {e:?}");
-                return Err(e);
-            }
-        }
-        Commands::Exec(exec_args) => {
-            if let Err(e) = exec_main::exec(exec_args) {
-                tracing::debug!("Exec failed: {e:?}");
-                return Err(e);
-            }
-        }
-        Commands::Cleanup(cleanup_args) => {
-            if let Err(e) = exec_main::cleanup(cleanup_args) {
-                tracing::debug!("Cleanup failed: {e:?}");
-                return Err(e);
-            }
-        }
-        Commands::Login(login_args) => {
-            if let Err(e) = login_main::login(login_args) {
-                tracing::debug!("Login failed: {e:?}");
-                return Err(e);
-            }
-        }
-        Commands::Logout(logout_args) => {
-            if let Err(e) = logout_main::logout(logout_args) {
-                tracing::debug!("Logout failed: {e:?}");
-                return Err(e);
-            }
-        }
-        Commands::Repo(repo_args) => {
-            if let Err(e) = repo_main::main(repo_args) {
-                tracing::debug!("list failed: {e:?}");
-                return Err(e);
-            }
-        }
+        Commands::Build(args) => build::build_image(&args),
+        Commands::Exec(args) => exec::exec(args),
+        Commands::Cleanup(args) => exec::cleanup(args),
+        Commands::Mount(args) => mount::main(args),
+        Commands::Login(args) => login::login(args),
+        Commands::Logout(args) => logout::logout(args),
+        Commands::Repo(args) => repo::repo(args),
     }
-    Ok(())
 }

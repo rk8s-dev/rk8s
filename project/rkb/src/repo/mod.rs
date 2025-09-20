@@ -1,15 +1,15 @@
-use crate::login_main::{LoginEntry, assert_not_sudo, with_resolved_entry};
+mod types;
+
+use crate::login::config::{LoginEntry, with_resolved_entry};
+use crate::repo::types::{ListRepoResponse, Visibility};
 use crate::rt::block_on;
-use axum::http::StatusCode;
+use crate::utils::cli::assert_not_sudo;
+use axum::http::{HeaderMap, StatusCode};
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
 use comfy_table::presets::UTF8_FULL;
-use reqwest::header::HeaderMap;
 use reqwest::{RequestBuilder, Response};
-use serde::Deserialize;
 use serde_json::json;
-use std::fmt::{Display, Formatter};
-use std::str::FromStr;
 
 #[derive(Parser, Debug)]
 pub struct RepoArgs {
@@ -31,46 +31,7 @@ enum RepoSubArgs {
     },
 }
 
-#[derive(Debug, Clone)]
-enum Visibility {
-    Public,
-    Private,
-}
-
-impl FromStr for Visibility {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_lowercase().as_str() {
-            "public" => Ok(Visibility::Public),
-            "private" => Ok(Visibility::Private),
-            _ => Err("visibility must be `public` or `private`".to_string()),
-        }
-    }
-}
-
-impl Display for Visibility {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Visibility::Public => write!(f, "public"),
-            Visibility::Private => write!(f, "private"),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-pub struct ListRepoResponse {
-    data: Vec<RepoView>,
-}
-
-#[derive(Deserialize)]
-struct RepoView {
-    namespace: String,
-    name: String,
-    is_public: bool,
-}
-
-pub fn main(args: RepoArgs) -> anyhow::Result<()> {
+pub fn repo(args: RepoArgs) -> anyhow::Result<()> {
     assert_not_sudo("repo")?;
     block_on(async move {
         with_resolved_entry(args.url, move |entry| {
@@ -89,7 +50,7 @@ pub fn main(args: RepoArgs) -> anyhow::Result<()> {
 
 async fn handle_repo_list(entry: &LoginEntry) -> anyhow::Result<()> {
     let client = client_with_authentication(&entry.pat).await?;
-    let url = format!("http://{}/api/v1/repo", entry.url);
+    let url = format!("https://{}/api/v1/repo", entry.url);
 
     let res = send_and_handle_unexpected(client.get(&url))
         .await?
@@ -118,7 +79,7 @@ async fn handle_repo_visibility(
     visibility: Visibility,
 ) -> anyhow::Result<()> {
     let client = client_with_authentication(&entry.pat).await?;
-    let url = format!("http://{}/api/v1/{}/visibility", entry.url, name.as_ref());
+    let url = format!("https://{}/api/v1/{}/visibility", entry.url, name.as_ref());
 
     send_and_handle_unexpected(client.put(&url).json(&json!({
         "visibility": visibility.to_string(),

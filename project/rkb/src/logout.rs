@@ -1,4 +1,5 @@
-use crate::login_main::{LoginConfig, assert_not_sudo};
+use crate::login::config::LoginConfig;
+use crate::utils::cli::assert_not_sudo;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
