@@ -12,17 +12,31 @@ use tokio::sync::RwLock;
 use crate::passthrough::Inode;
 
 const HUGE_PAGE_LIMIT: u64 = 4 * 1024 * 1024;
-const MAX_WINDOW_SIZE: usize = 40 * 1024 * 1024;
+pub const MAX_WINDOW_SIZE: usize = 40 * 1024 * 1024;
 
 #[derive(PartialEq, Eq, Hash)]
 pub struct MmapChunkKey {
-    inode: Inode,
-    offset: u64,
+    pub inode: Inode,
+    pub aligned_offset: u64,
+    pub page_size: u64,
 }
 
 impl MmapChunkKey {
-    pub fn new(inode: Inode, offset: u64) -> Self {
-        Self { inode, offset }
+    pub fn new(inode: Inode, offset: u64, file_size: u64) -> Self {
+        let page_size = get_effective_page_size(file_size);
+        let aligned_offset = align_down(offset, page_size);
+        Self {
+            inode,
+            aligned_offset,
+            page_size,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn contains(&self, mmap_len: usize, offset: u64) -> bool {
+        let start = self.aligned_offset;
+        let end = start + mmap_len as u64;
+        offset >= start && offset < end
     }
 }
 

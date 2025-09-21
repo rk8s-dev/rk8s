@@ -3,7 +3,7 @@
 // Simple passthrough filesystem example for integration tests.
 
 use clap::Parser;
-use libfuse_fs::passthrough::new_passthroughfs_layer;
+use libfuse_fs::passthrough::{new_passthroughfs_layer, newlogfs::LoggingFileSystem};
 use rfuse3::{MountOptions, raw::Session};
 use std::ffi::OsString;
 use tokio::signal;
@@ -34,6 +34,7 @@ async fn main() {
     let fs = new_passthroughfs_layer(&args.rootdir)
         .await
         .expect("Failed to init passthrough fs");
+    let fs = LoggingFileSystem::new(fs);
 
     let mount_path = OsString::from(&args.mountpoint);
     let uid = unsafe { libc::getuid() };
