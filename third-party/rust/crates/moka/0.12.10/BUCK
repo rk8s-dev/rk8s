@@ -32,6 +32,7 @@ cargo.rust_library(
         "event-listener",
         "future",
         "futures-util",
+        "sync",
     ],
     rustc_flags = ["@$(location :moka-0.12.10-build-script-run[rustc_flags])"],
     named_deps = {
@@ -81,6 +82,7 @@ cargo.rust_binary(
         "event-listener",
         "future",
         "futures-util",
+        "sync",
     ],
     visibility = [],
 )
@@ -95,6 +97,7 @@ buildscript_run(
         "event-listener",
         "future",
         "futures-util",
+        "sync",
     ],
     version = "0.12.10",
     local_manifest_dir = "**",

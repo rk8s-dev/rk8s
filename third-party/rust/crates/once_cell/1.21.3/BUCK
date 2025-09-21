@@ -27,9 +27,15 @@ cargo.rust_library(
     },
     features = [
         "alloc",
+        "critical-section",
         "default",
+        "portable-atomic",
         "race",
         "std",
     ],
+    named_deps = {
+        "critical_section": "//third-party/rust/crates/critical-section/1.2.0:critical-section-1.2.0",
+        "portable_atomic": "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic-1.11.1",
+    },
     visibility = ["PUBLIC"],
 )

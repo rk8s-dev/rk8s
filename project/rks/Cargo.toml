@@ -43,6 +43,9 @@ env_logger = "0.11.0"
 once_cell = "1.21.0"
 futures-util = "0.3"
 time = "0.3"
+hickory-server = "0.25.2"
+hickory-proto = "0.25.2"
+hickory-resolver = "0.25.2"
 
 [dev-dependencies]
 serial_test = "3.2.0"

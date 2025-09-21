@@ -1,0 +1,680 @@
+//! Includes implementations for a prefixset based on the prefixmap
+
+use crate::{Prefix, PrefixMap};
+
+/// Set of prefixes, organized in a tree. This strucutre gives efficient access to the longest
+/// prefix in the set that contains another prefix.
+#[derive(Clone)]
+pub struct PrefixSet<P>(pub(crate) PrefixMap<P, ()>);
+
+impl<P: Prefix> PrefixSet<P> {
+    /// Create a new, empty prefixset.
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+
+    /// Check wether some prefix is present in the set, without using longest prefix match.
+    pub fn contains(&self, prefix: &P) -> bool {
+        self.0.contains_key(prefix)
+    }
+
+    /// Get the longest prefix in the set that contains the given preifx.
+    pub fn get_lpm<'a, 'b>(&'a self, prefix: &'b P) -> Option<&'a P> {
+        self.0.get_lpm(prefix).map(|(p, _)| p)
+    }
+
+    /// Adds a value to the set.
+    ///
+    /// Returns whether the value was newly inserted. That is:
+    /// - If the set did not previously contain this value, `true` is returned.
+    /// - If the set already contained this value, `false` is returned.
+    pub fn insert(&mut self, prefix: P) -> bool {
+        self.0.insert(prefix, ()).is_none()
+    }
+
+    /// Removes a value from the set. Returns whether the value was present in the set.
+    pub fn remove(&mut self, prefix: &P) -> bool {
+        self.0.remove(prefix).is_some()
+    }
+
+    /// Removes a prefix from the set, returning wether the prefix was present or not. In contrast
+    /// to [`Self::remove`], his operation will keep the tree structure as is, but only remove the
+    /// element from it. This allows any future `insert` on the same prefix to be faster. However
+    /// future reads from the tree might be a bit slower because they need to traverse more nodes.
+    pub fn remove_keep_tree(&mut self, prefix: &P) -> bool {
+        self.0.remove_keep_tree(prefix).is_some()
+    }
+
+    /// Remove all elements that are contained within `prefix`. This will change the tree
+    /// structure. This operation is `O(n)`, as the entries must be freed up one-by-one.
+    pub fn remove_children(&mut self, prefix: &P) {
+        self.0.remove_children(prefix)
+    }
+
+    /// Clear the set but keep the allocated memory.
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
+
+    /// Iterate over all prefixes in the set
+    pub fn iter(&self) -> Iter<'_, P> {
+        self.into_iter()
+    }
+
+    /// Return an iterator that traverses both trees simultaneously and yields the union of both
+    /// sets in lexicographic order.
+    pub fn union<'a>(&'a self, other: &'a Self) -> Union<'a, P> {
+        Union {
+            set_a: &self.0,
+            set_b: &other.0,
+            nodes: vec![union::UnionIndex::Both(0, 0)],
+        }
+    }
+
+    /// Return an iterator that traverses both trees simultaneously and yields the intersection of
+    /// both sets in lexicographic order.
+    pub fn intersection<'a>(&'a self, other: &'a Self) -> Intersection<'a, P> {
+        Intersection {
+            set_a: &self.0,
+            set_b: &other.0,
+            nodes: vec![intersection::IntersectionIndex::Both(0, 0)],
+        }
+    }
+
+    /// Return an iterator that traverses both trees simultaneously and yields the difference of
+    /// both sets in lexicographic order.
+    pub fn difference<'a>(&'a self, other: &'a Self) -> Difference<'a, P> {
+        Difference {
+            set_a: &self.0,
+            set_b: &other.0,
+            nodes: vec![difference::DifferenceIndex::Both(0, 0)],
+        }
+    }
+}
+
+impl<P: Prefix> Default for PrefixSet<P> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<P> PartialEq for PrefixSet<P>
+where
+    P: Prefix + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().zip(other.iter()).all(|(a, b)| a == b)
+    }
+}
+
+impl<P> Eq for PrefixSet<P> where P: Prefix + Eq {}
+
+#[derive(Clone)]
+/// An iterator over all entries of a [`PrefixSet`] in lexicographic order.
+pub struct Iter<'a, P>(crate::iter::Iter<'a, P, ()>);
+
+impl<'a, P: Prefix> Iterator for Iter<'a, P> {
+    type Item = &'a P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(p, _)| p)
+    }
+}
+
+#[derive(Clone)]
+/// A consuming iterator over all entries of a [`PrefixSet`] in lexicographic order.
+pub struct IntoIter<P>(crate::iter::IntoIter<P, ()>);
+
+impl<P: Prefix> Iterator for IntoIter<P> {
+    type Item = P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(p, _)| p)
+    }
+}
+
+impl<P: Prefix> IntoIterator for PrefixSet<P> {
+    type Item = P;
+
+    type IntoIter = IntoIter<P>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter(self.0.into_iter())
+    }
+}
+
+impl<'a, P: Prefix> IntoIterator for &'a PrefixSet<P> {
+    type Item = &'a P;
+
+    type IntoIter = Iter<'a, P>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter(self.0.iter())
+    }
+}
+
+pub use union::Union;
+
+mod union {
+    use crate::{to_right, Prefix, PrefixMap};
+
+    #[derive(Clone)]
+    /// an iterator over all entries of two [`crate::PrefixSet`]s in lexicographic order.
+    pub struct Union<'a, P> {
+        pub(super) set_a: &'a PrefixMap<P, ()>,
+        pub(super) set_b: &'a PrefixMap<P, ()>,
+        pub(super) nodes: Vec<UnionIndex>,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+    pub(super) enum UnionIndex {
+        Both(usize, usize),
+        FirstA(usize, usize),
+        FirstB(usize, usize),
+        OnlyA(usize),
+        OnlyB(usize),
+    }
+
+    impl<'a, P: Prefix> Iterator for Union<'a, P> {
+        type Item = &'a P;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            while let Some(cur) = self.nodes.pop() {
+                match cur {
+                    UnionIndex::Both(a, b) => {
+                        let node_a = &self.set_a.table[a];
+                        let node_b = &self.set_b.table[b];
+                        self.nodes.extend(next_indices(
+                            self.set_a,
+                            self.set_b,
+                            node_a.right,
+                            node_b.right,
+                        ));
+                        self.nodes.extend(next_indices(
+                            self.set_a,
+                            self.set_b,
+                            node_a.left,
+                            node_b.left,
+                        ));
+                        if node_a.value.is_some() || node_b.value.is_some() {
+                            return Some(&node_a.prefix);
+                        }
+                    }
+                    UnionIndex::FirstA(a, b) => {
+                        let node_a = &self.set_a.table[a];
+                        self.nodes.extend(next_indices_first_a(
+                            self.set_a,
+                            self.set_b,
+                            a,
+                            node_a.left,
+                            node_a.right,
+                            b,
+                        ));
+                        if node_a.value.is_some() {
+                            return Some(&node_a.prefix);
+                        }
+                    }
+                    UnionIndex::FirstB(a, b) => {
+                        let node_b = &self.set_b.table[b];
+                        self.nodes.extend(next_indices_first_b(
+                            self.set_a,
+                            self.set_b,
+                            a,
+                            b,
+                            node_b.left,
+                            node_b.right,
+                        ));
+                        if node_b.value.is_some() {
+                            return Some(&node_b.prefix);
+                        }
+                    }
+                    UnionIndex::OnlyA(a) => {
+                        let node_a = &self.set_a.table[a];
+                        if let Some(right) = node_a.right {
+                            self.nodes.push(UnionIndex::OnlyA(right));
+                        }
+                        if let Some(left) = node_a.left {
+                            self.nodes.push(UnionIndex::OnlyA(left));
+                        }
+                        if node_a.value.is_some() {
+                            return Some(&node_a.prefix);
+                        }
+                    }
+                    UnionIndex::OnlyB(b) => {
+                        let node_b = &self.set_b.table[b];
+                        if let Some(right) = node_b.right {
+                            self.nodes.push(UnionIndex::OnlyB(right));
+                        }
+                        if let Some(left) = node_b.left {
+                            self.nodes.push(UnionIndex::OnlyB(left));
+                        }
+                        if node_b.value.is_some() {
+                            return Some(&node_b.prefix);
+                        }
+                    }
+                }
+            }
+            None
+        }
+    }
+
+    fn next_indices<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        node_a: Option<usize>,
+        node_b: Option<usize>,
+    ) -> Vec<UnionIndex> {
+        match (node_a, node_b) {
+            (None, Some(b)) => vec![UnionIndex::OnlyB(b)],
+            (Some(a), None) => vec![UnionIndex::OnlyA(a)],
+            (Some(a), Some(b)) => {
+                let p_a = &set_a.table[a].prefix;
+                let p_b = &set_b.table[b].prefix;
+                if p_a.prefix_len() == p_b.prefix_len() {
+                    match p_a.mask().cmp(&p_b.mask()) {
+                        std::cmp::Ordering::Less => {
+                            vec![UnionIndex::OnlyB(b), UnionIndex::OnlyA(a)]
+                        }
+                        std::cmp::Ordering::Equal => {
+                            vec![UnionIndex::Both(a, b)]
+                        }
+                        std::cmp::Ordering::Greater => {
+                            vec![UnionIndex::OnlyA(a), UnionIndex::OnlyB(b)]
+                        }
+                    }
+                } else if p_a.contains(p_b) {
+                    vec![UnionIndex::FirstA(a, b)]
+                } else if p_b.contains(p_a) {
+                    vec![UnionIndex::FirstB(a, b)]
+                } else {
+                    if p_a.mask() < p_b.mask() {
+                        vec![UnionIndex::OnlyB(b), UnionIndex::OnlyA(a)]
+                    } else {
+                        vec![UnionIndex::OnlyA(a), UnionIndex::OnlyB(b)]
+                    }
+                }
+            }
+            _ => vec![],
+        }
+    }
+
+    fn next_indices_first_a<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        a: usize,
+        a_left: Option<usize>,
+        a_right: Option<usize>,
+        b: usize,
+    ) -> Vec<UnionIndex> {
+        match (a_left, a_right) {
+            (None, None) => vec![UnionIndex::OnlyB(b)],
+            (None, Some(r)) => next_indices(set_a, set_b, Some(r), Some(b)),
+            (Some(l), None) => next_indices(set_a, set_b, Some(l), Some(b)),
+            (Some(l), Some(r)) => {
+                if to_right(&set_a.table[a].prefix, &set_b.table[b].prefix) {
+                    let mut idxes = next_indices(set_a, set_b, Some(r), Some(b));
+                    idxes.push(UnionIndex::OnlyA(l));
+                    idxes
+                } else {
+                    let mut idxes = next_indices(set_a, set_b, Some(l), Some(b));
+                    idxes.insert(0, UnionIndex::OnlyA(r));
+                    idxes
+                }
+            }
+        }
+    }
+
+    fn next_indices_first_b<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        a: usize,
+        b: usize,
+        b_left: Option<usize>,
+        b_right: Option<usize>,
+    ) -> Vec<UnionIndex> {
+        match (b_left, b_right) {
+            (None, None) => vec![UnionIndex::OnlyA(a)],
+            (None, Some(r)) => next_indices(set_a, set_b, Some(a), Some(r)),
+            (Some(l), None) => next_indices(set_a, set_b, Some(a), Some(l)),
+            (Some(l), Some(r)) => {
+                if to_right(&set_b.table[b].prefix, &set_a.table[a].prefix) {
+                    let mut idxes = next_indices(set_a, set_b, Some(a), Some(r));
+                    idxes.push(UnionIndex::OnlyB(l));
+                    idxes
+                } else {
+                    let mut idxes = next_indices(set_a, set_b, Some(a), Some(l));
+                    idxes.insert(0, UnionIndex::OnlyB(r));
+                    idxes
+                }
+            }
+        }
+    }
+}
+
+pub use intersection::Intersection;
+
+mod intersection {
+    use crate::{to_right, Prefix, PrefixMap};
+
+    #[derive(Clone)]
+    /// an iterator over the intersection of two [`crate::PrefixSet`]s in lexicographic order.
+    pub struct Intersection<'a, P> {
+        pub(super) set_a: &'a PrefixMap<P, ()>,
+        pub(super) set_b: &'a PrefixMap<P, ()>,
+        pub(super) nodes: Vec<IntersectionIndex>,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+    pub(super) enum IntersectionIndex {
+        Both(usize, usize),
+        FirstA(usize, usize),
+        FirstB(usize, usize),
+    }
+
+    impl<'a, P: Prefix> Iterator for Intersection<'a, P> {
+        type Item = &'a P;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            while let Some(cur) = self.nodes.pop() {
+                match cur {
+                    IntersectionIndex::Both(a, b) => {
+                        let node_a = &self.set_a.table[a];
+                        let node_b = &self.set_b.table[b];
+                        self.nodes.extend(next_indices(
+                            self.set_a,
+                            self.set_b,
+                            node_a.right,
+                            node_b.right,
+                        ));
+                        self.nodes.extend(next_indices(
+                            self.set_a,
+                            self.set_b,
+                            node_a.left,
+                            node_b.left,
+                        ));
+                        if node_a.value.is_some() && node_b.value.is_some() {
+                            return Some(&node_a.prefix);
+                        }
+                    }
+                    IntersectionIndex::FirstA(a, b) => {
+                        let node_a = &self.set_a.table[a];
+                        self.nodes.extend(next_indices_first_a(
+                            self.set_a,
+                            self.set_b,
+                            a,
+                            node_a.left,
+                            node_a.right,
+                            b,
+                        ));
+                    }
+                    IntersectionIndex::FirstB(a, b) => {
+                        let node_b = &self.set_b.table[b];
+                        self.nodes.extend(next_indices_first_b(
+                            self.set_a,
+                            self.set_b,
+                            a,
+                            b,
+                            node_b.left,
+                            node_b.right,
+                        ));
+                    }
+                }
+            }
+            None
+        }
+    }
+
+    fn next_indices<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        node_a: Option<usize>,
+        node_b: Option<usize>,
+    ) -> Option<IntersectionIndex> {
+        match (node_a, node_b) {
+            (None, Some(_)) => None,
+            (Some(_), None) => None,
+            (Some(a), Some(b)) => {
+                let p_a = &set_a.table[a].prefix;
+                let p_b = &set_b.table[b].prefix;
+                if p_a.prefix_len() == p_b.prefix_len() {
+                    match p_a.mask().cmp(&p_b.mask()) {
+                        std::cmp::Ordering::Equal => Some(IntersectionIndex::Both(a, b)),
+                        _ => None,
+                    }
+                } else if p_a.contains(p_b) {
+                    Some(IntersectionIndex::FirstA(a, b))
+                } else if p_b.contains(p_a) {
+                    Some(IntersectionIndex::FirstB(a, b))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn next_indices_first_a<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        a: usize,
+        a_left: Option<usize>,
+        a_right: Option<usize>,
+        b: usize,
+    ) -> Option<IntersectionIndex> {
+        match (a_left, a_right) {
+            (None, None) => None,
+            (None, Some(r)) => next_indices(set_a, set_b, Some(r), Some(b)),
+            (Some(l), None) => next_indices(set_a, set_b, Some(l), Some(b)),
+            (Some(l), Some(r)) => {
+                if to_right(&set_a.table[a].prefix, &set_b.table[b].prefix) {
+                    next_indices(set_a, set_b, Some(r), Some(b))
+                } else {
+                    next_indices(set_a, set_b, Some(l), Some(b))
+                }
+            }
+        }
+    }
+
+    fn next_indices_first_b<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        a: usize,
+        b: usize,
+        b_left: Option<usize>,
+        b_right: Option<usize>,
+    ) -> Option<IntersectionIndex> {
+        match (b_left, b_right) {
+            (None, None) => None,
+            (None, Some(r)) => next_indices(set_a, set_b, Some(a), Some(r)),
+            (Some(l), None) => next_indices(set_a, set_b, Some(a), Some(l)),
+            (Some(l), Some(r)) => {
+                if to_right(&set_b.table[b].prefix, &set_a.table[a].prefix) {
+                    next_indices(set_a, set_b, Some(a), Some(r))
+                } else {
+                    next_indices(set_a, set_b, Some(a), Some(l))
+                }
+            }
+        }
+    }
+}
+
+pub use difference::Difference;
+
+mod difference {
+    use crate::{to_right, Prefix, PrefixMap};
+
+    #[derive(Clone)]
+    /// an iterator over the difference of two [`crate::PrefixSet`]s in lexicographic order.
+    pub struct Difference<'a, P> {
+        pub(super) set_a: &'a PrefixMap<P, ()>,
+        pub(super) set_b: &'a PrefixMap<P, ()>,
+        pub(super) nodes: Vec<DifferenceIndex>,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+    pub(super) enum DifferenceIndex {
+        Both(usize, usize),
+        FirstA(usize, usize),
+        FirstB(usize, usize),
+        OnlyA(usize),
+    }
+
+    impl<'a, P: Prefix> Iterator for Difference<'a, P> {
+        type Item = &'a P;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            while let Some(cur) = self.nodes.pop() {
+                match cur {
+                    DifferenceIndex::Both(a, b) => {
+                        let node_a = &self.set_a.table[a];
+                        let node_b = &self.set_b.table[b];
+                        self.nodes.extend(next_indices(
+                            self.set_a,
+                            self.set_b,
+                            node_a.right,
+                            node_b.right,
+                        ));
+                        self.nodes.extend(next_indices(
+                            self.set_a,
+                            self.set_b,
+                            node_a.left,
+                            node_b.left,
+                        ));
+                        if node_a.value.is_some() && node_b.value.is_none() {
+                            return Some(&node_a.prefix);
+                        }
+                    }
+                    DifferenceIndex::FirstA(a, b) => {
+                        let node_a = &self.set_a.table[a];
+                        self.nodes.extend(next_indices_first_a(
+                            self.set_a,
+                            self.set_b,
+                            a,
+                            node_a.left,
+                            node_a.right,
+                            b,
+                        ));
+                        if node_a.value.is_some() {
+                            return Some(&node_a.prefix);
+                        }
+                    }
+                    DifferenceIndex::FirstB(a, b) => {
+                        let node_b = &self.set_b.table[b];
+                        self.nodes.extend(next_indices_first_b(
+                            self.set_a,
+                            self.set_b,
+                            a,
+                            b,
+                            node_b.left,
+                            node_b.right,
+                        ));
+                    }
+                    DifferenceIndex::OnlyA(a) => {
+                        let node_a = &self.set_a.table[a];
+                        if let Some(right) = node_a.right {
+                            self.nodes.push(DifferenceIndex::OnlyA(right));
+                        }
+                        if let Some(left) = node_a.left {
+                            self.nodes.push(DifferenceIndex::OnlyA(left));
+                        }
+                        if node_a.value.is_some() {
+                            return Some(&node_a.prefix);
+                        }
+                    }
+                }
+            }
+            None
+        }
+    }
+
+    fn next_indices<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        node_a: Option<usize>,
+        node_b: Option<usize>,
+    ) -> Vec<DifferenceIndex> {
+        match (node_a, node_b) {
+            (None, Some(_)) => vec![],
+            (Some(a), None) => vec![DifferenceIndex::OnlyA(a)],
+            (Some(a), Some(b)) => {
+                let p_a = &set_a.table[a].prefix;
+                let p_b = &set_b.table[b].prefix;
+                if p_a.prefix_len() == p_b.prefix_len() {
+                    match p_a.mask().cmp(&p_b.mask()) {
+                        std::cmp::Ordering::Equal => {
+                            vec![DifferenceIndex::Both(a, b)]
+                        }
+                        _ => {
+                            vec![DifferenceIndex::OnlyA(a)]
+                        }
+                    }
+                } else if p_a.contains(p_b) {
+                    vec![DifferenceIndex::FirstA(a, b)]
+                } else if p_b.contains(p_a) {
+                    vec![DifferenceIndex::FirstB(a, b)]
+                } else {
+                    vec![DifferenceIndex::OnlyA(a)]
+                }
+            }
+            _ => vec![],
+        }
+    }
+
+    fn next_indices_first_a<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        a: usize,
+        a_left: Option<usize>,
+        a_right: Option<usize>,
+        b: usize,
+    ) -> Vec<DifferenceIndex> {
+        match (a_left, a_right) {
+            (None, None) => vec![],
+            (None, Some(r)) => next_indices(set_a, set_b, Some(r), Some(b)),
+            (Some(l), None) => next_indices(set_a, set_b, Some(l), Some(b)),
+            (Some(l), Some(r)) => {
+                if to_right(&set_a.table[a].prefix, &set_b.table[b].prefix) {
+                    let mut idxes = next_indices(set_a, set_b, Some(r), Some(b));
+                    idxes.push(DifferenceIndex::OnlyA(l));
+                    idxes
+                } else {
+                    let mut idxes = next_indices(set_a, set_b, Some(l), Some(b));
+                    idxes.insert(0, DifferenceIndex::OnlyA(r));
+                    idxes
+                }
+            }
+        }
+    }
+
+    fn next_indices_first_b<'a, P: Prefix>(
+        set_a: &'a PrefixMap<P, ()>,
+        set_b: &'a PrefixMap<P, ()>,
+        a: usize,
+        b: usize,
+        b_left: Option<usize>,
+        b_right: Option<usize>,
+    ) -> Vec<DifferenceIndex> {
+        match (b_left, b_right) {
+            (None, None) => vec![DifferenceIndex::OnlyA(a)],
+            (None, Some(r)) => next_indices(set_a, set_b, Some(a), Some(r)),
+            (Some(l), None) => next_indices(set_a, set_b, Some(a), Some(l)),
+            (Some(l), Some(r)) => {
+                if to_right(&set_b.table[b].prefix, &set_a.table[a].prefix) {
+                    next_indices(set_a, set_b, Some(a), Some(r))
+                } else {
+                    next_indices(set_a, set_b, Some(a), Some(l))
+                }
+            }
+        }
+    }
+}
+
+impl<P: Prefix> FromIterator<P> for PrefixSet<P> {
+    fn from_iter<I: IntoIterator<Item = P>>(iter: I) -> Self {
+        let mut set = Self::new();
+        for p in iter {
+            set.insert(p);
+        }
+        set
+    }
+}

@@ -9,13 +9,14 @@ use crate::cri::cri_api::{
 use crate::rootpath;
 use anyhow::{Result, anyhow};
 use common::{ContainerRes, ContainerSpec, PodTask};
+use json::JsonValue;
+use libcni::rust_cni::cni::Libcni;
 use libcontainer::oci_spec::runtime::{
     Capability, LinuxBuilder, LinuxCapabilities, LinuxCpuBuilder, LinuxMemoryBuilder,
     LinuxNamespaceBuilder, LinuxNamespaceType, LinuxResources, LinuxResourcesBuilder,
     ProcessBuilder, Spec,
 };
 use liboci_cli::{Create, Delete, Kill, Start};
-use rust_cni::cni::Libcni;
 use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
@@ -167,7 +168,7 @@ impl TaskRunner {
             .pid
             .ok_or_else(|| anyhow!("PID not found for container {}", sandbox_id))?;
 
-        Self::setup_pod_network(pid_i32).map_err(|e| {
+        let _ = Self::setup_pod_network(pid_i32).map_err(|e| {
             let rollback_res = delete(
                 Delete {
                     container_id: sandbox_id.clone(),
@@ -191,17 +192,18 @@ impl TaskRunner {
         Ok(response)
     }
 
-    pub fn setup_pod_network(pid: i32) -> Result<(), anyhow::Error> {
+    pub fn setup_pod_network(pid: i32) -> Result<JsonValue, anyhow::Error> {
         let mut cni = get_cni()?;
         cni.load_default_conf();
 
         let netns_path = format!("/proc/{pid}/ns/net");
         let id = pid.to_string();
 
-        cni.setup(id.clone(), netns_path.clone())
+        let result = cni
+            .setup(id.clone(), netns_path.clone())
             .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))?;
 
-        Ok(())
+        Ok(result)
     }
 
     pub fn build_create_container_request(
