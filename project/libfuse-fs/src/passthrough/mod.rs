@@ -463,8 +463,10 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             Err(_) => 65536,
         };
 
+        let max_mmap_size = if cfg.use_mmap { cfg.max_mmap_size } else { 0 };
+
         let mmap_cache_builder = Cache::builder()
-            .max_capacity(cfg.max_mmap_size)
+            .max_capacity(max_mmap_size)
             .weigher(
                 |_key: &MmapChunkKey, value: &Arc<RwLock<mmap::MmapCachedValue>>| -> u32 {
                     let guard = block_on(value.read());

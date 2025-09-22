@@ -843,16 +843,21 @@ impl Filesystem for PassthroughFs {
         let mut buf = vec![0; size as usize];
         let file = &data.file;
 
-        match self
-            .read_from_mmap(inode, offset, size as u64, file, buf.as_mut_slice())
-            .await
-        {
-            Ok(bytes_read) => {
+        let res = if self.cfg.use_mmap {
+            self.read_from_mmap(inode, offset, size as u64, file, buf.as_mut_slice())
+                .await
+                .ok()
+        } else {
+            None
+        };
+
+        match res {
+            Some(bytes_read) => {
                 if bytes_read < size as usize {
                     buf.truncate(bytes_read); // Adjust the buffer size for EOF
                 }
             }
-            Err(_) => {
+            None => {
                 let ret = unsafe {
                     pread(
                         raw_fd as c_int,
@@ -903,9 +908,15 @@ impl Filesystem for PassthroughFs {
             handle_data.borrow_fd().as_raw_fd()
         };
 
-        let ret = match self.write_to_mmap(inode, offset, data, file).await {
-            Ok(ret) => ret as isize,
-            Err(_) => {
+        let res = if self.cfg.use_mmap {
+            self.write_to_mmap(inode, offset, data, file).await.ok()
+        } else {
+            None
+        };
+
+        let ret = match res {
+            Some(ret) => ret as isize,
+            None => {
                 let size = data.len();
 
                 self.check_fd_flags(&handle_data, raw_fd, flags).await?;
