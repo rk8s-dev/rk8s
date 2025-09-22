@@ -237,27 +237,27 @@ addr: "127.0.0.1:50051"
 
 xline_config:
 
-	endpoints:
+  endpoints:
 
-		- "http://172.20.0.3:2379"
+    - "http://172.20.0.3:2379"
 
-		- "http://172.20.0.4:2379"
+    - "http://172.20.0.4:2379"
 
-		- "http://172.20.0.5:2379"
+    - "http://172.20.0.5:2379"
 
-	prefix: "/coreos.com/network"
+  prefix: "/coreos.com/network"
 
-	subnet_lease_renew_margin: 60
+  subnet_lease_renew_margin: 60
 
 network_config:
 
-	Network: "10.1.0.0/16"
+  Network: "10.1.0.0/16"
 
-	SubnetMin: "10.1.1.0"
+  SubnetMin: "10.1.1.0"
 
-	SubnetMax: "10.1.254.0"
+  SubnetMax: "10.1.254.0"
 
-	SubnetLen: 24
+  SubnetLen: 24
 ```
 ## Key Features
 
