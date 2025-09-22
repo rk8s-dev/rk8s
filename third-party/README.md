@@ -1,19 +1,33 @@
-# Import Cargo packages with Reindeer
+# Third-party Dependency Management
 
-## Install Reindeer
+Buckal (a.k.a. `cargo-buckal`) is a Cargo plugin that enables seamless migration of Cargo packages to the Buck2 build system. It automatically resolves Cargo dependencies and generates BUCK files, allowing developers to use Buck2 as effortlessly as they would use `cargo`, with minimal manual configuration required.
 
-Reindeer builds with Cargo in the normal way. It has no unusual build-time dependencies. Therefore, you can use Cargo to not only build Reindeer, but to install it as well.
+## Install Buckal
 
+The rk8s project leverages Buckal for managing third-party dependencies and generating Buck2 build configurations. Install the Buckal plugin using the following command:
+
+```bash
+cargo install --git https://github.com/buck2hub/cargo-buckal.git
 ```
-cargo install --locked --git https://github.com/facebookincubator/reindeer reindeer
-```
+
+NOTE: Buckal requires Buck2 and Python 3. Please ensure both are installed on your system before proceeding.
 
 ## Manage dependencies
 
-You're working away on your code, and you suddenly need to use some third-party crates. You might want to follow the workflow below.
+You're working away on your code, and you suddenly need to use some third-party crates. With Buckal, you can keep using the familiar Cargo workflow. Simply prepend `buckal` to your usual command, and stay right in your project directory.
 
-1. Add the specification to `[dependencies]` in `third-party/Cargo.toml`, as you would if this were a Cargo project. You can use all the usual options, such as adding features, defining a local name, and so on.
-2. Run `reindeer --third-party-dir third-party vendor`. This will resolve the new dependencies (creating or updating `Cargo.lock`), vendor all the new code in the `third-party/vendor` directory (also deleting unused code).
-3. Run `reindeer --third-party-dir third-party buckify`. This will analyze the Cargo dependencies and (re)generate the BUCK file accordingly. If this succeeds silently then there's a good chance that nothing more is needed.
-4. Do a test build with `buck2 build //third-party:new-package#check` to make sure it is basically buildable.
+To add a dependency, run:
 
+```bash
+cargo buckal add <DEP>[@<VERSION>] [--features <FEATURES>]
+```
+
+This command adds the specified crate to your `Cargo.toml` and automatically generates or updates the corresponding BUCK build rules for Buck2.
+
+If you prefer editing `Cargo.toml` manually, just make your changes as usual and then synchronize them to Buck2 by running:
+
+```bash
+cargo buckal migrate
+```
+
+This parses your dependencies and updates only the BUCK files that need to change, keeping your build configuration in sync with your Cargo manifest — automatically and without manual effort.

@@ -3,6 +3,7 @@
 /registry
 /git
 .package-cache
+Cargo.lock
 
 # Various cruft in vendored packages
 /vendor
