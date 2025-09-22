@@ -1,6 +1,6 @@
 use common::{
     ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec, NodeStatus,
-    ObjectMeta, PodSpec, PodTask, Resource,
+    ObjectMeta, PodSpec, PodStatus, PodTask, Resource,
 };
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use serial_test::serial;
@@ -74,8 +74,8 @@ fn create_test_node(name: &str, cpu: &str, memory: &str) -> Node {
                 },
             ],
             conditions: vec![NodeCondition {
-                condition_type: "Ready".to_string(),
-                status: "True".to_string(),
+                condition_type: common::NodeConditionType::Ready,
+                status: common::ConditionStatus::True,
                 last_heartbeat_time: None,
             }],
         },
@@ -114,6 +114,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             }],
             init_containers: vec![],
         },
+        status: PodStatus { pod_ip: None },
     }
 }
 
@@ -147,14 +148,14 @@ async fn cleanup() -> Result<()> {
     let store = store.unwrap();
 
     // Clean up all pods and nodes
-    let pod_names = store.list_pods().await?;
+    let pod_names = store.list_pod_names().await?;
     for pod_name in pod_names {
         if pod_name.contains("scheduler-test") {
             store.delete_pod(&pod_name).await?;
         }
     }
 
-    let node_names = store.list_nodes().await?;
+    let node_names = store.list_node_names().await?;
     for node_name in node_names {
         if node_name.contains("scheduler-test") {
             store.delete_node(&node_name).await?;

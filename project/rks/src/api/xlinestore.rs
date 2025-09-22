@@ -1,9 +1,9 @@
+use crate::protocol::config::NetworkConfig;
 use anyhow::Result;
+use common::*;
 use etcd_client::{Client, GetOptions, PutOptions, WatchOptions, WatchStream, Watcher};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-use crate::protocol::config::NetworkConfig;
 
 /// XlineStore provides an etcd-like API for managing pods and nodes.
 /// Keys are stored under `/registry/pods/` and `/registry/nodes/`.
@@ -30,7 +30,7 @@ impl XlineStore {
     }
 
     /// List all pod names (keys only, values are ignored).
-    pub async fn list_pods(&self) -> Result<Vec<String>> {
+    pub async fn list_pod_names(&self) -> Result<Vec<String>> {
         let key = "/registry/pods/".to_string();
         let mut client = self.client.write().await;
         let resp = client
@@ -47,7 +47,7 @@ impl XlineStore {
     }
 
     /// List all node names (keys only, values are ignored).
-    pub async fn list_nodes(&self) -> Result<Vec<String>> {
+    pub async fn list_node_names(&self) -> Result<Vec<String>> {
         let key = "/registry/nodes/".to_string();
         let mut client = self.client.write().await;
         let resp = client
@@ -63,6 +63,50 @@ impl XlineStore {
             .collect())
     }
 
+    pub async fn list_nodes(&self) -> Result<Vec<Node>> {
+        let key = "/registry/nodes/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+
+        let nodes: Vec<Node> = resp
+            .kvs()
+            .iter()
+            .filter_map(|kv| {
+                let yaml_str = String::from_utf8_lossy(kv.value());
+                match serde_yaml::from_str::<Node>(&yaml_str) {
+                    Ok(node) => Some(node),
+                    Err(_e) => None,
+                }
+            })
+            .collect();
+
+        Ok(nodes)
+    }
+
+    pub async fn list_pods(&self) -> Result<Vec<PodTask>> {
+        let key = "/registry/pods/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+
+        let pods: Vec<PodTask> = resp
+            .kvs()
+            .iter()
+            .filter_map(|kv| {
+                let yaml_str = String::from_utf8_lossy(kv.value());
+                match serde_yaml::from_str::<PodTask>(&yaml_str) {
+                    Ok(pod) => Some(pod),
+                    Err(_e) => None,
+                }
+            })
+            .collect();
+
+        Ok(pods)
+    }
+
     /// Insert a node YAML definition into xline.
     pub async fn insert_node_yaml(&self, node_name: &str, node_yaml: &str) -> Result<()> {
         let key = format!("/registry/nodes/{node_name}");
@@ -72,21 +116,24 @@ impl XlineStore {
     }
 
     // Example (currently unused):
-    // pub async fn get_node_yaml(&self, node_name: &str) -> Result<Option<String>> {
-    //     let key = format!("/registry/nodes/{node_name}");
-    //     let mut client = self.client.write().await;
-    //     let resp = client.get(key, None).await?;
-    //     Ok(resp.kvs().first().map(|kv| String::from_utf8_lossy(kv.value()).to_string()))
-    // }
+    pub async fn get_node_yaml(&self, node_name: &str) -> Result<Option<String>> {
+        let key = format!("/registry/nodes/{node_name}");
+        let mut client = self.client.write().await;
+        let resp = client.get(key, None).await?;
+        Ok(resp
+            .kvs()
+            .first()
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string()))
+    }
 
-    // pub async fn get_node(&self, node_name: &str) -> Result<Option<Node>> {
-    //     if let Some(yaml) = self.get_node_yaml(node_name).await? {
-    //         let node: Node = serde_yaml::from_str(&yaml)?;
-    //         Ok(Some(node))
-    //     } else {
-    //         Ok(None)
-    //     }
-    // }
+    pub async fn get_node(&self, node_name: &str) -> Result<Option<Node>> {
+        if let Some(yaml) = self.get_node_yaml(node_name).await? {
+            let node: Node = serde_yaml::from_str(&yaml)?;
+            Ok(Some(node))
+        } else {
+            Ok(None)
+        }
+    }
 
     /// Insert a pod YAML definition into xline.
     pub async fn insert_pod_yaml(&self, pod_name: &str, pod_yaml: &str) -> Result<()> {

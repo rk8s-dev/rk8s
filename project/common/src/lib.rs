@@ -86,8 +86,14 @@ pub struct PodTask {
     pub kind: String,
     pub metadata: ObjectMeta,
     pub spec: PodSpec,
+    pub status: PodStatus,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PodStatus {
+    #[serde(rename = "podIP")]
+    pub pod_ip: Option<String>,
+}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum RksMessage {
     //request
@@ -98,7 +104,10 @@ pub enum RksMessage {
     GetNodeCount,
     RegisterNode(Box<Node>),
     UserRequest(String),
-    Heartbeat(String),
+    Heartbeat {
+        node_name: String,
+        conditions: Vec<NodeCondition>,
+    },
     SetNetwork(Box<NodeNetworkConfig>),
     UpdateRoutes(String, Vec<Route>),
 
@@ -107,6 +116,8 @@ pub enum RksMessage {
     Error(String),
     NodeCount(usize),
     ListPodRes(Vec<String>),
+    // (Podname, Podip)
+    SetPodip((String, String)),
 }
 
 /// Node spec
@@ -139,10 +150,28 @@ pub struct NodeAddress {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeCondition {
     #[serde(rename = "type")]
-    pub condition_type: String, // e.g., "Ready", "MemoryPressure"
-    pub status: String, // "True" | "False" | "Unknown"
+    pub condition_type: NodeConditionType, // e.g., "Ready", "MemoryPressure"
+    pub status: ConditionStatus, // "True" | "False" | "Unknown"
     #[serde(rename = "lastHeartbeatTime", default)]
     pub last_heartbeat_time: Option<String>, // Last heartbeat timestamp
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "PascalCase")]
+pub enum NodeConditionType {
+    Ready,
+    DiskPressure,
+    MemoryPressure,
+    PIDPressure,
+    NetworkUnavailable,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "PascalCase")]
+pub enum ConditionStatus {
+    True,
+    False,
+    Unknown,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

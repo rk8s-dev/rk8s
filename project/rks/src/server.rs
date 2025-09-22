@@ -4,8 +4,10 @@ use crate::commands::delete::watch_delete;
 use crate::commands::{create, delete};
 use crate::network::{self, backend::route, lease::LeaseWatchResult, manager::LocalManager};
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use common::{
-    NodeNetworkConfig, PodTask, RksMessage,
+    ConditionStatus, Node, NodeCondition, NodeConditionType, NodeNetworkConfig, PodTask,
+    RksMessage,
     lease::{Lease, LeaseAttrs},
 };
 use futures_util::StreamExt;
@@ -17,6 +19,7 @@ use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex, Notify, mpsc};
 
 #[derive(Clone)]
@@ -65,6 +68,13 @@ pub async fn serve(
     info!("QUIC server listening on {addr}");
 
     let node_registry = Arc::new(NodeRegistry::default());
+
+    // Check if lastheartbeattime times out
+    watch_heartbeat(
+        xline_store.clone(),
+        Duration::from_secs(50), // grace
+        Duration::from_secs(10), // interval
+    );
 
     // Channel for receiving lease watch results
     let (lease_tx, mut lease_rx) = mpsc::channel::<Vec<LeaseWatchResult>>(16);
@@ -229,7 +239,7 @@ async fn handle_connection(
                 info!("[server] received raw data: {:?}", &buf[..n]);
                 if let Ok(msg) = bincode::deserialize::<RksMessage>(&buf[..n]) {
                     match msg {
-                        RksMessage::RegisterNode(node) => {
+                        RksMessage::RegisterNode(mut node) => {
                             let id = node.metadata.name.clone();
                             if id.is_empty() {
                                 error!("[server] invalid node: metadata.name is empty");
@@ -238,9 +248,6 @@ async fn handle_connection(
                             is_worker = true;
                             node_id = Some(id.clone());
                             let ip = conn.remote_address().ip().to_string();
-                            let node_yaml = serde_yaml::to_string(&*node)?;
-                            xline_store.insert_node_yaml(&id, &node_yaml).await?;
-                            info!("[server] registered worker node: {id}, ip: {ip}");
 
                             let config = local_manager.get_network_config().await?;
                             info!("[server] get the network config : {config:?}");
@@ -262,6 +269,11 @@ async fn handle_connection(
                             let ipv6_subnet = lease.ipv6_subnet;
 
                             let (msg_tx, mut msg_rx) = mpsc::channel::<RksMessage>(32);
+
+                            node.spec.pod_cidr = subnet.to_string();
+                            let node_yaml = serde_yaml::to_string(&*node)?;
+                            xline_store.insert_node_yaml(&id, &node_yaml).await?;
+                            info!("[server] registered worker node: {id}, ip: {ip}");
 
                             let conn_clone = conn.clone();
                             tokio::spawn(async move {
@@ -363,7 +375,7 @@ async fn handle_connection(
                     Ok(Some(n)) => {
                         if let Ok(msg) = bincode::deserialize::<RksMessage>(&buf[..n]) {
                             if is_worker {
-                                let _ = dispatch_worker(msg.clone(), &conn).await;
+                                let _ = dispatch_worker(msg.clone(), &conn, &xline_store).await;
                             } else {
                                 let _ = dispatch_user(msg.clone(), &xline_store, &conn).await;
                             }
@@ -384,14 +396,21 @@ async fn handle_connection(
 }
 
 /// Dispatch worker-originated messages
-async fn dispatch_worker(msg: RksMessage, conn: &Connection) -> Result<()> {
+async fn dispatch_worker(
+    msg: RksMessage,
+    conn: &Connection,
+    xline_store: &Arc<XlineStore>,
+) -> Result<()> {
     match msg {
-        RksMessage::Heartbeat(node_id) => {
-            info!("[worker dispatch] receive heartbeat from node: {node_id}");
+        RksMessage::Heartbeat {
+            node_name,
+            conditions,
+        } => {
+            handle_heartbeat(xline_store, &node_name, conditions).await?;
             let response = RksMessage::Ack;
-            let data = bincode::serialize(&response)?;
+            let res = bincode::serialize(&response)?;
             if let Ok(mut stream) = conn.open_uni().await {
-                stream.write_all(&data).await?;
+                stream.write_all(&res).await?;
                 stream.finish()?;
             }
         }
@@ -417,7 +436,7 @@ pub async fn dispatch_user(
         }
 
         RksMessage::ListPod => {
-            let pods = xline_store.list_pods().await?;
+            let pods = xline_store.list_pod_names().await?;
             info!("[user dispatch] list current pod: {pods:?}");
             let res = bincode::serialize(&RksMessage::ListPodRes(pods))?;
             if let Ok(mut stream) = conn.open_uni().await {
@@ -505,4 +524,80 @@ pub fn build_node_network_config(
         node_id,
         subnet_env: contents,
     })
+}
+
+async fn handle_heartbeat(
+    xline_store: &Arc<XlineStore>,
+    node_name: &str,
+    conditions: Vec<NodeCondition>,
+) -> Result<()> {
+    if let Some(node_yaml) = xline_store.get_node_yaml(node_name).await? {
+        let mut node: Node = serde_yaml::from_str(&node_yaml)?;
+        node.status.conditions = conditions;
+        let new_yaml = serde_yaml::to_string(&node)?;
+        xline_store.insert_node_yaml(node_name, &new_yaml).await?;
+        info!("[worker dispatch] heartbeat from {node_name}");
+    } else {
+        warn!(
+            "[server] heartbeat received for unknown node: {}",
+            node_name
+        );
+    }
+
+    Ok(())
+}
+
+fn watch_heartbeat(xline_store: Arc<XlineStore>, grace: Duration, interval: Duration) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+
+        loop {
+            ticker.tick().await;
+            if let Ok(node_ids) = xline_store.list_node_names().await {
+                for node_id in node_ids {
+                    if let Some(node_yaml) =
+                        xline_store.get_node_yaml(&node_id).await.unwrap_or(None)
+                    {
+                        if let Ok(mut node) = serde_yaml::from_str::<Node>(&node_yaml) {
+                            if let Some(ready) = node
+                                .status
+                                .conditions
+                                .iter_mut()
+                                .find(|c| matches!(c.condition_type, NodeConditionType::Ready))
+                            {
+                                // If expired is true , it means out of date
+                                let expired =
+                                    ready.last_heartbeat_time.as_ref().map_or(true, |t| {
+                                        DateTime::parse_from_rfc3339(t)
+                                            .map(|dt| {
+                                                Utc::now()
+                                                    .signed_duration_since(dt.with_timezone(&Utc))
+                                                    .to_std()
+                                                    .map(|d| d > grace)
+                                                    .unwrap_or(true)
+                                            })
+                                            .unwrap_or(true)
+                                    });
+                                // Change status only timeout and ready is true
+                                if expired && !matches!(ready.status, ConditionStatus::Unknown) {
+                                    ready.status = ConditionStatus::Unknown;
+                                    ready.last_heartbeat_time = Some(Utc::now().to_rfc3339());
+
+                                    if let Ok(new_yaml) = serde_yaml::to_string(&node) {
+                                        if let Err(e) =
+                                            xline_store.insert_node_yaml(&node_id, &new_yaml).await
+                                        {
+                                            error!("failed to update {node_id}: {e:?}");
+                                        } else {
+                                            warn!("Node {node_id} marked Ready=Unknown (timeout)");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 }

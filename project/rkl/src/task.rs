@@ -122,7 +122,7 @@ impl TaskRunner {
     pub fn run_pod_sandbox(
         &mut self,
         request: RunPodSandboxRequest,
-    ) -> Result<RunPodSandboxResponse, anyhow::Error> {
+    ) -> Result<(RunPodSandboxResponse, String), anyhow::Error> {
         let config = request.config.unwrap_or_default();
         let sandbox_id = config.metadata.unwrap_or_default().name.to_string();
 
@@ -168,7 +168,7 @@ impl TaskRunner {
             .pid
             .ok_or_else(|| anyhow!("PID not found for container {}", sandbox_id))?;
 
-        let _ = Self::setup_pod_network(pid_i32).map_err(|e| {
+        let pod_json = Self::setup_pod_network(pid_i32).map_err(|e| {
             let rollback_res = delete(
                 Delete {
                     container_id: sandbox_id.clone(),
@@ -183,13 +183,15 @@ impl TaskRunner {
             }
         })?;
 
+        let podip = pod_json["ips"][0]["address"].as_str().unwrap().to_string();
+
         self.pause_pid = Some(pid_i32);
 
         let response = RunPodSandboxResponse {
             pod_sandbox_id: sandbox_id,
         };
 
-        Ok(response)
+        Ok((response, podip))
     }
 
     pub fn setup_pod_network(pid: i32) -> Result<JsonValue, anyhow::Error> {
@@ -443,7 +445,7 @@ impl TaskRunner {
         Ok(RemovePodSandboxResponse {})
     }
 
-    pub fn run(&mut self) -> Result<String, anyhow::Error> {
+    pub fn run(&mut self) -> Result<(String, String), anyhow::Error> {
         // run PodSandbox（Pause container）
         let pod_request = self.build_run_pod_sandbox_request();
         let config = pod_request
@@ -451,7 +453,7 @@ impl TaskRunner {
             .as_ref()
             .ok_or_else(|| anyhow!("PodSandbox config is required"))?;
         self.sandbox_config = Some(config.clone());
-        let pod_response = self
+        let (pod_response, podip) = self
             .run_pod_sandbox(pod_request)
             .map_err(|e| anyhow!("Failed to run PodSandbox: {}", e))?;
         let pod_sandbox_id = pod_response.pod_sandbox_id;
@@ -592,7 +594,7 @@ impl TaskRunner {
             }
         }
 
-        Ok(pod_sandbox_id)
+        Ok((pod_sandbox_id, podip))
     }
 }
 

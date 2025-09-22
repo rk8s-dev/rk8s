@@ -6,7 +6,7 @@ use tokio::time::timeout;
 
 use common::{
     ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec as XlineNodeSpec,
-    NodeStatus, ObjectMeta, PodSpec as XlinePodSpec, PodTask, Resource,
+    NodeStatus, ObjectMeta, PodSpec as XlinePodSpec, PodStatus, PodTask, Resource,
 };
 use etcd_client::{Client, DeleteOptions};
 use libscheduler::plugins::Plugins;
@@ -97,8 +97,8 @@ fn create_test_node(name: &str, cpu: &str, memory: &str) -> Node {
                 },
             ],
             conditions: vec![NodeCondition {
-                condition_type: "Ready".to_string(),
-                status: "True".to_string(),
+                condition_type: common::NodeConditionType::Ready,
+                status: common::ConditionStatus::True,
                 last_heartbeat_time: None,
             }],
         },
@@ -137,6 +137,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             }],
             init_containers: vec![],
         },
+        status: PodStatus { pod_ip: None },
     }
 }
 

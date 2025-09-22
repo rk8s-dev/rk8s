@@ -1,6 +1,6 @@
 use anyhow::{Ok, Result};
 //use rkl::task::{ContainerSpec, ObjectMeta, PodSpec, PodTask, Port};
-use common::{ContainerSpec, ObjectMeta, PodSpec, PodTask, Port};
+use common::{ContainerSpec, ObjectMeta, PodSpec, PodStatus, PodTask, Port};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -51,6 +51,7 @@ where
             }],
             init_containers: vec![],
         },
+        status: PodStatus { pod_ip: None },
     }
 }
 

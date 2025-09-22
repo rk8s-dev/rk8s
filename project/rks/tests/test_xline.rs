@@ -51,7 +51,7 @@ async fn test_xline_rw() {
     assert_eq!(fetched.as_deref(), Some(pod_yaml.as_str()));
 
     // List pods and check presence
-    let pods = store.list_pods().await.expect("List pods failed");
+    let pods = store.list_pod_names().await.expect("List pods failed");
     assert!(pods.contains(&pod_name));
 
     // Clean up

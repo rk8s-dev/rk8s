@@ -1,3 +1,4 @@
+
 # rk8s - A Lite Version of Kubernetes in Rust
 
 rk8s is a lightweight, Kubernetes-compatible container orchestration system built on top of [Youki](https://github.com/youki-dev/youki), implementing the Container Runtime Interface (CRI) with support for three primary workload types: single containers, Kubernetes-style pods, and Docker Compose-style multi-container applications.
@@ -67,6 +68,7 @@ spec:
         limits:
           cpu: "500m"
           memory: "512Mi"
+status:
 ```
 
 ### 3. Docker Compose-Style Applications
@@ -163,6 +165,7 @@ rk8s/
 ```bash
 cd rk8s/project/
 cargo build -p rkl
+cargo build -p rks
 ```
 
 2. **Set up networking:**
@@ -177,7 +180,14 @@ sudo mv target/debug/libbridge /opt/cni/bin/
 mkdir -p rootfs
 docker export $(docker create busybox) | tar -C rootfs -xvf -
 ```
-
+4. **Start Xline:**
+```bash
+git clone https://github.com/xline-kv/Xline.git
+cd Xline
+docker pull ghcr.io/xline-kv/xline:latest
+cp fixtures/{private,public}.pem scripts/
+./scripts/quick_start.sh
+```
 ### Usage Examples
 
 **Single Container:**
@@ -217,7 +227,38 @@ sudo rkl compose down
 export RKL_ADDRESS=127.0.0.1:50051
 sudo rkl pod daemon  # Monitors /etc/rk8s/manifests/ and acts as work node of rks
 ```
+**Start RKS:**
+```bash
+sudo rks start --config config.yaml
+```
+Example config.yaml:
+```yaml
+addr: "127.0.0.1:50051"
 
+xline_config:
+
+	endpoints:
+
+		- "http://172.20.0.3:2379"
+
+		- "http://172.20.0.4:2379"
+
+		- "http://172.20.0.5:2379"
+
+	prefix: "/coreos.com/network"
+
+	subnet_lease_renew_margin: 60
+
+network_config:
+
+	Network: "10.1.0.0/16"
+
+	SubnetMin: "10.1.1.0"
+
+	SubnetMax: "10.1.254.0"
+
+	SubnetLen: 24
+```
 ## Key Features
 
 - **CRI Compliance** - Full Container Runtime Interface implementation

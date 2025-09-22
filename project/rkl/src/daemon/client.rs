@@ -23,7 +23,7 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig as RustlsClientConfig, RootCertStore, SignatureScheme};
 use std::collections::HashMap;
 
-use sysinfo::System;
+use sysinfo::{Disks, System};
 
 fn get_subnet_file_path() -> String {
     if let Ok(path) = env::var("SUBNET_FILE_PATH") {
@@ -225,7 +225,18 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
     tokio::spawn(async move {
         loop {
             time::sleep(Duration::from_secs(5)).await;
-            let hb = RksMessage::Heartbeat(node_name.clone());
+            let conditions = vec![
+                ready_condition(),
+                memory_condition(0.9),
+                disk_condition(0.9),
+                pid_condition(0.9),
+                network_condition(),
+            ];
+
+            let hb = RksMessage::Heartbeat {
+                node_name: node_name.clone(),
+                conditions,
+            };
             if let Err(e) = send_uni(&hb_conn, &hb).await {
                 eprintln!("[worker heartbeat] send failed: {e}");
             } else {
@@ -325,8 +336,12 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
                             };
 
                             match pod::run_pod_from_taskrunner(runner) {
-                                Ok(_) => {
-                                    let _ = send_uni(&connection, &RksMessage::Ack).await;
+                                Ok(podip) => {
+                                    let _ = send_uni(
+                                        &connection,
+                                        &RksMessage::SetPodip((pod.metadata.name.clone(), podip)),
+                                    )
+                                    .await;
                                 }
                                 Err(e) => {
                                     eprintln!("[worker] run_pod_from_taskrunner failed: {e:?}");
@@ -488,18 +503,11 @@ pub async fn generate_node(ext_iface: &ExternalInterface) -> Result<Node> {
 
     // conditions
     let now = Utc::now().to_rfc3339();
-    let conditions = vec![
-        NodeCondition {
-            condition_type: "Ready".to_string(),
-            status: "True".to_string(),
-            last_heartbeat_time: Some(now.clone()),
-        },
-        NodeCondition {
-            condition_type: "MemoryPressure".to_string(),
-            status: "False".to_string(),
-            last_heartbeat_time: Some(now),
-        },
-    ];
+    let conditions = vec![NodeCondition {
+        condition_type: NodeConditionType::Ready,
+        status: ConditionStatus::True,
+        last_heartbeat_time: Some(now.clone()),
+    }];
 
     Ok(Node {
         api_version: "v1".to_string(),
@@ -511,7 +519,7 @@ pub async fn generate_node(ext_iface: &ExternalInterface) -> Result<Node> {
             annotations: HashMap::new(),
         },
         spec: NodeSpec {
-            pod_cidr: "10.244.1.0/24".to_string(),
+            pod_cidr: "0".to_string(),
         },
         status: NodeStatus {
             capacity,
@@ -520,4 +528,102 @@ pub async fn generate_node(ext_iface: &ExternalInterface) -> Result<Node> {
             conditions,
         },
     })
+}
+
+fn ready_condition() -> NodeCondition {
+    NodeCondition {
+        condition_type: NodeConditionType::Ready,
+        status: ConditionStatus::True,
+        last_heartbeat_time: Some(Utc::now().to_rfc3339()),
+    }
+}
+fn memory_condition(threshold: f64) -> NodeCondition {
+    let mut sys = System::new_all();
+    sys.refresh_memory();
+
+    let total_mem = sys.total_memory();
+    let avail_mem = sys.available_memory();
+    let used_ratio = if total_mem > 0 {
+        (total_mem - avail_mem) as f64 / total_mem as f64
+    } else {
+        0.0
+    };
+
+    let status = if used_ratio > threshold {
+        ConditionStatus::True
+    } else {
+        ConditionStatus::False
+    };
+
+    NodeCondition {
+        condition_type: NodeConditionType::MemoryPressure,
+        status,
+        last_heartbeat_time: Some(Utc::now().to_rfc3339()),
+    }
+}
+
+fn disk_condition(threshold: f64) -> NodeCondition {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    let mut pressure = false;
+    let disks = Disks::new_with_refreshed_list();
+    for disk in disks.list() {
+        let total = disk.total_space();
+        let avail = disk.available_space();
+
+        if total > 0 {
+            let used_ratio = 1.0 - (avail as f64 / total as f64);
+            if used_ratio > threshold {
+                pressure = true;
+                break;
+            }
+        }
+    }
+
+    let status = if pressure {
+        ConditionStatus::True
+    } else {
+        ConditionStatus::False
+    };
+
+    NodeCondition {
+        condition_type: NodeConditionType::DiskPressure,
+        status,
+        last_heartbeat_time: Some(Utc::now().to_rfc3339()),
+    }
+}
+fn pid_condition(threshold: f64) -> NodeCondition {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    let process_count = sys.processes().len();
+    let pid_max = get_pid_max().unwrap_or(32768);
+
+    let status = if (process_count as f64) / (pid_max as f64) > threshold {
+        ConditionStatus::True
+    } else {
+        ConditionStatus::False
+    };
+
+    NodeCondition {
+        condition_type: NodeConditionType::PIDPressure,
+        status,
+        last_heartbeat_time: Some(Utc::now().to_rfc3339()),
+    }
+}
+
+fn get_pid_max() -> Option<usize> {
+    fs::read_to_string("/proc/sys/kernel/pid_max")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+}
+
+pub fn network_condition() -> NodeCondition {
+    let status = ConditionStatus::False;
+    NodeCondition {
+        condition_type: NodeConditionType::NetworkUnavailable,
+        status,
+        last_heartbeat_time: Some(Utc::now().to_rfc3339()),
+    }
 }

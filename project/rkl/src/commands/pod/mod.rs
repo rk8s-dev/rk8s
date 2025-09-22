@@ -144,9 +144,9 @@ impl PodInfo {
     }
 }
 
-pub fn run_pod_from_taskrunner(mut task_runner: TaskRunner) -> Result<(), anyhow::Error> {
+pub fn run_pod_from_taskrunner(mut task_runner: TaskRunner) -> Result<String, anyhow::Error> {
     let pod_name = task_runner.task.metadata.name.clone();
-    let pod_sandbox_id = task_runner.run()?;
+    let (pod_sandbox_id, podip) = task_runner.run()?;
     info!("PodSandbox ID: {}", pod_sandbox_id);
 
     let container_names: Vec<String> = task_runner
@@ -165,10 +165,10 @@ pub fn run_pod_from_taskrunner(mut task_runner: TaskRunner) -> Result<(), anyhow
     pod_info.save(&root_path, &pod_name)?;
 
     info!("Pod {} created and started successfully", pod_name);
-    Ok(())
+    Ok(podip)
 }
 
-pub fn run_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
+pub fn run_pod(pod_yaml: &str) -> Result<String, anyhow::Error> {
     let task_runner = TaskRunner::from_file(pod_yaml)?;
     run_pod_from_taskrunner(task_runner)
 }
@@ -204,7 +204,10 @@ pub fn start_daemon() -> Result<(), anyhow::Error> {
 
 pub fn pod_execute(cmd: PodCommand) -> Result<()> {
     match cmd {
-        PodCommand::Run { pod_yaml } => run_pod(&pod_yaml),
+        PodCommand::Run { pod_yaml } => {
+            let _ = run_pod(&pod_yaml);
+            Ok(())
+        }
         PodCommand::Create { pod_yaml, cluster } => pod_create(&pod_yaml, cluster),
         PodCommand::Start { pod_name } => start_pod(&pod_name),
         PodCommand::Delete { pod_name, cluster } => pod_delete(&pod_name, cluster),
