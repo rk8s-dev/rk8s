@@ -557,41 +557,37 @@ fn watch_heartbeat(xline_store: Arc<XlineStore>, grace: Duration, interval: Dura
                 for node_id in node_ids {
                     if let Some(node_yaml) =
                         xline_store.get_node_yaml(&node_id).await.unwrap_or(None)
+                        && let Ok(mut node) = serde_yaml::from_str::<Node>(&node_yaml)
+                        && let Some(ready) = node
+                            .status
+                            .conditions
+                            .iter_mut()
+                            .find(|c| matches!(c.condition_type, NodeConditionType::Ready))
                     {
-                        if let Ok(mut node) = serde_yaml::from_str::<Node>(&node_yaml) {
-                            if let Some(ready) = node
-                                .status
-                                .conditions
-                                .iter_mut()
-                                .find(|c| matches!(c.condition_type, NodeConditionType::Ready))
-                            {
-                                // If expired is true , it means out of date
-                                let expired =
-                                    ready.last_heartbeat_time.as_ref().map_or(true, |t| {
-                                        DateTime::parse_from_rfc3339(t)
-                                            .map(|dt| {
-                                                Utc::now()
-                                                    .signed_duration_since(dt.with_timezone(&Utc))
-                                                    .to_std()
-                                                    .map(|d| d > grace)
-                                                    .unwrap_or(true)
-                                            })
-                                            .unwrap_or(true)
-                                    });
-                                // Change status only timeout and ready is true
-                                if expired && !matches!(ready.status, ConditionStatus::Unknown) {
-                                    ready.status = ConditionStatus::Unknown;
-                                    ready.last_heartbeat_time = Some(Utc::now().to_rfc3339());
+                        // If expired is true , it means out of date
+                        let expired = ready.last_heartbeat_time.as_ref().is_none_or(|t| {
+                            DateTime::parse_from_rfc3339(t)
+                                .map(|dt| {
+                                    Utc::now()
+                                        .signed_duration_since(dt.with_timezone(&Utc))
+                                        .to_std()
+                                        .map(|d| d > grace)
+                                        .unwrap_or(true)
+                                })
+                                .unwrap_or(true)
+                        });
+                        // Change status only timeout and ready is true
+                        if expired && !matches!(ready.status, ConditionStatus::Unknown) {
+                            ready.status = ConditionStatus::Unknown;
+                            ready.last_heartbeat_time = Some(Utc::now().to_rfc3339());
 
-                                    if let Ok(new_yaml) = serde_yaml::to_string(&node) {
-                                        if let Err(e) =
-                                            xline_store.insert_node_yaml(&node_id, &new_yaml).await
-                                        {
-                                            error!("failed to update {node_id}: {e:?}");
-                                        } else {
-                                            warn!("Node {node_id} marked Ready=Unknown (timeout)");
-                                        }
-                                    }
+                            if let Ok(new_yaml) = serde_yaml::to_string(&node) {
+                                if let Err(e) =
+                                    xline_store.insert_node_yaml(&node_id, &new_yaml).await
+                                {
+                                    error!("failed to update {node_id}: {e:?}");
+                                } else {
+                                    warn!("Node {node_id} marked Ready=Unknown (timeout)");
                                 }
                             }
                         }

@@ -185,9 +185,8 @@ impl TaskRunner {
 
         let podip = pod_json["ips"][0]["address"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("pod has no ip address"))?
+            .unwrap_or("")
             .to_string();
-
         self.pause_pid = Some(pid_i32);
 
         let response = RunPodSandboxResponse {
