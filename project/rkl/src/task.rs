@@ -183,10 +183,8 @@ impl TaskRunner {
             }
         })?;
 
-        let podip = pod_json["ips"]
-            .get(0)
-            .and_then(|ip| ip.get("address"))
-            .and_then(|addr| addr.as_str())
+        let podip = pod_json["ips"][0]["address"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("pod has no ip address"))?
             .to_string();
 
