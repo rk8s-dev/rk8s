@@ -75,10 +75,7 @@ impl XlineStore {
             .iter()
             .filter_map(|kv| {
                 let yaml_str = String::from_utf8_lossy(kv.value());
-                match serde_yaml::from_str::<Node>(&yaml_str) {
-                    Ok(node) => Some(node),
-                    Err(_e) => None,
-                }
+                serde_yaml::from_str::<Node>(&yaml_str).ok()
             })
             .collect();
 
@@ -97,10 +94,7 @@ impl XlineStore {
             .iter()
             .filter_map(|kv| {
                 let yaml_str = String::from_utf8_lossy(kv.value());
-                match serde_yaml::from_str::<PodTask>(&yaml_str) {
-                    Ok(pod) => Some(pod),
-                    Err(_e) => None,
-                }
+                serde_yaml::from_str::<PodTask>(&yaml_str).ok()
             })
             .collect();
 
