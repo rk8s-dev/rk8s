@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::config;
+use crate::config::registry::CONFIG;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MountConfig {
@@ -101,7 +101,7 @@ impl Default for MountConfig {
             upper_dir: PathBuf::default(),
             mountpoint: PathBuf::default(),
             work_dir: PathBuf::default(),
-            overlay: config::CONFIG.build_dir.join("overlay"),
+            overlay: CONFIG.build_dir.join("overlay"),
             upper_cnt: 0,
         }
     }

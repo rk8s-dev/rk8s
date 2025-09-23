@@ -3085,6 +3085,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
+name = "iterator-ext"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62c8d6e4fd801741f57d33b759ea39b0e3e81701f04289519cf34a9d893253cc"
+
+[[package]]
 name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3371,11 +3377,9 @@ dependencies = [
  "bitflags 2.9.4",
  "bytes",
  "clap",
- "env_logger 0.11.8",
  "futures",
  "futures-util",
  "libc",
- "log",
  "memmap2",
  "moka",
  "nix 0.29.0",
@@ -3385,6 +3389,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
  "vm-memory",
  "vmm-sys-util",
@@ -3956,10 +3962,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "oci-distribution"
-version = "0.11.0"
+name = "oci-client"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b95a2c51531af0cb93761f66094044ca6ea879320bccd35ab747ff3fcab3f422"
+checksum = "9b74df13319e08bc386d333d3dc289c774c88cc543cae31f5347db07b5ec2172"
 dependencies = [
  "bytes",
  "chrono",
@@ -3968,13 +3974,14 @@ dependencies = [
  "http-auth",
  "jwt",
  "lazy_static",
+ "oci-spec",
  "olpc-cjson",
  "regex",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.16",
  "tokio",
  "tracing",
  "unicase",
@@ -5033,15 +5040,16 @@ dependencies = [
  "dirs",
  "dockerfile-parser",
  "flate2",
+ "futures",
  "indicatif",
  "ipc-channel",
+ "iterator-ext",
  "libc",
  "libfuse-fs",
  "nix 0.29.0",
- "oci-distribution",
+ "oci-client",
  "oci-spec",
  "once_cell",
- "paste",
  "qrcode",
  "rand 0.9.2",
  "reqwest",

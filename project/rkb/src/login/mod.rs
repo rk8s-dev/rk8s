@@ -1,4 +1,4 @@
-use crate::login::config::LoginConfig;
+use crate::config::auth::AuthConfig;
 use crate::login::oauth::OAuthFlow;
 use crate::login::types::{CallbackResponse, RequestClientIdResponse};
 use crate::rt::block_on;
@@ -7,8 +7,6 @@ use axum::http::HeaderMap;
 use clap::Parser;
 use reqwest::Client;
 use std::sync::OnceLock;
-
-pub mod config;
 
 mod oauth;
 
@@ -37,8 +35,8 @@ pub struct LoginArgs {
 }
 
 pub fn login(args: LoginArgs) -> anyhow::Result<()> {
-    assert_not_sudo("login")?;
-    let config = LoginConfig::load()?;
+    assert_not_sudo()?;
+    let config = AuthConfig::load()?;
 
     let url = match args.url {
         Some(ref url) => url,
@@ -59,7 +57,7 @@ pub fn login(args: LoginArgs) -> anyhow::Result<()> {
             .send_and_json::<CallbackResponse>()
             .await?;
 
-        LoginConfig::login(res.pat, url)?;
+        AuthConfig::login(res.pat, url)?;
         println!("Logged in successfully!");
         Ok(())
     })?

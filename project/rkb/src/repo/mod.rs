@@ -1,6 +1,6 @@
 mod types;
 
-use crate::login::config::{LoginEntry, with_resolved_entry};
+use crate::config::auth::{AuthEntry, with_resolved_entry};
 use crate::repo::types::{ListRepoResponse, Visibility};
 use crate::rt::block_on;
 use crate::utils::cli::assert_not_sudo;
@@ -13,7 +13,7 @@ use serde_json::json;
 
 #[derive(Parser, Debug)]
 pub struct RepoArgs {
-    /// URL of the distribution server (optional if only one entry exists)
+    /// URL of the distribution server (optional if only one server is configured)
     #[arg(long)]
     url: Option<String>,
     #[clap(subcommand)]
@@ -32,7 +32,7 @@ enum RepoSubArgs {
 }
 
 pub fn repo(args: RepoArgs) -> anyhow::Result<()> {
-    assert_not_sudo("repo")?;
+    assert_not_sudo()?;
     block_on(async move {
         with_resolved_entry(args.url, move |entry| {
             Box::pin(async move {
@@ -48,7 +48,7 @@ pub fn repo(args: RepoArgs) -> anyhow::Result<()> {
     })?
 }
 
-async fn handle_repo_list(entry: &LoginEntry) -> anyhow::Result<()> {
+async fn handle_repo_list(entry: &AuthEntry) -> anyhow::Result<()> {
     let client = client_with_authentication(&entry.pat).await?;
     let url = format!("https://{}/api/v1/repo", entry.url);
 
@@ -74,7 +74,7 @@ async fn handle_repo_list(entry: &LoginEntry) -> anyhow::Result<()> {
 }
 
 async fn handle_repo_visibility(
-    entry: &LoginEntry,
+    entry: &AuthEntry,
     name: impl AsRef<str>,
     visibility: Visibility,
 ) -> anyhow::Result<()> {

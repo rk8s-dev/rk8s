@@ -1,19 +1,21 @@
+use crate::config::registry::CONFIG;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 #[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
-pub struct LoginConfig {
-    pub entries: Vec<LoginEntry>,
+pub struct AuthConfig {
+    pub entries: Vec<AuthEntry>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
-pub struct LoginEntry {
+pub struct AuthEntry {
     pub pat: String,
     pub url: String,
 }
 
-impl LoginEntry {
+impl AuthEntry {
     pub fn new(pat: impl Into<String>, url: impl Into<String>) -> Self {
         Self {
             pat: pat.into(),
@@ -22,30 +24,61 @@ impl LoginEntry {
     }
 }
 
-impl LoginConfig {
+impl AuthConfig {
     const APP_NAME: &'static str = "rk8s";
     const CONFIG_NAME: &'static str = "rkb";
 
-    pub fn single_entry(&self) -> anyhow::Result<&LoginEntry> {
+    pub fn current_config_path() -> anyhow::Result<PathBuf> {
+        confy::get_configuration_file_path(Self::APP_NAME, Self::CONFIG_NAME)
+            .with_context(|| "fail to get config file path".to_string())
+    }
+
+    pub fn single_entry(&self) -> anyhow::Result<&AuthEntry> {
         match self.entries.len() {
-            0 => anyhow::bail!("No entries, please log in first."),
+            0 => anyhow::bail!("No entries. Maybe you need to set a url."),
             1 => Ok(self.entries.first().unwrap()),
-            _ => anyhow::bail!("There are many entries, please select a url."),
+            _ => anyhow::bail!("There are many entries. Maybe you need to select a url."),
         }
     }
 
-    pub fn find_entry_by_url(&self, url: &str) -> anyhow::Result<&LoginEntry> {
+    pub fn find_entry_by_url(&self, url: impl AsRef<str>) -> anyhow::Result<&AuthEntry> {
+        let url = url.as_ref();
         self.entries
             .iter()
             .find(|entry| entry.url == url)
             .ok_or_else(|| anyhow::anyhow!("Failed to find entry with url {}", url))
     }
 
+    pub fn resolve_entry(&self, url: Option<impl AsRef<str>>) -> anyhow::Result<&AuthEntry> {
+        let entry = match url {
+            Some(url) => self.find_entry_by_url(url.as_ref())?,
+            None => self.single_entry()?,
+        };
+        Ok(entry)
+    }
+
+    pub fn resolve_url(&self, url: Option<impl AsRef<str>>) -> anyhow::Result<String> {
+        if let Some(url) = url {
+            return Ok(url.as_ref().to_string());
+        }
+        match self.single_entry() {
+            Ok(AuthEntry { url, .. }) => Ok(url.to_string()),
+            Err(_) => Ok(CONFIG.default_registry.to_string()),
+        }
+    }
+
     pub fn with_single_entry<F, R>(&self, f: F) -> anyhow::Result<R>
     where
-        F: FnOnce(&LoginEntry) -> anyhow::Result<R>,
+        F: FnOnce(&AuthEntry) -> anyhow::Result<R>,
     {
         f(self.single_entry()?)
+    }
+
+    pub fn with_resolved_entry<F, R>(&self, url: Option<impl AsRef<str>>, f: F) -> anyhow::Result<R>
+    where
+        F: FnOnce(&AuthEntry) -> anyhow::Result<R>,
+    {
+        f(self.resolve_entry(url)?)
     }
 
     /// Note: if load the config with sudo, it will load from `/root/.config/rk8s/rkb.toml`, which may not be expected.
@@ -59,6 +92,12 @@ impl LoginConfig {
         })
     }
 
+    pub fn load_from(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let path = path.as_ref();
+        confy::load_path(path)
+            .with_context(|| format!("failed to load config file `{}`", path.display()))
+    }
+
     fn store(&self) -> anyhow::Result<()> {
         confy::store(Self::APP_NAME, Self::CONFIG_NAME, self).with_context(|| {
             format!(
@@ -69,11 +108,16 @@ impl LoginConfig {
         })
     }
 
+    pub fn is_anonymous(&self, url: impl AsRef<str>) -> bool {
+        let url = url.as_ref();
+        self.entries.iter().all(|entry| entry.url != url)
+    }
+
     pub fn login(pat: impl Into<String>, url: impl Into<String>) -> anyhow::Result<()> {
         let mut config = Self::load()?;
 
         let url = url.into();
-        let entry = LoginEntry::new(pat, &url);
+        let entry = AuthEntry::new(pat, &url);
         if let Some((idx, _)) = config
             .entries
             .iter()
@@ -97,9 +141,9 @@ impl LoginConfig {
 
 pub async fn with_resolved_entry<F, R>(url: Option<impl AsRef<str>>, f: F) -> anyhow::Result<R>
 where
-    F: for<'a> FnOnce(&'a LoginEntry) -> Pin<Box<dyn Future<Output = anyhow::Result<R>> + 'a>>,
+    F: for<'a> FnOnce(&'a AuthEntry) -> Pin<Box<dyn Future<Output = anyhow::Result<R>> + 'a>>,
 {
-    let config = LoginConfig::load()?;
+    let config = AuthConfig::load()?;
 
     let entry = match url {
         Some(url) => config.find_entry_by_url(url.as_ref())?,

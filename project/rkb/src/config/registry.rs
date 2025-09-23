@@ -10,6 +10,7 @@ pub static DNS_CONFIG: &str = "/etc/resolv.conf";
 static REGISTRY: &str = "47.79.87.161:8968";
 static LAYER_PATH: &str = "/var/lib/rkb/layers";
 static BUILD_PATH: &str = "/var/lib/rkb/build";
+static METADATA_PATH: &str = "/var/lib/rkb/metadata";
 
 pub static BIND_MOUNTS: [&str; 3] = ["/dev", "/proc", "/sys"];
 
@@ -17,6 +18,7 @@ pub static BIND_MOUNTS: [&str; 3] = ["/dev", "/proc", "/sys"];
 pub struct Config {
     pub layers_store_root: PathBuf,
     pub build_dir: PathBuf,
+    pub metadata_dir: PathBuf,
     pub default_registry: String,
     pub is_root: bool,
 }
@@ -39,10 +41,13 @@ impl Config {
         })?;
         fs::create_dir_all(&build_dir)
             .with_context(|| format!("Failed to create build directory at {build_dir:?}"))?;
+        fs::create_dir_all(METADATA_PATH)
+            .with_context(|| format!("Failed to create metadata directory at {METADATA_PATH:?}"))?;
 
         Ok(Self {
             layers_store_root,
             build_dir: build_dir.clone(),
+            metadata_dir: METADATA_PATH.into(),
             default_registry: String::from(REGISTRY),
             is_root,
         })

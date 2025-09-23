@@ -1,4 +1,4 @@
-use crate::login::config::LoginConfig;
+use crate::config::auth::AuthConfig;
 use crate::utils::cli::assert_not_sudo;
 use clap::Parser;
 
@@ -9,13 +9,13 @@ pub struct LogoutArgs {
 }
 
 pub fn logout(args: LogoutArgs) -> anyhow::Result<()> {
-    assert_not_sudo("logout")?;
+    assert_not_sudo()?;
     match args.url {
-        Some(url) => LoginConfig::logout(&url)?,
+        Some(url) => AuthConfig::logout(&url)?,
         None => {
-            let config = LoginConfig::load()?;
+            let config = AuthConfig::load()?;
             let entry = config.single_entry()?;
-            LoginConfig::logout(&entry.url)?;
+            AuthConfig::logout(&entry.url)?;
         }
     }
     println!("Successfully logged out!");
