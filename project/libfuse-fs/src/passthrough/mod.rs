@@ -1197,7 +1197,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             .collect();
 
         for item in keys_to_remove {
-            self.mmap_chunks.invalidate(&item.0).await;
+            self.mmap_chunks.invalidate(item.0.as_ref()).await;
         }
     }
 }

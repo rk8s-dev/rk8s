@@ -28,5 +28,5 @@ env_logger = "0.11.7"
 vmm-sys-util = "0.12.1"
 bitflags = "2.9.0"
 nix = "0.29.0"
-moka = { version = "0.12.10", features = ["future"] }
+moka = { version = "0.12.11", features = ["future"] }
 memmap2 = "0.9.7"
