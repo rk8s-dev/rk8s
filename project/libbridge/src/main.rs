@@ -26,7 +26,7 @@ use netlink_packet_route::{
     AddressFamily,
     link::{InfoBridge, InfoData, LinkAttribute, LinkInfo},
 };
-use rkl::network::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
+use libnetwork::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
 use rtnetlink::{
     LinkBridge,
     packet_core::{NLM_F_ACK, NLM_F_REQUEST},

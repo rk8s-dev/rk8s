@@ -4,7 +4,7 @@ use log::{info, warn};
 use std::net::Ipv4Addr;
 
 use super::ExternalInterface;
-use crate::network::iface::{
+use libnetwork::iface::{
     get_default_gateway_interface, get_interface_by_ipv4, get_interface_ipv4_addrs,
     get_interface_ipv6_addrs,
 };

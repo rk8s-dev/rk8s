@@ -1,13 +1,12 @@
+#![allow(dead_code)]
 use anyhow::{Context, Result};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value as JsonValue};
 use std::net::{Ipv4Addr, Ipv6Addr};
-
-use crate::network::ip;
-
+use crate::ip;
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct Config {
+pub struct NetworkConfig {
     #[serde(rename = "EnableIPv4", default)]
     pub enable_ipv4: bool,
     #[serde(rename = "EnableIPv6", default)]
@@ -61,15 +60,17 @@ fn parse_backend_type(be: &Option<JsonValue>) -> Result<String> {
     }
 }
 
-pub fn parse_config(s: &str) -> Result<Config> {
-    let mut cfg: Config = serde_json::from_str(s).context("parsing Config JSON")?;
+/// Parse network configuration from JSON string
+pub fn parse_network_config(s: &str) -> Result<NetworkConfig> {
+    let mut cfg: NetworkConfig = serde_json::from_str(s).context("parsing NetworkConfig JSON")?;
     // default enable ipv4
     cfg.enable_ipv4 = true;
     cfg.backend_type = parse_backend_type(&cfg.backend)?;
     Ok(cfg)
 }
 
-pub fn check_network_config(cfg: &mut Config) -> Result<()> {
+/// Validate and adjust network configuration
+pub fn validate_network_config(cfg: &mut NetworkConfig) -> Result<()> {
     if cfg.enable_ipv4 {
         let net = cfg
             .network
@@ -196,8 +197,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_check_network_config_ipv4_only() {
-        let mut cfg = Config {
+    fn test_validate_network_config_ipv4_only() {
+        let mut cfg = NetworkConfig {
             enable_ipv4: true,
             enable_ipv6: false,
             enable_nftables: false,
@@ -213,14 +214,14 @@ mod tests {
             backend: None,
         };
 
-        check_network_config(&mut cfg).expect("IPv4 config should pass");
+        validate_network_config(&mut cfg).expect("IPv4 config should pass");
         assert_eq!(cfg.subnet_min.unwrap(), Ipv4Addr::new(10, 0, 1, 0));
         assert_eq!(cfg.subnet_max.unwrap(), Ipv4Addr::new(10, 0, 255, 0));
     }
 
     #[test]
-    fn test_check_network_config_ipv6_only() {
-        let mut cfg = Config {
+    fn test_validate_network_config_ipv6_only() {
+        let mut cfg = NetworkConfig {
             enable_ipv4: false,
             enable_ipv6: true,
             enable_nftables: false,
@@ -236,7 +237,7 @@ mod tests {
             backend: None,
         };
 
-        check_network_config(&mut cfg).expect("IPv6 config should pass");
+        validate_network_config(&mut cfg).expect("IPv6 config should pass");
         assert_eq!(
             cfg.ipv6_subnet_min.unwrap(),
             "fc00:0:0:1::".parse::<Ipv6Addr>().unwrap()

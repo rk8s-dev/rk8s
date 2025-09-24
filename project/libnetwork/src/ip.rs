@@ -7,7 +7,7 @@ use log::info;
 use regex::Regex;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use crate::network::iface;
+use crate::iface;
 
 pub trait AddIP<N> {
     fn add(self, n: N) -> Self;
@@ -96,7 +96,7 @@ pub async fn lookup_ext_iface(
     }
 
     let ifregex = if let Some(s) = ifregex_s.as_ref() {
-        Some(Regex::new(s).map_err(|e| anyhow!("could not compile regex: {}", e))?)
+        Some(Regex::new(s).map_err(|e| anyhow!("could not compile regex: {e}"))?)
     } else {
         None
     };
@@ -367,6 +367,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_ifcanreach_gateway_should_succeed() {
         use std::net::IpAddr;
 

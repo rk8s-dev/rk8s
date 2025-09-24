@@ -19,8 +19,9 @@ use tokio::time::{Duration as TokioDuration, sleep};
 
 use crate::network::lease::LeaseWatchResult;
 use crate::network::manager::{Cursor, WatchCursor, is_index_too_small};
-use crate::network::subnet::{self, parse_subnet_key};
+use crate::network::subnet::{self};
 use crate::protocol::config::XlineConfig;
+use libnetwork::subnet::{make_subnet_key, parse_subnet_key};
 
 #[derive(Debug, thiserror::Error)]
 pub enum XlineRegistryError {
@@ -189,7 +190,7 @@ impl Registry for XlineSubnetRegistry {
         let key = format!(
             "{}/subnets/{}",
             self.xline_cfg.prefix,
-            subnet::make_subnet_key(&sn, sn6.as_ref())
+            make_subnet_key(&sn, sn6.as_ref())
         );
         info!("key: {key}");
         let resp = self.kv().await.get(key, None).await?;
@@ -216,7 +217,7 @@ impl Registry for XlineSubnetRegistry {
         let key = format!(
             "{}/subnets/{}",
             self.xline_cfg.prefix,
-            subnet::make_subnet_key(&sn, sn6.as_ref())
+            make_subnet_key(&sn, sn6.as_ref())
         );
 
         let value = serde_json::to_vec(attrs)?;
@@ -266,7 +267,7 @@ impl Registry for XlineSubnetRegistry {
         let key = format!(
             "{}/subnets/{}",
             self.xline_cfg.prefix,
-            subnet::make_subnet_key(&sn, sn6.as_ref())
+            make_subnet_key(&sn, sn6.as_ref())
         );
 
         let value = serde_json::to_vec(attrs)?;
@@ -302,7 +303,7 @@ impl Registry for XlineSubnetRegistry {
         let key = format!(
             "{}/subnets/{}",
             self.xline_cfg.prefix,
-            subnet::make_subnet_key(&sn, sn6.as_ref())
+            make_subnet_key(&sn, sn6.as_ref())
         );
         self.kv().await.delete(key, None).await?;
         Ok(())
@@ -429,7 +430,7 @@ impl Registry for XlineSubnetRegistry {
         sn6: Option<Ipv6Network>,
         lease_watch_chan: Sender<Vec<LeaseWatchResult>>,
     ) -> Result<(), XlineRegistryError> {
-        let subnet_key = subnet::make_subnet_key(&sn, sn6.as_ref());
+        let subnet_key = make_subnet_key(&sn, sn6.as_ref());
         let key = format!("{}/subnets/{}", self.xline_cfg.prefix, subnet_key);
 
         let mut backoff = TokioDuration::from_millis(100);
@@ -563,7 +564,7 @@ impl XlineSubnetRegistry {
 pub fn kv_to_ip_lease(kv: &KeyValue, ttl: i64) -> Result<Lease, XlineRegistryError> {
     let key_str = std::str::from_utf8(kv.key())?;
     let (subnet4, subnet6) =
-        crate::network::subnet::parse_subnet_key(key_str).ok_or_else(|| {
+            parse_subnet_key(key_str).ok_or_else(|| {
             XlineRegistryError::Other(anyhow::anyhow!("invalid subnet key: {key_str}"))
         })?;
     let attrs: LeaseAttrs = serde_json::from_slice(kv.value())?;

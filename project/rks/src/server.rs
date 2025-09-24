@@ -2,7 +2,8 @@ use crate::api::xlinestore::XlineStore;
 use crate::commands::create::watch_create;
 use crate::commands::delete::watch_delete;
 use crate::commands::{create, delete};
-use crate::network::{self, backend::route, lease::LeaseWatchResult, manager::LocalManager};
+use crate::network::{lease::LeaseWatchResult, manager::LocalManager};
+use libnetwork::{route,config::NetworkConfig};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use common::{
@@ -491,7 +492,7 @@ fn calculate_routes_for_node(node_id: &str, leases: &[Lease]) -> Vec<Route> {
 /// Build node network configuration environment variables.
 pub fn build_node_network_config(
     node_id: String,
-    config: &network::config::Config,
+    config: &NetworkConfig,
     ip_masq: bool,
     mut sn4: Option<Ipv4Network>,
     mut sn6: Option<Ipv6Network>,

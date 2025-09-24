@@ -9,12 +9,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
-
-use crate::network::{
+use libnetwork::{route::RouteManager,
     config::NetworkConfig,
-    route::{RouteManager, RouteReceiver},
+};
+use crate::network::{
+    route::RouteReceiver,
     subnet::SubnetReceiver,
 };
+
 
 /// Main network configuration receiver that coordinates subnet and route configuration
 /// This will be the primary interface for receiving network configurations from rks

@@ -10,6 +10,7 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rks"
 common = { path = "../common" }
 libcni = { path = "../libcni" }
 libscheduler = { path = "../libscheduler" }
+libnetwork = { path = "../libnetwork", version = "0.1.0" }
 tokio = { version = "1.44", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.5.32", features = ["derive"] }

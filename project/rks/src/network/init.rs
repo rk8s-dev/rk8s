@@ -14,12 +14,13 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     network::{
         backend::{Backend, hostgw::HostgwBackend},
-        config::Config,
-        ip::{self, PublicIPOpts},
         manager::LocalManager,
         registry::XlineSubnetRegistry,
     },
     protocol::config::XlineConfig,
+};
+use libnetwork::{ip::{self, PublicIPOpts},
+config::NetworkConfig,
 };
 
 //const DEFAULT_SUBNET_FILE: &str = "/run/flannel/subnet.env";
@@ -198,7 +199,7 @@ pub async fn get_config(
     mut rx: mpsc::Receiver<()>,
     token: CancellationToken,
     sm: &LocalManager,
-) -> Result<Config> {
+) -> Result<NetworkConfig> {
     loop {
         match sm.get_network_config().await {
             Ok(config) => {

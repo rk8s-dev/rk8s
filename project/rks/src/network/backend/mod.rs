@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::network::config::Config;
+use libnetwork::config::NetworkConfig;
 use anyhow::Result;
 use async_trait::async_trait;
 use common::{ExternalInterface, lease::Lease};
@@ -8,7 +8,6 @@ use tokio::sync::Mutex;
 
 pub mod hostgw;
 pub mod interface;
-pub mod route;
 
 #[cfg(test)]
 pub mod tests;
@@ -17,7 +16,7 @@ pub mod tests;
 #[async_trait]
 pub trait Backend: Send + Sync {
     /// Register a network and return a Network instance
-    async fn register_network(&self, config: &Config) -> Result<Arc<Mutex<dyn Network>>>;
+    async fn register_network(&self, config: &NetworkConfig) -> Result<Arc<Mutex<dyn Network>>>;
 
     /// Get backend type name
     fn backend_type(&self) -> &str;

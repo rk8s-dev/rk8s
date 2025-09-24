@@ -6,9 +6,10 @@ use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tokio::time;
 
 use crate::commands::pod;
-use crate::network::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
+use libnetwork::{ip::{IPStack, PublicIPOpts, lookup_ext_iface},
+config::{NetworkConfig, validate_network_config},
+};
 use crate::network::{
-    config::{NetworkConfig, validate_network_config},
     receiver::{NetworkConfigMessage, NetworkReceiver},
 };
 use crate::task::TaskRunner;
