@@ -13,7 +13,7 @@ pub mod push;
 pub mod repo;
 pub mod rt;
 pub mod run;
-mod storage;
+pub mod storage;
 pub mod utils;
 
 use crate::args::{Cli, Commands};

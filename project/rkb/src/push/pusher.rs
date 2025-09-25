@@ -3,6 +3,7 @@ use futures::stream::FuturesUnordered;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use oci_client::client::PushResponse;
 use oci_client::errors::OciDistributionError;
+use oci_spec::distribution::ErrorResponse;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
@@ -57,13 +58,39 @@ impl Pusher {
             .map(|e| async move { (e.task.await, e.digest) })
             .collect::<FuturesUnordered<_>>();
 
+        let mut has_error = false;
         while let Some((result, digest)) = stream.next().await {
             let pb = bars[&digest].clone();
             match result {
                 Ok(_) => pb.finish_with_message("pushed"),
-                Err(e) => pb.finish_with_message(format!("failed: {e}")),
+                Err(e) => {
+                    pb.finish_with_message(format!("failed: {}", format_push_error(&e)?));
+                    has_error = true;
+                }
             }
         }
-        Ok(())
+
+        if !has_error {
+            Ok(())
+        } else {
+            anyhow::bail!("could not to push due to previous error")
+        }
+    }
+}
+
+fn format_push_error(e: &OciDistributionError) -> anyhow::Result<String> {
+    match e {
+        OciDistributionError::ServerError { message, .. } => {
+            let errors = serde_json::from_str::<ErrorResponse>(message)?;
+            let first_error = &errors.detail()[0];
+            first_error
+                .message()
+                .as_ref()
+                .map(|e| e.to_string())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("response from distribution should include error message")
+                })
+        }
+        _ => Ok(e.to_string()),
     }
 }

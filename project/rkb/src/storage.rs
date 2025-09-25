@@ -86,6 +86,9 @@ impl DigestExt for &str {
     }
 }
 
+/// Get the ultimate path of a blob in the layer storage directory.
+///
+/// Note: use full digest string with algorithm, for example, `sha256:abcdef...`.
 pub fn ultimate_blob_path(digest: impl AsRef<str>) -> anyhow::Result<PathBuf> {
     let digest = digest.as_ref();
     Ok(CONFIG.layers_store_root.join(digest.split_digest()?))

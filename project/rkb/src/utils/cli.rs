@@ -27,7 +27,9 @@ impl RequestBuilderExt for RequestBuilder {
 
 pub fn assert_not_sudo() -> anyhow::Result<()> {
     if nix::unistd::getuid().is_root() {
-        anyhow::bail!("Avoiding running rkb as root/sudo.\nIt will prompt a password when needed.")
+        anyhow::bail!(
+            "Please avoid running rkb as root/sudo.\nIt will prompt a password when needed."
+        )
     }
     Ok(())
 }
@@ -36,7 +38,15 @@ pub fn check_internal_sudo() -> bool {
     std::env::var("RKB_INTERNAL_SUDO").is_ok()
 }
 
-///
+// This is a little tricky. What makes our lives harder is the authentication config file.
+// The file will be saved in current user's config directory. But if we run this with sudo,
+// the config file will be saved in `/root/.config`, which is logical but not what we want.
+// Under the current situation, we must use sudo because of `libfuse`, but at the
+// same time, we also need to avoid messy config files. A feasible solution is to either prohibit
+// users from using sudo directly, or only permit users to run it via our specific sudo implementation.
+// When a non-root user runs this program, it will reinvoke itself with sudo and set a special
+// environment variable `RKB_INTERNAL_SUDO`. This variable, along with other extra envs, provides the necessary
+// information for the new process to proceed.
 pub fn sudo_guard(extra_env: Vec<(impl AsRef<OsStr>, impl AsRef<OsStr>)>) -> anyhow::Result<()> {
     if nix::unistd::getuid().is_root() && !check_internal_sudo() {
         return Err(anyhow::anyhow!(
