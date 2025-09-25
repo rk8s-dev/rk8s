@@ -25,8 +25,9 @@ use crate::network::{
     lease::LeaseWatchResult,
     registry::{Registry, XlineRegistryError},
 };
-use libnetwork::{ip::{next_ipv4_network, next_ipv6_network},
-    config::{self,NetworkConfig},
+use libnetwork::{
+    config::{self, NetworkConfig},
+    ip::{next_ipv4_network, next_ipv6_network},
     subnet::write_subnet_file,
 };
 

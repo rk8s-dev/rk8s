@@ -8,7 +8,10 @@ use anyhow::Result;
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use log::{error, info, warn};
 
-use libnetwork::{config::NetworkConfig,subnet::{make_subnet_key, parse_subnet_key,write_subnet_file}};
+use libnetwork::{
+    config::NetworkConfig,
+    subnet::{make_subnet_key, parse_subnet_key, write_subnet_file},
+};
 
 /// Read IPv4 CIDRs from subnet file
 pub fn read_cidrs_from_subnet_file(path: &str, cidr_key: &str) -> Vec<Ipv4Network> {

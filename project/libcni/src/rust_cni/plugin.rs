@@ -1,4 +1,5 @@
 // Copyright (c) 2024 https://github.com/divinerapier/cni-rs
+#![allow(dead_code)]
 use crate::rust_cni::result::ResultCNI;
 
 pub trait PluginInfo {

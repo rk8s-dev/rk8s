@@ -6,17 +6,16 @@ use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tokio::time;
 
 use crate::commands::pod;
-use libnetwork::{ip::{IPStack, PublicIPOpts, lookup_ext_iface},
-config::{NetworkConfig, validate_network_config},
-};
-use crate::network::{
-    receiver::{NetworkConfigMessage, NetworkReceiver},
-};
+use crate::network::receiver::{NetworkConfigMessage, NetworkReceiver};
 use crate::task::TaskRunner;
 use chrono::Utc;
 use common::*;
 use gethostname::gethostname;
 use ipnetwork::Ipv4Network;
+use libnetwork::{
+    config::{NetworkConfig, validate_network_config},
+    ip::{IPStack, PublicIPOpts, lookup_ext_iface},
+};
 use rustls::DigitallySignedStruct;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;

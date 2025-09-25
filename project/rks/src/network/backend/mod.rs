@@ -1,8 +1,8 @@
 #![allow(dead_code)]
-use libnetwork::config::NetworkConfig;
 use anyhow::Result;
 use async_trait::async_trait;
 use common::{ExternalInterface, lease::Lease};
+use libnetwork::config::NetworkConfig;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

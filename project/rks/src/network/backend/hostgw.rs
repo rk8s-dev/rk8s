@@ -1,21 +1,20 @@
-use crate::network::{
-    lease::LeaseWatcher, manager::LocalManager,
-};
-use libnetwork::config::NetworkConfig;
+use crate::network::{lease::LeaseWatcher, manager::LocalManager};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use common::{
     ExternalInterface,
     lease::{Event, EventType, Lease, LeaseAttrs},
 };
+use libnetwork::config::NetworkConfig;
 use log::{error, info, warn};
 use netlink_packet_route::AddressFamily;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 
 use super::{Backend, Network, SimpleNetwork};
-use libnetwork::{route::{RouteManager,RouteListOps},
-iface::check_hostgw_compatibility,
+use libnetwork::{
+    iface::check_hostgw_compatibility,
+    route::{RouteListOps, RouteManager},
 };
 /// Host-GW backend implementation
 /// This backend uses host routing table to implement container networking

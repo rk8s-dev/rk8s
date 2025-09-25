@@ -21,12 +21,12 @@ use libcni::{
     },
     ns::netns::{self, Netns},
 };
+use libnetwork::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
 use log::{debug, error, info};
 use netlink_packet_route::{
     AddressFamily,
     link::{InfoBridge, InfoData, LinkAttribute, LinkInfo},
 };
-use libnetwork::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
 use rtnetlink::{
     LinkBridge,
     packet_core::{NLM_F_ACK, NLM_F_REQUEST},

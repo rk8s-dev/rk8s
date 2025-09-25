@@ -19,8 +19,9 @@ use crate::{
     },
     protocol::config::XlineConfig,
 };
-use libnetwork::{ip::{self, PublicIPOpts},
-config::NetworkConfig,
+use libnetwork::{
+    config::NetworkConfig,
+    ip::{self, PublicIPOpts},
 };
 
 //const DEFAULT_SUBNET_FILE: &str = "/run/flannel/subnet.env";

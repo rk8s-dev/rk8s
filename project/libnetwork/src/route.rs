@@ -402,7 +402,6 @@ pub async fn add_blackhole_v6_route(dst: Ipv6Network) -> Result<()> {
     Ok(())
 }
 
-
 /// Generate IPv4 route from a lease
 pub fn get_route_from_lease(lease: &Lease) -> Option<Route> {
     if !lease.enable_ipv4 {

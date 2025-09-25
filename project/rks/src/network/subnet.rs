@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 
-
 use std::str;
 use std::sync::Arc;
 
-use anyhow:: Result;
+use anyhow::Result;
 use async_trait::async_trait;
 use common::lease::{Event, EventType, Lease, LeaseAttrs};
 use ipnetwork::{Ipv4Network, Ipv6Network};
@@ -13,8 +12,8 @@ use log::{error, info};
 
 use tokio::sync::mpsc::{self, Sender};
 
-use libnetwork::config::NetworkConfig;
 use crate::network::lease::{LeaseWatchResult, LeaseWatcher};
+use libnetwork::config::NetworkConfig;
 
 #[async_trait]
 pub trait Manager: Send + Sync {

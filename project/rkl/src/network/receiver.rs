@@ -1,6 +1,8 @@
 #![allow(dead_code)]
+use crate::network::{route::RouteReceiver, subnet::SubnetReceiver};
 use anyhow::Result;
 use libcni::ip::route::Route;
+use libnetwork::{config::NetworkConfig, route::RouteManager};
 use log::{error, info, warn};
 use quinn::{ClientConfig, Endpoint};
 use serde::{Deserialize, Serialize};
@@ -9,14 +11,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
-use libnetwork::{route::RouteManager,
-    config::NetworkConfig,
-};
-use crate::network::{
-    route::RouteReceiver,
-    subnet::SubnetReceiver,
-};
-
 
 /// Main network configuration receiver that coordinates subnet and route configuration
 /// This will be the primary interface for receiving network configurations from rks

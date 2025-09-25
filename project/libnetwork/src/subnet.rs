@@ -1,12 +1,12 @@
+use crate::config::NetworkConfig;
+use anyhow::{Context, Result};
+use ipnetwork::{Ipv4Network, Ipv6Network};
+use lazy_static::lazy_static;
+use log::info;
+use regex::Regex;
 use std::fs;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::Path;
-use lazy_static::lazy_static;
-use regex::Regex;
-use anyhow::{Context, Result};
-use ipnetwork::{Ipv4Network, Ipv6Network};
-use log::info;
-use crate::config::NetworkConfig;
 
 lazy_static! {
     static ref SUBNET_REGEX: Regex =
@@ -33,7 +33,6 @@ pub fn parse_subnet_key(s: &str) -> Option<(Ipv4Network, Option<Ipv6Network>)> {
         None
     }
 }
-
 
 /// Create subnet key from IPv4 and optional IPv6 networks
 pub fn make_subnet_key(sn4: &Ipv4Network, sn6: Option<&Ipv6Network>) -> String {

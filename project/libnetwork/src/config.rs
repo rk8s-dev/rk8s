@@ -1,10 +1,10 @@
 #![allow(dead_code)]
+use crate::ip;
 use anyhow::{Context, Result};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value as JsonValue};
 use std::net::{Ipv4Addr, Ipv6Addr};
-use crate::ip;
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct NetworkConfig {
     #[serde(rename = "EnableIPv4", default)]

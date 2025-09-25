@@ -547,7 +547,7 @@ networks:
         let mgr = get_manager_from_name(Some("abc_proj".to_string())).unwrap();
         assert_eq!(mgr.project_name, "abc_proj");
     }
-    
+
     #[tokio::test]
     #[serial]
     async fn test_up() {
