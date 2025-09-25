@@ -1,20 +1,19 @@
 #![allow(dead_code)]
-use std::fs;
-use std::net::{Ipv4Addr, Ipv6Addr};
-use std::path::Path;
+
+
 use std::str;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow:: Result;
 use async_trait::async_trait;
 use common::lease::{Event, EventType, Lease, LeaseAttrs};
 use ipnetwork::{Ipv4Network, Ipv6Network};
-use lazy_static::lazy_static;
+
 use log::{error, info};
-use regex::Regex;
+
 use tokio::sync::mpsc::{self, Sender};
 
-use libnetwork::{config::NetworkConfig,subnet::{make_subnet_key, parse_subnet_key,write_subnet_file}};
+use libnetwork::config::NetworkConfig;
 use crate::network::lease::{LeaseWatchResult, LeaseWatcher};
 
 #[async_trait]

@@ -24,7 +24,6 @@ use tonic::Code;
 use crate::network::{
     lease::LeaseWatchResult,
     registry::{Registry, XlineRegistryError},
-    subnet,
 };
 use libnetwork::{ip::{next_ipv4_network, next_ipv6_network},
     config::{self,NetworkConfig},

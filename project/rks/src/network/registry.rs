@@ -19,7 +19,6 @@ use tokio::time::{Duration as TokioDuration, sleep};
 
 use crate::network::lease::LeaseWatchResult;
 use crate::network::manager::{Cursor, WatchCursor, is_index_too_small};
-use crate::network::subnet::{self};
 use crate::protocol::config::XlineConfig;
 use libnetwork::subnet::{make_subnet_key, parse_subnet_key};
 
