@@ -562,10 +562,9 @@ impl XlineSubnetRegistry {
 
 pub fn kv_to_ip_lease(kv: &KeyValue, ttl: i64) -> Result<Lease, XlineRegistryError> {
     let key_str = std::str::from_utf8(kv.key())?;
-    let (subnet4, subnet6) =
-            parse_subnet_key(key_str).ok_or_else(|| {
-            XlineRegistryError::Other(anyhow::anyhow!("invalid subnet key: {key_str}"))
-        })?;
+    let (subnet4, subnet6) = parse_subnet_key(key_str).ok_or_else(|| {
+        XlineRegistryError::Other(anyhow::anyhow!("invalid subnet key: {key_str}"))
+    })?;
     let attrs: LeaseAttrs = serde_json::from_slice(kv.value())?;
 
     let expiration = Utc::now() + Duration::seconds(ttl);
