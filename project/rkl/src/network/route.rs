@@ -35,7 +35,7 @@ impl RouteReceiver {
                     }
                 }
                 Some(IpNetwork::V6(_)) => {
-                    if let Err(e) = manager.add_v6_route(&route).await {
+                    if let Err(e) = manager.add_route(&route).await {
                         error!("Failed to add IPv6 route {route:?}: {e}");
                     } else {
                         info!("Successfully added IPv6 route: {route:?}");

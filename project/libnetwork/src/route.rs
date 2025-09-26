@@ -240,6 +240,8 @@ impl RouteManager {
             select! {
                 _ = shutdown_rx.recv() => {
                     info!("Route check task shutting down");
+                    info!("IPv4 route check task shutting down");
+                    info!("IPv6 route check task shutting down");
                     break;
                 }
                 _ = sleep(Duration::from_secs(interval_secs)) => {
