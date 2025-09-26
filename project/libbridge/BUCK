@@ -34,7 +34,6 @@ cargo.rust_binary(
     deps = [
         "//project/libcni:libcni",
         "//project/libnetwork:liblibnetwork",
-        "//project/rkl:librkl",
         "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
         "//third-party/rust/crates/futures/0.3.31:futures-0.3.31",
         "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork-0.17.0",

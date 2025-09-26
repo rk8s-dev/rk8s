@@ -8,7 +8,6 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libbridge"
 
 [dependencies]
 libcni = { path = "../libcni" }
-rkl = { path = "../rkl" }
 libnetwork = { path = "../libnetwork", version = "0.1.0" }
 iptables = "0.6"
 cni-plugin = { version = "0.2.1", features = ["with-smol"] }
