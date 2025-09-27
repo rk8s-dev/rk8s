@@ -3,6 +3,7 @@ use oci_spec::image::{
     Arch, Config, ConfigBuilder, ImageConfiguration, ImageConfigurationBuilder, Os, RootFsBuilder,
 };
 
+#[allow(dead_code)]
 static DEFAULT_ENV: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 #[derive(Default)]
@@ -11,6 +12,7 @@ pub struct OciImageConfig {
 }
 
 impl OciImageConfig {
+    #[allow(dead_code)]
     pub fn default_config(mut self) -> Result<Self> {
         let config = ConfigBuilder::default()
             .cmd(vec!["sh".to_string()])

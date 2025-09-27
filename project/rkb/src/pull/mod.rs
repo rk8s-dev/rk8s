@@ -35,16 +35,40 @@ pub fn pull(args: PullArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Ensures an image is available locally, pulling any missing components.
+///
+/// This function implements a "local-first" strategy for image layers.
+/// It iterates through the required layers, checking if they exist in the local cache.
+/// Any layers not found locally will be pulled from the remote registry.
+///
+/// **Important**: This function will **always** fetch a fresh copy of the image manifest from
+/// the registry to ensure the layer information is up-to-date. It does not use a cached manifest.
+///
+/// # Parameters
+/// - `image_ref`: The reference of the image to retrieve, e.g., `ubuntu:latest`.
+/// - `url`: An `Option` of registry url, it will be "resolved", please refer to [`AuthConfig::resolve_url`].
+/// - `config_path`: The authentication config path, please refer to [`AuthConfig::current_config_path`].
+///
+/// # Returns
+///
+/// On success, returns a `Result` containing a tuple with two elements:
+/// 1. A `PathBuf` representing the local filesystem path to the newly fetched manifest.
+/// 2. A `Vec<PathBuf>` containing the local filesystem paths to all the image's layers.
+///
+/// # Errors
+///
+/// Returns an error if the image reference is invalid, the pull from the registry fails,
+/// or there are file system access issues.
 pub fn pull_or_get_image(
     image_ref: impl AsRef<str>,
     url: Option<impl AsRef<str>>,
     config_path: impl AsRef<str>,
-) -> anyhow::Result<Vec<PathBuf>> {
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
     let image_ref = image_ref.as_ref();
 
     let auth_config = AuthConfig::load_from(config_path.as_ref())?;
 
-    let url = auth_config.resolve_url(url)?;
+    let url = auth_config.resolve_url(url);
 
     let auth_method = match auth_config.find_entry_by_url(&url) {
         Ok(entry) => RegistryAuth::Bearer(entry.pat.clone()),
@@ -69,7 +93,7 @@ pub fn pull_or_get_image(
             OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
         }?;
 
-        write_manifest(&image_ref, &manifest, &digest).await?;
-        Ok(layers)
+        let manifest_path = write_manifest(&image_ref, &manifest, &digest).await?;
+        Ok((manifest_path, layers))
     })?
 }

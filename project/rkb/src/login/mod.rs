@@ -9,7 +9,6 @@ use reqwest::Client;
 use std::sync::OnceLock;
 
 mod oauth;
-
 mod types;
 
 static CLIENT: OnceLock<Client> = OnceLock::new();

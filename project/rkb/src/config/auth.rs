@@ -28,6 +28,14 @@ impl AuthConfig {
     const APP_NAME: &'static str = "rk8s";
     const CONFIG_NAME: &'static str = "rkb";
 
+    /// Get the current authentication config path (e.g., using XDG directories on Linux).
+    ///
+    /// # Warning: Running with `sudo`
+    ///
+    /// This function resolves the path based on the **current effective user**.
+    /// If this function runs with sudo or directly as the root user, it will return
+    /// a path within the root user's home directory (e.g., `/root/.config/rk8s/rkb.toml`),
+    /// which may not be expected.
     pub fn current_config_path() -> anyhow::Result<PathBuf> {
         confy::get_configuration_file_path(Self::APP_NAME, Self::CONFIG_NAME)
             .with_context(|| "fail to get config file path".to_string())
@@ -57,14 +65,19 @@ impl AuthConfig {
         Ok(entry)
     }
 
-    pub fn resolve_url(&self, url: Option<impl AsRef<str>>) -> anyhow::Result<String> {
+    /// Resolves the final registry URL based on a specific priority order.
+    ///
+    /// The resolution follows this priority order:
+    /// 1. The URL provided in the `url` parameter, if specified.
+    /// 2. The URL from the configuration file, if a single registry is configured.
+    /// 3. The default registry URL as a final fallback.
+    pub fn resolve_url(&self, url: Option<impl AsRef<str>>) -> String {
         if let Some(url) = url {
-            return Ok(url.as_ref().to_string());
+            return url.as_ref().to_string();
         }
-        match self.single_entry() {
-            Ok(AuthEntry { url, .. }) => Ok(url.to_string()),
-            Err(_) => Ok(CONFIG.default_registry.to_string()),
-        }
+        self.single_entry()
+            .map(|entry| entry.url.to_string())
+            .unwrap_or(CONFIG.default_registry.to_string())
     }
 
     pub fn with_single_entry<F, R>(&self, f: F) -> anyhow::Result<R>
@@ -81,7 +94,14 @@ impl AuthConfig {
         f(self.resolve_entry(url)?)
     }
 
-    /// Note: if load the config with sudo, it will load from `/root/.config/rk8s/rkb.toml`, which may not be expected.
+    /// Loads the config from pre-defined config path.
+    ///
+    /// # Warning: Running with `sudo`
+    ///
+    /// This function resolves the path based on the **current effective user**.
+    /// If this function runs with sudo or directly as the root user, it will return
+    /// a path within the root user's home directory (e.g., `/root/.config/rk8s/rkb.toml`),
+    /// which may not be expected.
     pub fn load() -> anyhow::Result<Self> {
         confy::load::<Self>(Self::APP_NAME, Self::CONFIG_NAME).with_context(|| {
             format!(

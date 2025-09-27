@@ -11,7 +11,7 @@ pub async fn write_manifest(
     image_ref: &Reference,
     manifest: &OciManifest,
     digest: impl AsRef<str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<PathBuf> {
     let digest = digest.as_ref();
 
     let path = ultimate_blob_path(digest)?;
@@ -19,7 +19,7 @@ pub async fn write_manifest(
 
     let image_ref = full_image_ref(image_ref.repository(), image_ref.tag());
     Repositories::add_store(vec![(image_ref, digest)])?;
-    Ok(())
+    Ok(path)
 }
 
 pub async fn write_to<T: Serialize>(dst: impl AsRef<Path>, object: &T) -> anyhow::Result<()> {
@@ -46,6 +46,26 @@ pub fn parse_image_ref(
         .with_context(|| format!("could not parse image reference: {}", url))
 }
 
+/// Constructs a full image reference by joining a base reference and a new tag. If the base reference does not contain namespace,
+/// it will be expanded to `library/{}`.
+///
+/// This function performs a simple string concatenation. It does not attempt to parse the `image_ref` or replace an existing tag.
+///
+/// # Parameters
+/// - `image_ref`: The base image reference string, with an optional tag.
+///   For example: `ubuntu` or `ubuntu:latest`.
+/// - `tag`: An `Option` containing the tag string to append. If `None`, the `image_ref` is returned unchanged.
+///
+/// # Errors
+/// This function does not handle complex logic. It will produce incorrect results if the `image_ref` already contains a tag
+/// and a new tag is provided. The new tag will simply be appended after another colon.
+///
+/// # Examples
+///
+/// ```rust
+/// assert_eq(full_image_ref("ubuntu", Some("latest")), "library/ubuntu:latest"));
+/// assert_eq(full_image_ref("ubuntu:latest", Some("latest"), "library/ubuntu:latest:latest"))
+/// ```
 pub fn full_image_ref(image_ref: impl AsRef<str>, tag: Option<impl AsRef<str>>) -> String {
     let image_ref = image_ref.as_ref();
 
@@ -88,7 +108,15 @@ impl DigestExt for &str {
 
 /// Get the ultimate path of a blob in the layer storage directory.
 ///
-/// Note: use full digest string with algorithm, for example, `sha256:abcdef...`.
+/// # Note
+/// You will get an error if you don't use a full digest string with algorithm.
+///
+/// ## correct
+/// `sha256:abcdef...`
+///
+/// ## incorrect
+///
+/// `abcdef...`
 pub fn ultimate_blob_path(digest: impl AsRef<str>) -> anyhow::Result<PathBuf> {
     let digest = digest.as_ref();
     Ok(CONFIG.layers_store_root.join(digest.split_digest()?))

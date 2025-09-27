@@ -3,6 +3,12 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// The `repositories.json`, but there, it is `repositories.toml`.
+///
+/// It records the maps from image reference with tags to its manifest path.
+///
+/// `(e,g.)
+/// "library/ubuntu.latest" = "sha256:4c07c..."`
 #[derive(Serialize, Deserialize, Default)]
 pub struct Repositories {
     repositories: HashMap<String, String>,
@@ -33,6 +39,12 @@ impl Repositories {
         Ok(repositories)
     }
 
+    /// Obtain the path corresponding to an image reference.
+    ///
+    /// The image reference must be `full`, that means, it cannot be missing any of the following:
+    /// namespace, repository name, or tag.
+    ///
+    /// You can get the full image reference with [`full_image_ref`][`crate::storage::full_image_ref`].
     pub fn get(&self, image_ref: impl AsRef<str>) -> anyhow::Result<Option<&str>> {
         match self.repositories.get(image_ref.as_ref()) {
             Some(digest) => Ok(Some(digest)),

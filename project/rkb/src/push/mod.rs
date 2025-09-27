@@ -48,7 +48,7 @@ pub fn push(args: PushArgs) -> anyhow::Result<()> {
 
     let auth_config = AuthConfig::load_from(std::env::var("AUTH_CONFIG_PATH")?)?;
 
-    let url = auth_config.resolve_url(args.url)?;
+    let url = auth_config.resolve_url(args.url);
 
     let auth_method = auth_config
         .find_entry_by_url(&url)
