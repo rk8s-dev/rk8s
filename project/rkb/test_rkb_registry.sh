@@ -187,7 +187,7 @@ ANONYMOUS_IMAGE_TAG="anonymous/test:v1"
 docker tag "$BASE_IMAGE" "$REGISTRY_HOST/$ANONYMOUS_IMAGE_TAG"
 
 info "Attempting to push '$ANONYMOUS_IMAGE_TAG' as anonymous user (this SHOULD fail)..."
-if ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image1" "$ANONYMOUS_IMAGE_TAG" > /dev/null 2>&1; then
+if sudo ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image1" "$ANONYMOUS_IMAGE_TAG" > /dev/null 2>&1; then
     fail "SECURITY RISK: Anonymous user was able to push an image!"
 else
     success "Push correctly failed for anonymous user as expected"
@@ -209,7 +209,7 @@ USER_A_IMAGE_TAG="$USER_A_NAME/test-image:v1"
 docker tag "$BASE_IMAGE" "$REGISTRY_HOST/$USER_A_IMAGE_TAG"
 
 info "User A attempting to push to their own namespace '$USER_A_IMAGE_TAG'..."
-if ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image1" "$USER_A_IMAGE_TAG" > /dev/null 2>&1; then
+if sudo ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image1" "$USER_A_IMAGE_TAG" > /dev/null 2>&1; then
     success "User A successfully pushed to their own namespace"
 else
     fail "User A failed to push to their own namespace"
@@ -220,7 +220,7 @@ USER_B_IMAGE_TAG_ATTEMPT="$USER_B_NAME/illegal-push:v1"
 docker tag "$BASE_IMAGE" "$REGISTRY_HOST/$USER_B_IMAGE_TAG_ATTEMPT"
 
 info "User A attempting to push to User B's namespace '$USER_B_IMAGE_TAG_ATTEMPT' (this SHOULD fail)..."
-if ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image1" "$USER_B_IMAGE_TAG_ATTEMPT" > /dev/null 2>&1; then
+if sudo ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image1" "$USER_B_IMAGE_TAG_ATTEMPT" > /dev/null 2>&1; then
     fail "SECURITY RISK: User A was able to push to User B's namespace!"
 else
     success "Push correctly failed as User A cannot push to User B's namespace"
@@ -242,7 +242,7 @@ PRIVATE_REPO_TAG="$USER_B_NAME/private-repo:v1"
 docker tag "$BASE_IMAGE" "$REGISTRY_HOST/$PRIVATE_REPO_TAG"
 
 info "User B pushing to create a private repository..."
-if ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image1" "$PRIVATE_REPO_TAG" > /dev/null 2>&1; then
+if sudo ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image1" "$PRIVATE_REPO_TAG" > /dev/null 2>&1; then
     success "User B created a private repository"
 else
     fail "User B failed to create private repository"
@@ -253,7 +253,7 @@ PUBLIC_REPO_TAG="$USER_B_NAME/public-repo:v1"
 docker tag "$BASE_IMAGE" "$REGISTRY_HOST/$PUBLIC_REPO_TAG"
 
 info "User B pushing to create a soon-to-be-public repository..."
-if ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image2" "$PUBLIC_REPO_TAG" > /dev/null 2>&1; then
+if sudo ../target/debug/rkb push --url "$REGISTRY_HOST" --path "output/image2" "$PUBLIC_REPO_TAG" > /dev/null 2>&1; then
     success "User B created a soon-to-be-public repository"
 else
     fail "User B failed to create public repository"
@@ -288,7 +288,7 @@ docker rmi "$REGISTRY_HOST/$PUBLIC_REPO_TAG" > /dev/null 2>&1 || true
 
 # User A tries to pull User B's private repo (should fail)
 info "User A attempting to pull User B's private repo '$PRIVATE_REPO_TAG' (this SHOULD fail)..."
-if ../target/debug/rkb pull --url "$REGISTRY_HOST" "$PRIVATE_REPO_TAG" > /dev/null 2>&1; then
+if sudo ../target/debug/rkb pull --url "$REGISTRY_HOST" "$PRIVATE_REPO_TAG" > /dev/null 2>&1; then
     fail "SECURITY RISK: User A was able to pull User B's private repo!"
 else
     success "Pull correctly failed as User A cannot access User B's private repo"
@@ -296,7 +296,7 @@ fi
 
 # User A tries to pull User B's public repo (should succeed)
 info "User A attempting to pull User B's public repo '$PUBLIC_REPO_TAG'..."
-if ../target/debug/rkb pull --url "$REGISTRY_HOST" "$PUBLIC_REPO_TAG" > /dev/null 2>&1; then
+if sudo ../target/debug/rkb pull --url "$REGISTRY_HOST" "$PUBLIC_REPO_TAG" > /dev/null 2>&1; then
     success "User A successfully pulled User B's public repo"
 else
     fail "User A failed to pull User B's public repo"
@@ -357,7 +357,7 @@ fi
 info "Testing pull of previously pushed image..."
 docker rmi "$REGISTRY_HOST/$USER_A_IMAGE_TAG" > /dev/null 2>&1 || true
 
-if ../target/debug/rkb pull --url "$REGISTRY_HOST" "$USER_A_IMAGE_TAG" > /dev/null 2>&1; then
+if sudo ../target/debug/rkb pull --url "$REGISTRY_HOST" "$USER_A_IMAGE_TAG" > /dev/null 2>&1; then
     success "Successfully pulled previously pushed image"
 else
     fail "Failed to pull previously pushed image"

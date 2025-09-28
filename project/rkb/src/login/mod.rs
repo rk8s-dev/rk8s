@@ -2,7 +2,7 @@ use crate::config::auth::AuthConfig;
 use crate::login::oauth::OAuthFlow;
 use crate::login::types::{CallbackResponse, RequestClientIdResponse};
 use crate::rt::block_on;
-use crate::utils::cli::{RequestBuilderExt, assert_not_sudo};
+use crate::utils::cli::RequestBuilderExt;
 use axum::http::HeaderMap;
 use clap::Parser;
 use reqwest::Client;
@@ -34,7 +34,6 @@ pub struct LoginArgs {
 }
 
 pub fn login(args: LoginArgs) -> anyhow::Result<()> {
-    assert_not_sudo()?;
     let config = AuthConfig::load()?;
 
     let url = match args.url {

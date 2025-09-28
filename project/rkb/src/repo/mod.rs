@@ -3,7 +3,6 @@ mod types;
 use crate::config::auth::{AuthEntry, with_resolved_entry};
 use crate::repo::types::{ListRepoResponse, Visibility};
 use crate::rt::block_on;
-use crate::utils::cli::assert_not_sudo;
 use axum::http::{HeaderMap, StatusCode};
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
@@ -32,7 +31,6 @@ enum RepoSubArgs {
 }
 
 pub fn repo(args: RepoArgs) -> anyhow::Result<()> {
-    assert_not_sudo()?;
     block_on(async move {
         with_resolved_entry(args.url, move |entry| {
             Box::pin(async move {

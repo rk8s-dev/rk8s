@@ -1,7 +1,8 @@
 use crate::config::registry::CONFIG;
+use crate::utils::cli::original_user_config_path;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::pin::Pin;
 
 #[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
@@ -27,19 +28,6 @@ impl AuthEntry {
 impl AuthConfig {
     const APP_NAME: &'static str = "rk8s";
     const CONFIG_NAME: &'static str = "rkb";
-
-    /// Get the current authentication config path (e.g., using XDG directories on Linux).
-    ///
-    /// # Warning: Running with `sudo`
-    ///
-    /// This function resolves the path based on the **current effective user**.
-    /// If this function runs with sudo or directly as the root user, it will return
-    /// a path within the root user's home directory (e.g., `/root/.config/rk8s/rkb.toml`),
-    /// which may not be expected.
-    pub fn current_config_path() -> anyhow::Result<PathBuf> {
-        confy::get_configuration_file_path(Self::APP_NAME, Self::CONFIG_NAME)
-            .with_context(|| "fail to get config file path".to_string())
-    }
 
     pub fn single_entry(&self) -> anyhow::Result<&AuthEntry> {
         match self.entries.len() {
@@ -95,21 +83,9 @@ impl AuthConfig {
     }
 
     /// Loads the config from pre-defined config path.
-    ///
-    /// # Warning: Running with `sudo`
-    ///
-    /// This function resolves the path based on the **current effective user**.
-    /// If this function runs with sudo or directly as the root user, it will return
-    /// a path within the root user's home directory (e.g., `/root/.config/rk8s/rkb.toml`),
-    /// which may not be expected.
     pub fn load() -> anyhow::Result<Self> {
-        confy::load::<Self>(Self::APP_NAME, Self::CONFIG_NAME).with_context(|| {
-            format!(
-                "failed to load config file `{}.{}`",
-                Self::APP_NAME,
-                Self::CONFIG_NAME,
-            )
-        })
+        let path = original_user_config_path(Self::APP_NAME, Some(Self::CONFIG_NAME))?;
+        Self::load_from(path)
     }
 
     pub fn load_from(path: impl AsRef<Path>) -> anyhow::Result<Self> {

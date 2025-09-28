@@ -6,7 +6,6 @@ use crate::config::auth::AuthConfig;
 use crate::pull::layer::pull_layers;
 use crate::rt::block_on;
 use crate::storage::{parse_image_ref, write_manifest};
-use crate::utils::cli::sudo_guard;
 use anyhow::Context;
 use clap::Parser;
 use oci_client::client::ClientConfig;
@@ -25,13 +24,7 @@ pub struct PullArgs {
 }
 
 pub fn pull(args: PullArgs) -> anyhow::Result<()> {
-    sudo_guard(vec![(
-        "AUTH_CONFIG_PATH",
-        AuthConfig::current_config_path()?.display().to_string(),
-    )])?;
-
-    let auth_config_path = std::env::var("AUTH_CONFIG_PATH")?;
-    pull_or_get_image(args.image_ref, args.url, &auth_config_path)?;
+    pull_or_get_image(args.image_ref, args.url)?;
     Ok(())
 }
 
@@ -47,7 +40,6 @@ pub fn pull(args: PullArgs) -> anyhow::Result<()> {
 /// # Parameters
 /// - `image_ref`: The reference of the image to retrieve, e.g., `ubuntu:latest`.
 /// - `url`: An `Option` of registry url, it will be "resolved", please refer to [`AuthConfig::resolve_url`].
-/// - `config_path`: The authentication config path, please refer to [`AuthConfig::current_config_path`].
 ///
 /// # Returns
 ///
@@ -62,11 +54,10 @@ pub fn pull(args: PullArgs) -> anyhow::Result<()> {
 pub fn pull_or_get_image(
     image_ref: impl AsRef<str>,
     url: Option<impl AsRef<str>>,
-    config_path: impl AsRef<str>,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
     let image_ref = image_ref.as_ref();
 
-    let auth_config = AuthConfig::load_from(config_path.as_ref())?;
+    let auth_config = AuthConfig::load()?;
 
     let url = auth_config.resolve_url(url);
 

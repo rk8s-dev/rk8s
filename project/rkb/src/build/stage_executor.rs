@@ -103,8 +103,7 @@ impl<'m> StageExecutor<'m> {
 
         let img_ref = full_image_ref(&image_parsed.image, image_parsed.tag.as_ref());
 
-        let config_path = std::env::var("AUTH_CONFIG_PATH")?;
-        let (_, layers) = pull_or_get_image(&img_ref, None::<String>, &config_path)?;
+        let (_, layers) = pull_or_get_image(&img_ref, None::<String>)?;
 
         // add image alias mapping
         if let Some(alias) = &from_instruction.alias {

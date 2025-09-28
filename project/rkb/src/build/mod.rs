@@ -35,8 +35,6 @@ pub struct BuildArgs {
     // TODO: Add registry info
 }
 
-use crate::config::auth::AuthConfig;
-use crate::utils::cli::sudo_guard;
 use builder::Builder;
 
 fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
@@ -49,11 +47,6 @@ fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
 }
 
 pub fn build_image(build_args: &BuildArgs) -> Result<()> {
-    sudo_guard(vec![(
-        "AUTH_CONFIG_PATH",
-        AuthConfig::current_config_path()?.display().to_string(),
-    )])?;
-
     if let Some(dockerfile_path) = build_args.file.as_ref() {
         let dockerfile = parse_dockerfile(dockerfile_path)?;
 

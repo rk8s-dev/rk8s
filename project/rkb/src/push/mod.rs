@@ -4,7 +4,6 @@ use crate::config::auth::AuthConfig;
 use crate::push::pusher::{PushTask, Pusher};
 use crate::rt::block_on;
 use crate::storage::{DigestExt, parse_image_ref};
-use crate::utils::cli::sudo_guard;
 use anyhow::Context;
 use clap::Parser;
 use oci_client::client::{ClientConfig, ImageLayer};
@@ -41,12 +40,7 @@ pub struct PushArgs {
 }
 
 pub fn push(args: PushArgs) -> anyhow::Result<()> {
-    sudo_guard(vec![(
-        "AUTH_CONFIG_PATH",
-        AuthConfig::current_config_path()?.display().to_string(),
-    )])?;
-
-    let auth_config = AuthConfig::load_from(std::env::var("AUTH_CONFIG_PATH")?)?;
+    let auth_config = AuthConfig::load()?;
 
     let url = auth_config.resolve_url(args.url);
 

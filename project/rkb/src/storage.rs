@@ -78,8 +78,8 @@ pub fn full_image_ref(image_ref: impl AsRef<str>, tag: Option<impl AsRef<str>>) 
     format!(
         "{image_ref}{}",
         match tag {
-            Some(tag) => &format!(":{}", tag.as_ref()),
-            None => "",
+            Some(tag) => format!(":{}", tag.as_ref()),
+            None => "".to_string(),
         }
     )
 }
