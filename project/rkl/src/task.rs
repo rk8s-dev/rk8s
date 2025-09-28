@@ -188,7 +188,7 @@ impl TaskRunner {
             .unwrap_or("")
             .to_string();
         self.pause_pid = Some(pid_i32);
-
+        println!("podip:{podip}");
         let response = RunPodSandboxResponse {
             pod_sandbox_id: sandbox_id,
         };

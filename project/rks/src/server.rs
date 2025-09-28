@@ -5,9 +5,9 @@ use crate::commands::{create, delete};
 use crate::network::{lease::LeaseWatchResult, manager::LocalManager};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use common::NodeStatus;
 use common::{
-    ConditionStatus, Node, NodeCondition, NodeConditionType, NodeNetworkConfig, PodTask,
-    RksMessage,
+    ConditionStatus, Node, NodeConditionType, NodeNetworkConfig, PodTask, RksMessage,
     lease::{Lease, LeaseAttrs},
 };
 use futures_util::StreamExt;
@@ -187,12 +187,38 @@ async fn watch_pods(
                     match event.event_type() {
                         etcd_client::EventType::Put => {
                             if let Some(kv) = event.kv() {
-                                watch_create(
-                                    String::from_utf8_lossy(kv.value()).to_string(),
-                                    conn,
-                                    &node_id,
-                                )
-                                .await?;
+                                let new_pod: PodTask = serde_yaml::from_slice(kv.value())?;
+                                if let Some(prev_kv) = event.prev_kv() {
+                                    let prev_pod: PodTask =
+                                        serde_yaml::from_slice(prev_kv.value())?;
+                                    // Only updating node_name can be watched and send to node
+                                    if prev_pod.spec.node_name.is_none()
+                                        && new_pod.spec.node_name.is_some()
+                                    {
+                                        info!(
+                                            "[watch_pods] Pod {} assigned to {:?}",
+                                            new_pod.metadata.name, new_pod.spec.node_name
+                                        );
+                                        watch_create(
+                                            String::from_utf8_lossy(kv.value()).to_string(),
+                                            conn,
+                                            &node_id,
+                                        )
+                                        .await?;
+                                    }
+                                } else {
+                                    // If the nodename is assigned at first, be watched by node
+                                    info!(
+                                        "[watch_pods] Pod {} assigned to {:?}",
+                                        new_pod.metadata.name, new_pod.spec.node_name
+                                    );
+                                    watch_create(
+                                        String::from_utf8_lossy(kv.value()).to_string(),
+                                        conn,
+                                        &node_id,
+                                    )
+                                    .await?;
+                                }
                             }
                         }
                         etcd_client::EventType::Delete => {
@@ -403,11 +429,8 @@ async fn dispatch_worker(
     xline_store: &Arc<XlineStore>,
 ) -> Result<()> {
     match msg {
-        RksMessage::Heartbeat {
-            node_name,
-            conditions,
-        } => {
-            handle_heartbeat(xline_store, &node_name, conditions).await?;
+        RksMessage::Heartbeat { node_name, status } => {
+            handle_heartbeat(xline_store, &node_name, status).await?;
             let response = RksMessage::Ack;
             let res = bincode::serialize(&response)?;
             if let Ok(mut stream) = conn.open_uni().await {
@@ -417,6 +440,23 @@ async fn dispatch_worker(
         }
         RksMessage::Error(err_msg) => error!("[worker dispatch] reported error: {err_msg}"),
         RksMessage::Ack => info!("[worker dispatch] received Ack"),
+        RksMessage::SetPodip((pod_name, pod_ip)) => {
+            if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await? {
+                let mut pod: PodTask = serde_yaml::from_str(&pod_yaml)?;
+                pod.status.pod_ip = Some(pod_ip.clone());
+                let new_yaml = serde_yaml::to_string(&pod)?;
+                xline_store.insert_pod_yaml(&pod_name, &new_yaml).await?;
+                info!(
+                    "[worker dispatch] updated Pod {} with IP {}",
+                    pod_name, pod_ip
+                );
+            } else {
+                warn!(
+                    "[worker dispatch] Pod {} not found when setting IP",
+                    pod_name
+                );
+            }
+        }
         _ => warn!("[worker dispatch] unknown or unexpected message from worker"),
     }
     Ok(())
@@ -530,21 +570,22 @@ pub fn build_node_network_config(
 async fn handle_heartbeat(
     xline_store: &Arc<XlineStore>,
     node_name: &str,
-    conditions: Vec<NodeCondition>,
+    status: NodeStatus,
 ) -> Result<()> {
     if let Some(node_yaml) = xline_store.get_node_yaml(node_name).await? {
         let mut node: Node = serde_yaml::from_str(&node_yaml)?;
-        node.status.conditions = conditions;
+        node.status = status;
         let new_yaml = serde_yaml::to_string(&node)?;
         xline_store.insert_node_yaml(node_name, &new_yaml).await?;
-        info!("[worker dispatch] heartbeat from {node_name}");
+        info!("[worker dispatch] heartbeat updated Node {}", node_name);
     } else {
-        warn!("[server] heartbeat received for unknown node: {node_name}");
+        warn!(
+            "[server] heartbeat received for unknown node: {}",
+            node_name
+        );
     }
-
     Ok(())
 }
-
 fn watch_heartbeat(xline_store: Arc<XlineStore>, grace: Duration, interval: Duration) {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(interval);

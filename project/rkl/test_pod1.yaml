@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod1
+  labels:
+    app: my-app 
+    bundle: ./rk8s/project/test/bundles/pause
+spec:
+  node_name: 
+  containers:
+    - name: container1    
+      image: ./rk8s/project/test/bundles/busybox
+      args:             
+        - "dd"                   
+        - "if=/dev/zero"  
+        - "of=/dev/null"          
+      ports:
+        - containerPort: 80
+      resources:
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+status:
+

@@ -127,9 +127,9 @@ pub async fn run_forever() -> Result<()> {
     } else {
         generate_node(&ext_iface).await?
     };
-
+    let ext_iface = Arc::new(ext_iface);
     loop {
-        if let Err(e) = run_once(server_addr, node.clone()).await {
+        if let Err(e) = run_once(server_addr, node.clone(), ext_iface.clone()).await {
             eprintln!("[rkl_worker] error: {e:?}, retrying in 3s");
             time::sleep(Duration::from_secs(3)).await;
         } else {
@@ -151,7 +151,11 @@ fn load_node_from_yaml(yaml_path: &str) -> Result<Node> {
 /// 3. Start heartbeat loop
 /// 4. Handle CreatePod/DeletePod messages
 /// 5. Handle Network Configuration
-pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
+pub async fn run_once(
+    server_addr: SocketAddr,
+    node: Node,
+    ext_iface: Arc<ExternalInterface>,
+) -> Result<()> {
     // Skip certificate verification
     let mut tls = RustlsClientConfig::builder()
         .with_root_certificates(RootCertStore::empty())
@@ -203,44 +207,37 @@ pub async fn run_once(server_addr: SocketAddr, node: Node) -> Result<()> {
     send_uni(&connection, &register_msg).await?;
     println!("[worker] sent RegisterNode({})", node.metadata.name);
 
-    // read ack
-    // if let Ok(Ok(mut recv)) = time::timeout(Duration::from_secs(3), connection.accept_uni()).await {
-    //     let mut buf = vec![0u8; 4096];
-    //     if let Ok(Some(n)) = recv.read(&mut buf).await {
-    //         if let Ok(resp) = bincode::deserialize::<RksMessage>(&buf[..n]) {
-    //             match resp {
-    //                 RksMessage::Ack => println!("[worker] got register Ack"),
-    //                 RksMessage::Error(e) => eprintln!("[worker] register error: {e}"),
-    //                 other => println!("[worker] unexpected register response: {other:?}"),
-    //             }
-    //         } else {
-    //             eprintln!("[worker] failed to parse register response");
-    //         }
-    //     }
-    // }
-
     // heartbeat
     let hb_conn = connection.clone();
     let node_name = node.metadata.name.clone();
     tokio::spawn(async move {
         loop {
             time::sleep(Duration::from_secs(5)).await;
-            let conditions = vec![
-                ready_condition(),
-                memory_condition(0.9),
-                disk_condition(0.9),
-                pid_condition(0.9),
-                network_condition(),
-            ];
+            match generate_node(&ext_iface).await {
+                Ok(node) => {
+                    let mut status = node.status;
+                    status.conditions = vec![
+                        ready_condition(),
+                        memory_condition(0.9),
+                        disk_condition(0.9),
+                        pid_condition(0.9),
+                        network_condition(),
+                    ];
 
-            let hb = RksMessage::Heartbeat {
-                node_name: node_name.clone(),
-                conditions,
-            };
-            if let Err(e) = send_uni(&hb_conn, &hb).await {
-                eprintln!("[worker heartbeat] send failed: {e}");
-            } else {
-                println!("[worker] heartbeat sent");
+                    let hb = RksMessage::Heartbeat {
+                        node_name: node_name.clone(),
+                        status,
+                    };
+
+                    if let Err(e) = send_uni(&hb_conn, &hb).await {
+                        eprintln!("[worker heartbeat] send failed: {e}");
+                    } else {
+                        println!("[worker] heartbeat sent");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[worker heartbeat] generate_node failed: {e}");
+                }
             }
         }
     });

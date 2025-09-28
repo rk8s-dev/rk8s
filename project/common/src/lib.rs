@@ -106,7 +106,7 @@ pub enum RksMessage {
     UserRequest(String),
     Heartbeat {
         node_name: String,
-        conditions: Vec<NodeCondition>,
+        status: NodeStatus,
     },
     SetNetwork(Box<NodeNetworkConfig>),
     UpdateRoutes(String, Vec<Route>),

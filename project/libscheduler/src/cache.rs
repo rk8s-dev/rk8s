@@ -97,8 +97,19 @@ impl Cache {
         res
     }
 
-    pub fn update_node(&mut self, node: NodeInfo) -> Option<NodeInfo> {
-        self.nodes.insert(node.name.clone(), node)
+    pub fn update_node(&mut self, new_node: NodeInfo) -> Option<NodeInfo> {
+        let name = new_node.name.clone();
+        if let Some(old_node) = self.nodes.get_mut(&name) {
+            // Keep requested and update other info
+            let requested = old_node.requested.clone();
+            old_node.labels = new_node.labels;
+            old_node.spec = new_node.spec;
+            old_node.allocatable = new_node.allocatable;
+            old_node.requested = requested;
+            Some(old_node.clone())
+        } else {
+            self.nodes.insert(name.clone(), new_node)
+        }
     }
 
     pub fn remove_node(&mut self, node_name: &str) {
