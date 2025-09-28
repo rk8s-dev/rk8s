@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustls-platform-verifier-vendor",
+    urls = ["https://static.crates.io/crates/rustls-platform-verifier/rustls-platform-verifier-0.6.1.crate"],
+    sha256 = "be59af91596cac372a6942530653ad0c3a246cdd491aaa9dcaee47f88d67d5a0",
+    type = "tar.gz",
+    strip_prefix = "rustls-platform-verifier-0.6.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustls-platform-verifier-0.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustls-platform-verifier",
+    srcs = [":rustls-platform-verifier-vendor"],
     crate = "rustls-platform-verifier",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustls-platform-verifier",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "ComplexSpaces <complexspacescode@gmail.com>:1Password",
         "CARGO_PKG_DESCRIPTION": "rustls-platform-verifier supports verifying TLS certificates in rustls with the operating system verifier",
         "CARGO_PKG_NAME": "rustls-platform-verifier",
@@ -26,12 +32,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
-        "rustls_native_certs": "//third-party/rust/crates/rustls-native-certs/0.8.1:rustls-native-certs-0.8.1",
-        "webpki": "//third-party/rust/crates/rustls-webpki/0.103.6:rustls-webpki-0.103.6",
+        "webpki": "//third-party/rust/crates/rustls-webpki/0.103.6:rustls-webpki",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/rustls/0.23.32:rustls-0.23.32",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/rustls-native-certs/0.8.1:rustls-native-certs",
+        "//third-party/rust/crates/rustls/0.23.32:rustls",
     ],
 )

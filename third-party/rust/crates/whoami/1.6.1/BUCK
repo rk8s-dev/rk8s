@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "whoami-vendor",
+    urls = ["https://static.crates.io/crates/whoami/whoami-1.6.1.crate"],
+    sha256 = "5d4a4db5077702ca3015d3d02d74974948aba2ad9e12ab7df718ee64ccd7e97d",
+    type = "tar.gz",
+    strip_prefix = "whoami-1.6.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "whoami-1.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "whoami",
+    srcs = [":whoami-vendor"],
     crate = "whoami",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "whoami",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Retrieve the current user and environment.",
         "CARGO_PKG_NAME": "whoami",

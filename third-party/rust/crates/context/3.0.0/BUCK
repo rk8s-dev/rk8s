@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "context-vendor",
+    urls = ["https://static.crates.io/crates/context/context-3.0.0.crate"],
+    sha256 = "0adf149597f6e75ab7c41ec360dd1a74c86667cf0ef09bd3c207d508665f60e8",
+    type = "tar.gz",
+    strip_prefix = "context-3.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "context-3.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "context",
+    srcs = [":context-vendor"],
     crate = "context",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "context",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Y. T. Chung <zonyitoo@gmail.com>:Leonard Hecker <leonard@hecker.io>",
         "CARGO_PKG_DESCRIPTION": "Cooperative multitasking for Rust using Boost.Context",
         "CARGO_PKG_LINKS": "boost_context",
@@ -25,25 +31,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :context-3.0.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :context-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :context-3.0.0-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :context-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )
 
 cargo.rust_binary(
-    name = "context-3.0.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "context-build-script-build",
+    srcs = [":context-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "context",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Y. T. Chung <zonyitoo@gmail.com>:Leonard Hecker <leonard@hecker.io>",
         "CARGO_PKG_DESCRIPTION": "Cooperative multitasking for Rust using Boost.Context",
         "CARGO_PKG_LINKS": "boost_context",
@@ -56,16 +59,16 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.38:cc-1.2.38"],
+    deps = ["//third-party/rust/crates/cc/1.2.38:cc"],
 )
 
 buildscript_run(
-    name = "context-3.0.0-build-script-run",
+    name = "context-build-script-run",
     package_name = "context",
-    buildscript_rule = ":context-3.0.0-build-script-build",
+    buildscript_rule = ":context-build-script-build",
     env = {
         "OPT_LEVEL": "0",
     },
     version = "3.0.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":context-vendor",
 )

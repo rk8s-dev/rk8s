@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "sqlx-vendor",
+    urls = ["https://static.crates.io/crates/sqlx/sqlx-0.8.6.crate"],
+    sha256 = "1fefb893899429669dcdd979aff487bd78f4064e5e7907e4269081e0ef7d97dc",
+    type = "tar.gz",
+    strip_prefix = "sqlx-0.8.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "sqlx-0.8.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "sqlx",
+    srcs = [":sqlx-vendor"],
     crate = "sqlx",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "sqlx",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Ryan Leckey <leckey.ryan@gmail.com>:Austin Bonander <austin.bonander@gmail.com>:Chloe Ross <orangesnowfox@gmail.com>:Daniel Akhterov <akhterovd@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "🧰 The Rust SQL Toolkit. An async, pure Rust SQL crate featuring compile-time checked queries without a DSL. Supports PostgreSQL, MySQL, and SQLite.",
         "CARGO_PKG_NAME": "sqlx",
@@ -46,12 +52,12 @@ cargo.rust_library(
         "tls-rustls-ring-webpki",
         "uuid",
     ],
-    named_deps = {
-        "sqlx_core": "//third-party/rust/crates/sqlx-core/0.8.6:sqlx-core-0.8.6",
-        "sqlx_macros": "//third-party/rust/crates/sqlx-macros/0.8.6:sqlx-macros-0.8.6",
-        "sqlx_mysql": "//third-party/rust/crates/sqlx-mysql/0.8.6:sqlx-mysql-0.8.6",
-        "sqlx_postgres": "//third-party/rust/crates/sqlx-postgres/0.8.6:sqlx-postgres-0.8.6",
-        "sqlx_sqlite": "//third-party/rust/crates/sqlx-sqlite/0.8.6:sqlx-sqlite-0.8.6",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/sqlx-core/0.8.6:sqlx-core",
+        "//third-party/rust/crates/sqlx-macros/0.8.6:sqlx-macros",
+        "//third-party/rust/crates/sqlx-mysql/0.8.6:sqlx-mysql",
+        "//third-party/rust/crates/sqlx-postgres/0.8.6:sqlx-postgres",
+        "//third-party/rust/crates/sqlx-sqlite/0.8.6:sqlx-sqlite",
+    ],
 )

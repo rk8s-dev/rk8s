@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "libseccomp-vendor",
+    urls = ["https://static.crates.io/crates/libseccomp/libseccomp-0.3.0.crate"],
+    sha256 = "21c57fd8981a80019807b7b68118618d29a87177c63d704fc96e6ecd003ae5b3",
+    type = "tar.gz",
+    strip_prefix = "libseccomp-0.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "libseccomp-0.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libseccomp",
+    srcs = [":libseccomp-vendor"],
     crate = "libseccomp",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "libseccomp",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Manabu Sugimoto <Manabu.Sugimoto@sony.com>",
         "CARGO_PKG_DESCRIPTION": "Rust Language Bindings for the libseccomp Library",
         "CARGO_PKG_NAME": "libseccomp",
@@ -24,31 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :libseccomp-0.3.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :libseccomp-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :libseccomp-0.3.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "libseccomp_sys": "//third-party/rust/crates/libseccomp-sys/0.2.1:libseccomp-sys-0.2.1",
-    },
+    rustc_flags = ["@$(location :libseccomp-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/1.3.2:bitflags-1.3.2",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
+        "//third-party/rust/crates/bitflags/1.3.2:bitflags",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libseccomp-sys/0.2.1:libseccomp-sys",
     ],
 )
 
 cargo.rust_binary(
-    name = "libseccomp-0.3.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libseccomp-build-script-build",
+    srcs = [":libseccomp-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "libseccomp",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Manabu Sugimoto <Manabu.Sugimoto@sony.com>",
         "CARGO_PKG_DESCRIPTION": "Rust Language Bindings for the libseccomp Library",
         "CARGO_PKG_NAME": "libseccomp",
@@ -59,16 +60,14 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "pkg_config": "//third-party/rust/crates/pkg-config/0.3.32:pkg-config-0.3.32",
-    },
     visibility = [],
+    deps = ["//third-party/rust/crates/pkg-config/0.3.32:pkg-config"],
 )
 
 buildscript_run(
-    name = "libseccomp-0.3.0-build-script-run",
+    name = "libseccomp-build-script-run",
     package_name = "libseccomp",
-    buildscript_rule = ":libseccomp-0.3.0-build-script-build",
+    buildscript_rule = ":libseccomp-build-script-build",
     version = "0.3.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":libseccomp-vendor",
 )

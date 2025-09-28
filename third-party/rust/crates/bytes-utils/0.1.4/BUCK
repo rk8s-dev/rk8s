@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "bytes-utils-vendor",
+    urls = ["https://static.crates.io/crates/bytes-utils/bytes-utils-0.1.4.crate"],
+    sha256 = "7dafe3a8757b027e2be6e4e5601ed563c55989fcf1546e933c66c8eb3a058d35",
+    type = "tar.gz",
+    strip_prefix = "bytes-utils-0.1.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "bytes-utils-0.1.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "bytes-utils",
+    srcs = [":bytes-utils-vendor"],
     crate = "bytes-utils",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "bytes-utils",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Michal 'vorner' Vaner <vorner@vorner.cz>",
         "CARGO_PKG_DESCRIPTION": "Additional utilities for working with the bytes crate",
         "CARGO_PKG_NAME": "bytes-utils",
@@ -31,7 +37,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/either/1.15.0:either-1.15.0",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/either/1.15.0:either",
     ],
 )

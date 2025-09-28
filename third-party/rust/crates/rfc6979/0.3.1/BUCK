@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rfc6979-vendor",
+    urls = ["https://static.crates.io/crates/rfc6979/rfc6979-0.3.1.crate"],
+    sha256 = "7743f17af12fa0b03b803ba12cd6a8d9483a587e89c69445e3909655c0b9fabb",
+    type = "tar.gz",
+    strip_prefix = "rfc6979-0.3.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rfc6979-0.3.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rfc6979",
+    srcs = [":rfc6979-vendor"],
     crate = "rfc6979",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rfc6979",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Pure Rust implementation of RFC6979: Deterministic Usage of the\nDigital Signature Algorithm (DSA) and Elliptic Curve Digital Signature Algorithm (ECDSA)\n",
         "CARGO_PKG_NAME": "rfc6979",
@@ -25,12 +31,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "crypto_bigint": "//third-party/rust/crates/crypto-bigint/0.4.9:crypto-bigint-0.4.9",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/hmac/0.12.1:hmac-0.12.1",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1",
+        "//third-party/rust/crates/crypto-bigint/0.4.9:crypto-bigint",
+        "//third-party/rust/crates/hmac/0.12.1:hmac",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
     ],
 )

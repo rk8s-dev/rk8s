@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustc-demangle-vendor",
+    urls = ["https://static.crates.io/crates/rustc-demangle/rustc-demangle-0.1.26.crate"],
+    sha256 = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace",
+    type = "tar.gz",
+    strip_prefix = "rustc-demangle-0.1.26",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustc-demangle-0.1.26",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustc-demangle",
+    srcs = [":rustc-demangle-vendor"],
     crate = "rustc-demangle",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "rustc-demangle",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "Rust compiler symbol demangling.\n",
         "CARGO_PKG_NAME": "rustc-demangle",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "option-ext-vendor",
+    urls = ["https://static.crates.io/crates/option-ext/option-ext-0.2.0.crate"],
+    sha256 = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d",
+    type = "tar.gz",
+    strip_prefix = "option-ext-0.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "option-ext-0.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "option-ext",
+    srcs = [":option-ext-vendor"],
     crate = "option-ext",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "option-ext",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Simon Ochsenreither <simon@ochsenreither.de>",
         "CARGO_PKG_DESCRIPTION": "Extends `Option` with additional operations",
         "CARGO_PKG_NAME": "option-ext",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "native-tls-vendor",
+    urls = ["https://static.crates.io/crates/native-tls/native-tls-0.2.14.crate"],
+    sha256 = "87de3442987e9dbec73158d5c715e7ad9072fda936bb03d19d7fa10e00520f0e",
+    type = "tar.gz",
+    strip_prefix = "native-tls-0.2.14",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "native-tls-0.2.14",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "native-tls",
+    srcs = [":native-tls-vendor"],
     crate = "native-tls",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "native-tls",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A wrapper over a platform's native TLS implementation",
         "CARGO_PKG_NAME": "native-tls",
@@ -24,32 +30,27 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "2",
         "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :native-tls-0.2.14-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :native-tls-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :native-tls-0.2.14-build-script-run[rustc_flags])"],
-    named_deps = {
-        "openssl_probe": "//third-party/rust/crates/openssl-probe/0.1.6:openssl-probe-0.1.6",
-        "openssl_sys": "//third-party/rust/crates/openssl-sys/0.9.109:openssl-sys-0.9.109",
-    },
+    rustc_flags = ["@$(location :native-tls-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/openssl/0.10.73:openssl-0.10.73",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/openssl-probe/0.1.6:openssl-probe",
+        "//third-party/rust/crates/openssl-sys/0.9.109:openssl-sys",
+        "//third-party/rust/crates/openssl/0.10.73:openssl",
     ],
 )
 
 cargo.rust_binary(
-    name = "native-tls-0.2.14-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "native-tls-build-script-build",
+    srcs = [":native-tls-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "native-tls",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A wrapper over a platform's native TLS implementation",
         "CARGO_PKG_NAME": "native-tls",
@@ -64,9 +65,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "native-tls-0.2.14-build-script-run",
+    name = "native-tls-build-script-run",
     package_name = "native-tls",
-    buildscript_rule = ":native-tls-0.2.14-build-script-build",
+    buildscript_rule = ":native-tls-build-script-build",
     version = "0.2.14",
-    local_manifest_dir = "**",
+    manifest_dir = ":native-tls-vendor",
 )

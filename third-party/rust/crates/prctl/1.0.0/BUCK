@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "prctl-vendor",
+    urls = ["https://static.crates.io/crates/prctl/prctl-1.0.0.crate"],
+    sha256 = "059a34f111a9dee2ce1ac2826a68b24601c4298cfeb1a587c3cb493d5ab46f52",
+    type = "tar.gz",
+    strip_prefix = "prctl-1.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "prctl-1.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "prctl",
+    srcs = [":prctl-vendor"],
     crate = "prctl",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "prctl",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stanisław Pitucha <viraptor@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "This package provides safe abstraction to the linux prctl() interface. Some\nfunctions may be architecture-specific.\n",
         "CARGO_PKG_NAME": "prctl",
@@ -27,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/nix/0.30.1:nix-0.30.1",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/nix/0.30.1:nix",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "socket2-vendor",
+    urls = ["https://static.crates.io/crates/socket2/socket2-0.5.10.crate"],
+    sha256 = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678",
+    type = "tar.gz",
+    strip_prefix = "socket2-0.5.10",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "socket2-0.5.10",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "socket2",
+    srcs = [":socket2-vendor"],
     crate = "socket2",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "socket2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>:Thomas de Zeeuw <thomasdezeeuw@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Utilities for handling networking sockets with a maximal amount of configuration\npossible intended.\n",
         "CARGO_PKG_NAME": "socket2",
@@ -27,5 +33,5 @@ cargo.rust_library(
     },
     features = ["all"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )

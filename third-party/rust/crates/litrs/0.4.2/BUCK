@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "litrs-vendor",
+    urls = ["https://static.crates.io/crates/litrs/litrs-0.4.2.crate"],
+    sha256 = "f5e54036fe321fd421e10d732f155734c4e4afd610dd556d9a82833ab3ee0bed",
+    type = "tar.gz",
+    strip_prefix = "litrs-0.4.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "litrs-0.4.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "litrs",
+    srcs = [":litrs-vendor"],
     crate = "litrs",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "litrs",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Lukas Kalbertodt <lukas.kalbertodt@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Parse and inspect Rust literals (i.e. tokens in the Rust programming language\nrepresenting fixed values). Particularly useful for proc macros, but can also\nbe used outside of a proc-macro context.\n",
         "CARGO_PKG_NAME": "litrs",

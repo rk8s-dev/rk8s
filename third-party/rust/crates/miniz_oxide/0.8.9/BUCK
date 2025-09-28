@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "miniz_oxide-vendor",
+    urls = ["https://static.crates.io/crates/miniz_oxide/miniz_oxide-0.8.9.crate"],
+    sha256 = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316",
+    type = "tar.gz",
+    strip_prefix = "miniz_oxide-0.8.9",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "miniz_oxide-0.8.9",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "miniz_oxide",
+    srcs = [":miniz_oxide-vendor"],
     crate = "miniz_oxide",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "miniz_oxide",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Frommi <daniil.liferenko@gmail.com>:oyvindln <oyvindln@users.noreply.github.com>:Rich Geldreich richgel99@gmail.com",
         "CARGO_PKG_DESCRIPTION": "DEFLATE compression and decompression library rewritten in Rust based on miniz",
         "CARGO_PKG_NAME": "miniz_oxide",
@@ -27,5 +33,5 @@ cargo.rust_library(
     },
     features = ["with-alloc"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/adler2/2.0.1:adler2-2.0.1"],
+    deps = ["//third-party/rust/crates/adler2/2.0.1:adler2"],
 )

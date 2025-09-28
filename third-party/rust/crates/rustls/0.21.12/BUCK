@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustls-vendor",
+    urls = ["https://static.crates.io/crates/rustls/rustls-0.21.12.crate"],
+    sha256 = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e",
+    type = "tar.gz",
+    strip_prefix = "rustls-0.21.12",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustls-0.21.12",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustls",
+    srcs = [":rustls-vendor"],
     crate = "rustls",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustls",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rustls is a modern TLS library written in Rust.",
         "CARGO_PKG_NAME": "rustls",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "21",
         "CARGO_PKG_VERSION_PATCH": "12",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :rustls-0.21.12-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rustls-build-script-run[out_dir])",
     },
     features = [
         "default",
@@ -32,30 +38,27 @@ cargo.rust_library(
         "logging",
         "tls12",
     ],
-    rustc_flags = ["@$(location :rustls-0.21.12-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :rustls-build-script-run[rustc_flags])"],
     named_deps = {
-        "webpki": "//third-party/rust/crates/rustls-webpki/0.101.7:rustls-webpki-0.101.7",
+        "webpki": "//third-party/rust/crates/rustls-webpki/0.101.7:rustls-webpki",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/ring/0.17.14:ring-0.17.14",
-        "//third-party/rust/crates/sct/0.7.1:sct-0.7.1",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/ring/0.17.14:ring",
+        "//third-party/rust/crates/sct/0.7.1:sct",
     ],
 )
 
 cargo.rust_binary(
-    name = "rustls-0.21.12-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustls-build-script-build",
+    srcs = [":rustls-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustls",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rustls is a modern TLS library written in Rust.",
         "CARGO_PKG_NAME": "rustls",
@@ -76,9 +79,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "rustls-0.21.12-build-script-run",
+    name = "rustls-build-script-run",
     package_name = "rustls",
-    buildscript_rule = ":rustls-0.21.12-build-script-build",
+    buildscript_rule = ":rustls-build-script-build",
     features = [
         "default",
         "log",
@@ -86,5 +89,5 @@ buildscript_run(
         "tls12",
     ],
     version = "0.21.12",
-    local_manifest_dir = "**",
+    manifest_dir = ":rustls-vendor",
 )

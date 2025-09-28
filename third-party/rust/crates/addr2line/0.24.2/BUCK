@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "addr2line-vendor",
+    urls = ["https://static.crates.io/crates/addr2line/addr2line-0.24.2.crate"],
+    sha256 = "dfbe277e56a376000877090da837660b4427aad530e3028d44e0bffe4f89a1c1",
+    type = "tar.gz",
+    strip_prefix = "addr2line-0.24.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "addr2line-0.24.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "addr2line",
+    srcs = [":addr2line-vendor"],
     crate = "addr2line",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "addr2line",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A cross-platform symbolication library written in Rust, using `gimli`",
         "CARGO_PKG_NAME": "addr2line",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/gimli/0.31.1:gimli-0.31.1"],
+    deps = ["//third-party/rust/crates/gimli/0.31.1:gimli"],
 )

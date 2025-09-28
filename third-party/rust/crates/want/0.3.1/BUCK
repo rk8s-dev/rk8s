@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "want-vendor",
+    urls = ["https://static.crates.io/crates/want/want-0.3.1.crate"],
+    sha256 = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e",
+    type = "tar.gz",
+    strip_prefix = "want-0.3.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "want-0.3.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "want",
+    srcs = [":want-vendor"],
     crate = "want",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "want",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "Detect when another Future wants a result.",
         "CARGO_PKG_NAME": "want",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "try_lock": "//third-party/rust/crates/try-lock/0.2.5:try-lock-0.2.5",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/try-lock/0.2.5:try-lock"],
 )

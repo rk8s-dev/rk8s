@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "serde_core-vendor",
+    urls = ["https://static.crates.io/crates/serde_core/serde_core-1.0.226.crate"],
+    sha256 = "ba2ba63999edb9dac981fb34b3e5c0d111a69b0924e253ed29d83f7c99e966a4",
+    type = "tar.gz",
+    strip_prefix = "serde_core-1.0.226",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "serde_core-1.0.226",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "serde_core",
+    srcs = [":serde_core-vendor"],
     crate = "serde_core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "serde_core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Erick Tryzelaar <erick.tryzelaar@gmail.com>:David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Serde traits only, with no support for derive -- use the `serde` crate instead",
         "CARGO_PKG_NAME": "serde_core",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "226",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :serde_core-1.0.226-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :serde_core-build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -32,22 +38,19 @@ cargo.rust_library(
         "result",
         "std",
     ],
-    rustc_flags = ["@$(location :serde_core-1.0.226-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :serde_core-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "serde_core-1.0.226-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "serde_core-build-script-build",
+    srcs = [":serde_core-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "serde_core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Erick Tryzelaar <erick.tryzelaar@gmail.com>:David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Serde traits only, with no support for derive -- use the `serde` crate instead",
         "CARGO_PKG_NAME": "serde_core",
@@ -68,16 +71,10 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "serde_core-1.0.226-build-script-run",
+    name = "serde_core-build-script-run",
     package_name = "serde_core",
-    buildscript_rule = ":serde_core-1.0.226-build-script-build",
+    buildscript_rule = ":serde_core-build-script-build",
     env = {
-        "CARGO_CRATE_NAME": "serde_core",
-        "CARGO_MANIFEST_DIR": ".",
-        "CARGO_PKG_AUTHORS": "Erick Tryzelaar <erick.tryzelaar@gmail.com>:David Tolnay <dtolnay@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "Serde traits only, with no support for derive -- use the `serde` crate instead",
-        "CARGO_PKG_NAME": "serde_core",
-        "CARGO_PKG_REPOSITORY": "https://github.com/serde-rs/serde",
         "CARGO_PKG_VERSION": "1.0.226",
         "CARGO_PKG_VERSION_MAJOR": "1",
         "CARGO_PKG_VERSION_MINOR": "0",
@@ -91,5 +88,5 @@ buildscript_run(
         "std",
     ],
     version = "1.0.226",
-    local_manifest_dir = "**",
+    manifest_dir = ":serde_core-vendor",
 )

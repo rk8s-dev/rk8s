@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "cpufeatures-vendor",
+    urls = ["https://static.crates.io/crates/cpufeatures/cpufeatures-0.2.17.crate"],
+    sha256 = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280",
+    type = "tar.gz",
+    strip_prefix = "cpufeatures-0.2.17",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "cpufeatures-0.2.17",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "cpufeatures",
+    srcs = [":cpufeatures-vendor"],
     crate = "cpufeatures",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "cpufeatures",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Lightweight runtime CPU feature detection for aarch64, loongarch64, and x86/x86_64 targets, \nwith no_std support and support for mobile targets including Android and iOS\n",
         "CARGO_PKG_NAME": "cpufeatures",

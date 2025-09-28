@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "regex-vendor",
+    urls = ["https://static.crates.io/crates/regex/regex-1.11.2.crate"],
+    sha256 = "23d7fd106d8c02486a8d64e778353d1cffe08ce79ac2e82f540c86d0facf6912",
+    type = "tar.gz",
+    strip_prefix = "regex-1.11.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "regex-1.11.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "regex",
+    srcs = [":regex-vendor"],
     crate = "regex",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "regex",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers:Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "An implementation of regular expressions for Rust. This implementation uses\nfinite automata and guarantees linear time matching on all inputs.\n",
         "CARGO_PKG_NAME": "regex",
@@ -44,11 +50,11 @@ cargo.rust_library(
         "unicode-script",
         "unicode-segment",
     ],
-    named_deps = {
-        "aho_corasick": "//third-party/rust/crates/aho-corasick/1.1.3:aho-corasick-1.1.3",
-        "regex_automata": "//third-party/rust/crates/regex-automata/0.4.10:regex-automata-0.4.10",
-        "regex_syntax": "//third-party/rust/crates/regex-syntax/0.8.6:regex-syntax-0.8.6",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5"],
+    deps = [
+        "//third-party/rust/crates/aho-corasick/1.1.3:aho-corasick",
+        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/regex-automata/0.4.10:regex-automata",
+        "//third-party/rust/crates/regex-syntax/0.8.6:regex-syntax",
+    ],
 )

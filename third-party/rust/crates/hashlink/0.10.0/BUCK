@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hashlink-vendor",
+    urls = ["https://static.crates.io/crates/hashlink/hashlink-0.10.0.crate"],
+    sha256 = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1",
+    type = "tar.gz",
+    strip_prefix = "hashlink-0.10.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hashlink-0.10.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hashlink",
+    srcs = [":hashlink-vendor"],
     crate = "hashlink",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "hashlink",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "kyren <kerriganw@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "HashMap-like containers that hold their key-value pairs in a user controllable order",
         "CARGO_PKG_NAME": "hashlink",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/hashbrown/0.15.5:hashbrown-0.15.5"],
+    deps = ["//third-party/rust/crates/hashbrown/0.15.5:hashbrown"],
 )

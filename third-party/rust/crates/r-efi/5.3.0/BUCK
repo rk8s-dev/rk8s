@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "r-efi-vendor",
+    urls = ["https://static.crates.io/crates/r-efi/r-efi-5.3.0.crate"],
+    sha256 = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
+    type = "tar.gz",
+    strip_prefix = "r-efi-5.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "r-efi-5.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "r-efi",
+    srcs = [":r-efi-vendor"],
     crate = "r-efi",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "r-efi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "UEFI Reference Specification Protocol Constants and Definitions",
         "CARGO_PKG_NAME": "r-efi",

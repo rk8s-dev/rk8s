@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "android_system_properties-vendor",
+    urls = ["https://static.crates.io/crates/android_system_properties/android_system_properties-0.1.5.crate"],
+    sha256 = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311",
+    type = "tar.gz",
+    strip_prefix = "android_system_properties-0.1.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "android_system_properties-0.1.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "android_system_properties",
+    srcs = [":android_system_properties-vendor"],
     crate = "android_system_properties",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "android_system_properties",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Nicolas Silva <nical@fastmail.com>",
         "CARGO_PKG_DESCRIPTION": "Minimal Android system properties wrapper",
         "CARGO_PKG_NAME": "android_system_properties",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )

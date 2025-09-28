@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "console-vendor",
+    urls = ["https://static.crates.io/crates/console/console-0.16.1.crate"],
+    sha256 = "b430743a6eb14e9764d4260d4c0d8123087d504eeb9c48f2b2a5e810dd369df4",
+    type = "tar.gz",
+    strip_prefix = "console-0.16.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "console-0.16.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "console",
+    srcs = [":console-vendor"],
     crate = "console",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "console",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A terminal and console abstraction for Rust",
         "CARGO_PKG_NAME": "console",
@@ -31,12 +37,10 @@ cargo.rust_library(
         "std",
         "unicode-width",
     ],
-    named_deps = {
-        "unicode_width": "//third-party/rust/crates/unicode-width/0.2.1:unicode-width-0.2.1",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/unicode-width/0.2.1:unicode-width",
     ],
 )

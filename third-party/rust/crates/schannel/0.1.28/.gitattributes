@@ -1,3 +1,0 @@
-appveyor.yml    eol=crlf
-.\test\*.cer    binary
-.\test\*.cer.sha1   binary

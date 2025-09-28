@@ -3,18 +3,21 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+filegroup(
+    name = "libcgroups-vendor",
+    srcs = glob(["**/**"]),
+    out = "vendor",
+)
+
 cargo.rust_library(
     name = "libcgroups",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    srcs = [":libcgroups-vendor"],
     crate = "libcgroups",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "libcgroups",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "youki team",
         "CARGO_PKG_DESCRIPTION": "Library for cgroup",
         "CARGO_PKG_NAME": "libcgroups",
@@ -31,16 +34,15 @@ cargo.rust_library(
         "v1",
         "v2",
     ],
-    named_deps = {
-        "oci_spec": "//third-party/rust/crates/oci-spec/0.8.2:oci-spec-0.8.2",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset-0.5.7",
-        "//third-party/rust/crates/nix/0.29.0:nix-0.29.0",
-        "//third-party/rust/crates/procfs/0.17.0:procfs-0.17.0",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
-        "//third-party/rust/crates/tracing/0.1.41:tracing-0.1.41",
+        "//project/libnetwork:liblibnetwork",
+        "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset",
+        "//third-party/rust/crates/nix/0.29.0:nix",
+        "//third-party/rust/crates/oci-spec/0.8.2:oci-spec",
+        "//third-party/rust/crates/procfs/0.17.0:procfs",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/thiserror/2.0.16:thiserror",
+        "//third-party/rust/crates/tracing/0.1.41:tracing",
     ],
 )

@@ -3,18 +3,21 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+filegroup(
+    name = "rfuse3-vendor",
+    srcs = glob(["**/**"]),
+    out = "vendor",
+)
+
 cargo.rust_library(
     name = "rfuse3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    srcs = [":rfuse3-vendor"],
     crate = "rfuse3",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rfuse3",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "rk8s-dev team",
         "CARGO_PKG_DESCRIPTION": "FUSE user-space library async version implementation.",
         "CARGO_PKG_NAME": "rfuse3",
@@ -30,22 +33,20 @@ cargo.rust_library(
         "tokio-runtime",
         "unprivileged",
     ],
-    named_deps = {
-        "async_notify": "//third-party/rust/crates/async-notify/0.3.0:async-notify-0.3.0",
-        "futures_channel": "//third-party/rust/crates/futures-channel/0.3.31:futures-channel-0.3.31",
-        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
-        "trait_make": "//third-party/rust/crates/trait-make/0.1.0:trait-make-0.1.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bincode/1.3.3:bincode-1.3.3",
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/nix/0.29.0:nix-0.29.0",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/slab/0.4.11:slab-0.4.11",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
-        "//third-party/rust/crates/tracing/0.1.41:tracing-0.1.41",
-        "//third-party/rust/crates/which/4.4.2:which-4.4.2",
+        "//third-party/rust/crates/async-notify/0.3.0:async-notify",
+        "//third-party/rust/crates/bincode/1.3.3:bincode",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",
+        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/nix/0.29.0:nix",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/slab/0.4.11:slab",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/trait-make/0.1.0:trait-make",
+        "//third-party/rust/crates/which/4.4.2:which",
     ],
 )

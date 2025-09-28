@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustls-pemfile-vendor",
+    urls = ["https://static.crates.io/crates/rustls-pemfile/rustls-pemfile-1.0.4.crate"],
+    sha256 = "1c74cae0a4cf6ccbbf5f359f08efdf8ee7e1dc532573bf0db71968cb56b1448c",
+    type = "tar.gz",
+    strip_prefix = "rustls-pemfile-1.0.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustls-pemfile-1.0.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustls-pemfile",
+    srcs = [":rustls-pemfile-vendor"],
     crate = "rustls-pemfile",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rustls-pemfile",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Basic .pem file parser for keys and certificates",
         "CARGO_PKG_NAME": "rustls-pemfile",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/base64/0.21.7:base64-0.21.7"],
+    deps = ["//third-party/rust/crates/base64/0.21.7:base64"],
 )

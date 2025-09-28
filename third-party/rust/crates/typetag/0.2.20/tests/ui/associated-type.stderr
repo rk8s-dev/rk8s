@@ -1,5 +1,0 @@
-error: typetag trait with associated type is not supported yet
- --> tests/ui/associated-type.rs:3:5
-  |
-3 |     type Assoc;
-  |     ^^^^^^^^^^^

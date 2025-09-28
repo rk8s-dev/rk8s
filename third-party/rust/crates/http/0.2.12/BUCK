@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "http-vendor",
+    urls = ["https://static.crates.io/crates/http/http-0.2.12.crate"],
+    sha256 = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1",
+    type = "tar.gz",
+    strip_prefix = "http-0.2.12",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "http-0.2.12",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "http",
+    srcs = [":http-vendor"],
     crate = "http",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "http",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>:Carl Lerche <me@carllerche.com>:Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "A set of types for representing HTTP requests and responses.\n",
         "CARGO_PKG_NAME": "http",
@@ -27,8 +33,8 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/fnv/1.0.7:fnv-1.0.7",
-        "//third-party/rust/crates/itoa/1.0.15:itoa-1.0.15",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/fnv/1.0.7:fnv",
+        "//third-party/rust/crates/itoa/1.0.15:itoa",
     ],
 )

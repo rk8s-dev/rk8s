@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "getset-vendor",
+    urls = ["https://static.crates.io/crates/getset/getset-0.1.6.crate"],
+    sha256 = "9cf0fc11e47561d47397154977bc219f4cf809b2974facc3ccb3b89e2436f912",
+    type = "tar.gz",
+    strip_prefix = "getset-0.1.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "getset-0.1.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "getset",
+    srcs = [":getset-vendor"],
     crate = "getset",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "getset",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Ana Hobden <ana@hoverbear.org>:John Baublitz <john.m.baublitz@gmail.com",
         "CARGO_PKG_DESCRIPTION": "Getset, we're ready to go!\n\nA procedural macro for generating the most basic getters and setters on fields.\n",
         "CARGO_PKG_NAME": "getset",
@@ -26,13 +32,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-        "proc_macro_error2": "//third-party/rust/crates/proc-macro-error2/2.0.1:proc-macro-error2-2.0.1",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/proc-macro-error2/2.0.1:proc-macro-error2",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

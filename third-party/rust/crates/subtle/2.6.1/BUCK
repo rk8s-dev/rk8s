@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "subtle-vendor",
+    urls = ["https://static.crates.io/crates/subtle/subtle-2.6.1.crate"],
+    sha256 = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292",
+    type = "tar.gz",
+    strip_prefix = "subtle-2.6.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "subtle-2.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "subtle",
+    srcs = [":subtle-vendor"],
     crate = "subtle",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "subtle",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Isis Lovecruft <isis@patternsinthevoid.net>:Henry de Valence <hdevalence@hdevalence.ca>",
         "CARGO_PKG_DESCRIPTION": "Pure-Rust traits and utilities for constant-time cryptographic implementations.",
         "CARGO_PKG_NAME": "subtle",

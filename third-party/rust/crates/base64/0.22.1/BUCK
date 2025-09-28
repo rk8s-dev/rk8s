@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "base64-vendor",
+    urls = ["https://static.crates.io/crates/base64/base64-0.22.1.crate"],
+    sha256 = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6",
+    type = "tar.gz",
+    strip_prefix = "base64-0.22.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "base64-0.22.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "base64",
+    srcs = [":base64-vendor"],
     crate = "base64",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "base64",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Marshall Pierce <marshall@mpierce.org>",
         "CARGO_PKG_DESCRIPTION": "encodes and decodes base64 as bytes or utf8",
         "CARGO_PKG_NAME": "base64",

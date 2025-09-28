@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "quinn-udp-vendor",
+    urls = ["https://static.crates.io/crates/quinn-udp/quinn-udp-0.5.14.crate"],
+    sha256 = "addec6a0dcad8a8d96a771f815f0eaf55f9d1805756410b39f5fa81332574cbd",
+    type = "tar.gz",
+    strip_prefix = "quinn-udp-0.5.14",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "quinn-udp-0.5.14",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "quinn-udp",
+    srcs = [":quinn-udp-vendor"],
     crate = "quinn-udp",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "quinn-udp",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "UDP sockets with ECN information for the QUIC transport protocol",
         "CARGO_PKG_NAME": "quinn-udp",
@@ -24,33 +30,30 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "5",
         "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :quinn-udp-0.5.14-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :quinn-udp-build-script-run[out_dir])",
     },
     features = [
         "log",
         "tracing",
     ],
-    rustc_flags = ["@$(location :quinn-udp-0.5.14-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :quinn-udp-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/socket2/0.6.0:socket2-0.6.0",
-        "//third-party/rust/crates/tracing/0.1.41:tracing-0.1.41",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/socket2/0.6.0:socket2",
+        "//third-party/rust/crates/tracing/0.1.41:tracing",
     ],
 )
 
 cargo.rust_binary(
-    name = "quinn-udp-0.5.14-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "quinn-udp-build-script-build",
+    srcs = [":quinn-udp-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "quinn-udp",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "UDP sockets with ECN information for the QUIC transport protocol",
         "CARGO_PKG_NAME": "quinn-udp",
@@ -66,17 +69,17 @@ cargo.rust_binary(
         "tracing",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/cfg_aliases/0.2.1:cfg_aliases-0.2.1"],
+    deps = ["//third-party/rust/crates/cfg_aliases/0.2.1:cfg_aliases"],
 )
 
 buildscript_run(
-    name = "quinn-udp-0.5.14-build-script-run",
+    name = "quinn-udp-build-script-run",
     package_name = "quinn-udp",
-    buildscript_rule = ":quinn-udp-0.5.14-build-script-build",
+    buildscript_rule = ":quinn-udp-build-script-build",
     features = [
         "log",
         "tracing",
     ],
     version = "0.5.14",
-    local_manifest_dir = "**",
+    manifest_dir = ":quinn-udp-vendor",
 )

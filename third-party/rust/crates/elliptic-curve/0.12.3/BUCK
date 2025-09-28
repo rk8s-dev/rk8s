@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "elliptic-curve-vendor",
+    urls = ["https://static.crates.io/crates/elliptic-curve/elliptic-curve-0.12.3.crate"],
+    sha256 = "e7bb888ab5300a19b8e5bceef25ac745ad065f3c9f7efc6de1b91958110891d3",
+    type = "tar.gz",
+    strip_prefix = "elliptic-curve-0.12.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "elliptic-curve-0.12.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "elliptic-curve",
+    srcs = [":elliptic-curve-vendor"],
     crate = "elliptic-curve",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "elliptic-curve",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "General purpose Elliptic Curve Cryptography (ECC) support, including types\nand traits for representing various elliptic curve forms, scalars, points,\nand public/secret keys composed thereof.\n",
         "CARGO_PKG_NAME": "elliptic-curve",
@@ -36,21 +42,19 @@ cargo.rust_library(
         "sec1",
         "std",
     ],
-    named_deps = {
-        "crypto_bigint": "//third-party/rust/crates/crypto-bigint/0.4.9:crypto-bigint-0.4.9",
-        "generic_array": "//third-party/rust/crates/generic-array/0.14.7:generic-array-0.14.7",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base16ct/0.1.1:base16ct-0.1.1",
-        "//third-party/rust/crates/der/0.6.1:der-0.6.1",
-        "//third-party/rust/crates/digest/0.10.7:digest-0.10.7",
-        "//third-party/rust/crates/ff/0.12.1:ff-0.12.1",
-        "//third-party/rust/crates/group/0.12.1:group-0.12.1",
-        "//third-party/rust/crates/pkcs8/0.9.0:pkcs8-0.9.0",
-        "//third-party/rust/crates/rand_core/0.6.4:rand_core-0.6.4",
-        "//third-party/rust/crates/sec1/0.3.0:sec1-0.3.0",
-        "//third-party/rust/crates/subtle/2.6.1:subtle-2.6.1",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1",
+        "//third-party/rust/crates/base16ct/0.1.1:base16ct",
+        "//third-party/rust/crates/crypto-bigint/0.4.9:crypto-bigint",
+        "//third-party/rust/crates/der/0.6.1:der",
+        "//third-party/rust/crates/digest/0.10.7:digest",
+        "//third-party/rust/crates/ff/0.12.1:ff",
+        "//third-party/rust/crates/generic-array/0.14.7:generic-array",
+        "//third-party/rust/crates/group/0.12.1:group",
+        "//third-party/rust/crates/pkcs8/0.9.0:pkcs8",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
+        "//third-party/rust/crates/sec1/0.3.0:sec1",
+        "//third-party/rust/crates/subtle/2.6.1:subtle",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
     ],
 )

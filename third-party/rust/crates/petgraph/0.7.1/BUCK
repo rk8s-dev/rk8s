@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "petgraph-vendor",
+    urls = ["https://static.crates.io/crates/petgraph/petgraph-0.7.1.crate"],
+    sha256 = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772",
+    type = "tar.gz",
+    strip_prefix = "petgraph-0.7.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "petgraph-0.7.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "petgraph",
+    srcs = [":petgraph-vendor"],
     crate = "petgraph",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "petgraph",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "bluss:mitchmindtree",
         "CARGO_PKG_DESCRIPTION": "Graph data structure library. Provides graph types and graph algorithms.",
         "CARGO_PKG_NAME": "petgraph",
@@ -27,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset-0.5.7",
-        "//third-party/rust/crates/indexmap/2.11.4:indexmap-2.11.4",
+        "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset",
+        "//third-party/rust/crates/indexmap/2.11.4:indexmap",
     ],
 )

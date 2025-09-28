@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "autocfg-vendor",
+    urls = ["https://static.crates.io/crates/autocfg/autocfg-1.5.0.crate"],
+    sha256 = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8",
+    type = "tar.gz",
+    strip_prefix = "autocfg-1.5.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "autocfg-1.5.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "autocfg",
+    srcs = [":autocfg-vendor"],
     crate = "autocfg",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "autocfg",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Josh Stone <cuviper@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Automatic cfg for Rust compiler features",
         "CARGO_PKG_NAME": "autocfg",

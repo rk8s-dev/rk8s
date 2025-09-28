@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "toml_write-vendor",
+    urls = ["https://static.crates.io/crates/toml_write/toml_write-0.1.2.crate"],
+    sha256 = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801",
+    type = "tar.gz",
+    strip_prefix = "toml_write-0.1.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "toml_write-0.1.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "toml_write",
+    srcs = [":toml_write-vendor"],
     crate = "toml_write",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "toml_write",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A low-level interface for writing out TOML\n",
         "CARGO_PKG_NAME": "toml_write",

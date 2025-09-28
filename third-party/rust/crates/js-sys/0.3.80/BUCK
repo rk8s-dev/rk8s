@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "js-sys-vendor",
+    urls = ["https://static.crates.io/crates/js-sys/js-sys-0.3.80.crate"],
+    sha256 = "852f13bec5eba4ba9afbeb93fd7c13fe56147f055939ae21c43a29a0ecb2702e",
+    type = "tar.gz",
+    strip_prefix = "js-sys-0.3.80",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "js-sys-0.3.80",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "js-sys",
+    srcs = [":js-sys-vendor"],
     crate = "js-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "js-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
         "CARGO_PKG_DESCRIPTION": "Bindings for all JS global objects and functions in all JS environments like\nNode.js and browsers, built on `#[wasm_bindgen]` using the `wasm-bindgen` crate.\n",
         "CARGO_PKG_NAME": "js-sys",
@@ -29,9 +35,9 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "wasm_bindgen": "//third-party/rust/crates/wasm-bindgen/0.2.103:wasm-bindgen-0.2.103",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3"],
+    deps = [
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/wasm-bindgen/0.2.103:wasm-bindgen",
+    ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "getrandom-vendor",
+    urls = ["https://static.crates.io/crates/getrandom/getrandom-0.2.16.crate"],
+    sha256 = "335ff9f135e4384c8150d6f27c6daed433577f86b4750418338c01a1a2528592",
+    type = "tar.gz",
+    strip_prefix = "getrandom-0.2.16",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "getrandom-0.2.16",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "getrandom",
+    srcs = [":getrandom-vendor"],
     crate = "getrandom",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "getrandom",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rand Project Developers",
         "CARGO_PKG_DESCRIPTION": "A small cross-platform library for retrieving random data from system source",
         "CARGO_PKG_NAME": "getrandom",
@@ -31,9 +37,9 @@ cargo.rust_library(
         "std",
         "wasm-bindgen",
     ],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = [
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+    ],
 )

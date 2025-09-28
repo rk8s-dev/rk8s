@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "stable_deref_trait-vendor",
+    urls = ["https://static.crates.io/crates/stable_deref_trait/stable_deref_trait-1.2.0.crate"],
+    sha256 = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3",
+    type = "tar.gz",
+    strip_prefix = "stable_deref_trait-1.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "stable_deref_trait-1.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "stable_deref_trait",
+    srcs = [":stable_deref_trait-vendor"],
     crate = "stable_deref_trait",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "stable_deref_trait",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Robert Grosse <n210241048576@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "An unsafe marker trait for types like Box and Rc that dereference to a stable address even when moved, and hence can be used with libraries such as owning_ref and rental.\n",
         "CARGO_PKG_NAME": "stable_deref_trait",

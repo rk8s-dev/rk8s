@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "signature-vendor",
+    urls = ["https://static.crates.io/crates/signature/signature-1.6.4.crate"],
+    sha256 = "74233d3b3b2f6d4b006dc19dee745e73e2a6bfb6f93607cd3b02bd5b00797d7c",
+    type = "tar.gz",
+    strip_prefix = "signature-1.6.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "signature-1.6.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "signature",
+    srcs = [":signature-vendor"],
     crate = "signature",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "signature",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Traits for cryptographic signature algorithms (e.g. ECDSA, Ed25519)",
         "CARGO_PKG_NAME": "signature",
@@ -35,7 +41,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/digest/0.10.7:digest-0.10.7",
-        "//third-party/rust/crates/rand_core/0.6.4:rand_core-0.6.4",
+        "//third-party/rust/crates/digest/0.10.7:digest",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
     ],
 )

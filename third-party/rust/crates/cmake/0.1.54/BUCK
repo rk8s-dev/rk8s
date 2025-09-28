@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "cmake-vendor",
+    urls = ["https://static.crates.io/crates/cmake/cmake-0.1.54.crate"],
+    sha256 = "e7caa3f9de89ddbe2c607f4101924c5abec803763ae9534e4f4d7d8f84aa81f0",
+    type = "tar.gz",
+    strip_prefix = "cmake-0.1.54",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "cmake-0.1.54",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "cmake",
+    srcs = [":cmake-vendor"],
     crate = "cmake",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "cmake",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "A build dependency for running `cmake` to build a native library\n",
         "CARGO_PKG_NAME": "cmake",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/cc/1.2.38:cc-1.2.38"],
+    deps = ["//third-party/rust/crates/cc/1.2.38:cc"],
 )

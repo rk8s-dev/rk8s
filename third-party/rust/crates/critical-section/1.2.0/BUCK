@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "critical-section-vendor",
+    urls = ["https://static.crates.io/crates/critical-section/critical-section-1.2.0.crate"],
+    sha256 = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b",
+    type = "tar.gz",
+    strip_prefix = "critical-section-1.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "critical-section-1.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "critical-section",
+    srcs = [":critical-section-vendor"],
     crate = "critical-section",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "critical-section",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Cross-platform critical section",
         "CARGO_PKG_NAME": "critical-section",

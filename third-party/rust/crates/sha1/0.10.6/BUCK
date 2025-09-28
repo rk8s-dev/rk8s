@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "sha1-vendor",
+    urls = ["https://static.crates.io/crates/sha1/sha1-0.10.6.crate"],
+    sha256 = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba",
+    type = "tar.gz",
+    strip_prefix = "sha1-0.10.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "sha1-0.10.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "sha1",
+    srcs = [":sha1-vendor"],
     crate = "sha1",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "sha1",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "SHA-1 hash function",
         "CARGO_PKG_NAME": "sha1",
@@ -29,12 +35,10 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/cpufeatures/0.2.17:cpufeatures-0.2.17",
-        "//third-party/rust/crates/digest/0.10.7:digest-0.10.7",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/cpufeatures/0.2.17:cpufeatures",
+        "//third-party/rust/crates/digest/0.10.7:digest",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rust-criu-vendor",
+    urls = ["https://static.crates.io/crates/rust-criu/rust-criu-0.4.0.crate"],
+    sha256 = "4737b28406b3395359f485127073117a11cedc8942738b69ba6ab9a79432acbc",
+    type = "tar.gz",
+    strip_prefix = "rust-criu-0.4.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rust-criu-0.4.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rust-criu",
+    srcs = [":rust-criu-vendor"],
     crate = "rust-criu",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rust-criu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rust bindings for CRIU",
         "CARGO_PKG_NAME": "rust-criu",
@@ -24,29 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "4",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :rust-criu-0.4.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rust-criu-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :rust-criu-0.4.0-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :rust-criu-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/protobuf/3.2.0:protobuf-3.2.0",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/protobuf/3.2.0:protobuf",
     ],
 )
 
 cargo.rust_binary(
-    name = "rust-criu-0.4.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rust-criu-build-script-build",
+    srcs = [":rust-criu-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rust-criu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rust bindings for CRIU",
         "CARGO_PKG_NAME": "rust-criu",
@@ -57,16 +60,14 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "protobuf_codegen": "//third-party/rust/crates/protobuf-codegen/3.2.0:protobuf-codegen-3.2.0",
-    },
     visibility = [],
+    deps = ["//third-party/rust/crates/protobuf-codegen/3.2.0:protobuf-codegen"],
 )
 
 buildscript_run(
-    name = "rust-criu-0.4.0-build-script-run",
+    name = "rust-criu-build-script-run",
     package_name = "rust-criu",
-    buildscript_rule = ":rust-criu-0.4.0-build-script-build",
+    buildscript_rule = ":rust-criu-build-script-build",
     version = "0.4.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":rust-criu-vendor",
 )

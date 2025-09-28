@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "macaddr-vendor",
+    urls = ["https://static.crates.io/crates/macaddr/macaddr-1.0.1.crate"],
+    sha256 = "baee0bbc17ce759db233beb01648088061bf678383130602a298e6998eedb2d8",
+    type = "tar.gz",
+    strip_prefix = "macaddr-1.0.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "macaddr-1.0.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "macaddr",
+    srcs = [":macaddr-vendor"],
     crate = "macaddr",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "macaddr",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "svartalf <self@svartalf.info>",
         "CARGO_PKG_DESCRIPTION": "MAC address types",
         "CARGO_PKG_NAME": "macaddr",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tokio-vendor",
+    urls = ["https://static.crates.io/crates/tokio/tokio-1.47.1.crate"],
+    sha256 = "89e49afdadebb872d3145a5638b59eb0691ea23e46ca484037cfab3b76b95038",
+    type = "tar.gz",
+    strip_prefix = "tokio-1.47.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tokio-1.47.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tokio",
+    srcs = [":tokio-vendor"],
     crate = "tokio",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "tokio",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "An event-driven, non-blocking I/O platform for writing asynchronous I/O\nbacked applications.\n",
         "CARGO_PKG_NAME": "tokio",
@@ -48,17 +54,15 @@ cargo.rust_library(
         "tokio-macros",
         "windows-sys",
     ],
-    named_deps = {
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-        "signal_hook_registry": "//third-party/rust/crates/signal-hook-registry/1.4.6:signal-hook-registry-1.4.6",
-        "tokio_macros": "//third-party/rust/crates/tokio-macros/2.5.0:tokio-macros-2.5.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/mio/1.0.4:mio-1.0.4",
-        "//third-party/rust/crates/parking_lot/0.12.4:parking_lot-0.12.4",
-        "//third-party/rust/crates/socket2/0.6.0:socket2-0.6.0",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/mio/1.0.4:mio",
+        "//third-party/rust/crates/parking_lot/0.12.4:parking_lot",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/signal-hook-registry/1.4.6:signal-hook-registry",
+        "//third-party/rust/crates/socket2/0.6.0:socket2",
+        "//third-party/rust/crates/tokio-macros/2.5.0:tokio-macros",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "fnv-vendor",
+    urls = ["https://static.crates.io/crates/fnv/fnv-1.0.7.crate"],
+    sha256 = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1",
+    type = "tar.gz",
+    strip_prefix = "fnv-1.0.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "fnv-1.0.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "fnv",
+    srcs = [":fnv-vendor"],
     crate = "fnv",
-    crate_root = "lib.rs",
+    crate_root = "vendor/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "fnv",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "Fowler–Noll–Vo hash function",
         "CARGO_PKG_NAME": "fnv",

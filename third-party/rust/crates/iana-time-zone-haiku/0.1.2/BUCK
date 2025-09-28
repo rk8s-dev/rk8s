@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "iana-time-zone-haiku-vendor",
+    urls = ["https://static.crates.io/crates/iana-time-zone-haiku/iana-time-zone-haiku-0.1.2.crate"],
+    sha256 = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f",
+    type = "tar.gz",
+    strip_prefix = "iana-time-zone-haiku-0.1.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "iana-time-zone-haiku-0.1.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "iana-time-zone-haiku",
+    srcs = [":iana-time-zone-haiku-vendor"],
     crate = "iana-time-zone-haiku",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "iana-time-zone-haiku",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "René Kijewski <crates.io@k6i.de>",
         "CARGO_PKG_DESCRIPTION": "iana-time-zone support crate for Haiku OS",
         "CARGO_PKG_NAME": "iana-time-zone-haiku",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "1",
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :iana-time-zone-haiku-0.1.2-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :iana-time-zone-haiku-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :iana-time-zone-haiku-0.1.2-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :iana-time-zone-haiku-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "iana-time-zone-haiku-0.1.2-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "iana-time-zone-haiku-build-script-build",
+    srcs = [":iana-time-zone-haiku-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "iana-time-zone-haiku",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "René Kijewski <crates.io@k6i.de>",
         "CARGO_PKG_DESCRIPTION": "iana-time-zone support crate for Haiku OS",
         "CARGO_PKG_NAME": "iana-time-zone-haiku",
@@ -53,13 +56,13 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.38:cc-1.2.38"],
+    deps = ["//third-party/rust/crates/cc/1.2.38:cc"],
 )
 
 buildscript_run(
-    name = "iana-time-zone-haiku-0.1.2-build-script-run",
+    name = "iana-time-zone-haiku-build-script-run",
     package_name = "iana-time-zone-haiku",
-    buildscript_rule = ":iana-time-zone-haiku-0.1.2-build-script-build",
+    buildscript_rule = ":iana-time-zone-haiku-build-script-build",
     version = "0.1.2",
-    local_manifest_dir = "**",
+    manifest_dir = ":iana-time-zone-haiku-vendor",
 )

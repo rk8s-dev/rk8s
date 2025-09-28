@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "anyhow-vendor",
+    urls = ["https://static.crates.io/crates/anyhow/anyhow-1.0.100.crate"],
+    sha256 = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61",
+    type = "tar.gz",
+    strip_prefix = "anyhow-1.0.100",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "anyhow-1.0.100",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "anyhow",
+    srcs = [":anyhow-vendor"],
     crate = "anyhow",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "anyhow",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Flexible concrete Error type built on std::error::Error",
         "CARGO_PKG_NAME": "anyhow",
@@ -24,28 +30,25 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "100",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :anyhow-1.0.100-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :anyhow-build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :anyhow-1.0.100-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :anyhow-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "anyhow-1.0.100-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "anyhow-build-script-build",
+    srcs = [":anyhow-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "anyhow",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Flexible concrete Error type built on std::error::Error",
         "CARGO_PKG_NAME": "anyhow",
@@ -64,13 +67,13 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "anyhow-1.0.100-build-script-run",
+    name = "anyhow-build-script-run",
     package_name = "anyhow",
-    buildscript_rule = ":anyhow-1.0.100-build-script-build",
+    buildscript_rule = ":anyhow-build-script-build",
     features = [
         "default",
         "std",
     ],
     version = "1.0.100",
-    local_manifest_dir = "**",
+    manifest_dir = ":anyhow-vendor",
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "io-lifetimes-vendor",
+    urls = ["https://static.crates.io/crates/io-lifetimes/io-lifetimes-1.0.11.crate"],
+    sha256 = "eae7b9aee968036d54dce06cebaefd919e4472e753296daccd6d344e3e2df0c2",
+    type = "tar.gz",
+    strip_prefix = "io-lifetimes-1.0.11",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "io-lifetimes-1.0.11",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "io-lifetimes",
+    srcs = [":io-lifetimes-vendor"],
     crate = "io-lifetimes",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "io-lifetimes",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Gohman <dev@sunfishcode.online>",
         "CARGO_PKG_DESCRIPTION": "A low-level I/O ownership and borrowing library",
         "CARGO_PKG_NAME": "io-lifetimes",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "11",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :io-lifetimes-1.0.11-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :io-lifetimes-build-script-run[out_dir])",
     },
     features = [
         "close",
@@ -32,23 +38,20 @@ cargo.rust_library(
         "libc",
         "windows-sys",
     ],
-    rustc_flags = ["@$(location :io-lifetimes-1.0.11-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :io-lifetimes-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )
 
 cargo.rust_binary(
-    name = "io-lifetimes-1.0.11-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "io-lifetimes-build-script-build",
+    srcs = [":io-lifetimes-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "io-lifetimes",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Gohman <dev@sunfishcode.online>",
         "CARGO_PKG_DESCRIPTION": "A low-level I/O ownership and borrowing library",
         "CARGO_PKG_NAME": "io-lifetimes",
@@ -69,9 +72,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "io-lifetimes-1.0.11-build-script-run",
+    name = "io-lifetimes-build-script-run",
     package_name = "io-lifetimes",
-    buildscript_rule = ":io-lifetimes-1.0.11-build-script-build",
+    buildscript_rule = ":io-lifetimes-build-script-build",
     features = [
         "close",
         "hermit-abi",
@@ -79,5 +82,5 @@ buildscript_run(
         "windows-sys",
     ],
     version = "1.0.11",
-    local_manifest_dir = "**",
+    manifest_dir = ":io-lifetimes-vendor",
 )

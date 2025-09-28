@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "jiff-vendor",
+    urls = ["https://static.crates.io/crates/jiff/jiff-0.2.15.crate"],
+    sha256 = "be1f93b8b1eb69c77f24bbb0afdf66f54b632ee39af40ca21c4365a1d7347e49",
+    type = "tar.gz",
+    strip_prefix = "jiff-0.2.15",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "jiff-0.2.15",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "jiff",
+    srcs = [":jiff-vendor"],
     crate = "jiff",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "jiff",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A date-time library that encourages you to jump into the pit of success.\n\nThis library is heavily inspired by the Temporal project.\n",
         "CARGO_PKG_NAME": "jiff",
@@ -31,7 +37,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/serde/1.0.226:serde",
     ],
 )

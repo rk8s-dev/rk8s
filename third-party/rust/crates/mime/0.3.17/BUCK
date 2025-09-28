@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "mime-vendor",
+    urls = ["https://static.crates.io/crates/mime/mime-0.3.17.crate"],
+    sha256 = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a",
+    type = "tar.gz",
+    strip_prefix = "mime-0.3.17",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "mime-0.3.17",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "mime",
+    srcs = [":mime-vendor"],
     crate = "mime",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "mime",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "Strongly Typed Mimes",
         "CARGO_PKG_NAME": "mime",

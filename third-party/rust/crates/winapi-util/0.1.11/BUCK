@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "winapi-util-vendor",
+    urls = ["https://static.crates.io/crates/winapi-util/winapi-util-0.1.11.crate"],
+    sha256 = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22",
+    type = "tar.gz",
+    strip_prefix = "winapi-util-0.1.11",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "winapi-util-0.1.11",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "winapi-util",
+    srcs = [":winapi-util-vendor"],
     crate = "winapi-util",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "winapi-util",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A dumping ground for high level safe wrappers over windows-sys.",
         "CARGO_PKG_NAME": "winapi-util",

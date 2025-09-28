@@ -1,4 +1,0 @@
-max_width = 80
-wrap_comments = true
-reorder_imports = true
-edition = "2021"

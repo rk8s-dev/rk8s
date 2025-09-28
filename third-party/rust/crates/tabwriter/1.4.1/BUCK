@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tabwriter-vendor",
+    urls = ["https://static.crates.io/crates/tabwriter/tabwriter-1.4.1.crate"],
+    sha256 = "fce91f2f0ec87dff7e6bcbbeb267439aa1188703003c6055193c821487400432",
+    type = "tar.gz",
+    strip_prefix = "tabwriter-1.4.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tabwriter-1.4.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tabwriter",
+    srcs = [":tabwriter-vendor"],
     crate = "tabwriter",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "tabwriter",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Elastic tabstops.",
         "CARGO_PKG_NAME": "tabwriter",
@@ -26,8 +32,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["default"],
-    named_deps = {
-        "unicode_width": "//third-party/rust/crates/unicode-width/0.2.1:unicode-width-0.2.1",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/unicode-width/0.2.1:unicode-width"],
 )

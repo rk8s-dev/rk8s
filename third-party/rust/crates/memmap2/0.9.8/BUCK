@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "memmap2-vendor",
+    urls = ["https://static.crates.io/crates/memmap2/memmap2-0.9.8.crate"],
+    sha256 = "843a98750cd611cc2965a8213b53b43e715f13c37a9e096c6408e69990961db7",
+    type = "tar.gz",
+    strip_prefix = "memmap2-0.9.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "memmap2-0.9.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "memmap2",
+    srcs = [":memmap2-vendor"],
     crate = "memmap2",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "memmap2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Burkert <dan@danburkert.com>:Yevhenii Reizner <razrfalcon@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Cross-platform Rust API for memory-mapped file IO",
         "CARGO_PKG_NAME": "memmap2",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )

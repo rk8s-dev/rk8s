@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ring-vendor",
+    urls = ["https://static.crates.io/crates/ring/ring-0.17.14.crate"],
+    sha256 = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7",
+    type = "tar.gz",
+    strip_prefix = "ring-0.17.14",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ring-0.17.14",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ring",
+    srcs = [":ring-vendor"],
     crate = "ring",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "ring",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "An experiment.",
         "CARGO_PKG_LINKS": "ring_core_0_17_14_",
@@ -25,7 +31,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "17",
         "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :ring-0.17.14-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :ring-build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -35,33 +41,28 @@ cargo.rust_library(
         "wasm32_unknown_unknown_js",
     ],
     rustc_flags = [
-        "-Lnative=$(location :ring-0.17.14-build-script-run[out_dir])",
+        "-Lnative=$(location :ring-build-script-run[out_dir])",
         "-lstatic=ring_core_0_17_14_",
         "-lstatic=ring_core_0_17_14__test",
-        "@$(location :ring-0.17.14-build-script-run[rustc_flags])",
+        "@$(location :ring-build-script-run[rustc_flags])",
     ],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/getrandom/0.2.16:getrandom-0.2.16",
-        "//third-party/rust/crates/untrusted/0.9.0:untrusted-0.9.0",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+        "//third-party/rust/crates/untrusted/0.9.0:untrusted",
     ],
 )
 
 cargo.rust_binary(
-    name = "ring-0.17.14-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ring-build-script-build",
+    srcs = [":ring-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "ring",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "An experiment.",
         "CARGO_PKG_LINKS": "ring_core_0_17_14_",
@@ -81,13 +82,13 @@ cargo.rust_binary(
         "wasm32_unknown_unknown_js",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.38:cc-1.2.38"],
+    deps = ["//third-party/rust/crates/cc/1.2.38:cc"],
 )
 
 buildscript_run(
-    name = "ring-0.17.14-build-script-run",
+    name = "ring-build-script-run",
     package_name = "ring",
-    buildscript_rule = ":ring-0.17.14-build-script-build",
+    buildscript_rule = ":ring-build-script-build",
     env = {
         "CARGO_MANIFEST_LINKS": "ring_core_0_17_14_",
         "CARGO_PKG_NAME": "ring",
@@ -106,5 +107,5 @@ buildscript_run(
         "wasm32_unknown_unknown_js",
     ],
     version = "0.17.14",
-    local_manifest_dir = "**",
+    manifest_dir = ":ring-vendor",
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows-future-vendor",
+    urls = ["https://static.crates.io/crates/windows-future/windows-future-0.2.1.crate"],
+    sha256 = "fc6a41e98427b19fe4b73c550f060b59fa592d7d686537eebf9385621bfbad8e",
+    type = "tar.gz",
+    strip_prefix = "windows-future-0.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows-future-0.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows-future",
+    srcs = [":windows-future-vendor"],
     crate = "windows-future",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows-future",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Windows async types",
         "CARGO_PKG_NAME": "windows-future",
@@ -25,10 +31,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "windows_core": "//third-party/rust/crates/windows-core/0.61.2:windows-core-0.61.2",
-        "windows_link": "//third-party/rust/crates/windows-link/0.1.3:windows-link-0.1.3",
-        "windows_threading": "//third-party/rust/crates/windows-threading/0.1.0:windows-threading-0.1.0",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/windows-core/0.61.2:windows-core",
+        "//third-party/rust/crates/windows-link/0.1.3:windows-link",
+        "//third-party/rust/crates/windows-threading/0.1.0:windows-threading",
+    ],
 )

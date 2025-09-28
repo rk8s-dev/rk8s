@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "aws-smithy-xml-vendor",
+    urls = ["https://static.crates.io/crates/aws-smithy-xml/aws-smithy-xml-0.60.10.crate"],
+    sha256 = "3db87b96cb1b16c024980f133968d52882ca0daaee3a086c6decc500f6c99728",
+    type = "tar.gz",
+    strip_prefix = "aws-smithy-xml-0.60.10",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "aws-smithy-xml-0.60.10",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "aws-smithy-xml",
+    srcs = [":aws-smithy-xml-vendor"],
     crate = "aws-smithy-xml",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "aws-smithy-xml",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "AWS Rust SDK Team <aws-sdk-rust@amazon.com>:Russell Cohen <rcoh@amazon.com>",
         "CARGO_PKG_DESCRIPTION": "XML parsing logic for Smithy protocols.",
         "CARGO_PKG_NAME": "aws-smithy-xml",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/xmlparser/0.13.6:xmlparser-0.13.6"],
+    deps = ["//third-party/rust/crates/xmlparser/0.13.6:xmlparser"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustix-vendor",
+    urls = ["https://static.crates.io/crates/rustix/rustix-0.38.44.crate"],
+    sha256 = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154",
+    type = "tar.gz",
+    strip_prefix = "rustix-0.38.44",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustix-0.38.44",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustix",
+    srcs = [":rustix-vendor"],
     crate = "rustix",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustix",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Gohman <dev@sunfishcode.online>:Jakub Konka <kubkon@jakubkonka.com>",
         "CARGO_PKG_DESCRIPTION": "Safe Rust bindings to POSIX/Unix/Linux/Winsock-like syscalls",
         "CARGO_PKG_NAME": "rustix",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "38",
         "CARGO_PKG_VERSION_PATCH": "44",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :rustix-0.38.44-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rustix-build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -38,30 +44,27 @@ cargo.rust_library(
         "thread",
         "use-libc-auxv",
     ],
-    rustc_flags = ["@$(location :rustix-0.38.44-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :rustix-build-script-run[rustc_flags])"],
     named_deps = {
-        "libc_errno": "//third-party/rust/crates/errno/0.3.14:errno-0.3.14",
-        "linux_raw_sys": "//third-party/rust/crates/linux-raw-sys/0.4.15:linux-raw-sys-0.4.15",
+        "libc_errno": "//third-party/rust/crates/errno/0.3.14:errno",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/linux-raw-sys/0.4.15:linux-raw-sys",
     ],
 )
 
 cargo.rust_binary(
-    name = "rustix-0.38.44-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustix-build-script-build",
+    srcs = [":rustix-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustix",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Gohman <dev@sunfishcode.online>:Jakub Konka <kubkon@jakubkonka.com>",
         "CARGO_PKG_DESCRIPTION": "Safe Rust bindings to POSIX/Unix/Linux/Winsock-like syscalls",
         "CARGO_PKG_NAME": "rustix",
@@ -88,9 +91,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "rustix-0.38.44-build-script-run",
+    name = "rustix-build-script-run",
     package_name = "rustix",
-    buildscript_rule = ":rustix-0.38.44-build-script-build",
+    buildscript_rule = ":rustix-build-script-build",
     features = [
         "alloc",
         "default",
@@ -104,5 +107,5 @@ buildscript_run(
         "use-libc-auxv",
     ],
     version = "0.38.44",
-    local_manifest_dir = "**",
+    manifest_dir = ":rustix-vendor",
 )

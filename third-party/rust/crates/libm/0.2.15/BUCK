@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "libm-vendor",
+    urls = ["https://static.crates.io/crates/libm/libm-0.2.15.crate"],
+    sha256 = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de",
+    type = "tar.gz",
+    strip_prefix = "libm-0.2.15",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "libm-0.2.15",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libm",
+    srcs = [":libm-vendor"],
     crate = "libm",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "libm",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jorge Aparicio <jorge@japaric.io>",
         "CARGO_PKG_DESCRIPTION": "libm in pure Rust",
         "CARGO_PKG_NAME": "libm",
@@ -24,28 +30,25 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "2",
         "CARGO_PKG_VERSION_PATCH": "15",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :libm-0.2.15-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :libm-build-script-run[out_dir])",
     },
     features = [
         "arch",
         "default",
     ],
-    rustc_flags = ["@$(location :libm-0.2.15-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :libm-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "libm-0.2.15-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libm-build-script-build",
+    srcs = [":libm-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "libm",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jorge Aparicio <jorge@japaric.io>",
         "CARGO_PKG_DESCRIPTION": "libm in pure Rust",
         "CARGO_PKG_NAME": "libm",
@@ -64,9 +67,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "libm-0.2.15-build-script-run",
+    name = "libm-build-script-run",
     package_name = "libm",
-    buildscript_rule = ":libm-0.2.15-build-script-build",
+    buildscript_rule = ":libm-build-script-build",
     env = {
         "CARGO_CFG_TARGET_ARCH": "x86_64",
         "CARGO_CFG_TARGET_ENV": "gnu",
@@ -82,5 +85,5 @@ buildscript_run(
         "default",
     ],
     version = "0.2.15",
-    local_manifest_dir = "**",
+    manifest_dir = ":libm-vendor",
 )

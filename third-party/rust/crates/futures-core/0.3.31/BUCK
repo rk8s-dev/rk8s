@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "futures-core-vendor",
+    urls = ["https://static.crates.io/crates/futures-core/futures-core-0.3.31.crate"],
+    sha256 = "05f29059c0c2090612e8d742178b0580d2dc940c837851ad723096f87af6663e",
+    type = "tar.gz",
+    strip_prefix = "futures-core-0.3.31",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "futures-core-0.3.31",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "futures-core",
+    srcs = [":futures-core-vendor"],
     crate = "futures-core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "futures-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "The core traits and types in for the `futures` library.\n",
         "CARGO_PKG_NAME": "futures-core",

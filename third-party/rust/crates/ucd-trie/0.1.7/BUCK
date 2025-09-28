@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ucd-trie-vendor",
+    urls = ["https://static.crates.io/crates/ucd-trie/ucd-trie-0.1.7.crate"],
+    sha256 = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971",
+    type = "tar.gz",
+    strip_prefix = "ucd-trie-0.1.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ucd-trie-0.1.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ucd-trie",
+    srcs = [":ucd-trie-vendor"],
     crate = "ucd-trie",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "ucd-trie",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A trie for storing Unicode codepoint sets and maps.\n",
         "CARGO_PKG_NAME": "ucd-trie",

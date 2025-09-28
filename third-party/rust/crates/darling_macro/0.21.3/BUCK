@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "darling_macro-vendor",
+    urls = ["https://static.crates.io/crates/darling_macro/darling_macro-0.21.3.crate"],
+    sha256 = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81",
+    type = "tar.gz",
+    strip_prefix = "darling_macro-0.21.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "darling_macro-0.21.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "darling_macro",
+    srcs = [":darling_macro-vendor"],
     crate = "darling_macro",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "darling_macro",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Ted Driggs <ted.driggs@outlook.com>",
         "CARGO_PKG_DESCRIPTION": "Internal support for a proc-macro library for reading attributes into structs when\nimplementing custom derives. Use https://crates.io/crates/darling in your code.\n",
         "CARGO_PKG_NAME": "darling_macro",
@@ -28,8 +34,8 @@ cargo.rust_library(
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/darling_core/0.21.3:darling_core-0.21.3",
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/darling_core/0.21.3:darling_core",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

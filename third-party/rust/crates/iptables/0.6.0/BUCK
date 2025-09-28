@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "iptables-vendor",
+    urls = ["https://static.crates.io/crates/iptables/iptables-0.6.0.crate"],
+    sha256 = "f30c9a636a0a728c67d1d420471c99b215708a17c222bb9afb16d0821e2d80d8",
+    type = "tar.gz",
+    strip_prefix = "iptables-0.6.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "iptables-0.6.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "iptables",
+    srcs = [":iptables-vendor"],
     crate = "iptables",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "iptables",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Navid Fathollahzade <yaa110@gmail.com>:Pit Kleyersburg <pitkley@googlemail.com>",
         "CARGO_PKG_DESCRIPTION": "Rust bindings for iptables",
         "CARGO_PKG_NAME": "iptables",
@@ -27,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/lazy_static/1.5.0:lazy_static-1.5.0",
-        "//third-party/rust/crates/regex/1.11.2:regex-1.11.2",
+        "//third-party/rust/crates/lazy_static/1.5.0:lazy_static",
+        "//third-party/rust/crates/regex/1.11.2:regex",
     ],
 )

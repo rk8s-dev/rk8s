@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "quote-vendor",
+    urls = ["https://static.crates.io/crates/quote/quote-1.0.40.crate"],
+    sha256 = "1885c039570dc00dcb4ff087a89e185fd56bae234ddc7f056a945bf36467248d",
+    type = "tar.gz",
+    strip_prefix = "quote-1.0.40",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "quote-1.0.40",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "quote",
+    srcs = [":quote-vendor"],
     crate = "quote",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "quote",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Quasi-quoting macro quote!(...)",
         "CARGO_PKG_NAME": "quote",
@@ -29,8 +35,6 @@ cargo.rust_library(
         "default",
         "proc-macro",
     ],
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2"],
 )

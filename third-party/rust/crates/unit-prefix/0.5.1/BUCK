@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "unit-prefix-vendor",
+    urls = ["https://static.crates.io/crates/unit-prefix/unit-prefix-0.5.1.crate"],
+    sha256 = "323402cff2dd658f39ca17c789b502021b3f18707c91cdf22e3838e1b4023817",
+    type = "tar.gz",
+    strip_prefix = "unit-prefix-0.5.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "unit-prefix-0.5.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "unit-prefix",
+    srcs = [":unit-prefix-vendor"],
     crate = "unit-prefix",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "unit-prefix",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Fabio Valentini <decathorpe@gmail.com>:Benjamin Sago <ogham@bsago.me>",
         "CARGO_PKG_DESCRIPTION": "Format numbers with metric and binary unit prefixes",
         "CARGO_PKG_NAME": "unit-prefix",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustls-webpki-vendor",
+    urls = ["https://static.crates.io/crates/rustls-webpki/rustls-webpki-0.103.6.crate"],
+    sha256 = "8572f3c2cb9934231157b45499fc41e1f58c589fdfb81a844ba873265e80f8eb",
+    type = "tar.gz",
+    strip_prefix = "rustls-webpki-0.103.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustls-webpki-0.103.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustls-webpki",
+    srcs = [":rustls-webpki-vendor"],
     crate = "rustls-webpki",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustls-webpki",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Web PKI X.509 Certificate Verification.",
         "CARGO_PKG_NAME": "rustls-webpki",
@@ -32,12 +38,12 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
-        "aws_lc_rs": "//third-party/rust/crates/aws-lc-rs/1.14.0:aws-lc-rs-1.14.0",
-        "pki_types": "//third-party/rust/crates/rustls-pki-types/1.12.0:rustls-pki-types-1.12.0",
+        "pki_types": "//third-party/rust/crates/rustls-pki-types/1.12.0:rustls-pki-types",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/ring/0.17.14:ring-0.17.14",
-        "//third-party/rust/crates/untrusted/0.9.0:untrusted-0.9.0",
+        "//third-party/rust/crates/aws-lc-rs/1.14.0:aws-lc-rs",
+        "//third-party/rust/crates/ring/0.17.14:ring",
+        "//third-party/rust/crates/untrusted/0.9.0:untrusted",
     ],
 )

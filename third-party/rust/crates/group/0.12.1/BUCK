@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "group-vendor",
+    urls = ["https://static.crates.io/crates/group/group-0.12.1.crate"],
+    sha256 = "5dfbfb3a6cfbd390d5c9564ab283a0349b9b9fcd46a706c1eb10e0db70bfbac7",
+    type = "tar.gz",
+    strip_prefix = "group-0.12.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "group-0.12.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "group",
+    srcs = [":group-vendor"],
     crate = "group",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "group",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean Bowe <ewillbefull@gmail.com>:Jack Grigg <jack@z.cash>",
         "CARGO_PKG_DESCRIPTION": "Elliptic curve group traits and utilities",
         "CARGO_PKG_NAME": "group",
@@ -27,8 +33,8 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/ff/0.12.1:ff-0.12.1",
-        "//third-party/rust/crates/rand_core/0.6.4:rand_core-0.6.4",
-        "//third-party/rust/crates/subtle/2.6.1:subtle-2.6.1",
+        "//third-party/rust/crates/ff/0.12.1:ff",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
+        "//third-party/rust/crates/subtle/2.6.1:subtle",
     ],
 )

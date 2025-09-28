@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "const_format_proc_macros-vendor",
+    urls = ["https://static.crates.io/crates/const_format_proc_macros/const_format_proc_macros-0.2.34.crate"],
+    sha256 = "1d57c2eccfb16dbac1f4e61e206105db5820c9d26c3c472bc17c774259ef7744",
+    type = "tar.gz",
+    strip_prefix = "const_format_proc_macros-0.2.34",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "const_format_proc_macros-0.2.34",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "const_format_proc_macros",
+    srcs = [":const_format_proc_macros-vendor"],
     crate = "const_format_proc_macros",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "const_format_proc_macros",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "rodrimati1992 <rodrimatt1985@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Implementation detail of the `const_format` crate",
         "CARGO_PKG_NAME": "const_format_proc_macros",
@@ -27,10 +33,10 @@ cargo.rust_library(
     },
     features = ["default"],
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-        "unicode_xid": "//third-party/rust/crates/unicode-xid/0.2.6:unicode-xid-0.2.6",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/quote/1.0.40:quote-1.0.40"],
+    deps = [
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/unicode-xid/0.2.6:unicode-xid",
+    ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "signal-hook-registry-vendor",
+    urls = ["https://static.crates.io/crates/signal-hook-registry/signal-hook-registry-1.4.6.crate"],
+    sha256 = "b2a4719bff48cee6b39d12c020eeb490953ad2443b7055bd0b21fca26bd8c28b",
+    type = "tar.gz",
+    strip_prefix = "signal-hook-registry-1.4.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "signal-hook-registry-1.4.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "signal-hook-registry",
+    srcs = [":signal-hook-registry-vendor"],
     crate = "signal-hook-registry",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "signal-hook-registry",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Michal 'vorner' Vaner <vorner@vorner.cz>:Masaki Hara <ackie.h.gmai@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Backend crate for signal-hook",
         "CARGO_PKG_NAME": "signal-hook-registry",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )

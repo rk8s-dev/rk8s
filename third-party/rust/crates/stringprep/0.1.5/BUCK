@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "stringprep-vendor",
+    urls = ["https://static.crates.io/crates/stringprep/stringprep-0.1.5.crate"],
+    sha256 = "7b4df3d392d81bd458a8a621b8bffbd2302a12ffe288a9d931670948749463b1",
+    type = "tar.gz",
+    strip_prefix = "stringprep-0.1.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "stringprep-0.1.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "stringprep",
+    srcs = [":stringprep-vendor"],
     crate = "stringprep",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "stringprep",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "An implementation of the stringprep algorithm",
         "CARGO_PKG_NAME": "stringprep",
@@ -25,10 +31,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "5",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "unicode_bidi": "//third-party/rust/crates/unicode-bidi/0.3.18:unicode-bidi-0.3.18",
-        "unicode_normalization": "//third-party/rust/crates/unicode-normalization/0.1.24:unicode-normalization-0.1.24",
-        "unicode_properties": "//third-party/rust/crates/unicode-properties/0.1.3:unicode-properties-0.1.3",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/unicode-bidi/0.3.18:unicode-bidi",
+        "//third-party/rust/crates/unicode-normalization/0.1.24:unicode-normalization",
+        "//third-party/rust/crates/unicode-properties/0.1.3:unicode-properties",
+    ],
 )

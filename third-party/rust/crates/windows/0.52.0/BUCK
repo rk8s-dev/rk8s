@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows-vendor",
+    urls = ["https://static.crates.io/crates/windows/windows-0.52.0.crate"],
+    sha256 = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be",
+    type = "tar.gz",
+    strip_prefix = "windows-0.52.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows-0.52.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows",
+    srcs = [":windows-vendor"],
     crate = "windows",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Rust for Windows",
         "CARGO_PKG_NAME": "windows",
@@ -71,9 +77,9 @@ cargo.rust_library(
         "Win32_UI_Shell",
         "default",
     ],
-    named_deps = {
-        "windows_core": "//third-party/rust/crates/windows-core/0.52.0:windows-core-0.52.0",
-        "windows_targets": "//third-party/rust/crates/windows-targets/0.52.6:windows-targets-0.52.6",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/windows-core/0.52.0:windows-core",
+        "//third-party/rust/crates/windows-targets/0.52.6:windows-targets",
+    ],
 )

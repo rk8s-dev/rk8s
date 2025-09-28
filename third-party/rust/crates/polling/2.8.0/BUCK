@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "polling-vendor",
+    urls = ["https://static.crates.io/crates/polling/polling-2.8.0.crate"],
+    sha256 = "4b2d323e8ca7996b3e23126511a523f7e62924d93ecd5ae73b333815b0eb3dce",
+    type = "tar.gz",
+    strip_prefix = "polling-2.8.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "polling-2.8.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "polling",
+    srcs = [":polling-vendor"],
     crate = "polling",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "polling",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Portable interface to epoll, kqueue, event ports, and IOCP",
         "CARGO_PKG_NAME": "polling",
@@ -24,35 +30,30 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "8",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :polling-2.8.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :polling-build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :polling-2.8.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
+    rustc_flags = ["@$(location :polling-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/log/0.4.28:log",
     ],
 )
 
 cargo.rust_binary(
-    name = "polling-2.8.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "polling-build-script-build",
+    srcs = [":polling-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "polling",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Portable interface to epoll, kqueue, event ports, and IOCP",
         "CARGO_PKG_NAME": "polling",
@@ -68,17 +69,17 @@ cargo.rust_binary(
         "std",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg-1.5.0"],
+    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "polling-2.8.0-build-script-run",
+    name = "polling-build-script-run",
     package_name = "polling",
-    buildscript_rule = ":polling-2.8.0-build-script-build",
+    buildscript_rule = ":polling-build-script-build",
     features = [
         "default",
         "std",
     ],
     version = "2.8.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":polling-vendor",
 )

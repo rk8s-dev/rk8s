@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "caps-vendor",
+    urls = ["https://static.crates.io/crates/caps/caps-0.5.5.crate"],
+    sha256 = "190baaad529bcfbde9e1a19022c42781bdb6ff9de25721abdb8fd98c0807730b",
+    type = "tar.gz",
+    strip_prefix = "caps-0.5.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "caps-0.5.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "caps",
+    srcs = [":caps-vendor"],
     crate = "caps",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "caps",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Luca Bruno <lucab@lucabruno.net>",
         "CARGO_PKG_DESCRIPTION": "A pure-Rust library to work with Linux capabilities",
         "CARGO_PKG_NAME": "caps",
@@ -27,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/thiserror/1.0.69:thiserror",
     ],
 )

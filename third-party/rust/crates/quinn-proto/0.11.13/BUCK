@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "quinn-proto-vendor",
+    urls = ["https://static.crates.io/crates/quinn-proto/quinn-proto-0.11.13.crate"],
+    sha256 = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31",
+    type = "tar.gz",
+    strip_prefix = "quinn-proto-0.11.13",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "quinn-proto-0.11.13",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "quinn-proto",
+    srcs = [":quinn-proto-vendor"],
     crate = "quinn-proto",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "quinn-proto",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "State machine for the QUIC transport protocol",
         "CARGO_PKG_NAME": "quinn-proto",
@@ -32,21 +38,19 @@ cargo.rust_library(
         "ring",
         "rustls-ring",
     ],
-    named_deps = {
-        "lru_slab": "//third-party/rust/crates/lru-slab/0.1.2:lru-slab-0.1.2",
-        "rustc_hash": "//third-party/rust/crates/rustc-hash/2.1.1:rustc-hash-2.1.1",
-        "rustls_platform_verifier": "//third-party/rust/crates/rustls-platform-verifier/0.6.1:rustls-platform-verifier-0.6.1",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/fastbloom/0.14.0:fastbloom-0.14.0",
-        "//third-party/rust/crates/rand/0.9.2:rand-0.9.2",
-        "//third-party/rust/crates/ring/0.17.14:ring-0.17.14",
-        "//third-party/rust/crates/rustls/0.23.32:rustls-0.23.32",
-        "//third-party/rust/crates/slab/0.4.11:slab-0.4.11",
-        "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
-        "//third-party/rust/crates/tinyvec/1.10.0:tinyvec-1.10.0",
-        "//third-party/rust/crates/tracing/0.1.41:tracing-0.1.41",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/fastbloom/0.14.0:fastbloom",
+        "//third-party/rust/crates/lru-slab/0.1.2:lru-slab",
+        "//third-party/rust/crates/rand/0.9.2:rand",
+        "//third-party/rust/crates/ring/0.17.14:ring",
+        "//third-party/rust/crates/rustc-hash/2.1.1:rustc-hash",
+        "//third-party/rust/crates/rustls-platform-verifier/0.6.1:rustls-platform-verifier",
+        "//third-party/rust/crates/rustls/0.23.32:rustls",
+        "//third-party/rust/crates/slab/0.4.11:slab",
+        "//third-party/rust/crates/thiserror/2.0.16:thiserror",
+        "//third-party/rust/crates/tinyvec/1.10.0:tinyvec",
+        "//third-party/rust/crates/tracing/0.1.41:tracing",
     ],
 )

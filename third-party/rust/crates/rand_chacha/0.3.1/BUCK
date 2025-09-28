@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rand_chacha-vendor",
+    urls = ["https://static.crates.io/crates/rand_chacha/rand_chacha-0.3.1.crate"],
+    sha256 = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88",
+    type = "tar.gz",
+    strip_prefix = "rand_chacha-0.3.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rand_chacha-0.3.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rand_chacha",
+    srcs = [":rand_chacha-vendor"],
     crate = "rand_chacha",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rand_chacha",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rand Project Developers:The Rust Project Developers:The CryptoCorrosion Contributors",
         "CARGO_PKG_DESCRIPTION": "ChaCha random number generator\n",
         "CARGO_PKG_NAME": "rand_chacha",
@@ -26,9 +32,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["std"],
-    named_deps = {
-        "ppv_lite86": "//third-party/rust/crates/ppv-lite86/0.2.21:ppv-lite86-0.2.21",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/rand_core/0.6.4:rand_core-0.6.4"],
+    deps = [
+        "//third-party/rust/crates/ppv-lite86/0.2.21:ppv-lite86",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
+    ],
 )

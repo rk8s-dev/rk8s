@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crossterm-vendor",
+    urls = ["https://static.crates.io/crates/crossterm/crossterm-0.29.0.crate"],
+    sha256 = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b",
+    type = "tar.gz",
+    strip_prefix = "crossterm-0.29.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crossterm-0.29.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crossterm",
+    srcs = [":crossterm-vendor"],
     crate = "crossterm",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crossterm",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "T. Post",
         "CARGO_PKG_DESCRIPTION": "A crossplatform terminal library for manipulating terminals.",
         "CARGO_PKG_NAME": "crossterm",
@@ -26,13 +32,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["windows"],
-    named_deps = {
-        "document_features": "//third-party/rust/crates/document-features/0.2.11:document-features-0.2.11",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4",
-        "//third-party/rust/crates/parking_lot/0.12.4:parking_lot-0.12.4",
-        "//third-party/rust/crates/rustix/1.1.2:rustix-1.1.2",
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/document-features/0.2.11:document-features",
+        "//third-party/rust/crates/parking_lot/0.12.4:parking_lot",
+        "//third-party/rust/crates/rustix/1.1.2:rustix",
     ],
 )

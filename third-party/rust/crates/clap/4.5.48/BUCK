@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "clap-vendor",
+    urls = ["https://static.crates.io/crates/clap/clap-4.5.48.crate"],
+    sha256 = "e2134bb3ea021b78629caa971416385309e0131b351b25e01dc16fb54e1b5fae",
+    type = "tar.gz",
+    strip_prefix = "clap-4.5.48",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "clap-4.5.48",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "clap",
+    srcs = [":clap-vendor"],
     crate = "clap",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "clap",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A simple to use, efficient, and full-featured Command Line Argument Parser",
         "CARGO_PKG_NAME": "clap",
@@ -39,7 +45,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/clap_builder/4.5.48:clap_builder-4.5.48",
-        "//third-party/rust/crates/clap_derive/4.5.47:clap_derive-4.5.47",
+        "//third-party/rust/crates/clap_builder/4.5.48:clap_builder",
+        "//third-party/rust/crates/clap_derive/4.5.47:clap_derive",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "netlink-packet-route-vendor",
+    urls = ["https://static.crates.io/crates/netlink-packet-route/netlink-packet-route-0.22.0.crate"],
+    sha256 = "fc0e7987b28514adf555dc1f9a5c30dfc3e50750bbaffb1aec41ca7b23dcd8e4",
+    type = "tar.gz",
+    strip_prefix = "netlink-packet-route-0.22.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "netlink-packet-route-0.22.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "netlink-packet-route",
+    srcs = [":netlink-packet-route-vendor"],
     crate = "netlink-packet-route",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "netlink-packet-route",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Corentin Henry <corentinhenry@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "netlink packet types",
         "CARGO_PKG_NAME": "netlink-packet-route",
@@ -25,16 +31,14 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "netlink_packet_core": "//third-party/rust/crates/netlink-packet-core/0.7.0:netlink-packet-core-0.7.0",
-        "netlink_packet_utils": "//third-party/rust/crates/netlink-packet-utils/0.5.2:netlink-packet-utils-0.5.2",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4",
-        "//third-party/rust/crates/byteorder/1.5.0:byteorder-1.5.0",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/byteorder/1.5.0:byteorder",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/netlink-packet-core/0.7.0:netlink-packet-core",
+        "//third-party/rust/crates/netlink-packet-utils/0.5.2:netlink-packet-utils",
     ],
 )

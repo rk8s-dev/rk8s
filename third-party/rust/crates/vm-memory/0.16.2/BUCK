@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "vm-memory-vendor",
+    urls = ["https://static.crates.io/crates/vm-memory/vm-memory-0.16.2.crate"],
+    sha256 = "1fd5e56d48353c5f54ef50bd158a0452fc82f5383da840f7b8efc31695dd3b9d",
+    type = "tar.gz",
+    strip_prefix = "vm-memory-0.16.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "vm-memory-0.16.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "vm-memory",
+    srcs = [":vm-memory-vendor"],
     crate = "vm-memory",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "vm-memory",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Liu Jiang <gerry@linux.alibaba.com>",
         "CARGO_PKG_DESCRIPTION": "Safe abstractions for accessing the VM physical memory",
         "CARGO_PKG_NAME": "vm-memory",
@@ -28,7 +34,7 @@ cargo.rust_library(
     features = ["default"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/thiserror/1.0.69:thiserror",
     ],
 )

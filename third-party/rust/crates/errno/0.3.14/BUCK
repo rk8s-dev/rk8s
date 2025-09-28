@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "errno-vendor",
+    urls = ["https://static.crates.io/crates/errno/errno-0.3.14.crate"],
+    sha256 = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb",
+    type = "tar.gz",
+    strip_prefix = "errno-0.3.14",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "errno-0.3.14",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "errno",
+    srcs = [":errno-vendor"],
     crate = "errno",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "errno",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Chris Wong <lambda.fairy@gmail.com>:Dan Gohman <dev@sunfishcode.online>",
         "CARGO_PKG_DESCRIPTION": "Cross-platform interface to the `errno` variable.",
         "CARGO_PKG_NAME": "errno",
@@ -27,5 +33,5 @@ cargo.rust_library(
     },
     features = ["std"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )

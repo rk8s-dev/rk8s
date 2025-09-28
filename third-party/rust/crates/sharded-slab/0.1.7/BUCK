@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "sharded-slab-vendor",
+    urls = ["https://static.crates.io/crates/sharded-slab/sharded-slab-0.1.7.crate"],
+    sha256 = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6",
+    type = "tar.gz",
+    strip_prefix = "sharded-slab-0.1.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "sharded-slab-0.1.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "sharded-slab",
+    srcs = [":sharded-slab-vendor"],
     crate = "sharded-slab",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "sharded-slab",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Eliza Weisman <eliza@buoyant.io>",
         "CARGO_PKG_DESCRIPTION": "A lock-free concurrent slab.\n",
         "CARGO_PKG_NAME": "sharded-slab",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/lazy_static/1.5.0:lazy_static-1.5.0"],
+    deps = ["//third-party/rust/crates/lazy_static/1.5.0:lazy_static"],
 )

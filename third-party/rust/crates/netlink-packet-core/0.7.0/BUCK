@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "netlink-packet-core-vendor",
+    urls = ["https://static.crates.io/crates/netlink-packet-core/netlink-packet-core-0.7.0.crate"],
+    sha256 = "72724faf704479d67b388da142b186f916188505e7e0b26719019c525882eda4",
+    type = "tar.gz",
+    strip_prefix = "netlink-packet-core-0.7.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "netlink-packet-core-0.7.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "netlink-packet-core",
+    srcs = [":netlink-packet-core-vendor"],
     crate = "netlink-packet-core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "netlink-packet-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Corentin Henry <corentinhenry@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "netlink packet types",
         "CARGO_PKG_NAME": "netlink-packet-core",
@@ -25,12 +31,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "netlink_packet_utils": "//third-party/rust/crates/netlink-packet-utils/0.5.2:netlink-packet-utils-0.5.2",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
-        "//third-party/rust/crates/byteorder/1.5.0:byteorder-1.5.0",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/byteorder/1.5.0:byteorder",
+        "//third-party/rust/crates/netlink-packet-utils/0.5.2:netlink-packet-utils",
     ],
 )

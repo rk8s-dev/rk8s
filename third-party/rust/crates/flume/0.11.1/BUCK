@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "flume-vendor",
+    urls = ["https://static.crates.io/crates/flume/flume-0.11.1.crate"],
+    sha256 = "da0e4dd2a88388a1f4ccc7c9ce104604dab68d9f408dc34cd45823d5a9069095",
+    type = "tar.gz",
+    strip_prefix = "flume-0.11.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "flume-0.11.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "flume",
+    srcs = [":flume-vendor"],
     crate = "flume",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "flume",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Joshua Barretto <joshua.s.barretto@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A blazingly fast multi-producer channel",
         "CARGO_PKG_NAME": "flume",
@@ -31,9 +37,11 @@ cargo.rust_library(
         "futures-sink",
     ],
     named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_sink": "//third-party/rust/crates/futures-sink/0.3.31:futures-sink-0.3.31",
-        "spin1": "//third-party/rust/crates/spin/0.9.8:spin-0.9.8",
+        "spin1": "//third-party/rust/crates/spin/0.9.8:spin",
     },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-sink/0.3.31:futures-sink",
+    ],
 )

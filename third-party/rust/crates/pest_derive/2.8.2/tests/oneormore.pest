@@ -1,5 +1,0 @@
-WHITESPACE = _{ " " | "\r" | "\n" | "\t" }
-
-
-identifier = { (ASCII_ALPHA | "_")+ }
-assign = { identifier ~ "<-" ~ identifier }

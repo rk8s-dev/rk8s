@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "serial_test_derive-vendor",
+    urls = ["https://static.crates.io/crates/serial_test_derive/serial_test_derive-3.2.0.crate"],
+    sha256 = "5d69265a08751de7844521fd15003ae0a888e035773ba05695c5c759a6f89eef",
+    type = "tar.gz",
+    strip_prefix = "serial_test_derive-3.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "serial_test_derive-3.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "serial_test_derive",
+    srcs = [":serial_test_derive-vendor"],
     crate = "serial_test_derive",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "serial_test_derive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tom Parker-Shemilt <palfrey@tevp.net>",
         "CARGO_PKG_DESCRIPTION": "Helper crate for serial_test",
         "CARGO_PKG_NAME": "serial_test_derive",
@@ -30,12 +36,10 @@ cargo.rust_library(
         "default",
     ],
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

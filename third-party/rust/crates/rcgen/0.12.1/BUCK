@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rcgen-vendor",
+    urls = ["https://static.crates.io/crates/rcgen/rcgen-0.12.1.crate"],
+    sha256 = "48406db8ac1f3cbc7dcdb56ec355343817958a356ff430259bb07baf7607e1e1",
+    type = "tar.gz",
+    strip_prefix = "rcgen-0.12.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rcgen-0.12.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rcgen",
+    srcs = [":rcgen-vendor"],
     crate = "rcgen",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rcgen",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rust X.509 certificate generator",
         "CARGO_PKG_NAME": "rcgen",
@@ -32,9 +38,9 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/pem/3.0.5:pem-3.0.5",
-        "//third-party/rust/crates/ring/0.17.14:ring-0.17.14",
-        "//third-party/rust/crates/time/0.3.44:time-0.3.44",
-        "//third-party/rust/crates/yasna/0.5.2:yasna-0.5.2",
+        "//third-party/rust/crates/pem/3.0.5:pem",
+        "//third-party/rust/crates/ring/0.17.14:ring",
+        "//third-party/rust/crates/time/0.3.44:time",
+        "//third-party/rust/crates/yasna/0.5.2:yasna",
     ],
 )

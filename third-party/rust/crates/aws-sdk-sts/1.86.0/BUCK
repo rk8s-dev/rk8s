@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "aws-sdk-sts-vendor",
+    urls = ["https://static.crates.io/crates/aws-sdk-sts/aws-sdk-sts-1.86.0.crate"],
+    sha256 = "e7d835f123f307cafffca7b9027c14979f1d403b417d8541d67cf252e8a21e35",
+    type = "tar.gz",
+    strip_prefix = "aws-sdk-sts-1.86.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "aws-sdk-sts-1.86.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "aws-sdk-sts",
+    srcs = [":aws-sdk-sts-vendor"],
     crate = "aws-sdk-sts",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "aws-sdk-sts",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "AWS Rust SDK Team <aws-sdk-rust@amazon.com>:Russell Cohen <rcoh@amazon.com>",
         "CARGO_PKG_DESCRIPTION": "AWS SDK for AWS Security Token Service",
         "CARGO_PKG_NAME": "aws-sdk-sts",
@@ -25,24 +31,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "aws_credential_types": "//third-party/rust/crates/aws-credential-types/1.2.6:aws-credential-types-1.2.6",
-        "aws_runtime": "//third-party/rust/crates/aws-runtime/1.5.10:aws-runtime-1.5.10",
-        "aws_smithy_async": "//third-party/rust/crates/aws-smithy-async/1.2.5:aws-smithy-async-1.2.5",
-        "aws_smithy_http": "//third-party/rust/crates/aws-smithy-http/0.62.3:aws-smithy-http-0.62.3",
-        "aws_smithy_json": "//third-party/rust/crates/aws-smithy-json/0.61.5:aws-smithy-json-0.61.5",
-        "aws_smithy_query": "//third-party/rust/crates/aws-smithy-query/0.60.7:aws-smithy-query-0.60.7",
-        "aws_smithy_runtime": "//third-party/rust/crates/aws-smithy-runtime/1.9.2:aws-smithy-runtime-1.9.2",
-        "aws_smithy_runtime_api": "//third-party/rust/crates/aws-smithy-runtime-api/1.9.0:aws-smithy-runtime-api-1.9.0",
-        "aws_smithy_types": "//third-party/rust/crates/aws-smithy-types/1.3.2:aws-smithy-types-1.3.2",
-        "aws_smithy_xml": "//third-party/rust/crates/aws-smithy-xml/0.60.10:aws-smithy-xml-0.60.10",
-        "aws_types": "//third-party/rust/crates/aws-types/1.3.8:aws-types-1.3.8",
-        "regex_lite": "//third-party/rust/crates/regex-lite/0.1.7:regex-lite-0.1.7",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/fastrand/2.3.0:fastrand-2.3.0",
-        "//third-party/rust/crates/http/0.2.12:http-0.2.12",
-        "//third-party/rust/crates/tracing/0.1.41:tracing-0.1.41",
+        "//third-party/rust/crates/aws-credential-types/1.2.6:aws-credential-types",
+        "//third-party/rust/crates/aws-runtime/1.5.10:aws-runtime",
+        "//third-party/rust/crates/aws-smithy-async/1.2.5:aws-smithy-async",
+        "//third-party/rust/crates/aws-smithy-http/0.62.3:aws-smithy-http",
+        "//third-party/rust/crates/aws-smithy-json/0.61.5:aws-smithy-json",
+        "//third-party/rust/crates/aws-smithy-query/0.60.7:aws-smithy-query",
+        "//third-party/rust/crates/aws-smithy-runtime-api/1.9.0:aws-smithy-runtime-api",
+        "//third-party/rust/crates/aws-smithy-runtime/1.9.2:aws-smithy-runtime",
+        "//third-party/rust/crates/aws-smithy-types/1.3.2:aws-smithy-types",
+        "//third-party/rust/crates/aws-smithy-xml/0.60.10:aws-smithy-xml",
+        "//third-party/rust/crates/aws-types/1.3.8:aws-types",
+        "//third-party/rust/crates/fastrand/2.3.0:fastrand",
+        "//third-party/rust/crates/http/0.2.12:http",
+        "//third-party/rust/crates/regex-lite/0.1.7:regex-lite",
+        "//third-party/rust/crates/tracing/0.1.41:tracing",
     ],
 )

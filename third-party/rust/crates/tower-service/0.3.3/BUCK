@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tower-service-vendor",
+    urls = ["https://static.crates.io/crates/tower-service/tower-service-0.3.3.crate"],
+    sha256 = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3",
+    type = "tar.gz",
+    strip_prefix = "tower-service-0.3.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tower-service-0.3.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tower-service",
+    srcs = [":tower-service-vendor"],
     crate = "tower-service",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tower-service",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tower Maintainers <team@tower-rs.com>",
         "CARGO_PKG_DESCRIPTION": "Trait representing an asynchronous, request / response based, client or server.\n",
         "CARGO_PKG_NAME": "tower-service",

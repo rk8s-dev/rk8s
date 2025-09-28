@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "icu_normalizer_data-vendor",
+    urls = ["https://static.crates.io/crates/icu_normalizer_data/icu_normalizer_data-2.0.0.crate"],
+    sha256 = "00210d6893afc98edb752b664b8890f0ef174c8adbb8d0be9710fa66fbbf72d3",
+    type = "tar.gz",
+    strip_prefix = "icu_normalizer_data-2.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "icu_normalizer_data-2.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "icu_normalizer_data",
+    srcs = [":icu_normalizer_data-vendor"],
     crate = "icu_normalizer_data",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "icu_normalizer_data",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "Data for the icu_normalizer crate",
         "CARGO_PKG_NAME": "icu_normalizer_data",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :icu_normalizer_data-2.0.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :icu_normalizer_data-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :icu_normalizer_data-2.0.0-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :icu_normalizer_data-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "icu_normalizer_data-2.0.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "icu_normalizer_data-build-script-build",
+    srcs = [":icu_normalizer_data-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "icu_normalizer_data",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "Data for the icu_normalizer crate",
         "CARGO_PKG_NAME": "icu_normalizer_data",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "icu_normalizer_data-2.0.0-build-script-run",
+    name = "icu_normalizer_data-build-script-run",
     package_name = "icu_normalizer_data",
-    buildscript_rule = ":icu_normalizer_data-2.0.0-build-script-build",
+    buildscript_rule = ":icu_normalizer_data-build-script-build",
     version = "2.0.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":icu_normalizer_data-vendor",
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "num-iter-vendor",
+    urls = ["https://static.crates.io/crates/num-iter/num-iter-0.1.45.crate"],
+    sha256 = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf",
+    type = "tar.gz",
+    strip_prefix = "num-iter-0.1.45",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "num-iter-0.1.45",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "num-iter",
+    srcs = [":num-iter-vendor"],
     crate = "num-iter",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "num-iter",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "External iterators for generic mathematics",
         "CARGO_PKG_NAME": "num-iter",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "45",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "num_integer": "//third-party/rust/crates/num-integer/0.1.46:num-integer-0.1.46",
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/num-integer/0.1.46:num-integer",
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
+    ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "dunce-vendor",
+    urls = ["https://static.crates.io/crates/dunce/dunce-1.0.5.crate"],
+    sha256 = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813",
+    type = "tar.gz",
+    strip_prefix = "dunce-1.0.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "dunce-1.0.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "dunce",
+    srcs = [":dunce-vendor"],
     crate = "dunce",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "dunce",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Kornel <kornel@geekhood.net>",
         "CARGO_PKG_DESCRIPTION": "Normalize Windows paths to the most compatible format, avoiding UNC where possible",
         "CARGO_PKG_NAME": "dunce",

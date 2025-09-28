@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tagptr-vendor",
+    urls = ["https://static.crates.io/crates/tagptr/tagptr-0.2.0.crate"],
+    sha256 = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417",
+    type = "tar.gz",
+    strip_prefix = "tagptr-0.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tagptr-0.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tagptr",
+    srcs = [":tagptr-vendor"],
     crate = "tagptr",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tagptr",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Oliver Giersch",
         "CARGO_PKG_DESCRIPTION": "Strongly typed atomic and non-atomic tagged pointers",
         "CARGO_PKG_NAME": "tagptr",

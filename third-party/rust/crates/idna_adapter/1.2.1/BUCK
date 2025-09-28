@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "idna_adapter-vendor",
+    urls = ["https://static.crates.io/crates/idna_adapter/idna_adapter-1.2.1.crate"],
+    sha256 = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344",
+    type = "tar.gz",
+    strip_prefix = "idna_adapter-1.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "idna_adapter-1.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "idna_adapter",
+    srcs = [":idna_adapter-vendor"],
     crate = "idna_adapter",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "idna_adapter",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The rust-url developers",
         "CARGO_PKG_DESCRIPTION": "Back end adapter for idna",
         "CARGO_PKG_NAME": "idna_adapter",
@@ -28,7 +34,7 @@ cargo.rust_library(
     features = ["compiled_data"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/icu_normalizer/2.0.0:icu_normalizer-2.0.0",
-        "//third-party/rust/crates/icu_properties/2.0.1:icu_properties-2.0.1",
+        "//third-party/rust/crates/icu_normalizer/2.0.0:icu_normalizer",
+        "//third-party/rust/crates/icu_properties/2.0.1:icu_properties",
     ],
 )

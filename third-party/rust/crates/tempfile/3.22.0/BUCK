@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tempfile-vendor",
+    urls = ["https://static.crates.io/crates/tempfile/tempfile-3.22.0.crate"],
+    sha256 = "84fa4d11fadde498443cca10fd3ac23c951f0dc59e080e9f4b93d4df4e4eea53",
+    type = "tar.gz",
+    strip_prefix = "tempfile-3.22.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tempfile-3.22.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tempfile",
+    srcs = [":tempfile-vendor"],
     crate = "tempfile",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "tempfile",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Allen <steven@stebalien.com>:The Rust Project Developers:Ashley Mannix <ashleymannix@live.com.au>:Jason White <me@jasonwhite.io>",
         "CARGO_PKG_DESCRIPTION": "A library for managing temporary files and directories.",
         "CARGO_PKG_NAME": "tempfile",
@@ -31,9 +37,9 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/fastrand/2.3.0:fastrand-2.3.0",
-        "//third-party/rust/crates/getrandom/0.3.3:getrandom-0.3.3",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
-        "//third-party/rust/crates/rustix/1.1.2:rustix-1.1.2",
+        "//third-party/rust/crates/fastrand/2.3.0:fastrand",
+        "//third-party/rust/crates/getrandom/0.3.3:getrandom",
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/rustix/1.1.2:rustix",
     ],
 )

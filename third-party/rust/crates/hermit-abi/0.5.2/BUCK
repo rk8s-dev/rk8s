@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hermit-abi-vendor",
+    urls = ["https://static.crates.io/crates/hermit-abi/hermit-abi-0.5.2.crate"],
+    sha256 = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c",
+    type = "tar.gz",
+    strip_prefix = "hermit-abi-0.5.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hermit-abi-0.5.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hermit-abi",
+    srcs = [":hermit-abi-vendor"],
     crate = "hermit-abi",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "hermit-abi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stefan Lankes",
         "CARGO_PKG_DESCRIPTION": "Hermit system calls definitions.",
         "CARGO_PKG_NAME": "hermit-abi",

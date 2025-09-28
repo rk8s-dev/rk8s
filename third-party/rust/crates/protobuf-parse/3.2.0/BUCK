@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "protobuf-parse-vendor",
+    urls = ["https://static.crates.io/crates/protobuf-parse/protobuf-parse-3.2.0.crate"],
+    sha256 = "9d39b14605eaa1f6a340aec7f320b34064feb26c93aec35d6a9a2272a8ddfa49",
+    type = "tar.gz",
+    strip_prefix = "protobuf-parse-3.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "protobuf-parse-3.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "protobuf-parse",
+    srcs = [":protobuf-parse-vendor"],
     crate = "protobuf-parse",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "protobuf-parse",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stepan Koltsov <stepan.koltsov@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Parse `.proto` files.\n\nFiles are parsed into a `protobuf::descriptor::FileDescriptorSet` object using either:\n* pure rust parser (no dependencies)\n* `protoc` binary (more reliable and compatible with Google's implementation)\n",
         "CARGO_PKG_NAME": "protobuf-parse",
@@ -25,17 +31,15 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "protobuf_support": "//third-party/rust/crates/protobuf-support/3.2.0:protobuf-support-3.2.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
-        "//third-party/rust/crates/indexmap/1.9.3:indexmap-1.9.3",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/protobuf/3.2.0:protobuf-3.2.0",
-        "//third-party/rust/crates/tempfile/3.22.0:tempfile-3.22.0",
-        "//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69",
-        "//third-party/rust/crates/which/4.4.2:which-4.4.2",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/indexmap/1.9.3:indexmap",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/protobuf-support/3.2.0:protobuf-support",
+        "//third-party/rust/crates/protobuf/3.2.0:protobuf",
+        "//third-party/rust/crates/tempfile/3.22.0:tempfile",
+        "//third-party/rust/crates/thiserror/1.0.69:thiserror",
+        "//third-party/rust/crates/which/4.4.2:which",
     ],
 )

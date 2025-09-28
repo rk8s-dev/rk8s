@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crc-vendor",
+    urls = ["https://static.crates.io/crates/crc/crc-3.3.0.crate"],
+    sha256 = "9710d3b3739c2e349eb44fe848ad0b7c8cb1e42bd87ee49371df2f7acaf3e675",
+    type = "tar.gz",
+    strip_prefix = "crc-3.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crc-3.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crc",
+    srcs = [":crc-vendor"],
     crate = "crc",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crc",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Rui Hu <code@mrhooray.com>:Akhil Velagapudi <4@4khil.com>",
         "CARGO_PKG_DESCRIPTION": "Rust implementation of CRC with support of various standards",
         "CARGO_PKG_NAME": "crc",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "crc_catalog": "//third-party/rust/crates/crc-catalog/2.4.0:crc-catalog-2.4.0",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/crc-catalog/2.4.0:crc-catalog"],
 )

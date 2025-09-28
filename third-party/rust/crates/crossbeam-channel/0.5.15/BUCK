@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crossbeam-channel-vendor",
+    urls = ["https://static.crates.io/crates/crossbeam-channel/crossbeam-channel-0.5.15.crate"],
+    sha256 = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2",
+    type = "tar.gz",
+    strip_prefix = "crossbeam-channel-0.5.15",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crossbeam-channel-0.5.15",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crossbeam-channel",
+    srcs = [":crossbeam-channel-vendor"],
     crate = "crossbeam-channel",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crossbeam-channel",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Multi-producer multi-consumer channels for message passing",
         "CARGO_PKG_NAME": "crossbeam-channel",
@@ -29,8 +35,6 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "crossbeam_utils": "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils-0.8.21",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils"],
 )

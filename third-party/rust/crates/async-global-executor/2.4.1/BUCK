@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-global-executor-vendor",
+    urls = ["https://static.crates.io/crates/async-global-executor/async-global-executor-2.4.1.crate"],
+    sha256 = "05b1b633a2115cd122d73b955eadd9916c18c8f510ec9cd1686404c60ad1c29c",
+    type = "tar.gz",
+    strip_prefix = "async-global-executor-2.4.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-global-executor-2.4.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-global-executor",
+    srcs = [":async-global-executor-vendor"],
     crate = "async-global-executor",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "async-global-executor",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Marc-Antoine Perennou <Marc-Antoine@Perennou.com>",
         "CARGO_PKG_DESCRIPTION": "A global executor built on top of async-executor and async-io",
         "CARGO_PKG_NAME": "async-global-executor",
@@ -29,16 +35,14 @@ cargo.rust_library(
         "async-io",
         "default",
     ],
-    named_deps = {
-        "async_channel": "//third-party/rust/crates/async-channel/2.5.0:async-channel-2.5.0",
-        "async_executor": "//third-party/rust/crates/async-executor/1.13.3:async-executor-1.13.3",
-        "async_io": "//third-party/rust/crates/async-io/2.6.0:async-io-2.6.0",
-        "async_lock": "//third-party/rust/crates/async-lock/3.4.1:async-lock-3.4.1",
-        "futures_lite": "//third-party/rust/crates/futures-lite/2.6.1:futures-lite-2.6.1",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/blocking/1.6.2:blocking-1.6.2",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
+        "//third-party/rust/crates/async-channel/2.5.0:async-channel",
+        "//third-party/rust/crates/async-executor/1.13.3:async-executor",
+        "//third-party/rust/crates/async-io/2.6.0:async-io",
+        "//third-party/rust/crates/async-lock/3.4.1:async-lock",
+        "//third-party/rust/crates/blocking/1.6.2:blocking",
+        "//third-party/rust/crates/futures-lite/2.6.1:futures-lite",
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
     ],
 )

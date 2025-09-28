@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ntapi-vendor",
+    urls = ["https://static.crates.io/crates/ntapi/ntapi-0.4.1.crate"],
+    sha256 = "e8a3895c6391c39d7fe7ebc444a87eb2991b2a0bc718fdabd071eec617fc68e4",
+    type = "tar.gz",
+    strip_prefix = "ntapi-0.4.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ntapi-0.4.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ntapi",
+    srcs = [":ntapi-vendor"],
     crate = "ntapi",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "ntapi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "MSxDOS <melcodos@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "FFI bindings for Native API",
         "CARGO_PKG_NAME": "ntapi",
@@ -24,29 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "4",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :ntapi-0.4.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :ntapi-build-script-run[out_dir])",
     },
     features = [
         "default",
         "user",
     ],
-    rustc_flags = ["@$(location :ntapi-0.4.1-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :ntapi-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/winapi/0.3.9:winapi-0.3.9"],
+    deps = ["//third-party/rust/crates/winapi/0.3.9:winapi"],
 )
 
 cargo.rust_binary(
-    name = "ntapi-0.4.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ntapi-build-script-build",
+    srcs = [":ntapi-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "ntapi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "MSxDOS <melcodos@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "FFI bindings for Native API",
         "CARGO_PKG_NAME": "ntapi",
@@ -65,13 +68,13 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "ntapi-0.4.1-build-script-run",
+    name = "ntapi-build-script-run",
     package_name = "ntapi",
-    buildscript_rule = ":ntapi-0.4.1-build-script-build",
+    buildscript_rule = ":ntapi-build-script-build",
     features = [
         "default",
         "user",
     ],
     version = "0.4.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":ntapi-vendor",
 )

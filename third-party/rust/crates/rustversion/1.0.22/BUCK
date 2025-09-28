@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustversion-vendor",
+    urls = ["https://static.crates.io/crates/rustversion/rustversion-1.0.22.crate"],
+    sha256 = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d",
+    type = "tar.gz",
+    strip_prefix = "rustversion-1.0.22",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustversion-1.0.22",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustversion",
+    srcs = [":rustversion-vendor"],
     crate = "rustversion",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rustversion",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Conditional compilation according to rustc compiler version",
         "CARGO_PKG_NAME": "rustversion",
@@ -24,25 +30,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "22",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :rustversion-1.0.22-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rustversion-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :rustversion-1.0.22-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :rustversion-build-script-run[rustc_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "rustversion-1.0.22-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustversion-build-script-build",
+    srcs = [":rustversion-vendor"],
     crate = "build-script-build",
-    crate_root = "build/build.rs",
+    crate_root = "vendor/build/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rustversion",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Conditional compilation according to rustc compiler version",
         "CARGO_PKG_NAME": "rustversion",
@@ -57,9 +60,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "rustversion-1.0.22-build-script-run",
+    name = "rustversion-build-script-run",
     package_name = "rustversion",
-    buildscript_rule = ":rustversion-1.0.22-build-script-build",
+    buildscript_rule = ":rustversion-build-script-build",
     version = "1.0.22",
-    local_manifest_dir = "**",
+    manifest_dir = ":rustversion-vendor",
 )

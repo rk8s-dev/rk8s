@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "encoding_rs-vendor",
+    urls = ["https://static.crates.io/crates/encoding_rs/encoding_rs-0.8.35.crate"],
+    sha256 = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3",
+    type = "tar.gz",
+    strip_prefix = "encoding_rs-0.8.35",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "encoding_rs-0.8.35",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "encoding_rs",
+    srcs = [":encoding_rs-vendor"],
     crate = "encoding_rs",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "encoding_rs",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Henri Sivonen <hsivonen@hsivonen.fi>",
         "CARGO_PKG_DESCRIPTION": "A Gecko-oriented implementation of the Encoding Standard",
         "CARGO_PKG_NAME": "encoding_rs",
@@ -29,8 +35,6 @@ cargo.rust_library(
         "alloc",
         "default",
     ],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/cfg-if/1.0.3:cfg-if"],
 )

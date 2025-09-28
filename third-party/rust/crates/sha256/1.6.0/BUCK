@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "sha256-vendor",
+    urls = ["https://static.crates.io/crates/sha256/sha256-1.6.0.crate"],
+    sha256 = "f880fc8562bdeb709793f00eb42a2ad0e672c4f883bbe59122b926eca935c8f6",
+    type = "tar.gz",
+    strip_prefix = "sha256-1.6.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "sha256-1.6.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "sha256",
+    srcs = [":sha256-vendor"],
     crate = "sha256",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "sha256",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "baoyachi <liaoymxsdl@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "sha256 crypto digest",
         "CARGO_PKG_NAME": "sha256",
@@ -30,14 +36,12 @@ cargo.rust_library(
         "default",
         "tokio",
     ],
-    named_deps = {
-        "async_trait": "//third-party/rust/crates/async-trait/0.1.89:async-trait-0.1.89",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/hex/0.4.3:hex-0.4.3",
-        "//third-party/rust/crates/sha2/0.10.9:sha2-0.10.9",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
+        "//third-party/rust/crates/async-trait/0.1.89:async-trait",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/hex/0.4.3:hex",
+        "//third-party/rust/crates/sha2/0.10.9:sha2",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
     ],
 )

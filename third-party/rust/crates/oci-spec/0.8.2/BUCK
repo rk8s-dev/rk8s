@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "oci-spec-vendor",
+    urls = ["https://static.crates.io/crates/oci-spec/oci-spec-0.8.2.crate"],
+    sha256 = "2078e2f6be932a4de9aca90a375a45590809dfb5a08d93ab1ee217107aceeb67",
+    type = "tar.gz",
+    strip_prefix = "oci-spec-0.8.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "oci-spec-0.8.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "oci-spec",
+    srcs = [":oci-spec-vendor"],
     crate = "oci-spec",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "oci-spec",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Furisto:Sascha Grunert <sgrunert@redhat.com>:Toru Komatsu <k0ma@utam0k.jp>",
         "CARGO_PKG_DESCRIPTION": "Open Container Initiative Specifications in Rust",
         "CARGO_PKG_NAME": "oci-spec",
@@ -35,15 +41,15 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/const_format/0.2.34:const_format-0.2.34",
-        "//third-party/rust/crates/derive_builder/0.20.2:derive_builder-0.20.2",
-        "//third-party/rust/crates/getset/0.1.6:getset-0.1.6",
-        "//third-party/rust/crates/quickcheck/1.0.3:quickcheck-1.0.3",
-        "//third-party/rust/crates/regex/1.11.2:regex-1.11.2",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json-1.0.145",
-        "//third-party/rust/crates/strum/0.27.2:strum-0.27.2",
-        "//third-party/rust/crates/strum_macros/0.27.2:strum_macros-0.27.2",
-        "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
+        "//third-party/rust/crates/const_format/0.2.34:const_format",
+        "//third-party/rust/crates/derive_builder/0.20.2:derive_builder",
+        "//third-party/rust/crates/getset/0.1.6:getset",
+        "//third-party/rust/crates/quickcheck/1.0.3:quickcheck",
+        "//third-party/rust/crates/regex/1.11.2:regex",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_json/1.0.145:serde_json",
+        "//third-party/rust/crates/strum/0.27.2:strum",
+        "//third-party/rust/crates/strum_macros/0.27.2:strum_macros",
+        "//third-party/rust/crates/thiserror/2.0.16:thiserror",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "block-buffer-vendor",
+    urls = ["https://static.crates.io/crates/block-buffer/block-buffer-0.10.4.crate"],
+    sha256 = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71",
+    type = "tar.gz",
+    strip_prefix = "block-buffer-0.10.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "block-buffer-0.10.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "block-buffer",
+    srcs = [":block-buffer-vendor"],
     crate = "block-buffer",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "block-buffer",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Buffer type for block processing of data",
         "CARGO_PKG_NAME": "block-buffer",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "generic_array": "//third-party/rust/crates/generic-array/0.14.7:generic-array-0.14.7",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/generic-array/0.14.7:generic-array"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "pest_derive-vendor",
+    urls = ["https://static.crates.io/crates/pest_derive/pest_derive-2.8.2.crate"],
+    sha256 = "bc58706f770acb1dbd0973e6530a3cff4746fb721207feb3a8a6064cd0b6c663",
+    type = "tar.gz",
+    strip_prefix = "pest_derive-2.8.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "pest_derive-2.8.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "pest_derive",
+    srcs = [":pest_derive-vendor"],
     crate = "pest_derive",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "pest_derive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dragoș Tiselice <dragostiselice@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "pest's derive macro",
         "CARGO_PKG_NAME": "pest_derive",
@@ -32,7 +38,7 @@ cargo.rust_library(
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/pest/2.8.2:pest-2.8.2",
-        "//third-party/rust/crates/pest_generator/2.8.2:pest_generator-2.8.2",
+        "//third-party/rust/crates/pest/2.8.2:pest",
+        "//third-party/rust/crates/pest_generator/2.8.2:pest_generator",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "anstream-vendor",
+    urls = ["https://static.crates.io/crates/anstream/anstream-0.6.20.crate"],
+    sha256 = "3ae563653d1938f79b1ab1b5e668c87c76a9930414574a6583a7b7e11a8e6192",
+    type = "tar.gz",
+    strip_prefix = "anstream-0.6.20",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "anstream-0.6.20",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "anstream",
+    srcs = [":anstream-vendor"],
     crate = "anstream",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "anstream",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "IO stream adapters for writing colored text that will gracefully degrade according to your terminal's capabilities.",
         "CARGO_PKG_NAME": "anstream",
@@ -30,15 +36,13 @@ cargo.rust_library(
         "default",
         "wincon",
     ],
-    named_deps = {
-        "anstyle_parse": "//third-party/rust/crates/anstyle-parse/0.2.7:anstyle-parse-0.2.7",
-        "anstyle_query": "//third-party/rust/crates/anstyle-query/1.1.4:anstyle-query-1.1.4",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anstyle/1.0.11:anstyle-1.0.11",
-        "//third-party/rust/crates/colorchoice/1.0.4:colorchoice-1.0.4",
-        "//third-party/rust/crates/is_terminal_polyfill/1.70.1:is_terminal_polyfill-1.70.1",
-        "//third-party/rust/crates/utf8parse/0.2.2:utf8parse-0.2.2",
+        "//third-party/rust/crates/anstyle-parse/0.2.7:anstyle-parse",
+        "//third-party/rust/crates/anstyle-query/1.1.4:anstyle-query",
+        "//third-party/rust/crates/anstyle/1.0.11:anstyle",
+        "//third-party/rust/crates/colorchoice/1.0.4:colorchoice",
+        "//third-party/rust/crates/is_terminal_polyfill/1.70.1:is_terminal_polyfill",
+        "//third-party/rust/crates/utf8parse/0.2.2:utf8parse",
     ],
 )

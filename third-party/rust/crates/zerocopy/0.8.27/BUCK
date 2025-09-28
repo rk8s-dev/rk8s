@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "zerocopy-vendor",
+    urls = ["https://static.crates.io/crates/zerocopy/zerocopy-0.8.27.crate"],
+    sha256 = "0894878a5fa3edfd6da3f88c4805f4c8558e2b996227a3d864f47fe11e38282c",
+    type = "tar.gz",
+    strip_prefix = "zerocopy-0.8.27",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "zerocopy-0.8.27",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "zerocopy",
+    srcs = [":zerocopy-vendor"],
     crate = "zerocopy",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "zerocopy",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Joshua Liebow-Feeser <joshlf@google.com>:Jack Wrenn <jswrenn@amazon.com>",
         "CARGO_PKG_DESCRIPTION": "Zerocopy makes zero-cost memory manipulation effortless. We write \"unsafe\" so you don't have to.",
         "CARGO_PKG_NAME": "zerocopy",
@@ -24,25 +30,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "8",
         "CARGO_PKG_VERSION_PATCH": "27",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :zerocopy-0.8.27-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :zerocopy-build-script-run[out_dir])",
     },
     features = ["simd"],
-    rustc_flags = ["@$(location :zerocopy-0.8.27-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :zerocopy-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "zerocopy-0.8.27-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "zerocopy-build-script-build",
+    srcs = [":zerocopy-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "zerocopy",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Joshua Liebow-Feeser <joshlf@google.com>:Jack Wrenn <jswrenn@amazon.com>",
         "CARGO_PKG_DESCRIPTION": "Zerocopy makes zero-cost memory manipulation effortless. We write \"unsafe\" so you don't have to.",
         "CARGO_PKG_NAME": "zerocopy",
@@ -58,10 +61,10 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "zerocopy-0.8.27-build-script-run",
+    name = "zerocopy-build-script-run",
     package_name = "zerocopy",
-    buildscript_rule = ":zerocopy-0.8.27-build-script-build",
+    buildscript_rule = ":zerocopy-build-script-build",
     features = ["simd"],
     version = "0.8.27",
-    local_manifest_dir = "**",
+    manifest_dir = ":zerocopy-vendor",
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rand-vendor",
+    urls = ["https://static.crates.io/crates/rand/rand-0.8.5.crate"],
+    sha256 = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404",
+    type = "tar.gz",
+    strip_prefix = "rand-0.8.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rand-0.8.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rand",
+    srcs = [":rand-vendor"],
     crate = "rand",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rand",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rand Project Developers:The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Random number generators and other randomness functionality.\n",
         "CARGO_PKG_NAME": "rand",
@@ -36,8 +42,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/rand_chacha/0.3.1:rand_chacha-0.3.1",
-        "//third-party/rust/crates/rand_core/0.6.4:rand_core-0.6.4",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/rand_chacha/0.3.1:rand_chacha",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
     ],
 )

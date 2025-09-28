@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hyper-rustls-vendor",
+    urls = ["https://static.crates.io/crates/hyper-rustls/hyper-rustls-0.24.2.crate"],
+    sha256 = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590",
+    type = "tar.gz",
+    strip_prefix = "hyper-rustls-0.24.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hyper-rustls-0.24.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hyper-rustls",
+    srcs = [":hyper-rustls-vendor"],
     crate = "hyper-rustls",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "hyper-rustls",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rustls+hyper integration for pure rust HTTPS",
         "CARGO_PKG_NAME": "hyper-rustls",
@@ -37,17 +43,15 @@ cargo.rust_library(
         "tls12",
         "tokio-runtime",
     ],
-    named_deps = {
-        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
-        "rustls_native_certs": "//third-party/rust/crates/rustls-native-certs/0.6.3:rustls-native-certs-0.6.3",
-        "tokio_rustls": "//third-party/rust/crates/tokio-rustls/0.24.1:tokio-rustls-0.24.1",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/http/0.2.12:http-0.2.12",
-        "//third-party/rust/crates/hyper/0.14.32:hyper-0.14.32",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/rustls/0.21.12:rustls-0.21.12",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
+        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/http/0.2.12:http",
+        "//third-party/rust/crates/hyper/0.14.32:hyper",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/rustls-native-certs/0.6.3:rustls-native-certs",
+        "//third-party/rust/crates/rustls/0.21.12:rustls",
+        "//third-party/rust/crates/tokio-rustls/0.24.1:tokio-rustls",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
     ],
 )

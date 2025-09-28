@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "zeroize-vendor",
+    urls = ["https://static.crates.io/crates/zeroize/zeroize-1.8.1.crate"],
+    sha256 = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde",
+    type = "tar.gz",
+    strip_prefix = "zeroize-1.8.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "zeroize-1.8.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "zeroize",
+    srcs = [":zeroize-vendor"],
     crate = "zeroize",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "zeroize",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The RustCrypto Project Developers",
         "CARGO_PKG_DESCRIPTION": "Securely clear secrets from memory with a simple trait built on\nstable Rust primitives which guarantee memory is zeroed using an\noperation will not be 'optimized away' by the compiler.\nUses a portable pure Rust implementation that works everywhere,\neven WASM!\n",
         "CARGO_PKG_NAME": "zeroize",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hickory-server-vendor",
+    urls = ["https://static.crates.io/crates/hickory-server/hickory-server-0.25.2.crate"],
+    sha256 = "d53e5fe811b941c74ee46b8818228bfd2bc2688ba276a0eaeb0f2c95ea3b2585",
+    type = "tar.gz",
+    strip_prefix = "hickory-server-0.25.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hickory-server-0.25.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hickory-server",
+    srcs = [":hickory-server-vendor"],
     crate = "hickory-server",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "hickory-server",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The contributors to Hickory DNS",
         "CARGO_PKG_DESCRIPTION": "Hickory DNS is a safe and secure DNS server with DNSSEC support.\n Eventually this could be a replacement for BIND9. The DNSSEC support allows\n for live signing of all records, in it does not currently support\n records signed offline. The server supports dynamic DNS with SIG0 authenticated\n requests. Hickory DNS is based on the Tokio and Futures libraries, which means\n it should be easily integrated into other software that also use those\n libraries.\n",
         "CARGO_PKG_NAME": "hickory-server",
@@ -25,24 +31,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "async_trait": "//third-party/rust/crates/async-trait/0.1.89:async-trait-0.1.89",
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-        "data_encoding": "//third-party/rust/crates/data-encoding/2.9.0:data-encoding-2.9.0",
-        "enum_as_inner": "//third-party/rust/crates/enum-as-inner/0.6.1:enum-as-inner-0.6.1",
-        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
-        "hickory_proto": "//third-party/rust/crates/hickory-proto/0.25.2:hickory-proto-0.25.2",
-        "prefix_trie": "//third-party/rust/crates/prefix-trie/0.7.0:prefix-trie-0.7.0",
-        "tokio_util": "//third-party/rust/crates/tokio-util/0.7.16:tokio-util-0.7.16",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/ipnet/2.11.0:ipnet-2.11.0",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
-        "//third-party/rust/crates/time/0.3.44:time-0.3.44",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
-        "//third-party/rust/crates/tracing/0.1.41:tracing-0.1.41",
+        "//third-party/rust/crates/async-trait/0.1.89:async-trait",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/data-encoding/2.9.0:data-encoding",
+        "//third-party/rust/crates/enum-as-inner/0.6.1:enum-as-inner",
+        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/hickory-proto/0.25.2:hickory-proto",
+        "//third-party/rust/crates/ipnet/2.11.0:ipnet",
+        "//third-party/rust/crates/prefix-trie/0.7.0:prefix-trie",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/thiserror/2.0.16:thiserror",
+        "//third-party/rust/crates/time/0.3.44:time",
+        "//third-party/rust/crates/tokio-util/0.7.16:tokio-util",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+        "//third-party/rust/crates/tracing/0.1.41:tracing",
     ],
 )

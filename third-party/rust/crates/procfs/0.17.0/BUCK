@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "procfs-vendor",
+    urls = ["https://static.crates.io/crates/procfs/procfs-0.17.0.crate"],
+    sha256 = "cc5b72d8145275d844d4b5f6d4e1eef00c8cd889edb6035c21675d1bb1f45c9f",
+    type = "tar.gz",
+    strip_prefix = "procfs-0.17.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "procfs-0.17.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "procfs",
+    srcs = [":procfs-vendor"],
     crate = "procfs",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "procfs",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Chin <achin@eminence32.net>",
         "CARGO_PKG_DESCRIPTION": "Interface to the linux procfs pseudo-filesystem",
         "CARGO_PKG_NAME": "procfs",
@@ -24,39 +30,34 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "17",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :procfs-0.17.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :procfs-build-script-run[out_dir])",
     },
     features = [
         "chrono",
         "default",
         "flate2",
     ],
-    rustc_flags = ["@$(location :procfs-0.17.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "procfs_core": "//third-party/rust/crates/procfs-core/0.17.0:procfs-core-0.17.0",
-    },
+    rustc_flags = ["@$(location :procfs-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4",
-        "//third-party/rust/crates/chrono/0.4.42:chrono-0.4.42",
-        "//third-party/rust/crates/flate2/1.1.2:flate2-1.1.2",
-        "//third-party/rust/crates/hex/0.4.3:hex-0.4.3",
-        "//third-party/rust/crates/rustix/0.38.44:rustix-0.38.44",
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/chrono/0.4.42:chrono",
+        "//third-party/rust/crates/flate2/1.1.2:flate2",
+        "//third-party/rust/crates/hex/0.4.3:hex",
+        "//third-party/rust/crates/procfs-core/0.17.0:procfs-core",
+        "//third-party/rust/crates/rustix/0.38.44:rustix",
     ],
 )
 
 cargo.rust_binary(
-    name = "procfs-0.17.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "procfs-build-script-build",
+    srcs = [":procfs-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "procfs",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Chin <achin@eminence32.net>",
         "CARGO_PKG_DESCRIPTION": "Interface to the linux procfs pseudo-filesystem",
         "CARGO_PKG_NAME": "procfs",
@@ -76,14 +77,14 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "procfs-0.17.0-build-script-run",
+    name = "procfs-build-script-run",
     package_name = "procfs",
-    buildscript_rule = ":procfs-0.17.0-build-script-build",
+    buildscript_rule = ":procfs-build-script-build",
     features = [
         "chrono",
         "default",
         "flate2",
     ],
     version = "0.17.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":procfs-vendor",
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "unicode-segmentation-vendor",
+    urls = ["https://static.crates.io/crates/unicode-segmentation/unicode-segmentation-1.12.0.crate"],
+    sha256 = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493",
+    type = "tar.gz",
+    strip_prefix = "unicode-segmentation-1.12.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "unicode-segmentation-1.12.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "unicode-segmentation",
+    srcs = [":unicode-segmentation-vendor"],
     crate = "unicode-segmentation",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "unicode-segmentation",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "kwantam <kwantam@gmail.com>:Manish Goregaokar <manishsmail@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "This crate provides Grapheme Cluster, Word and Sentence boundaries\naccording to Unicode Standard Annex #29 rules.\n",
         "CARGO_PKG_NAME": "unicode-segmentation",

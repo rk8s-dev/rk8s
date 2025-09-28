@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "inout-vendor",
+    urls = ["https://static.crates.io/crates/inout/inout-0.1.4.crate"],
+    sha256 = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01",
+    type = "tar.gz",
+    strip_prefix = "inout-0.1.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "inout-0.1.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "inout",
+    srcs = [":inout-vendor"],
     crate = "inout",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "inout",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Custom reference types for code generic over in-place and buffer-to-buffer modes of operation.",
         "CARGO_PKG_NAME": "inout",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "generic_array": "//third-party/rust/crates/generic-array/0.14.7:generic-array-0.14.7",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/generic-array/0.14.7:generic-array"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "protobuf-codegen-vendor",
+    urls = ["https://static.crates.io/crates/protobuf-codegen/protobuf-codegen-3.2.0.crate"],
+    sha256 = "0dd418ac3c91caa4032d37cb80ff0d44e2ebe637b2fb243b6234bf89cdac4901",
+    type = "tar.gz",
+    strip_prefix = "protobuf-codegen-3.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "protobuf-codegen-3.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "protobuf-codegen",
+    srcs = [":protobuf-codegen-vendor"],
     crate = "protobuf-codegen",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "protobuf-codegen",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stepan Koltsov <stepan.koltsov@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Code generator for rust-protobuf.\n\nIncludes a library to invoke programmatically (e. g. from `build.rs`) and `protoc-gen-rust` binary.\n",
         "CARGO_PKG_NAME": "protobuf-codegen",
@@ -25,16 +31,14 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "protobuf_parse": "//third-party/rust/crates/protobuf-parse/3.2.0:protobuf-parse-3.2.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
-        "//third-party/rust/crates/protobuf/3.2.0:protobuf-3.2.0",
-        "//third-party/rust/crates/regex/1.11.2:regex-1.11.2",
-        "//third-party/rust/crates/tempfile/3.22.0:tempfile-3.22.0",
-        "//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/protobuf-parse/3.2.0:protobuf-parse",
+        "//third-party/rust/crates/protobuf/3.2.0:protobuf",
+        "//third-party/rust/crates/regex/1.11.2:regex",
+        "//third-party/rust/crates/tempfile/3.22.0:tempfile",
+        "//third-party/rust/crates/thiserror/1.0.69:thiserror",
     ],
 )

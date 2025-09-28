@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tracing-log-vendor",
+    urls = ["https://static.crates.io/crates/tracing-log/tracing-log-0.2.0.crate"],
+    sha256 = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3",
+    type = "tar.gz",
+    strip_prefix = "tracing-log-0.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tracing-log-0.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tracing-log",
+    srcs = [":tracing-log-vendor"],
     crate = "tracing-log",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tracing-log",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "Provides compatibility between `tracing` and the `log` crate.\n",
         "CARGO_PKG_NAME": "tracing-log",
@@ -29,12 +35,10 @@ cargo.rust_library(
         "log-tracer",
         "std",
     ],
-    named_deps = {
-        "tracing_core": "//third-party/rust/crates/tracing-core/0.1.34:tracing-core-0.1.34",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/tracing-core/0.1.34:tracing-core",
     ],
 )

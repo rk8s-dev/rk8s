@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "spin-vendor",
+    urls = ["https://static.crates.io/crates/spin/spin-0.9.8.crate"],
+    sha256 = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67",
+    type = "tar.gz",
+    strip_prefix = "spin-0.9.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "spin-0.9.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "spin",
+    srcs = [":spin-vendor"],
     crate = "spin",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "spin",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Mathijs van de Nes <git@mathijs.vd-nes.nl>:John Ericson <git@JohnEricson.me>:Joshua Barretto <joshua.s.barretto@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Spin-based synchronization primitives",
         "CARGO_PKG_NAME": "spin",
@@ -37,7 +43,7 @@ cargo.rust_library(
         "spin_mutex",
     ],
     named_deps = {
-        "lock_api_crate": "//third-party/rust/crates/lock_api/0.4.13:lock_api-0.4.13",
+        "lock_api_crate": "//third-party/rust/crates/lock_api/0.4.13:lock_api",
     },
     visibility = ["PUBLIC"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "pem-rfc7468-vendor",
+    urls = ["https://static.crates.io/crates/pem-rfc7468/pem-rfc7468-0.7.0.crate"],
+    sha256 = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412",
+    type = "tar.gz",
+    strip_prefix = "pem-rfc7468-0.7.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "pem-rfc7468-0.7.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "pem-rfc7468",
+    srcs = [":pem-rfc7468-vendor"],
     crate = "pem-rfc7468",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "pem-rfc7468",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "PEM Encoding (RFC 7468) for PKIX, PKCS, and CMS Structures, implementing a\nstrict subset of the original Privacy-Enhanced Mail encoding intended\nspecifically for use with cryptographic keys, certificates, and other messages.\nProvides a no_std-friendly, constant-time implementation suitable for use with\ncryptographic private keys.\n",
         "CARGO_PKG_NAME": "pem-rfc7468",
@@ -27,5 +33,5 @@ cargo.rust_library(
     },
     features = ["alloc"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/base64ct/1.8.0:base64ct-1.8.0"],
+    deps = ["//third-party/rust/crates/base64ct/1.8.0:base64ct"],
 )

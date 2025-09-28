@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "wasm-bindgen-macro-vendor",
+    urls = ["https://static.crates.io/crates/wasm-bindgen-macro/wasm-bindgen-macro-0.2.103.crate"],
+    sha256 = "fc65f4f411d91494355917b605e1480033152658d71f722a90647f56a70c88a0",
+    type = "tar.gz",
+    strip_prefix = "wasm-bindgen-macro-0.2.103",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "wasm-bindgen-macro-0.2.103",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "wasm-bindgen-macro",
+    srcs = [":wasm-bindgen-macro-vendor"],
     crate = "wasm-bindgen-macro",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "wasm-bindgen-macro",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
         "CARGO_PKG_DESCRIPTION": "Definition of the `#[wasm_bindgen]` attribute, an internal dependency\n",
         "CARGO_PKG_NAME": "wasm-bindgen-macro",
@@ -26,9 +32,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "wasm_bindgen_macro_support": "//third-party/rust/crates/wasm-bindgen-macro-support/0.2.103:wasm-bindgen-macro-support-0.2.103",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/quote/1.0.40:quote-1.0.40"],
+    deps = [
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/wasm-bindgen-macro-support/0.2.103:wasm-bindgen-macro-support",
+    ],
 )

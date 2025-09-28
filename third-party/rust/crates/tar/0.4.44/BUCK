@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tar-vendor",
+    urls = ["https://static.crates.io/crates/tar/tar-0.4.44.crate"],
+    sha256 = "1d863878d212c87a19c1a610eb53bb01fe12951c0501cf5a0d65f724914a667a",
+    type = "tar.gz",
+    strip_prefix = "tar-0.4.44",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tar-0.4.44",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tar",
+    srcs = [":tar-vendor"],
     crate = "tar",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "tar",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "A Rust implementation of a TAR file reader and writer. This library does not\ncurrently handle compression, but it is abstract over all I/O readers and\nwriters. Additionally, great lengths are taken to ensure that the entire\ncontents are never required to be entirely resident in memory all at once.\n",
         "CARGO_PKG_NAME": "tar",
@@ -31,8 +37,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/filetime/0.2.26:filetime-0.2.26",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/xattr/1.6.1:xattr-1.6.1",
+        "//third-party/rust/crates/filetime/0.2.26:filetime",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/xattr/1.6.1:xattr",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "doc-comment-vendor",
+    urls = ["https://static.crates.io/crates/doc-comment/doc-comment-0.3.3.crate"],
+    sha256 = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10",
+    type = "tar.gz",
+    strip_prefix = "doc-comment-0.3.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "doc-comment-0.3.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "doc-comment",
+    srcs = [":doc-comment-vendor"],
     crate = "doc-comment",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "doc-comment",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Guillaume Gomez <guillaume1.gomez@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Macro to generate doc comments",
         "CARGO_PKG_NAME": "doc-comment",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :doc-comment-0.3.3-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :doc-comment-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :doc-comment-0.3.3-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :doc-comment-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "doc-comment-0.3.3-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "doc-comment-build-script-build",
+    srcs = [":doc-comment-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "doc-comment",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Guillaume Gomez <guillaume1.gomez@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Macro to generate doc comments",
         "CARGO_PKG_NAME": "doc-comment",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "doc-comment-0.3.3-build-script-run",
+    name = "doc-comment-build-script-run",
     package_name = "doc-comment",
-    buildscript_rule = ":doc-comment-0.3.3-build-script-build",
+    buildscript_rule = ":doc-comment-build-script-build",
     version = "0.3.3",
-    local_manifest_dir = "**",
+    manifest_dir = ":doc-comment-vendor",
 )

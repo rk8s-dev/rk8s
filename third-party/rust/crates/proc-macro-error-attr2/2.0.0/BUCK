@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "proc-macro-error-attr2-vendor",
+    urls = ["https://static.crates.io/crates/proc-macro-error-attr2/proc-macro-error-attr2-2.0.0.crate"],
+    sha256 = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5",
+    type = "tar.gz",
+    strip_prefix = "proc-macro-error-attr2-2.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "proc-macro-error-attr2-2.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "proc-macro-error-attr2",
+    srcs = [":proc-macro-error-attr2-vendor"],
     crate = "proc-macro-error-attr2",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "proc-macro-error-attr2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "CreepySkeleton <creepy-skeleton@yandex.ru>:GnomedDev <david2005thomas@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Attribute macro for the proc-macro-error2 crate",
         "CARGO_PKG_NAME": "proc-macro-error-attr2",
@@ -26,9 +32,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/quote/1.0.40:quote-1.0.40"],
+    deps = [
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+    ],
 )

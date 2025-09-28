@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "env_logger-vendor",
+    urls = ["https://static.crates.io/crates/env_logger/env_logger-0.8.4.crate"],
+    sha256 = "a19187fea3ac7e84da7dacf48de0c45d63c6a76f9490dae389aead16c243fce3",
+    type = "tar.gz",
+    strip_prefix = "env_logger-0.8.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "env_logger-0.8.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "env_logger",
+    srcs = [":env_logger-vendor"],
     crate = "env_logger",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "env_logger",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "A logging implementation for `log` which is configured via an environment\nvariable.\n",
         "CARGO_PKG_NAME": "env_logger",
@@ -28,7 +34,7 @@ cargo.rust_library(
     features = ["regex"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/regex/1.11.2:regex-1.11.2",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/regex/1.11.2:regex",
     ],
 )

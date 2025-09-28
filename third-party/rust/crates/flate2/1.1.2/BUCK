@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "flate2-vendor",
+    urls = ["https://static.crates.io/crates/flate2/flate2-1.1.2.crate"],
+    sha256 = "4a3d7db9596fecd151c5f638c0ee5d5bd487b6e0ea232e5dc96d5250f6f94b1d",
+    type = "tar.gz",
+    strip_prefix = "flate2-1.1.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "flate2-1.1.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "flate2",
+    srcs = [":flate2-vendor"],
     crate = "flate2",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "flate2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>:Josh Triplett <josh@joshtriplett.org>",
         "CARGO_PKG_DESCRIPTION": "DEFLATE compression and decompression exposed as Read/BufRead/Write streams.\nSupports miniz_oxide and multiple zlib implementations. Supports zlib, gzip,\nand raw deflate streams.\n",
         "CARGO_PKG_NAME": "flate2",
@@ -33,7 +39,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/crc32fast/1.5.0:crc32fast-1.5.0",
-        "//third-party/rust/crates/miniz_oxide/0.8.9:miniz_oxide-0.8.9",
+        "//third-party/rust/crates/crc32fast/1.5.0:crc32fast",
+        "//third-party/rust/crates/miniz_oxide/0.8.9:miniz_oxide",
     ],
 )

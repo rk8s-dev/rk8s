@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "security-framework-sys-vendor",
+    urls = ["https://static.crates.io/crates/security-framework-sys/security-framework-sys-2.15.0.crate"],
+    sha256 = "cc1f0cbffaac4852523ce30d8bd3c5cdc873501d96ff467ca09b6767bb8cd5c0",
+    type = "tar.gz",
+    strip_prefix = "security-framework-sys-2.15.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "security-framework-sys-2.15.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "security-framework-sys",
+    srcs = [":security-framework-sys-vendor"],
     crate = "security-framework-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "security-framework-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>:Kornel <kornel@geekhood.net>",
         "CARGO_PKG_DESCRIPTION": "Apple `Security.framework` low-level FFI bindings",
         "CARGO_PKG_NAME": "security-framework-sys",
@@ -34,9 +40,9 @@ cargo.rust_library(
         "OSX_10_9",
         "default",
     ],
-    named_deps = {
-        "core_foundation_sys": "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys-0.8.7",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = [
+        "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+    ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "strum-vendor",
+    urls = ["https://static.crates.io/crates/strum/strum-0.27.2.crate"],
+    sha256 = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf",
+    type = "tar.gz",
+    strip_prefix = "strum-0.27.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "strum-0.27.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "strum",
+    srcs = [":strum-vendor"],
     crate = "strum",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "strum",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Peter Glotfelty <peter.glotfelty@microsoft.com>",
         "CARGO_PKG_DESCRIPTION": "Helpful macros for working with enums and strings",
         "CARGO_PKG_NAME": "strum",

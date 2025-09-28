@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "itertools-vendor",
+    urls = ["https://static.crates.io/crates/itertools/itertools-0.12.1.crate"],
+    sha256 = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569",
+    type = "tar.gz",
+    strip_prefix = "itertools-0.12.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "itertools-0.12.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "itertools",
+    srcs = [":itertools-vendor"],
     crate = "itertools",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "itertools",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "bluss",
         "CARGO_PKG_DESCRIPTION": "Extra iterator adaptors, iterator methods, free functions, and macros.",
         "CARGO_PKG_NAME": "itertools",
@@ -27,5 +33,5 @@ cargo.rust_library(
     },
     features = ["use_alloc"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/either/1.15.0:either-1.15.0"],
+    deps = ["//third-party/rust/crates/either/1.15.0:either"],
 )

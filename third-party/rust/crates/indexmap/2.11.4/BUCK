@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "indexmap-vendor",
+    urls = ["https://static.crates.io/crates/indexmap/indexmap-2.11.4.crate"],
+    sha256 = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5",
+    type = "tar.gz",
+    strip_prefix = "indexmap-2.11.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "indexmap-2.11.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "indexmap",
+    srcs = [":indexmap-vendor"],
     crate = "indexmap",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "indexmap",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A hash table with consistent order and fast iteration.",
         "CARGO_PKG_NAME": "indexmap",
@@ -32,8 +38,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/equivalent/1.0.2:equivalent-1.0.2",
-        "//third-party/rust/crates/hashbrown/0.16.0:hashbrown-0.16.0",
-        "//third-party/rust/crates/serde_core/1.0.226:serde_core-1.0.226",
+        "//third-party/rust/crates/equivalent/1.0.2:equivalent",
+        "//third-party/rust/crates/hashbrown/0.16.0:hashbrown",
+        "//third-party/rust/crates/serde_core/1.0.226:serde_core",
     ],
 )

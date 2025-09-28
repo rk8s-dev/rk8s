@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "nc-vendor",
+    urls = ["https://static.crates.io/crates/nc/nc-0.9.6.crate"],
+    sha256 = "56c6d92d33b290df8a962fbf778711d529b11c92dc060cd675f1ce45a9a50977",
+    type = "tar.gz",
+    strip_prefix = "nc-0.9.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "nc-0.9.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "nc",
+    srcs = [":nc-vendor"],
     crate = "nc",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "nc",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Xu Shaohua <shaohua@biofan.org>",
         "CARGO_PKG_DESCRIPTION": "Access system calls directly",
         "CARGO_PKG_NAME": "nc",
@@ -24,28 +30,25 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "9",
         "CARGO_PKG_VERSION_PATCH": "6",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :nc-0.9.6-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :nc-build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :nc-0.9.6-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :nc-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "nc-0.9.6-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "nc-build-script-build",
+    srcs = [":nc-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "nc",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Xu Shaohua <shaohua@biofan.org>",
         "CARGO_PKG_DESCRIPTION": "Access system calls directly",
         "CARGO_PKG_NAME": "nc",
@@ -61,17 +64,17 @@ cargo.rust_binary(
         "std",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.38:cc-1.2.38"],
+    deps = ["//third-party/rust/crates/cc/1.2.38:cc"],
 )
 
 buildscript_run(
-    name = "nc-0.9.6-build-script-run",
+    name = "nc-build-script-run",
     package_name = "nc",
-    buildscript_rule = ":nc-0.9.6-build-script-build",
+    buildscript_rule = ":nc-build-script-build",
     features = [
         "default",
         "std",
     ],
     version = "0.9.6",
-    local_manifest_dir = "**",
+    manifest_dir = ":nc-vendor",
 )

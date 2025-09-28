@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "gethostname-vendor",
+    urls = ["https://static.crates.io/crates/gethostname/gethostname-0.4.3.crate"],
+    sha256 = "0176e0459c2e4a1fe232f984bca6890e681076abb9934f6cea7c326f3fc47818",
+    type = "tar.gz",
+    strip_prefix = "gethostname-0.4.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "gethostname-0.4.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "gethostname",
+    srcs = [":gethostname-vendor"],
     crate = "gethostname",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "gethostname",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sebastian Wiesner <sebastian@swsnr.de>",
         "CARGO_PKG_DESCRIPTION": "gethostname for all platforms",
         "CARGO_PKG_NAME": "gethostname",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )

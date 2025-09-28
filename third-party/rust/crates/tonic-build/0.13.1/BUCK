@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tonic-build-vendor",
+    urls = ["https://static.crates.io/crates/tonic-build/tonic-build-0.13.1.crate"],
+    sha256 = "eac6f67be712d12f0b41328db3137e0d0757645d8904b4cb7d51cd9c2279e847",
+    type = "tar.gz",
+    strip_prefix = "tonic-build-0.13.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tonic-build-0.13.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tonic-build",
+    srcs = [":tonic-build-vendor"],
     crate = "tonic-build",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "tonic-build",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Lucio Franco <luciofranco14@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Codegen module of `tonic` gRPC implementation.\n",
         "CARGO_PKG_NAME": "tonic-build",
@@ -31,15 +37,13 @@ cargo.rust_library(
         "prost-build",
         "transport",
     ],
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-        "prost_build": "//third-party/rust/crates/prost-build/0.13.5:prost-build-0.13.5",
-        "prost_types": "//third-party/rust/crates/prost-types/0.13.5:prost-types-0.13.5",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/prettyplease/0.2.37:prettyplease-0.2.37",
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/prettyplease/0.2.37:prettyplease",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/prost-build/0.13.5:prost-build",
+        "//third-party/rust/crates/prost-types/0.13.5:prost-types",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

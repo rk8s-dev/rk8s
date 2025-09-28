@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "vmm-sys-util-vendor",
+    urls = ["https://static.crates.io/crates/vmm-sys-util/vmm-sys-util-0.12.1.crate"],
+    sha256 = "1d1435039746e20da4f8d507a72ee1b916f7b4b05af7a91c093d2c6561934ede",
+    type = "tar.gz",
+    strip_prefix = "vmm-sys-util-0.12.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "vmm-sys-util-0.12.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "vmm-sys-util",
+    srcs = [":vmm-sys-util-vendor"],
     crate = "vmm-sys-util",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "vmm-sys-util",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Intel Virtualization Team <vmm-maintainers@intel.com>",
         "CARGO_PKG_DESCRIPTION": "A system utility set",
         "CARGO_PKG_NAME": "vmm-sys-util",
@@ -27,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/1.3.2:bitflags-1.3.2",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
+        "//third-party/rust/crates/bitflags/1.3.2:bitflags",
+        "//third-party/rust/crates/libc/0.2.175:libc",
     ],
 )

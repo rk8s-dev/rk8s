@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "aws-smithy-async-vendor",
+    urls = ["https://static.crates.io/crates/aws-smithy-async/aws-smithy-async-1.2.5.crate"],
+    sha256 = "1e190749ea56f8c42bf15dd76c65e14f8f765233e6df9b0506d9d934ebef867c",
+    type = "tar.gz",
+    strip_prefix = "aws-smithy-async-1.2.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "aws-smithy-async-1.2.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "aws-smithy-async",
+    srcs = [":aws-smithy-async-vendor"],
     crate = "aws-smithy-async",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "aws-smithy-async",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "AWS Rust SDK Team <aws-sdk-rust@amazon.com>:John DiSanti <jdisanti@amazon.com>",
         "CARGO_PKG_DESCRIPTION": "Async runtime agnostic abstractions for smithy-rs.",
         "CARGO_PKG_NAME": "aws-smithy-async",
@@ -26,10 +32,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["rt-tokio"],
-    named_deps = {
-        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1"],
+    deps = [
+        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+    ],
 )

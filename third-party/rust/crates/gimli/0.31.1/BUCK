@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "gimli-vendor",
+    urls = ["https://static.crates.io/crates/gimli/gimli-0.31.1.crate"],
+    sha256 = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f",
+    type = "tar.gz",
+    strip_prefix = "gimli-0.31.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "gimli-0.31.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "gimli",
+    srcs = [":gimli-vendor"],
     crate = "gimli",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "gimli",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A library for reading and writing the DWARF debugging format.",
         "CARGO_PKG_NAME": "gimli",

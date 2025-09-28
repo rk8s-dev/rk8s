@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "is_terminal_polyfill-vendor",
+    urls = ["https://static.crates.io/crates/is_terminal_polyfill/is_terminal_polyfill-1.70.1.crate"],
+    sha256 = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf",
+    type = "tar.gz",
+    strip_prefix = "is_terminal_polyfill-1.70.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "is_terminal_polyfill-1.70.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "is_terminal_polyfill",
+    srcs = [":is_terminal_polyfill-vendor"],
     crate = "is_terminal_polyfill",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "is_terminal_polyfill",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Polyfill for `is_terminal` stdlib feature for use with older MSRVs",
         "CARGO_PKG_NAME": "is_terminal_polyfill",

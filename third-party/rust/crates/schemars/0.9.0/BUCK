@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "schemars-vendor",
+    urls = ["https://static.crates.io/crates/schemars/schemars-0.9.0.crate"],
+    sha256 = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f",
+    type = "tar.gz",
+    strip_prefix = "schemars-0.9.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "schemars-0.9.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "schemars",
+    srcs = [":schemars-vendor"],
     crate = "schemars",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "schemars",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Graham Esau <gesau@hotmail.co.uk>",
         "CARGO_PKG_DESCRIPTION": "Generate JSON Schemas from Rust code",
         "CARGO_PKG_NAME": "schemars",
@@ -26,13 +32,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["std"],
-    named_deps = {
-        "dyn_clone": "//third-party/rust/crates/dyn-clone/1.0.20:dyn-clone-1.0.20",
-        "ref_cast": "//third-party/rust/crates/ref-cast/1.0.24:ref-cast-1.0.24",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json-1.0.145",
+        "//third-party/rust/crates/dyn-clone/1.0.20:dyn-clone",
+        "//third-party/rust/crates/ref-cast/1.0.24:ref-cast",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_json/1.0.145:serde_json",
     ],
 )

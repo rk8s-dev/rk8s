@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "lru-vendor",
+    urls = ["https://static.crates.io/crates/lru/lru-0.12.5.crate"],
+    sha256 = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38",
+    type = "tar.gz",
+    strip_prefix = "lru-0.12.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "lru-0.12.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "lru",
+    srcs = [":lru-vendor"],
     crate = "lru",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "lru",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jerome Froelich <jeromefroelic@hotmail.com>",
         "CARGO_PKG_DESCRIPTION": "A LRU cache implementation",
         "CARGO_PKG_NAME": "lru",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "hashbrown",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/hashbrown/0.15.5:hashbrown-0.15.5"],
+    deps = ["//third-party/rust/crates/hashbrown/0.15.5:hashbrown"],
 )

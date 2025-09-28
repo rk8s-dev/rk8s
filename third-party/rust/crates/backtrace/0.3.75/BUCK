@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "backtrace-vendor",
+    urls = ["https://static.crates.io/crates/backtrace/backtrace-0.3.75.crate"],
+    sha256 = "6806a6321ec58106fea15becdad98371e28d92ccbc7c8f1b3b6dd724fe8f1002",
+    type = "tar.gz",
+    strip_prefix = "backtrace-0.3.75",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "backtrace-0.3.75",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "backtrace",
+    srcs = [":backtrace-vendor"],
     crate = "backtrace",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "backtrace",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "A library to acquire a stack trace (backtrace) at runtime in a Rust program.\n",
         "CARGO_PKG_NAME": "backtrace",
@@ -29,15 +35,13 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-        "rustc_demangle": "//third-party/rust/crates/rustc-demangle/0.1.26:rustc-demangle-0.1.26",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/addr2line/0.24.2:addr2line-0.24.2",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/miniz_oxide/0.8.9:miniz_oxide-0.8.9",
-        "//third-party/rust/crates/object/0.36.7:object-0.36.7",
+        "//third-party/rust/crates/addr2line/0.24.2:addr2line",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/miniz_oxide/0.8.9:miniz_oxide",
+        "//third-party/rust/crates/object/0.36.7:object",
+        "//third-party/rust/crates/rustc-demangle/0.1.26:rustc-demangle",
     ],
 )

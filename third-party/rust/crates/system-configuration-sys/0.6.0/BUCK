@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "system-configuration-sys-vendor",
+    urls = ["https://static.crates.io/crates/system-configuration-sys/system-configuration-sys-0.6.0.crate"],
+    sha256 = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4",
+    type = "tar.gz",
+    strip_prefix = "system-configuration-sys-0.6.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "system-configuration-sys-0.6.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "system-configuration-sys",
+    srcs = [":system-configuration-sys-vendor"],
     crate = "system-configuration-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "system-configuration-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Mullvad VPN",
         "CARGO_PKG_DESCRIPTION": "Low level bindings to SystemConfiguration framework for macOS",
         "CARGO_PKG_NAME": "system-configuration-sys",
@@ -24,28 +30,25 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "6",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :system-configuration-sys-0.6.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :system-configuration-sys-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :system-configuration-sys-0.6.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "core_foundation_sys": "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys-0.8.7",
-    },
+    rustc_flags = ["@$(location :system-configuration-sys-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = [
+        "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+    ],
 )
 
 cargo.rust_binary(
-    name = "system-configuration-sys-0.6.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "system-configuration-sys-build-script-build",
+    srcs = [":system-configuration-sys-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "system-configuration-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Mullvad VPN",
         "CARGO_PKG_DESCRIPTION": "Low level bindings to SystemConfiguration framework for macOS",
         "CARGO_PKG_NAME": "system-configuration-sys",
@@ -60,9 +63,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "system-configuration-sys-0.6.0-build-script-run",
+    name = "system-configuration-sys-build-script-run",
     package_name = "system-configuration-sys",
-    buildscript_rule = ":system-configuration-sys-0.6.0-build-script-build",
+    buildscript_rule = ":system-configuration-sys-build-script-build",
     version = "0.6.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":system-configuration-sys-vendor",
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "matchit-vendor",
+    urls = ["https://static.crates.io/crates/matchit/matchit-0.8.4.crate"],
+    sha256 = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3",
+    type = "tar.gz",
+    strip_prefix = "matchit-0.8.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "matchit-0.8.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "matchit",
+    srcs = [":matchit-vendor"],
     crate = "matchit",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "matchit",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Ibraheem Ahmed <ibraheem@ibraheem.ca>",
         "CARGO_PKG_DESCRIPTION": "A high performance, zero-copy URL router.",
         "CARGO_PKG_NAME": "matchit",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "nom-vendor",
+    urls = ["https://static.crates.io/crates/nom/nom-7.1.3.crate"],
+    sha256 = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a",
+    type = "tar.gz",
+    strip_prefix = "nom-7.1.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "nom-7.1.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "nom",
+    srcs = [":nom-vendor"],
     crate = "nom",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "nom",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "contact@geoffroycouprie.com",
         "CARGO_PKG_DESCRIPTION": "A byte-oriented, zero-copy, parser combinators library",
         "CARGO_PKG_NAME": "nom",
@@ -29,9 +35,9 @@ cargo.rust_library(
         "alloc",
         "std",
     ],
-    named_deps = {
-        "minimal_lexical": "//third-party/rust/crates/minimal-lexical/0.2.1:minimal-lexical-0.2.1",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5"],
+    deps = [
+        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/minimal-lexical/0.2.1:minimal-lexical",
+    ],
 )

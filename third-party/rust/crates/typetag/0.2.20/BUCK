@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "typetag-vendor",
+    urls = ["https://static.crates.io/crates/typetag/typetag-0.2.20.crate"],
+    sha256 = "73f22b40dd7bfe8c14230cf9702081366421890435b2d625fa92b4acc4c3de6f",
+    type = "tar.gz",
+    strip_prefix = "typetag-0.2.20",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "typetag-0.2.20",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "typetag",
+    srcs = [":typetag-vendor"],
     crate = "typetag",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "typetag",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Serde serializable and deserializable trait objects",
         "CARGO_PKG_NAME": "typetag",
@@ -25,14 +31,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "20",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "erased_serde": "//third-party/rust/crates/erased-serde/0.4.8:erased-serde-0.4.8",
-        "typetag_impl": "//third-party/rust/crates/typetag-impl/0.2.20:typetag-impl-0.2.20",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/inventory/0.3.21:inventory-0.3.21",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
+        "//third-party/rust/crates/erased-serde/0.4.8:erased-serde",
+        "//third-party/rust/crates/inventory/0.3.21:inventory",
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/typetag-impl/0.2.20:typetag-impl",
     ],
 )

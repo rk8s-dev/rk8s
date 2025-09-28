@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "futures-task-vendor",
+    urls = ["https://static.crates.io/crates/futures-task/futures-task-0.3.31.crate"],
+    sha256 = "f90f7dce0722e95104fcb095585910c0977252f286e354b5e3bd38902cd99988",
+    type = "tar.gz",
+    strip_prefix = "futures-task-0.3.31",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "futures-task-0.3.31",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "futures-task",
+    srcs = [":futures-task-vendor"],
     crate = "futures-task",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "futures-task",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Tools for working with tasks.\n",
         "CARGO_PKG_NAME": "futures-task",

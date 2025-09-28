@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows-link-vendor",
+    urls = ["https://static.crates.io/crates/windows-link/windows-link-0.1.3.crate"],
+    sha256 = "5e6ad25900d524eaabdbbb96d20b4311e1e7ae1699af4fb28c17ae66c80d798a",
+    type = "tar.gz",
+    strip_prefix = "windows-link-0.1.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows-link-0.1.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows-link",
+    srcs = [":windows-link-vendor"],
     crate = "windows-link",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows-link",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Linking for Windows",
         "CARGO_PKG_NAME": "windows-link",

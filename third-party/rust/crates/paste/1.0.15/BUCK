@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "paste-vendor",
+    urls = ["https://static.crates.io/crates/paste/paste-1.0.15.crate"],
+    sha256 = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a",
+    type = "tar.gz",
+    strip_prefix = "paste-1.0.15",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "paste-1.0.15",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "paste",
+    srcs = [":paste-vendor"],
     crate = "paste",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "paste",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Macros for all your token pasting needs",
         "CARGO_PKG_NAME": "paste",
@@ -24,25 +30,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "15",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :paste-1.0.15-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :paste-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :paste-1.0.15-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :paste-build-script-run[rustc_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "paste-1.0.15-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "paste-build-script-build",
+    srcs = [":paste-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "paste",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Macros for all your token pasting needs",
         "CARGO_PKG_NAME": "paste",
@@ -57,9 +60,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "paste-1.0.15-build-script-run",
+    name = "paste-build-script-run",
     package_name = "paste",
-    buildscript_rule = ":paste-1.0.15-build-script-build",
+    buildscript_rule = ":paste-build-script-build",
     version = "1.0.15",
-    local_manifest_dir = "**",
+    manifest_dir = ":paste-vendor",
 )

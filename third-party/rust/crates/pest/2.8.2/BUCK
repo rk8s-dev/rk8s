@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "pest-vendor",
+    urls = ["https://static.crates.io/crates/pest/pest-2.8.2.crate"],
+    sha256 = "21e0a3a33733faeaf8651dfee72dd0f388f0c8e5ad496a3478fa5a922f49cfa8",
+    type = "tar.gz",
+    strip_prefix = "pest-2.8.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "pest-2.8.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "pest",
+    srcs = [":pest-vendor"],
     crate = "pest",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "pest",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dragoș Tiselice <dragostiselice@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "The Elegant Parser",
         "CARGO_PKG_NAME": "pest",
@@ -30,12 +36,10 @@ cargo.rust_library(
         "memchr",
         "std",
     ],
-    named_deps = {
-        "ucd_trie": "//third-party/rust/crates/ucd-trie/0.1.7:ucd-trie-0.1.7",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5",
-        "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
+        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/thiserror/2.0.16:thiserror",
+        "//third-party/rust/crates/ucd-trie/0.1.7:ucd-trie",
     ],
 )

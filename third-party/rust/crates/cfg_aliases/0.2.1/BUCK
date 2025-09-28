@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "cfg_aliases-vendor",
+    urls = ["https://static.crates.io/crates/cfg_aliases/cfg_aliases-0.2.1.crate"],
+    sha256 = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724",
+    type = "tar.gz",
+    strip_prefix = "cfg_aliases-0.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "cfg_aliases-0.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "cfg_aliases",
+    srcs = [":cfg_aliases-vendor"],
     crate = "cfg_aliases",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "cfg_aliases",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Zicklag <zicklag@katharostech.com>",
         "CARGO_PKG_DESCRIPTION": "A tiny utility to help save you a lot of effort with long winded `#[cfg()]` checks.",
         "CARGO_PKG_NAME": "cfg_aliases",

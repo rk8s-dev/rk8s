@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "der-vendor",
+    urls = ["https://static.crates.io/crates/der/der-0.6.1.crate"],
+    sha256 = "f1a467a65c5e759bce6e65eaf91cc29f466cdc57cb65777bd646872a8a1fd4de",
+    type = "tar.gz",
+    strip_prefix = "der-0.6.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "der-0.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "der",
+    srcs = [":der-vendor"],
     crate = "der",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "der",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Pure Rust embedded-friendly implementation of the Distinguished Encoding Rules\n(DER) for Abstract Syntax Notation One (ASN.1) as described in ITU X.690 with\nfull support for heapless no_std targets\n",
         "CARGO_PKG_NAME": "der",
@@ -31,9 +37,9 @@ cargo.rust_library(
         "oid",
         "zeroize",
     ],
-    named_deps = {
-        "const_oid": "//third-party/rust/crates/const-oid/0.9.6:const-oid-0.9.6",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1"],
+    deps = [
+        "//third-party/rust/crates/const-oid/0.9.6:const-oid",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
+    ],
 )

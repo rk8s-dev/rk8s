@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "allocator-api2-vendor",
+    urls = ["https://static.crates.io/crates/allocator-api2/allocator-api2-0.2.21.crate"],
+    sha256 = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923",
+    type = "tar.gz",
+    strip_prefix = "allocator-api2-0.2.21",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "allocator-api2-0.2.21",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "allocator-api2",
+    srcs = [":allocator-api2-vendor"],
     crate = "allocator-api2",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "allocator-api2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Zakarum <zaq.dev@icloud.com>",
         "CARGO_PKG_DESCRIPTION": "Mirror of Rust's allocator API",
         "CARGO_PKG_NAME": "allocator-api2",

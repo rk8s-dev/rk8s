@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "fs_extra-vendor",
+    urls = ["https://static.crates.io/crates/fs_extra/fs_extra-1.3.0.crate"],
+    sha256 = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c",
+    type = "tar.gz",
+    strip_prefix = "fs_extra-1.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "fs_extra-1.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "fs_extra",
+    srcs = [":fs_extra-vendor"],
     crate = "fs_extra",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "fs_extra",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Denis Kurilenko <webdesus@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Expanding std::fs and std::io. Recursively copy folders with information about process and much more.",
         "CARGO_PKG_NAME": "fs_extra",

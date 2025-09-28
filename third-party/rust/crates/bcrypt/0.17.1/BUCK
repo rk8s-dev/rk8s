@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "bcrypt-vendor",
+    urls = ["https://static.crates.io/crates/bcrypt/bcrypt-0.17.1.crate"],
+    sha256 = "abaf6da45c74385272ddf00e1ac074c7d8a6c1a1dda376902bd6a427522a8b2c",
+    type = "tar.gz",
+    strip_prefix = "bcrypt-0.17.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "bcrypt-0.17.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "bcrypt",
+    srcs = [":bcrypt-vendor"],
     crate = "bcrypt",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "bcrypt",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Vincent Prouillet <hello@prouilletvincent.com>",
         "CARGO_PKG_DESCRIPTION": "Easily hash and verify passwords using bcrypt",
         "CARGO_PKG_NAME": "bcrypt",
@@ -33,10 +39,10 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64/0.22.1:base64-0.22.1",
-        "//third-party/rust/crates/blowfish/0.9.1:blowfish-0.9.1",
-        "//third-party/rust/crates/getrandom/0.3.3:getrandom-0.3.3",
-        "//third-party/rust/crates/subtle/2.6.1:subtle-2.6.1",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1",
+        "//third-party/rust/crates/base64/0.22.1:base64",
+        "//third-party/rust/crates/blowfish/0.9.1:blowfish",
+        "//third-party/rust/crates/getrandom/0.3.3:getrandom",
+        "//third-party/rust/crates/subtle/2.6.1:subtle",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
     ],
 )

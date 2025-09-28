@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "derive_builder-vendor",
+    urls = ["https://static.crates.io/crates/derive_builder/derive_builder-0.20.2.crate"],
+    sha256 = "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947",
+    type = "tar.gz",
+    strip_prefix = "derive_builder-0.20.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "derive_builder-0.20.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "derive_builder",
+    srcs = [":derive_builder-vendor"],
     crate = "derive_builder",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "derive_builder",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Colin Kiegel <kiegel@gmx.de>:Pascal Hertleif <killercup@gmail.com>:Jan-Erik Rediger <janerik@fnordig.de>:Ted Driggs <ted.driggs@outlook.com>",
         "CARGO_PKG_DESCRIPTION": "Rust macro to automatically implement the builder pattern for arbitrary structs.",
         "CARGO_PKG_NAME": "derive_builder",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/derive_builder_macro/0.20.2:derive_builder_macro-0.20.2"],
+    deps = ["//third-party/rust/crates/derive_builder_macro/0.20.2:derive_builder_macro"],
 )

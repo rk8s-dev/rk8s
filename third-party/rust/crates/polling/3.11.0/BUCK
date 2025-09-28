@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "polling-vendor",
+    urls = ["https://static.crates.io/crates/polling/polling-3.11.0.crate"],
+    sha256 = "5d0e4f59085d47d8241c88ead0f274e8a0cb551f3625263c05eb8dd897c34218",
+    type = "tar.gz",
+    strip_prefix = "polling-3.11.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "polling-3.11.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "polling",
+    srcs = [":polling-vendor"],
     crate = "polling",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "polling",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>:John Nunley <dev@notgull.net>",
         "CARGO_PKG_DESCRIPTION": "Portable interface to epoll, kqueue, event ports, and IOCP",
         "CARGO_PKG_NAME": "polling",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/rustix/1.1.2:rustix-1.1.2"],
+    deps = [
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/rustix/1.1.2:rustix",
+    ],
 )

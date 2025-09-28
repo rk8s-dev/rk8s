@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "piper-vendor",
+    urls = ["https://static.crates.io/crates/piper/piper-0.2.4.crate"],
+    sha256 = "96c8c490f422ef9a4efd2cb5b42b76c8613d7e7dfc1caf667b8a3350a5acc066",
+    type = "tar.gz",
+    strip_prefix = "piper-0.2.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "piper-0.2.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "piper",
+    srcs = [":piper-vendor"],
     crate = "piper",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "piper",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>:John Nunley <dev@notgull.net>",
         "CARGO_PKG_DESCRIPTION": "Async pipes, channels, mutexes, and more.",
         "CARGO_PKG_NAME": "piper",
@@ -30,10 +36,10 @@ cargo.rust_library(
         "futures-io",
         "std",
     ],
-    named_deps = {
-        "atomic_waker": "//third-party/rust/crates/atomic-waker/1.1.2:atomic-waker-1.1.2",
-        "futures_io": "//third-party/rust/crates/futures-io/0.3.31:futures-io-0.3.31",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/fastrand/2.3.0:fastrand-2.3.0"],
+    deps = [
+        "//third-party/rust/crates/atomic-waker/1.1.2:atomic-waker",
+        "//third-party/rust/crates/fastrand/2.3.0:fastrand",
+        "//third-party/rust/crates/futures-io/0.3.31:futures-io",
+    ],
 )

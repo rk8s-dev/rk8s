@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "serde_json-vendor",
+    urls = ["https://static.crates.io/crates/serde_json/serde_json-1.0.145.crate"],
+    sha256 = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c",
+    type = "tar.gz",
+    strip_prefix = "serde_json-1.0.145",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "serde_json-1.0.145",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "serde_json",
+    srcs = [":serde_json-vendor"],
     crate = "serde_json",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "serde_json",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Erick Tryzelaar <erick.tryzelaar@gmail.com>:David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A JSON serialization file format",
         "CARGO_PKG_NAME": "serde_json",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "145",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :serde_json-1.0.145-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :serde_json-build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -32,28 +38,25 @@ cargo.rust_library(
         "raw_value",
         "std",
     ],
-    rustc_flags = ["@$(location :serde_json-1.0.145-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :serde_json-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/itoa/1.0.15:itoa-1.0.15",
-        "//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5",
-        "//third-party/rust/crates/ryu/1.0.20:ryu-1.0.20",
-        "//third-party/rust/crates/serde_core/1.0.226:serde_core-1.0.226",
+        "//third-party/rust/crates/itoa/1.0.15:itoa",
+        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/ryu/1.0.20:ryu",
+        "//third-party/rust/crates/serde_core/1.0.226:serde_core",
     ],
 )
 
 cargo.rust_binary(
-    name = "serde_json-1.0.145-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "serde_json-build-script-build",
+    srcs = [":serde_json-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "serde_json",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Erick Tryzelaar <erick.tryzelaar@gmail.com>:David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A JSON serialization file format",
         "CARGO_PKG_NAME": "serde_json",
@@ -74,9 +77,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "serde_json-1.0.145-build-script-run",
+    name = "serde_json-build-script-run",
     package_name = "serde_json",
-    buildscript_rule = ":serde_json-1.0.145-build-script-build",
+    buildscript_rule = ":serde_json-build-script-build",
     features = [
         "alloc",
         "default",
@@ -84,5 +87,5 @@ buildscript_run(
         "std",
     ],
     version = "1.0.145",
-    local_manifest_dir = "**",
+    manifest_dir = ":serde_json-vendor",
 )

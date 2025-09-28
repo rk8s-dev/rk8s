@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "parking_lot_core-vendor",
+    urls = ["https://static.crates.io/crates/parking_lot_core/parking_lot_core-0.9.11.crate"],
+    sha256 = "bc838d2a56b5b1a6c25f55575dfc605fabb63bb2365f6c2353ef9159aa69e4a5",
+    type = "tar.gz",
+    strip_prefix = "parking_lot_core-0.9.11",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "parking_lot_core-0.9.11",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "parking_lot_core",
+    srcs = [":parking_lot_core-vendor"],
     crate = "parking_lot_core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "parking_lot_core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Amanieu d'Antras <amanieu@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "An advanced API for creating custom synchronization primitives.",
         "CARGO_PKG_NAME": "parking_lot_core",
@@ -24,31 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "9",
         "CARGO_PKG_VERSION_PATCH": "11",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :parking_lot_core-0.9.11-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :parking_lot_core-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :parking_lot_core-0.9.11-build-script-run[rustc_flags])"],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
+    rustc_flags = ["@$(location :parking_lot_core-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/smallvec/1.15.1:smallvec-1.15.1",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/smallvec/1.15.1:smallvec",
     ],
 )
 
 cargo.rust_binary(
-    name = "parking_lot_core-0.9.11-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "parking_lot_core-build-script-build",
+    srcs = [":parking_lot_core-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "parking_lot_core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Amanieu d'Antras <amanieu@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "An advanced API for creating custom synchronization primitives.",
         "CARGO_PKG_NAME": "parking_lot_core",
@@ -63,9 +64,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "parking_lot_core-0.9.11-build-script-run",
+    name = "parking_lot_core-build-script-run",
     package_name = "parking_lot_core",
-    buildscript_rule = ":parking_lot_core-0.9.11-build-script-build",
+    buildscript_rule = ":parking_lot_core-build-script-build",
     version = "0.9.11",
-    local_manifest_dir = "**",
+    manifest_dir = ":parking_lot_core-vendor",
 )

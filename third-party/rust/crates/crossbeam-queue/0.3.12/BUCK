@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crossbeam-queue-vendor",
+    urls = ["https://static.crates.io/crates/crossbeam-queue/crossbeam-queue-0.3.12.crate"],
+    sha256 = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115",
+    type = "tar.gz",
+    strip_prefix = "crossbeam-queue-0.3.12",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crossbeam-queue-0.3.12",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crossbeam-queue",
+    srcs = [":crossbeam-queue-vendor"],
     crate = "crossbeam-queue",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crossbeam-queue",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Concurrent queues",
         "CARGO_PKG_NAME": "crossbeam-queue",
@@ -30,8 +36,6 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "crossbeam_utils": "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils-0.8.21",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils"],
 )

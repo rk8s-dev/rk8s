@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "matchers-vendor",
+    urls = ["https://static.crates.io/crates/matchers/matchers-0.2.0.crate"],
+    sha256 = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9",
+    type = "tar.gz",
+    strip_prefix = "matchers-0.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "matchers-0.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "matchers",
+    srcs = [":matchers-vendor"],
     crate = "matchers",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "matchers",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Eliza Weisman <eliza@buoyant.io>",
         "CARGO_PKG_DESCRIPTION": "Regex matching on character and byte streams.\n",
         "CARGO_PKG_NAME": "matchers",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "regex_automata": "//third-party/rust/crates/regex-automata/0.4.10:regex-automata-0.4.10",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/regex-automata/0.4.10:regex-automata"],
 )

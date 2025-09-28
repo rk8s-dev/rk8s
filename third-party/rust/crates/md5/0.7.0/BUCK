@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "md5-vendor",
+    urls = ["https://static.crates.io/crates/md5/md5-0.7.0.crate"],
+    sha256 = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771",
+    type = "tar.gz",
+    strip_prefix = "md5-0.7.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "md5-0.7.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "md5",
+    srcs = [":md5-vendor"],
     crate = "md5",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "md5",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Ivan Ukhov <ivan.ukhov@gmail.com>:Kamal Ahmad <shibe@openmailbox.org>:Konstantin Stepanov <milezv@gmail.com>:Lukas Kalbertodt <lukas.kalbertodt@gmail.com>:Nathan Musoke <nathan.musoke@gmail.com>:Scott Mabin <scott@mabez.dev>:Tony Arcieri <bascule@gmail.com>:Wim de With <register@dewith.io>:Yosef Dinerstein <yosefdi@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "The package provides the MD5 hash function.",
         "CARGO_PKG_NAME": "md5",

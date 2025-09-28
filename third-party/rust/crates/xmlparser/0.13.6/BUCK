@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "xmlparser-vendor",
+    urls = ["https://static.crates.io/crates/xmlparser/xmlparser-0.13.6.crate"],
+    sha256 = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4",
+    type = "tar.gz",
+    strip_prefix = "xmlparser-0.13.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "xmlparser-0.13.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "xmlparser",
+    srcs = [":xmlparser-vendor"],
     crate = "xmlparser",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "xmlparser",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Yevhenii Reizner <razrfalcon@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Pull-based, zero-allocation XML parser.",
         "CARGO_PKG_NAME": "xmlparser",

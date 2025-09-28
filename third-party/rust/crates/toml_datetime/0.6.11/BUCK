@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "toml_datetime-vendor",
+    urls = ["https://static.crates.io/crates/toml_datetime/toml_datetime-0.6.11.crate"],
+    sha256 = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c",
+    type = "tar.gz",
+    strip_prefix = "toml_datetime-0.6.11",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "toml_datetime-0.6.11",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "toml_datetime",
+    srcs = [":toml_datetime-vendor"],
     crate = "toml_datetime",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "toml_datetime",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A TOML-compatible datetime type",
         "CARGO_PKG_NAME": "toml_datetime",
@@ -27,5 +33,5 @@ cargo.rust_library(
     },
     features = ["serde"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/serde/1.0.226:serde-1.0.226"],
+    deps = ["//third-party/rust/crates/serde/1.0.226:serde"],
 )

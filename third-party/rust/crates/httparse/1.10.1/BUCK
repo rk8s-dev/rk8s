@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "httparse-vendor",
+    urls = ["https://static.crates.io/crates/httparse/httparse-1.10.1.crate"],
+    sha256 = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87",
+    type = "tar.gz",
+    strip_prefix = "httparse-1.10.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "httparse-1.10.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "httparse",
+    srcs = [":httparse-vendor"],
     crate = "httparse",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "httparse",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "A tiny, safe, speedy, zero-copy HTTP/1.x parser.",
         "CARGO_PKG_NAME": "httparse",
@@ -24,28 +30,25 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "10",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :httparse-1.10.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :httparse-build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :httparse-1.10.1-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :httparse-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "httparse-1.10.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "httparse-build-script-build",
+    srcs = [":httparse-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "httparse",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "A tiny, safe, speedy, zero-copy HTTP/1.x parser.",
         "CARGO_PKG_NAME": "httparse",
@@ -64,13 +67,13 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "httparse-1.10.1-build-script-run",
+    name = "httparse-build-script-run",
     package_name = "httparse",
-    buildscript_rule = ":httparse-1.10.1-build-script-build",
+    buildscript_rule = ":httparse-build-script-build",
     features = [
         "default",
         "std",
     ],
     version = "1.10.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":httparse-vendor",
 )

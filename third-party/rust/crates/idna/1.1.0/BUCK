@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "idna-vendor",
+    urls = ["https://static.crates.io/crates/idna/idna-1.1.0.crate"],
+    sha256 = "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de",
+    type = "tar.gz",
+    strip_prefix = "idna-1.1.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "idna-1.1.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "idna",
+    srcs = [":idna-vendor"],
     crate = "idna",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "idna",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The rust-url developers",
         "CARGO_PKG_DESCRIPTION": "IDNA (Internationalizing Domain Names in Applications) and Punycode.",
         "CARGO_PKG_NAME": "idna",
@@ -32,8 +38,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/idna_adapter/1.2.1:idna_adapter-1.2.1",
-        "//third-party/rust/crates/smallvec/1.15.1:smallvec-1.15.1",
-        "//third-party/rust/crates/utf8_iter/1.0.4:utf8_iter-1.0.4",
+        "//third-party/rust/crates/idna_adapter/1.2.1:idna_adapter",
+        "//third-party/rust/crates/smallvec/1.15.1:smallvec",
+        "//third-party/rust/crates/utf8_iter/1.0.4:utf8_iter",
     ],
 )

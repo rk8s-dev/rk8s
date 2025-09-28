@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "bitflags-vendor",
+    urls = ["https://static.crates.io/crates/bitflags/bitflags-2.9.4.crate"],
+    sha256 = "2261d10cca569e4643e526d8dc2e62e433cc8aba21ab764233731f8d369bf394",
+    type = "tar.gz",
+    strip_prefix = "bitflags-2.9.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "bitflags-2.9.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "bitflags",
+    srcs = [":bitflags-vendor"],
     crate = "bitflags",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "bitflags",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "A macro to generate structures which behave like bitflags.\n",
         "CARGO_PKG_NAME": "bitflags",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/serde/1.0.226:serde-1.0.226"],
+    deps = ["//third-party/rust/crates/serde/1.0.226:serde"],
 )

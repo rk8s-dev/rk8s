@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "netlink-sys-vendor",
+    urls = ["https://static.crates.io/crates/netlink-sys/netlink-sys-0.8.7.crate"],
+    sha256 = "16c903aa70590cb93691bf97a767c8d1d6122d2cc9070433deb3bbf36ce8bd23",
+    type = "tar.gz",
+    strip_prefix = "netlink-sys-0.8.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "netlink-sys-0.8.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "netlink-sys",
+    srcs = [":netlink-sys-vendor"],
     crate = "netlink-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "netlink-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Corentin Henry <corentinhenry@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "netlink sockets, with optional integration with tokio",
         "CARGO_PKG_NAME": "netlink-sys",
@@ -33,10 +39,10 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/futures/0.3.31:futures-0.3.31",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
     ],
 )

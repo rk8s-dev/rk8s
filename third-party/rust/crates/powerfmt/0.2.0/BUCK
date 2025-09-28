@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "powerfmt-vendor",
+    urls = ["https://static.crates.io/crates/powerfmt/powerfmt-0.2.0.crate"],
+    sha256 = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391",
+    type = "tar.gz",
+    strip_prefix = "powerfmt-0.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "powerfmt-0.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "powerfmt",
+    srcs = [":powerfmt-vendor"],
     crate = "powerfmt",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "powerfmt",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jacob Pratt <jacob@jhpratt.dev>",
         "CARGO_PKG_DESCRIPTION": "    `powerfmt` is a library that provides utilities for formatting values. This crate makes it\n    significantly easier to support filling to a minimum width with alignment, avoid heap\n    allocation, and avoid repetitive calculations.\n",
         "CARGO_PKG_NAME": "powerfmt",

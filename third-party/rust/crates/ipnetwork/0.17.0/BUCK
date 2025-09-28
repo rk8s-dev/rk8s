@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ipnetwork-vendor",
+    urls = ["https://static.crates.io/crates/ipnetwork/ipnetwork-0.17.0.crate"],
+    sha256 = "02c3eaab3ac0ede60ffa41add21970a7df7d91772c03383aac6c2c3d53cc716b",
+    type = "tar.gz",
+    strip_prefix = "ipnetwork-0.17.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ipnetwork-0.17.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ipnetwork",
+    srcs = [":ipnetwork-vendor"],
     crate = "ipnetwork",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "ipnetwork",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Abhishek Chanda <abhishek.becs@gmail.com>:Linus Färnstrand <faern@faern.net>",
         "CARGO_PKG_DESCRIPTION": "A library to work with IP CIDRs in Rust",
         "CARGO_PKG_NAME": "ipnetwork",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "serde",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/serde/1.0.226:serde-1.0.226"],
+    deps = ["//third-party/rust/crates/serde/1.0.226:serde"],
 )

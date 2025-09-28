@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "core-foundation-vendor",
+    urls = ["https://static.crates.io/crates/core-foundation/core-foundation-0.10.1.crate"],
+    sha256 = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6",
+    type = "tar.gz",
+    strip_prefix = "core-foundation-0.10.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "core-foundation-0.10.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "core-foundation",
+    srcs = [":core-foundation-vendor"],
     crate = "core-foundation",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "core-foundation",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Servo Project Developers",
         "CARGO_PKG_DESCRIPTION": "Bindings to Core Foundation for macOS",
         "CARGO_PKG_NAME": "core-foundation",
@@ -29,9 +35,9 @@ cargo.rust_library(
         "default",
         "link",
     ],
-    named_deps = {
-        "core_foundation_sys": "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys-0.8.7",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = [
+        "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+    ],
 )

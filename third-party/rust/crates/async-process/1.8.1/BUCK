@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-process-vendor",
+    urls = ["https://static.crates.io/crates/async-process/async-process-1.8.1.crate"],
+    sha256 = "ea6438ba0a08d81529c69b36700fa2f95837bfe3e776ab39cde9c14d9149da88",
+    type = "tar.gz",
+    strip_prefix = "async-process-1.8.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-process-1.8.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-process",
+    srcs = [":async-process-vendor"],
     crate = "async-process",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "async-process",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Async interface for working with processes",
         "CARGO_PKG_NAME": "async-process",
@@ -25,14 +31,14 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "async_io": "//third-party/rust/crates/async-io/1.13.0:async-io-1.13.0",
-        "async_lock": "//third-party/rust/crates/async-lock/2.8.0:async-lock-2.8.0",
-        "async_signal": "//third-party/rust/crates/async-signal/0.2.13:async-signal-0.2.13",
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-        "event_listener": "//third-party/rust/crates/event-listener/3.1.0:event-listener-3.1.0",
-        "futures_lite": "//third-party/rust/crates/futures-lite/1.13.0:futures-lite-1.13.0",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/rustix/0.38.44:rustix-0.38.44"],
+    deps = [
+        "//third-party/rust/crates/async-io/1.13.0:async-io",
+        "//third-party/rust/crates/async-lock/2.8.0:async-lock",
+        "//third-party/rust/crates/async-signal/0.2.13:async-signal",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/event-listener/3.1.0:event-listener",
+        "//third-party/rust/crates/futures-lite/1.13.0:futures-lite",
+        "//third-party/rust/crates/rustix/0.38.44:rustix",
+    ],
 )

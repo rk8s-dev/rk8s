@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hmac-vendor",
+    urls = ["https://static.crates.io/crates/hmac/hmac-0.12.1.crate"],
+    sha256 = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e",
+    type = "tar.gz",
+    strip_prefix = "hmac-0.12.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hmac-0.12.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hmac",
+    srcs = [":hmac-vendor"],
     crate = "hmac",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "hmac",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Generic implementation of Hash-based Message Authentication Code (HMAC)",
         "CARGO_PKG_NAME": "hmac",
@@ -27,5 +33,5 @@ cargo.rust_library(
     },
     features = ["reset"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/digest/0.10.7:digest-0.10.7"],
+    deps = ["//third-party/rust/crates/digest/0.10.7:digest"],
 )

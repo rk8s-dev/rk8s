@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "portable-atomic-vendor",
+    urls = ["https://static.crates.io/crates/portable-atomic/portable-atomic-1.11.1.crate"],
+    sha256 = "f84267b20a16ea918e43c6a88433c2d54fa145c92a811b5b047ccbe153674483",
+    type = "tar.gz",
+    strip_prefix = "portable-atomic-1.11.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "portable-atomic-1.11.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "portable-atomic",
+    srcs = [":portable-atomic-vendor"],
     crate = "portable-atomic",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "portable-atomic",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Portable atomic types including support for 128-bit atomics, atomic float, etc.\n",
         "CARGO_PKG_NAME": "portable-atomic",
@@ -24,29 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "11",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :portable-atomic-1.11.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :portable-atomic-build-script-run[out_dir])",
     },
     features = [
         "default",
         "fallback",
         "require-cas",
     ],
-    rustc_flags = ["@$(location :portable-atomic-1.11.1-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :portable-atomic-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "portable-atomic-1.11.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "portable-atomic-build-script-build",
+    srcs = [":portable-atomic-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "portable-atomic",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Portable atomic types including support for 128-bit atomics, atomic float, etc.\n",
         "CARGO_PKG_NAME": "portable-atomic",
@@ -66,14 +69,14 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "portable-atomic-1.11.1-build-script-run",
+    name = "portable-atomic-build-script-run",
     package_name = "portable-atomic",
-    buildscript_rule = ":portable-atomic-1.11.1-build-script-build",
+    buildscript_rule = ":portable-atomic-build-script-build",
     features = [
         "default",
         "fallback",
         "require-cas",
     ],
     version = "1.11.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":portable-atomic-vendor",
 )

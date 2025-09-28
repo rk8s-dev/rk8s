@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "event-listener-strategy-vendor",
+    urls = ["https://static.crates.io/crates/event-listener-strategy/event-listener-strategy-0.5.4.crate"],
+    sha256 = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93",
+    type = "tar.gz",
+    strip_prefix = "event-listener-strategy-0.5.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "event-listener-strategy-0.5.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "event-listener-strategy",
+    srcs = [":event-listener-strategy-vendor"],
     crate = "event-listener-strategy",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "event-listener-strategy",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "John Nunley <dev@notgull.net>",
         "CARGO_PKG_DESCRIPTION": "Block or poll on event_listener easily",
         "CARGO_PKG_NAME": "event-listener-strategy",
@@ -26,9 +32,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["std"],
-    named_deps = {
-        "event_listener": "//third-party/rust/crates/event-listener/5.4.1:event-listener-5.4.1",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/event-listener/5.4.1:event-listener",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+    ],
 )

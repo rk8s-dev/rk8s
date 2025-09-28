@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "toml_edit-vendor",
+    urls = ["https://static.crates.io/crates/toml_edit/toml_edit-0.22.27.crate"],
+    sha256 = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a",
+    type = "tar.gz",
+    strip_prefix = "toml_edit-0.22.27",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "toml_edit-0.22.27",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "toml_edit",
+    srcs = [":toml_edit-vendor"],
     crate = "toml_edit",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "toml_edit",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Yet another format-preserving TOML parser.",
         "CARGO_PKG_NAME": "toml_edit",
@@ -32,11 +38,11 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/indexmap/2.11.4:indexmap-2.11.4",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_spanned/0.6.9:serde_spanned-0.6.9",
-        "//third-party/rust/crates/toml_datetime/0.6.11:toml_datetime-0.6.11",
-        "//third-party/rust/crates/toml_write/0.1.2:toml_write-0.1.2",
-        "//third-party/rust/crates/winnow/0.7.13:winnow-0.7.13",
+        "//third-party/rust/crates/indexmap/2.11.4:indexmap",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_spanned/0.6.9:serde_spanned",
+        "//third-party/rust/crates/toml_datetime/0.6.11:toml_datetime",
+        "//third-party/rust/crates/toml_write/0.1.2:toml_write",
+        "//third-party/rust/crates/winnow/0.7.13:winnow",
     ],
 )

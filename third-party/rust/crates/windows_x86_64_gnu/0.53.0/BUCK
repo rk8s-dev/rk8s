@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows_x86_64_gnu-vendor",
+    urls = ["https://static.crates.io/crates/windows_x86_64_gnu/windows_x86_64_gnu-0.53.0.crate"],
+    sha256 = "2e55b5ac9ea33f2fc1716d1742db15574fd6fc8dadc51caab1c16a3d3b4190ba",
+    type = "tar.gz",
+    strip_prefix = "windows_x86_64_gnu-0.53.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows_x86_64_gnu-0.53.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows_x86_64_gnu",
+    srcs = [":windows_x86_64_gnu-vendor"],
     crate = "windows_x86_64_gnu",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows_x86_64_gnu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
         "CARGO_PKG_NAME": "windows_x86_64_gnu",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "53",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :windows_x86_64_gnu-0.53.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :windows_x86_64_gnu-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :windows_x86_64_gnu-0.53.0-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :windows_x86_64_gnu-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "windows_x86_64_gnu-0.53.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows_x86_64_gnu-build-script-build",
+    srcs = [":windows_x86_64_gnu-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows_x86_64_gnu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
         "CARGO_PKG_NAME": "windows_x86_64_gnu",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "windows_x86_64_gnu-0.53.0-build-script-run",
+    name = "windows_x86_64_gnu-build-script-run",
     package_name = "windows_x86_64_gnu",
-    buildscript_rule = ":windows_x86_64_gnu-0.53.0-build-script-build",
+    buildscript_rule = ":windows_x86_64_gnu-build-script-build",
     version = "0.53.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":windows_x86_64_gnu-vendor",
 )

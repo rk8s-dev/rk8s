@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "pem-vendor",
+    urls = ["https://static.crates.io/crates/pem/pem-3.0.5.crate"],
+    sha256 = "38af38e8470ac9dee3ce1bae1af9c1671fffc44ddfd8bd1d0a3445bf349a8ef3",
+    type = "tar.gz",
+    strip_prefix = "pem-3.0.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "pem-3.0.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "pem",
+    srcs = [":pem-vendor"],
     crate = "pem",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "pem",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jonathan Creekmore <jonathan@thecreekmores.org>",
         "CARGO_PKG_DESCRIPTION": "Parse and encode PEM-encoded data.",
         "CARGO_PKG_NAME": "pem",
@@ -31,7 +37,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64/0.22.1:base64-0.22.1",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
+        "//third-party/rust/crates/base64/0.22.1:base64",
+        "//third-party/rust/crates/serde/1.0.226:serde",
     ],
 )

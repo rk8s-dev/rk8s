@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "redox_users-vendor",
+    urls = ["https://static.crates.io/crates/redox_users/redox_users-0.5.2.crate"],
+    sha256 = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac",
+    type = "tar.gz",
+    strip_prefix = "redox_users-0.5.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "redox_users-0.5.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "redox_users",
+    srcs = [":redox_users-vendor"],
     crate = "redox_users",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "redox_users",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jose Narvaez <goyox86@gmail.com>:Wesley Hershberger <mggmugginsmc@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A Rust library to access Redox users and groups functionality",
         "CARGO_PKG_NAME": "redox_users",
@@ -27,8 +33,8 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/getrandom/0.2.16:getrandom-0.2.16",
-        "//third-party/rust/crates/libredox/0.1.10:libredox-0.1.10",
-        "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
+        "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+        "//third-party/rust/crates/libredox/0.1.10:libredox",
+        "//third-party/rust/crates/thiserror/2.0.16:thiserror",
     ],
 )

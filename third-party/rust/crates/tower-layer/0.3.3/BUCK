@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tower-layer-vendor",
+    urls = ["https://static.crates.io/crates/tower-layer/tower-layer-0.3.3.crate"],
+    sha256 = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e",
+    type = "tar.gz",
+    strip_prefix = "tower-layer-0.3.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tower-layer-0.3.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tower-layer",
+    srcs = [":tower-layer-vendor"],
     crate = "tower-layer",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tower-layer",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tower Maintainers <team@tower-rs.com>",
         "CARGO_PKG_DESCRIPTION": "Decorates a `Service` to allow easy composition between `Service`s.\n",
         "CARGO_PKG_NAME": "tower-layer",

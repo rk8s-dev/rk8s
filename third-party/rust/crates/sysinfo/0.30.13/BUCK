@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "sysinfo-vendor",
+    urls = ["https://static.crates.io/crates/sysinfo/sysinfo-0.30.13.crate"],
+    sha256 = "0a5b4ddaee55fb2bea2bf0e5000747e5f5c0de765e5a5ff87f4cd106439f4bb3",
+    type = "tar.gz",
+    strip_prefix = "sysinfo-0.30.13",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "sysinfo-0.30.13",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "sysinfo",
+    srcs = [":sysinfo-vendor"],
     crate = "sysinfo",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "sysinfo",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Guillaume Gomez <guillaume1.gomez@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Library to get system information such as processes, CPUs, disks, components and networks",
         "CARGO_PKG_NAME": "sysinfo",
@@ -30,13 +36,11 @@ cargo.rust_library(
         "multithread",
         "rayon",
     ],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
-        "//third-party/rust/crates/rayon/1.11.0:rayon-1.11.0",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/rayon/1.11.0:rayon",
     ],
 )

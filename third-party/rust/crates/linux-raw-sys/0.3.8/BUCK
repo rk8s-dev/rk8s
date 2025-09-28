@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "linux-raw-sys-vendor",
+    urls = ["https://static.crates.io/crates/linux-raw-sys/linux-raw-sys-0.3.8.crate"],
+    sha256 = "ef53942eb7bf7ff43a617b3e2c1c4a5ecf5944a7c1bc12d7ee39bbb15e5c1519",
+    type = "tar.gz",
+    strip_prefix = "linux-raw-sys-0.3.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "linux-raw-sys-0.3.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "linux-raw-sys",
+    srcs = [":linux-raw-sys-vendor"],
     crate = "linux-raw-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "linux-raw-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Gohman <dev@sunfishcode.online>",
         "CARGO_PKG_DESCRIPTION": "Generated bindings for Linux's userspace API",
         "CARGO_PKG_NAME": "linux-raw-sys",

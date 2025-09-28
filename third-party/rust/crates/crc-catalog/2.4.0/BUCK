@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crc-catalog-vendor",
+    urls = ["https://static.crates.io/crates/crc-catalog/crc-catalog-2.4.0.crate"],
+    sha256 = "19d374276b40fb8bbdee95aef7c7fa6b5316ec764510eb64b8dd0e2ed0d7e7f5",
+    type = "tar.gz",
+    strip_prefix = "crc-catalog-2.4.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crc-catalog-2.4.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crc-catalog",
+    srcs = [":crc-catalog-vendor"],
     crate = "crc-catalog",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "crc-catalog",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Akhil Velagapudi <akhilvelagapudi@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Catalog of CRC algorithms (generated from http://reveng.sourceforge.net/crc-catalogue) expressed as simple Rust structs.",
         "CARGO_PKG_NAME": "crc-catalog",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "utf8parse-vendor",
+    urls = ["https://static.crates.io/crates/utf8parse/utf8parse-0.2.2.crate"],
+    sha256 = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821",
+    type = "tar.gz",
+    strip_prefix = "utf8parse-0.2.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "utf8parse-0.2.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "utf8parse",
+    srcs = [":utf8parse-vendor"],
     crate = "utf8parse",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "utf8parse",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Joe Wilm <joe@jwilm.com>:Christian Duerr <contact@christianduerr.com>",
         "CARGO_PKG_DESCRIPTION": "Table-driven UTF-8 parser",
         "CARGO_PKG_NAME": "utf8parse",

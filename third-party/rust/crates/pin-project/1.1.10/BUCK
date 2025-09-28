@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "pin-project-vendor",
+    urls = ["https://static.crates.io/crates/pin-project/pin-project-1.1.10.crate"],
+    sha256 = "677f1add503faace112b9f1373e43e9e054bfdd22ff1a63c1bc485eaec6a6a8a",
+    type = "tar.gz",
+    strip_prefix = "pin-project-1.1.10",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "pin-project-1.1.10",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "pin-project",
+    srcs = [":pin-project-vendor"],
     crate = "pin-project",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "pin-project",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A crate for safe and ergonomic pin-projection.\n",
         "CARGO_PKG_NAME": "pin-project",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "10",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "pin_project_internal": "//third-party/rust/crates/pin-project-internal/1.1.10:pin-project-internal-1.1.10",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/pin-project-internal/1.1.10:pin-project-internal"],
 )

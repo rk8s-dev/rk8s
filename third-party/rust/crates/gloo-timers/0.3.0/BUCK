@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "gloo-timers-vendor",
+    urls = ["https://static.crates.io/crates/gloo-timers/gloo-timers-0.3.0.crate"],
+    sha256 = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994",
+    type = "tar.gz",
+    strip_prefix = "gloo-timers-0.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "gloo-timers-0.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "gloo-timers",
+    srcs = [":gloo-timers-vendor"],
     crate = "gloo-timers",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "gloo-timers",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Rust and WebAssembly Working Group",
         "CARGO_PKG_DESCRIPTION": "Convenience crate for working with JavaScript timers",
         "CARGO_PKG_NAME": "gloo-timers",
@@ -31,11 +37,11 @@ cargo.rust_library(
         "futures-channel",
         "futures-core",
     ],
-    named_deps = {
-        "futures_channel": "//third-party/rust/crates/futures-channel/0.3.31:futures-channel-0.3.31",
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "js_sys": "//third-party/rust/crates/js-sys/0.3.80:js-sys-0.3.80",
-        "wasm_bindgen": "//third-party/rust/crates/wasm-bindgen/0.2.103:wasm-bindgen-0.2.103",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/js-sys/0.3.80:js-sys",
+        "//third-party/rust/crates/wasm-bindgen/0.2.103:wasm-bindgen",
+    ],
 )

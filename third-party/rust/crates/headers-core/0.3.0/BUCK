@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "headers-core-vendor",
+    urls = ["https://static.crates.io/crates/headers-core/headers-core-0.3.0.crate"],
+    sha256 = "54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4",
+    type = "tar.gz",
+    strip_prefix = "headers-core-0.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "headers-core-0.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "headers-core",
+    srcs = [":headers-core-vendor"],
     crate = "headers-core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "headers-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "typed HTTP headers core trait",
         "CARGO_PKG_NAME": "headers-core",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/http/1.3.1:http-1.3.1"],
+    deps = ["//third-party/rust/crates/http/1.3.1:http"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "mio-vendor",
+    urls = ["https://static.crates.io/crates/mio/mio-1.0.4.crate"],
+    sha256 = "78bed444cc8a2160f01cbcf811ef18cac863ad68ae8ca62092e8db51d51c761c",
+    type = "tar.gz",
+    strip_prefix = "mio-1.0.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "mio-1.0.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "mio",
+    srcs = [":mio-vendor"],
     crate = "mio",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "mio",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Carl Lerche <me@carllerche.com>:Thomas de Zeeuw <thomasdezeeuw@gmail.com>:Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "Lightweight non-blocking I/O.",
         "CARGO_PKG_NAME": "mio",
@@ -31,5 +37,5 @@ cargo.rust_library(
         "os-poll",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc-0.2.175"],
+    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
 )

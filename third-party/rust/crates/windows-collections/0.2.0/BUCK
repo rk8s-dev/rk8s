@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows-collections-vendor",
+    urls = ["https://static.crates.io/crates/windows-collections/windows-collections-0.2.0.crate"],
+    sha256 = "3beeceb5e5cfd9eb1d76b381630e82c4241ccd0d27f1a39ed41b2760b255c5e8",
+    type = "tar.gz",
+    strip_prefix = "windows-collections-0.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows-collections-0.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows-collections",
+    srcs = [":windows-collections-vendor"],
     crate = "windows-collections",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows-collections",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Windows collection types",
         "CARGO_PKG_NAME": "windows-collections",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "windows_core": "//third-party/rust/crates/windows-core/0.61.2:windows-core-0.61.2",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/windows-core/0.61.2:windows-core"],
 )

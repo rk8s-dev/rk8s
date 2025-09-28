@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "typeid-vendor",
+    urls = ["https://static.crates.io/crates/typeid/typeid-1.0.3.crate"],
+    sha256 = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c",
+    type = "tar.gz",
+    strip_prefix = "typeid-1.0.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "typeid-1.0.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "typeid",
+    srcs = [":typeid-vendor"],
     crate = "typeid",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "typeid",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Const TypeId and non-'static TypeId",
         "CARGO_PKG_NAME": "typeid",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :typeid-1.0.3-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :typeid-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :typeid-1.0.3-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :typeid-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "typeid-1.0.3-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "typeid-build-script-build",
+    srcs = [":typeid-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "typeid",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Const TypeId and non-'static TypeId",
         "CARGO_PKG_NAME": "typeid",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "typeid-1.0.3-build-script-run",
+    name = "typeid-build-script-run",
     package_name = "typeid",
-    buildscript_rule = ":typeid-1.0.3-build-script-build",
+    buildscript_rule = ":typeid-build-script-build",
     version = "1.0.3",
-    local_manifest_dir = "**",
+    manifest_dir = ":typeid-vendor",
 )

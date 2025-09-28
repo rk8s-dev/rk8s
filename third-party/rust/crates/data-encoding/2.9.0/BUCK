@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "data-encoding-vendor",
+    urls = ["https://static.crates.io/crates/data-encoding/data-encoding-2.9.0.crate"],
+    sha256 = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476",
+    type = "tar.gz",
+    strip_prefix = "data-encoding-2.9.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "data-encoding-2.9.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "data-encoding",
+    srcs = [":data-encoding-vendor"],
     crate = "data-encoding",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "data-encoding",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Julien Cretin <git@ia0.eu>",
         "CARGO_PKG_DESCRIPTION": "Efficient and customizable data-encoding functions like base64, base32, and hex",
         "CARGO_PKG_NAME": "data-encoding",

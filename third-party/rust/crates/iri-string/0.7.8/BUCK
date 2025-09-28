@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "iri-string-vendor",
+    urls = ["https://static.crates.io/crates/iri-string/iri-string-0.7.8.crate"],
+    sha256 = "dbc5ebe9c3a1a7a5127f920a418f7585e9e758e911d0466ed004f393b0e380b2",
+    type = "tar.gz",
+    strip_prefix = "iri-string-0.7.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "iri-string-0.7.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "iri-string",
+    srcs = [":iri-string-vendor"],
     crate = "iri-string",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "iri-string",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "YOSHIOKA Takuma <nop_thread@nops.red>",
         "CARGO_PKG_DESCRIPTION": "IRI as string types",
         "CARGO_PKG_NAME": "iri-string",
@@ -32,7 +38,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
+        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/serde/1.0.226:serde",
     ],
 )

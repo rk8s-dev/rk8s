@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "jsonwebtoken-vendor",
+    urls = ["https://static.crates.io/crates/jsonwebtoken/jsonwebtoken-9.3.1.crate"],
+    sha256 = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde",
+    type = "tar.gz",
+    strip_prefix = "jsonwebtoken-9.3.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "jsonwebtoken-9.3.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "jsonwebtoken",
+    srcs = [":jsonwebtoken-vendor"],
     crate = "jsonwebtoken",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "jsonwebtoken",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Vincent Prouillet <hello@vincentprouillet.com>",
         "CARGO_PKG_DESCRIPTION": "Create and decode JWTs in a strongly typed way.",
         "CARGO_PKG_NAME": "jsonwebtoken",
@@ -33,11 +39,11 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64/0.22.1:base64-0.22.1",
-        "//third-party/rust/crates/pem/3.0.5:pem-3.0.5",
-        "//third-party/rust/crates/ring/0.17.14:ring-0.17.14",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json-1.0.145",
-        "//third-party/rust/crates/simple_asn1/0.6.3:simple_asn1-0.6.3",
+        "//third-party/rust/crates/base64/0.22.1:base64",
+        "//third-party/rust/crates/pem/3.0.5:pem",
+        "//third-party/rust/crates/ring/0.17.14:ring",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_json/1.0.145:serde_json",
+        "//third-party/rust/crates/simple_asn1/0.6.3:simple_asn1",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "clang-sys-vendor",
+    urls = ["https://static.crates.io/crates/clang-sys/clang-sys-1.8.1.crate"],
+    sha256 = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4",
+    type = "tar.gz",
+    strip_prefix = "clang-sys-1.8.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "clang-sys-1.8.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "clang-sys",
+    srcs = [":clang-sys-vendor"],
     crate = "clang-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "clang-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Kyle Mayes <kyle@mayeses.com>",
         "CARGO_PKG_DESCRIPTION": "Rust bindings for libclang.",
         "CARGO_PKG_LINKS": "clang",
@@ -25,7 +31,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "8",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :clang-sys-1.8.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :clang-sys-build-script-run[out_dir])",
     },
     features = [
         "clang_10_0",
@@ -44,27 +50,24 @@ cargo.rust_library(
         "libloading",
         "runtime",
     ],
-    rustc_flags = ["@$(location :clang-sys-1.8.1-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :clang-sys-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/glob/0.3.3:glob-0.3.3",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/libloading/0.8.8:libloading-0.8.8",
+        "//third-party/rust/crates/glob/0.3.3:glob",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libloading/0.8.8:libloading",
     ],
 )
 
 cargo.rust_binary(
-    name = "clang-sys-1.8.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "clang-sys-build-script-build",
+    srcs = [":clang-sys-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "clang-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Kyle Mayes <kyle@mayeses.com>",
         "CARGO_PKG_DESCRIPTION": "Rust bindings for libclang.",
         "CARGO_PKG_LINKS": "clang",
@@ -94,13 +97,13 @@ cargo.rust_binary(
         "runtime",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/glob/0.3.3:glob-0.3.3"],
+    deps = ["//third-party/rust/crates/glob/0.3.3:glob"],
 )
 
 buildscript_run(
-    name = "clang-sys-1.8.1-build-script-run",
+    name = "clang-sys-build-script-run",
     package_name = "clang-sys",
-    buildscript_rule = ":clang-sys-1.8.1-build-script-build",
+    buildscript_rule = ":clang-sys-build-script-build",
     features = [
         "clang_10_0",
         "clang_11_0",
@@ -119,5 +122,5 @@ buildscript_run(
         "runtime",
     ],
     version = "1.8.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":clang-sys-vendor",
 )

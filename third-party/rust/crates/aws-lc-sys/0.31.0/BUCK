@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "aws-lc-sys-vendor",
+    urls = ["https://static.crates.io/crates/aws-lc-sys/aws-lc-sys-0.31.0.crate"],
+    sha256 = "0e44d16778acaf6a9ec9899b92cebd65580b83f685446bf2e1f5d3d732f99dcd",
+    type = "tar.gz",
+    strip_prefix = "aws-lc-sys-0.31.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "aws-lc-sys-0.31.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "aws-lc-sys",
+    srcs = [":aws-lc-sys-vendor"],
     crate = "aws-lc-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "aws-lc-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "AWS-LC",
         "CARGO_PKG_DESCRIPTION": "AWS-LC is a general-purpose cryptographic library maintained by the AWS Cryptography team for AWS and their customers. It іs based on code from the Google BoringSSL project and the OpenSSL project.",
         "CARGO_PKG_LINKS": "aws_lc_0_31_0",
@@ -26,25 +32,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
         "OPT_LEVEL": "3",
-        "OUT_DIR": "$(location :aws-lc-sys-0.31.0-build-script-main-run[out_dir])",
+        "OUT_DIR": "$(location :aws-lc-sys-build-script-main-run[out_dir])",
     },
     features = ["prebuilt-nasm"],
-    rustc_flags = ["@$(location :aws-lc-sys-0.31.0-build-script-main-run[rustc_flags])"],
+    rustc_flags = ["@$(location :aws-lc-sys-build-script-main-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "aws-lc-sys-0.31.0-build-script-main",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "aws-lc-sys-build-script-main",
+    srcs = [":aws-lc-sys-vendor"],
     crate = "build-script-main",
-    crate_root = "builder/main.rs",
+    crate_root = "vendor/builder/main.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "aws-lc-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "AWS-LC",
         "CARGO_PKG_DESCRIPTION": "AWS-LC is a general-purpose cryptographic library maintained by the AWS Cryptography team for AWS and their customers. It іs based on code from the Google BoringSSL project and the OpenSSL project.",
         "CARGO_PKG_LINKS": "aws_lc_0_31_0",
@@ -59,23 +62,23 @@ cargo.rust_binary(
     features = ["prebuilt-nasm"],
     visibility = [],
     deps = [
-        "//third-party/rust/crates/cc/1.2.38:cc-1.2.38",
-        "//third-party/rust/crates/cmake/0.1.54:cmake-0.1.54",
-        "//third-party/rust/crates/dunce/1.0.5:dunce-1.0.5",
-        "//third-party/rust/crates/fs_extra/1.3.0:fs_extra-1.3.0",
+        "//third-party/rust/crates/cc/1.2.38:cc",
+        "//third-party/rust/crates/cmake/0.1.54:cmake",
+        "//third-party/rust/crates/dunce/1.0.5:dunce",
+        "//third-party/rust/crates/fs_extra/1.3.0:fs_extra",
     ],
 )
 
 buildscript_run(
-    name = "aws-lc-sys-0.31.0-build-script-main-run",
+    name = "aws-lc-sys-build-script-main-run",
     package_name = "aws-lc-sys",
-    buildscript_rule = ":aws-lc-sys-0.31.0-build-script-main",
+    buildscript_rule = ":aws-lc-sys-build-script-main",
     env = {
         "CARGO_MANIFEST_LINKS": "aws_lc_0_31_0",
         "OPT_LEVEL": "3",
     },
     features = ["prebuilt-nasm"],
     version = "0.31.0",
-    local_manifest_dir = "**",
-    visibility = ["//third-party/rust/crates/aws-lc-rs/1.14.0:aws-lc-rs-1.14.0-build-script-run"],
+    manifest_dir = ":aws-lc-sys-vendor",
+    visibility = ["//third-party/rust/crates/aws-lc-rs/1.14.0:aws-lc-rs-build-script-run"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "prost-vendor",
+    urls = ["https://static.crates.io/crates/prost/prost-0.13.5.crate"],
+    sha256 = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5",
+    type = "tar.gz",
+    strip_prefix = "prost-0.13.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "prost-0.13.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "prost",
+    srcs = [":prost-vendor"],
     crate = "prost",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "prost",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Burkert <dan@danburkert.com>:Lucio Franco <luciofranco14@gmail.com>:Casper Meijn <casper@meijn.net>:Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "A Protocol Buffers implementation for the Rust Language.",
         "CARGO_PKG_NAME": "prost",
@@ -31,9 +37,9 @@ cargo.rust_library(
         "prost-derive",
         "std",
     ],
-    named_deps = {
-        "prost_derive": "//third-party/rust/crates/prost-derive/0.13.5:prost-derive-0.13.5",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1"],
+    deps = [
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/prost-derive/0.13.5:prost-derive",
+    ],
 )

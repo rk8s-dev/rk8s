@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "futures-intrusive-vendor",
+    urls = ["https://static.crates.io/crates/futures-intrusive/futures-intrusive-0.5.0.crate"],
+    sha256 = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f",
+    type = "tar.gz",
+    strip_prefix = "futures-intrusive-0.5.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "futures-intrusive-0.5.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "futures-intrusive",
+    srcs = [":futures-intrusive-vendor"],
     crate = "futures-intrusive",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "futures-intrusive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Matthias Einwag <matthias.einwag@live.com>",
         "CARGO_PKG_DESCRIPTION": "Futures based on intrusive data structures - for std and no-std environments.\n",
         "CARGO_PKG_NAME": "futures-intrusive",
@@ -31,12 +37,10 @@ cargo.rust_library(
         "parking_lot",
         "std",
     ],
-    named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/lock_api/0.4.13:lock_api-0.4.13",
-        "//third-party/rust/crates/parking_lot/0.12.4:parking_lot-0.12.4",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/lock_api/0.4.13:lock_api",
+        "//third-party/rust/crates/parking_lot/0.12.4:parking_lot",
     ],
 )

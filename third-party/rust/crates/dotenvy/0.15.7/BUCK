@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "dotenvy-vendor",
+    urls = ["https://static.crates.io/crates/dotenvy/dotenvy-0.15.7.crate"],
+    sha256 = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b",
+    type = "tar.gz",
+    strip_prefix = "dotenvy-0.15.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "dotenvy-0.15.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "dotenvy",
+    srcs = [":dotenvy-vendor"],
     crate = "dotenvy",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "dotenvy",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Noemi Lapresta <noemi.lapresta@gmail.com>:Craig Hills <chills@gmail.com>:Mike Piccolo <mfpiccolo@gmail.com>:Alice Maz <alice@alicemaz.com>:Sean Griffin <sean@seantheprogrammer.com>:Adam Sharp <adam@sharplet.me>:Arpad Borsos <arpad.borsos@googlemail.com>:Allan Zhang <al@ayz.ai>",
         "CARGO_PKG_DESCRIPTION": "A well-maintained fork of the dotenv crate",
         "CARGO_PKG_NAME": "dotenvy",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "which-vendor",
+    urls = ["https://static.crates.io/crates/which/which-4.4.2.crate"],
+    sha256 = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7",
+    type = "tar.gz",
+    strip_prefix = "which-4.4.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "which-4.4.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "which",
+    srcs = [":which-vendor"],
     crate = "which",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "which",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Harry Fei <tiziyuanfang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A Rust equivalent of Unix command \"which\". Locate installed executable in cross platforms.",
         "CARGO_PKG_NAME": "which",
@@ -27,8 +33,8 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/either/1.15.0:either-1.15.0",
-        "//third-party/rust/crates/home/0.5.11:home-0.5.11",
-        "//third-party/rust/crates/rustix/0.38.44:rustix-0.38.44",
+        "//third-party/rust/crates/either/1.15.0:either",
+        "//third-party/rust/crates/home/0.5.11:home",
+        "//third-party/rust/crates/rustix/0.38.44:rustix",
     ],
 )

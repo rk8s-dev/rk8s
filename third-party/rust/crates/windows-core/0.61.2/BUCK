@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows-core-vendor",
+    urls = ["https://static.crates.io/crates/windows-core/windows-core-0.61.2.crate"],
+    sha256 = "c0fdd3ddb90610c7638aa2b3a3ab2904fb9e5cdbecc643ddb3647212781c4ae3",
+    type = "tar.gz",
+    strip_prefix = "windows-core-0.61.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows-core-0.61.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows-core",
+    srcs = [":windows-core-vendor"],
     crate = "windows-core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Core type support for COM and Windows",
         "CARGO_PKG_NAME": "windows-core",
@@ -25,16 +31,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "default",
-        "std",
-    ],
-    named_deps = {
-        "windows_implement": "//third-party/rust/crates/windows-implement/0.60.0:windows-implement-0.60.0",
-        "windows_interface": "//third-party/rust/crates/windows-interface/0.59.1:windows-interface-0.59.1",
-        "windows_link": "//third-party/rust/crates/windows-link/0.1.3:windows-link-0.1.3",
-        "windows_result": "//third-party/rust/crates/windows-result/0.3.4:windows-result-0.3.4",
-        "windows_strings": "//third-party/rust/crates/windows-strings/0.4.2:windows-strings-0.4.2",
-    },
+    features = ["std"],
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/windows-implement/0.60.0:windows-implement",
+        "//third-party/rust/crates/windows-interface/0.59.1:windows-interface",
+        "//third-party/rust/crates/windows-link/0.1.3:windows-link",
+        "//third-party/rust/crates/windows-result/0.3.4:windows-result",
+        "//third-party/rust/crates/windows-strings/0.4.2:windows-strings",
+    ],
 )

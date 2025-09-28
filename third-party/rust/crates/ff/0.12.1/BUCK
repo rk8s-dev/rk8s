@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ff-vendor",
+    urls = ["https://static.crates.io/crates/ff/ff-0.12.1.crate"],
+    sha256 = "d013fc25338cc558c5c2cfbad646908fb23591e2404481826742b651c9af7160",
+    type = "tar.gz",
+    strip_prefix = "ff-0.12.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ff-0.12.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ff",
+    srcs = [":ff-vendor"],
     crate = "ff",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "ff",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean Bowe <ewillbefull@gmail.com>:Jack Grigg <thestr4d@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Library for building and interfacing with finite fields",
         "CARGO_PKG_NAME": "ff",
@@ -27,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/rand_core/0.6.4:rand_core-0.6.4",
-        "//third-party/rust/crates/subtle/2.6.1:subtle-2.6.1",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
+        "//third-party/rust/crates/subtle/2.6.1:subtle",
     ],
 )

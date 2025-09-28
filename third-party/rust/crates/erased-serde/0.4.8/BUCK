@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "erased-serde-vendor",
+    urls = ["https://static.crates.io/crates/erased-serde/erased-serde-0.4.8.crate"],
+    sha256 = "259d404d09818dec19332e31d94558aeb442fea04c817006456c24b5460bbd4b",
+    type = "tar.gz",
+    strip_prefix = "erased-serde-0.4.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "erased-serde-0.4.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "erased-serde",
+    srcs = [":erased-serde-vendor"],
     crate = "erased-serde",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "erased-serde",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Type-erased Serialize and Serializer traits",
         "CARGO_PKG_NAME": "erased-serde",
@@ -24,29 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "4",
         "CARGO_PKG_VERSION_PATCH": "8",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :erased-serde-0.4.8-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :erased-serde-build-script-run[out_dir])",
     },
     features = ["alloc"],
-    rustc_flags = ["@$(location :erased-serde-0.4.8-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :erased-serde-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/serde_core/1.0.226:serde_core-1.0.226",
-        "//third-party/rust/crates/typeid/1.0.3:typeid-1.0.3",
+        "//third-party/rust/crates/serde_core/1.0.226:serde_core",
+        "//third-party/rust/crates/typeid/1.0.3:typeid",
     ],
 )
 
 cargo.rust_binary(
-    name = "erased-serde-0.4.8-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "erased-serde-build-script-build",
+    srcs = [":erased-serde-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "erased-serde",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Type-erased Serialize and Serializer traits",
         "CARGO_PKG_NAME": "erased-serde",
@@ -62,10 +65,10 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "erased-serde-0.4.8-build-script-run",
+    name = "erased-serde-build-script-run",
     package_name = "erased-serde",
-    buildscript_rule = ":erased-serde-0.4.8-build-script-build",
+    buildscript_rule = ":erased-serde-build-script-build",
     features = ["alloc"],
     version = "0.4.8",
-    local_manifest_dir = "**",
+    manifest_dir = ":erased-serde-vendor",
 )

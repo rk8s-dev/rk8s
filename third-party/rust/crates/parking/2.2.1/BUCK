@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "parking-vendor",
+    urls = ["https://static.crates.io/crates/parking/parking-2.2.1.crate"],
+    sha256 = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba",
+    type = "tar.gz",
+    strip_prefix = "parking-2.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "parking-2.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "parking",
+    srcs = [":parking-vendor"],
     crate = "parking",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "parking",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>:The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Thread parking and unparking",
         "CARGO_PKG_NAME": "parking",

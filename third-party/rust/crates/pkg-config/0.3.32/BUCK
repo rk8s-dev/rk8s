@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "pkg-config-vendor",
+    urls = ["https://static.crates.io/crates/pkg-config/pkg-config-0.3.32.crate"],
+    sha256 = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c",
+    type = "tar.gz",
+    strip_prefix = "pkg-config-0.3.32",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "pkg-config-0.3.32",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "pkg-config",
+    srcs = [":pkg-config-vendor"],
     crate = "pkg-config",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "pkg-config",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "A library to run the pkg-config system tool at build time in order to be used in\nCargo build scripts.\n",
         "CARGO_PKG_NAME": "pkg-config",

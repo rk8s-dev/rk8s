@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "regex-syntax-vendor",
+    urls = ["https://static.crates.io/crates/regex-syntax/regex-syntax-0.8.6.crate"],
+    sha256 = "caf4aa5b0f434c91fe5c7f1ecb6a5ece2130b02ad2a590589dda5146df959001",
+    type = "tar.gz",
+    strip_prefix = "regex-syntax-0.8.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "regex-syntax-0.8.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "regex-syntax",
+    srcs = [":regex-syntax-vendor"],
     crate = "regex-syntax",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "regex-syntax",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers:Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A regular expression parser.",
         "CARGO_PKG_NAME": "regex-syntax",

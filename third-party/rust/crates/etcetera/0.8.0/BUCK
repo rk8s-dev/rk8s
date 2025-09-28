@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "etcetera-vendor",
+    urls = ["https://static.crates.io/crates/etcetera/etcetera-0.8.0.crate"],
+    sha256 = "136d1b5283a1ab77bd9257427ffd09d8667ced0570b6f938942bc7568ed5b943",
+    type = "tar.gz",
+    strip_prefix = "etcetera-0.8.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "etcetera-0.8.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "etcetera",
+    srcs = [":etcetera-vendor"],
     crate = "etcetera",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "etcetera",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "An unopinionated library for obtaining configuration, data, cache, & other directories",
         "CARGO_PKG_NAME": "etcetera",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/home/0.5.11:home-0.5.11"],
+    deps = [
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/home/0.5.11:home",
+    ],
 )

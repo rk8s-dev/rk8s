@@ -1,5 +1,0 @@
-error: expected impl Trait for Type
- --> tests/ui/inherent-impl.rs:4:1
-  |
-4 | impl Struct {}
-  | ^^^^^^^^^^^

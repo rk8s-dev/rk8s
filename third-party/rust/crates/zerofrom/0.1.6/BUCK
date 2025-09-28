@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "zerofrom-vendor",
+    urls = ["https://static.crates.io/crates/zerofrom/zerofrom-0.1.6.crate"],
+    sha256 = "50cc42e0333e05660c3587f3bf9d0478688e15d870fab3346451ce7f8c9fbea5",
+    type = "tar.gz",
+    strip_prefix = "zerofrom-0.1.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "zerofrom-0.1.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "zerofrom",
+    srcs = [":zerofrom-vendor"],
     crate = "zerofrom",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "zerofrom",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Manish Goregaokar <manishsmail@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "ZeroFrom trait for constructing",
         "CARGO_PKG_NAME": "zerofrom",
@@ -29,8 +35,6 @@ cargo.rust_library(
         "alloc",
         "derive",
     ],
-    named_deps = {
-        "zerofrom_derive": "//third-party/rust/crates/zerofrom-derive/0.1.6:zerofrom-derive-0.1.6",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/zerofrom-derive/0.1.6:zerofrom-derive"],
 )

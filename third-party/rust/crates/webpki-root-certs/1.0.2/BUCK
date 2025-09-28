@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "webpki-root-certs-vendor",
+    urls = ["https://static.crates.io/crates/webpki-root-certs/webpki-root-certs-1.0.2.crate"],
+    sha256 = "4e4ffd8df1c57e87c325000a3d6ef93db75279dc3a231125aac571650f22b12a",
+    type = "tar.gz",
+    strip_prefix = "webpki-root-certs-1.0.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "webpki-root-certs-1.0.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "webpki-root-certs",
+    srcs = [":webpki-root-certs-vendor"],
     crate = "webpki-root-certs",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "webpki-root-certs",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Mozilla trusted certificate authorities in self-signed X.509 format for use with crates other than webpki",
         "CARGO_PKG_NAME": "webpki-root-certs",
@@ -26,7 +32,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
-        "pki_types": "//third-party/rust/crates/rustls-pki-types/1.12.0:rustls-pki-types-1.12.0",
+        "pki_types": "//third-party/rust/crates/rustls-pki-types/1.12.0:rustls-pki-types",
     },
     visibility = ["PUBLIC"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crossbeam-deque-vendor",
+    urls = ["https://static.crates.io/crates/crossbeam-deque/crossbeam-deque-0.8.6.crate"],
+    sha256 = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51",
+    type = "tar.gz",
+    strip_prefix = "crossbeam-deque-0.8.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crossbeam-deque-0.8.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crossbeam-deque",
+    srcs = [":crossbeam-deque-vendor"],
     crate = "crossbeam-deque",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crossbeam-deque",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Concurrent work-stealing deque",
         "CARGO_PKG_NAME": "crossbeam-deque",
@@ -29,9 +35,9 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "crossbeam_epoch": "//third-party/rust/crates/crossbeam-epoch/0.9.18:crossbeam-epoch-0.9.18",
-        "crossbeam_utils": "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils-0.8.21",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/crossbeam-epoch/0.9.18:crossbeam-epoch",
+        "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils",
+    ],
 )

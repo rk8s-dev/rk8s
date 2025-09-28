@@ -1,11 +1,6 @@
 name: RKL Test
 
 on:
-  push:
-    paths:
-      - 'project/libbridge/**'
-      - 'project/libipam/**'
-      - 'project/rkl/**'
   pull_request:
     paths:
       - 'project/libbridge/**'

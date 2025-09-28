@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "itoa-vendor",
+    urls = ["https://static.crates.io/crates/itoa/itoa-1.0.15.crate"],
+    sha256 = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c",
+    type = "tar.gz",
+    strip_prefix = "itoa-1.0.15",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "itoa-1.0.15",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "itoa",
+    srcs = [":itoa-vendor"],
     crate = "itoa",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "itoa",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Fast integer primitive to string conversion",
         "CARGO_PKG_NAME": "itoa",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "headers-vendor",
+    urls = ["https://static.crates.io/crates/headers/headers-0.4.1.crate"],
+    sha256 = "b3314d5adb5d94bcdf56771f2e50dbbc80bb4bdf88967526706205ac9eff24eb",
+    type = "tar.gz",
+    strip_prefix = "headers-0.4.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "headers-0.4.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "headers",
+    srcs = [":headers-vendor"],
     crate = "headers",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "headers",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "typed HTTP headers",
         "CARGO_PKG_NAME": "headers",
@@ -25,16 +31,14 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "headers_core": "//third-party/rust/crates/headers-core/0.3.0:headers-core-0.3.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64/0.22.1:base64-0.22.1",
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/http/1.3.1:http-1.3.1",
-        "//third-party/rust/crates/httpdate/1.0.3:httpdate-1.0.3",
-        "//third-party/rust/crates/mime/0.3.17:mime-0.3.17",
-        "//third-party/rust/crates/sha1/0.10.6:sha1-0.10.6",
+        "//third-party/rust/crates/base64/0.22.1:base64",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/headers-core/0.3.0:headers-core",
+        "//third-party/rust/crates/http/1.3.1:http",
+        "//third-party/rust/crates/httpdate/1.0.3:httpdate",
+        "//third-party/rust/crates/mime/0.3.17:mime",
+        "//third-party/rust/crates/sha1/0.10.6:sha1",
     ],
 )

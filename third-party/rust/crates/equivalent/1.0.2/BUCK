@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "equivalent-vendor",
+    urls = ["https://static.crates.io/crates/equivalent/equivalent-1.0.2.crate"],
+    sha256 = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f",
+    type = "tar.gz",
+    strip_prefix = "equivalent-1.0.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "equivalent-1.0.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "equivalent",
+    srcs = [":equivalent-vendor"],
     crate = "equivalent",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "equivalent",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Traits for key comparison in maps.",
         "CARGO_PKG_NAME": "equivalent",

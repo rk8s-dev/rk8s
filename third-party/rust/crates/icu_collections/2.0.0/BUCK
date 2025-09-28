@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "icu_collections-vendor",
+    urls = ["https://static.crates.io/crates/icu_collections/icu_collections-2.0.0.crate"],
+    sha256 = "200072f5d0e3614556f94a9930d5dc3e0662a652823904c3a75dc3b0af7fee47",
+    type = "tar.gz",
+    strip_prefix = "icu_collections-2.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "icu_collections-2.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "icu_collections",
+    srcs = [":icu_collections-vendor"],
     crate = "icu_collections",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "icu_collections",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "Collection of API for use in ICU libraries.",
         "CARGO_PKG_NAME": "icu_collections",
@@ -27,10 +33,10 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc-0.2.5",
-        "//third-party/rust/crates/potential_utf/0.1.3:potential_utf-0.1.3",
-        "//third-party/rust/crates/yoke/0.8.0:yoke-0.8.0",
-        "//third-party/rust/crates/zerofrom/0.1.6:zerofrom-0.1.6",
-        "//third-party/rust/crates/zerovec/0.11.4:zerovec-0.11.4",
+        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc",
+        "//third-party/rust/crates/potential_utf/0.1.3:potential_utf",
+        "//third-party/rust/crates/yoke/0.8.0:yoke",
+        "//third-party/rust/crates/zerofrom/0.1.6:zerofrom",
+        "//third-party/rust/crates/zerovec/0.11.4:zerovec",
     ],
 )

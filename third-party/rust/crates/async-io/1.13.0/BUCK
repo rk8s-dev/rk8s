@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-io-vendor",
+    urls = ["https://static.crates.io/crates/async-io/async-io-1.13.0.crate"],
+    sha256 = "0fc5b45d93ef0529756f812ca52e44c221b35341892d3dcc34132ac02f3dd2af",
+    type = "tar.gz",
+    strip_prefix = "async-io-1.13.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-io-1.13.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-io",
+    srcs = [":async-io-vendor"],
     crate = "async-io",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "async-io",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Async I/O and timers",
         "CARGO_PKG_NAME": "async-io",
@@ -24,39 +30,34 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "13",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :async-io-1.13.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :async-io-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :async-io-1.13.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "async_lock": "//third-party/rust/crates/async-lock/2.8.0:async-lock-2.8.0",
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-        "concurrent_queue": "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue-2.5.0",
-        "futures_lite": "//third-party/rust/crates/futures-lite/1.13.0:futures-lite-1.13.0",
-        "waker_fn": "//third-party/rust/crates/waker-fn/1.2.0:waker-fn-1.2.0",
-    },
+    rustc_flags = ["@$(location :async-io-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/parking/2.2.1:parking-2.2.1",
-        "//third-party/rust/crates/polling/2.8.0:polling-2.8.0",
-        "//third-party/rust/crates/rustix/0.37.28:rustix-0.37.28",
-        "//third-party/rust/crates/slab/0.4.11:slab-0.4.11",
-        "//third-party/rust/crates/socket2/0.4.10:socket2-0.4.10",
+        "//third-party/rust/crates/async-lock/2.8.0:async-lock",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue",
+        "//third-party/rust/crates/futures-lite/1.13.0:futures-lite",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/parking/2.2.1:parking",
+        "//third-party/rust/crates/polling/2.8.0:polling",
+        "//third-party/rust/crates/rustix/0.37.28:rustix",
+        "//third-party/rust/crates/slab/0.4.11:slab",
+        "//third-party/rust/crates/socket2/0.4.10:socket2",
+        "//third-party/rust/crates/waker-fn/1.2.0:waker-fn",
     ],
 )
 
 cargo.rust_binary(
-    name = "async-io-1.13.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-io-build-script-build",
+    srcs = [":async-io-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "async-io",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Async I/O and timers",
         "CARGO_PKG_NAME": "async-io",
@@ -68,13 +69,13 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg-1.5.0"],
+    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "async-io-1.13.0-build-script-run",
+    name = "async-io-build-script-run",
     package_name = "async-io",
-    buildscript_rule = ":async-io-1.13.0-build-script-build",
+    buildscript_rule = ":async-io-build-script-build",
     version = "1.13.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":async-io-vendor",
 )

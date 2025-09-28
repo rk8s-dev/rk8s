@@ -1,6 +1,0 @@
-/target
-/Cargo.lock
-.idea
-*.iml
-/test/self-signed.badssl.com.cer
-/test/self-signed.badssl.com.cer.sha1

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "webpki-roots-vendor",
+    urls = ["https://static.crates.io/crates/webpki-roots/webpki-roots-0.26.11.crate"],
+    sha256 = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9",
+    type = "tar.gz",
+    strip_prefix = "webpki-roots-0.26.11",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "webpki-roots-0.26.11",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "webpki-roots",
+    srcs = [":webpki-roots-vendor"],
     crate = "webpki-roots",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "webpki-roots",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Mozilla's CA root certificates for use with webpki",
         "CARGO_PKG_NAME": "webpki-roots",
@@ -26,7 +32,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
-        "parent": "//third-party/rust/crates/webpki-roots/1.0.2:webpki-roots-1.0.2",
+        "parent": "//third-party/rust/crates/webpki-roots/1.0.2:webpki-roots",
     },
     visibility = ["PUBLIC"],
 )

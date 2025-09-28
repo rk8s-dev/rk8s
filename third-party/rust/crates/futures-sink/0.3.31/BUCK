@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "futures-sink-vendor",
+    urls = ["https://static.crates.io/crates/futures-sink/futures-sink-0.3.31.crate"],
+    sha256 = "e575fab7d1e0dcb8d0c7bcf9a63ee213816ab51902e6d244a95819acacf1d4f7",
+    type = "tar.gz",
+    strip_prefix = "futures-sink-0.3.31",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "futures-sink-0.3.31",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "futures-sink",
+    srcs = [":futures-sink-vendor"],
     crate = "futures-sink",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "futures-sink",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "The asynchronous `Sink` trait for the futures-rs library.\n",
         "CARGO_PKG_NAME": "futures-sink",

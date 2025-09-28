@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "version_check-vendor",
+    urls = ["https://static.crates.io/crates/version_check/version_check-0.9.5.crate"],
+    sha256 = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a",
+    type = "tar.gz",
+    strip_prefix = "version_check-0.9.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "version_check-0.9.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "version_check",
+    srcs = [":version_check-vendor"],
     crate = "version_check",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "version_check",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sergio Benitez <sb@sergio.bz>",
         "CARGO_PKG_DESCRIPTION": "Tiny crate to check the version of the installed/running rustc.",
         "CARGO_PKG_NAME": "version_check",

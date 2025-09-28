@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "nix-vendor",
+    urls = ["https://static.crates.io/crates/nix/nix-0.29.0.crate"],
+    sha256 = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46",
+    type = "tar.gz",
+    strip_prefix = "nix-0.29.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "nix-0.29.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "nix",
+    srcs = [":nix-vendor"],
     crate = "nix",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "nix",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The nix-rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Rust friendly bindings to *nix APIs",
         "CARGO_PKG_NAME": "nix",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "29",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :nix-0.29.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :nix-build-script-run[out_dir])",
     },
     features = [
         "default",
@@ -45,30 +51,25 @@ cargo.rust_library(
         "uio",
         "user",
     ],
-    rustc_flags = ["@$(location :nix-0.29.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
+    rustc_flags = ["@$(location :nix-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
-        "//third-party/rust/crates/memoffset/0.9.1:memoffset-0.9.1",
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/memoffset/0.9.1:memoffset",
     ],
 )
 
 cargo.rust_binary(
-    name = "nix-0.29.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "nix-build-script-build",
+    srcs = [":nix-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "nix",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The nix-rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Rust friendly bindings to *nix APIs",
         "CARGO_PKG_NAME": "nix",
@@ -99,13 +100,13 @@ cargo.rust_binary(
         "user",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/cfg_aliases/0.2.1:cfg_aliases-0.2.1"],
+    deps = ["//third-party/rust/crates/cfg_aliases/0.2.1:cfg_aliases"],
 )
 
 buildscript_run(
-    name = "nix-0.29.0-build-script-run",
+    name = "nix-build-script-run",
     package_name = "nix",
-    buildscript_rule = ":nix-0.29.0-build-script-build",
+    buildscript_rule = ":nix-build-script-build",
     features = [
         "default",
         "dir",
@@ -126,5 +127,5 @@ buildscript_run(
         "user",
     ],
     version = "0.29.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":nix-vendor",
 )

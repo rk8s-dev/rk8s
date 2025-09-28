@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "blocking-vendor",
+    urls = ["https://static.crates.io/crates/blocking/blocking-1.6.2.crate"],
+    sha256 = "e83f8d02be6967315521be875afa792a316e28d57b5a2d401897e2a7921b7f21",
+    type = "tar.gz",
+    strip_prefix = "blocking-1.6.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "blocking-1.6.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "blocking",
+    srcs = [":blocking-vendor"],
     crate = "blocking",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "blocking",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A thread pool for isolating blocking I/O in async programs",
         "CARGO_PKG_NAME": "blocking",
@@ -25,12 +31,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "async_channel": "//third-party/rust/crates/async-channel/2.5.0:async-channel-2.5.0",
-        "async_task": "//third-party/rust/crates/async-task/4.7.1:async-task-4.7.1",
-        "futures_io": "//third-party/rust/crates/futures-io/0.3.31:futures-io-0.3.31",
-        "futures_lite": "//third-party/rust/crates/futures-lite/2.6.1:futures-lite-2.6.1",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/piper/0.2.4:piper-0.2.4"],
+    deps = [
+        "//third-party/rust/crates/async-channel/2.5.0:async-channel",
+        "//third-party/rust/crates/async-task/4.7.1:async-task",
+        "//third-party/rust/crates/futures-io/0.3.31:futures-io",
+        "//third-party/rust/crates/futures-lite/2.6.1:futures-lite",
+        "//third-party/rust/crates/piper/0.2.4:piper",
+    ],
 )

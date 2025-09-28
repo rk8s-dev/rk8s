@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "vcpkg-vendor",
+    urls = ["https://static.crates.io/crates/vcpkg/vcpkg-0.2.15.crate"],
+    sha256 = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426",
+    type = "tar.gz",
+    strip_prefix = "vcpkg-0.2.15",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "vcpkg-0.2.15",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "vcpkg",
+    srcs = [":vcpkg-vendor"],
     crate = "vcpkg",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "vcpkg",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jim McGrath <jimmc2@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A library to find native dependencies in a vcpkg tree at build\ntime in order to be used in Cargo build scripts.\n",
         "CARGO_PKG_NAME": "vcpkg",
