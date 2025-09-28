@@ -87,8 +87,9 @@
       "gid": 0
     },
     "args": [
-      "sleep",
-      "36000"
+      "dd",
+      "if=/dev/zero",
+      "of=/dev/null"
     ],
     "env": [
       "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -97,34 +98,34 @@
     "cwd": "/",
     "capabilities": {
       "bounding": [
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_RAW",
+        "CAP_NET_BIND_SERVICE",
         "CAP_KILL",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_NET_RAW",
+        "CAP_AUDIT_WRITE"
       ],
       "effective": [
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_RAW",
+        "CAP_NET_BIND_SERVICE",
         "CAP_KILL",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_NET_RAW",
+        "CAP_AUDIT_WRITE"
       ],
       "inheritable": [
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_RAW",
+        "CAP_NET_BIND_SERVICE",
         "CAP_KILL",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_NET_RAW",
+        "CAP_AUDIT_WRITE"
       ],
       "permitted": [
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_RAW",
+        "CAP_NET_BIND_SERVICE",
         "CAP_KILL",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_NET_RAW",
+        "CAP_AUDIT_WRITE"
       ],
       "ambient": [
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_RAW",
+        "CAP_NET_BIND_SERVICE",
         "CAP_KILL",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_NET_RAW",
+        "CAP_AUDIT_WRITE"
       ]
     },
     "rlimits": [
@@ -141,7 +142,7 @@
   "linux": {
     "resources": {
       "memory": {
-        "limit": 244318208
+        "limit": 536870912
       },
       "cpu": {
         "quota": 500000,
@@ -150,16 +151,20 @@
     },
     "namespaces": [
       {
-        "type": "pid"
+        "type": "pid",
+        "path": "/proc/61653/ns/pid"
       },
       {
-        "type": "network"
+        "type": "network",
+        "path": "/proc/61653/ns/net"
       },
       {
-        "type": "ipc"
+        "type": "ipc",
+        "path": "/proc/61653/ns/ipc"
       },
       {
-        "type": "uts"
+        "type": "uts",
+        "path": "/proc/61653/ns/uts"
       },
       {
         "type": "mount"

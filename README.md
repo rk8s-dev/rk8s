@@ -1,4 +1,3 @@
-
 # rk8s - A Lite Version of Kubernetes in Rust
 
 rk8s is a lightweight, Kubernetes-compatible container orchestration system built on top of [Youki](https://github.com/youki-dev/youki), implementing the Container Runtime Interface (CRI) with support for three primary workload types: single containers, Kubernetes-style pods, and Docker Compose-style multi-container applications.
@@ -189,76 +188,43 @@ cp fixtures/{private,public}.pem scripts/
 ./scripts/quick_start.sh
 ```
 ### Usage Examples
-
 **Single Container:**
 ```bash
-sudo rkl container run single.yaml
-sudo rkl container list
-sudo rkl container exec single-container-test /bin/sh
+sudo project/target/debug/rkl container run single.yaml
+sudo project/target/debug/rkl container list
+sudo project/target/debug/rkl container exec single-container-test /bin/sh
+```
+**Pod Management(Standalone):**
+
+```bash
+sudo project/target/debug/rkl pod run pod.yaml
+sudo project/target/debug/rkl pod state simple-container-task
+sudo project/target/debug/rkl pod exec simple-container-task container-name /bin/sh
 ```
 
-**Pod Management(Standalone):**
-```bash
-sudo rkl pod run pod.yaml
-sudo rkl pod state simple-container-task
-sudo rkl pod exec simple-container-task container-name /bin/sh
-```
 **Pod Management(Cluster):**
 ```bash
-# Create pod via RKS control plane  
-sudo rkl pod create pod.yaml --cluster 127.0.0.1:50051  
-  
-# List pods from RKS  
-RKS_ADDRESS=127.0.0.1:50051 sudo rkl pod list  
-  
-# Delete pod via RKS  
-sudo rkl pod delete simple-container-task --cluster 127.0.0.1:50051
+# Create pod via RKS control plane
+sudo project/target/debug/rkl pod create pod.yaml --cluster 127.0.0.1:50051
+# List pods from RKS
+sudo project/target/debug/rkl pod list --cluster 127.0.0.1:50051
+# Delete pod via RKS
+sudo project/target/debug/rkl pod delete simple-container-task --cluster 127.0.0.1:50051
 ```
 
 **Compose Applications:**
 ```bash
-sudo rkl compose up
-sudo rkl compose ps
-sudo rkl compose down
+sudo project/target/debug/rkl compose up
+sudo project/target/debug/rkl compose ps
+sudo project/target/debug/rkl compose down
 ```
 
 **Daemon Mode:**
 ```bash
-export RKL_ADDRESS=127.0.0.1:50051
-sudo rkl pod daemon  # Monitors /etc/rk8s/manifests/ and acts as work node of rks
+sudo RKL_ADDRESS=127.0.0.1:50051 project/target/debug/rkl pod daemon # Monitors /etc/rk8s/manifests/ and acts as work node of rks
 ```
-**Start RKS:**
-```bash
-sudo rks start --config config.yaml
-```
-Example config.yaml:
-```yaml
-addr: "127.0.0.1:50051"
-
-xline_config:
-
-  endpoints:
-
-    - "http://172.20.0.3:2379"
-
-    - "http://172.20.0.4:2379"
-
-    - "http://172.20.0.5:2379"
-
-  prefix: "/coreos.com/network"
-
-  subnet_lease_renew_margin: 60
-
-network_config:
-
-  Network: "10.1.0.0/16"
-
-  SubnetMin: "10.1.1.0"
-
-  SubnetMax: "10.1.254.0"
-
-  SubnetLen: 24
-```
+**RKS:**
+For detail about building a cluster with RKS and RKL, please refer to [RKS–RKL usage](./project/rks/readme.md).
 ## Key Features
 
 - **CRI Compliance** - Full Container Runtime Interface implementation
