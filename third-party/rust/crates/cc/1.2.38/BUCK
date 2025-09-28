@@ -36,7 +36,7 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/find-msvc-tools/0.1.2:find-msvc-tools",
         "//third-party/rust/crates/jobserver/0.1.34:jobserver",
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/shlex/1.3.0:shlex",
     ],
 )

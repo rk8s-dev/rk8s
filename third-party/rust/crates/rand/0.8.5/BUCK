@@ -42,7 +42,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/rand_chacha/0.3.1:rand_chacha",
         "//third-party/rust/crates/rand_core/0.6.4:rand_core",
     ],

@@ -48,6 +48,6 @@ cargo.rust_library(
         "//third-party/rust/crates/prost/0.13.5:prost",
         "//third-party/rust/crates/regex/1.11.2:regex",
         "//third-party/rust/crates/syn/2.0.106:syn",
-        "//third-party/rust/crates/tempfile/3.22.0:tempfile",
+        "//third-party/rust/crates/tempfile/3.23.0:tempfile",
     ],
 )

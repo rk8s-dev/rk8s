@@ -57,7 +57,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.10.1:bytes",
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/mio/1.0.4:mio",
         "//third-party/rust/crates/parking_lot/0.12.4:parking_lot",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",

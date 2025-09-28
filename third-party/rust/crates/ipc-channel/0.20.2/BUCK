@@ -37,10 +37,10 @@ cargo.rust_library(
         "//third-party/rust/crates/bincode/1.3.3:bincode",
         "//third-party/rust/crates/crossbeam-channel/0.5.15:crossbeam-channel",
         "//third-party/rust/crates/fnv/1.0.7:fnv",
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/mio/1.0.4:mio",
         "//third-party/rust/crates/serde/1.0.226:serde",
-        "//third-party/rust/crates/tempfile/3.22.0:tempfile",
+        "//third-party/rust/crates/tempfile/3.23.0:tempfile",
         "//third-party/rust/crates/uuid/1.18.1:uuid",
     ],
 )

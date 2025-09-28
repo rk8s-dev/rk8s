@@ -38,7 +38,7 @@ cargo.rust_library(
         "//third-party/rust/crates/log/0.4.28:log",
         "//third-party/rust/crates/protobuf-support/3.2.0:protobuf-support",
         "//third-party/rust/crates/protobuf/3.2.0:protobuf",
-        "//third-party/rust/crates/tempfile/3.22.0:tempfile",
+        "//third-party/rust/crates/tempfile/3.23.0:tempfile",
         "//third-party/rust/crates/thiserror/1.0.69:thiserror",
         "//third-party/rust/crates/which/4.4.2:which",
     ],

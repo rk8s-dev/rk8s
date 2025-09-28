@@ -35,7 +35,7 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/crc/3.3.0:crc",
         "//third-party/rust/crates/digest/0.10.7:digest",
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/rand/0.9.2:rand",
         "//third-party/rust/crates/regex/1.11.2:regex",
     ],

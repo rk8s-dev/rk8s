@@ -46,7 +46,7 @@ cargo.rust_library(
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
         "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
         "//third-party/rust/crates/foreign-types/0.3.2:foreign-types",
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/once_cell/1.21.3:once_cell",
         "//third-party/rust/crates/openssl-macros/0.1.1:openssl-macros",
     ],

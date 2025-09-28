@@ -33,5 +33,5 @@ cargo.rust_library(
     },
     features = ["std"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.175:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.176:libc"],
 )

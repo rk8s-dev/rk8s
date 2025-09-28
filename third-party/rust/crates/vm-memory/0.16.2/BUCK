@@ -34,7 +34,7 @@ cargo.rust_library(
     features = ["default"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/thiserror/1.0.69:thiserror",
     ],
 )

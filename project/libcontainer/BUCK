@@ -41,7 +41,7 @@ cargo.rust_library(
         "//third-party/rust/crates/caps/0.5.5:caps",
         "//third-party/rust/crates/chrono/0.4.42:chrono",
         "//third-party/rust/crates/fastrand/2.3.0:fastrand",
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/libseccomp/0.3.0:libseccomp",
         "//third-party/rust/crates/nc/0.9.6:nc",
         "//third-party/rust/crates/nix/0.29.0:nix",

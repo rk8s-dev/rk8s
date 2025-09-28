@@ -36,7 +36,7 @@ cargo.rust_library(
         "//third-party/rust/crates/anyhow/1.0.100:anyhow",
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
         "//third-party/rust/crates/byteorder/1.5.0:byteorder",
-        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/libc/0.2.176:libc",
         "//third-party/rust/crates/log/0.4.28:log",
         "//third-party/rust/crates/netlink-packet-core/0.7.0:netlink-packet-core",
         "//third-party/rust/crates/netlink-packet-utils/0.5.2:netlink-packet-utils",
