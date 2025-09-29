@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows-strings-vendor",
+    urls = ["https://static.crates.io/crates/windows-strings/windows-strings-0.4.2.crate"],
+    sha256 = "56e6c93f3a0c3b36176cb1327a4958a0353d5d166c2a35cb268ace15e91d3b57",
+    type = "tar.gz",
+    strip_prefix = "windows-strings-0.4.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows-strings-0.4.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows-strings",
+    srcs = [":windows-strings-vendor"],
     crate = "windows-strings",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows-strings",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Windows string types",
         "CARGO_PKG_NAME": "windows-strings",
@@ -26,8 +32,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["std"],
-    named_deps = {
-        "windows_link": "//third-party/rust/crates/windows-link/0.1.3:windows-link-0.1.3",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/windows-link/0.1.3:windows-link"],
 )

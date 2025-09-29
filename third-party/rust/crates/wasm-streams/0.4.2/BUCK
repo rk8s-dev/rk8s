@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "wasm-streams-vendor",
+    urls = ["https://static.crates.io/crates/wasm-streams/wasm-streams-0.4.2.crate"],
+    sha256 = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65",
+    type = "tar.gz",
+    strip_prefix = "wasm-streams-0.4.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "wasm-streams-0.4.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "wasm-streams",
+    srcs = [":wasm-streams-vendor"],
     crate = "wasm-streams",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "wasm-streams",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Mattias Buelens <mattias@buelens.com>",
         "CARGO_PKG_DESCRIPTION": "Bridging between web streams and Rust streams using WebAssembly\n",
         "CARGO_PKG_NAME": "wasm-streams",
@@ -25,12 +31,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
-        "js_sys": "//third-party/rust/crates/js-sys/0.3.80:js-sys-0.3.80",
-        "wasm_bindgen": "//third-party/rust/crates/wasm-bindgen/0.2.103:wasm-bindgen-0.2.103",
-        "wasm_bindgen_futures": "//third-party/rust/crates/wasm-bindgen-futures/0.4.53:wasm-bindgen-futures-0.4.53",
-        "web_sys": "//third-party/rust/crates/web-sys/0.3.80:web-sys-0.3.80",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/js-sys/0.3.80:js-sys",
+        "//third-party/rust/crates/wasm-bindgen-futures/0.4.53:wasm-bindgen-futures",
+        "//third-party/rust/crates/wasm-bindgen/0.2.103:wasm-bindgen",
+        "//third-party/rust/crates/web-sys/0.3.80:web-sys",
+    ],
 )

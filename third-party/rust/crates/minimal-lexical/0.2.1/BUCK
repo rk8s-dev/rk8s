@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "minimal-lexical-vendor",
+    urls = ["https://static.crates.io/crates/minimal-lexical/minimal-lexical-0.2.1.crate"],
+    sha256 = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a",
+    type = "tar.gz",
+    strip_prefix = "minimal-lexical-0.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "minimal-lexical-0.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "minimal-lexical",
+    srcs = [":minimal-lexical-vendor"],
     crate = "minimal-lexical",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "minimal-lexical",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Huszagh <ahuszagh@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Fast float parsing conversion routines.",
         "CARGO_PKG_NAME": "minimal-lexical",

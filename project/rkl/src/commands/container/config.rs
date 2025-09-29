@@ -1,5 +1,6 @@
 use anyhow::{Ok, Result};
 use std::collections::HashMap;
+use thiserror::Error;
 
 use crate::{
     cri::cri_api::{
@@ -9,6 +10,13 @@ use crate::{
     task::get_linux_container_config,
 };
 use common::ContainerSpec;
+
+#[allow(unused)]
+#[derive(Error, Debug)]
+pub enum ConfigParseError {
+    #[error("invalid env vectors from image config")]
+    InvalidEnvFromImageConfig,
+}
 
 #[derive(Clone)]
 pub struct ContainerConfigBuilder {
@@ -76,19 +84,80 @@ impl ContainerConfigBuilder {
 
         let log_path = format!("{}/0.log", spec.name);
         let linux = get_linux_container_config(spec.resources.clone())?;
-        let args = spec.args.clone();
+        if !spec.args.is_empty() {
+            self.args = Some(spec.args.clone());
+        }
 
         self.metadata = metadata;
         self.image = image;
         self.log_path = log_path;
         self.linux = linux;
-        self.args = Some(args);
 
         Ok(self)
     }
 
+    // entrypoints + cmd
+    pub fn args_from_image_config(
+        &mut self,
+        entrypoints: &Option<Vec<String>>,
+        cmd: &Option<Vec<String>>,
+    ) -> &mut Self {
+        let mut args: Vec<String> = Vec::new();
+        if let Some(entry) = entrypoints {
+            args.extend(entry.clone());
+            if let Some(command) = cmd {
+                args.extend(command.clone());
+            }
+        } else {
+            args.extend(cmd.clone().unwrap_or_default());
+        }
+        self.args = Some(args);
+        self
+    }
+
+    pub fn work_dir(&mut self, work_dir: &Option<String>) -> &mut Self {
+        self.working_dir = work_dir.clone();
+        self
+    }
+
+    pub fn envs_from_image_config(&mut self, envs: &Option<Vec<String>>) -> &mut Self {
+        if let Some(env) = envs.as_deref() {
+            let key_vaule_vecs: Vec<KeyValue> = env
+                .iter()
+                .map(move |e| {
+                    //  pattern: KEY=VALUE
+                    // vec[0] = KEY
+                    // vec[1] = Vaule
+                    let vec: Vec<&str> = e.split("=").collect();
+                    KeyValue {
+                        key: vec[0].to_string(),
+                        value: vec[1].to_string(),
+                    }
+                })
+                .collect();
+            self.envs.extend(key_vaule_vecs);
+        }
+        self
+    }
+
     pub fn mounts(&mut self, mounts: Vec<Mount>) -> &mut Self {
         self.mounts.extend(mounts);
+        self
+    }
+
+    #[allow(unused)]
+    pub fn metadata(&mut self, metadata: ContainerMetadata) -> &mut Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    pub fn images(&mut self, image: String) -> &mut Self {
+        self.image = Some(ImageSpec {
+            image,
+            annotations: HashMap::new(),
+            user_specified_image: String::new(),
+            runtime_handler: String::new(),
+        });
         self
     }
 

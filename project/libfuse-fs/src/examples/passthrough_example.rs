@@ -7,11 +7,16 @@
 use clap::Parser;
 use libfuse_fs::passthrough::new_passthroughfs_layer;
 use rfuse3::{MountOptions, raw::Session};
-use tokio::signal;
 use std::ffi::OsString;
+use tokio::signal;
+use tracing::debug;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Passthrough FS example for integration tests")] 
+#[command(
+    author,
+    version,
+    about = "Passthrough FS example for integration tests"
+)]
 struct Args {
     /// Path to mount point
     #[arg(long)]
@@ -26,7 +31,6 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
     let args = Args::parse();
 
     let fs = new_passthroughfs_layer(&args.rootdir)
@@ -42,13 +46,13 @@ async fn main() {
     mount_options.force_readdir_plus(true).uid(uid).gid(gid);
 
     let mut mount_handle = if !args.not_unprivileged {
-        println!("Mounting passthrough (unprivileged)");
+        debug!("Mounting passthrough (unprivileged)");
         Session::new(mount_options)
             .mount_with_unprivileged(fs, mount_path)
             .await
             .expect("Unprivileged mount failed")
     } else {
-        println!("Mounting passthrough (privileged)");
+        debug!("Mounting passthrough (privileged)");
         Session::new(mount_options)
             .mount(fs, mount_path)
             .await

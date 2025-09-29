@@ -9,7 +9,7 @@ use libfuse_fs::overlayfs::mount_fs;
 use tokio::signal;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "OverlayFS example for integration tests")] 
+#[command(author, version, about = "OverlayFS example for integration tests")]
 struct Args {
     /// Mount point path
     #[arg(long)]
@@ -27,7 +27,6 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
     let args = Args::parse();
 
     // Start mount (returns a future that resolves when unmounted)

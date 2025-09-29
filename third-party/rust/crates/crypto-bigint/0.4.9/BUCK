@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crypto-bigint-vendor",
+    urls = ["https://static.crates.io/crates/crypto-bigint/crypto-bigint-0.4.9.crate"],
+    sha256 = "ef2b4b23cddf68b89b8f8069890e8c270d54e2d5fe1b143820234805e4cb17ef",
+    type = "tar.gz",
+    strip_prefix = "crypto-bigint-0.4.9",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crypto-bigint-0.4.9",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crypto-bigint",
+    srcs = [":crypto-bigint-vendor"],
     crate = "crypto-bigint",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crypto-bigint",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Pure Rust implementation of a big integer library which has been designed from\nthe ground-up for use in cryptographic applications. Provides constant-time,\nno_std-friendly implementations of modern formulas using const generics.\n",
         "CARGO_PKG_NAME": "crypto-bigint",
@@ -30,13 +36,11 @@ cargo.rust_library(
         "rand_core",
         "zeroize",
     ],
-    named_deps = {
-        "generic_array": "//third-party/rust/crates/generic-array/0.14.7:generic-array-0.14.7",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/rand_core/0.6.4:rand_core-0.6.4",
-        "//third-party/rust/crates/subtle/2.6.1:subtle-2.6.1",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1",
+        "//third-party/rust/crates/generic-array/0.14.7:generic-array",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
+        "//third-party/rust/crates/subtle/2.6.1:subtle",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
     ],
 )

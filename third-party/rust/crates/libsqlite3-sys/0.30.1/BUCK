@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "libsqlite3-sys-vendor",
+    urls = ["https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.30.1.crate"],
+    sha256 = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149",
+    type = "tar.gz",
+    strip_prefix = "libsqlite3-sys-0.30.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "libsqlite3-sys-0.30.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libsqlite3-sys",
+    srcs = [":libsqlite3-sys-vendor"],
     crate = "libsqlite3-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "libsqlite3-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The rusqlite developers",
         "CARGO_PKG_DESCRIPTION": "Native bindings to the libsqlite3 library",
         "CARGO_PKG_LINKS": "sqlite3",
@@ -26,7 +32,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
         "OPT_LEVEL": "0",
-        "OUT_DIR": "$(location :libsqlite3-sys-0.30.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :libsqlite3-sys-build-script-run[out_dir])",
     },
     features = [
         "bundled",
@@ -37,25 +43,22 @@ cargo.rust_library(
         "vcpkg",
     ],
     rustc_flags = [
-        "-Lnative=$(location :libsqlite3-sys-0.30.1-build-script-run[out_dir])",
+        "-Lnative=$(location :libsqlite3-sys-build-script-run[out_dir])",
         "-lstatic=sqlite3",
-        "@$(location :libsqlite3-sys-0.30.1-build-script-run[rustc_flags])",
+        "@$(location :libsqlite3-sys-build-script-run[rustc_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "libsqlite3-sys-0.30.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libsqlite3-sys-build-script-build",
+    srcs = [":libsqlite3-sys-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "libsqlite3-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The rusqlite developers",
         "CARGO_PKG_DESCRIPTION": "Native bindings to the libsqlite3 library",
         "CARGO_PKG_LINKS": "sqlite3",
@@ -75,20 +78,18 @@ cargo.rust_binary(
         "unlock_notify",
         "vcpkg",
     ],
-    named_deps = {
-        "pkg_config": "//third-party/rust/crates/pkg-config/0.3.32:pkg-config-0.3.32",
-    },
     visibility = [],
     deps = [
-        "//third-party/rust/crates/cc/1.2.38:cc-1.2.38",
-        "//third-party/rust/crates/vcpkg/0.2.15:vcpkg-0.2.15",
+        "//third-party/rust/crates/cc/1.2.38:cc",
+        "//third-party/rust/crates/pkg-config/0.3.32:pkg-config",
+        "//third-party/rust/crates/vcpkg/0.2.15:vcpkg",
     ],
 )
 
 buildscript_run(
-    name = "libsqlite3-sys-0.30.1-build-script-run",
+    name = "libsqlite3-sys-build-script-run",
     package_name = "libsqlite3-sys",
-    buildscript_rule = ":libsqlite3-sys-0.30.1-build-script-build",
+    buildscript_rule = ":libsqlite3-sys-build-script-build",
     env = {
         "CARGO_MANIFEST_LINKS": "sqlite3",
         "OPT_LEVEL": "0",
@@ -102,5 +103,5 @@ buildscript_run(
         "vcpkg",
     ],
     version = "0.30.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":libsqlite3-sys-vendor",
 )

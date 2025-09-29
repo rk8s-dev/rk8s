@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "prost-types-vendor",
+    urls = ["https://static.crates.io/crates/prost-types/prost-types-0.13.5.crate"],
+    sha256 = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16",
+    type = "tar.gz",
+    strip_prefix = "prost-types-0.13.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "prost-types-0.13.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "prost-types",
+    srcs = [":prost-types-vendor"],
     crate = "prost-types",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "prost-types",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Burkert <dan@danburkert.com>:Lucio Franco <luciofranco14@gmail.com>:Casper Meijn <casper@meijn.net>:Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "Prost definitions of Protocol Buffers well known types.",
         "CARGO_PKG_NAME": "prost-types",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/prost/0.13.5:prost-0.13.5"],
+    deps = ["//third-party/rust/crates/prost/0.13.5:prost"],
 )

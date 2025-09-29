@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "yasna-vendor",
+    urls = ["https://static.crates.io/crates/yasna/yasna-0.5.2.crate"],
+    sha256 = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd",
+    type = "tar.gz",
+    strip_prefix = "yasna-0.5.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "yasna-0.5.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "yasna",
+    srcs = [":yasna-vendor"],
     crate = "yasna",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "yasna",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Masaki Hara <ackie.h.gmai@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "ASN.1 library for Rust",
         "CARGO_PKG_NAME": "yasna",
@@ -31,5 +37,5 @@ cargo.rust_library(
         "time",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/time/0.3.44:time-0.3.44"],
+    deps = ["//third-party/rust/crates/time/0.3.44:time"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows_aarch64_gnullvm-vendor",
+    urls = ["https://static.crates.io/crates/windows_aarch64_gnullvm/windows_aarch64_gnullvm-0.42.2.crate"],
+    sha256 = "597a5118570b68bc08d8d59125332c54f1ba9d9adeedeef5b99b02ba2b0698f8",
+    type = "tar.gz",
+    strip_prefix = "windows_aarch64_gnullvm-0.42.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows_aarch64_gnullvm-0.42.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows_aarch64_gnullvm",
+    srcs = [":windows_aarch64_gnullvm-vendor"],
     crate = "windows_aarch64_gnullvm",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "windows_aarch64_gnullvm",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
         "CARGO_PKG_NAME": "windows_aarch64_gnullvm",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "42",
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :windows_aarch64_gnullvm-0.42.2-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :windows_aarch64_gnullvm-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :windows_aarch64_gnullvm-0.42.2-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :windows_aarch64_gnullvm-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "windows_aarch64_gnullvm-0.42.2-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows_aarch64_gnullvm-build-script-build",
+    srcs = [":windows_aarch64_gnullvm-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "windows_aarch64_gnullvm",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
         "CARGO_PKG_NAME": "windows_aarch64_gnullvm",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "windows_aarch64_gnullvm-0.42.2-build-script-run",
+    name = "windows_aarch64_gnullvm-build-script-run",
     package_name = "windows_aarch64_gnullvm",
-    buildscript_rule = ":windows_aarch64_gnullvm-0.42.2-build-script-build",
+    buildscript_rule = ":windows_aarch64_gnullvm-build-script-build",
     version = "0.42.2",
-    local_manifest_dir = "**",
+    manifest_dir = ":windows_aarch64_gnullvm-vendor",
 )

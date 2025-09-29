@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "foreign-types-vendor",
+    urls = ["https://static.crates.io/crates/foreign-types/foreign-types-0.3.2.crate"],
+    sha256 = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1",
+    type = "tar.gz",
+    strip_prefix = "foreign-types-0.3.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "foreign-types-0.3.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "foreign-types",
+    srcs = [":foreign-types-vendor"],
     crate = "foreign-types",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "foreign-types",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A framework for Rust wrappers over C APIs",
         "CARGO_PKG_NAME": "foreign-types",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "foreign_types_shared": "//third-party/rust/crates/foreign-types-shared/0.1.1:foreign-types-shared-0.1.1",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/foreign-types-shared/0.1.1:foreign-types-shared"],
 )

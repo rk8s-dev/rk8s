@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "semver-parser-vendor",
+    urls = ["https://static.crates.io/crates/semver-parser/semver-parser-0.10.3.crate"],
+    sha256 = "9900206b54a3527fdc7b8a938bffd94a568bac4f4aa8113b209df75a09c0dec2",
+    type = "tar.gz",
+    strip_prefix = "semver-parser-0.10.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "semver-parser-0.10.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "semver-parser",
+    srcs = [":semver-parser-vendor"],
     crate = "semver-parser",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "semver-parser",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steve Klabnik <steve@steveklabnik.com>",
         "CARGO_PKG_DESCRIPTION": "Parsing of the semver spec.\n",
         "CARGO_PKG_NAME": "semver-parser",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/pest/2.8.2:pest-2.8.2"],
+    deps = ["//third-party/rust/crates/pest/2.8.2:pest"],
 )

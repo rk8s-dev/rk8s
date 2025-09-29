@@ -3,18 +3,21 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+filegroup(
+    name = "common-vendor",
+    srcs = glob(["**/**"]),
+    out = "vendor",
+)
+
 cargo.rust_library(
     name = "common",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    srcs = [":common-vendor"],
     crate = "common",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "common",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "rk8s-dev team",
         "CARGO_PKG_DESCRIPTION": "Pod and Node definitions for rk8s",
         "CARGO_PKG_NAME": "common",
@@ -28,9 +31,9 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//project/libcni:libcni",
-        "//third-party/rust/crates/chrono/0.4.42:chrono-0.4.42",
-        "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork-0.17.0",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json-1.0.145",
+        "//third-party/rust/crates/chrono/0.4.42:chrono",
+        "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_json/1.0.145:serde_json",
     ],
 )

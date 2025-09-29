@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "semver-vendor",
+    urls = ["https://static.crates.io/crates/semver/semver-0.11.0.crate"],
+    sha256 = "f301af10236f6df4160f7c3f04eec6dbc70ace82d23326abad5edee88801c6b6",
+    type = "tar.gz",
+    strip_prefix = "semver-0.11.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "semver-0.11.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "semver",
+    srcs = [":semver-vendor"],
     crate = "semver",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "semver",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steve Klabnik <steve@steveklabnik.com>:The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Semantic version parsing and comparison.\n",
         "CARGO_PKG_NAME": "semver",
@@ -26,8 +32,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["default"],
-    named_deps = {
-        "semver_parser": "//third-party/rust/crates/semver-parser/0.10.3:semver-parser-0.10.3",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/semver-parser/0.10.3:semver-parser"],
 )

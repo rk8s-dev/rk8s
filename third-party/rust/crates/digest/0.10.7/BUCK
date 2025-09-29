@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "digest-vendor",
+    urls = ["https://static.crates.io/crates/digest/digest-0.10.7.crate"],
+    sha256 = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292",
+    type = "tar.gz",
+    strip_prefix = "digest-0.10.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "digest-0.10.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "digest",
+    srcs = [":digest-vendor"],
     crate = "digest",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "digest",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Traits for cryptographic hash functions and message authentication codes",
         "CARGO_PKG_NAME": "digest",
@@ -36,11 +42,11 @@ cargo.rust_library(
         "std",
         "subtle",
     ],
-    named_deps = {
-        "block_buffer": "//third-party/rust/crates/block-buffer/0.10.4:block-buffer-0.10.4",
-        "const_oid": "//third-party/rust/crates/const-oid/0.9.6:const-oid-0.9.6",
-        "crypto_common": "//third-party/rust/crates/crypto-common/0.1.6:crypto-common-0.1.6",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/subtle/2.6.1:subtle-2.6.1"],
+    deps = [
+        "//third-party/rust/crates/block-buffer/0.10.4:block-buffer",
+        "//third-party/rust/crates/const-oid/0.9.6:const-oid",
+        "//third-party/rust/crates/crypto-common/0.1.6:crypto-common",
+        "//third-party/rust/crates/subtle/2.6.1:subtle",
+    ],
 )

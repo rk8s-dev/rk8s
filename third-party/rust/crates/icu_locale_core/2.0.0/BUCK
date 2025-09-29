@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "icu_locale_core-vendor",
+    urls = ["https://static.crates.io/crates/icu_locale_core/icu_locale_core-2.0.0.crate"],
+    sha256 = "0cde2700ccaed3872079a65fb1a78f6c0a36c91570f28755dda67bc8f7d9f00a",
+    type = "tar.gz",
+    strip_prefix = "icu_locale_core-2.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "icu_locale_core-2.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "icu_locale_core",
+    srcs = [":icu_locale_core-vendor"],
     crate = "icu_locale_core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "icu_locale_core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "API for managing Unicode Language and Locale Identifiers",
         "CARGO_PKG_NAME": "icu_locale_core",
@@ -28,10 +34,10 @@ cargo.rust_library(
     features = ["zerovec"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc-0.2.5",
-        "//third-party/rust/crates/litemap/0.8.0:litemap-0.8.0",
-        "//third-party/rust/crates/tinystr/0.8.1:tinystr-0.8.1",
-        "//third-party/rust/crates/writeable/0.6.1:writeable-0.6.1",
-        "//third-party/rust/crates/zerovec/0.11.4:zerovec-0.11.4",
+        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc",
+        "//third-party/rust/crates/litemap/0.8.0:litemap",
+        "//third-party/rust/crates/tinystr/0.8.1:tinystr",
+        "//third-party/rust/crates/writeable/0.6.1:writeable",
+        "//third-party/rust/crates/zerovec/0.11.4:zerovec",
     ],
 )

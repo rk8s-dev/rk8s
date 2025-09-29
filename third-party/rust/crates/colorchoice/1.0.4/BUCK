@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "colorchoice-vendor",
+    urls = ["https://static.crates.io/crates/colorchoice/colorchoice-1.0.4.crate"],
+    sha256 = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75",
+    type = "tar.gz",
+    strip_prefix = "colorchoice-1.0.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "colorchoice-1.0.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "colorchoice",
+    srcs = [":colorchoice-vendor"],
     crate = "colorchoice",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "colorchoice",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Global override of color control",
         "CARGO_PKG_NAME": "colorchoice",

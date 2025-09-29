@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ipconfig-vendor",
+    urls = ["https://static.crates.io/crates/ipconfig/ipconfig-0.3.2.crate"],
+    sha256 = "b58db92f96b720de98181bbbe63c831e87005ab460c1bf306eb2622b4707997f",
+    type = "tar.gz",
+    strip_prefix = "ipconfig-0.3.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ipconfig-0.3.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ipconfig",
+    srcs = [":ipconfig-vendor"],
     crate = "ipconfig",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "ipconfig",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Liran Ringel <liranringel@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Get network adapters information and network configuration for windows.",
         "CARGO_PKG_NAME": "ipconfig",
@@ -24,29 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :ipconfig-0.3.2-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :ipconfig-build-script-run[out_dir])",
     },
     features = [
         "computer",
         "default",
         "winreg",
     ],
-    rustc_flags = ["@$(location :ipconfig-0.3.2-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :ipconfig-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "ipconfig-0.3.2-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ipconfig-build-script-build",
+    srcs = [":ipconfig-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "ipconfig",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Liran Ringel <liranringel@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Get network adapters information and network configuration for windows.",
         "CARGO_PKG_NAME": "ipconfig",
@@ -66,14 +69,14 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "ipconfig-0.3.2-build-script-run",
+    name = "ipconfig-build-script-run",
     package_name = "ipconfig",
-    buildscript_rule = ":ipconfig-0.3.2-build-script-build",
+    buildscript_rule = ":ipconfig-build-script-build",
     features = [
         "computer",
         "default",
         "winreg",
     ],
     version = "0.3.2",
-    local_manifest_dir = "**",
+    manifest_dir = ":ipconfig-vendor",
 )

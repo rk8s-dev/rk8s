@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ryu-vendor",
+    urls = ["https://static.crates.io/crates/ryu/ryu-1.0.20.crate"],
+    sha256 = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f",
+    type = "tar.gz",
+    strip_prefix = "ryu-1.0.20",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ryu-1.0.20",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ryu",
+    srcs = [":ryu-vendor"],
     crate = "ryu",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "ryu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Fast floating point to string conversion",
         "CARGO_PKG_NAME": "ryu",

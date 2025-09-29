@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "byteorder-vendor",
+    urls = ["https://static.crates.io/crates/byteorder/byteorder-1.5.0.crate"],
+    sha256 = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b",
+    type = "tar.gz",
+    strip_prefix = "byteorder-1.5.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "byteorder-1.5.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "byteorder",
+    srcs = [":byteorder-vendor"],
     crate = "byteorder",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "byteorder",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Library for reading/writing numbers in big-endian and little-endian.",
         "CARGO_PKG_NAME": "byteorder",

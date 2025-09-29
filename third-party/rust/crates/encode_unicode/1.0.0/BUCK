@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "encode_unicode-vendor",
+    urls = ["https://static.crates.io/crates/encode_unicode/encode_unicode-1.0.0.crate"],
+    sha256 = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0",
+    type = "tar.gz",
+    strip_prefix = "encode_unicode-1.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "encode_unicode-1.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "encode_unicode",
+    srcs = [":encode_unicode-vendor"],
     crate = "encode_unicode",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "encode_unicode",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Torbjørn Birch Moltu <t.b.moltu@lyse.net>",
         "CARGO_PKG_DESCRIPTION": "UTF-8 and UTF-16 character types, iterators and related methods for char, u8 and u16.\n",
         "CARGO_PKG_NAME": "encode_unicode",

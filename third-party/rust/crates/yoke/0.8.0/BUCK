@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "yoke-vendor",
+    urls = ["https://static.crates.io/crates/yoke/yoke-0.8.0.crate"],
+    sha256 = "5f41bb01b8226ef4bfd589436a297c53d118f65921786300e427be8d487695cc",
+    type = "tar.gz",
+    strip_prefix = "yoke-0.8.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "yoke-0.8.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "yoke",
+    srcs = [":yoke-vendor"],
     crate = "yoke",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "yoke",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Manish Goregaokar <manishsmail@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Abstraction allowing borrowed data to be carried along with the backing data it borrows from",
         "CARGO_PKG_NAME": "yoke",
@@ -30,13 +36,11 @@ cargo.rust_library(
         "derive",
         "zerofrom",
     ],
-    named_deps = {
-        "yoke_derive": "//third-party/rust/crates/yoke-derive/0.8.0:yoke-derive-0.8.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/stable_deref_trait/1.2.0:stable_deref_trait-1.2.0",
-        "//third-party/rust/crates/zerofrom/0.1.6:zerofrom-0.1.6",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/stable_deref_trait/1.2.0:stable_deref_trait",
+        "//third-party/rust/crates/yoke-derive/0.8.0:yoke-derive",
+        "//third-party/rust/crates/zerofrom/0.1.6:zerofrom",
     ],
 )

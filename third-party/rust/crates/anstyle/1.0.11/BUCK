@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "anstyle-vendor",
+    urls = ["https://static.crates.io/crates/anstyle/anstyle-1.0.11.crate"],
+    sha256 = "862ed96ca487e809f1c8e5a8447f6ee2cf102f846893800b20cebdf541fc6bbd",
+    type = "tar.gz",
+    strip_prefix = "anstyle-1.0.11",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "anstyle-1.0.11",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "anstyle",
+    srcs = [":anstyle-vendor"],
     crate = "anstyle",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "anstyle",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "ANSI text styling",
         "CARGO_PKG_NAME": "anstyle",

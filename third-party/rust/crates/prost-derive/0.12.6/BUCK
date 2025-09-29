@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "prost-derive-vendor",
+    urls = ["https://static.crates.io/crates/prost-derive/prost-derive-0.12.6.crate"],
+    sha256 = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1",
+    type = "tar.gz",
+    strip_prefix = "prost-derive-0.12.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "prost-derive-0.12.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "prost-derive",
+    srcs = [":prost-derive-vendor"],
     crate = "prost-derive",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "prost-derive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Burkert <dan@danburkert.com>:Lucio Franco <luciofranco14@gmail.com>:Casper Meijn <casper@meijn.net>:Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "Generate encoding and decoding implementations for Prost annotated types.",
         "CARGO_PKG_NAME": "prost-derive",
@@ -26,14 +32,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
-        "//third-party/rust/crates/itertools/0.12.1:itertools-0.12.1",
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/itertools/0.12.1:itertools",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "regex-lite-vendor",
+    urls = ["https://static.crates.io/crates/regex-lite/regex-lite-0.1.7.crate"],
+    sha256 = "943f41321c63ef1c92fd763bfe054d2668f7f225a5c29f0105903dc2fc04ba30",
+    type = "tar.gz",
+    strip_prefix = "regex-lite-0.1.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "regex-lite-0.1.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "regex-lite",
+    srcs = [":regex-lite-vendor"],
     crate = "regex-lite",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "regex-lite",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers:Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A lightweight regex engine that optimizes for binary size and compilation time.\n",
         "CARGO_PKG_NAME": "regex-lite",

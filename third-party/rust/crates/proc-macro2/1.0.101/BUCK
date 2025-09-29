@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "proc-macro2-vendor",
+    urls = ["https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.101.crate"],
+    sha256 = "89ae43fd86e4158d6db51ad8e2b80f313af9cc74f5c0e03ccb87de09998732de",
+    type = "tar.gz",
+    strip_prefix = "proc-macro2-1.0.101",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "proc-macro2-1.0.101",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "proc-macro2",
+    srcs = [":proc-macro2-vendor"],
     crate = "proc-macro2",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "proc-macro2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>:Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "A substitute implementation of the compiler's `proc_macro` API to decouple token-based libraries from the procedural macro use case.",
         "CARGO_PKG_NAME": "proc-macro2",
@@ -24,32 +30,27 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "101",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :proc-macro2-1.0.101-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :proc-macro2-build-script-run[out_dir])",
     },
     features = [
         "default",
         "proc-macro",
         "span-locations",
     ],
-    rustc_flags = ["@$(location :proc-macro2-1.0.101-build-script-run[rustc_flags])"],
-    named_deps = {
-        "unicode_ident": "//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident-1.0.19",
-    },
+    rustc_flags = ["@$(location :proc-macro2-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident"],
 )
 
 cargo.rust_binary(
-    name = "proc-macro2-1.0.101-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "proc-macro2-build-script-build",
+    srcs = [":proc-macro2-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "proc-macro2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>:Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "A substitute implementation of the compiler's `proc_macro` API to decouple token-based libraries from the procedural macro use case.",
         "CARGO_PKG_NAME": "proc-macro2",
@@ -69,14 +70,14 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "proc-macro2-1.0.101-build-script-run",
+    name = "proc-macro2-build-script-run",
     package_name = "proc-macro2",
-    buildscript_rule = ":proc-macro2-1.0.101-build-script-build",
+    buildscript_rule = ":proc-macro2-build-script-build",
     features = [
         "default",
         "proc-macro",
         "span-locations",
     ],
     version = "1.0.101",
-    local_manifest_dir = "**",
+    manifest_dir = ":proc-macro2-vendor",
 )

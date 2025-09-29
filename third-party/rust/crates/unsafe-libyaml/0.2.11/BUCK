@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "unsafe-libyaml-vendor",
+    urls = ["https://static.crates.io/crates/unsafe-libyaml/unsafe-libyaml-0.2.11.crate"],
+    sha256 = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861",
+    type = "tar.gz",
+    strip_prefix = "unsafe-libyaml-0.2.11",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "unsafe-libyaml-0.2.11",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "unsafe-libyaml",
+    srcs = [":unsafe-libyaml-vendor"],
     crate = "unsafe-libyaml",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "unsafe-libyaml",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "libyaml transpiled to rust by c2rust",
         "CARGO_PKG_NAME": "unsafe-libyaml",

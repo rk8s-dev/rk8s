@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "foreign-types-shared-vendor",
+    urls = ["https://static.crates.io/crates/foreign-types-shared/foreign-types-shared-0.1.1.crate"],
+    sha256 = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b",
+    type = "tar.gz",
+    strip_prefix = "foreign-types-shared-0.1.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "foreign-types-shared-0.1.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "foreign-types-shared",
+    srcs = [":foreign-types-shared-vendor"],
     crate = "foreign-types-shared",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "foreign-types-shared",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "An internal crate used by foreign-types",
         "CARGO_PKG_NAME": "foreign-types-shared",

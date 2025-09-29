@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crossbeam-utils-vendor",
+    urls = ["https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.21.crate"],
+    sha256 = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28",
+    type = "tar.gz",
+    strip_prefix = "crossbeam-utils-0.8.21",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crossbeam-utils-0.8.21",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crossbeam-utils",
+    srcs = [":crossbeam-utils-vendor"],
     crate = "crossbeam-utils",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crossbeam-utils",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Utilities for concurrent programming",
         "CARGO_PKG_NAME": "crossbeam-utils",
@@ -24,28 +30,25 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "8",
         "CARGO_PKG_VERSION_PATCH": "21",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :crossbeam-utils-0.8.21-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :crossbeam-utils-build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :crossbeam-utils-0.8.21-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :crossbeam-utils-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "crossbeam-utils-0.8.21-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crossbeam-utils-build-script-build",
+    srcs = [":crossbeam-utils-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crossbeam-utils",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Utilities for concurrent programming",
         "CARGO_PKG_NAME": "crossbeam-utils",
@@ -64,13 +67,13 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "crossbeam-utils-0.8.21-build-script-run",
+    name = "crossbeam-utils-build-script-run",
     package_name = "crossbeam-utils",
-    buildscript_rule = ":crossbeam-utils-0.8.21-build-script-build",
+    buildscript_rule = ":crossbeam-utils-build-script-build",
     features = [
         "default",
         "std",
     ],
     version = "0.8.21",
-    local_manifest_dir = "**",
+    manifest_dir = ":crossbeam-utils-vendor",
 )

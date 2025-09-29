@@ -1,4 +1,4 @@
-use crate::config;
+use crate::config::registry::DNS_CONFIG;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
 use clap::Parser;
@@ -32,6 +32,7 @@ pub enum Task {
     },
 }
 
+#[allow(unused)]
 pub fn exec(args: ExecArgs) -> Result<()> {
     let mount_pid = std::env::var("MOUNT_PID")?.parse::<u32>()?;
     switch_namespace(mount_pid)?;
@@ -41,18 +42,18 @@ pub fn exec(args: ExecArgs) -> Result<()> {
     let task: Task = serde_json::from_slice(&task)?;
     match task {
         Task::Run { command, envp } => {
-            prepare_network(mountpoint).context("Failed to prepare network")?;
-            for b in config::BIND_MOUNTS {
-                let dir = mountpoint.join(b.strip_prefix('/').unwrap());
-                nix::mount::mount::<_, _, str, str>(
-                    Some(b),
-                    &dir,
-                    None,
-                    nix::mount::MsFlags::MS_BIND | nix::mount::MsFlags::MS_REC,
-                    None,
-                )
-                .with_context(|| format!("Failed to bind mount {}", dir.display()))?;
-            }
+            // prepare_network(mountpoint).context("Failed to prepare network")?;
+            // for b in config::BIND_MOUNTS {
+            //     let dir = mountpoint.join(b.strip_prefix('/').unwrap());
+            //     nix::mount::mount::<_, _, str, str>(
+            //         Some(b),
+            //         &dir,
+            //         None,
+            //         nix::mount::MsFlags::MS_BIND | nix::mount::MsFlags::MS_REC,
+            //         None,
+            //     )
+            //     .with_context(|| format!("Failed to bind mount {}", dir.display()))?;
+            // }
             let command = command.iter().map(|s| s.as_str()).collect::<Vec<_>>();
             let envp = envp
                 .iter()
@@ -83,6 +84,7 @@ pub fn exec(args: ExecArgs) -> Result<()> {
     }
 }
 
+#[allow(unused)]
 fn chroot_linux(mountpoint: &Path) -> Result<()> {
     tracing::trace!("Chrooting to {}", mountpoint.display());
     chroot(mountpoint).with_context(|| format!("Failed to chroot to {}", mountpoint.display()))?;
@@ -91,7 +93,7 @@ fn chroot_linux(mountpoint: &Path) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 fn sh_shell(envp: &Vec<CString>) -> Result<()> {
     let file = CString::new("/bin/sh").unwrap();
     let argv = vec![&file];
@@ -99,6 +101,7 @@ fn sh_shell(envp: &Vec<CString>) -> Result<()> {
     Ok(())
 }
 
+#[allow(unused)]
 fn execute_command(command: &[&str], envp: &[CString]) -> Result<()> {
     let file = CString::new(command[0]).unwrap();
     let argv: Vec<CString> = command.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -107,6 +110,7 @@ fn execute_command(command: &[&str], envp: &[CString]) -> Result<()> {
     unreachable!();
 }
 
+#[allow(unused)]
 fn do_exec(mountpoint: &Path, command: &[&str], envp: &[CString]) -> Result<()> {
     assert!(mountpoint.exists());
     chroot_linux(mountpoint).context("Failed to chroot")?;
@@ -114,6 +118,7 @@ fn do_exec(mountpoint: &Path, command: &[&str], envp: &[CString]) -> Result<()> 
     unreachable!();
 }
 
+#[allow(unused)]
 fn switch_namespace(mount_pid: u32) -> Result<()> {
     let ns_path = format!("/proc/{mount_pid}/ns/mnt");
     let ns_fd = std::fs::File::open(&ns_path)
@@ -123,9 +128,10 @@ fn switch_namespace(mount_pid: u32) -> Result<()> {
     Ok(())
 }
 
+#[allow(unused)]
 fn prepare_network(mountpoint: &Path) -> Result<()> {
-    let host_resolv_conf = Path::new(config::DNS_CONFIG);
-    let target_resolv_conf = mountpoint.join(config::DNS_CONFIG.strip_prefix('/').unwrap());
+    let host_resolv_conf = Path::new(DNS_CONFIG);
+    let target_resolv_conf = mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap());
 
     assert!(host_resolv_conf.exists());
     if !target_resolv_conf.exists() {
@@ -145,8 +151,9 @@ fn prepare_network(mountpoint: &Path) -> Result<()> {
     Ok(())
 }
 
+#[allow(unused)]
 fn cleanup_network(mountpoint: &Path) -> Result<()> {
-    let target_resolv_conf = mountpoint.join(config::DNS_CONFIG.strip_prefix('/').unwrap());
+    let target_resolv_conf = mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap());
     if target_resolv_conf.exists() {
         nix::mount::umount2(&target_resolv_conf, nix::mount::MntFlags::MNT_DETACH)
             .with_context(|| format!("Failed to unmount {}", target_resolv_conf.display()))?;
@@ -154,18 +161,19 @@ fn cleanup_network(mountpoint: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn cleanup(args: CleanupArgs) -> Result<()> {
+#[allow(unused)]
+pub fn cleanup(_: CleanupArgs) -> Result<()> {
     let mount_pid = std::env::var("MOUNT_PID")?.parse::<u32>()?;
     switch_namespace(mount_pid)?;
 
-    let mountpoint = Path::new(&args.mountpoint);
-    cleanup_network(mountpoint).context("Failed to cleanup network")?;
-    for b in config::BIND_MOUNTS.iter().rev() {
-        let dir = mountpoint.join(b.strip_prefix('/').unwrap());
-        if dir.exists() {
-            nix::mount::umount2(&dir, nix::mount::MntFlags::MNT_DETACH)
-                .with_context(|| format!("Failed to unmount {}", dir.display()))?;
-        }
-    }
+    // let mountpoint = Path::new(&args.mountpoint);
+    // cleanup_network(mountpoint).context("Failed to cleanup network")?;
+    // for b in config::BIND_MOUNTS.iter().rev() {
+    //     let dir = mountpoint.join(b.strip_prefix('/').unwrap());
+    //     if dir.exists() {
+    //         nix::mount::umount2(&dir, nix::mount::MntFlags::MNT_DETACH)
+    //             .with_context(|| format!("Failed to unmount {}", dir.display()))?;
+    //     }
+    // }
     Ok(())
 }

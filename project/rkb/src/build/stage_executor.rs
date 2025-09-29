@@ -1,6 +1,8 @@
 use super::{config::ImageConfig, config::StageExecutorConfig};
 use crate::exec::Task;
-use crate::{overlayfs::MountConfig, registry::pull_or_get_image, run::exec_task};
+use crate::pull::pull_or_get_image;
+use crate::storage::full_image_ref;
+use crate::{overlayfs::MountConfig, run::exec_task};
 use anyhow::{Context, Result, bail};
 use dockerfile_parser::{
     ArgInstruction, BreakableStringComponent, CmdInstruction, CopyInstruction,
@@ -99,11 +101,9 @@ impl<'m> StageExecutor<'m> {
         let _from_flags = &from_instruction.flags;
         let image_parsed = &from_instruction.image_parsed;
 
-        // TODO: Handle from_flags
-        let img_ref = format!("{image_parsed}");
-        let rt = tokio::runtime::Runtime::new()?;
+        let img_ref = full_image_ref(&image_parsed.image, image_parsed.tag.as_ref());
 
-        let image = rt.block_on(async { pull_or_get_image(&img_ref).await })?;
+        let (_, layers) = pull_or_get_image(&img_ref, None::<String>)?;
 
         // add image alias mapping
         if let Some(alias) = &from_instruction.alias {
@@ -111,7 +111,7 @@ impl<'m> StageExecutor<'m> {
                 .insert(alias.content.clone(), img_ref.clone());
         }
 
-        for layer in image.layers.iter() {
+        for layer in layers.iter() {
             self.mount_config.lower_dir.push(layer.clone());
         }
 

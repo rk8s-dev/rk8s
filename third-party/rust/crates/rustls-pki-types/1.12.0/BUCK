@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustls-pki-types-vendor",
+    urls = ["https://static.crates.io/crates/rustls-pki-types/rustls-pki-types-1.12.0.crate"],
+    sha256 = "229a4a4c221013e7e1f1a043678c5cc39fe5171437c88fb47151a21e6f5b5c79",
+    type = "tar.gz",
+    strip_prefix = "rustls-pki-types-1.12.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustls-pki-types-1.12.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustls-pki-types",
+    srcs = [":rustls-pki-types-vendor"],
     crate = "rustls-pki-types",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustls-pki-types",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Shared types for the rustls PKI ecosystem",
         "CARGO_PKG_NAME": "rustls-pki-types",
@@ -33,5 +39,5 @@ cargo.rust_library(
         "web-time",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1"],
+    deps = ["//third-party/rust/crates/zeroize/1.8.1:zeroize"],
 )

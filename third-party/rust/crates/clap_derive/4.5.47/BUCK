@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "clap_derive-vendor",
+    urls = ["https://static.crates.io/crates/clap_derive/clap_derive-4.5.47.crate"],
+    sha256 = "bbfd7eae0b0f1a6e63d4b13c9c478de77c2eb546fba158ad50b4203dc24b9f9c",
+    type = "tar.gz",
+    strip_prefix = "clap_derive-4.5.47",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "clap_derive-4.5.47",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "clap_derive",
+    srcs = [":clap_derive-vendor"],
     crate = "clap_derive",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "clap_derive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Parse command line argument by defining a struct, derive crate.",
         "CARGO_PKG_NAME": "clap_derive",
@@ -27,13 +33,11 @@ cargo.rust_library(
     },
     features = ["default"],
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/heck/0.5.0:heck-0.5.0",
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/heck/0.5.0:heck",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

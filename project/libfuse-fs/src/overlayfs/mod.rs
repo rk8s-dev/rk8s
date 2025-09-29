@@ -23,6 +23,10 @@ use rfuse3::raw::reply::{
 };
 use rfuse3::raw::{Filesystem, Request, Session};
 use std::sync::{Arc, Weak};
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::trace;
 
 use rfuse3::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
 const SLASH_ASCII: char = '/';
@@ -2592,13 +2596,13 @@ pub async fn mount_fs(
 
     // Mount filesystem based on privilege flag and return the mount handle
     if !privileged {
-        println!("Mounting with unprivileged mode");
+        debug!("Mounting with unprivileged mode");
         Session::new(mount_options)
             .mount_with_unprivileged(logfs, mount_path)
             .await
             .expect("Unprivileged mount failed")
     } else {
-        println!("Mounting with privileged mode");
+        debug!("Mounting with privileged mode");
         Session::new(mount_options)
             .mount(logfs, mount_path)
             .await

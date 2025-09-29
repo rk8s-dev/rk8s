@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "object-vendor",
+    urls = ["https://static.crates.io/crates/object/object-0.36.7.crate"],
+    sha256 = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87",
+    type = "tar.gz",
+    strip_prefix = "object-0.36.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "object-0.36.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "object",
+    srcs = [":object-vendor"],
     crate = "object",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "object",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A unified interface for reading and writing object file formats.",
         "CARGO_PKG_NAME": "object",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "36",
         "CARGO_PKG_VERSION_PATCH": "7",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :object-0.36.7-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :object-build-script-run[out_dir])",
     },
     features = [
         "archive",
@@ -36,23 +42,20 @@ cargo.rust_library(
         "unaligned",
         "xcoff",
     ],
-    rustc_flags = ["@$(location :object-0.36.7-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :object-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5"],
+    deps = ["//third-party/rust/crates/memchr/2.7.5:memchr"],
 )
 
 cargo.rust_binary(
-    name = "object-0.36.7-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "object-build-script-build",
+    srcs = [":object-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "object",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A unified interface for reading and writing object file formats.",
         "CARGO_PKG_NAME": "object",
@@ -77,9 +80,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "object-0.36.7-build-script-run",
+    name = "object-build-script-run",
     package_name = "object",
-    buildscript_rule = ":object-0.36.7-build-script-build",
+    buildscript_rule = ":object-build-script-build",
     features = [
         "archive",
         "coff",
@@ -91,5 +94,5 @@ buildscript_run(
         "xcoff",
     ],
     version = "0.36.7",
-    local_manifest_dir = "**",
+    manifest_dir = ":object-vendor",
 )

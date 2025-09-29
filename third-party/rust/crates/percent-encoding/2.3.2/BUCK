@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "percent-encoding-vendor",
+    urls = ["https://static.crates.io/crates/percent-encoding/percent-encoding-2.3.2.crate"],
+    sha256 = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220",
+    type = "tar.gz",
+    strip_prefix = "percent-encoding-2.3.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "percent-encoding-2.3.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "percent-encoding",
+    srcs = [":percent-encoding-vendor"],
     crate = "percent-encoding",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "percent-encoding",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The rust-url developers",
         "CARGO_PKG_DESCRIPTION": "Percent encoding and decoding",
         "CARGO_PKG_NAME": "percent-encoding",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "cfg-if-vendor",
+    urls = ["https://static.crates.io/crates/cfg-if/cfg-if-1.0.3.crate"],
+    sha256 = "2fd1289c04a9ea8cb22300a459a72a385d7c73d3259e2ed7dcb2af674838cfa9",
+    type = "tar.gz",
+    strip_prefix = "cfg-if-1.0.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "cfg-if-1.0.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "cfg-if",
+    srcs = [":cfg-if-vendor"],
     crate = "cfg-if",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "cfg-if",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "A macro to ergonomically define an item depending on a large number of #[cfg]\nparameters. Structured like an if-else chain, the first matching branch is the\nitem that gets emitted.\n",
         "CARGO_PKG_NAME": "cfg-if",

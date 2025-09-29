@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "atoi-vendor",
+    urls = ["https://static.crates.io/crates/atoi/atoi-2.0.0.crate"],
+    sha256 = "f28d99ec8bfea296261ca1af174f24225171fea9664ba9003cbebee704810528",
+    type = "tar.gz",
+    strip_prefix = "atoi-2.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "atoi-2.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "atoi",
+    srcs = [":atoi-vendor"],
     crate = "atoi",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "atoi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Markus Klein",
         "CARGO_PKG_DESCRIPTION": "Parse integers directly from `[u8]` slices in safe code",
         "CARGO_PKG_NAME": "atoi",
@@ -29,8 +35,6 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/num-traits/0.2.19:num-traits"],
 )

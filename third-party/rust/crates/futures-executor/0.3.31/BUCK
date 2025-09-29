@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "futures-executor-vendor",
+    urls = ["https://static.crates.io/crates/futures-executor/futures-executor-0.3.31.crate"],
+    sha256 = "1e28d1d997f585e54aebc3f97d39e72338912123a67330d723fdbb564d646c9f",
+    type = "tar.gz",
+    strip_prefix = "futures-executor-0.3.31",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "futures-executor-0.3.31",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "futures-executor",
+    srcs = [":futures-executor-vendor"],
     crate = "futures-executor",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "futures-executor",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Executors for asynchronous tasks based on the futures-rs library.\n",
         "CARGO_PKG_NAME": "futures-executor",
@@ -29,10 +35,10 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_task": "//third-party/rust/crates/futures-task/0.3.31:futures-task-0.3.31",
-        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-task/0.3.31:futures-task",
+        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+    ],
 )

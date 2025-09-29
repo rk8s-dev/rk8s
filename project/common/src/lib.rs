@@ -88,10 +88,11 @@ pub struct PodTask {
     pub kind: String,
     pub metadata: ObjectMeta,
     pub spec: PodSpec,
+    #[serde(default)]
     pub status: PodStatus,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct PodStatus {
     #[serde(rename = "podIP")]
     pub pod_ip: Option<String>,

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tokio-native-tls-vendor",
+    urls = ["https://static.crates.io/crates/tokio-native-tls/tokio-native-tls-0.3.1.crate"],
+    sha256 = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2",
+    type = "tar.gz",
+    strip_prefix = "tokio-native-tls-0.3.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tokio-native-tls-0.3.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tokio-native-tls",
+    srcs = [":tokio-native-tls-vendor"],
     crate = "tokio-native-tls",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tokio-native-tls",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "An implementation of TLS/SSL streams for Tokio using native-tls giving an implementation of TLS\nfor nonblocking I/O streams.\n",
         "CARGO_PKG_NAME": "tokio-native-tls",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "native_tls": "//third-party/rust/crates/native-tls/0.2.14:native-tls-0.2.14",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1"],
+    deps = [
+        "//third-party/rust/crates/native-tls/0.2.14:native-tls",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+    ],
 )

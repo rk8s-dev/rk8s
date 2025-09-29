@@ -26,7 +26,6 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
     let args = Args::parse();
 
     let mut mount_handle = mount_fs(

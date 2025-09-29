@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        PROFILE: ${PROFILE:-debug}
         OCI_REGISTRY_PORT: ${OCI_REGISTRY_PORT}
         OCI_REGISTRY_ROOTDIR: ${OCI_REGISTRY_ROOTDIR}
     restart: unless-stopped
@@ -12,6 +13,8 @@ services:
     volumes:
       - registry_data:${OCI_REGISTRY_ROOTDIR}
     environment:
+      PROFILE: ${PROFILE}
+
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
 
       OCI_REGISTRY_URL: ${OCI_REGISTRY_URL}
@@ -20,10 +23,12 @@ services:
       OCI_REGISTRY_ROOTDIR: ${OCI_REGISTRY_ROOTDIR}
       OCI_REGISTRY_PUBLIC_URL: ${OCI_REGISTRY_PUBLIC_URL}
 
-      PASSWORD_SALT: ${PASSWORD_SALT}
       JWT_SECRET: ${JWT_SECRET}
       JWT_LIFETIME_SECONDS: ${JWT_LIFETIME_SECONDS}
       RUST_LOG: ${RUST_LOG}
+
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
     depends_on:
       - db
 

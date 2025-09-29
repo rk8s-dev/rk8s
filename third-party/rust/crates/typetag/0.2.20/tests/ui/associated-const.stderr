@@ -1,5 +1,0 @@
-error: typetag trait with associated const is not supported yet
- --> tests/ui/associated-const.rs:3:5
-  |
-3 |     const ASSOC: u8;
-  |     ^^^^^^^^^^^^^^^^

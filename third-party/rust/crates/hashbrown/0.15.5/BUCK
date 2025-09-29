@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hashbrown-vendor",
+    urls = ["https://static.crates.io/crates/hashbrown/hashbrown-0.15.5.crate"],
+    sha256 = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1",
+    type = "tar.gz",
+    strip_prefix = "hashbrown-0.15.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hashbrown-0.15.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hashbrown",
+    srcs = [":hashbrown-vendor"],
     crate = "hashbrown",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "hashbrown",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Amanieu d'Antras <amanieu@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A Rust port of Google's SwissTable hash map",
         "CARGO_PKG_NAME": "hashbrown",
@@ -33,12 +39,10 @@ cargo.rust_library(
         "inline-more",
         "raw-entry",
     ],
-    named_deps = {
-        "allocator_api2": "//third-party/rust/crates/allocator-api2/0.2.21:allocator-api2-0.2.21",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/equivalent/1.0.2:equivalent-1.0.2",
-        "//third-party/rust/crates/foldhash/0.1.5:foldhash-0.1.5",
+        "//third-party/rust/crates/allocator-api2/0.2.21:allocator-api2",
+        "//third-party/rust/crates/equivalent/1.0.2:equivalent",
+        "//third-party/rust/crates/foldhash/0.1.5:foldhash",
     ],
 )

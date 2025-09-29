@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustls-native-certs-vendor",
+    urls = ["https://static.crates.io/crates/rustls-native-certs/rustls-native-certs-0.6.3.crate"],
+    sha256 = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00",
+    type = "tar.gz",
+    strip_prefix = "rustls-native-certs-0.6.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustls-native-certs-0.6.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustls-native-certs",
+    srcs = [":rustls-native-certs-vendor"],
     crate = "rustls-native-certs",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustls-native-certs",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "rustls-native-certs allows rustls to use the platform native certificate store",
         "CARGO_PKG_NAME": "rustls-native-certs",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "openssl_probe": "//third-party/rust/crates/openssl-probe/0.1.6:openssl-probe-0.1.6",
-        "rustls_pemfile": "//third-party/rust/crates/rustls-pemfile/1.0.4:rustls-pemfile-1.0.4",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/openssl-probe/0.1.6:openssl-probe",
+        "//third-party/rust/crates/rustls-pemfile/1.0.4:rustls-pemfile",
+    ],
 )

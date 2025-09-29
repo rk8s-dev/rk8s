@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "num-traits-vendor",
+    urls = ["https://static.crates.io/crates/num-traits/num-traits-0.2.19.crate"],
+    sha256 = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841",
+    type = "tar.gz",
+    strip_prefix = "num-traits-0.2.19",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "num-traits-0.2.19",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "num-traits",
+    srcs = [":num-traits-vendor"],
     crate = "num-traits",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "num-traits",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Numeric traits for generic mathematics",
         "CARGO_PKG_NAME": "num-traits",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "2",
         "CARGO_PKG_VERSION_PATCH": "19",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :num-traits-0.2.19-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :num-traits-build-script-run[out_dir])",
     },
     features = [
         "default",
@@ -32,23 +38,20 @@ cargo.rust_library(
         "libm",
         "std",
     ],
-    rustc_flags = ["@$(location :num-traits-0.2.19-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :num-traits-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libm/0.2.15:libm-0.2.15"],
+    deps = ["//third-party/rust/crates/libm/0.2.15:libm"],
 )
 
 cargo.rust_binary(
-    name = "num-traits-0.2.19-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "num-traits-build-script-build",
+    srcs = [":num-traits-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "num-traits",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Numeric traits for generic mathematics",
         "CARGO_PKG_NAME": "num-traits",
@@ -66,13 +69,13 @@ cargo.rust_binary(
         "std",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg-1.5.0"],
+    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "num-traits-0.2.19-build-script-run",
+    name = "num-traits-build-script-run",
     package_name = "num-traits",
-    buildscript_rule = ":num-traits-0.2.19-build-script-build",
+    buildscript_rule = ":num-traits-build-script-build",
     features = [
         "default",
         "i128",
@@ -80,5 +83,5 @@ buildscript_run(
         "std",
     ],
     version = "0.2.19",
-    local_manifest_dir = "**",
+    manifest_dir = ":num-traits-vendor",
 )

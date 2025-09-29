@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "fixedbitset-vendor",
+    urls = ["https://static.crates.io/crates/fixedbitset/fixedbitset-0.5.7.crate"],
+    sha256 = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99",
+    type = "tar.gz",
+    strip_prefix = "fixedbitset-0.5.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "fixedbitset-0.5.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "fixedbitset",
+    srcs = [":fixedbitset-vendor"],
     crate = "fixedbitset",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "fixedbitset",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "bluss",
         "CARGO_PKG_DESCRIPTION": "FixedBitSet is a simple bitset collection",
         "CARGO_PKG_NAME": "fixedbitset",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "bumpalo-vendor",
+    urls = ["https://static.crates.io/crates/bumpalo/bumpalo-3.19.0.crate"],
+    sha256 = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43",
+    type = "tar.gz",
+    strip_prefix = "bumpalo-3.19.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "bumpalo-3.19.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "bumpalo",
+    srcs = [":bumpalo-vendor"],
     crate = "bumpalo",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "bumpalo",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Nick Fitzgerald <fitzgen@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A fast bump allocation arena for Rust.",
         "CARGO_PKG_NAME": "bumpalo",

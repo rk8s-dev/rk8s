@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "futures-util-vendor",
+    urls = ["https://static.crates.io/crates/futures-util/futures-util-0.3.31.crate"],
+    sha256 = "9fa08315bb612088cc391249efdc3bc77536f16c91f6cf495e6fbe85b20a4a81",
+    type = "tar.gz",
+    strip_prefix = "futures-util-0.3.31",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "futures-util-0.3.31",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "futures-util",
+    srcs = [":futures-util-vendor"],
     crate = "futures-util",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "futures-util",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Common utilities and extension traits for the futures-rs library.\n",
         "CARGO_PKG_NAME": "futures-util",
@@ -41,19 +47,17 @@ cargo.rust_library(
         "slab",
         "std",
     ],
-    named_deps = {
-        "futures_channel": "//third-party/rust/crates/futures-channel/0.3.31:futures-channel-0.3.31",
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_io": "//third-party/rust/crates/futures-io/0.3.31:futures-io-0.3.31",
-        "futures_macro": "//third-party/rust/crates/futures-macro/0.3.31:futures-macro-0.3.31",
-        "futures_sink": "//third-party/rust/crates/futures-sink/0.3.31:futures-sink-0.3.31",
-        "futures_task": "//third-party/rust/crates/futures-task/0.3.31:futures-task-0.3.31",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-        "pin_utils": "//third-party/rust/crates/pin-utils/0.1.0:pin-utils-0.1.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5",
-        "//third-party/rust/crates/slab/0.4.11:slab-0.4.11",
+        "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-io/0.3.31:futures-io",
+        "//third-party/rust/crates/futures-macro/0.3.31:futures-macro",
+        "//third-party/rust/crates/futures-sink/0.3.31:futures-sink",
+        "//third-party/rust/crates/futures-task/0.3.31:futures-task",
+        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/pin-utils/0.1.0:pin-utils",
+        "//third-party/rust/crates/slab/0.4.11:slab",
     ],
 )

@@ -16,6 +16,8 @@ use statx::StatExt;
 use std::cmp;
 use std::io::Result;
 use std::ops::DerefMut;
+use tracing::error;
+use tracing::{debug, warn};
 
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::{
@@ -738,8 +740,13 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let dir_file = dir.get_file()?;
         let (handle_arc, st) = self.open_file_and_handle(&dir_file, name).await?;
         let id = InodeId::from_stat(&st);
-        // println!("do_lookup: parent: {}, name: {}, handle_arc: {:?}, id: {:?}",
-        //     parent, name.to_string_lossy(), handle_arc, id);
+        debug!(
+            "do_lookup: parent: {}, name: {}, handle_arc: {:?}, id: {:?}",
+            parent,
+            name.to_string_lossy(),
+            handle_arc,
+            id
+        );
 
         let mut found = None;
         'search: loop {

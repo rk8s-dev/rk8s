@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "netlink-proto-vendor",
+    urls = ["https://static.crates.io/crates/netlink-proto/netlink-proto-0.11.5.crate"],
+    sha256 = "72452e012c2f8d612410d89eea01e2d9b56205274abb35d53f60200b2ec41d60",
+    type = "tar.gz",
+    strip_prefix = "netlink-proto-0.11.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "netlink-proto-0.11.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "netlink-proto",
+    srcs = [":netlink-proto-vendor"],
     crate = "netlink-proto",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "netlink-proto",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Corentin Henry <corentinhenry@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "async netlink protocol",
         "CARGO_PKG_NAME": "netlink-proto",
@@ -26,15 +32,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["tokio_socket"],
-    named_deps = {
-        "netlink_packet_core": "//third-party/rust/crates/netlink-packet-core/0.7.0:netlink-packet-core-0.7.0",
-        "netlink_sys": "//third-party/rust/crates/netlink-sys/0.8.7:netlink-sys-0.8.7",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/futures/0.3.31:futures-0.3.31",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/thiserror/2.0.16:thiserror-2.0.16",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/netlink-packet-core/0.7.0:netlink-packet-core",
+        "//third-party/rust/crates/netlink-sys/0.8.7:netlink-sys",
+        "//third-party/rust/crates/thiserror/2.0.16:thiserror",
     ],
 )

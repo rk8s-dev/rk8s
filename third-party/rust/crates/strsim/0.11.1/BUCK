@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "strsim-vendor",
+    urls = ["https://static.crates.io/crates/strsim/strsim-0.11.1.crate"],
+    sha256 = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f",
+    type = "tar.gz",
+    strip_prefix = "strsim-0.11.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "strsim-0.11.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "strsim",
+    srcs = [":strsim-vendor"],
     crate = "strsim",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "strsim",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Danny Guo <danny@dannyguo.com>:maxbachmann <oss@maxbachmann.de>",
         "CARGO_PKG_DESCRIPTION": "Implementations of string similarity metrics. Includes Hamming, Levenshtein,\nOSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.\n",
         "CARGO_PKG_NAME": "strsim",

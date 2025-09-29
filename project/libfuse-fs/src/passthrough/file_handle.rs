@@ -12,6 +12,7 @@ use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Arc;
 
+use tracing::error;
 use vmm_sys_util::fam::{FamStruct, FamStructWrapper};
 
 use super::EMPTY_CSTR;

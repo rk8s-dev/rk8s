@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustix-vendor",
+    urls = ["https://static.crates.io/crates/rustix/rustix-0.37.28.crate"],
+    sha256 = "519165d378b97752ca44bbe15047d5d3409e875f39327546b42ac81d7e18c1b6",
+    type = "tar.gz",
+    strip_prefix = "rustix-0.37.28",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustix-0.37.28",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustix",
+    srcs = [":rustix-vendor"],
     crate = "rustix",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rustix",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Gohman <dev@sunfishcode.online>:Jakub Konka <kubkon@jakubkonka.com>",
         "CARGO_PKG_DESCRIPTION": "Safe Rust bindings to POSIX/Unix/Linux/Winsock2-like syscalls",
         "CARGO_PKG_NAME": "rustix",
@@ -24,34 +30,31 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "37",
         "CARGO_PKG_VERSION_PATCH": "28",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :rustix-0.37.28-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rustix-build-script-run[out_dir])",
     },
     features = [
         "fs",
         "io-lifetimes",
         "std",
     ],
-    rustc_flags = ["@$(location :rustix-0.37.28-build-script-run[rustc_flags])"],
-    named_deps = {
-        "io_lifetimes": "//third-party/rust/crates/io-lifetimes/1.0.11:io-lifetimes-1.0.11",
-        "linux_raw_sys": "//third-party/rust/crates/linux-raw-sys/0.3.8:linux-raw-sys-0.3.8",
-    },
+    rustc_flags = ["@$(location :rustix-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/bitflags/1.3.2:bitflags-1.3.2"],
+    deps = [
+        "//third-party/rust/crates/bitflags/1.3.2:bitflags",
+        "//third-party/rust/crates/io-lifetimes/1.0.11:io-lifetimes",
+        "//third-party/rust/crates/linux-raw-sys/0.3.8:linux-raw-sys",
+    ],
 )
 
 cargo.rust_binary(
-    name = "rustix-0.37.28-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustix-build-script-build",
+    srcs = [":rustix-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rustix",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Dan Gohman <dev@sunfishcode.online>:Jakub Konka <kubkon@jakubkonka.com>",
         "CARGO_PKG_DESCRIPTION": "Safe Rust bindings to POSIX/Unix/Linux/Winsock2-like syscalls",
         "CARGO_PKG_NAME": "rustix",
@@ -71,14 +74,14 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "rustix-0.37.28-build-script-run",
+    name = "rustix-build-script-run",
     package_name = "rustix",
-    buildscript_rule = ":rustix-0.37.28-build-script-build",
+    buildscript_rule = ":rustix-build-script-build",
     features = [
         "fs",
         "io-lifetimes",
         "std",
     ],
     version = "0.37.28",
-    local_manifest_dir = "**",
+    manifest_dir = ":rustix-vendor",
 )

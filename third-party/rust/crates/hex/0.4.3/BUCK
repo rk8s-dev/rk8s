@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hex-vendor",
+    urls = ["https://static.crates.io/crates/hex/hex-0.4.3.crate"],
+    sha256 = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70",
+    type = "tar.gz",
+    strip_prefix = "hex-0.4.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hex-0.4.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hex",
+    srcs = [":hex-vendor"],
     crate = "hex",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "hex",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "KokaKiwi <kokakiwi@kokakiwi.net>",
         "CARGO_PKG_DESCRIPTION": "Encoding and decoding data into/from hexadecimal representation.",
         "CARGO_PKG_NAME": "hex",

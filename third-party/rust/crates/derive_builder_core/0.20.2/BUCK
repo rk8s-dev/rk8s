@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "derive_builder_core-vendor",
+    urls = ["https://static.crates.io/crates/derive_builder_core/derive_builder_core-0.20.2.crate"],
+    sha256 = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8",
+    type = "tar.gz",
+    strip_prefix = "derive_builder_core-0.20.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "derive_builder_core-0.20.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "derive_builder_core",
+    srcs = [":derive_builder_core-vendor"],
     crate = "derive_builder_core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "derive_builder_core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Colin Kiegel <kiegel@gmx.de>:Pascal Hertleif <killercup@gmail.com>:Jan-Erik Rediger <janerik@fnordig.de>:Ted Driggs <ted.driggs@outlook.com>",
         "CARGO_PKG_DESCRIPTION": "Internal helper library for the derive_builder crate.",
         "CARGO_PKG_NAME": "derive_builder_core",
@@ -26,13 +32,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["lib_has_std"],
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/darling/0.20.11:darling-0.20.11",
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/darling/0.20.11:darling",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

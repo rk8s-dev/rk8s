@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "pin-project-lite-vendor",
+    urls = ["https://static.crates.io/crates/pin-project-lite/pin-project-lite-0.2.16.crate"],
+    sha256 = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b",
+    type = "tar.gz",
+    strip_prefix = "pin-project-lite-0.2.16",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "pin-project-lite-0.2.16",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "pin-project-lite",
+    srcs = [":pin-project-lite-vendor"],
     crate = "pin-project-lite",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "pin-project-lite",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A lightweight version of pin-project written with declarative macros.\n",
         "CARGO_PKG_NAME": "pin-project-lite",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "enquote-vendor",
+    urls = ["https://static.crates.io/crates/enquote/enquote-1.1.0.crate"],
+    sha256 = "06c36cb11dbde389f4096111698d8b567c0720e3452fd5ac3e6b4e47e1939932",
+    type = "tar.gz",
+    strip_prefix = "enquote-1.1.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "enquote-1.1.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "enquote",
+    srcs = [":enquote-vendor"],
     crate = "enquote",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "enquote",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "reujab <reujab@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Quotes and unquotes strings",
         "CARGO_PKG_NAME": "enquote",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69"],
+    deps = ["//third-party/rust/crates/thiserror/1.0.69:thiserror"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "redox_syscall-vendor",
+    urls = ["https://static.crates.io/crates/redox_syscall/redox_syscall-0.5.17.crate"],
+    sha256 = "5407465600fb0548f1442edf71dd20683c6ed326200ace4b1ef0763521bb3b77",
+    type = "tar.gz",
+    strip_prefix = "redox_syscall-0.5.17",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "redox_syscall-0.5.17",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "redox_syscall",
+    srcs = [":redox_syscall-vendor"],
     crate = "redox_syscall",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "redox_syscall",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jeremy Soller <jackpot51@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A Rust library to access raw Redox system calls",
         "CARGO_PKG_NAME": "redox_syscall",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "userspace",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4"],
+    deps = ["//third-party/rust/crates/bitflags/2.9.4:bitflags"],
 )

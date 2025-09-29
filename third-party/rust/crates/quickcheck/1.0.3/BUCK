@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "quickcheck-vendor",
+    urls = ["https://static.crates.io/crates/quickcheck/quickcheck-1.0.3.crate"],
+    sha256 = "588f6378e4dd99458b60ec275b4477add41ce4fa9f64dcba6f15adccb19b50d6",
+    type = "tar.gz",
+    strip_prefix = "quickcheck-1.0.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "quickcheck-1.0.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "quickcheck",
+    srcs = [":quickcheck-vendor"],
     crate = "quickcheck",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "quickcheck",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Automatic property based testing with shrinking.",
         "CARGO_PKG_NAME": "quickcheck",
@@ -34,8 +40,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/env_logger/0.8.4:env_logger-0.8.4",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/rand/0.8.5:rand-0.8.5",
+        "//third-party/rust/crates/env_logger/0.8.4:env_logger",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/rand/0.8.5:rand",
     ],
 )

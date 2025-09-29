@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustc-hash-vendor",
+    urls = ["https://static.crates.io/crates/rustc-hash/rustc-hash-2.1.1.crate"],
+    sha256 = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d",
+    type = "tar.gz",
+    strip_prefix = "rustc-hash-2.1.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustc-hash-2.1.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustc-hash",
+    srcs = [":rustc-hash-vendor"],
     crate = "rustc-hash",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustc-hash",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "A speedy, non-cryptographic hashing algorithm used by rustc",
         "CARGO_PKG_NAME": "rustc-hash",

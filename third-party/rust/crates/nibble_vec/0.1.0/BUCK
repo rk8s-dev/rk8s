@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "nibble_vec-vendor",
+    urls = ["https://static.crates.io/crates/nibble_vec/nibble_vec-0.1.0.crate"],
+    sha256 = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43",
+    type = "tar.gz",
+    strip_prefix = "nibble_vec-0.1.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "nibble_vec-0.1.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "nibble_vec",
+    srcs = [":nibble_vec-vendor"],
     crate = "nibble_vec",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "nibble_vec",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Michael Sproul <micsproul@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Vector data-structure for half-byte values.",
         "CARGO_PKG_NAME": "nibble_vec",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/smallvec/1.15.1:smallvec-1.15.1"],
+    deps = ["//third-party/rust/crates/smallvec/1.15.1:smallvec"],
 )

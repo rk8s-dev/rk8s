@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-std-vendor",
+    urls = ["https://static.crates.io/crates/async-std/async-std-1.13.2.crate"],
+    sha256 = "2c8e079a4ab67ae52b7403632e4618815d6db36d2a010cfe41b02c1b1578f93b",
+    type = "tar.gz",
+    strip_prefix = "async-std-1.13.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-std-1.13.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-std",
+    srcs = [":async-std-vendor"],
     crate = "async-std",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "async-std",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>:Yoshua Wuyts <yoshuawuyts@gmail.com>:Friedel Ziegelmayer <me@dignifiedquire.com>:Contributors to async-std",
         "CARGO_PKG_DESCRIPTION": "Deprecated in favor of `smol` - Async version of the Rust standard library",
         "CARGO_PKG_NAME": "async-std",
@@ -48,24 +54,22 @@ cargo.rust_library(
         "std",
         "wasm-bindgen-futures",
     ],
-    named_deps = {
-        "async_channel": "//third-party/rust/crates/async-channel/1.9.0:async-channel-1.9.0",
-        "async_global_executor": "//third-party/rust/crates/async-global-executor/2.4.1:async-global-executor-2.4.1",
-        "async_io": "//third-party/rust/crates/async-io/2.6.0:async-io-2.6.0",
-        "async_lock": "//third-party/rust/crates/async-lock/3.4.1:async-lock-3.4.1",
-        "crossbeam_utils": "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils-0.8.21",
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_io": "//third-party/rust/crates/futures-io/0.3.31:futures-io-0.3.31",
-        "futures_lite": "//third-party/rust/crates/futures-lite/2.6.1:futures-lite-2.6.1",
-        "kv_log_macro": "//third-party/rust/crates/kv-log-macro/1.0.7:kv-log-macro-1.0.7",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-        "pin_utils": "//third-party/rust/crates/pin-utils/0.1.0:pin-utils-0.1.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
-        "//third-party/rust/crates/slab/0.4.11:slab-0.4.11",
+        "//third-party/rust/crates/async-channel/1.9.0:async-channel",
+        "//third-party/rust/crates/async-global-executor/2.4.1:async-global-executor",
+        "//third-party/rust/crates/async-io/2.6.0:async-io",
+        "//third-party/rust/crates/async-lock/3.4.1:async-lock",
+        "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-io/0.3.31:futures-io",
+        "//third-party/rust/crates/futures-lite/2.6.1:futures-lite",
+        "//third-party/rust/crates/kv-log-macro/1.0.7:kv-log-macro",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/pin-utils/0.1.0:pin-utils",
+        "//third-party/rust/crates/slab/0.4.11:slab",
     ],
 )

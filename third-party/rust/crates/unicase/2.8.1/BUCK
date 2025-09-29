@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "unicase-vendor",
+    urls = ["https://static.crates.io/crates/unicase/unicase-2.8.1.crate"],
+    sha256 = "75b844d17643ee918803943289730bec8aac480150456169e647ed0b576ba539",
+    type = "tar.gz",
+    strip_prefix = "unicase-2.8.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "unicase-2.8.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "unicase",
+    srcs = [":unicase-vendor"],
     crate = "unicase",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "unicase",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "A case-insensitive wrapper around strings.",
         "CARGO_PKG_NAME": "unicase",

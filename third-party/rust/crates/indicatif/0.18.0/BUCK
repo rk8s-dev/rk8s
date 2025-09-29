@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "indicatif-vendor",
+    urls = ["https://static.crates.io/crates/indicatif/indicatif-0.18.0.crate"],
+    sha256 = "70a646d946d06bedbbc4cac4c218acf4bbf2d87757a784857025f4d447e4e1cd",
+    type = "tar.gz",
+    strip_prefix = "indicatif-0.18.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "indicatif-0.18.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "indicatif",
+    srcs = [":indicatif-vendor"],
     crate = "indicatif",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "indicatif",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A progress bar and cli reporting library for Rust",
         "CARGO_PKG_NAME": "indicatif",
@@ -29,11 +35,11 @@ cargo.rust_library(
         "default",
         "unicode-width",
     ],
-    named_deps = {
-        "portable_atomic": "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic-1.11.1",
-        "unicode_width": "//third-party/rust/crates/unicode-width/0.2.1:unicode-width-0.2.1",
-        "unit_prefix": "//third-party/rust/crates/unit-prefix/0.5.1:unit-prefix-0.5.1",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/console/0.16.1:console-0.16.1"],
+    deps = [
+        "//third-party/rust/crates/console/0.16.1:console",
+        "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic",
+        "//third-party/rust/crates/unicode-width/0.2.1:unicode-width",
+        "//third-party/rust/crates/unit-prefix/0.5.1:unit-prefix",
+    ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "anstyle-wincon-vendor",
+    urls = ["https://static.crates.io/crates/anstyle-wincon/anstyle-wincon-3.0.10.crate"],
+    sha256 = "3e0633414522a32ffaac8ac6cc8f748e090c5717661fddeea04219e2344f5f2a",
+    type = "tar.gz",
+    strip_prefix = "anstyle-wincon-3.0.10",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "anstyle-wincon-3.0.10",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "anstyle-wincon",
+    srcs = [":anstyle-wincon-vendor"],
     crate = "anstyle-wincon",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "anstyle-wincon",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Styling legacy Windows terminals",
         "CARGO_PKG_NAME": "anstyle-wincon",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/anstyle/1.0.11:anstyle-1.0.11"],
+    deps = ["//third-party/rust/crates/anstyle/1.0.11:anstyle"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tower-vendor",
+    urls = ["https://static.crates.io/crates/tower/tower-0.5.2.crate"],
+    sha256 = "d039ad9159c98b70ecfd540b2573b97f7f52c3e8d9f8ad57a24b916a536975f9",
+    type = "tar.gz",
+    strip_prefix = "tower-0.5.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tower-0.5.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tower",
+    srcs = [":tower-vendor"],
     crate = "tower",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tower",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tower Maintainers <team@tower-rs.com>",
         "CARGO_PKG_DESCRIPTION": "Tower is a library of modular and reusable components for building robust\nclients and servers.\n",
         "CARGO_PKG_NAME": "tower",
@@ -48,20 +54,18 @@ cargo.rust_library(
         "tracing",
         "util",
     ],
-    named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-        "tokio_util": "//third-party/rust/crates/tokio-util/0.7.16:tokio-util-0.7.16",
-        "tower_layer": "//third-party/rust/crates/tower-layer/0.3.3:tower-layer-0.3.3",
-        "tower_service": "//third-party/rust/crates/tower-service/0.3.3:tower-service-0.3.3",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/indexmap/2.11.4:indexmap-2.11.4",
-        "//third-party/rust/crates/slab/0.4.11:slab-0.4.11",
-        "//third-party/rust/crates/sync_wrapper/1.0.2:sync_wrapper-1.0.2",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
-        "//third-party/rust/crates/tracing/0.1.41:tracing-0.1.41",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/indexmap/2.11.4:indexmap",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/slab/0.4.11:slab",
+        "//third-party/rust/crates/sync_wrapper/1.0.2:sync_wrapper",
+        "//third-party/rust/crates/tokio-util/0.7.16:tokio-util",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+        "//third-party/rust/crates/tower-layer/0.3.3:tower-layer",
+        "//third-party/rust/crates/tower-service/0.3.3:tower-service",
+        "//third-party/rust/crates/tracing/0.1.41:tracing",
     ],
 )

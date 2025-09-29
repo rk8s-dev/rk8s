@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "http-auth-vendor",
+    urls = ["https://static.crates.io/crates/http-auth/http-auth-0.1.10.crate"],
+    sha256 = "150fa4a9462ef926824cf4519c84ed652ca8f4fbae34cb8af045b5cbcaf98822",
+    type = "tar.gz",
+    strip_prefix = "http-auth-0.1.10",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "http-auth-0.1.10",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "http-auth",
+    srcs = [":http-auth-vendor"],
     crate = "http-auth",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "http-auth",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "HTTP authentication: parse challenge lists, respond to Basic and Digest challenges. Likely to be extended with server support and additional auth schemes.",
         "CARGO_PKG_NAME": "http-auth",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5"],
+    deps = ["//third-party/rust/crates/memchr/2.7.5:memchr"],
 )

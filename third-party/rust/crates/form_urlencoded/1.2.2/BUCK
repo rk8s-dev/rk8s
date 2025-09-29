@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "form_urlencoded-vendor",
+    urls = ["https://static.crates.io/crates/form_urlencoded/form_urlencoded-1.2.2.crate"],
+    sha256 = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf",
+    type = "tar.gz",
+    strip_prefix = "form_urlencoded-1.2.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "form_urlencoded-1.2.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "form_urlencoded",
+    srcs = [":form_urlencoded-vendor"],
     crate = "form_urlencoded",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "form_urlencoded",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The rust-url developers",
         "CARGO_PKG_DESCRIPTION": "Parser and serializer for the application/x-www-form-urlencoded syntax, as used by HTML forms.",
         "CARGO_PKG_NAME": "form_urlencoded",
@@ -30,8 +36,6 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "percent_encoding": "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding-2.3.2",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding"],
 )

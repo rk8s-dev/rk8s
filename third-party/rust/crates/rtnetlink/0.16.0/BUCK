@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rtnetlink-vendor",
+    urls = ["https://static.crates.io/crates/rtnetlink/rtnetlink-0.16.0.crate"],
+    sha256 = "3cb5850b5aa2c9c0ae44f157694bbe85107a2e13d76eb3178d0e3ee96c410f57",
+    type = "tar.gz",
+    strip_prefix = "rtnetlink-0.16.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rtnetlink-0.16.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rtnetlink",
+    srcs = [":rtnetlink-vendor"],
     crate = "rtnetlink",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rtnetlink",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Corentin Henry <corentinhenry@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "manipulate linux networking resources via netlink",
         "CARGO_PKG_NAME": "rtnetlink",
@@ -30,19 +36,17 @@ cargo.rust_library(
         "tokio",
         "tokio_socket",
     ],
-    named_deps = {
-        "netlink_packet_core": "//third-party/rust/crates/netlink-packet-core/0.7.0:netlink-packet-core-0.7.0",
-        "netlink_packet_route": "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route-0.22.0",
-        "netlink_packet_utils": "//third-party/rust/crates/netlink-packet-utils/0.5.2:netlink-packet-utils-0.5.2",
-        "netlink_proto": "//third-party/rust/crates/netlink-proto/0.11.5:netlink-proto-0.11.5",
-        "netlink_sys": "//third-party/rust/crates/netlink-sys/0.8.7:netlink-sys-0.8.7",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/futures/0.3.31:futures-0.3.31",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/nix/0.29.0:nix-0.29.0",
-        "//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
+        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/netlink-packet-core/0.7.0:netlink-packet-core",
+        "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route",
+        "//third-party/rust/crates/netlink-packet-utils/0.5.2:netlink-packet-utils",
+        "//third-party/rust/crates/netlink-proto/0.11.5:netlink-proto",
+        "//third-party/rust/crates/netlink-sys/0.8.7:netlink-sys",
+        "//third-party/rust/crates/nix/0.29.0:nix",
+        "//third-party/rust/crates/thiserror/1.0.69:thiserror",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
     ],
 )

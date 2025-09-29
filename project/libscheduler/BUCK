@@ -3,18 +3,21 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+filegroup(
+    name = "libscheduler-vendor",
+    srcs = glob(["**/**"]),
+    out = "vendor",
+)
+
 cargo.rust_library(
     name = "libscheduler",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    srcs = [":libscheduler-vendor"],
     crate = "libscheduler",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "libscheduler",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "rk8s-dev team",
         "CARGO_PKG_DESCRIPTION": "Scheduler library for rk8s",
         "CARGO_PKG_NAME": "libscheduler",
@@ -25,19 +28,17 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "etcd_client": "//third-party/rust/crates/etcd-client/0.16.1:etcd-client-0.16.1",
-    },
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_yaml/0.9.34+deprecated:serde_yaml-0.9.34+deprecated",
-        "//third-party/rust/crates/serial_test/3.2.0:serial_test-3.2.0",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
-        "//third-party/rust/crates/uuid/1.18.1:uuid-1.18.1",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/etcd-client/0.16.1:etcd-client",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_yaml/0.9.34+deprecated:serde_yaml",
+        "//third-party/rust/crates/serial_test/3.2.0:serial_test",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+        "//third-party/rust/crates/uuid/1.18.1:uuid",
     ],
 )

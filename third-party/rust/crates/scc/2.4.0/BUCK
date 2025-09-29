@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "scc-vendor",
+    urls = ["https://static.crates.io/crates/scc/scc-2.4.0.crate"],
+    sha256 = "46e6f046b7fef48e2660c57ed794263155d713de679057f2d0c169bfc6e756cc",
+    type = "tar.gz",
+    strip_prefix = "scc-2.4.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "scc-2.4.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "scc",
+    srcs = [":scc-vendor"],
     crate = "scc",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "scc",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "wvwwvwwv <wvwwvwwv@me.com>",
         "CARGO_PKG_DESCRIPTION": "High-performance containers and utilities for concurrent and asynchronous programming",
         "CARGO_PKG_NAME": "scc",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/sdd/3.0.10:sdd-3.0.10"],
+    deps = ["//third-party/rust/crates/sdd/3.0.10:sdd"],
 )

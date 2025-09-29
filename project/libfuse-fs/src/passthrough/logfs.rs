@@ -45,7 +45,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         offset: u64,
         lock_owner: u64,
     ) -> Result<ReplyDirectoryPlus<Self::DirEntryPlusStream<'_>>> {
-        println!(
+        debug!(
             "fs:{}, [readdirplus]: parent: {:?}, fh: {}, offset: {}",
             self.fsname, parent, fh, offset
         );
@@ -55,11 +55,11 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
             .await
         {
             Ok(reply) => {
-                // println!("readdirplus result:{:?}",reply.entries.);
+                // debug!("readdirplus result:{:?}",reply.entries.);
                 Ok(reply)
             }
             Err(e) => {
-                println!("fs:{}, readdirplus error: {:?}", self.fsname, e);
+                debug!("fs:{}, readdirplus error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -67,40 +67,40 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
 
     /// initialize filesystem. Called before any other filesystem method.
     async fn init(&self, req: Request) -> Result<ReplyInit> {
-        println!("fs:{}, init ", self.fsname);
+        debug!("fs:{}, init ", self.fsname);
         match self.inner.init(req).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, init error: {:?}", self.fsname, e);
+                debug!("fs:{}, init error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn destroy(&self, req: Request) {
-        println!("fs:{}, destroy ", self.fsname);
+        debug!("fs:{}, destroy ", self.fsname);
         self.inner.destroy(req).await
     }
 
     async fn lookup(&self, req: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {
-        println!(
+        debug!(
             "fs:{}, lookup: parent: {:?}, name: {:?}",
             self.fsname, parent, name
         );
         match self.inner.lookup(req, parent, name).await {
             Ok(reply) => {
-                println!("look up result :{reply:?}");
+                debug!("look up result :{reply:?}");
                 Ok(reply)
             }
             Err(e) => {
-                println!("fs:{}, lookup error: {:?}", self.fsname, e);
+                debug!("fs:{}, lookup error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn forget(&self, req: Request, inode: Inode, nlookup: u64) {
-        println!(
+        debug!(
             "fs:{}, forget: inode: {:?}, nlookup: {}",
             self.fsname, inode, nlookup
         );
@@ -114,17 +114,17 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         fh: Option<u64>,
         flags: u32,
     ) -> Result<ReplyAttr> {
-        println!(
+        debug!(
             "fs:{}, getattr: inode: {:?}, fh: {:?}, flags: {}",
             self.fsname, inode, fh, flags
         );
         match self.inner.getattr(req, inode, fh, flags).await {
             Ok(reply) => {
-                println!("getattr result :{reply:?}");
+                debug!("getattr result :{reply:?}");
                 Ok(reply)
             }
             Err(e) => {
-                println!("fs:{}, getattr error: {:?}", self.fsname, e);
+                debug!("fs:{}, getattr error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -181,7 +181,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         match self.inner.mknod(req, parent, name, mode, rdev).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, mknod error: {:?}", self.fsname, e);
+                debug!("fs:{}, mknod error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -195,42 +195,42 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         mode: u32,
         umask: u32,
     ) -> Result<ReplyEntry> {
-        println!(
+        debug!(
             "fs:{}, mkdir: parent: {:?}, name: {:?}, mode: {}, umask: {}",
             self.fsname, parent, name, mode, umask
         );
         match self.inner.mkdir(req, parent, name, mode, umask).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, mkdir error: {:?}", self.fsname, e);
+                debug!("fs:{}, mkdir error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn unlink(&self, req: Request, parent: Inode, name: &OsStr) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, unlink: parent: {:?}, name: {:?}",
             self.fsname, parent, name
         );
         match self.inner.unlink(req, parent, name).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, unlink error: {:?}", self.fsname, e);
+                debug!("fs:{}, unlink error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn rmdir(&self, req: Request, parent: Inode, name: &OsStr) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, rmdir: parent: {:?}, name: {:?}",
             self.fsname, parent, name
         );
         match self.inner.rmdir(req, parent, name).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, rmdir error: {:?}", self.fsname, e);
+                debug!("fs:{}, rmdir error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -244,7 +244,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         new_parent: Inode,
         new_name: &OsStr,
     ) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, rename: parent: {:?}, name: {:?}, new_parent: {:?}, new_name: {:?}",
             self.fsname, parent, name, new_parent, new_name
         );
@@ -255,7 +255,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, rename error: {:?}", self.fsname, e);
+                debug!("fs:{}, rename error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -268,28 +268,28 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         new_parent: Inode,
         new_name: &OsStr,
     ) -> Result<ReplyEntry> {
-        println!(
+        debug!(
             "fs:{}, link: inode: {:?}, new_parent: {:?}, new_name: {:?}",
             self.fsname, inode, new_parent, new_name
         );
         match self.inner.link(req, inode, new_parent, new_name).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, link error: {:?}", self.fsname, e);
+                debug!("fs:{}, link error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn open(&self, req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
-        println!(
+        debug!(
             "fs:{}, open: inode: {:?}, flags: {}",
             self.fsname, inode, flags
         );
         match self.inner.open(req, inode, flags).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, open error: {:?}", self.fsname, e);
+                debug!("fs:{}, open error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -303,14 +303,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         offset: u64,
         size: u32,
     ) -> Result<ReplyData> {
-        println!(
+        debug!(
             "fs:{}, read: inode: {:?}, fh: {}, offset: {}, size: {}",
             self.fsname, inode, fh, offset, size
         );
         match self.inner.read(req, inode, fh, offset, size).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, read error: {:?}", self.fsname, e);
+                debug!("fs:{}, read error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -326,7 +326,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         write_flags: u32,
         flags: u32,
     ) -> Result<ReplyWrite> {
-        println!(
+        debug!(
             "fs:{}, write: inode: {:?}, fh: {}, offset: {}, size: {}",
             self.fsname,
             inode,
@@ -341,18 +341,18 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, write error: {:?}", self.fsname, e);
+                debug!("fs:{}, write error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn statfs(&self, req: Request, inode: Inode) -> Result<ReplyStatFs> {
-        println!("fs:{}, statfs: inode: {:?}", self.fsname, inode);
+        debug!("fs:{}, statfs: inode: {:?}", self.fsname, inode);
         match self.inner.statfs(req, inode).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, statfs error: {:?}", self.fsname, e);
+                debug!("fs:{}, statfs error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -367,7 +367,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         lock_owner: u64,
         flush: bool,
     ) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, release: inode: {:?}, fh: {}, flags: {}, lock_owner: {}, flush: {}",
             self.fsname, inode, fh, flags, lock_owner, flush
         );
@@ -378,21 +378,21 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, release error: {:?}", self.fsname, e);
+                debug!("fs:{}, release error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
     }
 
     async fn fsync(&self, req: Request, inode: Inode, fh: u64, datasync: bool) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, fsync: inode: {:?}, fh: {}, datasync: {}",
             self.fsname, inode, fh, datasync
         );
         match self.inner.fsync(req, inode, fh, datasync).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, fsync error: {:?}", self.fsname, e);
+                debug!("fs:{}, fsync error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -407,7 +407,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         flags: u32,
         position: u32,
     ) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, setxattr: inode: {:?}, name: {:?}, value_size: {}, flags: {}",
             self.fsname,
             inode,
@@ -422,7 +422,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, setxattr error: {:?}", self.fsname, e);
+                debug!("fs:{}, setxattr error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -435,14 +435,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         name: &OsStr,
         size: u32,
     ) -> Result<ReplyXAttr> {
-        println!(
+        debug!(
             "fs:{}, getxattr: inode: {:?}, name: {:?}, size: {}",
             self.fsname, inode, name, size
         );
         match self.inner.getxattr(req, inode, name, size).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, getxattr error: {:?}", self.fsname, e);
+                debug!("fs:{}, getxattr error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -450,14 +450,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
 
     /// List extended attribute names.
     async fn listxattr(&self, req: Request, inode: Inode, size: u32) -> Result<ReplyXAttr> {
-        println!(
+        debug!(
             "fs:{}, listxattr: inode: {:?}, size: {}",
             self.fsname, inode, size
         );
         match self.inner.listxattr(req, inode, size).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, listxattr error: {:?}", self.fsname, e);
+                debug!("fs:{}, listxattr error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -465,14 +465,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
 
     /// remove an extended attribute.
     async fn removexattr(&self, req: Request, inode: Inode, name: &OsStr) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, removexattr: inode: {:?}, name: {:?}",
             self.fsname, inode, name
         );
         match self.inner.removexattr(req, inode, name).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, removexattr error: {:?}", self.fsname, e);
+                debug!("fs:{}, removexattr error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -480,14 +480,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
 
     /// flush method. This is called on each `close()` of the opened file.
     async fn flush(&self, req: Request, inode: Inode, fh: u64, lock_owner: u64) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, flush: inode: {:?}, fh: {}, lock_owner: {}",
             self.fsname, inode, fh, lock_owner
         );
         match self.inner.flush(req, inode, fh, lock_owner).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, flush error: {:?}", self.fsname, e);
+                debug!("fs:{}, flush error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -497,14 +497,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn opendir(&self, req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
         match self.inner.opendir(req, inode, flags).await {
             Ok(reply) => {
-                println!(
+                debug!(
                     "fs:{}, opendir: inode: {:?}, flags: {} --- return fh:{}",
                     self.fsname, inode, flags, reply.fh
                 );
                 Ok(reply)
             }
             Err(e) => {
-                println!("fs:{}, opendir error: {:?}", self.fsname, e);
+                debug!("fs:{}, opendir error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -518,14 +518,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         fh: u64,
         offset: i64,
     ) -> Result<ReplyDirectory<Self::DirEntryStream<'_>>> {
-        println!(
+        debug!(
             "fs:{}, readdir: parent: {:?}, fh: {}, offset: {}",
             self.fsname, parent, fh, offset
         );
         match self.inner.readdir(req, parent, fh, offset).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, readdir error: {:?}", self.fsname, e);
+                debug!("fs:{}, readdir error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -533,14 +533,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
 
     /// release an open directory.
     async fn releasedir(&self, req: Request, inode: Inode, fh: u64, flags: u32) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, releasedir: inode: {:?}, fh: {}, flags: {}",
             self.fsname, inode, fh, flags
         );
         match self.inner.releasedir(req, inode, fh, flags).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, releasedir error: {:?}", self.fsname, e);
+                debug!("fs:{}, releasedir error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -548,14 +548,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
 
     /// synchronize directory contents.
     async fn fsyncdir(&self, req: Request, inode: Inode, fh: u64, datasync: bool) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, fsyncdir: inode: {:?}, fh: {}, datasync: {}",
             self.fsname, inode, fh, datasync
         );
         match self.inner.fsyncdir(req, inode, fh, datasync).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, fsyncdir error: {:?}", self.fsname, e);
+                debug!("fs:{}, fsyncdir error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -565,14 +565,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     /// `default_permissions` mount option is given, this method is not be called. This method is
     /// not called under Linux kernel versions 2.4.x.
     async fn access(&self, req: Request, inode: Inode, mask: u32) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, access: inode: {:?}, mask: {}",
             self.fsname, inode, mask
         );
         match self.inner.access(req, inode, mask).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, access error: {:?}", self.fsname, e);
+                debug!("fs:{}, access error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -602,7 +602,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         mode: u32,
         flags: u32,
     ) -> Result<ReplyCreated> {
-        println!(
+        debug!(
             "fs:{}, create: parnet: {}; name :{},mode:{},flags:{}",
             self.fsname,
             parent,
@@ -617,11 +617,11 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     /// handle interrupt. When a operation is interrupted, an interrupt request will send to fuse
     /// server with the unique id of the operation.
     async fn interrupt(&self, req: Request, unique: u64) -> Result<()> {
-        println!("fs:{}, interrupt: unique: {}", self.fsname, unique);
+        debug!("fs:{}, interrupt: unique: {}", self.fsname, unique);
         match self.inner.interrupt(req, unique).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, interrupt error: {:?}", self.fsname, e);
+                debug!("fs:{}, interrupt error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -642,7 +642,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         match self.inner.bmap(req, inode, blocksize, idx).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, bmap error: {:?}", self.fsname, e);
+                debug!("fs:{}, bmap error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -681,7 +681,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, poll error: {:?}", self.fsname, e);
+                debug!("fs:{}, poll error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -695,14 +695,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         offset: u64,
         data: Bytes,
     ) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, notify_reply: inode: {:?}, offset: {}, data: {:?}",
             self.fsname, inode, offset, data
         );
         match self.inner.notify_reply(req, inode, offset, data).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, notify_reply error: {:?}", self.fsname, e);
+                debug!("fs:{}, notify_reply error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -728,7 +728,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         length: u64,
         mode: u32,
     ) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, fallocate: inode: {:?}, fh: {}, offset: {}, length: {}, mode: {}",
             self.fsname, inode, fh, offset, length, mode
         );
@@ -739,7 +739,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, fallocate error: {:?}", self.fsname, e);
+                debug!("fs:{}, fallocate error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -755,7 +755,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         new_name: &OsStr,
         flags: u32,
     ) -> Result<()> {
-        println!(
+        debug!(
             "fs:{}, rename2: parent: {:?}, name: {:?}, new_parent: {:?}, new_name: {:?}, flags: {}",
             self.fsname, parent, name, new_parent, new_name, flags
         );
@@ -767,7 +767,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         {
             Ok(()) => Ok(()),
             Err(e) => {
-                println!("fs:{}, rename2 error: {:?}", self.fsname, e);
+                debug!("fs:{}, rename2 error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -782,14 +782,14 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         offset: u64,
         whence: u32,
     ) -> Result<ReplyLSeek> {
-        println!(
+        debug!(
             "fs:{}, lseek: inode: {:?}, fh: {}, offset: {}, whence: {}",
             self.fsname, inode, fh, offset, whence
         );
         match self.inner.lseek(req, inode, fh, offset, whence).await {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, lseek error: {:?}", self.fsname, e);
+                debug!("fs:{}, lseek error: {:?}", self.fsname, e);
                 Err(e)
             }
         }
@@ -812,7 +812,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         length: u64,
         flags: u64,
     ) -> Result<ReplyCopyFileRange> {
-        println!(
+        debug!(
             "fs:{}, copy_file_range: inode: {:?}, fh_in: {}, off_in: {}, inode_out: {:?}, fh_out: {}, off_out: {}, length: {}, flags: {}",
             self.fsname, inode, fh_in, off_in, inode_out, fh_out, off_out, length, flags
         );
@@ -826,7 +826,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         {
             Ok(reply) => Ok(reply),
             Err(e) => {
-                println!("fs:{}, copy_file_range error: {:?}", self.fsname, e);
+                debug!("fs:{}, copy_file_range error: {:?}", self.fsname, e);
                 Err(e)
             }
         }

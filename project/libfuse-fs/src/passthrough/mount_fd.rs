@@ -9,6 +9,8 @@ use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
+use tracing::debug;
+
 use super::MOUNT_INFO_FILE;
 use super::statx::statx;
 use super::util::{einval, is_safe_inode};

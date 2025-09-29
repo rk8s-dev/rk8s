@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "memchr-vendor",
+    urls = ["https://static.crates.io/crates/memchr/memchr-2.7.5.crate"],
+    sha256 = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0",
+    type = "tar.gz",
+    strip_prefix = "memchr-2.7.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "memchr-2.7.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "memchr",
+    srcs = [":memchr-vendor"],
     crate = "memchr",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "memchr",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>:bluss",
         "CARGO_PKG_DESCRIPTION": "Provides extremely fast (uses SIMD on x86_64, aarch64 and wasm32) routines for\n1, 2 or 3 byte search and single substring search.\n",
         "CARGO_PKG_NAME": "memchr",

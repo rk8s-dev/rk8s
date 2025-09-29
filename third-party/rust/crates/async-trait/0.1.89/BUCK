@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-trait-vendor",
+    urls = ["https://static.crates.io/crates/async-trait/async-trait-0.1.89.crate"],
+    sha256 = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb",
+    type = "tar.gz",
+    strip_prefix = "async-trait-0.1.89",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-trait-0.1.89",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-trait",
+    srcs = [":async-trait-vendor"],
     crate = "async-trait",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "async-trait",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Type erasure for async trait methods",
         "CARGO_PKG_NAME": "async-trait",
@@ -26,12 +32,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

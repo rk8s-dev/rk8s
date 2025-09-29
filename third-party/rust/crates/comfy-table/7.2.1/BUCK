@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "comfy-table-vendor",
+    urls = ["https://static.crates.io/crates/comfy-table/comfy-table-7.2.1.crate"],
+    sha256 = "b03b7db8e0b4b2fdad6c551e634134e99ec000e5c8c3b6856c65e8bbaded7a3b",
+    type = "tar.gz",
+    strip_prefix = "comfy-table-7.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "comfy-table-7.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "comfy-table",
+    srcs = [":comfy-table-vendor"],
     crate = "comfy-table",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "comfy-table",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Arne Beer <contact@arne.beer>",
         "CARGO_PKG_DESCRIPTION": "An easy to use library for building beautiful tables with automatic content wrapping",
         "CARGO_PKG_NAME": "comfy-table",
@@ -29,10 +35,10 @@ cargo.rust_library(
         "default",
         "tty",
     ],
-    named_deps = {
-        "unicode_segmentation": "//third-party/rust/crates/unicode-segmentation/1.12.0:unicode-segmentation-1.12.0",
-        "unicode_width": "//third-party/rust/crates/unicode-width/0.2.1:unicode-width-0.2.1",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/crossterm/0.29.0:crossterm-0.29.0"],
+    deps = [
+        "//third-party/rust/crates/crossterm/0.29.0:crossterm",
+        "//third-party/rust/crates/unicode-segmentation/1.12.0:unicode-segmentation",
+        "//third-party/rust/crates/unicode-width/0.2.1:unicode-width",
+    ],
 )

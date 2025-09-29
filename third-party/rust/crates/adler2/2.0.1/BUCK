@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "adler2-vendor",
+    urls = ["https://static.crates.io/crates/adler2/adler2-2.0.1.crate"],
+    sha256 = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa",
+    type = "tar.gz",
+    strip_prefix = "adler2-2.0.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "adler2-2.0.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "adler2",
+    srcs = [":adler2-vendor"],
     crate = "adler2",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "adler2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jonas Schievink <jonasschievink@gmail.com>:oyvindln <oyvindln@users.noreply.github.com>",
         "CARGO_PKG_DESCRIPTION": "A simple clean-room implementation of the Adler-32 checksum",
         "CARGO_PKG_NAME": "adler2",

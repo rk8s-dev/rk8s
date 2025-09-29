@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "protobuf-support-vendor",
+    urls = ["https://static.crates.io/crates/protobuf-support/protobuf-support-3.2.0.crate"],
+    sha256 = "a5d4d7b8601c814cfb36bcebb79f0e61e45e1e93640cf778837833bbed05c372",
+    type = "tar.gz",
+    strip_prefix = "protobuf-support-3.2.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "protobuf-support-3.2.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "protobuf-support",
+    srcs = [":protobuf-support-vendor"],
     crate = "protobuf-support",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "protobuf-support",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stepan Koltsov <stepan.koltsov@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Code supporting protobuf implementation. None of code in this crate is public API.\n",
         "CARGO_PKG_NAME": "protobuf-support",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69"],
+    deps = ["//third-party/rust/crates/thiserror/1.0.69:thiserror"],
 )

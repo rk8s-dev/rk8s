@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "jni-sys-vendor",
+    urls = ["https://static.crates.io/crates/jni-sys/jni-sys-0.3.0.crate"],
+    sha256 = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130",
+    type = "tar.gz",
+    strip_prefix = "jni-sys-0.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "jni-sys-0.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "jni-sys",
+    srcs = [":jni-sys-vendor"],
     crate = "jni-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "jni-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Rust definitions corresponding to jni.h",
         "CARGO_PKG_NAME": "jni-sys",

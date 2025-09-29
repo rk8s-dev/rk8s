@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "procfs-core-vendor",
+    urls = ["https://static.crates.io/crates/procfs-core/procfs-core-0.17.0.crate"],
+    sha256 = "239df02d8349b06fc07398a3a1697b06418223b1c7725085e801e7c0fc6a12ec",
+    type = "tar.gz",
+    strip_prefix = "procfs-core-0.17.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "procfs-core-0.17.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "procfs-core",
+    srcs = [":procfs-core-vendor"],
     crate = "procfs-core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "procfs-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Chin <achin@eminence32.net>",
         "CARGO_PKG_DESCRIPTION": "Data structures and parsing for the linux procfs pseudo-filesystem",
         "CARGO_PKG_NAME": "procfs-core",
@@ -31,8 +37,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4",
-        "//third-party/rust/crates/chrono/0.4.42:chrono-0.4.42",
-        "//third-party/rust/crates/hex/0.4.3:hex-0.4.3",
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/chrono/0.4.42:chrono",
+        "//third-party/rust/crates/hex/0.4.3:hex",
     ],
 )

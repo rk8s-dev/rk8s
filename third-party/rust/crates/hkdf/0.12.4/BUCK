@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hkdf-vendor",
+    urls = ["https://static.crates.io/crates/hkdf/hkdf-0.12.4.crate"],
+    sha256 = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7",
+    type = "tar.gz",
+    strip_prefix = "hkdf-0.12.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hkdf-0.12.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hkdf",
+    srcs = [":hkdf-vendor"],
     crate = "hkdf",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "hkdf",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "HMAC-based Extract-and-Expand Key Derivation Function (HKDF)",
         "CARGO_PKG_NAME": "hkdf",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/hmac/0.12.1:hmac-0.12.1"],
+    deps = ["//third-party/rust/crates/hmac/0.12.1:hmac"],
 )

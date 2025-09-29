@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "prettyplease-vendor",
+    urls = ["https://static.crates.io/crates/prettyplease/prettyplease-0.2.37.crate"],
+    sha256 = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b",
+    type = "tar.gz",
+    strip_prefix = "prettyplease-0.2.37",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "prettyplease-0.2.37",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "prettyplease",
+    srcs = [":prettyplease-vendor"],
     crate = "prettyplease",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "prettyplease",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A minimal `syn` syntax tree pretty-printer",
         "CARGO_PKG_LINKS": "prettyplease02",
@@ -25,29 +31,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "2",
         "CARGO_PKG_VERSION_PATCH": "37",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :prettyplease-0.2.37-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :prettyplease-build-script-run[out_dir])",
     },
     features = ["verbatim"],
-    rustc_flags = ["@$(location :prettyplease-0.2.37-build-script-run[rustc_flags])"],
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
+    rustc_flags = ["@$(location :prettyplease-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/syn/2.0.106:syn-2.0.106"],
+    deps = [
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/syn/2.0.106:syn",
+    ],
 )
 
 cargo.rust_binary(
-    name = "prettyplease-0.2.37-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "prettyplease-build-script-build",
+    srcs = [":prettyplease-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "prettyplease",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A minimal `syn` syntax tree pretty-printer",
         "CARGO_PKG_LINKS": "prettyplease02",
@@ -64,10 +67,10 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "prettyplease-0.2.37-build-script-run",
+    name = "prettyplease-build-script-run",
     package_name = "prettyplease",
-    buildscript_rule = ":prettyplease-0.2.37-build-script-build",
+    buildscript_rule = ":prettyplease-build-script-build",
     features = ["verbatim"],
     version = "0.2.37",
-    local_manifest_dir = "**",
+    manifest_dir = ":prettyplease-vendor",
 )

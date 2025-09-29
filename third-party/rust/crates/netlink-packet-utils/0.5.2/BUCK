@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "netlink-packet-utils-vendor",
+    urls = ["https://static.crates.io/crates/netlink-packet-utils/netlink-packet-utils-0.5.2.crate"],
+    sha256 = "0ede8a08c71ad5a95cdd0e4e52facd37190977039a4704eb82a283f713747d34",
+    type = "tar.gz",
+    strip_prefix = "netlink-packet-utils-0.5.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "netlink-packet-utils-0.5.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "netlink-packet-utils",
+    srcs = [":netlink-packet-utils-vendor"],
     crate = "netlink-packet-utils",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "netlink-packet-utils",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Corentin Henry <corentinhenry@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "macros and helpers for parsing netlink messages",
         "CARGO_PKG_NAME": "netlink-packet-utils",
@@ -27,9 +33,9 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow-1.0.100",
-        "//third-party/rust/crates/byteorder/1.5.0:byteorder-1.5.0",
-        "//third-party/rust/crates/paste/1.0.15:paste-1.0.15",
-        "//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/byteorder/1.5.0:byteorder",
+        "//third-party/rust/crates/paste/1.0.15:paste",
+        "//third-party/rust/crates/thiserror/1.0.69:thiserror",
     ],
 )

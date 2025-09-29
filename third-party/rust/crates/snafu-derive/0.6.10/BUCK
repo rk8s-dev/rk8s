@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "snafu-derive-vendor",
+    urls = ["https://static.crates.io/crates/snafu-derive/snafu-derive-0.6.10.crate"],
+    sha256 = "1508efa03c362e23817f96cde18abed596a25219a8b2c66e8db33c03543d315b",
+    type = "tar.gz",
+    strip_prefix = "snafu-derive-0.6.10",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "snafu-derive-0.6.10",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "snafu-derive",
+    srcs = [":snafu-derive-vendor"],
     crate = "snafu-derive",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "snafu-derive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jake Goulding <jake.goulding@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "An ergonomic error handling library",
         "CARGO_PKG_NAME": "snafu-derive",
@@ -26,12 +32,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/1.0.109:syn-1.0.109",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/1.0.109:syn",
     ],
 )

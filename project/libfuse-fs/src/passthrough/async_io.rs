@@ -18,6 +18,7 @@ use std::{
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
+use tracing::{debug, error, info, trace};
 
 use vm_memory::{ByteValued, bitmap::BitmapSlice};
 

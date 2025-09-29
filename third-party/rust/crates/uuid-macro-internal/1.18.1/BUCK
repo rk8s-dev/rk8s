@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "uuid-macro-internal-vendor",
+    urls = ["https://static.crates.io/crates/uuid-macro-internal/uuid-macro-internal-1.18.1.crate"],
+    sha256 = "d9384a660318abfbd7f8932c34d67e4d1ec511095f95972ddc01e19d7ba8413f",
+    type = "tar.gz",
+    strip_prefix = "uuid-macro-internal-1.18.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "uuid-macro-internal-1.18.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "uuid-macro-internal",
+    srcs = [":uuid-macro-internal-vendor"],
     crate = "uuid-macro-internal",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "uuid-macro-internal",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "QnnOkabayashi",
         "CARGO_PKG_DESCRIPTION": "Private implementation details of the uuid! macro.",
         "CARGO_PKG_NAME": "uuid-macro-internal",
@@ -26,12 +32,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

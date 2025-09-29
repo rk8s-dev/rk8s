@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "unicode-xid-vendor",
+    urls = ["https://static.crates.io/crates/unicode-xid/unicode-xid-0.2.6.crate"],
+    sha256 = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853",
+    type = "tar.gz",
+    strip_prefix = "unicode-xid-0.2.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "unicode-xid-0.2.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "unicode-xid",
+    srcs = [":unicode-xid-vendor"],
     crate = "unicode-xid",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "unicode-xid",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "erick.tryzelaar <erick.tryzelaar@gmail.com>:kwantam <kwantam@gmail.com>:Manish Goregaokar <manishsmail@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Determine whether characters have the XID_Start\nor XID_Continue properties according to\nUnicode Standard Annex #31.\n",
         "CARGO_PKG_NAME": "unicode-xid",

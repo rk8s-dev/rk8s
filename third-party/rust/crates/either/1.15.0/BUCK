@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "either-vendor",
+    urls = ["https://static.crates.io/crates/either/either-1.15.0.crate"],
+    sha256 = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719",
+    type = "tar.gz",
+    strip_prefix = "either-1.15.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "either-1.15.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "either",
+    srcs = [":either-vendor"],
     crate = "either",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "either",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "bluss",
         "CARGO_PKG_DESCRIPTION": "The enum `Either` with variants `Left` and `Right` is a general purpose sum type with two cases.\n",
         "CARGO_PKG_NAME": "either",
@@ -32,5 +38,5 @@ cargo.rust_library(
         "use_std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/serde/1.0.226:serde-1.0.226"],
+    deps = ["//third-party/rust/crates/serde/1.0.226:serde"],
 )

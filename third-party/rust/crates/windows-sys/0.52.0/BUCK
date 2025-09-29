@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows-sys-vendor",
+    urls = ["https://static.crates.io/crates/windows-sys/windows-sys-0.52.0.crate"],
+    sha256 = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d",
+    type = "tar.gz",
+    strip_prefix = "windows-sys-0.52.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows-sys-0.52.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows-sys",
+    srcs = [":windows-sys-vendor"],
     crate = "windows-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Rust for Windows",
         "CARGO_PKG_NAME": "windows-sys",
@@ -40,8 +46,6 @@ cargo.rust_library(
         "Win32_System_WindowsProgramming",
         "default",
     ],
-    named_deps = {
-        "windows_targets": "//third-party/rust/crates/windows-targets/0.52.6:windows-targets-0.52.6",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/windows-targets/0.52.6:windows-targets"],
 )

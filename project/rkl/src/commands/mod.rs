@@ -30,6 +30,7 @@ use tabwriter::TabWriter;
 pub mod compose;
 pub mod container;
 pub mod pod;
+pub mod utils;
 
 fn construct_container_root<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<PathBuf> {
     // resolves relative paths, symbolic links etc. and get complete path

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "fastrand-vendor",
+    urls = ["https://static.crates.io/crates/fastrand/fastrand-1.9.0.crate"],
+    sha256 = "e51093e27b0797c359783294ca4f0a911c270184cb10f85783b118614a1501be",
+    type = "tar.gz",
+    strip_prefix = "fastrand-1.9.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "fastrand-1.9.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "fastrand",
+    srcs = [":fastrand-vendor"],
     crate = "fastrand",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "fastrand",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A simple and fast random number generator",
         "CARGO_PKG_NAME": "fastrand",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "syn-vendor",
+    urls = ["https://static.crates.io/crates/syn/syn-2.0.106.crate"],
+    sha256 = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6",
+    type = "tar.gz",
+    strip_prefix = "syn-2.0.106",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "syn-2.0.106",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "syn",
+    srcs = [":syn-vendor"],
     crate = "syn",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "syn",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Parser for Rust source code",
         "CARGO_PKG_NAME": "syn",
@@ -38,10 +44,10 @@ cargo.rust_library(
         "visit",
         "visit-mut",
     ],
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-        "unicode_ident": "//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident-1.0.19",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/quote/1.0.40:quote-1.0.40"],
+    deps = [
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident",
+    ],
 )

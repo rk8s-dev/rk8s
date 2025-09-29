@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "downcast-vendor",
+    urls = ["https://static.crates.io/crates/downcast/downcast-0.11.0.crate"],
+    sha256 = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1",
+    type = "tar.gz",
+    strip_prefix = "downcast-0.11.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "downcast-0.11.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "downcast",
+    srcs = [":downcast-vendor"],
     crate = "downcast",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "downcast",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Felix Köpge <fkoep@mailbox.org>",
         "CARGO_PKG_DESCRIPTION": "Trait for downcasting trait objects back to their original types.",
         "CARGO_PKG_NAME": "downcast",

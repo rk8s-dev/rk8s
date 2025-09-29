@@ -205,7 +205,7 @@ pub fn start_daemon() -> Result<(), anyhow::Error> {
 pub fn pod_execute(cmd: PodCommand) -> Result<()> {
     match cmd {
         PodCommand::Run { pod_yaml } => {
-            let _ = run_pod(&pod_yaml);
+            let _ = run_pod(&pod_yaml)?;
             Ok(())
         }
         PodCommand::Create { pod_yaml, cluster } => pod_create(&pod_yaml, cluster),
@@ -228,7 +228,9 @@ fn pod_list(addr: Option<String>) -> Result<()> {
         Some(rks_addr) => rt.block_on(cluster::list_pod(rks_addr.as_str())),
         None => match env_addr {
             Some(rks_addr) => rt.block_on(cluster::list_pod(rks_addr.as_str())),
-            None => Err(anyhow!("no rks address configuration find")),
+            None => Err(anyhow!(
+                "no rks address configuration find (Currently rkl does not support list cmd in standalone mode)"
+            )),
         },
     }
 }

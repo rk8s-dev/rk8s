@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "untrusted-vendor",
+    urls = ["https://static.crates.io/crates/untrusted/untrusted-0.9.0.crate"],
+    sha256 = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1",
+    type = "tar.gz",
+    strip_prefix = "untrusted-0.9.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "untrusted-0.9.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "untrusted",
+    srcs = [":untrusted-vendor"],
     crate = "untrusted",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "untrusted",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Brian Smith <brian@briansmith.org>",
         "CARGO_PKG_DESCRIPTION": "Safe, fast, zero-panic, zero-crashing, zero-allocation parsing of untrusted inputs in Rust.",
         "CARGO_PKG_NAME": "untrusted",

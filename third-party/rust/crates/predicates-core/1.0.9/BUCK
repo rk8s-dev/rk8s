@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "predicates-core-vendor",
+    urls = ["https://static.crates.io/crates/predicates-core/predicates-core-1.0.9.crate"],
+    sha256 = "727e462b119fe9c93fd0eb1429a5f7647394014cf3c04ab2c0350eeb09095ffa",
+    type = "tar.gz",
+    strip_prefix = "predicates-core-1.0.9",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "predicates-core-1.0.9",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "predicates-core",
+    srcs = [":predicates-core-vendor"],
     crate = "predicates-core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "predicates-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Nick Stevens <nick@bitcurry.com>",
         "CARGO_PKG_DESCRIPTION": "An API for boolean-valued predicate functions.",
         "CARGO_PKG_NAME": "predicates-core",

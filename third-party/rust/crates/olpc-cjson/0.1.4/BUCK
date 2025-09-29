@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "olpc-cjson-vendor",
+    urls = ["https://static.crates.io/crates/olpc-cjson/olpc-cjson-0.1.4.crate"],
+    sha256 = "696183c9b5fe81a7715d074fd632e8bd46f4ccc0231a3ed7fc580a80de5f7083",
+    type = "tar.gz",
+    strip_prefix = "olpc-cjson-0.1.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "olpc-cjson-0.1.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "olpc-cjson",
+    srcs = [":olpc-cjson-vendor"],
     crate = "olpc-cjson",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "olpc-cjson",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "iliana destroyer of worlds <iweller@amazon.com>",
         "CARGO_PKG_DESCRIPTION": "serde_json Formatter to serialize as OLPC-style canonical JSON",
         "CARGO_PKG_NAME": "olpc-cjson",
@@ -25,12 +31,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "unicode_normalization": "//third-party/rust/crates/unicode-normalization/0.1.24:unicode-normalization-0.1.24",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json-1.0.145",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_json/1.0.145:serde_json",
+        "//third-party/rust/crates/unicode-normalization/0.1.24:unicode-normalization",
     ],
 )

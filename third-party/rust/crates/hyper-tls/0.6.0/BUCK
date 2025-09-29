@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hyper-tls-vendor",
+    urls = ["https://static.crates.io/crates/hyper-tls/hyper-tls-0.6.0.crate"],
+    sha256 = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0",
+    type = "tar.gz",
+    strip_prefix = "hyper-tls-0.6.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hyper-tls-0.6.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hyper-tls",
+    srcs = [":hyper-tls-vendor"],
     crate = "hyper-tls",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "hyper-tls",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "Default TLS implementation for use with hyper",
         "CARGO_PKG_NAME": "hyper-tls",
@@ -25,17 +31,15 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "http_body_util": "//third-party/rust/crates/http-body-util/0.1.3:http-body-util-0.1.3",
-        "hyper_util": "//third-party/rust/crates/hyper-util/0.1.17:hyper-util-0.1.17",
-        "native_tls": "//third-party/rust/crates/native-tls/0.2.14:native-tls-0.2.14",
-        "tokio_native_tls": "//third-party/rust/crates/tokio-native-tls/0.3.1:tokio-native-tls-0.3.1",
-        "tower_service": "//third-party/rust/crates/tower-service/0.3.3:tower-service-0.3.3",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/hyper/1.7.0:hyper-1.7.0",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/http-body-util/0.1.3:http-body-util",
+        "//third-party/rust/crates/hyper-util/0.1.17:hyper-util",
+        "//third-party/rust/crates/hyper/1.7.0:hyper",
+        "//third-party/rust/crates/native-tls/0.2.14:native-tls",
+        "//third-party/rust/crates/tokio-native-tls/0.3.1:tokio-native-tls",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+        "//third-party/rust/crates/tower-service/0.3.3:tower-service",
     ],
 )

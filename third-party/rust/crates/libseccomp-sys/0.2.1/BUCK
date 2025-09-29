@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "libseccomp-sys-vendor",
+    urls = ["https://static.crates.io/crates/libseccomp-sys/libseccomp-sys-0.2.1.crate"],
+    sha256 = "9a7cbbd4ad467251987c6e5b47d53b11a5a05add08f2447a9e2d70aef1e0d138",
+    type = "tar.gz",
+    strip_prefix = "libseccomp-sys-0.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "libseccomp-sys-0.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libseccomp-sys",
+    srcs = [":libseccomp-sys-vendor"],
     crate = "libseccomp-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "libseccomp-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Manabu Sugimoto <Manabu.Sugimoto@sony.com>",
         "CARGO_PKG_DESCRIPTION": "Raw FFI Bindings for the libseccomp Library",
         "CARGO_PKG_NAME": "libseccomp-sys",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "2",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :libseccomp-sys-0.2.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :libseccomp-sys-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :libseccomp-sys-0.2.1-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :libseccomp-sys-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "libseccomp-sys-0.2.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libseccomp-sys-build-script-build",
+    srcs = [":libseccomp-sys-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "libseccomp-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Manabu Sugimoto <Manabu.Sugimoto@sony.com>",
         "CARGO_PKG_DESCRIPTION": "Raw FFI Bindings for the libseccomp Library",
         "CARGO_PKG_NAME": "libseccomp-sys",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "libseccomp-sys-0.2.1-build-script-run",
+    name = "libseccomp-sys-build-script-run",
     package_name = "libseccomp-sys",
-    buildscript_rule = ":libseccomp-sys-0.2.1-build-script-build",
+    buildscript_rule = ":libseccomp-sys-build-script-build",
     version = "0.2.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":libseccomp-sys-vendor",
 )

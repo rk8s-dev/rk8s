@@ -1,8 +1,8 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, ItemImpl};
 use quote::quote;
+use syn::{ItemImpl, parse_macro_input};
 
 #[proc_macro]
 pub fn impl_filesystem_logging(input: TokenStream) -> TokenStream {
@@ -25,9 +25,9 @@ pub fn impl_filesystem_logging(input: TokenStream) -> TokenStream {
 
                 quote! {
                     fn #method_name(&self, #method_inputs) -> #method_output {
-                        println!("{}::{} called", stringify!(#struct_name), stringify!(#method_name));
+                        debug!("{}::{} called", stringify!(#struct_name), stringify!(#method_name));
                         let result = <#struct_name as #trait_path>::#method_name(self, #method_inputs);
-                        println!("{}::{} returned: {:?}", stringify!(#struct_name), stringify!(#method_name), result);
+                        debug!("{}::{} returned: {:?}", stringify!(#struct_name), stringify!(#method_name), result);
                         result
                     }
                 }

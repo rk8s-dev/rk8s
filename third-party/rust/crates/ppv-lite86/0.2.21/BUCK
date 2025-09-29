@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ppv-lite86-vendor",
+    urls = ["https://static.crates.io/crates/ppv-lite86/ppv-lite86-0.2.21.crate"],
+    sha256 = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9",
+    type = "tar.gz",
+    strip_prefix = "ppv-lite86-0.2.21",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ppv-lite86-0.2.21",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ppv-lite86",
+    srcs = [":ppv-lite86-vendor"],
     crate = "ppv-lite86",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "ppv-lite86",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The CryptoCorrosion Contributors",
         "CARGO_PKG_DESCRIPTION": "Cross-platform cryptography-oriented low-level SIMD library.",
         "CARGO_PKG_NAME": "ppv-lite86",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/zerocopy/0.8.27:zerocopy-0.8.27"],
+    deps = ["//third-party/rust/crates/zerocopy/0.8.27:zerocopy"],
 )

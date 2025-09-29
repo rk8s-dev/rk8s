@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "once_cell-vendor",
+    urls = ["https://static.crates.io/crates/once_cell/once_cell-1.21.3.crate"],
+    sha256 = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d",
+    type = "tar.gz",
+    strip_prefix = "once_cell-1.21.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "once_cell-1.21.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "once_cell",
+    srcs = [":once_cell-vendor"],
     crate = "once_cell",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "once_cell",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Aleksey Kladov <aleksey.kladov@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Single assignment cells and lazy values.",
         "CARGO_PKG_NAME": "once_cell",
@@ -33,9 +39,9 @@ cargo.rust_library(
         "race",
         "std",
     ],
-    named_deps = {
-        "critical_section": "//third-party/rust/crates/critical-section/1.2.0:critical-section-1.2.0",
-        "portable_atomic": "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic-1.11.1",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/critical-section/1.2.0:critical-section",
+        "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic",
+    ],
 )

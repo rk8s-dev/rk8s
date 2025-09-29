@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "writeable-vendor",
+    urls = ["https://static.crates.io/crates/writeable/writeable-0.6.1.crate"],
+    sha256 = "ea2f10b9bb0928dfb1b42b65e1f9e36f7f54dbdf08457afefb38afcdec4fa2bb",
+    type = "tar.gz",
+    strip_prefix = "writeable-0.6.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "writeable-0.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "writeable",
+    srcs = [":writeable-vendor"],
     crate = "writeable",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "writeable",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "A more efficient alternative to fmt::Display",
         "CARGO_PKG_NAME": "writeable",

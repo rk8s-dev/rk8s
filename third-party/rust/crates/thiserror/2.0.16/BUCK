@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "thiserror-vendor",
+    urls = ["https://static.crates.io/crates/thiserror/thiserror-2.0.16.crate"],
+    sha256 = "3467d614147380f2e4e374161426ff399c91084acd2363eaf549172b3d5e60c0",
+    type = "tar.gz",
+    strip_prefix = "thiserror-2.0.16",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "thiserror-2.0.16",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "thiserror",
+    srcs = [":thiserror-vendor"],
     crate = "thiserror",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "thiserror",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "derive(Error)",
         "CARGO_PKG_NAME": "thiserror",
@@ -24,31 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "16",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :thiserror-2.0.16-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :thiserror-build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :thiserror-2.0.16-build-script-run[rustc_flags])"],
-    named_deps = {
-        "thiserror_impl": "//third-party/rust/crates/thiserror-impl/2.0.16:thiserror-impl-2.0.16",
-    },
+    rustc_flags = ["@$(location :thiserror-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/thiserror-impl/2.0.16:thiserror-impl"],
 )
 
 cargo.rust_binary(
-    name = "thiserror-2.0.16-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "thiserror-build-script-build",
+    srcs = [":thiserror-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "thiserror",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "derive(Error)",
         "CARGO_PKG_NAME": "thiserror",
@@ -67,13 +68,13 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "thiserror-2.0.16-build-script-run",
+    name = "thiserror-build-script-run",
     package_name = "thiserror",
-    buildscript_rule = ":thiserror-2.0.16-build-script-build",
+    buildscript_rule = ":thiserror-build-script-build",
     features = [
         "default",
         "std",
     ],
     version = "2.0.16",
-    local_manifest_dir = "**",
+    manifest_dir = ":thiserror-vendor",
 )

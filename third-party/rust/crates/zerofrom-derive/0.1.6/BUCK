@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "zerofrom-derive-vendor",
+    urls = ["https://static.crates.io/crates/zerofrom-derive/zerofrom-derive-0.1.6.crate"],
+    sha256 = "d71e5d6e06ab090c67b5e44993ec16b72dcbaabc526db883a360057678b48502",
+    type = "tar.gz",
+    strip_prefix = "zerofrom-derive-0.1.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "zerofrom-derive-0.1.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "zerofrom-derive",
+    srcs = [":zerofrom-derive-vendor"],
     crate = "zerofrom-derive",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "zerofrom-derive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Manish Goregaokar <manishsmail@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Custom derive for the zerofrom crate",
         "CARGO_PKG_NAME": "zerofrom-derive",
@@ -26,13 +32,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
-        "//third-party/rust/crates/synstructure/0.13.2:synstructure-0.13.2",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
+        "//third-party/rust/crates/synstructure/0.13.2:synstructure",
     ],
 )

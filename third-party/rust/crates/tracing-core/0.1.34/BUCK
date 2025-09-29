@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tracing-core-vendor",
+    urls = ["https://static.crates.io/crates/tracing-core/tracing-core-0.1.34.crate"],
+    sha256 = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678",
+    type = "tar.gz",
+    strip_prefix = "tracing-core-0.1.34",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tracing-core-0.1.34",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tracing-core",
+    srcs = [":tracing-core-vendor"],
     crate = "tracing-core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tracing-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "Core primitives for application-level tracing.\n",
         "CARGO_PKG_NAME": "tracing-core",
@@ -31,5 +37,5 @@ cargo.rust_library(
         "std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3"],
+    deps = ["//third-party/rust/crates/once_cell/1.21.3:once_cell"],
 )

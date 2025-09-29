@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-notify-vendor",
+    urls = ["https://static.crates.io/crates/async-notify/async-notify-0.3.0.crate"],
+    sha256 = "db96c36382f56ea91e5d012c4c7170046c7731449daa46655cbcabc594c8bee6",
+    type = "tar.gz",
+    strip_prefix = "async-notify-0.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-notify-0.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-notify",
+    srcs = [":async-notify-vendor"],
     crate = "async-notify",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "async-notify",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sherlock Holo <sherlockya@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A general version async Notify, like `tokio` Notify but can work with any async runtime.",
         "CARGO_PKG_NAME": "async-notify",
@@ -25,10 +31,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "event_listener": "//third-party/rust/crates/event-listener/4.0.3:event-listener-4.0.3",
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/event-listener/4.0.3:event-listener",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+    ],
 )

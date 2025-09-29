@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "aws-lc-rs-vendor",
+    urls = ["https://static.crates.io/crates/aws-lc-rs/aws-lc-rs-1.14.0.crate"],
+    sha256 = "94b8ff6c09cd57b16da53641caa860168b88c172a5ee163b0288d3d6eea12786",
+    type = "tar.gz",
+    strip_prefix = "aws-lc-rs-1.14.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "aws-lc-rs-1.14.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "aws-lc-rs",
+    srcs = [":aws-lc-rs-vendor"],
     crate = "aws-lc-rs",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "aws-lc-rs",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "AWS-LibCrypto",
         "CARGO_PKG_DESCRIPTION": "aws-lc-rs is a cryptographic library using AWS-LC for its cryptographic operations. This library strives to be API-compatible with the popular Rust library named ring.",
         "CARGO_PKG_LINKS": "aws_lc_rs_1_14_0_sys",
@@ -25,32 +31,29 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "14",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :aws-lc-rs-1.14.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :aws-lc-rs-build-script-run[out_dir])",
     },
     features = [
         "aws-lc-sys",
         "prebuilt-nasm",
     ],
-    rustc_flags = ["@$(location :aws-lc-rs-1.14.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "aws_lc_sys": "//third-party/rust/crates/aws-lc-sys/0.31.0:aws-lc-sys-0.31.0",
-    },
+    rustc_flags = ["@$(location :aws-lc-rs-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1"],
+    deps = [
+        "//third-party/rust/crates/aws-lc-sys/0.31.0:aws-lc-sys",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
+    ],
 )
 
 cargo.rust_binary(
-    name = "aws-lc-rs-1.14.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "aws-lc-rs-build-script-build",
+    srcs = [":aws-lc-rs-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "aws-lc-rs",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "AWS-LibCrypto",
         "CARGO_PKG_DESCRIPTION": "aws-lc-rs is a cryptographic library using AWS-LC for its cryptographic operations. This library strives to be API-compatible with the popular Rust library named ring.",
         "CARGO_PKG_LINKS": "aws_lc_rs_1_14_0_sys",
@@ -70,16 +73,16 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "aws-lc-rs-1.14.0-build-script-run",
+    name = "aws-lc-rs-build-script-run",
     package_name = "aws-lc-rs",
-    buildscript_rule = ":aws-lc-rs-1.14.0-build-script-build",
+    buildscript_rule = ":aws-lc-rs-build-script-build",
     env = {
-        "DEP_AWS_LC_0_31_0_INCLUDE": "$(location //third-party/rust/crates/aws-lc-sys/0.31.0:aws-lc-sys-0.31.0-build-script-main-run[out_dir])/include",
+        "DEP_AWS_LC_0_31_0_INCLUDE": "$(location //third-party/rust/crates/aws-lc-sys/0.31.0:aws-lc-sys-build-script-main-run[out_dir])/include",
     },
     features = [
         "aws-lc-sys",
         "prebuilt-nasm",
     ],
     version = "1.14.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":aws-lc-rs-vendor",
 )

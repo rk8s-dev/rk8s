@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "etcd-client-vendor",
+    urls = ["https://static.crates.io/crates/etcd-client/etcd-client-0.16.1.crate"],
+    sha256 = "88365f1a5671eb2f7fc240adb216786bc6494b38ce15f1d26ad6eaa303d5e822",
+    type = "tar.gz",
+    strip_prefix = "etcd-client-0.16.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "etcd-client-0.16.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "etcd-client",
+    srcs = [":etcd-client-vendor"],
     crate = "etcd-client",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "etcd-client",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The etcd-client Authors <davidli2010@foxmail.com>",
         "CARGO_PKG_DESCRIPTION": "An etcd v3 API client",
         "CARGO_PKG_NAME": "etcd-client",
@@ -24,35 +30,30 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "16",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :etcd-client-0.16.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :etcd-client-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :etcd-client-0.16.1-build-script-run[rustc_flags])"],
-    named_deps = {
-        "tokio_stream": "//third-party/rust/crates/tokio-stream/0.1.17:tokio-stream-0.1.17",
-        "tower_service": "//third-party/rust/crates/tower-service/0.3.3:tower-service-0.3.3",
-    },
+    rustc_flags = ["@$(location :etcd-client-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/http/1.3.1:http-1.3.1",
-        "//third-party/rust/crates/prost/0.13.5:prost-0.13.5",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
-        "//third-party/rust/crates/tonic/0.13.1:tonic-0.13.1",
-        "//third-party/rust/crates/tower/0.5.2:tower-0.5.2",
+        "//third-party/rust/crates/http/1.3.1:http",
+        "//third-party/rust/crates/prost/0.13.5:prost",
+        "//third-party/rust/crates/tokio-stream/0.1.17:tokio-stream",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+        "//third-party/rust/crates/tonic/0.13.1:tonic",
+        "//third-party/rust/crates/tower-service/0.3.3:tower-service",
+        "//third-party/rust/crates/tower/0.5.2:tower",
     ],
 )
 
 cargo.rust_binary(
-    name = "etcd-client-0.16.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "etcd-client-build-script-build",
+    srcs = [":etcd-client-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "etcd-client",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The etcd-client Authors <davidli2010@foxmail.com>",
         "CARGO_PKG_DESCRIPTION": "An etcd v3 API client",
         "CARGO_PKG_NAME": "etcd-client",
@@ -63,16 +64,14 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "tonic_build": "//third-party/rust/crates/tonic-build/0.13.1:tonic-build-0.13.1",
-    },
     visibility = [],
+    deps = ["//third-party/rust/crates/tonic-build/0.13.1:tonic-build"],
 )
 
 buildscript_run(
-    name = "etcd-client-0.16.1-build-script-run",
+    name = "etcd-client-build-script-run",
     package_name = "etcd-client",
-    buildscript_rule = ":etcd-client-0.16.1-build-script-build",
+    buildscript_rule = ":etcd-client-build-script-build",
     version = "0.16.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":etcd-client-vendor",
 )

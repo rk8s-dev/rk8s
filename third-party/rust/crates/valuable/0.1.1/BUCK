@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "valuable-vendor",
+    urls = ["https://static.crates.io/crates/valuable/valuable-0.1.1.crate"],
+    sha256 = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
+    type = "tar.gz",
+    strip_prefix = "valuable-0.1.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "valuable-0.1.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "valuable",
+    srcs = [":valuable-vendor"],
     crate = "valuable",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "valuable",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Object-safe value inspection, used to pass un-typed structured data across trait-object boundaries.\n",
         "CARGO_PKG_NAME": "valuable",
@@ -24,28 +30,25 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "1",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :valuable-0.1.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :valuable-build-script-run[out_dir])",
     },
     features = [
         "alloc",
         "std",
     ],
-    rustc_flags = ["@$(location :valuable-0.1.1-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :valuable-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "valuable-0.1.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "valuable-build-script-build",
+    srcs = [":valuable-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "valuable",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Object-safe value inspection, used to pass un-typed structured data across trait-object boundaries.\n",
         "CARGO_PKG_NAME": "valuable",
@@ -64,13 +67,13 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "valuable-0.1.1-build-script-run",
+    name = "valuable-build-script-run",
     package_name = "valuable",
-    buildscript_rule = ":valuable-0.1.1-build-script-build",
+    buildscript_rule = ":valuable-build-script-build",
     features = [
         "alloc",
         "std",
     ],
     version = "0.1.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":valuable-vendor",
 )

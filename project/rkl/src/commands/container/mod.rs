@@ -4,6 +4,7 @@ use crate::{
         compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
         container::config::ContainerConfigBuilder,
         create, delete, exec, list, load_container, start,
+        utils::{ImageType, determine_image_path, get_bundle_from_path, handle_oci_image},
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
     rootpath,
@@ -21,10 +22,15 @@ use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, Spec, get_default_namespaces};
 use oci_spec::runtime::{Mount as OciMount, MountBuilder};
-use std::{env, fmt::Write as _, io};
+use std::fmt::Write as fmtWrite;
+use std::{
+    env,
+    io::{self, BufWriter},
+};
 use std::{
     fs::{self, File},
-    io::{BufWriter, Read, Write},
+    io::Read,
+    io::Write,
     path::{Path, PathBuf},
 };
 use tabwriter::TabWriter;
@@ -84,13 +90,22 @@ pub struct ContainerRunner {
 }
 
 impl ContainerRunner {
-    pub fn from_spec(spec: ContainerSpec, root_path: Option<PathBuf>) -> Result<Self> {
+    // for now just for compose
+    pub fn from_spec(mut spec: ContainerSpec, root_path: Option<PathBuf>) -> Result<Self> {
         let container_id = spec.name.clone();
+
+        let builder = handle_image_typ(&spec)?;
+        if builder.is_some() {
+            spec.image = get_bundle_from_path(spec.image)?
+                .to_str()
+                .unwrap_or_default()
+                .to_string();
+        }
 
         Ok(ContainerRunner {
             spec,
             config: None,
-            config_builder: ContainerConfigBuilder::default(),
+            config_builder: builder.unwrap_or_default(),
             container_id,
             root_path: match root_path {
                 Some(p) => p,
@@ -104,14 +119,24 @@ impl ContainerRunner {
         let mut file = File::open(spec_path)
             .map_err(|e| anyhow!("open the container spec file failed: {e}"))?;
         let mut content = String::new();
+
         file.read_to_string(&mut content)?;
 
-        let container_spec: ContainerSpec = serde_yaml::from_str(&content)?;
+        let mut container_spec: ContainerSpec = serde_yaml::from_str(&content)?;
+
+        let builder = handle_image_typ(&container_spec)?;
+        if builder.is_some() {
+            container_spec.image = get_bundle_from_path(container_spec.image)?
+                .to_str()
+                .unwrap_or_default()
+                .to_string();
+        }
+
         let container_id = container_spec.name.clone();
         let root_path = rootpath::determine(None)?;
         Ok(ContainerRunner {
             spec: container_spec,
-            config_builder: ContainerConfigBuilder::default(),
+            config_builder: builder.unwrap_or_default(),
             root_path,
             config: None,
             container_id,
@@ -218,6 +243,7 @@ impl ContainerRunner {
         // spec.set_root(Some(root));
 
         // use the default namespace configuration
+
         let namespaces = get_default_namespaces();
 
         let mut linux: LinuxBuilder = LinuxBuilder::default().namespaces(namespaces);
@@ -230,15 +256,15 @@ impl ContainerRunner {
         spec.set_linux(Some(linux));
 
         // build the process path
-        let mut process = ProcessBuilder::default()
-            .args(self.spec.args.clone())
-            .build()?;
-
+        let mut process = ProcessBuilder::default().cwd(&config.working_dir).build()?;
         let mut capabilities = process.capabilities().clone().unwrap();
         // add the CAP_NET_RAW
         add_cap_net_raw(&mut capabilities);
 
         process.set_capabilities(Some(capabilities));
+        process.set_args(Some(config.args.clone()));
+        // TODO: env
+        // process.set_env(Some(config.envs));
 
         spec.set_process(Some(process));
 
@@ -255,7 +281,7 @@ impl ContainerRunner {
         // determine if it's in the single mode
 
         //  create oci spec
-        let spec = self.create_oci_spec()?;
+        let spec: Spec = self.create_oci_spec()?;
 
         // create a config.path at the bundle path
         // TODO: Here use the local file path directly
@@ -278,7 +304,7 @@ impl ContainerRunner {
                 )
             })?;
         }
-        let file = File::create(config_path)?;
+        let file = File::create(&config_path)?;
         let mut writer = BufWriter::new(file);
         serde_json::to_writer_pretty(&mut writer, &spec)?;
         writer.flush()?;
@@ -589,10 +615,30 @@ pub fn setup_network_conf() -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    // write it to
     fs::write(conf_path, serde_json::to_string_pretty(&conf_value)?)?;
 
     Ok(())
+}
+
+pub fn handle_image_typ(container_spec: &ContainerSpec) -> Result<Option<ContainerConfigBuilder>> {
+    // TODO: MVP
+    // check if the image path
+    if let ImageType::OCIImage = determine_image_path(&container_spec.image)? {
+        let image_config = handle_oci_image(&container_spec.image, container_spec.name.clone())?;
+        // handle image_config
+        let mut builder = ContainerConfigBuilder::default();
+        if let Some(config) = image_config.config() {
+            // add cmd to config
+            builder.args_from_image_config(config.entrypoint(), config.cmd());
+            // extend env
+            builder.envs_from_image_config(config.env());
+            // set work_dir
+            builder.work_dir(config.working_dir());
+            // builder.users(config.user());
+        }
+        return Ok(Some(builder));
+    }
+    Ok(None)
 }
 
 pub fn container_execute(cmd: ContainerCommand) -> Result<()> {

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tinystr-vendor",
+    urls = ["https://static.crates.io/crates/tinystr/tinystr-0.8.1.crate"],
+    sha256 = "5d4f6d1145dcb577acf783d4e601bc1d76a13337bb54e6233add580b07344c8b",
+    type = "tar.gz",
+    strip_prefix = "tinystr-0.8.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tinystr-0.8.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tinystr",
+    srcs = [":tinystr-vendor"],
     crate = "tinystr",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "tinystr",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "A small ASCII-only bounded length string representation.",
         "CARGO_PKG_NAME": "tinystr",
@@ -31,7 +37,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc-0.2.5",
-        "//third-party/rust/crates/zerovec/0.11.4:zerovec-0.11.4",
+        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc",
+        "//third-party/rust/crates/zerovec/0.11.4:zerovec",
     ],
 )

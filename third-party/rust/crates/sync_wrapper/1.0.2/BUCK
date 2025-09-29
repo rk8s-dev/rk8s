@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "sync_wrapper-vendor",
+    urls = ["https://static.crates.io/crates/sync_wrapper/sync_wrapper-1.0.2.crate"],
+    sha256 = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263",
+    type = "tar.gz",
+    strip_prefix = "sync_wrapper-1.0.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "sync_wrapper-1.0.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "sync_wrapper",
+    srcs = [":sync_wrapper-vendor"],
     crate = "sync_wrapper",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "sync_wrapper",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Actyx AG <developer@actyx.io>",
         "CARGO_PKG_DESCRIPTION": "A tool for enlisting the compiler's help in proving the absence of concurrency",
         "CARGO_PKG_NAME": "sync_wrapper",
@@ -29,8 +35,6 @@ cargo.rust_library(
         "futures",
         "futures-core",
     ],
-    named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/futures-core/0.3.31:futures-core"],
 )

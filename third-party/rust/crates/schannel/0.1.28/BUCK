@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "schannel-vendor",
+    urls = ["https://static.crates.io/crates/schannel/schannel-0.1.28.crate"],
+    sha256 = "891d81b926048e76efe18581bf793546b4c0eaf8448d72be8de2bbee5fd166e1",
+    type = "tar.gz",
+    strip_prefix = "schannel-0.1.28",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "schannel-0.1.28",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "schannel",
+    srcs = [":schannel-vendor"],
     crate = "schannel",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "schannel",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>:Steffen Butzer <steffen.butzer@outlook.com>",
         "CARGO_PKG_DESCRIPTION": "Schannel bindings for rust, allowing SSL/TLS (e.g. https) without openssl",
         "CARGO_PKG_NAME": "schannel",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "28",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "windows_sys": "//third-party/rust/crates/windows-sys/0.61.0:windows-sys-0.61.0",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/windows-sys/0.61.0:windows-sys"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "syn-vendor",
+    urls = ["https://static.crates.io/crates/syn/syn-1.0.109.crate"],
+    sha256 = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237",
+    type = "tar.gz",
+    strip_prefix = "syn-1.0.109",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "syn-1.0.109",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "syn",
+    srcs = [":syn-vendor"],
     crate = "syn",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "syn",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Parser for Rust source code",
         "CARGO_PKG_NAME": "syn",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "109",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :syn-1.0.109-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :syn-build-script-run[out_dir])",
     },
     features = [
         "clone-impls",
@@ -36,27 +42,24 @@ cargo.rust_library(
         "proc-macro",
         "quote",
     ],
-    rustc_flags = ["@$(location :syn-1.0.109-build-script-run[rustc_flags])"],
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-        "unicode_ident": "//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident-1.0.19",
-    },
+    rustc_flags = ["@$(location :syn-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/quote/1.0.40:quote-1.0.40"],
+    deps = [
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident",
+    ],
 )
 
 cargo.rust_binary(
-    name = "syn-1.0.109-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "syn-build-script-build",
+    srcs = [":syn-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "syn",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Parser for Rust source code",
         "CARGO_PKG_NAME": "syn",
@@ -81,9 +84,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "syn-1.0.109-build-script-run",
+    name = "syn-build-script-run",
     package_name = "syn",
-    buildscript_rule = ":syn-1.0.109-build-script-build",
+    buildscript_rule = ":syn-build-script-build",
     features = [
         "clone-impls",
         "default",
@@ -95,5 +98,5 @@ buildscript_run(
         "quote",
     ],
     version = "1.0.109",
-    local_manifest_dir = "**",
+    manifest_dir = ":syn-vendor",
 )

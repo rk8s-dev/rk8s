@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "anstyle-parse-vendor",
+    urls = ["https://static.crates.io/crates/anstyle-parse/anstyle-parse-0.2.7.crate"],
+    sha256 = "4e7644824f0aa2c7b9384579234ef10eb7efb6a0deb83f9630a49594dd9c15c2",
+    type = "tar.gz",
+    strip_prefix = "anstyle-parse-0.2.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "anstyle-parse-0.2.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "anstyle-parse",
+    srcs = [":anstyle-parse-vendor"],
     crate = "anstyle-parse",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "anstyle-parse",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Parse ANSI Style Escapes",
         "CARGO_PKG_NAME": "anstyle-parse",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "utf8",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/utf8parse/0.2.2:utf8parse-0.2.2"],
+    deps = ["//third-party/rust/crates/utf8parse/0.2.2:utf8parse"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tinyvec-vendor",
+    urls = ["https://static.crates.io/crates/tinyvec/tinyvec-1.10.0.crate"],
+    sha256 = "bfa5fdc3bce6191a1dbc8c02d5c8bffcf557bafa17c124c5264a458f1b0613fa",
+    type = "tar.gz",
+    strip_prefix = "tinyvec-1.10.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tinyvec-1.10.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tinyvec",
+    srcs = [":tinyvec-vendor"],
     crate = "tinyvec",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tinyvec",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Lokathor <zefria@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "`tinyvec` provides 100% safe vec-like data structures.",
         "CARGO_PKG_NAME": "tinyvec",
@@ -31,5 +37,5 @@ cargo.rust_library(
         "tinyvec_macros",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/tinyvec_macros/0.1.1:tinyvec_macros-0.1.1"],
+    deps = ["//third-party/rust/crates/tinyvec_macros/0.1.1:tinyvec_macros"],
 )

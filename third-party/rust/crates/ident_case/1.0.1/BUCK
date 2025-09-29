@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ident_case-vendor",
+    urls = ["https://static.crates.io/crates/ident_case/ident_case-1.0.1.crate"],
+    sha256 = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39",
+    type = "tar.gz",
+    strip_prefix = "ident_case-1.0.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ident_case-1.0.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ident_case",
+    srcs = [":ident_case-vendor"],
     crate = "ident_case",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "ident_case",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Ted Driggs <ted.driggs@outlook.com>",
         "CARGO_PKG_DESCRIPTION": "Utility for applying case rules to Rust identifiers.",
         "CARGO_PKG_NAME": "ident_case",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "image-vendor",
+    urls = ["https://static.crates.io/crates/image/image-0.25.8.crate"],
+    sha256 = "529feb3e6769d234375c4cf1ee2ce713682b8e76538cb13f9fc23e1400a591e7",
+    type = "tar.gz",
+    strip_prefix = "image-0.25.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "image-0.25.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "image",
+    srcs = [":image-vendor"],
     crate = "image",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "image",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The image-rs Developers",
         "CARGO_PKG_DESCRIPTION": "Imaging library. Provides basic image processing and encoders/decoders for common image formats.",
         "CARGO_PKG_NAME": "image",
@@ -25,13 +31,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "8",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "byteorder_lite": "//third-party/rust/crates/byteorder-lite/0.1.0:byteorder-lite-0.1.0",
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytemuck/1.23.2:bytemuck-1.23.2",
-        "//third-party/rust/crates/moxcms/0.7.5:moxcms-0.7.5",
+        "//third-party/rust/crates/bytemuck/1.23.2:bytemuck",
+        "//third-party/rust/crates/byteorder-lite/0.1.0:byteorder-lite",
+        "//third-party/rust/crates/moxcms/0.7.5:moxcms",
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
     ],
 )

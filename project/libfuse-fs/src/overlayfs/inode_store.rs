@@ -12,6 +12,7 @@ use super::{Inode, OverlayInode};
 
 use futures::future::join_all;
 use radix_trie::Trie;
+use tracing::{error, trace};
 
 pub struct InodeStore {
     // Active inodes.

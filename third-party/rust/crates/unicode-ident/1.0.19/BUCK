@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "unicode-ident-vendor",
+    urls = ["https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.19.crate"],
+    sha256 = "f63a545481291138910575129486daeaf8ac54aee4387fe7906919f7830c7d9d",
+    type = "tar.gz",
+    strip_prefix = "unicode-ident-1.0.19",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "unicode-ident-1.0.19",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "unicode-ident",
+    srcs = [":unicode-ident-vendor"],
     crate = "unicode-ident",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "unicode-ident",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Determine whether characters have the XID_Start or XID_Continue properties according to Unicode Standard Annex #31",
         "CARGO_PKG_NAME": "unicode-ident",

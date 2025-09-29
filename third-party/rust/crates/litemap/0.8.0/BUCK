@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "litemap-vendor",
+    urls = ["https://static.crates.io/crates/litemap/litemap-0.8.0.crate"],
+    sha256 = "241eaef5fd12c88705a01fc1066c48c4b36e0dd4377dcdc7ec3942cea7a69956",
+    type = "tar.gz",
+    strip_prefix = "litemap-0.8.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "litemap-0.8.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "litemap",
+    srcs = [":litemap-vendor"],
     crate = "litemap",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "litemap",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "A key-value Map implementation based on a flat, sorted Vec.",
         "CARGO_PKG_NAME": "litemap",

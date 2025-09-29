@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "combine-vendor",
+    urls = ["https://static.crates.io/crates/combine/combine-4.6.7.crate"],
+    sha256 = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd",
+    type = "tar.gz",
+    strip_prefix = "combine-4.6.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "combine-4.6.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "combine",
+    srcs = [":combine-vendor"],
     crate = "combine",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "combine",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Markus Westerlind <marwes91@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Fast parser combinators on arbitrary streams with zero-copy support.",
         "CARGO_PKG_NAME": "combine",
@@ -33,7 +39,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/memchr/2.7.5:memchr-2.7.5",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/memchr/2.7.5:memchr",
     ],
 )

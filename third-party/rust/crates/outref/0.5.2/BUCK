@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "outref-vendor",
+    urls = ["https://static.crates.io/crates/outref/outref-0.5.2.crate"],
+    sha256 = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e",
+    type = "tar.gz",
+    strip_prefix = "outref-0.5.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "outref-0.5.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "outref",
+    srcs = [":outref-vendor"],
     crate = "outref",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "outref",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Out reference",
         "CARGO_PKG_NAME": "outref",

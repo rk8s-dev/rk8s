@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "icu_normalizer-vendor",
+    urls = ["https://static.crates.io/crates/icu_normalizer/icu_normalizer-2.0.0.crate"],
+    sha256 = "436880e8e18df4d7bbc06d58432329d6458cc84531f7ac5f024e93deadb37979",
+    type = "tar.gz",
+    strip_prefix = "icu_normalizer-2.0.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "icu_normalizer-2.0.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "icu_normalizer",
+    srcs = [":icu_normalizer-vendor"],
     crate = "icu_normalizer",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "icu_normalizer",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "API for normalizing text into Unicode Normalization Forms",
         "CARGO_PKG_NAME": "icu_normalizer",
@@ -28,12 +34,12 @@ cargo.rust_library(
     features = ["compiled_data"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc-0.2.5",
-        "//third-party/rust/crates/icu_collections/2.0.0:icu_collections-2.0.0",
-        "//third-party/rust/crates/icu_normalizer_data/2.0.0:icu_normalizer_data-2.0.0",
-        "//third-party/rust/crates/icu_properties/2.0.1:icu_properties-2.0.1",
-        "//third-party/rust/crates/icu_provider/2.0.0:icu_provider-2.0.0",
-        "//third-party/rust/crates/smallvec/1.15.1:smallvec-1.15.1",
-        "//third-party/rust/crates/zerovec/0.11.4:zerovec-0.11.4",
+        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc",
+        "//third-party/rust/crates/icu_collections/2.0.0:icu_collections",
+        "//third-party/rust/crates/icu_normalizer_data/2.0.0:icu_normalizer_data",
+        "//third-party/rust/crates/icu_properties/2.0.1:icu_properties",
+        "//third-party/rust/crates/icu_provider/2.0.0:icu_provider",
+        "//third-party/rust/crates/smallvec/1.15.1:smallvec",
+        "//third-party/rust/crates/zerovec/0.11.4:zerovec",
     ],
 )

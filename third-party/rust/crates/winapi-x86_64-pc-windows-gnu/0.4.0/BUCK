@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "winapi-x86_64-pc-windows-gnu-vendor",
+    urls = ["https://static.crates.io/crates/winapi-x86_64-pc-windows-gnu/winapi-x86_64-pc-windows-gnu-0.4.0.crate"],
+    sha256 = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f",
+    type = "tar.gz",
+    strip_prefix = "winapi-x86_64-pc-windows-gnu-0.4.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "winapi-x86_64-pc-windows-gnu-0.4.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "winapi-x86_64-pc-windows-gnu",
+    srcs = [":winapi-x86_64-pc-windows-gnu-vendor"],
     crate = "winapi-x86_64-pc-windows-gnu",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "winapi-x86_64-pc-windows-gnu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Peter Atashian <retep998@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Import libraries for the x86_64-pc-windows-gnu target. Please don't use this crate directly, depend on winapi instead.",
         "CARGO_PKG_NAME": "winapi-x86_64-pc-windows-gnu",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "4",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :winapi-x86_64-pc-windows-gnu-0.4.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :winapi-x86_64-pc-windows-gnu-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :winapi-x86_64-pc-windows-gnu-0.4.0-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :winapi-x86_64-pc-windows-gnu-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "winapi-x86_64-pc-windows-gnu-0.4.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "winapi-x86_64-pc-windows-gnu-build-script-build",
+    srcs = [":winapi-x86_64-pc-windows-gnu-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "winapi-x86_64-pc-windows-gnu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Peter Atashian <retep998@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Import libraries for the x86_64-pc-windows-gnu target. Please don't use this crate directly, depend on winapi instead.",
         "CARGO_PKG_NAME": "winapi-x86_64-pc-windows-gnu",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "winapi-x86_64-pc-windows-gnu-0.4.0-build-script-run",
+    name = "winapi-x86_64-pc-windows-gnu-build-script-run",
     package_name = "winapi-x86_64-pc-windows-gnu",
-    buildscript_rule = ":winapi-x86_64-pc-windows-gnu-0.4.0-build-script-build",
+    buildscript_rule = ":winapi-x86_64-pc-windows-gnu-build-script-build",
     version = "0.4.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":winapi-x86_64-pc-windows-gnu-vendor",
 )

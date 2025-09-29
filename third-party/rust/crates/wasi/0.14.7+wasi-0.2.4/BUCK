@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "wasi-vendor",
+    urls = ["https://static.crates.io/crates/wasi/wasi-0.14.7+wasi-0.2.4.crate"],
+    sha256 = "883478de20367e224c0090af9cf5f9fa85bed63a95c1abf3afc5c083ebc06e8c",
+    type = "tar.gz",
+    strip_prefix = "wasi-0.14.7+wasi-0.2.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "wasi-0.14.7+wasi-0.2.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "wasi",
+    srcs = [":wasi-vendor"],
     crate = "wasi",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "wasi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "WASI API bindings for Rust",
         "CARGO_PKG_NAME": "wasi",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/wasip2/1.0.1+wasi-0.2.4:wasip2-1.0.1+wasi-0.2.4"],
+    deps = ["//third-party/rust/crates/wasip2/1.0.1+wasi-0.2.4:wasip2"],
 )

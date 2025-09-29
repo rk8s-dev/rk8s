@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "synstructure-vendor",
+    urls = ["https://static.crates.io/crates/synstructure/synstructure-0.13.2.crate"],
+    sha256 = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2",
+    type = "tar.gz",
+    strip_prefix = "synstructure-0.13.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "synstructure-0.13.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "synstructure",
+    srcs = [":synstructure-vendor"],
     crate = "synstructure",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "synstructure",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Nika Layzell <nika@thelayzells.com>",
         "CARGO_PKG_DESCRIPTION": "Helper methods and macros for custom derives",
         "CARGO_PKG_NAME": "synstructure",
@@ -29,12 +35,10 @@ cargo.rust_library(
         "default",
         "proc-macro",
     ],
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

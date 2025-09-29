@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tracing-vendor",
+    urls = ["https://static.crates.io/crates/tracing/tracing-0.1.41.crate"],
+    sha256 = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0",
+    type = "tar.gz",
+    strip_prefix = "tracing-0.1.41",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tracing-0.1.41",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tracing",
+    srcs = [":tracing-vendor"],
     crate = "tracing",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "tracing",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Eliza Weisman <eliza@buoyant.io>:Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "Application-level tracing for Rust.\n",
         "CARGO_PKG_NAME": "tracing",
@@ -32,11 +38,11 @@ cargo.rust_library(
         "std",
         "tracing-attributes",
     ],
-    named_deps = {
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-        "tracing_attributes": "//third-party/rust/crates/tracing-attributes/0.1.30:tracing-attributes-0.1.30",
-        "tracing_core": "//third-party/rust/crates/tracing-core/0.1.34:tracing-core-0.1.34",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/log/0.4.28:log-0.4.28"],
+    deps = [
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/tracing-attributes/0.1.30:tracing-attributes",
+        "//third-party/rust/crates/tracing-core/0.1.34:tracing-core",
+    ],
 )

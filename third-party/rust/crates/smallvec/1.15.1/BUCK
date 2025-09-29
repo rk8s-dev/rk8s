@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "smallvec-vendor",
+    urls = ["https://static.crates.io/crates/smallvec/smallvec-1.15.1.crate"],
+    sha256 = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03",
+    type = "tar.gz",
+    strip_prefix = "smallvec-1.15.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "smallvec-1.15.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "smallvec",
+    srcs = [":smallvec-vendor"],
     crate = "smallvec",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "smallvec",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Servo Project Developers",
         "CARGO_PKG_DESCRIPTION": "'Small vector' optimization: store up to a small number of items on the stack",
         "CARGO_PKG_NAME": "smallvec",
@@ -31,5 +37,5 @@ cargo.rust_library(
         "serde",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/serde/1.0.226:serde-1.0.226"],
+    deps = ["//third-party/rust/crates/serde/1.0.226:serde"],
 )

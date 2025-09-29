@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "moxcms-vendor",
+    urls = ["https://static.crates.io/crates/moxcms/moxcms-0.7.5.crate"],
+    sha256 = "ddd32fa8935aeadb8a8a6b6b351e40225570a37c43de67690383d87ef170cd08",
+    type = "tar.gz",
+    strip_prefix = "moxcms-0.7.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "moxcms-0.7.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "moxcms",
+    srcs = [":moxcms-vendor"],
     crate = "moxcms",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "moxcms",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Radzivon Bartoshyk",
         "CARGO_PKG_DESCRIPTION": "Simple Color Management in Rust",
         "CARGO_PKG_NAME": "moxcms",
@@ -31,9 +37,9 @@ cargo.rust_library(
         "neon",
         "sse",
     ],
-    named_deps = {
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/pxfm/0.1.24:pxfm-0.1.24"],
+    deps = [
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
+        "//third-party/rust/crates/pxfm/0.1.24:pxfm",
+    ],
 )

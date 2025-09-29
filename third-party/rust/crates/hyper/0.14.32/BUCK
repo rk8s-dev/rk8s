@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hyper-vendor",
+    urls = ["https://static.crates.io/crates/hyper/hyper-0.14.32.crate"],
+    sha256 = "41dfc780fdec9373c01bae43289ea34c972e40ee3c9f6b3c8801a35f35586ce7",
+    type = "tar.gz",
+    strip_prefix = "hyper-0.14.32",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hyper-0.14.32",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hyper",
+    srcs = [":hyper-vendor"],
     crate = "hyper",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "hyper",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "A fast and correct HTTP library.",
         "CARGO_PKG_NAME": "hyper",
@@ -37,25 +43,23 @@ cargo.rust_library(
         "stream",
         "tcp",
     ],
-    named_deps = {
-        "futures_channel": "//third-party/rust/crates/futures-channel/0.3.31:futures-channel-0.3.31",
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util-0.3.31",
-        "http_body": "//third-party/rust/crates/http-body/0.4.6:http-body-0.4.6",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-        "tower_service": "//third-party/rust/crates/tower-service/0.3.3:tower-service-0.3.3",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/h2/0.3.27:h2-0.3.27",
-        "//third-party/rust/crates/http/0.2.12:http-0.2.12",
-        "//third-party/rust/crates/httparse/1.10.1:httparse-1.10.1",
-        "//third-party/rust/crates/httpdate/1.0.3:httpdate-1.0.3",
-        "//third-party/rust/crates/itoa/1.0.15:itoa-1.0.15",
-        "//third-party/rust/crates/socket2/0.5.10:socket2-0.5.10",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
-        "//third-party/rust/crates/tracing/0.1.41:tracing-0.1.41",
-        "//third-party/rust/crates/want/0.3.1:want-0.3.1",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/h2/0.3.27:h2",
+        "//third-party/rust/crates/http-body/0.4.6:http-body",
+        "//third-party/rust/crates/http/0.2.12:http",
+        "//third-party/rust/crates/httparse/1.10.1:httparse",
+        "//third-party/rust/crates/httpdate/1.0.3:httpdate",
+        "//third-party/rust/crates/itoa/1.0.15:itoa",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/socket2/0.5.10:socket2",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+        "//third-party/rust/crates/tower-service/0.3.3:tower-service",
+        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/want/0.3.1:want",
     ],
 )

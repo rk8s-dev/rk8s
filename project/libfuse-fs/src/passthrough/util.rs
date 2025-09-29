@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use libc::stat64;
 use rfuse3::raw::reply::FileAttr;
 use rfuse3::{FileType, Timestamp};
+use tracing::error;
 
 use super::inode_store::InodeId;
 use super::{CURRENT_DIR_CSTR, EMPTY_CSTR, MAX_HOST_INO, PARENT_DIR_CSTR};

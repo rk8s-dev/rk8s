@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-executor-vendor",
+    urls = ["https://static.crates.io/crates/async-executor/async-executor-1.13.3.crate"],
+    sha256 = "497c00e0fd83a72a79a39fcbd8e3e2f055d6f6c7e025f3b3d91f4f8e76527fb8",
+    type = "tar.gz",
+    strip_prefix = "async-executor-1.13.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-executor-1.13.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-executor",
+    srcs = [":async-executor-vendor"],
     crate = "async-executor",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "async-executor",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>:John Nunley <dev@notgull.net>",
         "CARGO_PKG_DESCRIPTION": "Async executor",
         "CARGO_PKG_NAME": "async-executor",
@@ -25,15 +31,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "async_task": "//third-party/rust/crates/async-task/4.7.1:async-task-4.7.1",
-        "concurrent_queue": "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue-2.5.0",
-        "futures_lite": "//third-party/rust/crates/futures-lite/2.6.1:futures-lite-2.6.1",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/fastrand/2.3.0:fastrand-2.3.0",
-        "//third-party/rust/crates/slab/0.4.11:slab-0.4.11",
+        "//third-party/rust/crates/async-task/4.7.1:async-task",
+        "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue",
+        "//third-party/rust/crates/fastrand/2.3.0:fastrand",
+        "//third-party/rust/crates/futures-lite/2.6.1:futures-lite",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/slab/0.4.11:slab",
     ],
 )

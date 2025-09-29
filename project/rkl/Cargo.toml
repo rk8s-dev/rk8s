@@ -27,6 +27,7 @@ serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.3", features = ["v4"] }
 nix = { version = "0.29.0", features = ["fs", "mount"] }
 libcni = { path = "../libcni" }
+libfuse-fs = { path = "../libfuse-fs" }
 anyhow = "1.0.98"
 protobuf = "=3.2.0"
 liboci-cli = "0.5.1"
@@ -60,6 +61,7 @@ regex = "1.0"
 dotenvy = "0.15"
 netlink-packet-route = "0.22.0"
 json= "0.12.4"
+thiserror = "2.0.16"
 
 [dev-dependencies]
 tempfile = "3"

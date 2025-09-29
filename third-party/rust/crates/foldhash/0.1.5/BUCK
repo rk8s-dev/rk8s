@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "foldhash-vendor",
+    urls = ["https://static.crates.io/crates/foldhash/foldhash-0.1.5.crate"],
+    sha256 = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2",
+    type = "tar.gz",
+    strip_prefix = "foldhash-0.1.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "foldhash-0.1.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "foldhash",
+    srcs = [":foldhash-vendor"],
     crate = "foldhash",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "foldhash",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Orson Peters <orsonpeters@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A fast, non-cryptographic, minimally DoS-resistant hashing algorithm.",
         "CARGO_PKG_NAME": "foldhash",

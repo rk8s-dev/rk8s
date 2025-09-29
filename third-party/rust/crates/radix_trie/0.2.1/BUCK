@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "radix_trie-vendor",
+    urls = ["https://static.crates.io/crates/radix_trie/radix_trie-0.2.1.crate"],
+    sha256 = "c069c179fcdc6a2fe24d8d18305cf085fdbd4f922c041943e203685d6a1c58fd",
+    type = "tar.gz",
+    strip_prefix = "radix_trie-0.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "radix_trie-0.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "radix_trie",
+    srcs = [":radix_trie-vendor"],
     crate = "radix_trie",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "radix_trie",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Michael Sproul <micsproul@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Generic radix trie data-structure.",
         "CARGO_PKG_NAME": "radix_trie",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "endian_type": "//third-party/rust/crates/endian-type/0.1.2:endian-type-0.1.2",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/nibble_vec/0.1.0:nibble_vec-0.1.0"],
+    deps = [
+        "//third-party/rust/crates/endian-type/0.1.2:endian-type",
+        "//third-party/rust/crates/nibble_vec/0.1.0:nibble_vec",
+    ],
 )

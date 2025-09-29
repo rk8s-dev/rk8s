@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crc32fast-vendor",
+    urls = ["https://static.crates.io/crates/crc32fast/crc32fast-1.5.0.crate"],
+    sha256 = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511",
+    type = "tar.gz",
+    strip_prefix = "crc32fast-1.5.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crc32fast-1.5.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crc32fast",
+    srcs = [":crc32fast-vendor"],
     crate = "crc32fast",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crc32fast",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sam Rijs <srijs@airpost.net>:Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "Fast, SIMD-accelerated CRC32 (IEEE) checksum computation",
         "CARGO_PKG_NAME": "crc32fast",
@@ -24,31 +30,26 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "5",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :crc32fast-1.5.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :crc32fast-build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :crc32fast-1.5.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
+    rustc_flags = ["@$(location :crc32fast-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/cfg-if/1.0.3:cfg-if"],
 )
 
 cargo.rust_binary(
-    name = "crc32fast-1.5.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crc32fast-build-script-build",
+    srcs = [":crc32fast-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "crc32fast",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Sam Rijs <srijs@airpost.net>:Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "Fast, SIMD-accelerated CRC32 (IEEE) checksum computation",
         "CARGO_PKG_NAME": "crc32fast",
@@ -67,13 +68,13 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "crc32fast-1.5.0-build-script-run",
+    name = "crc32fast-build-script-run",
     package_name = "crc32fast",
-    buildscript_rule = ":crc32fast-1.5.0-build-script-build",
+    buildscript_rule = ":crc32fast-build-script-build",
     features = [
         "default",
         "std",
     ],
     version = "1.5.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":crc32fast-vendor",
 )

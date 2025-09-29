@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "httpdate-vendor",
+    urls = ["https://static.crates.io/crates/httpdate/httpdate-1.0.3.crate"],
+    sha256 = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9",
+    type = "tar.gz",
+    strip_prefix = "httpdate-1.0.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "httpdate-1.0.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "httpdate",
+    srcs = [":httpdate-vendor"],
     crate = "httpdate",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "httpdate",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Pyfisch <pyfisch@posteo.org>",
         "CARGO_PKG_DESCRIPTION": "HTTP date parsing and formatting",
         "CARGO_PKG_NAME": "httpdate",

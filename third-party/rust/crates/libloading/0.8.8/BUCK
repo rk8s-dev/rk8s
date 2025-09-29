@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "libloading-vendor",
+    urls = ["https://static.crates.io/crates/libloading/libloading-0.8.8.crate"],
+    sha256 = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667",
+    type = "tar.gz",
+    strip_prefix = "libloading-0.8.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "libloading-0.8.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "libloading",
+    srcs = [":libloading-vendor"],
     crate = "libloading",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "libloading",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Simonas Kazlauskas <libloading@kazlauskas.me>",
         "CARGO_PKG_DESCRIPTION": "Bindings around the platform's dynamic library loading primitives with greatly improved memory safety.",
         "CARGO_PKG_NAME": "libloading",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "8",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/cfg-if/1.0.3:cfg-if"],
 )

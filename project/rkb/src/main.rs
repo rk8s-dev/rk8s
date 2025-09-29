@@ -8,10 +8,12 @@ pub mod logout;
 pub mod mount;
 pub mod oci_spec;
 pub mod overlayfs;
-pub mod registry;
+pub mod pull;
+pub mod push;
 pub mod repo;
 pub mod rt;
 pub mod run;
+pub mod storage;
 pub mod utils;
 
 use crate::args::{Cli, Commands};
@@ -34,5 +36,7 @@ fn main() -> Result<()> {
         Commands::Login(args) => login::login(args),
         Commands::Logout(args) => logout::logout(args),
         Commands::Repo(args) => repo::repo(args),
+        Commands::Pull(args) => pull::pull(args),
+        Commands::Push(args) => push::push(args),
     }
 }

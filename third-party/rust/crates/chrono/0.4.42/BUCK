@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "chrono-vendor",
+    urls = ["https://static.crates.io/crates/chrono/chrono-0.4.42.crate"],
+    sha256 = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2",
+    type = "tar.gz",
+    strip_prefix = "chrono-0.4.42",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "chrono-0.4.42",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "chrono",
+    srcs = [":chrono-vendor"],
     crate = "chrono",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "chrono",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Date and time library for Rust",
         "CARGO_PKG_NAME": "chrono",
@@ -40,10 +46,10 @@ cargo.rust_library(
         "winapi",
         "windows-link",
     ],
-    named_deps = {
-        "iana_time_zone": "//third-party/rust/crates/iana-time-zone/0.1.64:iana-time-zone-0.1.64",
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/serde/1.0.226:serde-1.0.226"],
+    deps = [
+        "//third-party/rust/crates/iana-time-zone/0.1.64:iana-time-zone",
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+    ],
 )

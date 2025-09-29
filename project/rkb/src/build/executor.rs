@@ -1,8 +1,8 @@
 use super::{config::ImageConfig, config::StageExecutorConfig, stage_executor::StageExecutor};
 use crate::compressor::LayerCompressor;
+use crate::config::registry::BLOBS;
 use crate::{
     compressor::{LayerCompressionConfig, LayerCompressionResult},
-    config,
     overlayfs::{MountConfig, OverlayGuard},
 };
 use anyhow::{Context, Result};
@@ -50,7 +50,7 @@ impl Executor {
         }
 
         // check if `image_output_dir/blobs/sha256` exists
-        let layer_dir = self.image_output_dir.join(config::BLOBS);
+        let layer_dir = self.image_output_dir.join(BLOBS);
         if !layer_dir.exists() {
             fs::create_dir_all(&layer_dir)
                 .with_context(|| format!("Failed to create directory {}", layer_dir.display()))?;

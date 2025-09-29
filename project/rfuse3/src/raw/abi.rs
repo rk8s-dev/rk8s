@@ -283,7 +283,7 @@ pub struct fuse_kstatfs {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, dead_code)]
 pub struct fuse_file_lock {
     pub start: u64,
     pub end: u64,

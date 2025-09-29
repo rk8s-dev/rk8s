@@ -1,5 +1,5 @@
-#[macro_use]
-extern crate log;
+// #[macro_use]
+// extern crate log;
 
 pub mod overlayfs;
 pub mod passthrough;

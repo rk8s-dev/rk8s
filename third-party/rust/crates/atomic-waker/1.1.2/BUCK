@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "atomic-waker-vendor",
+    urls = ["https://static.crates.io/crates/atomic-waker/atomic-waker-1.1.2.crate"],
+    sha256 = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0",
+    type = "tar.gz",
+    strip_prefix = "atomic-waker-1.1.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "atomic-waker-1.1.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "atomic-waker",
+    srcs = [":atomic-waker-vendor"],
     crate = "atomic-waker",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "atomic-waker",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>:Contributors to futures-rs",
         "CARGO_PKG_DESCRIPTION": "A synchronization primitive for task wakeup",
         "CARGO_PKG_NAME": "atomic-waker",

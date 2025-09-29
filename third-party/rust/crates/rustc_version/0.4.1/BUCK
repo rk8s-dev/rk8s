@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustc_version-vendor",
+    urls = ["https://static.crates.io/crates/rustc_version/rustc_version-0.4.1.crate"],
+    sha256 = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92",
+    type = "tar.gz",
+    strip_prefix = "rustc_version-0.4.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustc_version-0.4.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustc_version",
+    srcs = [":rustc_version-vendor"],
     crate = "rustc_version",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rustc_version",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A library for querying the version of a installed rustc compiler",
         "CARGO_PKG_NAME": "rustc_version",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/semver/1.0.27:semver-1.0.27"],
+    deps = ["//third-party/rust/crates/semver/1.0.27:semver"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "predicates-tree-vendor",
+    urls = ["https://static.crates.io/crates/predicates-tree/predicates-tree-1.0.12.crate"],
+    sha256 = "72dd2d6d381dfb73a193c7fca536518d7caee39fc8503f74e7dc0be0531b425c",
+    type = "tar.gz",
+    strip_prefix = "predicates-tree-1.0.12",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "predicates-tree-1.0.12",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "predicates-tree",
+    srcs = [":predicates-tree-vendor"],
     crate = "predicates-tree",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "predicates-tree",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Nick Stevens <nick@bitcurry.com>",
         "CARGO_PKG_DESCRIPTION": "Render boolean-valued predicate functions results as a tree.",
         "CARGO_PKG_NAME": "predicates-tree",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "12",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "predicates_core": "//third-party/rust/crates/predicates-core/1.0.9:predicates-core-1.0.9",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/termtree/0.5.1:termtree-0.5.1"],
+    deps = [
+        "//third-party/rust/crates/predicates-core/1.0.9:predicates-core",
+        "//third-party/rust/crates/termtree/0.5.1:termtree",
+    ],
 )

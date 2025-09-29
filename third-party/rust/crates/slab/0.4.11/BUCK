@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "slab-vendor",
+    urls = ["https://static.crates.io/crates/slab/slab-0.4.11.crate"],
+    sha256 = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589",
+    type = "tar.gz",
+    strip_prefix = "slab-0.4.11",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "slab-0.4.11",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "slab",
+    srcs = [":slab-vendor"],
     crate = "slab",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "slab",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Carl Lerche <me@carllerche.com>",
         "CARGO_PKG_DESCRIPTION": "Pre-allocated storage for a uniform data type",
         "CARGO_PKG_NAME": "slab",

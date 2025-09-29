@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "mockall_derive-vendor",
+    urls = ["https://static.crates.io/crates/mockall_derive/mockall_derive-0.13.1.crate"],
+    sha256 = "25ca3004c2efe9011bd4e461bd8256445052b9615405b4f7ea43fc8ca5c20898",
+    type = "tar.gz",
+    strip_prefix = "mockall_derive-0.13.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "mockall_derive-0.13.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "mockall_derive",
+    srcs = [":mockall_derive-vendor"],
     crate = "mockall_derive",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "mockall_derive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alan Somers <asomers@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Procedural macros for Mockall\n",
         "CARGO_PKG_NAME": "mockall_derive",
@@ -24,33 +30,28 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "13",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :mockall_derive-0.13.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :mockall_derive-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :mockall_derive-0.13.1-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :mockall_derive-build-script-run[rustc_flags])"],
     proc_macro = True,
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )
 
 cargo.rust_binary(
-    name = "mockall_derive-0.13.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "mockall_derive-build-script-build",
+    srcs = [":mockall_derive-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "mockall_derive",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alan Somers <asomers@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Procedural macros for Mockall\n",
         "CARGO_PKG_NAME": "mockall_derive",
@@ -65,9 +66,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "mockall_derive-0.13.1-build-script-run",
+    name = "mockall_derive-build-script-run",
     package_name = "mockall_derive",
-    buildscript_rule = ":mockall_derive-0.13.1-build-script-build",
+    buildscript_rule = ":mockall_derive-build-script-build",
     version = "0.13.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":mockall_derive-vendor",
 )

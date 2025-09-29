@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "memoffset-vendor",
+    urls = ["https://static.crates.io/crates/memoffset/memoffset-0.9.1.crate"],
+    sha256 = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a",
+    type = "tar.gz",
+    strip_prefix = "memoffset-0.9.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "memoffset-0.9.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "memoffset",
+    srcs = [":memoffset-vendor"],
     crate = "memoffset",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "memoffset",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Gilad Naaman <gilad.naaman@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "offset_of functionality for Rust structs.",
         "CARGO_PKG_NAME": "memoffset",
@@ -24,25 +30,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "9",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :memoffset-0.9.1-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :memoffset-build-script-run[out_dir])",
     },
     features = ["default"],
-    rustc_flags = ["@$(location :memoffset-0.9.1-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :memoffset-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "memoffset-0.9.1-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "memoffset-build-script-build",
+    srcs = [":memoffset-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "memoffset",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Gilad Naaman <gilad.naaman@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "offset_of functionality for Rust structs.",
         "CARGO_PKG_NAME": "memoffset",
@@ -55,14 +58,14 @@ cargo.rust_binary(
     },
     features = ["default"],
     visibility = [],
-    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg-1.5.0"],
+    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "memoffset-0.9.1-build-script-run",
+    name = "memoffset-build-script-run",
     package_name = "memoffset",
-    buildscript_rule = ":memoffset-0.9.1-build-script-build",
+    buildscript_rule = ":memoffset-build-script-build",
     features = ["default"],
     version = "0.9.1",
-    local_manifest_dir = "**",
+    manifest_dir = ":memoffset-vendor",
 )

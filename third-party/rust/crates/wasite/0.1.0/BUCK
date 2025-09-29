@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "wasite-vendor",
+    urls = ["https://static.crates.io/crates/wasite/wasite-0.1.0.crate"],
+    sha256 = "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b",
+    type = "tar.gz",
+    strip_prefix = "wasite-0.1.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "wasite-0.1.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "wasite",
+    srcs = [":wasite-vendor"],
     crate = "wasite",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "wasite",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "WASI Terminal Environment API",
         "CARGO_PKG_NAME": "wasite",

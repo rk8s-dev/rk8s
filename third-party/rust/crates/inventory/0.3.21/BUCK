@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "inventory-vendor",
+    urls = ["https://static.crates.io/crates/inventory/inventory-0.3.21.crate"],
+    sha256 = "bc61209c082fbeb19919bee74b176221b27223e27b65d781eb91af24eb1fb46e",
+    type = "tar.gz",
+    strip_prefix = "inventory-0.3.21",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "inventory-0.3.21",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "inventory",
+    srcs = [":inventory-vendor"],
     crate = "inventory",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "inventory",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Typed distributed plugin registration",
         "CARGO_PKG_NAME": "inventory",

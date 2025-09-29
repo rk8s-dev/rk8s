@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "base64-simd-vendor",
+    urls = ["https://static.crates.io/crates/base64-simd/base64-simd-0.8.0.crate"],
+    sha256 = "339abbe78e73178762e23bea9dfd08e697eb3f3301cd4be981c0f78ba5859195",
+    type = "tar.gz",
+    strip_prefix = "base64-simd-0.8.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "base64-simd-0.8.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "base64-simd",
+    srcs = [":base64-simd-vendor"],
     crate = "base64-simd",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "base64-simd",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "SIMD-accelerated base64 encoding and decoding",
         "CARGO_PKG_NAME": "base64-simd",
@@ -33,7 +39,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/outref/0.5.2:outref-0.5.2",
-        "//third-party/rust/crates/vsimd/0.8.0:vsimd-0.8.0",
+        "//third-party/rust/crates/outref/0.5.2:outref",
+        "//third-party/rust/crates/vsimd/0.8.0:vsimd",
     ],
 )

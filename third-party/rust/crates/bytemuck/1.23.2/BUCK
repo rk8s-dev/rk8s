@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "bytemuck-vendor",
+    urls = ["https://static.crates.io/crates/bytemuck/bytemuck-1.23.2.crate"],
+    sha256 = "3995eaeebcdf32f91f980d360f78732ddc061097ab4e39991ae7a6ace9194677",
+    type = "tar.gz",
+    strip_prefix = "bytemuck-1.23.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "bytemuck-1.23.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "bytemuck",
+    srcs = [":bytemuck-vendor"],
     crate = "bytemuck",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "bytemuck",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Lokathor <zefria@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A crate for mucking around with piles of bytes.",
         "CARGO_PKG_NAME": "bytemuck",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "fragile-vendor",
+    urls = ["https://static.crates.io/crates/fragile/fragile-2.0.1.crate"],
+    sha256 = "28dd6caf6059519a65843af8fe2a3ae298b14b80179855aeb4adc2c1934ee619",
+    type = "tar.gz",
+    strip_prefix = "fragile-2.0.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "fragile-2.0.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "fragile",
+    srcs = [":fragile-vendor"],
     crate = "fragile",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "fragile",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Armin Ronacher <armin.ronacher@active-4.com>",
         "CARGO_PKG_DESCRIPTION": "Provides wrapper types for sending non-send values to other threads.",
         "CARGO_PKG_NAME": "fragile",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "wasip2-vendor",
+    urls = ["https://static.crates.io/crates/wasip2/wasip2-1.0.1+wasi-0.2.4.crate"],
+    sha256 = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7",
+    type = "tar.gz",
+    strip_prefix = "wasip2-1.0.1+wasi-0.2.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "wasip2-1.0.1+wasi-0.2.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "wasip2",
+    srcs = [":wasip2-vendor"],
     crate = "wasip2",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "wasip2",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "WASIp2 API bindings for Rust",
         "CARGO_PKG_NAME": "wasip2",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "wit_bindgen": "//third-party/rust/crates/wit-bindgen/0.46.0:wit-bindgen-0.46.0",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/wit-bindgen/0.46.0:wit-bindgen"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "crossterm_winapi-vendor",
+    urls = ["https://static.crates.io/crates/crossterm_winapi/crossterm_winapi-0.9.1.crate"],
+    sha256 = "acdd7c62a3665c7f6830a51635d9ac9b23ed385797f70a83bb8bafe9c572ab2b",
+    type = "tar.gz",
+    strip_prefix = "crossterm_winapi-0.9.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "crossterm_winapi-0.9.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "crossterm_winapi",
+    srcs = [":crossterm_winapi-vendor"],
     crate = "crossterm_winapi",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "crossterm_winapi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "T. Post",
         "CARGO_PKG_DESCRIPTION": "WinAPI wrapper that provides some basic simple abstractions around common WinAPI calls",
         "CARGO_PKG_NAME": "crossterm_winapi",

@@ -13,6 +13,8 @@ flowchart TD
 
   subgraph Parse & dispatch
     B -->|build| CmdBuild[Commands::Build]
+    B -->|push| CmdPush[Commands::Push]
+    B -->|pull| CmdPull[Commands::Pull]
     B -->|mount| CmdMount[Commands::Mount]
     B -->|exec| CmdExec[Commands::Exec]
     B -->|cleanup| CmdCleanup[Commands::Cleanup]
@@ -47,9 +49,13 @@ flowchart TD
     LoginMain --> Config[LoginConfig::store]
     CmdLogout --> LogoutMain[logout_main::logout]
     LogoutMain --> Config
+    CmdPush --> PushMain[push_main::push]
+    CmdPull --> PullMain[pull_main::pull]
     CmdRepo --> RepoMain[repo_main::main]
-    RepoMain --> AuthClient[client_with_authentication]
-    RepoMain --> RepoAPI[Distribution Server API]
+    PushMain --> AuthClient[client_with_authentication]
+    PullMain --> AuthClient
+    RepoMain --> AuthClient
+    AuthClient --> RepoAPI[Distribution Server API]
   end
 
   StageExec --> ExecTask
@@ -216,6 +222,50 @@ sudo umoci unpack --image image1:latest bundle
 
 ## Registry Management
 
+### Push and Pull Images
+
+Push a local OCI image to a distribution server:
+
+```sh
+# Push image to registry
+rkb push --url https://your-distribution-server.com --path output/image1 mynamespace/myimage:latest
+
+# If only one server is configured, you can omit the URL
+rkb push --path output/image1 mynamespace/myimage:latest
+```
+
+Pull an image from a distribution server:
+
+```sh
+# Pull image from registry
+rkb pull --url https://your-distribution-server.com mynamespace/myimage:latest
+
+# If only one server is configured, you can omit the URL
+rkb pull mynamespace/myimage:latest
+```
+
+#### Important Notes on Image References
+
+**❌ Incorrect usage:**
+```sh
+# DON'T include the server URL in the image reference
+rkb push --url 127.0.0.1:8968 --path output/image1 127.0.0.1:8968/me/image:latest
+rkb pull --url 127.0.0.1:8968 127.0.0.1:8968/me/image:latest
+```
+
+**✅ Correct usage:**
+```sh
+# Use the server URL as a separate --url parameter
+rkb push --url 127.0.0.1:8968 --path output/image1 me/image:latest
+rkb pull --url 127.0.0.1:8968 me/image:latest
+
+# Or omit --url if only one server is configured
+rkb push --path output/image1 me/image:latest
+rkb pull me/image:latest
+```
+
+The image reference should only contain the namespace and image name (e.g., `mynamespace/myimage:latest`), while the server URL should be specified separately using the `--url` parameter.
+
 ### Login to Distribution Server
 
 First, login to your distribution server using GitHub OAuth:
@@ -283,6 +333,8 @@ Usage: rkb <COMMAND>
 
 Commands:
   build   Build a container image from Dockerfile
+  push    Push an image to specific distribution server
+  pull    Pull an image from specific distribution server
   login   Login to distribution server
   logout  Logout from distribution server
   repo    List and manage repositories
@@ -307,6 +359,31 @@ Options:
 ```
 
 ### Registry Management Commands
+
+#### Push
+```sh
+Usage: rkb push [OPTIONS] <IMAGE_REF>
+
+Arguments:
+  <IMAGE_REF>  Image reference
+
+Options:
+      --path <PATH>  Image path (default current directory)
+      --url <URL>    URL of the distribution server (optional if only one server is configured)
+  -h, --help        Print help
+```
+
+#### Pull
+```sh
+Usage: rkb pull [OPTIONS] <IMAGE_REF>
+
+Arguments:
+  <IMAGE_REF>  Image reference
+
+Options:
+      --url <URL>  URL of the distribution server (optional if only one server is configured)
+  -h, --help       Print help
+```
 
 #### Login
 ```sh
@@ -351,12 +428,41 @@ Options:
 | Feature                    | Status |
 |----------------------------|--------|
 | Image building             | ✅     |
+| Image push/pull            | ✅     |
 | lib-fuse integration       | ✅     |
 | Registry authentication    | ✅     |
 | Repository management      | ✅     |
 | GitHub OAuth login         | ✅     |
 | Multi-server support       | ✅     |
 | Cross-platform             | ❌     |
+
+## Testing
+
+### Running the Registry Test Suite
+
+The project includes a comprehensive test script that validates rkb's functionality with a distribution server:
+
+```sh
+# Make sure you have a distribution server running
+# (e.g., using docker-compose up -d)
+
+# Run the test suite
+./test_rkb_registry.sh
+```
+
+The test suite covers:
+- Anonymous user permission isolation
+- Cross-namespace push permissions
+- Private/public repository access control
+- Repository management (list, visibility changes)
+- Image push/pull functionality
+
+### Prerequisites for Testing
+
+- Docker installed and running
+- Distribution server running (e.g., on 127.0.0.1:8968)
+- `jq` command-line JSON processor
+- Built rkb binary in `../target/debug/rkb`
 
 ### Supported Dockerfile instructions
 

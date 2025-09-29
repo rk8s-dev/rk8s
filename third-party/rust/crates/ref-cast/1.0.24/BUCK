@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ref-cast-vendor",
+    urls = ["https://static.crates.io/crates/ref-cast/ref-cast-1.0.24.crate"],
+    sha256 = "4a0ae411dbe946a674d89546582cea4ba2bb8defac896622d6496f14c23ba5cf",
+    type = "tar.gz",
+    strip_prefix = "ref-cast-1.0.24",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ref-cast-1.0.24",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ref-cast",
+    srcs = [":ref-cast-vendor"],
     crate = "ref-cast",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "ref-cast",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Safely cast &T to &U where the struct U contains a single field of type T.",
         "CARGO_PKG_NAME": "ref-cast",
@@ -24,27 +30,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "24",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :ref-cast-1.0.24-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :ref-cast-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :ref-cast-1.0.24-build-script-run[rustc_flags])"],
-    named_deps = {
-        "ref_cast_impl": "//third-party/rust/crates/ref-cast-impl/1.0.24:ref-cast-impl-1.0.24",
-    },
+    rustc_flags = ["@$(location :ref-cast-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/ref-cast-impl/1.0.24:ref-cast-impl"],
 )
 
 cargo.rust_binary(
-    name = "ref-cast-1.0.24-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ref-cast-build-script-build",
+    srcs = [":ref-cast-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "ref-cast",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Safely cast &T to &U where the struct U contains a single field of type T.",
         "CARGO_PKG_NAME": "ref-cast",
@@ -59,9 +60,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "ref-cast-1.0.24-build-script-run",
+    name = "ref-cast-build-script-run",
     package_name = "ref-cast",
-    buildscript_rule = ":ref-cast-1.0.24-build-script-build",
+    buildscript_rule = ":ref-cast-build-script-build",
     version = "1.0.24",
-    local_manifest_dir = "**",
+    manifest_dir = ":ref-cast-vendor",
 )

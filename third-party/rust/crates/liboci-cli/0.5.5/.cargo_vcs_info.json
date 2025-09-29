@@ -1,6 +1,0 @@
-{
-  "git": {
-    "sha1": "cfb492b029e7b71b80d1fed9705e8e8b387af6e0"
-  },
-  "path_in_vcs": "crates/liboci-cli"
-}

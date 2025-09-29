@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "dyn-clone-vendor",
+    urls = ["https://static.crates.io/crates/dyn-clone/dyn-clone-1.0.20.crate"],
+    sha256 = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555",
+    type = "tar.gz",
+    strip_prefix = "dyn-clone-1.0.20",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "dyn-clone-1.0.20",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "dyn-clone",
+    srcs = [":dyn-clone-vendor"],
     crate = "dyn-clone",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "dyn-clone",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Clone trait that is dyn-compatible",
         "CARGO_PKG_NAME": "dyn-clone",

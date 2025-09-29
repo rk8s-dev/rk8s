@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "json-vendor",
+    urls = ["https://static.crates.io/crates/json/json-0.12.4.crate"],
+    sha256 = "078e285eafdfb6c4b434e0d31e8cfcb5115b651496faca5749b88fafd4f23bfd",
+    type = "tar.gz",
+    strip_prefix = "json-0.12.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "json-0.12.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "json",
+    srcs = [":json-vendor"],
     crate = "json",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "json",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Maciej Hirsz <hello@maciej.codes>",
         "CARGO_PKG_DESCRIPTION": "JSON implementation in Rust",
         "CARGO_PKG_NAME": "json",

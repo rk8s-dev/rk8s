@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "http-body-util-vendor",
+    urls = ["https://static.crates.io/crates/http-body-util/http-body-util-0.1.3.crate"],
+    sha256 = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a",
+    type = "tar.gz",
+    strip_prefix = "http-body-util-0.1.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "http-body-util-0.1.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "http-body-util",
+    srcs = [":http-body-util-vendor"],
     crate = "http-body-util",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "http-body-util",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Carl Lerche <me@carllerche.com>:Lucio Franco <luciofranco14@gmail.com>:Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "Combinators and adapters for HTTP request or response bodies.\n",
         "CARGO_PKG_NAME": "http-body-util",
@@ -26,14 +32,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["default"],
-    named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "http_body": "//third-party/rust/crates/http-body/1.0.1:http-body-1.0.1",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/http/1.3.1:http-1.3.1",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/http-body/1.0.1:http-body",
+        "//third-party/rust/crates/http/1.3.1:http",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
     ],
 )

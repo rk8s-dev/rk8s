@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "shlex-vendor",
+    urls = ["https://static.crates.io/crates/shlex/shlex-1.3.0.crate"],
+    sha256 = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64",
+    type = "tar.gz",
+    strip_prefix = "shlex-1.3.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "shlex-1.3.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "shlex",
+    srcs = [":shlex-vendor"],
     crate = "shlex",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "shlex",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "comex <comexk@gmail.com>:Fenhl <fenhl@fenhl.net>:Adrian Taylor <adetaylor@chromium.org>:Alex Touchet <alextouchet@outlook.com>:Daniel Parks <dp+git@oxidized.org>:Garrett Berg <googberg@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Split a string into shell words, like Python's shlex.",
         "CARGO_PKG_NAME": "shlex",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "displaydoc-vendor",
+    urls = ["https://static.crates.io/crates/displaydoc/displaydoc-0.2.5.crate"],
+    sha256 = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0",
+    type = "tar.gz",
+    strip_prefix = "displaydoc-0.2.5",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "displaydoc-0.2.5",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "displaydoc",
+    srcs = [":displaydoc-vendor"],
     crate = "displaydoc",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "displaydoc",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Jane Lusby <jlusby@yaah.dev>",
         "CARGO_PKG_DESCRIPTION": "A derive macro for implementing the display Trait via a doc comment and string interpolation\n",
         "CARGO_PKG_NAME": "displaydoc",
@@ -26,12 +32,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

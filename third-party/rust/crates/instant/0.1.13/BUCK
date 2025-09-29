@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "instant-vendor",
+    urls = ["https://static.crates.io/crates/instant/instant-0.1.13.crate"],
+    sha256 = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222",
+    type = "tar.gz",
+    strip_prefix = "instant-0.1.13",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "instant-0.1.13",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "instant",
+    srcs = [":instant-vendor"],
     crate = "instant",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "instant",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "sebcrozet <developer@crozet.re>",
         "CARGO_PKG_DESCRIPTION": "Unmaintained, consider using web-time instead - A partial replacement for std::time::Instant that works on WASM to.",
         "CARGO_PKG_NAME": "instant",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "13",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/cfg-if/1.0.3:cfg-if"],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "spki-vendor",
+    urls = ["https://static.crates.io/crates/spki/spki-0.6.0.crate"],
+    sha256 = "67cf02bbac7a337dc36e4f5a693db6c21e7863f45070f7064577eb4367a3212b",
+    type = "tar.gz",
+    strip_prefix = "spki-0.6.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "spki-0.6.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "spki",
+    srcs = [":spki-vendor"],
     crate = "spki",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "spki",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "X.509 Subject Public Key Info (RFC5280) describing public keys as well as their\nassociated AlgorithmIdentifiers (i.e. OIDs)\n",
         "CARGO_PKG_NAME": "spki",
@@ -31,7 +37,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64ct/1.8.0:base64ct-1.8.0",
-        "//third-party/rust/crates/der/0.6.1:der-0.6.1",
+        "//third-party/rust/crates/base64ct/1.8.0:base64ct",
+        "//third-party/rust/crates/der/0.6.1:der",
     ],
 )

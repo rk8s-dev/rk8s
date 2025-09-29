@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "unicode-bidi-vendor",
+    urls = ["https://static.crates.io/crates/unicode-bidi/unicode-bidi-0.3.18.crate"],
+    sha256 = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5",
+    type = "tar.gz",
+    strip_prefix = "unicode-bidi-0.3.18",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "unicode-bidi-0.3.18",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "unicode-bidi",
+    srcs = [":unicode-bidi-vendor"],
     crate = "unicode-bidi",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "unicode-bidi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Servo Project Developers",
         "CARGO_PKG_DESCRIPTION": "Implementation of the Unicode Bidirectional Algorithm",
         "CARGO_PKG_NAME": "unicode-bidi",

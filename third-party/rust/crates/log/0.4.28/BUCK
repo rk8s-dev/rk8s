@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "log-vendor",
+    urls = ["https://static.crates.io/crates/log/log-0.4.28.crate"],
+    sha256 = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432",
+    type = "tar.gz",
+    strip_prefix = "log-0.4.28",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "log-0.4.28",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "log",
+    srcs = [":log-vendor"],
     crate = "log",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "log",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "A lightweight logging facade for Rust\n",
         "CARGO_PKG_NAME": "log",
@@ -31,8 +37,6 @@ cargo.rust_library(
         "std",
         "value-bag",
     ],
-    named_deps = {
-        "value_bag": "//third-party/rust/crates/value-bag/1.11.1:value-bag-1.11.1",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/value-bag/1.11.1:value-bag"],
 )

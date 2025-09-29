@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "num-bigint-vendor",
+    urls = ["https://static.crates.io/crates/num-bigint/num-bigint-0.4.6.crate"],
+    sha256 = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9",
+    type = "tar.gz",
+    strip_prefix = "num-bigint-0.4.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "num-bigint-0.4.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "num-bigint",
+    srcs = [":num-bigint-vendor"],
     crate = "num-bigint",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "num-bigint",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Big integer implementation for Rust",
         "CARGO_PKG_NAME": "num-bigint",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "6",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "num_integer": "//third-party/rust/crates/num-integer/0.1.46:num-integer-0.1.46",
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/num-integer/0.1.46:num-integer",
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
+    ],
 )

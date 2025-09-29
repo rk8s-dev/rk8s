@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "pkcs8-vendor",
+    urls = ["https://static.crates.io/crates/pkcs8/pkcs8-0.10.2.crate"],
+    sha256 = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7",
+    type = "tar.gz",
+    strip_prefix = "pkcs8-0.10.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "pkcs8-0.10.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "pkcs8",
+    srcs = [":pkcs8-vendor"],
     crate = "pkcs8",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "pkcs8",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Pure Rust implementation of Public-Key Cryptography Standards (PKCS) #8:\nPrivate-Key Information Syntax Specification (RFC 5208), with additional\nsupport for PKCS#8v2 asymmetric key packages (RFC 5958)\n",
         "CARGO_PKG_NAME": "pkcs8",
@@ -32,7 +38,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/der/0.7.10:der-0.7.10",
-        "//third-party/rust/crates/spki/0.7.3:spki-0.7.3",
+        "//third-party/rust/crates/der/0.7.10:der",
+        "//third-party/rust/crates/spki/0.7.3:spki",
     ],
 )

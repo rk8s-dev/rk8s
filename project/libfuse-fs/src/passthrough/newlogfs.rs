@@ -7,6 +7,7 @@ use rfuse3::{Result, SetAttr};
 use std::any::type_name_of_val;
 use std::ffi::OsStr;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tracing::debug;
 // LoggingFileSystem . provide log info for a filesystem trait.
 pub struct LoggingFileSystem<FS: Filesystem> {
     inner: FS,
@@ -31,13 +32,13 @@ impl<FS: Filesystem> LoggingFileSystem<FS> {
             .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join(", ");
-        println!("ID: {id} | [{method}] REQ {req:?} - Call_arg: {args_str}");
+        debug!("ID: {id} | [{method}] REQ {req:?} - Call_arg: {args_str}");
     }
 
     fn log_result(&self, id: u64, method: &str, result: &Result<impl std::fmt::Debug>) {
         match result {
-            Ok(res) => println!("ID: {id} | [{method}] - Success: {res:?}"),
-            Err(e) => println!("ID: {id} | [{method}] - Error: {e:?}"),
+            Ok(res) => debug!("ID: {id} | [{method}] - Success: {res:?}"),
+            Err(e) => debug!("ID: {id} | [{method}] - Error: {e:?}"),
         }
     }
 }
@@ -66,7 +67,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         let method = "destroy";
         self.log_start(&req, id, method, &[]);
         self.inner.destroy(req).await;
-        println!("ID: {} [{}] {} - Completed", id, self.fsname, method);
+        debug!("ID: {} [{}] {} - Completed", id, self.fsname, method);
     }
 
     async fn lookup(&self, req: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {
@@ -91,7 +92,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         ];
         self.log_start(&req, id, method, &args);
         self.inner.forget(req, inode, nlookup).await;
-        println!("ID: {} [{}] {} - Completed", id, self.fsname, method);
+        debug!("ID: {} [{}] {} - Completed", id, self.fsname, method);
     }
 
     async fn getattr(
@@ -166,7 +167,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         self.log_start(&req, id, method, &args);
         let result = self.inner.opendir(req, inode, flags).await;
         if let Ok(ref reply) = result {
-            println!(
+            debug!(
                 "ID: {} [{}] {} - Obtained fh: {}",
                 id, self.fsname, method, reply.fh
             );
@@ -214,7 +215,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         self.log_start(&req, id, method, &args);
         let result = self.inner.read(req, inode, fh, offset, size).await;
         if let Ok(ref data) = result {
-            println!(
+            debug!(
                 "ID: {} [{}] {} - Read {} bytes",
                 id,
                 self.fsname,
@@ -253,7 +254,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
             .write(req, inode, fh, offset, data, write_flags, flags)
             .await;
         if let Ok(ref reply) = result {
-            println!(
+            debug!(
                 "ID: {} [{}] {} - Wrote {} bytes",
                 id, self.fsname, method, reply.written
             );
@@ -502,7 +503,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         self.log_start(&req, id, method, &args);
         let result = self.inner.open(req, inode, flags).await;
         if let Ok(ref reply) = result {
-            println!(
+            debug!(
                 "ID: {} [{}] {} - Obtained fh: {}",
                 id, self.fsname, method, reply.fh
             );

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "dockerfile-parser-vendor",
+    urls = ["https://static.crates.io/crates/dockerfile-parser/dockerfile-parser-0.9.0.crate"],
+    sha256 = "aa53f9cb1532d7d7c19e269848ede84d7c80d59264c658469f0051a1d88c2780",
+    type = "tar.gz",
+    strip_prefix = "dockerfile-parser-0.9.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "dockerfile-parser-0.9.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "dockerfile-parser",
+    srcs = [":dockerfile-parser-vendor"],
     crate = "dockerfile-parser",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "dockerfile-parser",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tim Buckley <timothy.jas.buckley@hpe.com>",
         "CARGO_PKG_DESCRIPTION": "a Rust library for parsing, validating, and modifying Dockerfiles",
         "CARGO_PKG_NAME": "dockerfile-parser",
@@ -27,11 +33,11 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/enquote/1.1.0:enquote-1.1.0",
-        "//third-party/rust/crates/lazy_static/1.5.0:lazy_static-1.5.0",
-        "//third-party/rust/crates/pest/2.8.2:pest-2.8.2",
-        "//third-party/rust/crates/pest_derive/2.8.2:pest_derive-2.8.2",
-        "//third-party/rust/crates/regex/1.11.2:regex-1.11.2",
-        "//third-party/rust/crates/snafu/0.6.10:snafu-0.6.10",
+        "//third-party/rust/crates/enquote/1.1.0:enquote",
+        "//third-party/rust/crates/lazy_static/1.5.0:lazy_static",
+        "//third-party/rust/crates/pest/2.8.2:pest",
+        "//third-party/rust/crates/pest_derive/2.8.2:pest_derive",
+        "//third-party/rust/crates/regex/1.11.2:regex",
+        "//third-party/rust/crates/snafu/0.6.10:snafu",
     ],
 )

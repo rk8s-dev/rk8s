@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "futures-channel-vendor",
+    urls = ["https://static.crates.io/crates/futures-channel/futures-channel-0.3.31.crate"],
+    sha256 = "2dff15bf788c671c1934e366d07e30c1814a8ef514e1af724a602e8a2fbe1b10",
+    type = "tar.gz",
+    strip_prefix = "futures-channel-0.3.31",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "futures-channel-0.3.31",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "futures-channel",
+    srcs = [":futures-channel-vendor"],
     crate = "futures-channel",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "futures-channel",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Channels for asynchronous communication using futures-rs.\n",
         "CARGO_PKG_NAME": "futures-channel",
@@ -32,9 +38,9 @@ cargo.rust_library(
         "sink",
         "std",
     ],
-    named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_sink": "//third-party/rust/crates/futures-sink/0.3.31:futures-sink-0.3.31",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-sink/0.3.31:futures-sink",
+    ],
 )

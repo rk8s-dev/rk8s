@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "cipher-vendor",
+    urls = ["https://static.crates.io/crates/cipher/cipher-0.4.4.crate"],
+    sha256 = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad",
+    type = "tar.gz",
+    strip_prefix = "cipher-0.4.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "cipher-0.4.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "cipher",
+    srcs = [":cipher-vendor"],
     crate = "cipher",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "cipher",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Traits for describing block ciphers and stream ciphers",
         "CARGO_PKG_NAME": "cipher",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "crypto_common": "//third-party/rust/crates/crypto-common/0.1.6:crypto-common-0.1.6",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/inout/0.1.4:inout-0.1.4"],
+    deps = [
+        "//third-party/rust/crates/crypto-common/0.1.6:crypto-common",
+        "//third-party/rust/crates/inout/0.1.4:inout",
+    ],
 )

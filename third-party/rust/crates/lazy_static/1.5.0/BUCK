@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "lazy_static-vendor",
+    urls = ["https://static.crates.io/crates/lazy_static/lazy_static-1.5.0.crate"],
+    sha256 = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe",
+    type = "tar.gz",
+    strip_prefix = "lazy_static-1.5.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "lazy_static-1.5.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "lazy_static",
+    srcs = [":lazy_static-vendor"],
     crate = "lazy_static",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "lazy_static",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Marvin Löbel <loebel.marvin@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A macro for declaring lazily evaluated statics in Rust.",
         "CARGO_PKG_NAME": "lazy_static",
@@ -30,5 +36,5 @@ cargo.rust_library(
         "spin_no_std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/spin/0.9.8:spin-0.9.8"],
+    deps = ["//third-party/rust/crates/spin/0.9.8:spin"],
 )

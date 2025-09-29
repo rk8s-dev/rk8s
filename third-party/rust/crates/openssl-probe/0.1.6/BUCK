@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "openssl-probe-vendor",
+    urls = ["https://static.crates.io/crates/openssl-probe/openssl-probe-0.1.6.crate"],
+    sha256 = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e",
+    type = "tar.gz",
+    strip_prefix = "openssl-probe-0.1.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "openssl-probe-0.1.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "openssl-probe",
+    srcs = [":openssl-probe-vendor"],
     crate = "openssl-probe",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "openssl-probe",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "Tool for helping to find SSL certificate locations on the system for OpenSSL\n",
         "CARGO_PKG_NAME": "openssl-probe",

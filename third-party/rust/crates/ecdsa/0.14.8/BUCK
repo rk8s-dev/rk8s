@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "ecdsa-vendor",
+    urls = ["https://static.crates.io/crates/ecdsa/ecdsa-0.14.8.crate"],
+    sha256 = "413301934810f597c1d19ca71c8710e99a3f1ba28a0d2ebc01551a2daeea3c5c",
+    type = "tar.gz",
+    strip_prefix = "ecdsa-0.14.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "ecdsa-0.14.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "ecdsa",
+    srcs = [":ecdsa-vendor"],
     crate = "ecdsa",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "ecdsa",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Pure Rust implementation of the Elliptic Curve Digital Signature Algorithm\n(ECDSA) as specified in FIPS 186-4 (Digital Signature Standard), providing\nRFC6979 deterministic signatures as well as support for added entropy\n",
         "CARGO_PKG_NAME": "ecdsa",
@@ -37,13 +43,11 @@ cargo.rust_library(
         "std",
         "verify",
     ],
-    named_deps = {
-        "elliptic_curve": "//third-party/rust/crates/elliptic-curve/0.12.3:elliptic-curve-0.12.3",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/der/0.6.1:der-0.6.1",
-        "//third-party/rust/crates/rfc6979/0.3.1:rfc6979-0.3.1",
-        "//third-party/rust/crates/signature/1.6.4:signature-1.6.4",
+        "//third-party/rust/crates/der/0.6.1:der",
+        "//third-party/rust/crates/elliptic-curve/0.12.3:elliptic-curve",
+        "//third-party/rust/crates/rfc6979/0.3.1:rfc6979",
+        "//third-party/rust/crates/signature/1.6.4:signature",
     ],
 )

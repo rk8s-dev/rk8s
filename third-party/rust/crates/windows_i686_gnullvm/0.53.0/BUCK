@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows_i686_gnullvm-vendor",
+    urls = ["https://static.crates.io/crates/windows_i686_gnullvm/windows_i686_gnullvm-0.53.0.crate"],
+    sha256 = "9ce6ccbdedbf6d6354471319e781c0dfef054c81fbc7cf83f338a4296c0cae11",
+    type = "tar.gz",
+    strip_prefix = "windows_i686_gnullvm-0.53.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows_i686_gnullvm-0.53.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows_i686_gnullvm",
+    srcs = [":windows_i686_gnullvm-vendor"],
     crate = "windows_i686_gnullvm",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows_i686_gnullvm",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
         "CARGO_PKG_NAME": "windows_i686_gnullvm",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "53",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :windows_i686_gnullvm-0.53.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :windows_i686_gnullvm-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :windows_i686_gnullvm-0.53.0-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :windows_i686_gnullvm-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "windows_i686_gnullvm-0.53.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows_i686_gnullvm-build-script-build",
+    srcs = [":windows_i686_gnullvm-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows_i686_gnullvm",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
         "CARGO_PKG_NAME": "windows_i686_gnullvm",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "windows_i686_gnullvm-0.53.0-build-script-run",
+    name = "windows_i686_gnullvm-build-script-run",
     package_name = "windows_i686_gnullvm",
-    buildscript_rule = ":windows_i686_gnullvm-0.53.0-build-script-build",
+    buildscript_rule = ":windows_i686_gnullvm-build-script-build",
     version = "0.53.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":windows_i686_gnullvm-vendor",
 )

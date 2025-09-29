@@ -199,10 +199,10 @@ impl ComposeManager {
                     name: srv
                         .container_name
                         .clone()
+                        // .map(|str| format!("compose_{}", str))
                         .unwrap_or(self.generate_container_name(&srv_name)),
                     image: srv.image.clone(),
                     ports: container_ports,
-                    // TODO: Here just pass the command directly not support ENTRYPOINT yet
                     args: srv.command.clone(),
                     resources: None,
                 };

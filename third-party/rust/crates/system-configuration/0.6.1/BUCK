@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "system-configuration-vendor",
+    urls = ["https://static.crates.io/crates/system-configuration/system-configuration-0.6.1.crate"],
+    sha256 = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b",
+    type = "tar.gz",
+    strip_prefix = "system-configuration-0.6.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "system-configuration-0.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "system-configuration",
+    srcs = [":system-configuration-vendor"],
     crate = "system-configuration",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "system-configuration",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Mullvad VPN",
         "CARGO_PKG_DESCRIPTION": "Bindings to SystemConfiguration framework for macOS",
         "CARGO_PKG_NAME": "system-configuration",
@@ -25,10 +31,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "core_foundation": "//third-party/rust/crates/core-foundation/0.9.4:core-foundation-0.9.4",
-        "system_configuration_sys": "//third-party/rust/crates/system-configuration-sys/0.6.0:system-configuration-sys-0.6.0",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4"],
+    deps = [
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/core-foundation/0.9.4:core-foundation",
+        "//third-party/rust/crates/system-configuration-sys/0.6.0:system-configuration-sys",
+    ],
 )

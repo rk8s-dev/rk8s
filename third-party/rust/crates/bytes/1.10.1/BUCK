@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "bytes-vendor",
+    urls = ["https://static.crates.io/crates/bytes/bytes-1.10.1.crate"],
+    sha256 = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a",
+    type = "tar.gz",
+    strip_prefix = "bytes-1.10.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "bytes-1.10.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "bytes",
+    srcs = [":bytes-vendor"],
     crate = "bytes",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "bytes",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Carl Lerche <me@carllerche.com>:Sean McArthur <sean@seanmonstar.com>",
         "CARGO_PKG_DESCRIPTION": "Types and traits for working with bytes",
         "CARGO_PKG_NAME": "bytes",

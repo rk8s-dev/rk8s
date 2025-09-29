@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rand_core-vendor",
+    urls = ["https://static.crates.io/crates/rand_core/rand_core-0.6.4.crate"],
+    sha256 = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c",
+    type = "tar.gz",
+    strip_prefix = "rand_core-0.6.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rand_core-0.6.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rand_core",
+    srcs = [":rand_core-vendor"],
     crate = "rand_core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "rand_core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rand Project Developers:The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Core random number generator traits and tools for implementation.\n",
         "CARGO_PKG_NAME": "rand_core",
@@ -31,5 +37,5 @@ cargo.rust_library(
         "std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/getrandom/0.2.16:getrandom-0.2.16"],
+    deps = ["//third-party/rust/crates/getrandom/0.2.16:getrandom"],
 )

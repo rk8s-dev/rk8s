@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "hyper-timeout-vendor",
+    urls = ["https://static.crates.io/crates/hyper-timeout/hyper-timeout-0.5.2.crate"],
+    sha256 = "2b90d566bffbce6a75bd8b09a05aa8c2cb1fabb6cb348f8840c9e4c90a0d83b0",
+    type = "tar.gz",
+    strip_prefix = "hyper-timeout-0.5.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "hyper-timeout-0.5.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "hyper-timeout",
+    srcs = [":hyper-timeout-vendor"],
     crate = "hyper-timeout",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "hyper-timeout",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Herman J. Radtke III <herman@hermanradtke.com>",
         "CARGO_PKG_DESCRIPTION": "A connect, read and write timeout aware connector to be used with hyper Client.",
         "CARGO_PKG_NAME": "hyper-timeout",
@@ -25,14 +31,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "hyper_util": "//third-party/rust/crates/hyper-util/0.1.17:hyper-util-0.1.17",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-        "tower_service": "//third-party/rust/crates/tower-service/0.3.3:tower-service-0.3.3",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/hyper/1.7.0:hyper-1.7.0",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
+        "//third-party/rust/crates/hyper-util/0.1.17:hyper-util",
+        "//third-party/rust/crates/hyper/1.7.0:hyper",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
+        "//third-party/rust/crates/tower-service/0.3.3:tower-service",
     ],
 )

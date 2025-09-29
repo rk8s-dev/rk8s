@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-channel-vendor",
+    urls = ["https://static.crates.io/crates/async-channel/async-channel-2.5.0.crate"],
+    sha256 = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2",
+    type = "tar.gz",
+    strip_prefix = "async-channel-2.5.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-channel-2.5.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-channel",
+    srcs = [":async-channel-vendor"],
     crate = "async-channel",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "async-channel",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Async multi-producer multi-consumer channel",
         "CARGO_PKG_NAME": "async-channel",
@@ -29,11 +35,11 @@ cargo.rust_library(
         "default",
         "std",
     ],
-    named_deps = {
-        "concurrent_queue": "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue-2.5.0",
-        "event_listener_strategy": "//third-party/rust/crates/event-listener-strategy/0.5.4:event-listener-strategy-0.5.4",
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-    },
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue",
+        "//third-party/rust/crates/event-listener-strategy/0.5.4:event-listener-strategy",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+    ],
 )

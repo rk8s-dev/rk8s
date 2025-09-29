@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "enum-as-inner-vendor",
+    urls = ["https://static.crates.io/crates/enum-as-inner/enum-as-inner-0.6.1.crate"],
+    sha256 = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc",
+    type = "tar.gz",
+    strip_prefix = "enum-as-inner-0.6.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "enum-as-inner-0.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "enum-as-inner",
+    srcs = [":enum-as-inner-vendor"],
     crate = "enum-as-inner",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "enum-as-inner",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Benjamin Fry <benjaminfry@me.com>",
         "CARGO_PKG_DESCRIPTION": "A proc-macro for deriving inner field accessor functions on enums.\n",
         "CARGO_PKG_NAME": "enum-as-inner",
@@ -26,13 +32,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/heck/0.5.0:heck-0.5.0",
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+        "//third-party/rust/crates/heck/0.5.0:heck",
+        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

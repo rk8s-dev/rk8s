@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "aws-credential-types-vendor",
+    urls = ["https://static.crates.io/crates/aws-credential-types/aws-credential-types-1.2.6.crate"],
+    sha256 = "d025db5d9f52cbc413b167136afb3d8aeea708c0d8884783cf6253be5e22f6f2",
+    type = "tar.gz",
+    strip_prefix = "aws-credential-types-1.2.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "aws-credential-types-1.2.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "aws-credential-types",
+    srcs = [":aws-credential-types-vendor"],
     crate = "aws-credential-types",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "aws-credential-types",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "AWS Rust SDK Team <aws-sdk-rust@amazon.com>",
         "CARGO_PKG_DESCRIPTION": "Types for AWS SDK credentials.",
         "CARGO_PKG_NAME": "aws-credential-types",
@@ -26,11 +32,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["test-util"],
-    named_deps = {
-        "aws_smithy_async": "//third-party/rust/crates/aws-smithy-async/1.2.5:aws-smithy-async-1.2.5",
-        "aws_smithy_runtime_api": "//third-party/rust/crates/aws-smithy-runtime-api/1.9.0:aws-smithy-runtime-api-1.9.0",
-        "aws_smithy_types": "//third-party/rust/crates/aws-smithy-types/1.3.2:aws-smithy-types-1.3.2",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1"],
+    deps = [
+        "//third-party/rust/crates/aws-smithy-async/1.2.5:aws-smithy-async",
+        "//third-party/rust/crates/aws-smithy-runtime-api/1.9.0:aws-smithy-runtime-api",
+        "//third-party/rust/crates/aws-smithy-types/1.3.2:aws-smithy-types",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
+    ],
 )

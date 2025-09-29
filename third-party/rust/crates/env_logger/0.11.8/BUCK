@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "env_logger-vendor",
+    urls = ["https://static.crates.io/crates/env_logger/env_logger-0.11.8.crate"],
+    sha256 = "13c863f0904021b108aa8b2f55046443e6b1ebde8fd4a15c399893aae4fa069f",
+    type = "tar.gz",
+    strip_prefix = "env_logger-0.11.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "env_logger-0.11.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "env_logger",
+    srcs = [":env_logger-vendor"],
     crate = "env_logger",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "env_logger",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A logging implementation for `log` which is configured via an environment\nvariable.\n",
         "CARGO_PKG_NAME": "env_logger",
@@ -34,10 +40,10 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anstream/0.6.20:anstream-0.6.20",
-        "//third-party/rust/crates/anstyle/1.0.11:anstyle-1.0.11",
-        "//third-party/rust/crates/env_filter/0.1.3:env_filter-0.1.3",
-        "//third-party/rust/crates/jiff/0.2.15:jiff-0.2.15",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
+        "//third-party/rust/crates/anstream/0.6.20:anstream",
+        "//third-party/rust/crates/anstyle/1.0.11:anstyle",
+        "//third-party/rust/crates/env_filter/0.1.3:env_filter",
+        "//third-party/rust/crates/jiff/0.2.15:jiff",
+        "//third-party/rust/crates/log/0.4.28:log",
     ],
 )

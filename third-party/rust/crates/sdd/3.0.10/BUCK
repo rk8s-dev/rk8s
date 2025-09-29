@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "sdd-vendor",
+    urls = ["https://static.crates.io/crates/sdd/sdd-3.0.10.crate"],
+    sha256 = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca",
+    type = "tar.gz",
+    strip_prefix = "sdd-3.0.10",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "sdd-3.0.10",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "sdd",
+    srcs = [":sdd-vendor"],
     crate = "sdd",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "sdd",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "wvwwvwwv <wvwwvwwv@me.com>",
         "CARGO_PKG_DESCRIPTION": "Scalable lock-free delayed memory reclaimer",
         "CARGO_PKG_NAME": "sdd",

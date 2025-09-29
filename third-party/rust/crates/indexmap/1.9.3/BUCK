@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "indexmap-vendor",
+    urls = ["https://static.crates.io/crates/indexmap/indexmap-1.9.3.crate"],
+    sha256 = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99",
+    type = "tar.gz",
+    strip_prefix = "indexmap-1.9.3",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "indexmap-1.9.3",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "indexmap",
+    srcs = [":indexmap-vendor"],
     crate = "indexmap",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "indexmap",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A hash table with consistent order and fast iteration.",
         "CARGO_PKG_NAME": "indexmap",
@@ -24,33 +30,30 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "9",
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :indexmap-1.9.3-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :indexmap-build-script-run[out_dir])",
     },
     features = [
         "serde",
         "serde-1",
         "std",
     ],
-    rustc_flags = ["@$(location :indexmap-1.9.3-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :indexmap-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/hashbrown/0.12.3:hashbrown-0.12.3",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
+        "//third-party/rust/crates/hashbrown/0.12.3:hashbrown",
+        "//third-party/rust/crates/serde/1.0.226:serde",
     ],
 )
 
 cargo.rust_binary(
-    name = "indexmap-1.9.3-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "indexmap-build-script-build",
+    srcs = [":indexmap-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "indexmap",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A hash table with consistent order and fast iteration.",
         "CARGO_PKG_NAME": "indexmap",
@@ -67,18 +70,18 @@ cargo.rust_binary(
         "std",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg-1.5.0"],
+    deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "indexmap-1.9.3-build-script-run",
+    name = "indexmap-build-script-run",
     package_name = "indexmap",
-    buildscript_rule = ":indexmap-1.9.3-build-script-build",
+    buildscript_rule = ":indexmap-build-script-build",
     features = [
         "serde",
         "serde-1",
         "std",
     ],
     version = "1.9.3",
-    local_manifest_dir = "**",
+    manifest_dir = ":indexmap-vendor",
 )

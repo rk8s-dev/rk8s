@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "prefix-trie-vendor",
+    urls = ["https://static.crates.io/crates/prefix-trie/prefix-trie-0.7.0.crate"],
+    sha256 = "85cf4c7c25f1dd66c76b451e9041a8cfce26e4ca754934fa7aed8d5a59a01d20",
+    type = "tar.gz",
+    strip_prefix = "prefix-trie-0.7.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "prefix-trie-0.7.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "prefix-trie",
+    srcs = [":prefix-trie-vendor"],
     crate = "prefix-trie",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "prefix-trie",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Prefix trie (tree) datastructure (both a set and a map) that provides exact and longest-prefix matches.",
         "CARGO_PKG_NAME": "prefix-trie",
@@ -29,9 +35,9 @@ cargo.rust_library(
         "default",
         "ipnet",
     ],
-    named_deps = {
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/ipnet/2.11.0:ipnet-2.11.0"],
+    deps = [
+        "//third-party/rust/crates/ipnet/2.11.0:ipnet",
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
+    ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "p256-vendor",
+    urls = ["https://static.crates.io/crates/p256/p256-0.11.1.crate"],
+    sha256 = "51f44edd08f51e2ade572f141051021c5af22677e42b7dd28a88155151c33594",
+    type = "tar.gz",
+    strip_prefix = "p256-0.11.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "p256-0.11.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "p256",
+    srcs = [":p256-vendor"],
     crate = "p256",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "p256",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers",
         "CARGO_PKG_DESCRIPTION": "Pure Rust implementation of the NIST P-256 (a.k.a. secp256r1, prime256v1)\nelliptic curve with support for ECDH, ECDSA signing/verification, and general\npurpose curve arithmetic\n",
         "CARGO_PKG_NAME": "p256",
@@ -37,9 +43,11 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
-        "ecdsa_core": "//third-party/rust/crates/ecdsa/0.14.8:ecdsa-0.14.8",
-        "elliptic_curve": "//third-party/rust/crates/elliptic-curve/0.12.3:elliptic-curve-0.12.3",
+        "ecdsa_core": "//third-party/rust/crates/ecdsa/0.14.8:ecdsa",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/sha2/0.10.9:sha2-0.10.9"],
+    deps = [
+        "//third-party/rust/crates/elliptic-curve/0.12.3:elliptic-curve",
+        "//third-party/rust/crates/sha2/0.10.9:sha2",
+    ],
 )

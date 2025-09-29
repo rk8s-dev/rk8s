@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "url-vendor",
+    urls = ["https://static.crates.io/crates/url/url-2.5.7.crate"],
+    sha256 = "08bc136a29a3d1758e07a9cca267be308aeebf5cfd5a10f3f67ab2097683ef5b",
+    type = "tar.gz",
+    strip_prefix = "url-2.5.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "url-2.5.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "url",
+    srcs = [":url-vendor"],
     crate = "url",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "url",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The rust-url developers",
         "CARGO_PKG_DESCRIPTION": "URL library for Rust, based on the WHATWG URL Standard",
         "CARGO_PKG_NAME": "url",
@@ -30,13 +36,11 @@ cargo.rust_library(
         "serde",
         "std",
     ],
-    named_deps = {
-        "percent_encoding": "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding-2.3.2",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/form_urlencoded/1.2.2:form_urlencoded-1.2.2",
-        "//third-party/rust/crates/idna/1.1.0:idna-1.1.0",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
+        "//third-party/rust/crates/form_urlencoded/1.2.2:form_urlencoded",
+        "//third-party/rust/crates/idna/1.1.0:idna",
+        "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding",
+        "//third-party/rust/crates/serde/1.0.226:serde",
     ],
 )

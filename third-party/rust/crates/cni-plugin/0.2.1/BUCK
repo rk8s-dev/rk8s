@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "cni-plugin-vendor",
+    urls = ["https://static.crates.io/crates/cni-plugin/cni-plugin-0.2.1.crate"],
+    sha256 = "48c6fba2d1478ddc5ecc7f258ad010cf19b37c12f143d9497bd02ce4b6bb6b57",
+    type = "tar.gz",
+    strip_prefix = "cni-plugin-0.2.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "cni-plugin-0.2.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "cni-plugin",
+    srcs = [":cni-plugin-vendor"],
     crate = "cni-plugin",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "cni-plugin",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Félix Saparelli <felix@passcod.name>",
         "CARGO_PKG_DESCRIPTION": "Framework to implement CNI (container networking) plugins in Rust",
         "CARGO_PKG_NAME": "cni-plugin",
@@ -30,21 +36,19 @@ cargo.rust_library(
         "futures",
         "with-smol",
     ],
-    named_deps = {
-        "async_process": "//third-party/rust/crates/async-process/1.8.1:async-process-1.8.1",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/futures/0.3.31:futures-0.3.31",
-        "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork-0.17.0",
-        "//third-party/rust/crates/log/0.4.28:log-0.4.28",
-        "//third-party/rust/crates/macaddr/1.0.1:macaddr-1.0.1",
-        "//third-party/rust/crates/regex/1.11.2:regex-1.11.2",
-        "//third-party/rust/crates/semver/0.11.0:semver-0.11.0",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json-1.0.145",
-        "//third-party/rust/crates/simplelog/0.10.2:simplelog-0.10.2",
-        "//third-party/rust/crates/thiserror/1.0.69:thiserror-1.0.69",
-        "//third-party/rust/crates/which/4.4.2:which-4.4.2",
+        "//third-party/rust/crates/async-process/1.8.1:async-process",
+        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork",
+        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/macaddr/1.0.1:macaddr",
+        "//third-party/rust/crates/regex/1.11.2:regex",
+        "//third-party/rust/crates/semver/0.11.0:semver",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_json/1.0.145:serde_json",
+        "//third-party/rust/crates/simplelog/0.10.2:simplelog",
+        "//third-party/rust/crates/thiserror/1.0.69:thiserror",
+        "//third-party/rust/crates/which/4.4.2:which",
     ],
 )

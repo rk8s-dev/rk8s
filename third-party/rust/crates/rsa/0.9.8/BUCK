@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rsa-vendor",
+    urls = ["https://static.crates.io/crates/rsa/rsa-0.9.8.crate"],
+    sha256 = "78928ac1ed176a5ca1d17e578a1825f3d81ca54cf41053a592584b020cfd691b",
+    type = "tar.gz",
+    strip_prefix = "rsa-0.9.8",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rsa-0.9.8",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rsa",
+    srcs = [":rsa-vendor"],
     crate = "rsa",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rsa",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "RustCrypto Developers:dignifiedquire <dignifiedquire@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Pure Rust RSA implementation",
         "CARGO_PKG_NAME": "rsa",
@@ -32,20 +38,20 @@ cargo.rust_library(
         "u64_digit",
     ],
     named_deps = {
-        "const_oid": "//third-party/rust/crates/const-oid/0.9.6:const-oid-0.9.6",
-        "num_bigint": "//third-party/rust/crates/num-bigint-dig/0.8.4:num-bigint-dig-0.8.4",
-        "num_integer": "//third-party/rust/crates/num-integer/0.1.46:num-integer-0.1.46",
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
+        "num_bigint": "//third-party/rust/crates/num-bigint-dig/0.8.4:num-bigint-dig",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/digest/0.10.7:digest-0.10.7",
-        "//third-party/rust/crates/pkcs1/0.7.5:pkcs1-0.7.5",
-        "//third-party/rust/crates/pkcs8/0.10.2:pkcs8-0.10.2",
-        "//third-party/rust/crates/rand_core/0.6.4:rand_core-0.6.4",
-        "//third-party/rust/crates/signature/2.2.0:signature-2.2.0",
-        "//third-party/rust/crates/spki/0.7.3:spki-0.7.3",
-        "//third-party/rust/crates/subtle/2.6.1:subtle-2.6.1",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1",
+        "//third-party/rust/crates/const-oid/0.9.6:const-oid",
+        "//third-party/rust/crates/digest/0.10.7:digest",
+        "//third-party/rust/crates/num-integer/0.1.46:num-integer",
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
+        "//third-party/rust/crates/pkcs1/0.7.5:pkcs1",
+        "//third-party/rust/crates/pkcs8/0.10.2:pkcs8",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
+        "//third-party/rust/crates/signature/2.2.0:signature",
+        "//third-party/rust/crates/spki/0.7.3:spki",
+        "//third-party/rust/crates/subtle/2.6.1:subtle",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
     ],
 )

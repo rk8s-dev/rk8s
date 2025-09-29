@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rayon-vendor",
+    urls = ["https://static.crates.io/crates/rayon/rayon-1.11.0.crate"],
+    sha256 = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f",
+    type = "tar.gz",
+    strip_prefix = "rayon-1.11.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rayon-1.11.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rayon",
+    srcs = [":rayon-vendor"],
     crate = "rayon",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rayon",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Simple work-stealing parallelism for Rust",
         "CARGO_PKG_NAME": "rayon",
@@ -25,9 +31,9 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "rayon_core": "//third-party/rust/crates/rayon-core/1.13.0:rayon-core-1.13.0",
-    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/either/1.15.0:either-1.15.0"],
+    deps = [
+        "//third-party/rust/crates/either/1.15.0:either",
+        "//third-party/rust/crates/rayon-core/1.13.0:rayon-core",
+    ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "async-task-vendor",
+    urls = ["https://static.crates.io/crates/async-task/async-task-4.7.1.crate"],
+    sha256 = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de",
+    type = "tar.gz",
+    strip_prefix = "async-task-4.7.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "async-task-4.7.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "async-task",
+    srcs = [":async-task-vendor"],
     crate = "async-task",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "async-task",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Task abstraction for building executors",
         "CARGO_PKG_NAME": "async-task",

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows_i686_gnu-vendor",
+    urls = ["https://static.crates.io/crates/windows_i686_gnu/windows_i686_gnu-0.42.2.crate"],
+    sha256 = "c61d927d8da41da96a81f029489353e68739737d3beca43145c8afec9a31a84f",
+    type = "tar.gz",
+    strip_prefix = "windows_i686_gnu-0.42.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows_i686_gnu-0.42.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows_i686_gnu",
+    srcs = [":windows_i686_gnu-vendor"],
     crate = "windows_i686_gnu",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "windows_i686_gnu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
         "CARGO_PKG_NAME": "windows_i686_gnu",
@@ -24,24 +30,21 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "42",
         "CARGO_PKG_VERSION_PATCH": "2",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :windows_i686_gnu-0.42.2-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :windows_i686_gnu-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :windows_i686_gnu-0.42.2-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :windows_i686_gnu-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "windows_i686_gnu-0.42.2-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows_i686_gnu-build-script-build",
+    srcs = [":windows_i686_gnu-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "windows_i686_gnu",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import lib for Windows",
         "CARGO_PKG_NAME": "windows_i686_gnu",
@@ -56,9 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "windows_i686_gnu-0.42.2-build-script-run",
+    name = "windows_i686_gnu-build-script-run",
     package_name = "windows_i686_gnu",
-    buildscript_rule = ":windows_i686_gnu-0.42.2-build-script-build",
+    buildscript_rule = ":windows_i686_gnu-build-script-build",
     version = "0.42.2",
-    local_manifest_dir = "**",
+    manifest_dir = ":windows_i686_gnu-vendor",
 )

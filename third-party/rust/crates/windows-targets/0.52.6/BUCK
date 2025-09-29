@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "windows-targets-vendor",
+    urls = ["https://static.crates.io/crates/windows-targets/windows-targets-0.52.6.crate"],
+    sha256 = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973",
+    type = "tar.gz",
+    strip_prefix = "windows-targets-0.52.6",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "windows-targets-0.52.6",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "windows-targets",
+    srcs = [":windows-targets-vendor"],
     crate = "windows-targets",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "windows-targets",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Microsoft",
         "CARGO_PKG_DESCRIPTION": "Import libs for Windows",
         "CARGO_PKG_NAME": "windows-targets",
@@ -26,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu-0.52.6"],
+    deps = ["//third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu"],
 )

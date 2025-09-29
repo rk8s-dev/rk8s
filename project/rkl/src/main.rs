@@ -53,7 +53,13 @@ enum Workload {
 
 fn main() -> Result<(), anyhow::Error> {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env().add_directive(
+                "rfuse3=off"
+                    .parse()
+                    .expect("failed to filter [rfuse3]'s log"),
+            ),
+        )
         .finish();
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");

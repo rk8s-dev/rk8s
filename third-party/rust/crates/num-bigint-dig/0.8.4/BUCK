@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "num-bigint-dig-vendor",
+    urls = ["https://static.crates.io/crates/num-bigint-dig/num-bigint-dig-0.8.4.crate"],
+    sha256 = "dc84195820f291c7697304f3cbdadd1cb7199c0efc917ff5eafd71225c136151",
+    type = "tar.gz",
+    strip_prefix = "num-bigint-dig-0.8.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "num-bigint-dig-0.8.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "num-bigint-dig",
+    srcs = [":num-bigint-dig-vendor"],
     crate = "num-bigint-dig",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "num-bigint-dig",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "dignifiedquire <dignifiedquire@gmail.com>:The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Big integer implementation for Rust",
         "CARGO_PKG_NAME": "num-bigint-dig",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "8",
         "CARGO_PKG_VERSION_PATCH": "4",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :num-bigint-dig-0.8.4-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :num-bigint-dig-build-script-run[out_dir])",
     },
     features = [
         "i128",
@@ -33,35 +39,30 @@ cargo.rust_library(
         "u64_digit",
         "zeroize",
     ],
-    rustc_flags = ["@$(location :num-bigint-dig-0.8.4-build-script-run[rustc_flags])"],
-    named_deps = {
-        "num_integer": "//third-party/rust/crates/num-integer/0.1.46:num-integer-0.1.46",
-        "num_iter": "//third-party/rust/crates/num-iter/0.1.45:num-iter-0.1.45",
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
+    rustc_flags = ["@$(location :num-bigint-dig-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/byteorder/1.5.0:byteorder-1.5.0",
-        "//third-party/rust/crates/lazy_static/1.5.0:lazy_static-1.5.0",
-        "//third-party/rust/crates/libm/0.2.15:libm-0.2.15",
-        "//third-party/rust/crates/rand/0.8.5:rand-0.8.5",
-        "//third-party/rust/crates/smallvec/1.15.1:smallvec-1.15.1",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize-1.8.1",
+        "//third-party/rust/crates/byteorder/1.5.0:byteorder",
+        "//third-party/rust/crates/lazy_static/1.5.0:lazy_static",
+        "//third-party/rust/crates/libm/0.2.15:libm",
+        "//third-party/rust/crates/num-integer/0.1.46:num-integer",
+        "//third-party/rust/crates/num-iter/0.1.45:num-iter",
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
+        "//third-party/rust/crates/rand/0.8.5:rand",
+        "//third-party/rust/crates/smallvec/1.15.1:smallvec",
+        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
     ],
 )
 
 cargo.rust_binary(
-    name = "num-bigint-dig-0.8.4-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "num-bigint-dig-build-script-build",
+    srcs = [":num-bigint-dig-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "num-bigint-dig",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "dignifiedquire <dignifiedquire@gmail.com>:The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Big integer implementation for Rust",
         "CARGO_PKG_NAME": "num-bigint-dig",
@@ -83,9 +84,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "num-bigint-dig-0.8.4-build-script-run",
+    name = "num-bigint-dig-build-script-run",
     package_name = "num-bigint-dig",
-    buildscript_rule = ":num-bigint-dig-0.8.4-build-script-build",
+    buildscript_rule = ":num-bigint-dig-build-script-build",
     features = [
         "i128",
         "prime",
@@ -94,5 +95,5 @@ buildscript_run(
         "zeroize",
     ],
     version = "0.8.4",
-    local_manifest_dir = "**",
+    manifest_dir = ":num-bigint-dig-vendor",
 )

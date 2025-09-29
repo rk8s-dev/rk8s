@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "security-framework-vendor",
+    urls = ["https://static.crates.io/crates/security-framework/security-framework-3.4.0.crate"],
+    sha256 = "60b369d18893388b345804dc0007963c99b7d665ae71d275812d828c6f089640",
+    type = "tar.gz",
+    strip_prefix = "security-framework-3.4.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "security-framework-3.4.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "security-framework",
+    srcs = [":security-framework-vendor"],
     crate = "security-framework",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "security-framework",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Steven Fackler <sfackler@gmail.com>:Kornel <kornel@geekhood.net>",
         "CARGO_PKG_DESCRIPTION": "Security.framework bindings for macOS and iOS",
         "CARGO_PKG_NAME": "security-framework",
@@ -33,14 +39,12 @@ cargo.rust_library(
         "default",
         "session-tickets",
     ],
-    named_deps = {
-        "core_foundation": "//third-party/rust/crates/core-foundation/0.10.1:core-foundation-0.10.1",
-        "core_foundation_sys": "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys-0.8.7",
-        "security_framework_sys": "//third-party/rust/crates/security-framework-sys/2.15.0:security-framework-sys-2.15.0",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags-2.9.4",
-        "//third-party/rust/crates/libc/0.2.175:libc-0.2.175",
+        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys",
+        "//third-party/rust/crates/core-foundation/0.10.1:core-foundation",
+        "//third-party/rust/crates/libc/0.2.175:libc",
+        "//third-party/rust/crates/security-framework-sys/2.15.0:security-framework-sys",
     ],
 )

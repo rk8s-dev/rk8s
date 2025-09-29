@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "num-integer-vendor",
+    urls = ["https://static.crates.io/crates/num-integer/num-integer-0.1.46.crate"],
+    sha256 = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f",
+    type = "tar.gz",
+    strip_prefix = "num-integer-0.1.46",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "num-integer-0.1.46",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "num-integer",
+    srcs = [":num-integer-vendor"],
     crate = "num-integer",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "num-integer",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Rust Project Developers",
         "CARGO_PKG_DESCRIPTION": "Integer traits and functions",
         "CARGO_PKG_NAME": "num-integer",
@@ -30,8 +36,6 @@ cargo.rust_library(
         "i128",
         "std",
     ],
-    named_deps = {
-        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/num-traits/0.2.19:num-traits"],
 )

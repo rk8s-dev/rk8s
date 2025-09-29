@@ -1,4 +1,4 @@
-use crate::{build, exec, login, logout, mount, repo};
+use crate::{build, exec, login, logout, mount, pull, push, repo};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -12,6 +12,10 @@ pub struct Cli {
 pub enum Commands {
     /// Build a container image from Dockerfile
     Build(build::BuildArgs),
+    /// Pull an image from specific distribution server.
+    Pull(pull::PullArgs),
+    /// Push an image to specific distribution server.
+    Push(push::PushArgs),
     #[command(hide = true)]
     Mount(mount::MountArgs),
     #[command(hide = true)]

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "jwt-vendor",
+    urls = ["https://static.crates.io/crates/jwt/jwt-0.16.0.crate"],
+    sha256 = "6204285f77fe7d9784db3fdc449ecce1a0114927a51d5a41c4c7a292011c015f",
+    type = "tar.gz",
+    strip_prefix = "jwt-0.16.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "jwt-0.16.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "jwt",
+    srcs = [":jwt-vendor"],
     crate = "jwt",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "jwt",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Michael Yang <mikkyangg@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "JSON Web Token library",
         "CARGO_PKG_NAME": "jwt",
@@ -25,16 +31,14 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "crypto_common": "//third-party/rust/crates/crypto-common/0.1.6:crypto-common-0.1.6",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64/0.13.1:base64-0.13.1",
-        "//third-party/rust/crates/digest/0.10.7:digest-0.10.7",
-        "//third-party/rust/crates/hmac/0.12.1:hmac-0.12.1",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json-1.0.145",
-        "//third-party/rust/crates/sha2/0.10.9:sha2-0.10.9",
+        "//third-party/rust/crates/base64/0.13.1:base64",
+        "//third-party/rust/crates/crypto-common/0.1.6:crypto-common",
+        "//third-party/rust/crates/digest/0.10.7:digest",
+        "//third-party/rust/crates/hmac/0.12.1:hmac",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_json/1.0.145:serde_json",
+        "//third-party/rust/crates/sha2/0.10.9:sha2",
     ],
 )

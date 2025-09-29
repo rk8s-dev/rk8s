@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rustls-platform-verifier-android-vendor",
+    urls = ["https://static.crates.io/crates/rustls-platform-verifier-android/rustls-platform-verifier-android-0.1.1.crate"],
+    sha256 = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f",
+    type = "tar.gz",
+    strip_prefix = "rustls-platform-verifier-android-0.1.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rustls-platform-verifier-android-0.1.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rustls-platform-verifier-android",
+    srcs = [":rustls-platform-verifier-android-vendor"],
     crate = "rustls-platform-verifier-android",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rustls-platform-verifier-android",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "The internal JVM support component of the rustls-platform-verifier crate. You shouldn't depend on this directly.",
         "CARGO_PKG_NAME": "rustls-platform-verifier-android",

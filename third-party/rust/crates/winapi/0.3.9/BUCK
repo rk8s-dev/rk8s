@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "winapi-vendor",
+    urls = ["https://static.crates.io/crates/winapi/winapi-0.3.9.crate"],
+    sha256 = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419",
+    type = "tar.gz",
+    strip_prefix = "winapi-0.3.9",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "winapi-0.3.9",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "winapi",
+    srcs = [":winapi-vendor"],
     crate = "winapi",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "winapi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Peter Atashian <retep998@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Raw FFI bindings for all of Windows API.",
         "CARGO_PKG_NAME": "winapi",
@@ -24,7 +30,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "9",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :winapi-0.3.9-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :winapi-build-script-run[out_dir])",
     },
     features = [
         "cfg",
@@ -51,22 +57,19 @@ cargo.rust_library(
         "ws2ipdef",
         "ws2tcpip",
     ],
-    rustc_flags = ["@$(location :winapi-0.3.9-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :winapi-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-    name = "winapi-0.3.9-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "winapi-build-script-build",
+    srcs = [":winapi-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "winapi",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Peter Atashian <retep998@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Raw FFI bindings for all of Windows API.",
         "CARGO_PKG_NAME": "winapi",
@@ -106,9 +109,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "winapi-0.3.9-build-script-run",
+    name = "winapi-build-script-run",
     package_name = "winapi",
-    buildscript_rule = ":winapi-0.3.9-build-script-build",
+    buildscript_rule = ":winapi-build-script-build",
     features = [
         "cfg",
         "consoleapi",
@@ -135,5 +138,5 @@ buildscript_run(
         "ws2tcpip",
     ],
     version = "0.3.9",
-    local_manifest_dir = "**",
+    manifest_dir = ":winapi-vendor",
 )

@@ -7,7 +7,6 @@ pub async fn mount_filesystem<F: Filesystem + std::marker::Sync + Send + 'static
     fs: F,
     mountpoint: &OsStr,
 ) -> MountHandle {
-    env_logger::init();
     //let logfs = LoggingFileSystem::new(fs);
 
     let mount_path: OsString = OsString::from(mountpoint);

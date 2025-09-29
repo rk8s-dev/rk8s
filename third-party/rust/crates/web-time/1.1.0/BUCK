@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "web-time-vendor",
+    urls = ["https://static.crates.io/crates/web-time/web-time-1.1.0.crate"],
+    sha256 = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb",
+    type = "tar.gz",
+    strip_prefix = "web-time-1.1.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "web-time-1.1.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "web-time",
+    srcs = [":web-time-vendor"],
     crate = "web-time",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "web-time",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Drop-in replacement for std::time for Wasm in browsers",
         "CARGO_PKG_NAME": "web-time",

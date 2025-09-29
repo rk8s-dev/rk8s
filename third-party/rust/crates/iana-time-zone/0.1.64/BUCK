@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "iana-time-zone-vendor",
+    urls = ["https://static.crates.io/crates/iana-time-zone/iana-time-zone-0.1.64.crate"],
+    sha256 = "33e57f83510bb73707521ebaffa789ec8caf86f9657cad665b092b581d40e9fb",
+    type = "tar.gz",
+    strip_prefix = "iana-time-zone-0.1.64",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "iana-time-zone-0.1.64",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "iana-time-zone",
+    srcs = [":iana-time-zone-vendor"],
     crate = "iana-time-zone",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "iana-time-zone",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Straw <strawman@astraw.com>:René Kijewski <rene.kijewski@fu-berlin.de>:Ryan Lopopolo <rjl@hyperbo.la>",
         "CARGO_PKG_DESCRIPTION": "get the IANA time zone for the current system",
         "CARGO_PKG_NAME": "iana-time-zone",

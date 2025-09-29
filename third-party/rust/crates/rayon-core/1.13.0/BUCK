@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "rayon-core-vendor",
+    urls = ["https://static.crates.io/crates/rayon-core/rayon-core-1.13.0.crate"],
+    sha256 = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91",
+    type = "tar.gz",
+    strip_prefix = "rayon-core-1.13.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "rayon-core-1.13.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rayon-core",
+    srcs = [":rayon-core-vendor"],
     crate = "rayon-core",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rayon-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Core APIs for Rayon",
         "CARGO_PKG_LINKS": "rayon-core",
@@ -25,28 +31,25 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "13",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :rayon-core-1.13.0-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rayon-core-build-script-run[out_dir])",
     },
-    rustc_flags = ["@$(location :rayon-core-1.13.0-build-script-run[rustc_flags])"],
-    named_deps = {
-        "crossbeam_deque": "//third-party/rust/crates/crossbeam-deque/0.8.6:crossbeam-deque-0.8.6",
-        "crossbeam_utils": "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils-0.8.21",
-    },
+    rustc_flags = ["@$(location :rayon-core-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/crossbeam-deque/0.8.6:crossbeam-deque",
+        "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils",
+    ],
 )
 
 cargo.rust_binary(
-    name = "rayon-core-1.13.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "rayon-core-build-script-build",
+    srcs = [":rayon-core-vendor"],
     crate = "build-script-build",
-    crate_root = "build.rs",
+    crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "rayon-core",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Core APIs for Rayon",
         "CARGO_PKG_LINKS": "rayon-core",
@@ -62,9 +65,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-    name = "rayon-core-1.13.0-build-script-run",
+    name = "rayon-core-build-script-run",
     package_name = "rayon-core",
-    buildscript_rule = ":rayon-core-1.13.0-build-script-build",
+    buildscript_rule = ":rayon-core-build-script-build",
     version = "1.13.0",
-    local_manifest_dir = "**",
+    manifest_dir = ":rayon-core-vendor",
 )

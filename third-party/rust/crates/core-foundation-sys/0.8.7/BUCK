@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "core-foundation-sys-vendor",
+    urls = ["https://static.crates.io/crates/core-foundation-sys/core-foundation-sys-0.8.7.crate"],
+    sha256 = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b",
+    type = "tar.gz",
+    strip_prefix = "core-foundation-sys-0.8.7",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "core-foundation-sys-0.8.7",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "core-foundation-sys",
+    srcs = [":core-foundation-sys-vendor"],
     crate = "core-foundation-sys",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "core-foundation-sys",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The Servo Project Developers",
         "CARGO_PKG_DESCRIPTION": "Bindings to Core Foundation for macOS",
         "CARGO_PKG_NAME": "core-foundation-sys",

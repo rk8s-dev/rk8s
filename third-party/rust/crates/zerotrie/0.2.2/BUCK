@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "zerotrie-vendor",
+    urls = ["https://static.crates.io/crates/zerotrie/zerotrie-0.2.2.crate"],
+    sha256 = "36f0bbd478583f79edad978b407914f61b2972f5af6fa089686016be8f9af595",
+    type = "tar.gz",
+    strip_prefix = "zerotrie-0.2.2",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "zerotrie-0.2.2",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "zerotrie",
+    srcs = [":zerotrie-vendor"],
     crate = "zerotrie",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "zerotrie",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "The ICU4X Project Developers",
         "CARGO_PKG_DESCRIPTION": "A data structure that efficiently maps strings to integers",
         "CARGO_PKG_NAME": "zerotrie",
@@ -31,8 +37,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc-0.2.5",
-        "//third-party/rust/crates/yoke/0.8.0:yoke-0.8.0",
-        "//third-party/rust/crates/zerofrom/0.1.6:zerofrom-0.1.6",
+        "//third-party/rust/crates/displaydoc/0.2.5:displaydoc",
+        "//third-party/rust/crates/yoke/0.8.0:yoke",
+        "//third-party/rust/crates/zerofrom/0.1.6:zerofrom",
     ],
 )

@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "multimap-vendor",
+    urls = ["https://static.crates.io/crates/multimap/multimap-0.10.1.crate"],
+    sha256 = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084",
+    type = "tar.gz",
+    strip_prefix = "multimap-0.10.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "multimap-0.10.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "multimap",
+    srcs = [":multimap-vendor"],
     crate = "multimap",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
         "CARGO_CRATE_NAME": "multimap",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Håvar Nøvik <havar.novik@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A multimap implementation.",
         "CARGO_PKG_NAME": "multimap",

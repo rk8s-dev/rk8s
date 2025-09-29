@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "vsimd-vendor",
+    urls = ["https://static.crates.io/crates/vsimd/vsimd-0.8.0.crate"],
+    sha256 = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64",
+    type = "tar.gz",
+    strip_prefix = "vsimd-0.8.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "vsimd-0.8.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "vsimd",
+    srcs = [":vsimd-vendor"],
     crate = "vsimd",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "vsimd",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "SIMD utilities",
         "CARGO_PKG_NAME": "vsimd",

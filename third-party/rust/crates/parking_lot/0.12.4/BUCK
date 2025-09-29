@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "parking_lot-vendor",
+    urls = ["https://static.crates.io/crates/parking_lot/parking_lot-0.12.4.crate"],
+    sha256 = "70d58bf43669b5795d1576d0641cfb6fbb2057bf629506267a92807158584a13",
+    type = "tar.gz",
+    strip_prefix = "parking_lot-0.12.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "parking_lot-0.12.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "parking_lot",
+    srcs = [":parking_lot-vendor"],
     crate = "parking_lot",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "parking_lot",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Amanieu d'Antras <amanieu@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "More compact and efficient implementations of the standard synchronization primitives.",
         "CARGO_PKG_NAME": "parking_lot",
@@ -28,7 +34,7 @@ cargo.rust_library(
     features = ["default"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/lock_api/0.4.13:lock_api-0.4.13",
-        "//third-party/rust/crates/parking_lot_core/0.9.11:parking_lot_core-0.9.11",
+        "//third-party/rust/crates/lock_api/0.4.13:lock_api",
+        "//third-party/rust/crates/parking_lot_core/0.9.11:parking_lot_core",
     ],
 )

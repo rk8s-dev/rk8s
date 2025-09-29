@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "utf8_iter-vendor",
+    urls = ["https://static.crates.io/crates/utf8_iter/utf8_iter-1.0.4.crate"],
+    sha256 = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be",
+    type = "tar.gz",
+    strip_prefix = "utf8_iter-1.0.4",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "utf8_iter-1.0.4",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "utf8_iter",
+    srcs = [":utf8_iter-vendor"],
     crate = "utf8_iter",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "utf8_iter",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Henri Sivonen <hsivonen@hsivonen.fi>",
         "CARGO_PKG_DESCRIPTION": "Iterator by char over potentially-invalid UTF-8 in &[u8]",
         "CARGO_PKG_NAME": "utf8_iter",

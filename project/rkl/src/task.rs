@@ -1,10 +1,12 @@
+use crate::commands::container::config::ContainerConfigBuilder;
+use crate::commands::container::handle_image_typ;
+use crate::commands::utils::get_bundle_from_path;
 use crate::commands::{create, delete, kill, load_container, start};
 use crate::cri::cri_api::{
-    ContainerConfig, ContainerMetadata, CreateContainerRequest, CreateContainerResponse, ImageSpec,
-    KeyValue, LinuxContainerConfig, LinuxContainerResources, Mount, PodSandboxConfig,
-    PodSandboxMetadata, PortMapping, Protocol, RemovePodSandboxRequest, RemovePodSandboxResponse,
-    RunPodSandboxRequest, RunPodSandboxResponse, StartContainerRequest, StartContainerResponse,
-    StopPodSandboxRequest, StopPodSandboxResponse,
+    CreateContainerRequest, CreateContainerResponse, LinuxContainerConfig, LinuxContainerResources,
+    PodSandboxConfig, PodSandboxMetadata, PortMapping, Protocol, RemovePodSandboxRequest,
+    RemovePodSandboxResponse, RunPodSandboxRequest, RunPodSandboxResponse, StartContainerRequest,
+    StartContainerResponse, StopPodSandboxRequest, StopPodSandboxResponse,
 };
 use crate::rootpath;
 use anyhow::{Result, anyhow};
@@ -21,7 +23,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 pub struct TaskRunner {
     pub task: PodTask,
@@ -51,6 +53,7 @@ impl TaskRunner {
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
         let task: PodTask = serde_yaml::from_str(&contents)?;
+        debug!("{task:?}");
         Self::from_task(task)
     }
 
@@ -127,13 +130,8 @@ impl TaskRunner {
         let sandbox_id = config.metadata.unwrap_or_default().name.to_string();
 
         // get bundle path of pause container from labels
-        let bundle_path = self
-            .task
-            .metadata
-            .labels
-            .get("bundle")
-            .cloned()
-            .ok_or_else(|| anyhow!("bundle not found in Pod labels"))?;
+        let bundle_path = self.task.metadata.labels.get("bundle").cloned().unwrap();
+        // .unwrap_or(get_pause_bundle()?);
         let bundle_dir = PathBuf::from(&bundle_path);
         if !bundle_dir.exists() {
             return Err(anyhow!("Bundle directory does not exist"));
@@ -215,63 +213,23 @@ impl TaskRunner {
         pod_sandbox_id: &str,
         container: &ContainerSpec,
     ) -> Result<CreateContainerRequest, anyhow::Error> {
-        let config = ContainerConfig {
-            //just create accronding to the format of ContainerConfig
-            //now some data isn't used
-            metadata: Some(ContainerMetadata {
-                name: container.name.clone(),
-                attempt: 0,
-            }),
-            image: Some(ImageSpec {
-                image: container.image.clone(),
-                annotations: std::collections::HashMap::new(),
-                user_specified_image: container.image.clone(),
-                runtime_handler: "".to_string(),
-            }),
-            command: vec!["/bin/sh".to_string()],
-            args: container.args.clone(),
-            working_dir: "/".to_string(),
-            envs: vec![KeyValue {
-                key: "PATH".to_string(),
-                value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
-            }],
-            mounts: vec![
-                Mount {
-                    container_path: "/proc".to_string(),
-                    host_path: "proc".to_string(),
-                    readonly: false,
-                    selinux_relabel: false,
-                    propagation: 0,
-                    uid_mappings: vec![],
-                    gid_mappings: vec![],
-                    recursive_read_only: false,
-                    image: None,
-                    image_sub_path: "".to_string(),
-                },
-                Mount {
-                    container_path: "/dev".to_string(),
-                    host_path: "tmpfs".to_string(),
-                    readonly: false,
-                    selinux_relabel: false,
-                    propagation: 0,
-                    uid_mappings: vec![],
-                    gid_mappings: vec![],
-                    recursive_read_only: false,
-                    image: None,
-                    image_sub_path: "".to_string(),
-                },
-            ],
-            devices: vec![],
-            labels: std::collections::HashMap::new(),
-            annotations: std::collections::HashMap::new(),
-            log_path: format!("{}/0.log", container.name),
-            stdin: false,
-            stdin_once: false,
-            tty: false,
-            linux: get_linux_container_config(container.resources.clone())?,
-            windows: None,
-            cdi_devices: vec![],
-            stop_signal: 0,
+        let mut config_builder = handle_image_typ(container)?;
+
+        let config = if let Some(ref mut builder) = config_builder {
+            builder.container_spec(container.clone())?;
+            builder.images(
+                get_bundle_from_path(&container.image)
+                    .unwrap_or_default()
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            builder.clone().build()
+        } else {
+            ContainerConfigBuilder::default()
+                .container_spec(container.clone())?
+                .clone()
+                .build()
         };
 
         Ok(CreateContainerRequest {
@@ -296,6 +254,14 @@ impl TaskRunner {
             .as_ref()
             .map(|m| m.name.clone())
             .ok_or_else(|| anyhow!("Container metadata is required"))?;
+
+        let container_spec = self
+            .task
+            .spec
+            .containers
+            .iter()
+            .find(|c| c.name == container_id)
+            .ok_or_else(|| anyhow!("Container spec not found for ID: {}", container_id))?;
 
         // check sandbox_config
         if self.sandbox_config.is_none() {
@@ -340,23 +306,30 @@ impl TaskRunner {
         let linux = linux.build()?;
         spec.set_linux(Some(linux));
 
-        let container_spec = self
-            .task
-            .spec
-            .containers
-            .iter()
-            .find(|c| c.name == container_id)
-            .ok_or_else(|| anyhow!("Container spec not found for ID: {}", container_id))?;
-        let mut process = ProcessBuilder::default()
-            .args(container_spec.args.clone())
-            .build()?;
+        let mut process = ProcessBuilder::default().build()?;
+
+        // set args
+        let arg = if container_spec.args.is_empty() {
+            config.args.clone()
+        } else {
+            container_spec.args.clone()
+        };
+
+        process.set_args(Some(arg));
 
         let mut capabilities = process.capabilities().clone().unwrap();
         add_cap_net_raw(&mut capabilities);
         process.set_capabilities(Some(capabilities));
 
         spec.set_process(Some(process));
-        let bundle_path = container_spec.image.clone();
+        // [image_specification] check if config's spec
+
+        let bundle_path = if let Some(image_spec) = &config.image {
+            image_spec.image.clone()
+        } else {
+            container_spec.image.clone()
+        };
+
         if bundle_path.is_empty() {
             return Err(anyhow!(
                 "Bundle path (image) for container {} is empty",
@@ -598,6 +571,12 @@ impl TaskRunner {
 
         Ok((pod_sandbox_id, podip))
     }
+}
+
+// TODO: when bundle is not provided, then pull the default image from remote
+#[allow(unused)]
+fn get_pause_bundle() -> Result<String> {
+    Err(anyhow!("local bundle path is not provided"))
 }
 
 // only support limit config now.

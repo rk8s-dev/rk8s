@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "walkdir-vendor",
+    urls = ["https://static.crates.io/crates/walkdir/walkdir-2.5.0.crate"],
+    sha256 = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b",
+    type = "tar.gz",
+    strip_prefix = "walkdir-2.5.0",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "walkdir-2.5.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "walkdir",
+    srcs = [":walkdir-vendor"],
     crate = "walkdir",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
         "CARGO_CRATE_NAME": "walkdir",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Recursively walk a directory.",
         "CARGO_PKG_NAME": "walkdir",
@@ -25,8 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    named_deps = {
-        "same_file": "//third-party/rust/crates/same-file/1.0.6:same-file-1.0.6",
-    },
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/same-file/1.0.6:same-file"],
 )

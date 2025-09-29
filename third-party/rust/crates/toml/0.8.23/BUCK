@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "toml-vendor",
+    urls = ["https://static.crates.io/crates/toml/toml-0.8.23.crate"],
+    sha256 = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362",
+    type = "tar.gz",
+    strip_prefix = "toml-0.8.23",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "toml-0.8.23",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "toml",
+    srcs = [":toml-vendor"],
     crate = "toml",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "toml",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A native Rust encoder and decoder of TOML-formatted files and streams. Provides\nimplementations of the standard Serialize/Deserialize traits for TOML data to\nfacilitate deserializing and serializing Rust structures.\n",
         "CARGO_PKG_NAME": "toml",
@@ -32,9 +38,9 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_spanned/0.6.9:serde_spanned-0.6.9",
-        "//third-party/rust/crates/toml_datetime/0.6.11:toml_datetime-0.6.11",
-        "//third-party/rust/crates/toml_edit/0.22.27:toml_edit-0.22.27",
+        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde_spanned/0.6.9:serde_spanned",
+        "//third-party/rust/crates/toml_datetime/0.6.11:toml_datetime",
+        "//third-party/rust/crates/toml_edit/0.22.27:toml_edit",
     ],
 )

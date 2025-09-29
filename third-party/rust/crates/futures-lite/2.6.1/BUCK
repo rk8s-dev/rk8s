@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "futures-lite-vendor",
+    urls = ["https://static.crates.io/crates/futures-lite/futures-lite-2.6.1.crate"],
+    sha256 = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad",
+    type = "tar.gz",
+    strip_prefix = "futures-lite-2.6.1",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "futures-lite-2.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "futures-lite",
+    srcs = [":futures-lite-vendor"],
     crate = "futures-lite",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "futures-lite",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Stjepan Glavina <stjepang@gmail.com>:Contributors to futures-rs",
         "CARGO_PKG_DESCRIPTION": "Futures, streams, and async I/O combinators",
         "CARGO_PKG_NAME": "futures-lite",
@@ -34,14 +40,12 @@ cargo.rust_library(
         "race",
         "std",
     ],
-    named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_io": "//third-party/rust/crates/futures-io/0.3.31:futures-io-0.3.31",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/fastrand/2.3.0:fastrand-2.3.0",
-        "//third-party/rust/crates/parking/2.2.1:parking-2.2.1",
+        "//third-party/rust/crates/fastrand/2.3.0:fastrand",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-io/0.3.31:futures-io",
+        "//third-party/rust/crates/parking/2.2.1:parking",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
     ],
 )

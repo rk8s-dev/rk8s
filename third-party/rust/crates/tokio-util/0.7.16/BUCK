@@ -3,18 +3,24 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+http_archive(
+    name = "tokio-util-vendor",
+    urls = ["https://static.crates.io/crates/tokio-util/tokio-util-0.7.16.crate"],
+    sha256 = "14307c986784f72ef81c89db7d9e28d6ac26d16213b109ea501696195e6e3ce5",
+    type = "tar.gz",
+    strip_prefix = "tokio-util-0.7.16",
+    out = "vendor",
+)
+
 cargo.rust_library(
-    name = "tokio-util-0.7.16",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
+    name = "tokio-util",
+    srcs = [":tokio-util-vendor"],
     crate = "tokio-util",
-    crate_root = "src/lib.rs",
+    crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "tokio-util",
-        "CARGO_MANIFEST_DIR": ".",
+        "CARGO_MANIFEST_DIR": "vendor",
         "CARGO_PKG_AUTHORS": "Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "Additional utilities for working with Tokio.\n",
         "CARGO_PKG_NAME": "tokio-util",
@@ -30,14 +36,12 @@ cargo.rust_library(
         "default",
         "io",
     ],
-    named_deps = {
-        "futures_core": "//third-party/rust/crates/futures-core/0.3.31:futures-core-0.3.31",
-        "futures_sink": "//third-party/rust/crates/futures-sink/0.3.31:futures-sink-0.3.31",
-        "pin_project_lite": "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite-0.2.16",
-    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes-1.10.1",
-        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
+        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "//third-party/rust/crates/futures-sink/0.3.31:futures-sink",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/tokio/1.47.1:tokio",
     ],
 )
