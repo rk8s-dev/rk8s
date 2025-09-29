@@ -51,7 +51,6 @@ impl Cache {
         node.requested.cpu += pod_info.spec.resources.cpu;
         node.requested.memory += pod_info.spec.resources.memory;
 
-
         true
     }
 
@@ -64,12 +63,9 @@ impl Cache {
             return None;
         };
 
-
-
         pod_info.scheduled = None;
         node.requested.cpu -= pod_info.spec.resources.cpu;
         node.requested.memory -= pod_info.spec.resources.memory;
-
 
         Some(pod_info.clone())
     }
