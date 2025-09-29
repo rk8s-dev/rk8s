@@ -179,14 +179,6 @@ sudo mv target/debug/libbridge /opt/cni/bin/
 mkdir -p rootfs
 docker export $(docker create busybox) | tar -C rootfs -xvf -
 ```
-4. **Start Xline:**
-```bash
-git clone https://github.com/xline-kv/Xline.git
-cd Xline
-docker pull ghcr.io/xline-kv/xline:latest
-cp fixtures/{private,public}.pem scripts/
-./scripts/quick_start.sh
-```
 ### Usage Examples
 **Single Container:**
 ```bash
