@@ -1,10 +1,10 @@
+use crate::config::registry::DNS_CONFIG;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
 use clap::Parser;
 use nix::unistd::{chdir, chroot, execve, execvpe, getuid, setuid};
 use serde::{Deserialize, Serialize};
 use std::{ffi::CString, os::fd::AsFd, path::Path, process::Command};
-use crate::config::registry::DNS_CONFIG;
 
 #[derive(Debug, Parser)]
 pub struct ExecArgs {
