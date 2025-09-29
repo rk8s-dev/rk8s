@@ -33,7 +33,7 @@ pub async fn user_create(
     xline_store: &Arc<XlineStore>,
     conn: &Connection,
 ) -> Result<()> {
-    if let Some(_) = xline_store.get_pod_yaml(&pod_task.metadata.name).await? {
+    if (xline_store.get_pod_yaml(&pod_task.metadata.name).await?).is_some() {
         error!(
             "[user_create] Pod {} already exists, creation skipped",
             pod_task.metadata.name

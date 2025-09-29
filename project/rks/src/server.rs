@@ -688,20 +688,18 @@ pub async fn evict_pods_for_node(node_id: &str, xline_store: Arc<XlineStore>) {
         for pod_name in pods {
             if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await.unwrap_or(None)
                 && let Ok(pod) = serde_yaml::from_str::<PodTask>(&pod_yaml)
+                && pod.spec.node_name.as_deref() == Some(node_id)
             {
-                if pod.spec.node_name.as_deref() == Some(node_id) {
-                    let taint = Taint::new(TaintKey::NodeNotReady, TaintEffect::NoExecute);
+                let taint = Taint::new(TaintKey::NodeNotReady, TaintEffect::NoExecute);
 
-                    // Check if pod has a matching toleration
-                    let has_toleration =
-                        pod.spec.tolerations.iter().any(|tol| tol.tolerate(&taint));
+                // Check if pod has a matching toleration
+                let has_toleration = pod.spec.tolerations.iter().any(|tol| tol.tolerate(&taint));
 
-                    // Evict if no toleration found
-                    if !has_toleration {
-                        info!("Evicting pod {} from node {}", pod.metadata.name, node_id);
-                        if let Err(e) = xline_store.delete_pod(&pod.metadata.name).await {
-                            error!("Failed to evict pod {}: {:?}", pod.metadata.name, e);
-                        }
+                // Evict if no toleration found
+                if !has_toleration {
+                    info!("Evicting pod {} from node {}", pod.metadata.name, node_id);
+                    if let Err(e) = xline_store.delete_pod(&pod.metadata.name).await {
+                        error!("Failed to evict pod {}: {:?}", pod.metadata.name, e);
                     }
                 }
             }
