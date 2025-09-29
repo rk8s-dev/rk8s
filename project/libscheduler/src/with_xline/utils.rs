@@ -98,7 +98,7 @@ fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
         },
         priority: 0,
         scheduling_gates: Vec::new(),
-        tolerations: Vec::new(),
+        tolerations: pod_task.spec.tolerations,
         node_name: pod_task.spec.node_name.clone(),
         node_selector: HashMap::new(),
         affinity: None,
@@ -117,7 +117,7 @@ fn convert_k8s_node_to_node_info(k8s_node: Node) -> NodeInfo {
 
     let spec = NodeSpec {
         unschedulable: false,
-        taints: Vec::new(),
+        taints: k8s_node.spec.taints,
     };
 
     let allocatable = ResourcesRequirements {

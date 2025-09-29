@@ -5,9 +5,9 @@ use crate::commands::{create, delete};
 use crate::network::{lease::LeaseWatchResult, manager::LocalManager};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use common::NodeStatus;
 use common::{
-    ConditionStatus, Node, NodeConditionType, NodeNetworkConfig, PodTask, RksMessage,
+    ConditionStatus, Node, NodeCondition, NodeConditionType, NodeNetworkConfig, NodeStatus,
+    PodTask, RksMessage, Taint, TaintEffect, TaintKey,
     lease::{Lease, LeaseAttrs},
 };
 use futures_util::StreamExt;
@@ -575,6 +575,7 @@ async fn handle_heartbeat(
     if let Some(node_yaml) = xline_store.get_node_yaml(node_name).await? {
         let mut node: Node = serde_yaml::from_str(&node_yaml)?;
         node.status = status;
+        node.spec.taints = convert_conditions_to_taints(&node.status.conditions);
         let new_yaml = serde_yaml::to_string(&node)?;
         xline_store.insert_node_yaml(node_name, &new_yaml).await?;
         info!("[worker dispatch] heartbeat updated Node {}", node_name);
@@ -619,7 +620,8 @@ fn watch_heartbeat(xline_store: Arc<XlineStore>, grace: Duration, interval: Dura
                         if expired && !matches!(ready.status, ConditionStatus::Unknown) {
                             ready.status = ConditionStatus::Unknown;
                             ready.last_heartbeat_time = Some(Utc::now().to_rfc3339());
-
+                            node.spec.taints =
+                                convert_conditions_to_taints(&node.status.conditions);
                             if let Ok(new_yaml) = serde_yaml::to_string(&node) {
                                 if let Err(e) =
                                     xline_store.insert_node_yaml(&node_id, &new_yaml).await
@@ -629,10 +631,80 @@ fn watch_heartbeat(xline_store: Arc<XlineStore>, grace: Duration, interval: Dura
                                     warn!("Node {node_id} marked Ready=Unknown (timeout)");
                                 }
                             }
+                            evict_pods_for_node(&node_id, xline_store.clone()).await;
                         }
                     }
                 }
             }
         }
     });
+}
+
+fn convert_conditions_to_taints(conditions: &[NodeCondition]) -> Vec<Taint> {
+    let mut taints = Vec::new();
+    for cond in conditions {
+        match cond.condition_type {
+            NodeConditionType::Ready => {
+                if matches!(
+                    cond.status,
+                    ConditionStatus::False | ConditionStatus::Unknown
+                ) {
+                    taints.push(Taint::new(TaintKey::NodeNotReady, TaintEffect::NoExecute));
+                }
+            }
+            NodeConditionType::MemoryPressure => {
+                if matches!(cond.status, ConditionStatus::True) {
+                    taints.push(Taint::new(
+                        TaintKey::NodeMemoryPressure,
+                        TaintEffect::NoSchedule,
+                    ));
+                }
+            }
+            NodeConditionType::DiskPressure => {
+                if matches!(cond.status, ConditionStatus::True) {
+                    taints.push(Taint::new(
+                        TaintKey::NodeDiskPressure,
+                        TaintEffect::NoSchedule,
+                    ));
+                }
+            }
+            NodeConditionType::NetworkUnavailable => {
+                if matches!(cond.status, ConditionStatus::True) {
+                    taints.push(Taint::new(
+                        TaintKey::NodeNetworkUnavailable,
+                        TaintEffect::NoSchedule,
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    taints
+}
+
+/// Evict all pods running on a given node if they don't tolerate NoExecute taints.
+pub async fn evict_pods_for_node(node_id: &str, xline_store: Arc<XlineStore>) {
+    if let Ok(pods) = xline_store.list_pod_names().await {
+        for pod_name in pods {
+            if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await.unwrap_or(None)
+                && let Ok(pod) = serde_yaml::from_str::<PodTask>(&pod_yaml)
+            {
+                if pod.spec.node_name.as_deref() == Some(node_id) {
+                    let taint = Taint::new(TaintKey::NodeNotReady, TaintEffect::NoExecute);
+
+                    // Check if pod has a matching toleration
+                    let has_toleration =
+                        pod.spec.tolerations.iter().any(|tol| tol.tolerate(&taint));
+
+                    // Evict if no toleration found
+                    if !has_toleration {
+                        info!("Evicting pod {} from node {}", pod.metadata.name, node_id);
+                        if let Err(e) = xline_store.delete_pod(&pod.metadata.name).await {
+                            error!("Failed to evict pod {}: {:?}", pod.metadata.name, e);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -517,6 +517,7 @@ pub async fn generate_node(ext_iface: &ExternalInterface) -> Result<Node> {
         },
         spec: NodeSpec {
             pod_cidr: "0".to_string(),
+            taints:vec![],
         },
         status: NodeStatus {
             capacity,

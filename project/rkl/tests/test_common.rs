@@ -50,6 +50,7 @@ where
                 resources: None,
             }],
             init_containers: vec![],
+            tolerations:vec![],
         },
         status: PodStatus { pod_ip: None },
     }

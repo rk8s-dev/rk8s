@@ -2,6 +2,7 @@ use common::{
     ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec, NodeStatus,
     ObjectMeta, PodSpec, PodStatus, PodTask, Resource,
 };
+use libnetwork::config::validate_network_config;
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use serial_test::serial;
 use std::{collections::HashMap, sync::Arc};
@@ -59,6 +60,7 @@ fn create_test_node(name: &str, cpu: &str, memory: &str) -> Node {
         },
         spec: NodeSpec {
             pod_cidr: "10.244.0.0/24".to_string(),
+            taints: vec![],
         },
         status: NodeStatus {
             capacity,
@@ -113,6 +115,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
                 resources,
             }],
             init_containers: vec![],
+            tolerations: vec![],
         },
         status: PodStatus { pod_ip: None },
     }

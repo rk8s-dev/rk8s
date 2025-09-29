@@ -1,9 +1,9 @@
 use crate::{
     cycle_state::CycleState,
-    models::{NodeInfo, PodInfo, Taint, TaintEffect, TaintKey},
+    models::{NodeInfo, PodInfo},
     plugins::{Code, FilterPlugin, Plugin, Status},
 };
-
+use common::{Taint, TaintEffect, TaintKey};
 pub struct NodeUnschedulable;
 
 impl Plugin for NodeUnschedulable {
@@ -36,10 +36,8 @@ impl FilterPlugin for NodeUnschedulable {
 mod tests {
     use super::*;
     use crate::cycle_state::CycleState;
-    use crate::models::{
-        NodeSpec, PodSpec, QueuedInfo, TaintEffect, Toleration, TolerationOperator,
-    };
-
+    use crate::models::{NodeSpec, PodSpec, QueuedInfo};
+    use common::{TaintEffect, Toleration, TolerationOperator};
     #[test]
     fn test_node_unschedulable_filter_schedulable_node() {
         let plugin = NodeUnschedulable;

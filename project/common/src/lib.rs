@@ -38,6 +38,8 @@ pub struct PodSpec {
     pub containers: Vec<ContainerSpec>,
     #[serde(default)]
     pub init_containers: Vec<ContainerSpec>,
+    #[serde(default)]
+    pub tolerations: Vec<Toleration>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -94,6 +96,66 @@ pub struct PodStatus {
     #[serde(rename = "podIP")]
     pub pod_ip: Option<String>,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct Toleration {
+    /// Empty means match all taint keys.
+    pub key: Option<TaintKey>,
+
+    /// Operator represents a key's relationship to the value.
+    #[serde(default)]
+    pub operator: TolerationOperator,
+
+    /// Effect indicates the taint effect to match. None means match all.
+    pub effect: Option<TaintEffect>,
+
+    #[serde(default)]
+    pub value: String,
+}
+impl Toleration {
+    pub fn tolerate(&self, taint: &Taint) -> bool {
+        if self.effect.is_some() && self.effect.as_ref().unwrap() != &taint.effect {
+            return false;
+        }
+        if self.key.is_some() && self.key.as_ref().unwrap() != &taint.key {
+            return false;
+        }
+        match self.operator {
+            TolerationOperator::Equal => self.value == taint.value,
+            TolerationOperator::Exists => true,
+        }
+    }
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum TolerationOperator {
+    Exists,
+    Equal,
+}
+
+impl Default for TolerationOperator {
+    fn default() -> Self {
+        Self::Equal
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum TaintEffect {
+    NoSchedule,
+    PreferNoSchedule,
+    NoExecute,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum TaintKey {
+    NodeNotReady,
+    NodeUnreachable,
+    NodeUnschedulable,
+    NodeMemoryPressure,
+    NodeDiskPressure,
+    NodeNetworkUnavailable,
+    NodeOutOfService,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum RksMessage {
     //request
@@ -106,7 +168,7 @@ pub enum RksMessage {
     UserRequest(String),
     Heartbeat {
         node_name: String,
-        status: NodeStatus,
+        status: NodeStatus,    
     },
     SetNetwork(Box<NodeNetworkConfig>),
     UpdateRoutes(String, Vec<Route>),
@@ -125,8 +187,25 @@ pub enum RksMessage {
 pub struct NodeSpec {
     #[serde(rename = "podCIDR")]
     pub pod_cidr: String, // Pod network CIDR assigned to this node
+    #[serde(default)]
+    pub taints: Vec<Taint>,
 }
-
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Taint {
+    pub key: TaintKey,
+    #[serde(default)]
+    pub value: String,
+    pub effect: TaintEffect,
+}
+impl Taint {
+    pub fn new(key: TaintKey, effect: TaintEffect) -> Self {
+        Self {
+            key,
+            effect,
+            value: String::new(),
+        }
+    }
+}
 /// Node status
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeStatus {

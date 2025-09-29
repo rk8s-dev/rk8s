@@ -553,6 +553,12 @@ impl Scheduler {
             } else {
                 self.enqueue(pod).await;
             }
+        } else {
+            let pod_name = pod.name.clone();
+            let node_name = pod.scheduled.clone().unwrap();
+            let mut cache = self.cache.write().await;
+            let _ = cache.assume(&pod_name, &node_name);
+            drop(cache);
         }
     }
 

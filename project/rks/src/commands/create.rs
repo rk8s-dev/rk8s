@@ -3,7 +3,7 @@ use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use clap::builder::Str;
 use common::{PodTask, RksMessage};
-use log::info;
+use log::{error, info};
 use quinn::Connection;
 use std::sync::Arc;
 
@@ -33,6 +33,21 @@ pub async fn user_create(
     xline_store: &Arc<XlineStore>,
     conn: &Connection,
 ) -> Result<()> {
+    if let Some(_) = xline_store.get_pod_yaml(&pod_task.metadata.name).await? {
+        error!(
+            "[user_create] Pod {} already exists, creation skipped",
+            pod_task.metadata.name
+        );
+
+        let response = RksMessage::Error(format!("Pod {} already exists", pod_task.metadata.name));
+        let data = bincode::serialize(&response)?;
+        if let Ok(mut stream) = conn.open_uni().await {
+            stream.write_all(&data).await?;
+            stream.finish()?;
+        }
+        return Ok(());
+    }
+
     // Serialize pod to YAML
     let pod_yaml = match serde_yaml::to_string(&pod_task) {
         Ok(yaml) => yaml,
@@ -48,12 +63,11 @@ pub async fn user_create(
         }
     };
 
-    // Insert into Xline
     xline_store
         .insert_pod_yaml(&pod_task.metadata.name, &pod_yaml)
         .await?;
 
-    println!(
+    info!(
         "[user_create] created pod {} (written to Xline)",
         pod_task.metadata.name
     );

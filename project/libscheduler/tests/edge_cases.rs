@@ -1,7 +1,7 @@
+use common::{Taint, TaintEffect, TaintKey, Toleration, TolerationOperator};
 use libscheduler::models::{
     Affinity, NodeAffinity, NodeInfo, NodeSelector, NodeSelectorOperator, NodeSelectorRequirement,
-    NodeSelectorTerm, NodeSpec, PodInfo, PodSpec, QueuedInfo, ResourcesRequirements, Taint,
-    TaintEffect, TaintKey, Toleration, TolerationOperator,
+    NodeSelectorTerm, NodeSpec, PodInfo, PodSpec, QueuedInfo, ResourcesRequirements,
 };
 use libscheduler::plugins::Plugins;
 use libscheduler::plugins::node_resources_fit::ScoringStrategy;
@@ -9,7 +9,6 @@ use libscheduler::scheduler::Scheduler;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::timeout;
-
 fn make_pod(name: &str, priority: u64, cpu: u64, memory: u64) -> PodInfo {
     PodInfo {
         name: name.to_string(),
@@ -407,7 +406,7 @@ async fn test_scheduler_node_removal_pod_rescheduling() {
     let res = timeout(Duration::from_secs(2), rx.recv()).await;
     assert!(res.is_err());
 
-    let mut pod2_2 = make_pod("pod2", 10, 1, 1000);
+    let mut pod2_2 = make_pod("pod3", 10, 1, 1000);
     pod2_2.spec.node_name = Some("node2".to_string());
     scheduler.update_cache_pod(pod2_2).await;
     let res = timeout(Duration::from_secs(2), rx.recv())

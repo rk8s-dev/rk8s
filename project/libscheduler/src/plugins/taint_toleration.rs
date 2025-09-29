@@ -2,13 +2,15 @@ use log;
 
 use crate::{
     cycle_state::CycleState,
-    models::{NodeInfo, PodInfo, Taint, TaintEffect, Toleration},
+    models::{NodeInfo, PodInfo},
     plugins::{
         ActionType, ClusterEvent, ClusterEventWithHint, Code, DefaultNormalizeScore,
         EnqueueExtension, EventInner, EventResource, FilterPlugin, Plugin, PreScorePlugin,
         QueueingHint, ScoreExtension, ScorePlugin, Status,
     },
 };
+
+use common::{Taint, TaintEffect, Toleration};
 
 pub struct TaintToleration;
 
@@ -187,10 +189,8 @@ fn is_schedulable_after_pod_toleration_change(
 mod tests {
     use super::*;
     use crate::cycle_state::CycleState;
-    use crate::models::{
-        NodeSpec, PodSpec, QueuedInfo, Taint, TaintEffect, TaintKey, Toleration, TolerationOperator,
-    };
-
+    use crate::models::{NodeSpec, PodSpec, QueuedInfo};
+    use common::{Taint, TaintEffect, TaintKey, Toleration, TolerationOperator};
     #[test]
     fn test_taint_toleration_filter_no_taints() {
         let plugin = TaintToleration;

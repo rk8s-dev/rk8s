@@ -2,6 +2,7 @@ use std::{cmp::Ordering, collections::HashMap};
 
 use tokio::time::Instant;
 
+use common::*;
 #[derive(Clone, Default, Debug)]
 pub struct ResourcesRequirements {
     /// CPU resource limits, measured in millicores.
@@ -196,7 +197,6 @@ pub struct PodInfo {
     pub queued_info: QueuedInfo,
     pub scheduled: Option<String>,
 }
-
 impl PartialEq for PodInfo {
     fn eq(&self, other: &Self) -> bool {
         self.spec.priority == other.spec.priority
@@ -263,82 +263,4 @@ impl Ord for BackOffPod {
 pub struct Assignment {
     pub pod_name: String,
     pub node_name: String,
-}
-
-/// The pod this Toleration is attached to tolerates any taint that matches
-/// the triple <key,value,effect> using the matching operator <operator>.
-#[derive(Default, Clone, Debug)]
-pub struct Toleration {
-    /// Key is the taint key that the toleration applies to. Empty means match all taint keys.
-    /// If the key is empty, operator must be Exists; this combination means to match all values and all keys.
-    pub key: Option<TaintKey>,
-    /// Operator represents a key's relationship to the value.
-    /// Valid operators are Exists and Equal. Defaults to Equal.
-    pub operator: TolerationOperator,
-    /// Effect indicates the taint effect to match. None means match all taint effects.
-    /// When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
-    pub effect: Option<TaintEffect>,
-    pub value: String,
-}
-
-impl Toleration {
-    pub fn tolerate(&self, taint: &Taint) -> bool {
-        if self.effect.is_some() && self.effect.as_ref().unwrap() != &taint.effect {
-            return false;
-        }
-        if self.key.is_some() && self.key.as_ref().unwrap() != &taint.key {
-            return false;
-        }
-        match self.operator {
-            TolerationOperator::Equal => self.value == taint.value,
-            TolerationOperator::Exists => true,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum TolerationOperator {
-    Exists,
-    Equal,
-}
-
-impl Default for TolerationOperator {
-    fn default() -> Self {
-        Self::Equal
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum TaintEffect {
-    NoSchedule,
-    PreferNoSchedule,
-    NoExecute,
-}
-
-#[derive(Clone, Debug)]
-pub struct Taint {
-    pub key: TaintKey,
-    pub value: String,
-    pub effect: TaintEffect,
-}
-
-impl Taint {
-    pub fn new(key: TaintKey, effect: TaintEffect) -> Self {
-        Self {
-            key,
-            effect,
-            value: String::new(),
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum TaintKey {
-    NodeNotReady,
-    NodeUnreachable,
-    NodeUnschedulable,
-    NodeMemoryPressure,
-    NodeDiskPressure,
-    NodeNetworkUnavailable,
-    NodeOutOfService,
 }

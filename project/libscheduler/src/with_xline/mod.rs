@@ -36,7 +36,10 @@ pub async fn run_scheduler_with_xline(
         let max_backoff = std::time::Duration::from_secs(5);
 
         loop {
-            let watch_opts = WatchOptions::new().with_prefix().with_start_revision(since);
+            let watch_opts = WatchOptions::new()
+                .with_prefix()
+                .with_prev_key()
+                .with_start_revision(since);
             // Watch nodes in Xline
             let (mut _node_watcher, mut nodes_watch_stream) = match client
                 .watch("/registry/nodes/".to_string(), Some(watch_opts.clone()))
@@ -120,9 +123,21 @@ async fn handle_pod_update(
             if let Some(kv) = e.kv() {
                 match e.event_type() {
                     EventType::Put => {
-                        let pod_res = get_pod_from_kv(kv);
-                        if let Ok(pod) = pod_res {
-                            scheduler.update_cache_pod(pod).await;
+                        if let Ok(new_pod) = get_pod_from_kv(kv) {
+                            let node_name = new_pod.spec.node_name.clone();
+                            let prev_pod = e.prev_kv().and_then(|pkv| get_pod_from_kv(pkv).ok());
+                            match (node_name, prev_pod) {
+                                // Case 1: New pod without nodeName，needs to be schedulerd
+                                (None, _) => {
+                                    scheduler.update_cache_pod(new_pod).await;
+                                }
+                                // Case 2: New pod with nodeName,just assumes once
+                                (Some(_), None) => {
+                                    scheduler.update_cache_pod(new_pod).await;
+                                }
+                                // Case 3: ignore pod updated (like podip)
+                                _ => {}
+                            }
                         }
                     }
                     EventType::Delete => {

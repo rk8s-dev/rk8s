@@ -82,6 +82,7 @@ fn create_test_node(name: &str, cpu: &str, memory: &str) -> Node {
         },
         spec: XlineNodeSpec {
             pod_cidr: "10.244.0.0/24".to_string(),
+            taints: vec![],
         },
         status: NodeStatus {
             capacity,
@@ -136,6 +137,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
                 resources,
             }],
             init_containers: vec![],
+            tolerations: vec![],
         },
         status: PodStatus { pod_ip: None },
     }
