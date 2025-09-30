@@ -1,0 +1,139 @@
+[package]
+name = "libvault"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = """
+RustyVault is a powerful identity-based secrets management software, providing features such as
+cryptographic key management, encryption as a service, public key cryptography, certificates management, identity credentials
+management and so forth.
+
+RustyVault's RESTful API is designed to be fully compatible with Hashicorp Vault.
+"""
+repository = "https://github.com/Tongsuo-Project/RustyVault"
+documentation = "https://docs.rs/rusty_vault/latest/rusty_vault/"
+build = "build.rs"
+exclude = [
+    "docs/*",
+]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = { version = "^1.0" }
+thiserror = { version = "^1.0" }
+serde = { version = "^1.0", features = ["derive", "rc", "alloc"] }
+serde_derive = "^1.0"
+serde_json = "^1.0"
+serde_bytes = "0.11"
+serde_yaml = "0.9"
+go-defer = "^0.1"
+rand = "^0.8"
+derivative = "2.2.0"
+enum-map = "2.6.1"
+strum = { version = "0.25", features = ["derive"] }
+strum_macros = "0.25"
+radix_trie = "0.2.1"
+lazy_static = "1.4.0"
+regex = "1.11"
+clap = { version = "4.5", features = ["wrap_help", "derive", "env", "suggestions"] }
+sysexits = { version = "0.7", features = ["std"] }
+build-time = "0.1"
+hcl-rs = "0.18"
+actix-web = { version = "4.9", features = ["openssl"] }
+actix-tls = "3.1"
+actix-rt = "2.9"
+log = "0.4"
+env_logger = "0.10"
+hex = "0.4"
+humantime = "2.1"
+as-any = "0.3.1"
+pem = "3.0"
+chrono = "0.4"
+zeroize = { version = "1.7.0", features = ["zeroize_derive"] }
+diesel = { version = "2.1.4", features = ["mysql", "r2d2"], optional = true }
+r2d2 = { version = "0.8.9", optional = true }
+r2d2-diesel = { version = "1.0.0", optional = true }
+sqlx = { version = "0.8", optional = true, default-features = true, features = ["macros", "mysql", "postgres", "sqlite", "any", "runtime-tokio", "chrono", "uuid", "json", "bigdecimal"] }
+bcrypt = "0.15"
+url = "2.5"
+ureq = { version = "2.10", features = ["json"] }
+rustls = { version = "0.23.16" }
+rustls-pemfile = "2.1"
+webpki-roots = { version = "0.26", default-features = true }
+glob = "0.3"
+base64 = "0.22"
+ipnetwork = "0.20"
+blake2b_simd = "1.0"
+derive_more = "0.99.17"
+dashmap = "6.1"
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros"] }
+ctor = "0.2.8"
+better_default = "1.0.5"
+prometheus-client = "0.22.3"
+sysinfo = "0.31.4"
+prettytable = "0.10"
+rpassword = "7.3"
+async-trait = "0.1"
+stretto = "0.8"
+priority-queue = "2.1"
+crossbeam-channel = "0.5"
+maybe-async = { version = "0.2", optional = false }
+lockfile = "0.4.0"
+arc-swap = "1"
+blake3 = "1.8"
+
+# optional dependencies
+openssl = { version = "*", optional = true }
+openssl-sys = { version = "*", optional = true }
+itertools = "0.14.0"
+
+# rust-tongsuo is a superset of rust-openssl, so we can use it mandatorily anyway.
+[patch.crates-io]
+openssl = { git = "https://github.com/Tongsuo-Project/rust-tongsuo.git" }
+openssl-sys = { git = "https://github.com/Tongsuo-Project/rust-tongsuo.git" }
+
+[build-dependencies]
+toml = "0.8.19"
+
+[dev-dependencies]
+serial_test = "3.2"
+
+[features]
+default = ["crypto_adaptor_openssl"]
+storage_sqlx = ["sqlx"]
+storage_mysql = ["diesel", "r2d2", "r2d2-diesel"]
+crypto_adaptor_openssl = ["dep:openssl", "dep:openssl-sys"]
+crypto_adaptor_tongsuo = ["dep:openssl", "dep:openssl-sys"]
+sync_handler = ["maybe-async/is_sync"]
+
+[target.'cfg(unix)'.dependencies]
+daemonize = "0.5"
+
+[dependencies.foreign-types]
+version = "0.3.1"
+
+[dependencies.libc]
+version = "0.2"
+
+[lints.clippy]
+result_large_err = "allow"
+ptr_arg = "allow"
+let_and_return = "allow"
+should_implement_trait = "allow"
+new_without_default = "allow"
+field_reassign_with_default = "allow"
+await_holding_lock = "allow"
+too_many_arguments = "allow"
+unnecessary_unwrap = "allow"
+collapsible_match = "allow"
+large_enum_variant = "allow"
+unnecessary_map_or = "allow"
+
+[[bin]]
+name = "rvault"
+path = "bin/rusty_vault.rs"
+
+[[test]]
+name = "test_default_logical"
+path = "tests/test_default_logical.rs"

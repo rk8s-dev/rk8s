@@ -1,0 +1,13 @@
+/* stylelint-disable docusaurus/copyright-header */
+
+.features {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.seaography {
+  width: 60%;
+  max-width: 1000px;
+  border-radius: 5px;
+}

@@ -1,0 +1,42 @@
+{
+  "link.title.Docs": {
+    "message": "文档",
+    "description": "The title of the footer links column with title=Docs in the footer"
+  },
+  "link.title.Community": {
+    "message": "社区",
+    "description": "The title of the footer links column with title=Community in the footer"
+  },
+  "link.title.More": {
+    "message": "更多",
+    "description": "The title of the footer links column with title=More in the footer"
+  },
+  "link.item.label.Getting Started": {
+    "message": "快速开始",
+    "description": "The label of footer link with label=Getting Started linking to /docs"
+  },
+  "link.item.label.API Reference": {
+    "message": "API Reference",
+    "description": "The label of footer link with label=API Reference linking to https://docs.rs/rusty_vault/"
+  },
+  "link.item.label.GitHub": {
+    "message": "GitHub",
+    "description": "The label of footer link with label=GitHub linking to https://github.com/Tongsuo-Project/RustyVault/discussions"
+  },
+  "link.item.label.OSPP": {
+    "message": "OSPP",
+    "description": "The label of footer link with label=OSPP linking to https://summer-ospp.ac.cn/org/orgdetail/e4de262f-50b1-4f11-930b-8b8e841de420?lang=zh"
+  },
+  "link.item.label.Blog": {
+    "message": "博客",
+    "description": "The label of footer link with label=Blog linking to /blog/"
+  },
+  "link.item.label.Tongsuo": {
+    "message": "铜锁/Tongsuo",
+    "description": "The label of footer link with label=Tongsuo linking to https://tongsuo.net"
+  },
+  "copyright": {
+    "message": "Copyright © 2021-2025 OpenAtom Tongsuo Built with Docusaurus. ",
+    "description": "The footer copyright"
+  }
+}

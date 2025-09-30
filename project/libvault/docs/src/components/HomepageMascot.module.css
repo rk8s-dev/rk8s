@@ -1,0 +1,12 @@
+/* stylelint-disable docusaurus/copyright-header */
+
+.features {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.mascot {
+  width: 400px;
+  border-radius: 200px;
+}
