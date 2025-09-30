@@ -2,7 +2,7 @@ use better_default::Default;
 use serde_json::{Map, Value};
 
 use crate::{
-    api::{auth::LoginHandler, client::Client, HttpResponse},
+    api::{HttpResponse, auth::LoginHandler, client::Client},
     errors::RvError,
     rv_error_response,
 };
@@ -25,7 +25,13 @@ impl LoginHandler for CertAuthCliHandler {
 
         let mount = data["mount"]
             .as_str()
-            .map_or(self.default_mount.as_str(), |s| if s.is_empty() { self.default_mount.as_str() } else { s })
+            .map_or(self.default_mount.as_str(), |s| {
+                if s.is_empty() {
+                    self.default_mount.as_str()
+                } else {
+                    s
+                }
+            })
             .trim();
         let path = format!("auth/{mount}/login");
 

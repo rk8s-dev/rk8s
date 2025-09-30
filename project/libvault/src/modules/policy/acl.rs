@@ -25,12 +25,12 @@ use dashmap::DashMap;
 use radix_trie::{Trie, TrieCommon};
 
 use super::{
-    policy::{to_granting_capabilities, Capability},
     Permissions, Policy, PolicyPathRules, PolicyType,
+    policy::{Capability, to_granting_capabilities},
 };
 use crate::{
     errors::RvError,
-    logical::{auth::PolicyInfo, Operation, Request},
+    logical::{Operation, Request, auth::PolicyInfo},
     rv_error_string,
     utils::string::ensure_no_leading_slash,
 };
@@ -148,11 +148,13 @@ impl ACL {
                     }
 
                     existing_perms.merge(&pr.permissions)?;
-                    existing_perms.add_granting_policy_to_map(policy, pr.permissions.capabilities_bitmap)?;
+                    existing_perms
+                        .add_granting_policy_to_map(policy, pr.permissions.capabilities_bitmap)?;
                     acl.insert_permissions(pr, existing_perms)?;
                 } else {
                     let mut cloned_perms = pr.permissions.clone();
-                    cloned_perms.add_granting_policy_to_map(policy, pr.permissions.capabilities_bitmap)?;
+                    cloned_perms
+                        .add_granting_policy_to_map(policy, pr.permissions.capabilities_bitmap)?;
                     acl.insert_permissions(pr, cloned_perms)?;
                 }
             }
@@ -179,7 +181,11 @@ impl ACL {
                 return Ok(Some(existing_perms.value().clone()));
             }
         } else {
-            let tree = if pr.is_prefix { &self.prefix_rules } else { &self.exact_rules };
+            let tree = if pr.is_prefix {
+                &self.prefix_rules
+            } else {
+                &self.exact_rules
+            };
 
             if let Some(existing_perms) = tree.get(&pr.path) {
                 return Ok(Some(existing_perms.clone()));
@@ -202,11 +208,19 @@ impl ACL {
     /// # Returns
     ///
     /// * `Result<(), RvError>` - Returns an error if insertion fails.
-    pub fn insert_permissions(&mut self, pr: &PolicyPathRules, perm: Permissions) -> Result<(), RvError> {
+    pub fn insert_permissions(
+        &mut self,
+        pr: &PolicyPathRules,
+        perm: Permissions,
+    ) -> Result<(), RvError> {
         if pr.has_segment_wildcards {
             self.segment_wildcard_paths.insert(pr.path.clone(), perm);
         } else {
-            let tree = if pr.is_prefix { &mut self.prefix_rules } else { &mut self.exact_rules };
+            let tree = if pr.is_prefix {
+                &mut self.prefix_rules
+            } else {
+                &mut self.exact_rules
+            };
 
             tree.insert(pr.path.clone(), perm);
         }
@@ -244,7 +258,10 @@ impl ACL {
         }
 
         if req.operation == Operation::Help {
-            return Ok(ACLResults { allowed: true, ..Default::default() });
+            return Ok(ACLResults {
+                allowed: true,
+                ..Default::default()
+            });
         }
 
         let path = ensure_no_leading_slash(&req.path);
@@ -253,10 +270,10 @@ impl ACL {
             return perm.check(req, check_only);
         }
 
-        if req.operation == Operation::List {
-            if let Some(perm) = self.exact_rules.get(path.trim_end_matches('/')) {
-                return perm.check(req, check_only);
-            }
+        if req.operation == Operation::List
+            && let Some(perm) = self.exact_rules.get(path.trim_end_matches('/'))
+        {
+            return perm.check(req, check_only);
         }
 
         if let Some(perm) = self.get_none_exact_paths_permissions(&path, false) {
@@ -278,7 +295,11 @@ impl ACL {
     /// # Returns
     ///
     /// * `Option<Permissions>` - Returns permissions if found, otherwise `None`.
-    pub fn get_none_exact_paths_permissions(&self, path: &str, bare_mount: bool) -> Option<Permissions> {
+    pub fn get_none_exact_paths_permissions(
+        &self,
+        path: &str,
+        bare_mount: bool,
+    ) -> Option<Permissions> {
         let mut wc_path_descrs = Vec::with_capacity(self.segment_wildcard_paths.len() + 1);
 
         if let Some(item) = self.prefix_rules.get_ancestor(path) {
@@ -347,7 +368,10 @@ impl ACL {
                     _ if *acl_part == path_parts[i] => {
                         segments.push(path_parts[i]);
                     }
-                    _ if pd.is_prefix && i == split_curr_wc_path.len() - 1 && path_parts[i].starts_with(acl_part) => {
+                    _ if pd.is_prefix
+                        && i == split_curr_wc_path.len() - 1
+                        && path_parts[i].starts_with(acl_part) =>
+                    {
                         segments.extend_from_slice(&path_parts[i..]);
                     }
                     _ if !bare_mount => {
@@ -382,7 +406,10 @@ impl ACL {
 
         wc_path_descrs.sort();
 
-        wc_path_descrs.into_iter().next_back().and_then(|pd| pd.perms)
+        wc_path_descrs
+            .into_iter()
+            .next_back()
+            .and_then(|pd| pd.perms)
     }
 
     pub fn capabilities<S: Into<String>>(&self, path: S) -> Vec<String> {
@@ -438,7 +465,9 @@ fn check_path_capability(rules: &Trie<String, Permissions>, path: &str) -> bool 
     !path.is_empty()
         && rules
             .iter()
-            .filter(|(p, perms)| p.starts_with(path) && perms.capabilities_bitmap & Capability::Deny.to_bits() == 0)
+            .filter(|(p, perms)| {
+                p.starts_with(path) && perms.capabilities_bitmap & Capability::Deny.to_bits() == 0
+            })
             .any(|(_key, perms)| {
                 perms.capabilities_bitmap
                     & (Capability::Create.to_bits()
@@ -461,7 +490,7 @@ mod mod_policy_acl_tests {
         time::{Duration, Instant},
     };
 
-    use serde_json::{json, Map, Value};
+    use serde_json::{Map, Value, json};
 
     use super::*;
     use crate::logical::{Operation, Request};
@@ -882,7 +911,11 @@ path "kv/deny" {
 
     fn acl_batch_test(acl: &ACL, cases: &[BatchTestCase]) {
         for case in cases.iter() {
-            let req = Request { operation: case.0, path: case.1.to_string(), ..Default::default() };
+            let req = Request {
+                operation: case.0,
+                path: case.1.to_string(),
+                ..Default::default()
+            };
 
             let result = acl.allow_operation(&req, false).unwrap();
             assert_eq!(case.2, result.allowed);
@@ -1015,7 +1048,10 @@ path "kv/deny" {
             Capability::Read.to_bits() | Capability::List.to_bits()
         );
         assert_eq!(
-            acl.prefix_rules.get_ancestor_value("path2/kk").unwrap().capabilities_bitmap,
+            acl.prefix_rules
+                .get_ancestor_value("path2/kk")
+                .unwrap()
+                .capabilities_bitmap,
             Capability::Update.to_bits() | Capability::Delete.to_bits()
         );
     }
@@ -1050,19 +1086,31 @@ path "kv/deny" {
 
         let perm1 = acl.get_permissions(&policy1.paths[0]).unwrap().unwrap();
         if policy1.paths[0].path == "path1/" {
-            assert_eq!(perm1.capabilities_bitmap, Capability::Read.to_bits() | Capability::List.to_bits());
+            assert_eq!(
+                perm1.capabilities_bitmap,
+                Capability::Read.to_bits() | Capability::List.to_bits()
+            );
         } else {
-            assert_eq!(perm1.capabilities_bitmap, Capability::Update.to_bits() | Capability::Delete.to_bits());
+            assert_eq!(
+                perm1.capabilities_bitmap,
+                Capability::Update.to_bits() | Capability::Delete.to_bits()
+            );
         }
 
         let perm2 = acl.get_permissions(&policy2.paths[0]).unwrap().unwrap();
-        assert_eq!(perm2.capabilities_bitmap, Capability::Update.to_bits() | Capability::Delete.to_bits());
+        assert_eq!(
+            perm2.capabilities_bitmap,
+            Capability::Update.to_bits() | Capability::Delete.to_bits()
+        );
     }
 
     #[test]
     fn test_insert_permissions() {
         let mut acl = ACL::default();
-        let perm = Permissions { capabilities_bitmap: Capability::Read.to_bits(), ..Default::default() };
+        let perm = Permissions {
+            capabilities_bitmap: Capability::Read.to_bits(),
+            ..Default::default()
+        };
 
         acl.insert_permissions(
             &PolicyPathRules {
@@ -1075,7 +1123,10 @@ path "kv/deny" {
         )
         .unwrap();
 
-        assert_eq!(acl.exact_rules.get("path1/").unwrap().capabilities_bitmap, Capability::Read.to_bits());
+        assert_eq!(
+            acl.exact_rules.get("path1/").unwrap().capabilities_bitmap,
+            Capability::Read.to_bits()
+        );
 
         acl.insert_permissions(
             &PolicyPathRules {
@@ -1089,7 +1140,10 @@ path "kv/deny" {
         .unwrap();
 
         assert_eq!(
-            acl.prefix_rules.get_ancestor_value("path222").unwrap().capabilities_bitmap,
+            acl.prefix_rules
+                .get_ancestor_value("path222")
+                .unwrap()
+                .capabilities_bitmap,
             Capability::Read.to_bits()
         );
     }
@@ -1109,7 +1163,10 @@ path "kv/deny" {
 
         let result = acl.get_none_exact_paths_permissions("path1/subpath", false);
         assert!(result.is_some());
-        assert_eq!(result.unwrap().capabilities_bitmap, Capability::Read.to_bits());
+        assert_eq!(
+            result.unwrap().capabilities_bitmap,
+            Capability::Read.to_bits()
+        );
     }
 
     #[test]
@@ -1125,7 +1182,11 @@ path "kv/deny" {
 
         let acl = ACL::new(&[Arc::new(policy)]).unwrap();
 
-        let mut req = Request { operation: Operation::Read, path: "path1/".to_string(), ..Default::default() };
+        let mut req = Request {
+            operation: Operation::Read,
+            path: "path1/".to_string(),
+            ..Default::default()
+        };
 
         let result = acl.allow_operation(&req, false).unwrap();
         assert!(result.allowed);
@@ -1143,9 +1204,17 @@ path "kv/deny" {
 
     #[test]
     fn test_acl_root() {
-        let acl = ACL::new(&[Arc::new(Policy { name: "root".into(), ..Default::default() })]).unwrap();
+        let acl = ACL::new(&[Arc::new(Policy {
+            name: "root".into(),
+            ..Default::default()
+        })])
+        .unwrap();
 
-        let req = Request { operation: Operation::Write, path: "sys/mount/foo".to_string(), ..Default::default() };
+        let req = Request {
+            operation: Operation::Write,
+            path: "sys/mount/foo".to_string(),
+            ..Default::default()
+        };
 
         let result = acl.allow_operation(&req, false).unwrap();
         assert!(result.allowed);
@@ -1196,9 +1265,19 @@ path "kv/deny" {
             BatchTestCase(Operation::Read, "test/segment/at/end/foo", true, false),
             BatchTestCase(Operation::Read, "test/segment/at/end/foo/", false, false),
             BatchTestCase(Operation::Read, "test/segment/at/end/v2/foo/", true, false),
-            BatchTestCase(Operation::Read, "test/segment/wildcard/at/foo/", true, false),
+            BatchTestCase(
+                Operation::Read,
+                "test/segment/wildcard/at/foo/",
+                true,
+                false,
+            ),
             BatchTestCase(Operation::Read, "test/segment/wildcard/at/end", true, false),
-            BatchTestCase(Operation::Read, "test/segment/wildcard/at/end/", true, false),
+            BatchTestCase(
+                Operation::Read,
+                "test/segment/wildcard/at/end/",
+                true,
+                false,
+            ),
             // Path segment wildcards vs glob
             BatchTestCase(Operation::Read, "1/2/3/4", false, false),
             BatchTestCase(Operation::Read, "1/2/3", true, false),
@@ -1256,17 +1335,57 @@ path "kv/deny" {
         let acl = ACL::new(&[Arc::new(policy)]).unwrap();
 
         #[derive(Debug)]
-        struct Case(&'static str, Option<Value>, Option<Value>, Vec<&'static str>);
+        struct Case(
+            &'static str,
+            Option<Value>,
+            Option<Value>,
+            Vec<&'static str>,
+        );
 
         let cases = [
-            Case("foo/bar", None, Some(json!({"zip": [], "baz": []})), ["baz"].to_vec()),
-            Case("hello/universe", Some(json!({"foo": [], "bar": []})), None, ["foo", "bar"].to_vec()),
-            Case("allow/all", Some(json!({"*": [], "test": [], "test1": ["foo"]})), None, vec![]),
-            Case("allow/all1", Some(json!({"*": [], "test": [], "test1": ["foo"]})), None, vec![]),
+            Case(
+                "foo/bar",
+                None,
+                Some(json!({"zip": [], "baz": []})),
+                ["baz"].to_vec(),
+            ),
+            Case(
+                "hello/universe",
+                Some(json!({"foo": [], "bar": []})),
+                None,
+                ["foo", "bar"].to_vec(),
+            ),
+            Case(
+                "allow/all",
+                Some(json!({"*": [], "test": [], "test1": ["foo"]})),
+                None,
+                vec![],
+            ),
+            Case(
+                "allow/all1",
+                Some(json!({"*": [], "test": [], "test1": ["foo"]})),
+                None,
+                vec![],
+            ),
             Case("deny/all", None, Some(json!({"*": [], "test": []})), vec![]),
-            Case("deny/all1", None, Some(json!({"*": [], "test": []})), vec![]),
-            Case("value/merge", Some(json!({"test": [1, 2, 3, 4]})), Some(json!({"test": [1, 2, 3, 4]})), vec![]),
-            Case("value/empty", Some(json!({"empty": []})), Some(json!({"empty": []})), vec![]),
+            Case(
+                "deny/all1",
+                None,
+                Some(json!({"*": [], "test": []})),
+                vec![],
+            ),
+            Case(
+                "value/merge",
+                Some(json!({"test": [1, 2, 3, 4]})),
+                Some(json!({"test": [1, 2, 3, 4]})),
+                vec![],
+            ),
+            Case(
+                "value/empty",
+                Some(json!({"empty": []})),
+                Some(json!({"empty": []})),
+                vec![],
+            ),
         ];
 
         for case in cases.iter() {
@@ -1340,7 +1459,11 @@ path "kv/deny" {
         ];
 
         for case in cases.iter() {
-            let mut req = Request { operation: Operation::Write, path: case.0.to_string(), ..Default::default() };
+            let mut req = Request {
+                operation: Operation::Write,
+                path: case.0.to_string(),
+                ..Default::default()
+            };
 
             let mut data: Map<String, Value> = Map::new();
             for parameter in case.1.iter() {
@@ -1363,47 +1486,181 @@ path "kv/deny" {
         struct Case(&'static str, Vec<&'static str>, Vec<Value>, bool);
 
         let cases = [
-            Case("dev/ops", ["allow"].to_vec(), [json!("good")].to_vec(), true),
-            Case("dev/ops", ["allow"].to_vec(), [json!("bad")].to_vec(), false),
+            Case(
+                "dev/ops",
+                ["allow"].to_vec(),
+                [json!("good")].to_vec(),
+                true,
+            ),
+            Case(
+                "dev/ops",
+                ["allow"].to_vec(),
+                [json!("bad")].to_vec(),
+                false,
+            ),
             Case("foo/bar", ["deny"].to_vec(), [json!("bad")].to_vec(), false),
-            Case("foo/bar", ["deny"].to_vec(), [json!("bad glob")].to_vec(), false),
+            Case(
+                "foo/bar",
+                ["deny"].to_vec(),
+                [json!("bad glob")].to_vec(),
+                false,
+            ),
             Case("foo/bar", ["deny"].to_vec(), [json!("good")].to_vec(), true),
-            Case("foo/bar", ["allow"].to_vec(), [json!("good")].to_vec(), true),
+            Case(
+                "foo/bar",
+                ["allow"].to_vec(),
+                [json!("good")].to_vec(),
+                true,
+            ),
             Case("foo/bar", ["deny"].to_vec(), [Value::Null].to_vec(), true),
             Case("foo/bar", ["allow"].to_vec(), [Value::Null].to_vec(), true),
-            Case("foo/baz", ["aLLow"].to_vec(), [json!("good")].to_vec(), true),
+            Case(
+                "foo/baz",
+                ["aLLow"].to_vec(),
+                [json!("good")].to_vec(),
+                true,
+            ),
             Case("foo/baz", ["deny"].to_vec(), [json!("bad")].to_vec(), false),
-            Case("foo/baz", ["deny"].to_vec(), [json!("good")].to_vec(), false),
-            Case("foo/baz", ["allow", "deny"].to_vec(), [json!("good"), json!("bad")].to_vec(), false),
-            Case("foo/baz", ["deny", "allow"].to_vec(), [json!("good"), json!("bad")].to_vec(), false),
-            Case("foo/baz", ["deNy", "allow"].to_vec(), [json!("bad"), json!("good")].to_vec(), false),
-            Case("foo/baz", ["aLLow"].to_vec(), [json!("bad")].to_vec(), false),
-            Case("foo/baz", ["Neither"].to_vec(), [json!("bad")].to_vec(), false),
+            Case(
+                "foo/baz",
+                ["deny"].to_vec(),
+                [json!("good")].to_vec(),
+                false,
+            ),
+            Case(
+                "foo/baz",
+                ["allow", "deny"].to_vec(),
+                [json!("good"), json!("bad")].to_vec(),
+                false,
+            ),
+            Case(
+                "foo/baz",
+                ["deny", "allow"].to_vec(),
+                [json!("good"), json!("bad")].to_vec(),
+                false,
+            ),
+            Case(
+                "foo/baz",
+                ["deNy", "allow"].to_vec(),
+                [json!("bad"), json!("good")].to_vec(),
+                false,
+            ),
+            Case(
+                "foo/baz",
+                ["aLLow"].to_vec(),
+                [json!("bad")].to_vec(),
+                false,
+            ),
+            Case(
+                "foo/baz",
+                ["Neither"].to_vec(),
+                [json!("bad")].to_vec(),
+                false,
+            ),
             Case("foo/baz", ["allow"].to_vec(), [Value::Null].to_vec(), false),
-            Case("fizz/buzz", ["allow_multi"].to_vec(), [json!("good")].to_vec(), true),
-            Case("fizz/buzz", ["allow_multi"].to_vec(), [json!("good1")].to_vec(), true),
-            Case("fizz/buzz", ["allow_multi"].to_vec(), [json!("good2")].to_vec(), true),
-            Case("fizz/buzz", ["allow_multi"].to_vec(), [json!("glob good2")].to_vec(), false),
-            Case("fizz/buzz", ["allow_multi"].to_vec(), [json!("glob good3")].to_vec(), true),
-            Case("fizz/buzz", ["allow_multi"].to_vec(), [json!("bad")].to_vec(), false),
-            Case("fizz/buzz", ["allow_multi"].to_vec(), [json!("bad")].to_vec(), false),
-            Case("fizz/buzz", ["allow_multi", "allow"].to_vec(), [json!("good1"), json!("good")].to_vec(), true),
-            Case("fizz/buzz", ["deny_multi"].to_vec(), [json!("bad2")].to_vec(), false),
-            Case("fizz/buzz", ["deny_multi", "allow_multi"].to_vec(), [json!("good"), json!("good2")].to_vec(), false),
-            Case("test/types", ["map"].to_vec(), [json!({"good": "one"})].to_vec(), true),
-            Case("test/types", ["map"].to_vec(), [json!({"bad": "one"})].to_vec(), false),
+            Case(
+                "fizz/buzz",
+                ["allow_multi"].to_vec(),
+                [json!("good")].to_vec(),
+                true,
+            ),
+            Case(
+                "fizz/buzz",
+                ["allow_multi"].to_vec(),
+                [json!("good1")].to_vec(),
+                true,
+            ),
+            Case(
+                "fizz/buzz",
+                ["allow_multi"].to_vec(),
+                [json!("good2")].to_vec(),
+                true,
+            ),
+            Case(
+                "fizz/buzz",
+                ["allow_multi"].to_vec(),
+                [json!("glob good2")].to_vec(),
+                false,
+            ),
+            Case(
+                "fizz/buzz",
+                ["allow_multi"].to_vec(),
+                [json!("glob good3")].to_vec(),
+                true,
+            ),
+            Case(
+                "fizz/buzz",
+                ["allow_multi"].to_vec(),
+                [json!("bad")].to_vec(),
+                false,
+            ),
+            Case(
+                "fizz/buzz",
+                ["allow_multi"].to_vec(),
+                [json!("bad")].to_vec(),
+                false,
+            ),
+            Case(
+                "fizz/buzz",
+                ["allow_multi", "allow"].to_vec(),
+                [json!("good1"), json!("good")].to_vec(),
+                true,
+            ),
+            Case(
+                "fizz/buzz",
+                ["deny_multi"].to_vec(),
+                [json!("bad2")].to_vec(),
+                false,
+            ),
+            Case(
+                "fizz/buzz",
+                ["deny_multi", "allow_multi"].to_vec(),
+                [json!("good"), json!("good2")].to_vec(),
+                false,
+            ),
+            Case(
+                "test/types",
+                ["map"].to_vec(),
+                [json!({"good": "one"})].to_vec(),
+                true,
+            ),
+            Case(
+                "test/types",
+                ["map"].to_vec(),
+                [json!({"bad": "one"})].to_vec(),
+                false,
+            ),
             Case("test/types", ["int"].to_vec(), [json!(1)].to_vec(), true),
             Case("test/types", ["int"].to_vec(), [json!(3)].to_vec(), false),
-            Case("test/types", ["bool"].to_vec(), [json!(false)].to_vec(), true),
-            Case("test/types", ["bool"].to_vec(), [json!(true)].to_vec(), false),
-            Case("test/star", ["anything"].to_vec(), [json!(true)].to_vec(), true),
+            Case(
+                "test/types",
+                ["bool"].to_vec(),
+                [json!(false)].to_vec(),
+                true,
+            ),
+            Case(
+                "test/types",
+                ["bool"].to_vec(),
+                [json!(true)].to_vec(),
+                false,
+            ),
+            Case(
+                "test/star",
+                ["anything"].to_vec(),
+                [json!(true)].to_vec(),
+                true,
+            ),
             Case("test/star", ["foo"].to_vec(), [json!(true)].to_vec(), true),
             Case("test/star", ["bar"].to_vec(), [json!(false)].to_vec(), true),
             Case("test/star", ["bar"].to_vec(), [json!(true)].to_vec(), false),
         ];
 
         for case in cases.iter() {
-            let mut req = Request { operation: Operation::Write, path: case.0.to_string(), ..Default::default() };
+            let mut req = Request {
+                operation: Operation::Write,
+                path: case.0.to_string(),
+                ..Default::default()
+            };
 
             let mut data: Map<String, Value> = Map::new();
             let mut i = 0;
@@ -1493,7 +1750,11 @@ path "kv/deny" {
             let policy = create_test_policy("", case.0);
             let acl = ACL::new(&[Arc::new(policy)]).unwrap();
 
-            let mut req = Request { operation: Operation::Write, path: case.1.to_string(), ..Default::default() };
+            let mut req = Request {
+                operation: Operation::Write,
+                path: case.1.to_string(),
+                ..Default::default()
+            };
 
             let result = acl.allow_operation(&req, false).unwrap();
             assert!(result.allowed);
@@ -1515,14 +1776,46 @@ path "kv/deny" {
         let cases = [
             Case(r#"path "+" { capabilities = ["read"] }"#, "foo/", true),
             Case(r#"path "+/*" { capabilities = ["read"] }"#, "foo/", true),
-            Case(r#"path "foo/+/+/*" { capabilities = ["read"] }"#, "foo/", true),
-            Case(r#"path "foo/+/+/*" { capabilities = ["read"] }"#, "foo/bar/", true),
-            Case(r#"path "foo/+/+/*" { capabilities = ["read"] }"#, "foo/bar/bar/", true),
-            Case(r#"path "foo/+/+/*" { capabilities = ["read"] }"#, "foo/bar/bar/baz/", true),
-            Case(r#"path "foo/+/+/baz" { capabilities = ["read"] }"#, "foo/bar/bar/baz/", true),
-            Case(r#"path "foo/+/bar/baz" { capabilities = ["read"] }"#, "foo/bar/bar/baz/", true),
-            Case(r#"path "foo/bar/+/baz*" { capabilities = ["read"] }"#, "foo/bar/bar/baz/", true),
-            Case(r#"path "foo/bar/+/b*" { capabilities = ["read"] }"#, "foo/bar/bar/baz/", true),
+            Case(
+                r#"path "foo/+/+/*" { capabilities = ["read"] }"#,
+                "foo/",
+                true,
+            ),
+            Case(
+                r#"path "foo/+/+/*" { capabilities = ["read"] }"#,
+                "foo/bar/",
+                true,
+            ),
+            Case(
+                r#"path "foo/+/+/*" { capabilities = ["read"] }"#,
+                "foo/bar/bar/",
+                true,
+            ),
+            Case(
+                r#"path "foo/+/+/*" { capabilities = ["read"] }"#,
+                "foo/bar/bar/baz/",
+                true,
+            ),
+            Case(
+                r#"path "foo/+/+/baz" { capabilities = ["read"] }"#,
+                "foo/bar/bar/baz/",
+                true,
+            ),
+            Case(
+                r#"path "foo/+/bar/baz" { capabilities = ["read"] }"#,
+                "foo/bar/bar/baz/",
+                true,
+            ),
+            Case(
+                r#"path "foo/bar/+/baz*" { capabilities = ["read"] }"#,
+                "foo/bar/bar/baz/",
+                true,
+            ),
+            Case(
+                r#"path "foo/bar/+/b*" { capabilities = ["read"] }"#,
+                "foo/bar/bar/baz/",
+                true,
+            ),
             Case(r#"path "foo/+" { capabilities = ["read"] }"#, "foo/", true),
         ];
 
@@ -1546,11 +1839,13 @@ path "kv/deny" {
 
         for _i in 0..50 {
             let p = policy.clone();
-            threads.push(thread::spawn(move || loop {
-                if Instant::now() >= stop_time {
-                    break;
+            threads.push(thread::spawn(move || {
+                loop {
+                    if Instant::now() >= stop_time {
+                        break;
+                    }
+                    assert!(ACL::new(&[p.clone()]).is_ok());
                 }
-                assert!(ACL::new(&[p.clone()]).is_ok());
             }));
         }
 
@@ -1578,15 +1873,57 @@ path "kv/deny" {
         };
 
         #[derive(Debug)]
-        struct Case(&'static str, Operation, Vec<Arc<Policy>>, Vec<PolicyInfo>, bool);
+        struct Case(
+            &'static str,
+            Operation,
+            Vec<Arc<Policy>>,
+            Vec<PolicyInfo>,
+            bool,
+        );
 
         let cases = [
-            Case("kv/foo", Operation::Read, [policy.clone()].to_vec(), [policy_info.clone()].to_vec(), true),
-            Case("kv/foo", Operation::Write, [policy.clone()].to_vec(), [policy_info.clone()].to_vec(), true),
-            Case("kv/bad", Operation::Read, [policy.clone()].to_vec(), vec![], false),
-            Case("kv/deny", Operation::Read, [policy.clone()].to_vec(), vec![], false),
-            Case("kv/path/foo", Operation::Read, [policy.clone()].to_vec(), [policy_info.clone()].to_vec(), true),
-            Case("kv/path/longer", Operation::Read, [policy.clone()].to_vec(), [policy_info.clone()].to_vec(), true),
+            Case(
+                "kv/foo",
+                Operation::Read,
+                [policy.clone()].to_vec(),
+                [policy_info.clone()].to_vec(),
+                true,
+            ),
+            Case(
+                "kv/foo",
+                Operation::Write,
+                [policy.clone()].to_vec(),
+                [policy_info.clone()].to_vec(),
+                true,
+            ),
+            Case(
+                "kv/bad",
+                Operation::Read,
+                [policy.clone()].to_vec(),
+                vec![],
+                false,
+            ),
+            Case(
+                "kv/deny",
+                Operation::Read,
+                [policy.clone()].to_vec(),
+                vec![],
+                false,
+            ),
+            Case(
+                "kv/path/foo",
+                Operation::Read,
+                [policy.clone()].to_vec(),
+                [policy_info.clone()].to_vec(),
+                true,
+            ),
+            Case(
+                "kv/path/longer",
+                Operation::Read,
+                [policy.clone()].to_vec(),
+                [policy_info.clone()].to_vec(),
+                true,
+            ),
             Case(
                 "kv/foo",
                 Operation::Read,
@@ -1608,7 +1945,13 @@ path "kv/deny" {
                 [merged_info.clone()].to_vec(),
                 true,
             ),
-            Case("kv/deny", Operation::Read, [policy.clone(), merged.clone()].to_vec(), vec![], false),
+            Case(
+                "kv/deny",
+                Operation::Read,
+                [policy.clone(), merged.clone()].to_vec(),
+                vec![],
+                false,
+            ),
             Case(
                 "kv/path/longer",
                 Operation::Write,
@@ -1627,7 +1970,11 @@ path "kv/deny" {
         for case in cases.iter() {
             let acl = ACL::new(&case.2).unwrap();
 
-            let req = Request { operation: case.1, path: case.0.to_string(), ..Default::default() };
+            let req = Request {
+                operation: case.1,
+                path: case.0.to_string(),
+                ..Default::default()
+            };
 
             let result = acl.allow_operation(&req, false).unwrap();
             assert_eq!(case.3, result.granting_policies);
@@ -1668,7 +2015,10 @@ path "kv/deny" {
         );
 
         let caps = acl.capabilities("prod/foo");
-        assert_eq!(caps, vec![Capability::Read.to_string(), Capability::List.to_string()]);
+        assert_eq!(
+            caps,
+            vec![Capability::Read.to_string(), Capability::List.to_string()]
+        );
 
         let caps = acl.capabilities("sys/mount");
         assert_eq!(caps, vec![Capability::Deny.to_string()]);
@@ -1679,7 +2029,10 @@ path "kv/deny" {
         let mut rules = Trie::new();
         rules.insert(
             "/api".to_string(),
-            Permissions { capabilities_bitmap: Capability::Deny.to_bits(), ..Default::default() },
+            Permissions {
+                capabilities_bitmap: Capability::Deny.to_bits(),
+                ..Default::default()
+            },
         );
         rules.insert(
             "/api/v1".to_string(),
@@ -1690,23 +2043,38 @@ path "kv/deny" {
         );
         rules.insert(
             "/api/v2".to_string(),
-            Permissions { capabilities_bitmap: Capability::Create.to_bits(), ..Default::default() },
+            Permissions {
+                capabilities_bitmap: Capability::Create.to_bits(),
+                ..Default::default()
+            },
         );
         rules.insert(
             "/api/v3".to_string(),
-            Permissions { capabilities_bitmap: Capability::Deny.to_bits(), ..Default::default() },
+            Permissions {
+                capabilities_bitmap: Capability::Deny.to_bits(),
+                ..Default::default()
+            },
         );
         rules.insert(
             "/admin".to_string(),
-            Permissions { capabilities_bitmap: Capability::Sudo.to_bits(), ..Default::default() },
+            Permissions {
+                capabilities_bitmap: Capability::Sudo.to_bits(),
+                ..Default::default()
+            },
         );
         rules.insert(
             "/root".to_string(),
-            Permissions { capabilities_bitmap: Capability::Deny.to_bits(), ..Default::default() },
+            Permissions {
+                capabilities_bitmap: Capability::Deny.to_bits(),
+                ..Default::default()
+            },
         );
         rules.insert(
             "".to_string(),
-            Permissions { capabilities_bitmap: Capability::Read.to_bits(), ..Default::default() },
+            Permissions {
+                capabilities_bitmap: Capability::Read.to_bits(),
+                ..Default::default()
+            },
         );
 
         assert!(check_path_capability(&rules, "/api/v1"));

@@ -92,7 +92,10 @@ Using "ca" or "crl" as the value fetches the appropriate information in DER enco
 
 #[maybe_async::maybe_async]
 impl PkiBackendInner {
-    pub async fn handle_fetch_cert_bundle(&self, cert_bundle: &CertBundle) -> Result<Option<Response>, RvError> {
+    pub async fn handle_fetch_cert_bundle(
+        &self,
+        cert_bundle: &CertBundle,
+    ) -> Result<Option<Response>, RvError> {
         let ca_chain_pem: String = cert_bundle
             .ca_chain
             .iter()
@@ -135,7 +138,9 @@ impl PkiBackendInner {
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
         let serial_number_value = req.get_data("serial")?;
-        let serial_number = serial_number_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let serial_number = serial_number_value
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
         let serial_number_hex = serial_number.replace(':', "-").to_lowercase();
         let cert = self.fetch_cert(req, &serial_number_hex).await?;
         let ca_bundle = self.fetch_ca_bundle(req).await?;
@@ -149,7 +154,8 @@ impl PkiBackendInner {
             .collect::<Vec<String>>()
             .join("");
 
-        ca_chain_pem = ca_chain_pem + &String::from_utf8_lossy(&ca_bundle.certificate.to_pem().unwrap());
+        ca_chain_pem =
+            ca_chain_pem + &String::from_utf8_lossy(&ca_bundle.certificate.to_pem().unwrap());
 
         let resp_data = json!({
             "ca_chain": ca_chain_pem,
@@ -171,7 +177,9 @@ impl PkiBackendInner {
     }
 
     pub async fn fetch_cert(&self, req: &Request, serial_number: &str) -> Result<X509, RvError> {
-        let entry = req.storage_get(format!("certs/{serial_number}").as_str()).await?;
+        let entry = req
+            .storage_get(format!("certs/{serial_number}").as_str())
+            .await?;
         if entry.is_none() {
             return Err(RvError::ErrPkiCertNotFound);
         }
@@ -180,15 +188,24 @@ impl PkiBackendInner {
         Ok(cert)
     }
 
-    pub async fn store_cert(&self, req: &Request, serial_number: &str, cert: &X509) -> Result<(), RvError> {
+    pub async fn store_cert(
+        &self,
+        req: &Request,
+        serial_number: &str,
+        cert: &X509,
+    ) -> Result<(), RvError> {
         let value = cert.to_der()?;
-        let entry = StorageEntry { key: format!("certs/{serial_number}"), value };
+        let entry = StorageEntry {
+            key: format!("certs/{serial_number}"),
+            value,
+        };
         req.storage_put(&entry).await?;
         Ok(())
     }
 
     pub async fn delete_cert(&self, req: &Request, serial_number: &str) -> Result<(), RvError> {
-        req.storage_delete(format!("certs/{serial_number}").as_str()).await?;
+        req.storage_delete(format!("certs/{serial_number}").as_str())
+            .await?;
         Ok(())
     }
 }

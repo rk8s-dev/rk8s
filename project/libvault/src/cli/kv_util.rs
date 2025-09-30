@@ -6,7 +6,11 @@ use crate::{
     rv_error_string,
 };
 
-pub fn kv_read_request(client: &Client, path: &str, data: Option<Map<String, Value>>) -> Result<HttpResponse, RvError> {
+pub fn kv_read_request(
+    client: &Client,
+    path: &str,
+    data: Option<Map<String, Value>>,
+) -> Result<HttpResponse, RvError> {
     client.request("GET", format!("/v1/{path}"), data)
 }
 

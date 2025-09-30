@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use super::{field, util, PkiBackend, PkiBackendInner};
+use super::{PkiBackend, PkiBackendInner, field, util};
 use crate::{
     context::Context,
     errors::RvError,
@@ -46,9 +46,18 @@ impl PkiBackend {
 
 #[maybe_async::maybe_async]
 impl PkiBackendInner {
-    pub async fn generate_root(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn generate_root(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let mut export_private_key = false;
-        if req.get_data_or_default("exported")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)? == "exported" {
+        if req
+            .get_data_or_default("exported")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            == "exported"
+        {
             export_private_key = true;
         }
 
@@ -62,7 +71,8 @@ impl PkiBackendInner {
 
         self.store_ca_bundle(req, &cert_bundle).await?;
 
-        let cert_expiration = utils::asn1time_to_timestamp(cert_bundle.certificate.not_after().to_string().as_str())?;
+        let cert_expiration =
+            utils::asn1time_to_timestamp(cert_bundle.certificate.not_after().to_string().as_str())?;
 
         let mut resp_data = json!({
             "expiration": cert_expiration,
@@ -78,16 +88,24 @@ impl PkiBackendInner {
             resp_data.insert(
                 "private_key".to_string(),
                 Value::String(
-                    String::from_utf8_lossy(&cert_bundle.private_key.private_key_to_pem_pkcs8()?).to_string(),
+                    String::from_utf8_lossy(&cert_bundle.private_key.private_key_to_pem_pkcs8()?)
+                        .to_string(),
                 ),
             );
-            resp_data.insert("private_key_type".to_string(), Value::String(cert_bundle.private_key_type.clone()));
+            resp_data.insert(
+                "private_key_type".to_string(),
+                Value::String(cert_bundle.private_key_type.clone()),
+            );
         }
 
         Ok(Some(Response::data_response(Some(resp_data))))
     }
 
-    pub async fn delete_root(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn delete_root(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         self.delete_ca_bundle(req).await?;
         Ok(None)
     }

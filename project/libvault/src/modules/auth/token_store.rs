@@ -20,11 +20,11 @@ use humantime::parse_duration;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
-    expiration::{ExpirationManager, DEFAULT_LEASE_DURATION_SECS, MAX_LEASE_DURATION_SECS},
     AUTH_ROUTER_PREFIX,
+    expiration::{DEFAULT_LEASE_DURATION_SECS, ExpirationManager, MAX_LEASE_DURATION_SECS},
 };
 use crate::{
     context::Context,
@@ -32,16 +32,18 @@ use crate::{
     errors::RvError,
     handler::{AuthHandler, HandlePhase, Handler},
     logical::{
-        lease::calculate_ttl, Auth, Backend, Field, FieldType, Lease, LogicalBackend, Operation, Path, PathOperation,
-        Request, Response,
+        Auth, Backend, Field, FieldType, Lease, LogicalBackend, Operation, Path, PathOperation,
+        Request, Response, lease::calculate_ttl,
     },
     modules::policy::policy_store::NON_ASSIGNABLE_POLICIES,
-    new_fields, new_fields_internal, new_logical_backend, new_logical_backend_internal, new_path, new_path_internal,
+    new_fields, new_fields_internal, new_logical_backend, new_logical_backend_internal, new_path,
+    new_path_internal,
     router::Router,
     rv_error_response, rv_error_string,
     storage::{Storage, StorageEntry},
     utils::{
-        default_system_time, deserialize_duration, deserialize_system_time, generate_uuid, is_str_subset,
+        default_system_time, deserialize_duration, deserialize_system_time, generate_uuid,
+        is_str_subset,
         policy::sanitize_policies,
         serialize_duration, serialize_system_time, sha1,
         token_util::{DEFAULT_LEASE_TTL, MAX_LEASE_TTL},
@@ -106,9 +108,17 @@ pub struct TokenEntry {
         deserialize_with = "deserialize_system_time"
     )]
     pub creation_time: SystemTime,
-    #[serde(default, serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub period: Duration,
-    #[serde(default, serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub explicit_max_ttl: Duration,
 }
 
@@ -138,7 +148,10 @@ impl TokenStore {
     }
 
     /// Creates a new `TokenStore` and initializes it with the necessary components.
-    pub async fn new(core: &Core, expiration: Arc<ExpirationManager>) -> Result<TokenStore, RvError> {
+    pub async fn new(
+        core: &Core,
+        expiration: Arc<ExpirationManager>,
+    ) -> Result<TokenStore, RvError> {
         let Some(system_view) = core.state.load().system_view.as_ref().cloned() else {
             return Err(RvError::ErrBarrierSealed);
         };
@@ -161,8 +174,10 @@ impl TokenStore {
 
         if token_store.salt.is_empty() {
             token_store.salt = generate_uuid();
-            let raw =
-                StorageEntry { key: TOKEN_SALT_LOCATION.to_string(), value: token_store.salt.as_bytes().to_vec() };
+            let raw = StorageEntry {
+                key: TOKEN_SALT_LOCATION.to_string(),
+                value: token_store.salt.as_bytes().to_vec(),
+            };
             view.put(&raw).await?;
         }
 
@@ -331,14 +346,25 @@ impl TokenStore {
                 return Err(RvError::ErrAuthTokenNotFound);
             }
 
-            let path = format!("{}{}/{}", TOKEN_PARENT_PREFIX, self.salt_id(&entry.parent), salted_id);
-            let entry = StorageEntry { key: path, ..StorageEntry::default() };
+            let path = format!(
+                "{}{}/{}",
+                TOKEN_PARENT_PREFIX,
+                self.salt_id(&entry.parent),
+                salted_id
+            );
+            let entry = StorageEntry {
+                key: path,
+                ..StorageEntry::default()
+            };
 
             view.put(&entry).await?;
         }
 
-        view.put(&StorageEntry { key: format!("{TOKEN_LOOKUP_PREFIX}{salted_id}"), value: value.as_bytes().to_vec() })
-            .await
+        view.put(&StorageEntry {
+            key: format!("{TOKEN_LOOKUP_PREFIX}{salted_id}"),
+            value: value.as_bytes().to_vec(),
+        })
+        .await
     }
 
     /// Uses the token and decrements its use count.
@@ -361,7 +387,10 @@ impl TokenStore {
         let value = serde_json::to_string(&entry)?;
 
         let path = format!("{TOKEN_LOOKUP_PREFIX}{salted_id}");
-        let entry = StorageEntry { key: path, value: value.as_bytes().to_vec() };
+        let entry = StorageEntry {
+            key: path,
+            value: value.as_bytes().to_vec(),
+        };
 
         view.put(&entry).await
     }
@@ -443,7 +472,12 @@ impl TokenStore {
         if entry.is_some() {
             let entry = entry.unwrap();
             if entry.parent.as_str() != "" {
-                let path = format!("{}{}/{}", TOKEN_PARENT_PREFIX, self.salt_id(&entry.parent), salted_id);
+                let path = format!(
+                    "{}{}/{}",
+                    TOKEN_PARENT_PREFIX,
+                    self.salt_id(&entry.parent),
+                    salted_id
+                );
                 view.delete(&path).await?;
             }
             //Revoke all secrets under this token
@@ -507,7 +541,11 @@ impl TokenStore {
         self.revoke_salted(salted_id)
     }
 
-    pub async fn handle_create(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_create(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         if req.body.is_none() {
             return Err(RvError::ErrRequestInvalid);
         }
@@ -524,7 +562,8 @@ impl TokenStore {
 
         let is_root = parent.policies.iter().any(|s| s.as_str() == "root");
 
-        let mut data: TokenReqData = serde_json::from_value(Value::Object(req.body.as_ref().unwrap().clone()))?;
+        let mut data: TokenReqData =
+            serde_json::from_value(Value::Object(req.body.as_ref().unwrap().clone()))?;
 
         let mut te = TokenEntry {
             parent: req.client_token.clone(),
@@ -564,12 +603,16 @@ impl TokenStore {
 
         for policy in te.policies.iter() {
             if NON_ASSIGNABLE_POLICIES.contains(&policy.as_str()) {
-                return Err(rv_error_response!(&format!("cannot assign policy {policy}")));
+                return Err(rv_error_response!(&format!(
+                    "cannot assign policy {policy}"
+                )));
             }
         }
 
         if te.policies.contains(&"root".into()) && !parent.policies.contains(&"root".into()) {
-            return Err(rv_error_response!("root tokens may not be created without parent token being root"));
+            return Err(rv_error_response!(
+                "root tokens may not be created without parent token being root"
+            ));
         }
 
         if data.no_parent {
@@ -590,7 +633,10 @@ impl TokenStore {
         te.period = data.period;
         te.explicit_max_ttl = data.explicit_max_ttl;
 
-        if te.period.as_secs() > 0 || te.ttl > 0 || (te.ttl == 0 && !te.policies.contains(&"root".to_string())) {
+        if te.period.as_secs() > 0
+            || te.ttl > 0
+            || (te.ttl == 0 && !te.policies.contains(&"root".to_string()))
+        {
             te.ttl = calculate_ttl(
                 MAX_LEASE_TTL,
                 DEFAULT_LEASE_TTL,
@@ -615,7 +661,9 @@ impl TokenStore {
 
         if te.ttl == 0 {
             if parent.ttl != 0 {
-                return Err(rv_error_response!("expiring root tokens cannot create non-expiring root tokens"));
+                return Err(rv_error_response!(
+                    "expiring root tokens cannot create non-expiring root tokens"
+                ));
             }
             renewable = false;
         }
@@ -623,7 +671,11 @@ impl TokenStore {
         self.create(&mut te).await?;
 
         let auth = Auth {
-            lease: Lease { ttl: Duration::from_secs(te.ttl), renewable, ..Lease::default() },
+            lease: Lease {
+                ttl: Duration::from_secs(te.ttl),
+                renewable,
+                ..Lease::default()
+            },
             client_token: te.id.clone(),
             display_name: te.display_name.clone(),
             policies: te.policies.clone(),
@@ -632,7 +684,10 @@ impl TokenStore {
             metadata: te.meta.clone(),
             ..Default::default()
         };
-        let resp = Response { auth: Some(auth), ..Response::default() };
+        let resp = Response {
+            auth: Some(auth),
+            ..Response::default()
+        };
 
         Ok(Some(resp))
     }
@@ -685,7 +740,11 @@ impl TokenStore {
         self.handle_lookup(backend, req).await
     }
 
-    pub async fn handle_lookup(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_lookup(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         log::debug!("lookup token");
         let mut id = req.get_data_as_str("token")?;
         if id.is_empty() {
@@ -728,7 +787,11 @@ impl TokenStore {
         Ok(Some(Response::data_response(Some(data))))
     }
 
-    pub async fn handle_renew(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_renew(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let id = req.get_data_as_str("token")?;
         if id.is_empty() {
             return Err(RvError::ErrRequestInvalid);
@@ -742,19 +805,29 @@ impl TokenStore {
         self.expiration.renew_token(req, &te, increment).await
     }
 
-    pub async fn auth_renew(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn auth_renew(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         if req.auth.is_none() {
             return Err(rv_error_string!("request auth is nil"));
         }
 
         let id = &req.auth.as_ref().unwrap().client_token;
-        let te = self.lookup(id).await?.ok_or(rv_error_string!("no token entry found during lookup"))?;
+        let te = self
+            .lookup(id)
+            .await?
+            .ok_or(rv_error_string!("no token entry found during lookup"))?;
 
         let auth = req.auth.as_mut().unwrap();
         auth.period = te.period;
         auth.explicit_max_ttl = te.explicit_max_ttl;
 
-        Ok(Some(Response { auth: Some(auth.clone()), ..Default::default() }))
+        Ok(Some(Response {
+            auth: Some(auth.clone()),
+            ..Default::default()
+        }))
     }
 }
 
@@ -817,7 +890,11 @@ impl Handler for TokenStore {
 
     /// Handles post-routing logic after routing a request. The main operation here is the expiration
     /// time management of secrets and tokens.
-    async fn post_route(&self, req: &mut Request, resp: &mut Option<Response>) -> Result<(), RvError> {
+    async fn post_route(
+        &self,
+        req: &mut Request,
+        resp: &mut Option<Response>,
+    ) -> Result<(), RvError> {
         if resp.is_none() {
             return Ok(());
         }
@@ -857,8 +934,13 @@ impl Handler for TokenStore {
         if let Some(auth) = resp.auth.as_mut() {
             if is_unauth_path {
                 let source = self.router.matching_mount(&req.path)?;
-                let source = source.as_str().trim_start_matches(AUTH_ROUTER_PREFIX).replace('/', "-");
-                auth.display_name = (source + &auth.display_name).trim_end_matches('-').to_string();
+                let source = source
+                    .as_str()
+                    .trim_start_matches(AUTH_ROUTER_PREFIX)
+                    .replace('/', "-");
+                auth.display_name = (source + &auth.display_name)
+                    .trim_end_matches('-')
+                    .to_string();
                 req.name.clone_from(&auth.display_name);
             } else if !req.path.starts_with("auth/token/") {
                 return Err(RvError::ErrPermissionDenied);
@@ -930,7 +1012,10 @@ mod mod_token_store_tests {
 
     macro_rules! mock_token_store {
         () => {{
-            let name = format!("{}_{}", file!(), line!()).replace("/", "_").replace("\\", "_").replace(".", "_");
+            let name = format!("{}_{}", file!(), line!())
+                .replace("/", "_")
+                .replace("\\", "_")
+                .replace(".", "_");
             println!("init_test_rusty_vault, name: {}", name);
             #[cfg(not(feature = "sync_handler"))]
             let (_, core, _) = new_unseal_test_rusty_vault(&name).await;
@@ -939,7 +1024,10 @@ mod mod_token_store_tests {
 
             let expiration = ExpirationManager::new(&core).unwrap().wrap();
             #[cfg(not(feature = "sync_handler"))]
-            let token_store = TokenStore::new(&core, expiration.clone()).await.unwrap().wrap();
+            let token_store = TokenStore::new(&core, expiration.clone())
+                .await
+                .unwrap()
+                .wrap();
             #[cfg(feature = "sync_handler")]
             let token_store = TokenStore::new(&core, expiration.clone()).unwrap().wrap();
 
@@ -979,7 +1067,10 @@ mod mod_token_store_tests {
         }
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_token_create_and_lookup() {
         let token_store = mock_token_store!();
 
@@ -999,7 +1090,10 @@ mod mod_token_store_tests {
         assert_eq!(looked_up_entry.policies, entry.policies);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_token_revoke() {
         let token_store = mock_token_store!();
 
@@ -1018,7 +1112,10 @@ mod mod_token_store_tests {
         assert!(result.is_none());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_token_revoke_tree() {
         let token_store = mock_token_store!();
 
@@ -1048,7 +1145,10 @@ mod mod_token_store_tests {
         assert!(child_result.is_none());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_token_handle_create_request() {
         let token_store = mock_token_store!();
         let mock_backend = MockBackend(());
@@ -1076,7 +1176,10 @@ mod mod_token_store_tests {
             ..Request::default()
         };
 
-        let response = token_store.handle_create(&mock_backend, &mut req).await.unwrap();
+        let response = token_store
+            .handle_create(&mock_backend, &mut req)
+            .await
+            .unwrap();
         assert!(response.is_some());
         let resp = response.unwrap();
         assert!(resp.auth.is_some());

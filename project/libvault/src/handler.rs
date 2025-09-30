@@ -14,7 +14,7 @@ use crate::{
     cli::config::Config,
     core::Core,
     errors::RvError,
-    logical::{request::Request, response::Response, Auth},
+    logical::{Auth, request::Request, response::Response},
 };
 
 #[maybe_async::maybe_async]
@@ -33,7 +33,11 @@ pub trait Handler: Send + Sync {
         Err(RvError::ErrHandlerDefault)
     }
 
-    async fn post_route(&self, _req: &mut Request, _resp: &mut Option<Response>) -> Result<(), RvError> {
+    async fn post_route(
+        &self,
+        _req: &mut Request,
+        _resp: &mut Option<Response>,
+    ) -> Result<(), RvError> {
         Err(RvError::ErrHandlerDefault)
     }
 

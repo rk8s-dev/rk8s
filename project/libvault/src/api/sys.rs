@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use derive_more::Deref;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
-use super::{secret::SecretAuth, Client, HttpResponse};
+use super::{Client, HttpResponse, secret::SecretAuth};
 use crate::{
     errors::RvError,
     http::sys::InitRequest,
@@ -57,9 +57,17 @@ pub struct MountInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MountConfigInput {
-    #[serde(default, serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub default_lease_ttl: Duration,
-    #[serde(default, serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub max_lease_ttl: Duration,
     #[serde(default)]
     pub description: String,
@@ -153,7 +161,10 @@ impl Sys<'_> {
             "policy": policy,
         });
 
-        self.request_write(format!("/v1/sys/policies/acl/{name}"), data.as_object().cloned())
+        self.request_write(
+            format!("/v1/sys/policies/acl/{name}"),
+            data.as_object().cloned(),
+        )
     }
 
     pub fn delete_policy(&self, name: &str) -> Result<HttpResponse, RvError> {

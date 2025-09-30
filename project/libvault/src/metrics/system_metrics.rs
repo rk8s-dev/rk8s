@@ -1,5 +1,5 @@
 //! Define and implement operating system metrics, using [sysinfo](https://docs.rs/sysinfo/latest/sysinfo/) to capture.
-use std::sync::{atomic::AtomicU64, Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::AtomicU64};
 
 use prometheus_client::{metrics::gauge::Gauge, registry::Registry};
 use sysinfo::{Disks, System};
@@ -59,8 +59,16 @@ impl SystemMetrics {
         registry.register(USED_MEMORY, USED_MEMORY_HELP, used_memory.clone());
         registry.register(FREE_MEMORY, FREE_MEMORY_HELP, free_memory.clone());
 
-        registry.register(TOTAL_DISK_SPACE, TOTAL_DISK_SPACE_HELP, total_disk_space.clone());
-        registry.register(TOTAL_DISK_AVAILABLE, TOTAL_DISK_AVAILABLE_HELP, total_disk_available.clone());
+        registry.register(
+            TOTAL_DISK_SPACE,
+            TOTAL_DISK_SPACE_HELP,
+            total_disk_space.clone(),
+        );
+        registry.register(
+            TOTAL_DISK_AVAILABLE,
+            TOTAL_DISK_AVAILABLE_HELP,
+            total_disk_available.clone(),
+        );
 
         // registry.register(NETWORK_IN, NETWORK_IN_HELP, network_in.clone());
         // registry.register(NETWORK_OUT, NETWORK_OUT_HELP, network_out.clone());
@@ -166,13 +174,18 @@ mod tests {
         gauge_map
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_sys_metrics() {
         let server = TestHttpServer::new_with_prometheus("test_sys_metrics", false).await;
         let root_token = &server.root_token;
         thread::sleep(Duration::from_secs(20));
 
-        let (status, resp) = server.request_prometheus("GET", "metrics", None, Some(root_token), None).unwrap();
+        let (status, resp) = server
+            .request_prometheus("GET", "metrics", None, Some(root_token), None)
+            .unwrap();
         assert_eq!(status, 200);
 
         let mut gauge_map = parse_gauge(resp["metrics"].as_str().unwrap());

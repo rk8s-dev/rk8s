@@ -5,7 +5,9 @@ use std::{future::Future, pin::Pin};
 use regex::Regex;
 use serde_json::{Map, Value};
 
-use super::{path::Path, request::Request, response::Response, secret::Secret, Backend, FieldType, Operation};
+use super::{
+    Backend, FieldType, Operation, path::Path, request::Request, response::Response, secret::Secret,
+};
 use crate::{context::Context, errors::RvError};
 
 #[cfg(not(feature = "sync_handler"))]
@@ -16,7 +18,8 @@ type BackendOperationHandler = dyn for<'a> Fn(
     + Send
     + Sync;
 #[cfg(feature = "sync_handler")]
-type BackendOperationHandler = dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
+type BackendOperationHandler =
+    dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
 
 pub const CTX_KEY_BACKEND_PATH: &str = "backend.path";
 
@@ -146,7 +149,10 @@ impl LogicalBackend {
         auth_renew_handler(self, req).await
     }
 
-    pub async fn handle_revoke_renew(&self, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_revoke_renew(
+        &self,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         if req.operation == Operation::Renew && req.auth.is_some() {
             return self.handle_auth_renew(req).await;
         }
@@ -156,21 +162,25 @@ impl LogicalBackend {
             return Ok(None);
         }
 
-        if let Some(raw_secret_type) = req.secret.as_ref().unwrap().internal_data.get("secret_type") {
-            if let Some(secret_type) = raw_secret_type.as_str() {
-                if let Some(secret) = self.secret(secret_type) {
-                    match req.operation {
-                        Operation::Renew => {
-                            return secret.renew(self, req).await;
-                        }
-                        Operation::Revoke => {
-                            return secret.revoke(self, req).await;
-                        }
-                        _ => {
-                            log::error!("invalid operation for revoke/renew: {}", req.operation);
-                            return Ok(None);
-                        }
-                    }
+        if let Some(raw_secret_type) = req
+            .secret
+            .as_ref()
+            .unwrap()
+            .internal_data
+            .get("secret_type")
+            && let Some(secret_type) = raw_secret_type.as_str()
+            && let Some(secret) = self.secret(secret_type)
+        {
+            match req.operation {
+                Operation::Renew => {
+                    return secret.renew(self, req).await;
+                }
+                Operation::Revoke => {
+                    return secret.revoke(self, req).await;
+                }
+                _ => {
+                    log::error!("invalid operation for revoke/renew: {}", req.operation);
+                    return Ok(None);
                 }
             }
         }
@@ -281,8 +291,9 @@ mod test {
 
     use super::*;
     use crate::{
-        logical::{field::FieldTrait, Field, FieldType, PathOperation},
-        new_fields, new_fields_internal, new_path, new_path_internal, new_secret, new_secret_internal, storage,
+        logical::{Field, FieldType, PathOperation, field::FieldTrait},
+        new_fields, new_fields_internal, new_path, new_path_internal, new_secret,
+        new_secret_internal, storage,
         test_utils::new_test_backend,
     };
 
@@ -294,7 +305,11 @@ mod test {
             MyTest
         }
 
-        pub async fn noop(&self, _backend: &dyn Backend, _req: &mut Request) -> Result<Option<Response>, RvError> {
+        pub async fn noop(
+            &self,
+            _backend: &dyn Backend,
+            _req: &mut Request,
+        ) -> Result<Option<Response>, RvError> {
             Ok(None)
         }
     }
@@ -318,12 +333,18 @@ mod test {
     }
 
     #[maybe_async::maybe_async]
-    pub async fn renew_noop_handler(_backend: &dyn Backend, _req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn renew_noop_handler(
+        _backend: &dyn Backend,
+        _req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         Ok(None)
     }
 
     #[maybe_async::maybe_async]
-    pub async fn revoke_noop_handler(_backend: &dyn Backend, _req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn revoke_noop_handler(
+        _backend: &dyn Backend,
+        _req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         Ok(None)
     }
 
@@ -408,28 +429,80 @@ mod test {
         assert_eq!(logical_backend.paths.len(), 2);
         assert_eq!(&logical_backend.paths[0].pattern, "/(?P<bar>.+?)");
         assert!(logical_backend.paths[0].fields.get("mytype").is_some());
-        assert_eq!(logical_backend.paths[0].fields["mytype"].field_type, FieldType::Int);
-        assert_eq!(logical_backend.paths[0].fields["mytype"].description, "haha");
+        assert_eq!(
+            logical_backend.paths[0].fields["mytype"].field_type,
+            FieldType::Int
+        );
+        assert_eq!(
+            logical_backend.paths[0].fields["mytype"].description,
+            "haha"
+        );
         assert!(logical_backend.paths[0].fields.get("mypath").is_some());
-        assert_eq!(logical_backend.paths[0].fields["mypath"].field_type, FieldType::Str);
-        assert_eq!(logical_backend.paths[0].fields["mypath"].description, "hehe");
+        assert_eq!(
+            logical_backend.paths[0].fields["mypath"].field_type,
+            FieldType::Str
+        );
+        assert_eq!(
+            logical_backend.paths[0].fields["mypath"].description,
+            "hehe"
+        );
         assert!(logical_backend.paths[0].fields.get("xxfield").is_none());
         assert_eq!(logical_backend.paths[0].operations[0].op, Operation::Read);
         assert_eq!(logical_backend.paths[0].operations[1].op, Operation::Write);
         assert_eq!(logical_backend.paths[0].operations.len(), 3);
-        assert!((logical_backend.paths[0].operations[0].handler)(&logical_backend, &mut req).await.is_ok());
-        assert!((logical_backend.paths[0].operations[0].handler)(&logical_backend, &mut req).await.unwrap().is_none());
-        assert!((logical_backend.paths[0].operations[1].handler)(&logical_backend, &mut req).await.is_ok());
-        assert!((logical_backend.paths[0].operations[1].handler)(&logical_backend, &mut req).await.unwrap().is_some());
-        assert!((logical_backend.paths[0].operations[2].handler)(&logical_backend, &mut req).await.is_err());
+        assert!(
+            (logical_backend.paths[0].operations[0].handler)(&logical_backend, &mut req)
+                .await
+                .is_ok()
+        );
+        assert!(
+            (logical_backend.paths[0].operations[0].handler)(&logical_backend, &mut req)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            (logical_backend.paths[0].operations[1].handler)(&logical_backend, &mut req)
+                .await
+                .is_ok()
+        );
+        assert!(
+            (logical_backend.paths[0].operations[1].handler)(&logical_backend, &mut req)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            (logical_backend.paths[0].operations[2].handler)(&logical_backend, &mut req)
+                .await
+                .is_err()
+        );
 
-        assert_eq!(&logical_backend.paths[1].pattern, "/(?P<foo>.+?)/(?P<goo>.+)");
-        assert_eq!(logical_backend.paths[1].fields["myflag"].field_type, FieldType::Bool);
-        assert_eq!(logical_backend.paths[1].fields["myflag"].description, "hoho");
+        assert_eq!(
+            &logical_backend.paths[1].pattern,
+            "/(?P<foo>.+?)/(?P<goo>.+)"
+        );
+        assert_eq!(
+            logical_backend.paths[1].fields["myflag"].field_type,
+            FieldType::Bool
+        );
+        assert_eq!(
+            logical_backend.paths[1].fields["myflag"].description,
+            "hoho"
+        );
         assert_eq!(logical_backend.paths[1].operations.len(), 1);
         assert_eq!(logical_backend.paths[1].operations[0].op, Operation::Read);
-        assert!((logical_backend.paths[1].operations[0].handler)(&logical_backend, &mut req).await.is_ok());
-        assert!((logical_backend.paths[1].operations[0].handler)(&logical_backend, &mut req).await.unwrap().is_none());
+        assert!(
+            (logical_backend.paths[1].operations[0].handler)(&logical_backend, &mut req)
+                .await
+                .is_ok()
+        );
+        assert!(
+            (logical_backend.paths[1].operations[0].handler)(&logical_backend, &mut req)
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         assert_eq!(logical_backend.unauth_paths.len(), 1);
         assert_eq!(&logical_backend.unauth_paths[0], "/login");
@@ -479,8 +552,22 @@ mod test {
         assert!(logical_backend.secret("kv").is_some());
         assert!(logical_backend.secret("test").is_some());
         assert!(logical_backend.secret("test_no").is_none());
-        assert!(logical_backend.secret("kv").unwrap().renew(&logical_backend, &mut req).await.is_ok());
-        assert!(logical_backend.secret("kv").unwrap().revoke(&logical_backend, &mut req).await.is_ok());
+        assert!(
+            logical_backend
+                .secret("kv")
+                .unwrap()
+                .renew(&logical_backend, &mut req)
+                .await
+                .is_ok()
+        );
+        assert!(
+            logical_backend
+                .secret("kv")
+                .unwrap()
+                .revoke(&logical_backend, &mut req)
+                .await
+                .is_ok()
+        );
     }
 
     #[actix_rt::test]
@@ -564,28 +651,69 @@ mod test {
         assert_eq!(logical_backend.paths.len(), 2);
         assert_eq!(&logical_backend.paths[0].pattern, "/(?P<bar>.+?)");
         assert!(logical_backend.paths[0].fields.get("mytype").is_some());
-        assert_eq!(logical_backend.paths[0].fields["mytype"].field_type, FieldType::Int);
-        assert_eq!(logical_backend.paths[0].fields["mytype"].description, "haha");
+        assert_eq!(
+            logical_backend.paths[0].fields["mytype"].field_type,
+            FieldType::Int
+        );
+        assert_eq!(
+            logical_backend.paths[0].fields["mytype"].description,
+            "haha"
+        );
         assert!(logical_backend.paths[0].fields.get("mypath").is_some());
-        assert_eq!(logical_backend.paths[0].fields["mypath"].field_type, FieldType::Str);
-        assert_eq!(logical_backend.paths[0].fields["mypath"].description, "hehe");
+        assert_eq!(
+            logical_backend.paths[0].fields["mypath"].field_type,
+            FieldType::Str
+        );
+        assert_eq!(
+            logical_backend.paths[0].fields["mypath"].description,
+            "hehe"
+        );
         assert!(logical_backend.paths[0].fields.get("xxfield").is_none());
         assert_eq!(logical_backend.paths[0].operations[0].op, Operation::Read);
         assert_eq!(logical_backend.paths[0].operations[1].op, Operation::Write);
         assert_eq!(logical_backend.paths[0].operations.len(), 3);
-        assert!((logical_backend.paths[0].operations[0].handler)(&logical_backend, &mut req).is_ok());
-        assert!((logical_backend.paths[0].operations[0].handler)(&logical_backend, &mut req).unwrap().is_none());
-        assert!((logical_backend.paths[0].operations[1].handler)(&logical_backend, &mut req).is_ok());
-        assert!((logical_backend.paths[0].operations[1].handler)(&logical_backend, &mut req).unwrap().is_some());
-        assert!((logical_backend.paths[0].operations[2].handler)(&logical_backend, &mut req).is_err());
+        assert!(
+            (logical_backend.paths[0].operations[0].handler)(&logical_backend, &mut req).is_ok()
+        );
+        assert!(
+            (logical_backend.paths[0].operations[0].handler)(&logical_backend, &mut req)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            (logical_backend.paths[0].operations[1].handler)(&logical_backend, &mut req).is_ok()
+        );
+        assert!(
+            (logical_backend.paths[0].operations[1].handler)(&logical_backend, &mut req)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            (logical_backend.paths[0].operations[2].handler)(&logical_backend, &mut req).is_err()
+        );
 
-        assert_eq!(&logical_backend.paths[1].pattern, "/(?P<foo>.+?)/(?P<goo>.+)");
-        assert_eq!(logical_backend.paths[1].fields["myflag"].field_type, FieldType::Bool);
-        assert_eq!(logical_backend.paths[1].fields["myflag"].description, "hoho");
+        assert_eq!(
+            &logical_backend.paths[1].pattern,
+            "/(?P<foo>.+?)/(?P<goo>.+)"
+        );
+        assert_eq!(
+            logical_backend.paths[1].fields["myflag"].field_type,
+            FieldType::Bool
+        );
+        assert_eq!(
+            logical_backend.paths[1].fields["myflag"].description,
+            "hoho"
+        );
         assert_eq!(logical_backend.paths[1].operations.len(), 1);
         assert_eq!(logical_backend.paths[1].operations[0].op, Operation::Read);
-        assert!((logical_backend.paths[1].operations[0].handler)(&logical_backend, &mut req).is_ok());
-        assert!((logical_backend.paths[1].operations[0].handler)(&logical_backend, &mut req).unwrap().is_none());
+        assert!(
+            (logical_backend.paths[1].operations[0].handler)(&logical_backend, &mut req).is_ok()
+        );
+        assert!(
+            (logical_backend.paths[1].operations[0].handler)(&logical_backend, &mut req)
+                .unwrap()
+                .is_none()
+        );
 
         assert_eq!(logical_backend.unauth_paths.len(), 1);
         assert_eq!(&logical_backend.unauth_paths[0], "/login");
@@ -635,8 +763,20 @@ mod test {
         assert!(logical_backend.secret("kv").is_some());
         assert!(logical_backend.secret("test").is_some());
         assert!(logical_backend.secret("test_no").is_none());
-        assert!(logical_backend.secret("kv").unwrap().renew(&logical_backend, &mut req).is_ok());
-        assert!(logical_backend.secret("kv").unwrap().revoke(&logical_backend, &mut req).is_ok());
+        assert!(
+            logical_backend
+                .secret("kv")
+                .unwrap()
+                .renew(&logical_backend, &mut req)
+                .is_ok()
+        );
+        assert!(
+            logical_backend
+                .secret("kv")
+                .unwrap()
+                .revoke(&logical_backend, &mut req)
+                .is_ok()
+        );
     }
 
     #[actix_rt::test]

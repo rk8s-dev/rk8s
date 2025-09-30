@@ -2,8 +2,8 @@ use std::{collections::HashMap, fs, io::BufReader, path::PathBuf, sync::Arc, tim
 
 use better_default::Default;
 use rustls::{
-    pki_types::{pem::PemObject, PrivateKeyDer},
-    ClientConfig, RootCertStore, ALL_VERSIONS,
+    ALL_VERSIONS, ClientConfig, RootCertStore,
+    pki_types::{PrivateKeyDer, pem::PemObject},
 };
 use serde_json::{Map, Value};
 use ureq::AgentBuilder;
@@ -92,29 +92,36 @@ impl TLSConfigBuilder {
 
         let builder = if self.insecure {
             log::debug!("Certificate verification disabled");
-            builder.dangerous().with_custom_certificate_verifier(Arc::new(DisabledVerifier))
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(DisabledVerifier))
         } else if let Some(server_ca) = &self.server_ca_pem {
             let mut cert_reader = BufReader::new(&server_ca[..]);
-            let root_certs = rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
+            let root_certs =
+                rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
 
             let mut root_store = RootCertStore::empty();
             let (_added, _ignored) = root_store.add_parsable_certificates(root_certs);
             builder.with_root_certificates(root_store)
         } else {
-            let root_store = RootCertStore { roots: TLS_SERVER_ROOTS.to_vec() };
+            let root_store = RootCertStore {
+                roots: TLS_SERVER_ROOTS.to_vec(),
+            };
             builder.with_root_certificates(root_store)
         };
 
-        let client_config =
-            if let (Some(client_cert_pem), Some(client_key_pem)) = (&self.client_cert_pem, &self.client_key_pem) {
-                let mut cert_reader = BufReader::new(&client_cert_pem[..]);
-                let client_certs = rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
-                let client_key = PrivateKeyDer::from_pem_slice(client_key_pem)?;
+        let client_config = if let (Some(client_cert_pem), Some(client_key_pem)) =
+            (&self.client_cert_pem, &self.client_key_pem)
+        {
+            let mut cert_reader = BufReader::new(&client_cert_pem[..]);
+            let client_certs =
+                rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
+            let client_key = PrivateKeyDer::from_pem_slice(client_key_pem)?;
 
-                builder.with_client_auth_cert(client_certs, client_key)?
-            } else {
-                builder.with_no_client_auth()
-            };
+            builder.with_client_auth_cert(client_certs, client_key)?
+        } else {
+            builder.with_no_client_auth()
+        };
 
         Ok(TLSConfig { client_config })
     }
@@ -146,7 +153,9 @@ impl Client {
     }
 
     pub fn build(mut self) -> Self {
-        let mut agent = AgentBuilder::new().timeout_connect(Duration::from_secs(10)).timeout(Duration::from_secs(30));
+        let mut agent = AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30));
 
         if let Some(tls_config) = &self.tls_config {
             agent = agent.tls_config(Arc::new(tls_config.client_config.clone()));
@@ -177,9 +186,17 @@ impl Client {
             req = req.set("X-RustyVault-Token", &self.token);
         }
 
-        let mut ret = HttpResponse { method: method.to_string(), url, ..Default::default() };
+        let mut ret = HttpResponse {
+            method: method.to_string(),
+            url,
+            ..Default::default()
+        };
 
-        let response_result = if let Some(send_data) = data { req.send_json(send_data) } else { req.call() };
+        let response_result = if let Some(send_data) = data {
+            req.send_json(send_data)
+        } else {
+            req.call()
+        };
 
         match response_result {
             Ok(response) => {

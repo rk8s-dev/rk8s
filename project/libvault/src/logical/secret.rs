@@ -6,7 +6,7 @@ use derive_more::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::{lease::Lease, Backend, Request, Response};
+use super::{Backend, Request, Response, lease::Lease};
 use crate::errors::RvError;
 
 #[cfg(not(feature = "sync_handler"))]
@@ -17,7 +17,8 @@ type SecretOperationHandler = dyn for<'a> Fn(
     + Send
     + Sync;
 #[cfg(feature = "sync_handler")]
-type SecretOperationHandler = dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
+type SecretOperationHandler =
+    dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
 
 #[derive(Debug, Clone, Eq, Default, PartialEq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SecretData {
@@ -43,18 +44,29 @@ impl Secret {
         self.renew_handler.is_some()
     }
 
-    pub fn response(&self, data: Option<Map<String, Value>>, internal: Option<Map<String, Value>>) -> Response {
+    pub fn response(
+        &self,
+        data: Option<Map<String, Value>>,
+        internal: Option<Map<String, Value>>,
+    ) -> Response {
         let mut lease = Lease::default();
         lease.ttl = self.default_duration;
         lease.renewable = self.renewable();
 
-        let mut secret = SecretData { lease, lease_id: String::new(), internal_data: Map::new() };
+        let mut secret = SecretData {
+            lease,
+            lease_id: String::new(),
+            internal_data: Map::new(),
+        };
 
         if internal.is_some() {
             secret.internal_data.clone_from(internal.as_ref().unwrap());
         }
 
-        secret.internal_data.insert("secret_type".to_owned(), Value::String(self.secret_type.clone()));
+        secret.internal_data.insert(
+            "secret_type".to_owned(),
+            Value::String(self.secret_type.clone()),
+        );
 
         let mut resp = Response::default();
         resp.data = data;
@@ -62,7 +74,11 @@ impl Secret {
         resp
     }
 
-    pub async fn renew(&self, backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn renew(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         if !self.renewable() || self.renew_handler.is_none() {
             return Err(RvError::ErrLogicalOperationUnsupported);
         }
@@ -70,7 +86,11 @@ impl Secret {
         (self.renew_handler.as_ref().unwrap())(backend, req).await
     }
 
-    pub async fn revoke(&self, backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn revoke(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         if self.revoke_handler.is_none() {
             return Err(RvError::ErrLogicalOperationUnsupported);
         }
@@ -153,13 +173,20 @@ mod test {
             MyTest
         }
 
-        pub async fn noop(&self, _backend: &dyn Backend, _req: &mut Request) -> Result<Option<Response>, RvError> {
+        pub async fn noop(
+            &self,
+            _backend: &dyn Backend,
+            _req: &mut Request,
+        ) -> Result<Option<Response>, RvError> {
             Ok(None)
         }
     }
 
     #[maybe_async::maybe_async]
-    pub async fn noop(_backend: &dyn Backend, _req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn noop(
+        _backend: &dyn Backend,
+        _req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         Ok(None)
     }
 

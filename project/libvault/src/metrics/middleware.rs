@@ -17,12 +17,12 @@ use std::{
 };
 
 use actix_web::{
+    Error,
     body::MessageBody,
     dev::{ServiceRequest, ServiceResponse},
     http::Method,
     middleware::Next,
     web::Data,
-    Error,
 };
 
 use super::{http_metrics::MetricsMethod, manager::MetricsManager};
@@ -46,12 +46,21 @@ pub async fn metrics_midleware(
     let res = next.call(req).await?;
 
     let status = res.status().as_u16();
-    let label = HttpLabel { path, method, status };
-    if let Some(m) = res.request().app_data::<Data<Arc<RwLock<MetricsManager>>>>() {
+    let label = HttpLabel {
+        path,
+        method,
+        status,
+    };
+    if let Some(m) = res
+        .request()
+        .app_data::<Data<Arc<RwLock<MetricsManager>>>>()
+    {
         let metrics_manager = m.read().unwrap();
         metrics_manager.http_metrics.increment_request_count(&label);
         let duration = start_time.elapsed().as_secs_f64();
-        metrics_manager.http_metrics.observe_duration(&label, duration);
+        metrics_manager
+            .http_metrics
+            .observe_duration(&label, duration);
     }
 
     Ok(res)
@@ -80,7 +89,10 @@ mod tests {
 
     static HTTP_METRICS_MAP: &[(&str, &str)] = &[
         (HTTP_REQUEST_COUNT, HTTP_REQUEST_COUNT_HELP),
-        (HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUEST_DURATION_SECONDS_HELP),
+        (
+            HTTP_REQUEST_DURATION_SECONDS,
+            HTTP_REQUEST_DURATION_SECONDS_HELP,
+        ),
     ];
 
     fn parse_metrics_name_help(raw: &str) -> HashMap<String, String> {
@@ -99,18 +111,27 @@ mod tests {
         metrics_map
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_metrics_name_and_help_info() {
         let sys_metrics_map: HashMap<&str, &str> = SYS_METRICS_MAP.iter().cloned().collect();
         let http_metrics_map: HashMap<&str, &str> = HTTP_METRICS_MAP.iter().cloned().collect();
 
-        let server = TestHttpServer::new_with_prometheus("test_metrics_name_and_help_info", false).await;
+        let server =
+            TestHttpServer::new_with_prometheus("test_metrics_name_and_help_info", false).await;
         let root_token = &server.root_token;
-        let (status, resp) = server.request_prometheus("GET", "metrics", None, Some(root_token), None).unwrap();
+        let (status, resp) = server
+            .request_prometheus("GET", "metrics", None, Some(root_token), None)
+            .unwrap();
         assert_eq!(status, 200);
 
         let metrics_map = parse_metrics_name_help(resp["metrics"].as_str().unwrap());
-        assert_eq!(sys_metrics_map.len() + http_metrics_map.len(), metrics_map.len());
+        assert_eq!(
+            sys_metrics_map.len() + http_metrics_map.len(),
+            metrics_map.len()
+        );
 
         for (metric_name, metric_help) in &metrics_map {
             let name = metric_name.as_str();

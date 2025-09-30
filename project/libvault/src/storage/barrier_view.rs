@@ -1,6 +1,6 @@
 use std::{any::Any, sync::Arc};
 
-use super::{barrier::SecurityBarrier, Storage, StorageEntry};
+use super::{Storage, StorageEntry, barrier::SecurityBarrier};
 use crate::errors::RvError;
 
 pub struct BarrierView {
@@ -19,7 +19,10 @@ impl Storage for BarrierView {
         self.sanity_check(key)?;
         let storage_entry = self.barrier.get(self.expand_key(key).as_str()).await?;
         if let Some(entry) = storage_entry {
-            Ok(Some(StorageEntry { key: self.truncate_key(entry.key.as_str()), value: entry.value }))
+            Ok(Some(StorageEntry {
+                key: self.truncate_key(entry.key.as_str()),
+                value: entry.value,
+            }))
         } else {
             Ok(None)
         }
@@ -27,7 +30,10 @@ impl Storage for BarrierView {
 
     async fn put(&self, entry: &StorageEntry) -> Result<(), RvError> {
         self.sanity_check(entry.key.as_str())?;
-        let nested = StorageEntry { key: self.expand_key(entry.key.as_str()), value: entry.value.clone() };
+        let nested = StorageEntry {
+            key: self.expand_key(entry.key.as_str()),
+            value: entry.value.clone(),
+        };
         self.barrier.put(&nested).await
     }
 
@@ -44,11 +50,17 @@ impl Storage for BarrierView {
 #[maybe_async::maybe_async]
 impl BarrierView {
     pub fn new(barrier: Arc<dyn SecurityBarrier>, prefix: &str) -> Self {
-        Self { barrier, prefix: prefix.to_string() }
+        Self {
+            barrier,
+            prefix: prefix.to_string(),
+        }
     }
 
     pub fn new_sub_view(&self, prefix: &str) -> Self {
-        Self { barrier: self.barrier.clone(), prefix: self.expand_key(prefix) }
+        Self {
+            barrier: self.barrier.clone(),
+            prefix: self.expand_key(prefix),
+        }
     }
 
     pub async fn get_keys(&self) -> Result<Vec<String>, RvError> {
@@ -110,12 +122,15 @@ impl BarrierView {
 mod test {
     use std::sync::Arc;
 
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, thread_rng};
 
     use super::{super::*, *};
     use crate::test_utils::new_test_backend;
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_new_barrier_view() {
         let backend = new_test_backend("test_new_barrier_view");
 

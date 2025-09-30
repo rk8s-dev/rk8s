@@ -19,11 +19,19 @@ pub struct IpSockAddr {
 impl IpSockAddr {
     pub fn new(s: &str) -> Result<Self, RvError> {
         if let Ok(sock_addr) = SocketAddr::from_str(s) {
-            return Ok(IpSockAddr { addr: IpNetwork::from(sock_addr.ip()), port: sock_addr.port() });
+            return Ok(IpSockAddr {
+                addr: IpNetwork::from(sock_addr.ip()),
+                port: sock_addr.port(),
+            });
         } else if let Ok(ip_addr) = IpNetwork::from_str(s) {
-            return Ok(IpSockAddr { addr: ip_addr, port: 0 });
+            return Ok(IpSockAddr {
+                addr: ip_addr,
+                port: 0,
+            });
         }
-        Err(RvError::ErrResponse(format!("Unable to parse {s} to an IP address:")))
+        Err(RvError::ErrResponse(format!(
+            "Unable to parse {s} to an IP address:"
+        )))
     }
 }
 

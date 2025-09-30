@@ -26,11 +26,11 @@ use std::ops::DerefMut;
 use blake2b_simd::Params;
 use openssl::rand::rand_priv_bytes;
 use serde::Serialize;
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{Deserialize, de::DeserializeOwned};
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::modules::crypto::{AEADCipher, AESKeySize, BlockCipher, CipherMode, AES};
+use crate::modules::crypto::{AEADCipher, AES, AESKeySize, BlockCipher, CipherMode};
 
 /// Error types that can occur during cryptographic operations.
 ///
@@ -147,7 +147,10 @@ impl CryptoKey {
         let mut aad = Zeroizing::new(vec![0u8; 16]);
         let _ = rand_priv_bytes(aad.deref_mut().as_mut_slice());
 
-        Self { key: key.to_vec(), aad: aad.to_vec() }
+        Self {
+            key: key.to_vec(),
+            aad: aad.to_vec(),
+        }
     }
 
     /// Encrypts a serializable value using AES-256-GCM.
@@ -234,8 +237,13 @@ impl CryptoKey {
         let nonce = value[0..16].to_vec();
         let tag = value[16..32].to_vec();
 
-        let mut aes_decrypter =
-            AES::new(false, Some(AESKeySize::AES256), Some(CipherMode::GCM), Some(self.key.clone()), Some(nonce))?;
+        let mut aes_decrypter = AES::new(
+            false,
+            Some(AESKeySize::AES256),
+            Some(CipherMode::GCM),
+            Some(self.key.clone()),
+            Some(nonce),
+        )?;
 
         aes_decrypter.set_aad(self.aad.clone())?;
 
@@ -273,7 +281,11 @@ where
         let key = CryptoKey::new();
         let ciphertext = key.encrypt(value)?;
 
-        Ok(Self { ciphertext, key, _marker: std::marker::PhantomData })
+        Ok(Self {
+            ciphertext,
+            key,
+            _marker: std::marker::PhantomData,
+        })
     }
 
     /// Retrieves and decrypts the stored value.
@@ -316,7 +328,11 @@ where
 /// - Deterministic: same input always produces same output
 /// - Collision-resistant and preimage-resistant
 pub fn blake2b256_hash(key: &str) -> Vec<u8> {
-    let hash = Params::new().hash_length(32).to_state().update(key.as_bytes()).finalize();
+    let hash = Params::new()
+        .hash_length(32)
+        .to_state()
+        .update(key.as_bytes())
+        .finalize();
     hash.as_bytes().to_vec()
 }
 
@@ -342,7 +358,12 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt_basic() {
-        let original_data = TestData { id: 123, name: "test wallet".to_string(), value: 99.99, active: true };
+        let original_data = TestData {
+            id: 123,
+            name: "test wallet".to_string(),
+            value: 99.99,
+            active: true,
+        };
 
         let encrypted_box = EncryptedBox::new(&original_data).unwrap();
 
@@ -358,7 +379,11 @@ mod tests {
         metadata.insert("type".to_string(), "wallet".to_string());
 
         let original_data = ComplexData {
-            items: vec!["item1".to_string(), "item2".to_string(), "item3".to_string()],
+            items: vec![
+                "item1".to_string(),
+                "item2".to_string(),
+                "item3".to_string(),
+            ],
             metadata,
             timestamp: 9999999999,
         };
@@ -372,7 +397,12 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt_empty_data() {
-        let original_data = TestData { id: 0, name: "".to_string(), value: 0.0, active: false };
+        let original_data = TestData {
+            id: 0,
+            name: "".to_string(),
+            value: 0.0,
+            active: false,
+        };
 
         let encrypted_box = EncryptedBox::new(&original_data).unwrap();
         let decrypted_data = encrypted_box.get().unwrap();
@@ -383,7 +413,12 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt_large_data() {
         let large_string = "a".repeat(10000);
-        let original_data = TestData { id: 999, name: large_string, value: 123.456, active: true };
+        let original_data = TestData {
+            id: 999,
+            name: large_string,
+            value: 123.456,
+            active: true,
+        };
 
         let encrypted_box = EncryptedBox::new(&original_data).unwrap();
         let decrypted_data = encrypted_box.get().unwrap();
@@ -393,7 +428,12 @@ mod tests {
 
     #[test]
     fn test_multiple_encryptions_produce_different_ciphertext() {
-        let data = TestData { id: 1, name: "test".to_string(), value: 1.0, active: true };
+        let data = TestData {
+            id: 1,
+            name: "test".to_string(),
+            value: 1.0,
+            active: true,
+        };
 
         let encrypted1 = EncryptedBox::new(&data).unwrap();
         let encrypted2 = EncryptedBox::new(&data).unwrap();
@@ -408,7 +448,12 @@ mod tests {
 
     #[test]
     fn test_encrypted_box_structure() {
-        let data = TestData { id: 42, name: "structure test".to_string(), value: 42.0, active: false };
+        let data = TestData {
+            id: 42,
+            name: "structure test".to_string(),
+            value: 42.0,
+            active: false,
+        };
 
         let encrypted_box = EncryptedBox::new(&data).unwrap();
 
@@ -420,7 +465,12 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip() {
-        let data = TestData { id: 100, name: "serialization test".to_string(), value: 100.0, active: true };
+        let data = TestData {
+            id: 100,
+            name: "serialization test".to_string(),
+            value: 100.0,
+            active: true,
+        };
 
         let json = serde_json::to_string(&data).unwrap();
         let deserialized: TestData = serde_json::from_str(&json).unwrap();
@@ -446,7 +496,12 @@ mod tests {
     #[test]
     fn test_crypto_key_encrypt_decrypt_basic() {
         let key = CryptoKey::new();
-        let data = TestData { id: 123, name: "test".to_string(), value: 45.67, active: true };
+        let data = TestData {
+            id: 123,
+            name: "test".to_string(),
+            value: 45.67,
+            active: true,
+        };
 
         let encrypted = key.encrypt(&data).unwrap();
         let decrypted: TestData = key.decrypt(&encrypted).unwrap();
@@ -461,8 +516,11 @@ mod tests {
         metadata.insert("key1".to_string(), "value1".to_string());
         metadata.insert("key2".to_string(), "value2".to_string());
 
-        let data =
-            ComplexData { items: vec!["item1".to_string(), "item2".to_string()], metadata, timestamp: 1234567890 };
+        let data = ComplexData {
+            items: vec!["item1".to_string(), "item2".to_string()],
+            metadata,
+            timestamp: 1234567890,
+        };
 
         let encrypted = key.encrypt(&data).unwrap();
         let decrypted: ComplexData = key.decrypt(&encrypted).unwrap();
@@ -473,7 +531,12 @@ mod tests {
     #[test]
     fn test_crypto_key_encrypt_decrypt_empty() {
         let key = CryptoKey::new();
-        let data = TestData { id: 0, name: "".to_string(), value: 0.0, active: false };
+        let data = TestData {
+            id: 0,
+            name: "".to_string(),
+            value: 0.0,
+            active: false,
+        };
 
         let encrypted = key.encrypt(&data).unwrap();
         let decrypted: TestData = key.decrypt(&encrypted).unwrap();
@@ -485,7 +548,12 @@ mod tests {
     fn test_crypto_key_encrypt_decrypt_large_data() {
         let key = CryptoKey::new();
         let large_string = "x".repeat(5000);
-        let data = TestData { id: 999, name: large_string, value: 999.999, active: true };
+        let data = TestData {
+            id: 999,
+            name: large_string,
+            value: 999.999,
+            active: true,
+        };
 
         let encrypted = key.encrypt(&data).unwrap();
         let decrypted: TestData = key.decrypt(&encrypted).unwrap();
@@ -496,7 +564,12 @@ mod tests {
     #[test]
     fn test_crypto_key_multiple_encryptions() {
         let key = CryptoKey::new();
-        let data = TestData { id: 42, name: "multiple".to_string(), value: 42.0, active: false };
+        let data = TestData {
+            id: 42,
+            name: "multiple".to_string(),
+            value: 42.0,
+            active: false,
+        };
 
         let encrypted1 = key.encrypt(&data).unwrap();
         let encrypted2 = key.encrypt(&data).unwrap();
@@ -514,7 +587,12 @@ mod tests {
     fn test_crypto_key_different_keys() {
         let key1 = CryptoKey::new();
         let key2 = CryptoKey::new();
-        let data = TestData { id: 100, name: "different keys".to_string(), value: 100.0, active: true };
+        let data = TestData {
+            id: 100,
+            name: "different keys".to_string(),
+            value: 100.0,
+            active: true,
+        };
 
         let encrypted1 = key1.encrypt(&data).unwrap();
         let encrypted2 = key2.encrypt(&data).unwrap();
@@ -532,7 +610,12 @@ mod tests {
     fn test_crypto_key_decrypt_wrong_key() {
         let key1 = CryptoKey::new();
         let key2 = CryptoKey::new();
-        let data = TestData { id: 200, name: "wrong key".to_string(), value: 200.0, active: true };
+        let data = TestData {
+            id: 200,
+            name: "wrong key".to_string(),
+            value: 200.0,
+            active: true,
+        };
 
         let encrypted = key1.encrypt(&data).unwrap();
 
@@ -543,7 +626,12 @@ mod tests {
     #[test]
     fn test_crypto_key_decrypt_corrupted_data() {
         let key = CryptoKey::new();
-        let data = TestData { id: 300, name: "corrupted".to_string(), value: 300.0, active: true };
+        let data = TestData {
+            id: 300,
+            name: "corrupted".to_string(),
+            value: 300.0,
+            active: true,
+        };
 
         let encrypted = key.encrypt(&data).unwrap();
 
@@ -577,7 +665,12 @@ mod tests {
     #[test]
     fn test_crypto_key_serialization() {
         let key = CryptoKey::new();
-        let data = TestData { id: 400, name: "serialization".to_string(), value: 400.0, active: true };
+        let data = TestData {
+            id: 400,
+            name: "serialization".to_string(),
+            value: 400.0,
+            active: true,
+        };
 
         let encrypted = key.encrypt(&data).unwrap();
 
@@ -593,10 +686,30 @@ mod tests {
         let key = CryptoKey::new();
 
         let test_cases = vec![
-            TestData { id: i32::MIN, name: "min".to_string(), value: f64::MIN, active: false },
-            TestData { id: i32::MAX, name: "max".to_string(), value: f64::MAX, active: true },
-            TestData { id: 0, name: "".to_string(), value: 0.0, active: false },
-            TestData { id: -1, name: "negative".to_string(), value: -1.0, active: true },
+            TestData {
+                id: i32::MIN,
+                name: "min".to_string(),
+                value: f64::MIN,
+                active: false,
+            },
+            TestData {
+                id: i32::MAX,
+                name: "max".to_string(),
+                value: f64::MAX,
+                active: true,
+            },
+            TestData {
+                id: 0,
+                name: "".to_string(),
+                value: 0.0,
+                active: false,
+            },
+            TestData {
+                id: -1,
+                name: "negative".to_string(),
+                value: -1.0,
+                active: true,
+            },
         ];
 
         for test_case in test_cases {
@@ -617,7 +730,12 @@ mod tests {
 
         let key = CryptoKey::new();
         let data = NestedData {
-            inner: TestData { id: 1, name: "nested".to_string(), value: 1.0, active: true },
+            inner: TestData {
+                id: 1,
+                name: "nested".to_string(),
+                value: 1.0,
+                active: true,
+            },
             count: 42,
             optional: Some("optional".to_string()),
         };
@@ -631,7 +749,12 @@ mod tests {
     #[test]
     fn test_crypto_key_performance() {
         let key = CryptoKey::new();
-        let data = TestData { id: 600, name: "performance".to_string(), value: 600.0, active: true };
+        let data = TestData {
+            id: 600,
+            name: "performance".to_string(),
+            value: 600.0,
+            active: true,
+        };
 
         for _ in 0..100 {
             let encrypted = key.encrypt(&data).unwrap();

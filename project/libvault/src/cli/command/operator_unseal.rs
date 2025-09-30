@@ -6,9 +6,9 @@ use rpassword::read_password;
 use sysexits::ExitCode;
 
 use crate::{
+    EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_OK,
     cli::command::{self, CommandExecutor},
     errors::RvError,
-    EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_OK,
 };
 
 #[derive(Parser, Deref)]
@@ -30,7 +30,11 @@ Instead, run the command with no arguments and it will prompt for the key:
   Key (will be hidden): 05ce1abc1f913de5407c86869bb298e5645748e01bdfd14c7ac43c05c4bc204b01"#
 )]
 pub struct Unseal {
-    #[arg(next_line_help = false, value_name = "KEY", help = r#"A portion of the root key to unseal a Vault server."#)]
+    #[arg(
+        next_line_help = false,
+        value_name = "KEY",
+        help = r#"A portion of the root key to unseal a Vault server."#
+    )]
     unseal_key: Option<String>,
 
     #[deref]
@@ -71,7 +75,8 @@ impl CommandExecutor for Unseal {
         match sys.unseal(&key) {
             Ok(ret) => {
                 if ret.response_status == 200 {
-                    self.output.print_value(ret.response_data.as_ref().unwrap(), true)?;
+                    self.output
+                        .print_value(ret.response_data.as_ref().unwrap(), true)?;
                 } else if ret.response_status == 204 {
                     println!("ok");
                 } else {
@@ -97,24 +102,36 @@ mod test {
         let test_http_server = TestHttpServer::new_without_init("test_cli_operator_unseal", true);
 
         // rvault operator init
-        let ret = test_http_server.cli(&["operator", "init"], &["--format=raw", "--key-shares=5", "--key-threshold=3"]);
+        let ret = test_http_server.cli(
+            &["operator", "init"],
+            &["--format=raw", "--key-shares=5", "--key-threshold=3"],
+        );
         assert!(ret.is_ok());
         let ret = Value::from_str(ret.unwrap().as_str()).unwrap();
         let init_result = ret.as_object().unwrap();
 
         // rvault operator unseal
         let keys = &init_result["keys"];
-        let ret = test_http_server.cli(&["operator", "unseal"], &["--format=raw", keys[0].as_str().unwrap()]);
+        let ret = test_http_server.cli(
+            &["operator", "unseal"],
+            &["--format=raw", keys[0].as_str().unwrap()],
+        );
         let ret = Value::from_str(ret.unwrap().as_str()).unwrap();
         let unseal_result = ret.as_object().unwrap();
         assert_eq!(unseal_result["n"], 3);
         assert_eq!(unseal_result["t"], 5);
         assert_eq!(unseal_result["sealed"], true);
-        let ret = test_http_server.cli(&["operator", "unseal"], &["--format=raw", keys[1].as_str().unwrap()]);
+        let ret = test_http_server.cli(
+            &["operator", "unseal"],
+            &["--format=raw", keys[1].as_str().unwrap()],
+        );
         let ret = Value::from_str(ret.unwrap().as_str()).unwrap();
         let unseal_result = ret.as_object().unwrap();
         assert_eq!(unseal_result["sealed"], true);
-        let ret = test_http_server.cli(&["operator", "unseal"], &["--format=raw", keys[2].as_str().unwrap()]);
+        let ret = test_http_server.cli(
+            &["operator", "unseal"],
+            &["--format=raw", keys[2].as_str().unwrap()],
+        );
         let ret = Value::from_str(ret.unwrap().as_str()).unwrap();
         let unseal_result = ret.as_object().unwrap();
         assert_eq!(unseal_result["sealed"], false);

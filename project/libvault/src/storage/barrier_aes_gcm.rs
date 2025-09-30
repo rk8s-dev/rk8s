@@ -10,16 +10,16 @@ use std::{
 use arc_swap::ArcSwap;
 use better_default::Default;
 use openssl::{
-    hash::{hash, MessageDigest},
+    hash::{MessageDigest, hash},
     symm::{Cipher, Crypter, Mode},
 };
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::{
-    barrier::{SecurityBarrier, BARRIER_INIT_PATH},
     Backend, BackendEntry, Storage, StorageEntry,
+    barrier::{BARRIER_INIT_PATH, SecurityBarrier},
 };
 use crate::errors::RvError;
 
@@ -80,7 +80,10 @@ impl Storage for AESGCMBarrier {
 
         // Decrypt the ciphertext
         let plain = self.decrypt(key, pe.as_ref().unwrap().value.as_slice())?;
-        let entry = StorageEntry { key: key.to_string(), value: plain };
+        let entry = StorageEntry {
+            key: key.to_string(),
+            value: plain,
+        };
 
         Ok(Some(entry))
     }
@@ -92,7 +95,10 @@ impl Storage for AESGCMBarrier {
 
         let ciphertext = self.encrypt(&entry.key, entry.value.as_slice())?;
 
-        let be = BackendEntry { key: entry.key.clone(), value: ciphertext };
+        let be = BackendEntry {
+            key: entry.key.clone(),
+            value: ciphertext,
+        };
 
         self.backend.put(&be).await?;
 
@@ -136,7 +142,10 @@ impl SecurityBarrier for AESGCMBarrier {
         // the encrypt_key variable will be zeroized automatically on drop
         let encrypt_key = self.generate_key()?;
 
-        let barrier_init = BarrierInit { version: 1, key: encrypt_key.to_vec() };
+        let barrier_init = BarrierInit {
+            version: 1,
+            key: encrypt_key.to_vec(),
+        };
 
         let serialized_barrier_init = serde_json::to_string(&barrier_init)?;
 
@@ -144,7 +153,10 @@ impl SecurityBarrier for AESGCMBarrier {
 
         let value = self.encrypt(BARRIER_INIT_PATH, serialized_barrier_init.as_bytes())?;
 
-        let be = BackendEntry { key: BARRIER_INIT_PATH.to_string(), value };
+        let be = BackendEntry {
+            key: BARRIER_INIT_PATH.to_string(),
+            value,
+        };
 
         self.backend.put(&be).await?;
 
@@ -232,7 +244,10 @@ impl SecurityBarrier for AESGCMBarrier {
 
 impl AESGCMBarrier {
     pub fn new(physical: Arc<dyn Backend>) -> Self {
-        Self { backend: physical, barrier_info: ArcSwap::from_pointee(BarrierInfo::default()) }
+        Self {
+            backend: physical,
+            barrier_info: ArcSwap::from_pointee(BarrierInfo::default()),
+        }
     }
 
     fn init_cipher(&self, key: &[u8]) -> Result<(), RvError> {
@@ -304,7 +319,11 @@ impl AESGCMBarrier {
             return Err(RvError::ErrBarrierNotInit);
         }
 
-        if ciphertext[0] != 0 || ciphertext[1] != 0 || ciphertext[2] != 0 || ciphertext[3] != KEY_EPOCH {
+        if ciphertext[0] != 0
+            || ciphertext[1] != 0
+            || ciphertext[2] != 0
+            || ciphertext[3] != KEY_EPOCH
+        {
             return Err(RvError::ErrBarrierEpochMismatch);
         }
 
@@ -364,7 +383,11 @@ mod test {
 
         let barrier = AESGCMBarrier {
             backend,
-            barrier_info: ArcSwap::from_pointee(BarrierInfo { sealed: true, key: Some(key), ..Default::default() }),
+            barrier_info: ArcSwap::from_pointee(BarrierInfo {
+                sealed: true,
+                key: Some(key),
+                ..Default::default()
+            }),
         };
 
         let path = "test/";
@@ -385,28 +408,33 @@ mod test {
         let backend = new_test_backend("test_decrypt");
 
         let key = vec![
-            121, 133, 170, 204, 71, 77, 160, 134, 22, 37, 254, 206, 120, 206, 143, 197, 150, 83, 5, 45, 121, 51, 124,
-            110, 162, 1, 9, 51, 16, 75, 157, 129,
+            121, 133, 170, 204, 71, 77, 160, 134, 22, 37, 254, 206, 120, 206, 143, 197, 150, 83, 5,
+            45, 121, 51, 124, 110, 162, 1, 9, 51, 16, 75, 157, 129,
         ];
 
         let barrier = AESGCMBarrier {
             backend,
-            barrier_info: ArcSwap::from_pointee(BarrierInfo { sealed: true, key: Some(key), ..Default::default() }),
+            barrier_info: ArcSwap::from_pointee(BarrierInfo {
+                sealed: true,
+                key: Some(key),
+                ..Default::default()
+            }),
         };
 
         // AES_GCM_VERSION1
         let ciphertext = &[
-            0, 0, 0, 1, 1, 99, 115, 28, 164, 208, 39, 20, 70, 150, 217, 80, 159, 80, 251, 42, 49, 32, 136, 109, 90,
-            160, 217, 227, 252, 159, 54, 194, 68, 146, 37, 88, 57, 225, 144, 96, 105, 160, 187, 112, 145, 175, 24, 89,
-            33,
+            0, 0, 0, 1, 1, 99, 115, 28, 164, 208, 39, 20, 70, 150, 217, 80, 159, 80, 251, 42, 49,
+            32, 136, 109, 90, 160, 217, 227, 252, 159, 54, 194, 68, 146, 37, 88, 57, 225, 144, 96,
+            105, 160, 187, 112, 145, 175, 24, 89, 33,
         ];
         let res = barrier.decrypt("test/", ciphertext);
         assert!(res.is_ok());
 
         // AES_GCM_VERSION2
         let ciphertext2 = &[
-            0, 0, 0, 1, 2, 146, 4, 80, 230, 214, 110, 208, 132, 3, 230, 0, 186, 251, 246, 9, 166, 168, 126, 134, 95,
-            20, 28, 253, 33, 169, 84, 146, 234, 7, 140, 98, 119, 42, 14, 35, 26, 213, 131, 32, 139, 216, 68, 148, 136,
+            0, 0, 0, 1, 2, 146, 4, 80, 230, 214, 110, 208, 132, 3, 230, 0, 186, 251, 246, 9, 166,
+            168, 126, 134, 95, 20, 28, 253, 33, 169, 84, 146, 234, 7, 140, 98, 119, 42, 14, 35, 26,
+            213, 131, 32, 139, 216, 68, 148, 136,
         ];
         let plaintext = "rusty vault test";
 
@@ -415,7 +443,10 @@ mod test {
         assert_eq!(plaintext.as_bytes(), res.unwrap());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_barrier_aes256_gcm() {
         let backend = new_test_backend("test_barriew_aes256_gcm");
 
@@ -453,7 +484,10 @@ mod test {
         assert!(sealed.unwrap());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_barrier_storage_api() {
         let backend = new_test_backend("test_barriew_storage_api");
 
@@ -489,9 +523,18 @@ mod test {
         let get = barrier.get("/").await;
         assert!(get.is_err());
 
-        let entry1 = StorageEntry { key: "bar".to_string(), value: "test1".as_bytes().to_vec() };
-        let entry2 = StorageEntry { key: "bar/foo".to_string(), value: "test2".as_bytes().to_vec() };
-        let entry3 = StorageEntry { key: "bar/foo/goo".to_string(), value: "test3".as_bytes().to_vec() };
+        let entry1 = StorageEntry {
+            key: "bar".to_string(),
+            value: "test1".as_bytes().to_vec(),
+        };
+        let entry2 = StorageEntry {
+            key: "bar/foo".to_string(),
+            value: "test2".as_bytes().to_vec(),
+        };
+        let entry3 = StorageEntry {
+            key: "bar/foo/goo".to_string(),
+            value: "test3".as_bytes().to_vec(),
+        };
 
         let put = barrier.put(&entry1).await;
         assert!(put.is_ok());

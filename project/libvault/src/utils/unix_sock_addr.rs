@@ -18,7 +18,9 @@ impl UnixSockAddr {
     pub fn new(s: &str) -> Result<Self, RvError> {
         // Check to make sure the string begins with either a '.' or '/', or contains a '/'.
         if s.len() > 1 && (s[0..1].contains('.') || s[0..1].contains('/') || s.contains('/')) {
-            Ok(Self { path: s.to_string() })
+            Ok(Self {
+                path: s.to_string(),
+            })
         } else {
             Err(RvError::ErrResponse(format!(
                 "Unable to convert {s} to a UNIX Socke, make sure the string begins with either a '.' or '/', or \

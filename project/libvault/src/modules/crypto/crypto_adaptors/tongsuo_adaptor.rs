@@ -2,12 +2,14 @@
 
 use openssl::{
     rand::rand_priv_bytes,
-    symm::{decrypt, decrypt_aead, encrypt, encrypt_aead, Cipher, Crypter, Mode},
+    symm::{Cipher, Crypter, Mode, decrypt, decrypt_aead, encrypt, encrypt_aead},
 };
 
 use crate::{
     errors::RvError,
-    modules::crypto::{crypto_adaptors::common, AEADCipher, AESKeySize, BlockCipher, CipherMode, AES, SM4},
+    modules::crypto::{
+        AEADCipher, AES, AESKeySize, BlockCipher, CipherMode, SM4, crypto_adaptors::common,
+    },
 };
 
 pub struct AdaptorCTX {
@@ -49,7 +51,11 @@ impl BlockCipher for AES {
         common_aes_encrypt!(self, plaintext);
     }
 
-    fn encrypt_update(&mut self, plaintext: Vec<u8>, ciphertext: &mut Vec<u8>) -> Result<usize, RvError> {
+    fn encrypt_update(
+        &mut self,
+        plaintext: Vec<u8>,
+        ciphertext: &mut Vec<u8>,
+    ) -> Result<usize, RvError> {
         common_aes_encrypt_update!(self, plaintext, ciphertext);
     }
 
@@ -61,7 +67,11 @@ impl BlockCipher for AES {
         common_aes_decrypt!(self, ciphertext);
     }
 
-    fn decrypt_update(&mut self, ciphertext: Vec<u8>, plaintext: &mut Vec<u8>) -> Result<usize, RvError> {
+    fn decrypt_update(
+        &mut self,
+        ciphertext: Vec<u8>,
+        plaintext: &mut Vec<u8>,
+    ) -> Result<usize, RvError> {
         common_aes_decrypt_update!(self, ciphertext, plaintext);
     }
 
@@ -124,7 +134,14 @@ impl SM4 {
             sm4_iv = buf2.to_vec();
         }
 
-        Ok(SM4 { mode: c_mode, key: sm4_key, iv: sm4_iv, aad: None, ctx: None, tag: None })
+        Ok(SM4 {
+            mode: c_mode,
+            key: sm4_key,
+            iv: sm4_iv,
+            aad: None,
+            ctx: None,
+            tag: None,
+        })
     }
 
     /// This function returns the key and iv vaule stored in one SM4 object.
@@ -161,7 +178,11 @@ impl BlockCipher for SM4 {
         }
     }
 
-    fn encrypt_update(&mut self, plaintext: Vec<u8>, ciphertext: &mut Vec<u8>) -> Result<usize, RvError> {
+    fn encrypt_update(
+        &mut self,
+        plaintext: Vec<u8>,
+        ciphertext: &mut Vec<u8>,
+    ) -> Result<usize, RvError> {
         let cipher;
 
         match self.mode {
@@ -179,7 +200,11 @@ impl BlockCipher for SM4 {
         if let None = self.ctx {
             // init adaptor ctx if it's not inited.
             let encrypter = Crypter::new(cipher, Mode::Encrypt, &self.key, Some(&self.iv))?;
-            let adaptor_ctx = AdaptorCTX { ctx: encrypter, tag_set: false, aad_set: false };
+            let adaptor_ctx = AdaptorCTX {
+                ctx: encrypter,
+                tag_set: false,
+                aad_set: false,
+            };
 
             self.ctx = Some(adaptor_ctx);
         }
@@ -199,7 +224,12 @@ impl BlockCipher for SM4 {
         // error information by unwrapping it.
         // we also can't use the question mark operatior since the error codes are differently
         // defined in RustyVault and underlying adaptor, such as rust-openssl.
-        let count = self.ctx.as_mut().unwrap().ctx.update(&plaintext, &mut ciphertext[..])?;
+        let count = self
+            .ctx
+            .as_mut()
+            .unwrap()
+            .ctx
+            .update(&plaintext, &mut ciphertext[..])?;
         Ok(count)
     }
 
@@ -248,7 +278,11 @@ impl BlockCipher for SM4 {
             _ => Err(RvError::ErrCryptoCipherOPNotSupported),
         }
     }
-    fn decrypt_update(&mut self, ciphertext: Vec<u8>, plaintext: &mut Vec<u8>) -> Result<usize, RvError> {
+    fn decrypt_update(
+        &mut self,
+        ciphertext: Vec<u8>,
+        plaintext: &mut Vec<u8>,
+    ) -> Result<usize, RvError> {
         let cipher;
 
         match self.mode {
@@ -266,7 +300,11 @@ impl BlockCipher for SM4 {
         if self.ctx.is_none() {
             // init adaptor ctx if it's not inited.
             let encrypter = Crypter::new(cipher, Mode::Decrypt, &self.key, Some(&self.iv))?;
-            let adaptor_ctx = AdaptorCTX { ctx: encrypter, tag_set: false, aad_set: false };
+            let adaptor_ctx = AdaptorCTX {
+                ctx: encrypter,
+                tag_set: false,
+                aad_set: false,
+            };
 
             self.ctx = Some(adaptor_ctx);
         }
@@ -283,7 +321,13 @@ impl BlockCipher for SM4 {
 
         // do real jobs.
         // this Crypter::update returns a Result<usize, ErrorStack>, print detailed error if any.
-        match self.ctx.as_mut().unwrap().ctx.update(&ciphertext, plaintext) {
+        match self
+            .ctx
+            .as_mut()
+            .unwrap()
+            .ctx
+            .update(&ciphertext, plaintext)
+        {
             Ok(count) => {
                 return Ok(count);
             }

@@ -3,9 +3,9 @@ use derive_more::Deref;
 use sysexits::ExitCode;
 
 use crate::{
+    EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_OK,
     cli::command::{self, CommandExecutor},
     errors::RvError,
-    EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_OK,
 };
 
 #[derive(Parser, Deref)]
@@ -67,7 +67,10 @@ mod test {
 
     use crate::test_utils::TestHttpServer;
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_cli_operator_seal() {
         let test_http_server = TestHttpServer::new("test_cli_operator_seal", true).await;
 

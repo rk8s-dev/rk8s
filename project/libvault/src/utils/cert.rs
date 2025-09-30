@@ -16,21 +16,22 @@ use openssl::{
     pkey::{PKey, Private},
     rsa::Rsa,
     x509::{
+        X509, X509Builder, X509Extension, X509Name, X509NameBuilder, X509Ref,
         extension::{
-            AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAlternativeName,
-            SubjectKeyIdentifier,
+            AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage,
+            SubjectAlternativeName, SubjectKeyIdentifier,
         },
-        X509Builder, X509Extension, X509Name, X509NameBuilder, X509Ref, X509,
     },
 };
 use openssl_sys::{
-    stack_st_X509, X509_get_extended_key_usage, X509_get_extension_flags, EXFLAG_XKUSAGE, X509_STORE_CTX,
+    EXFLAG_XKUSAGE, X509_STORE_CTX, X509_get_extended_key_usage, X509_get_extension_flags,
+    stack_st_X509,
 };
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     pki_types::CertificateDer,
 };
-use serde::{ser::SerializeTuple, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeTuple};
 use serde_bytes::ByteBuf;
 
 use crate::errors::RvError;
@@ -40,19 +41,28 @@ lazy_static! {
     static ref PKEY_DEFAULT: PKey<Private> = PKey::generate_ed25519().unwrap();
 }
 
-extern "C" {
+unsafe extern "C" {
     pub fn X509_check_ca(x509: *mut openssl_sys::X509) -> c_int;
     pub fn X509_STORE_CTX_set0_trusted_stack(ctx: *mut X509_STORE_CTX, chain: *mut stack_st_X509);
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CertBundle {
-    #[serde(serialize_with = "serialize_x509", deserialize_with = "deserialize_x509")]
+    #[serde(
+        serialize_with = "serialize_x509",
+        deserialize_with = "deserialize_x509"
+    )]
     #[default(X509_DEFAULT.clone())]
     pub certificate: X509,
-    #[serde(serialize_with = "serialize_vec_x509", deserialize_with = "deserialize_vec_x509")]
+    #[serde(
+        serialize_with = "serialize_vec_x509",
+        deserialize_with = "deserialize_vec_x509"
+    )]
     pub ca_chain: Vec<X509>,
-    #[serde(serialize_with = "serialize_pkey", deserialize_with = "deserialize_pkey")]
+    #[serde(
+        serialize_with = "serialize_pkey",
+        deserialize_with = "deserialize_pkey"
+    )]
     #[default(PKEY_DEFAULT.clone())]
     pub private_key: PKey<Private>,
     #[serde(default)]
@@ -262,7 +272,9 @@ impl Certificate {
             san_ext.uri(uri.as_str());
         }
 
-        if (self.dns_sans.len() | self.email_sans.len() | self.ip_sans.len() | self.uri_sans.len()) > 0 {
+        if (self.dns_sans.len() | self.email_sans.len() | self.ip_sans.len() | self.uri_sans.len())
+            > 0
+        {
             builder.append_extension(san_ext.build(&builder.x509v3_context(ca_cert, None))?)?;
         }
 
@@ -272,20 +284,39 @@ impl Certificate {
 
         if self.is_ca {
             builder.append_extension(BasicConstraints::new().critical().ca().build()?)?;
-            builder.append_extension(KeyUsage::new().critical().key_cert_sign().crl_sign().build()?)?;
+            builder.append_extension(
+                KeyUsage::new()
+                    .critical()
+                    .key_cert_sign()
+                    .crl_sign()
+                    .build()?,
+            )?;
         } else {
             builder.append_extension(BasicConstraints::new().critical().build()?)?;
             builder.append_extension(
-                KeyUsage::new().critical().non_repudiation().digital_signature().key_encipherment().build()?,
+                KeyUsage::new()
+                    .critical()
+                    .non_repudiation()
+                    .digital_signature()
+                    .key_encipherment()
+                    .build()?,
             )?;
-            builder.append_extension(ExtendedKeyUsage::new().server_auth().client_auth().build()?)?;
+            builder.append_extension(
+                ExtendedKeyUsage::new()
+                    .server_auth()
+                    .client_auth()
+                    .build()?,
+            )?;
         }
 
-        let subject_key_id = SubjectKeyIdentifier::new().build(&builder.x509v3_context(ca_cert, None))?;
+        let subject_key_id =
+            SubjectKeyIdentifier::new().build(&builder.x509v3_context(ca_cert, None))?;
         builder.append_extension(subject_key_id)?;
 
-        let authority_key_id =
-            AuthorityKeyIdentifier::new().keyid(true).issuer(false).build(&builder.x509v3_context(ca_cert, None))?;
+        let authority_key_id = AuthorityKeyIdentifier::new()
+            .keyid(true)
+            .issuer(false)
+            .build(&builder.x509v3_context(ca_cert, None))?;
         builder.append_extension(authority_key_id)?;
 
         let digest = match self.key_type.as_str() {
@@ -405,7 +436,9 @@ impl ServerCertVerifier for DisabledVerifier {
         let provider = rustls::crypto::CryptoProvider::get_default()
             .cloned()
             .unwrap_or(Arc::new(rustls::crypto::ring::default_provider()));
-        provider.signature_verification_algorithms.supported_schemes()
+        provider
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 
@@ -425,7 +458,9 @@ mod test {
         subject_name.append_entry_by_text("ST", "ZJ").unwrap();
         subject_name.append_entry_by_text("L", "HZ").unwrap();
         subject_name.append_entry_by_text("O", "Ant-Group").unwrap();
-        subject_name.append_entry_by_text("CN", "www.test.com").unwrap();
+        subject_name
+            .append_entry_by_text("CN", "www.test.com")
+            .unwrap();
         let subject = subject_name.build();
 
         let mut cert = Certificate {
@@ -502,7 +537,11 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         let cert_bundle = cert.to_cert_bundle(Some(&ca_cert), Some(&ca_key));
         assert!(cert_bundle.is_ok());
         let cert_bundle = cert_bundle.unwrap();
-        assert!(cert_bundle.private_key.public_eq(&cert_bundle.certificate.public_key().unwrap()));
+        assert!(
+            cert_bundle
+                .private_key
+                .public_eq(&cert_bundle.certificate.public_key().unwrap())
+        );
     }
 
     #[test]
@@ -514,7 +553,9 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         subject_name.append_entry_by_text("ST", "ZJ").unwrap();
         subject_name.append_entry_by_text("L", "HZ").unwrap();
         subject_name.append_entry_by_text("O", "Ant-Group").unwrap();
-        subject_name.append_entry_by_text("CN", "www.testca.com").unwrap();
+        subject_name
+            .append_entry_by_text("CN", "www.testca.com")
+            .unwrap();
         let subject = subject_name.build();
 
         let mut cert = Certificate {
@@ -537,7 +578,11 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         let cert_bundle = cert.to_cert_bundle(None, None);
         assert!(cert_bundle.is_ok());
         let cert_bundle = cert_bundle.unwrap();
-        assert!(cert_bundle.private_key.public_eq(&cert_bundle.certificate.public_key().unwrap()));
+        assert!(
+            cert_bundle
+                .private_key
+                .public_eq(&cert_bundle.certificate.public_key().unwrap())
+        );
         println!("create ca result:\n{:?}", cert_bundle);
     }
 }

@@ -43,7 +43,7 @@
 
 use std::{
     any::Any,
-    sync::{atomic::AtomicU32, Arc},
+    sync::{Arc, atomic::AtomicU32},
 };
 
 use arc_swap::ArcSwapOption;
@@ -53,7 +53,7 @@ use crate::{
     core::Core,
     errors::RvError,
     logical::{Backend, LogicalBackend},
-    modules::{auth::AuthModule, Module},
+    modules::{Module, auth::AuthModule},
     new_logical_backend, new_logical_backend_internal,
     utils::{locks::Locks, salt::Salt},
 };
@@ -106,7 +106,9 @@ pub struct AppRoleBackend {
 
 impl AppRoleBackend {
     pub fn new(core: Arc<Core>) -> Self {
-        Self { inner: Arc::new(AppRoleBackendInner::new(core)) }
+        Self {
+            inner: Arc::new(AppRoleBackendInner::new(core)),
+        }
     }
 
     pub fn new_backend(&self) -> LogicalBackend {
@@ -145,7 +147,10 @@ impl AppRoleBackendInner {
 
 impl AppRoleModule {
     pub fn new(core: Arc<Core>) -> Self {
-        Self { name: "approle".to_string(), backend: Arc::new(AppRoleBackend::new(core)) }
+        Self {
+            name: "approle".to_string(),
+            backend: Arc::new(AppRoleBackend::new(core)),
+        }
     }
 }
 
@@ -201,14 +206,15 @@ impl Module for AppRoleModule {
 
 #[cfg(test)]
 mod test {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::{
         core::Core,
-        logical::{field::FieldTrait, Operation, Request, Response},
+        logical::{Operation, Request, Response, field::FieldTrait},
         test_utils::{
-            new_unseal_test_rusty_vault, test_delete_api, test_mount_auth_api, test_read_api, test_write_api,
+            new_unseal_test_rusty_vault, test_delete_api, test_mount_auth_api, test_read_api,
+            test_write_api,
         },
     };
 
@@ -219,7 +225,13 @@ mod test {
         path: &str,
         role_name: &str,
     ) -> Result<Option<Response>, RvError> {
-        let resp = test_read_api(core, token, format!("auth/{}/role/{}", path, role_name).as_str(), true).await;
+        let resp = test_read_api(
+            core,
+            token,
+            format!("auth/{}/role/{}", path, role_name).as_str(),
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         resp
     }
@@ -250,22 +262,44 @@ mod test {
             role_data.remove("role_id");
         }
 
-        let _ =
-            test_write_api(core, token, format!("auth/{}/role/{}", path, role_name).as_str(), expect, Some(role_data))
-                .await;
+        let _ = test_write_api(
+            core,
+            token,
+            format!("auth/{}/role/{}", path, role_name).as_str(),
+            expect,
+            Some(role_data),
+        )
+        .await;
     }
 
     #[maybe_async::maybe_async]
     pub async fn test_delete_role(core: &Core, token: &str, path: &str, role_name: &str) {
-        let resp = test_delete_api(core, token, format!("auth/{}/role/{}", path, role_name).as_str(), true, None).await;
+        let resp = test_delete_api(
+            core,
+            token,
+            format!("auth/{}/role/{}", path, role_name).as_str(),
+            true,
+            None,
+        )
+        .await;
         assert!(resp.is_ok());
     }
 
     #[maybe_async::maybe_async]
-    pub async fn generate_secret_id(core: &Core, token: &str, path: &str, role_name: &str) -> (String, String) {
-        let resp =
-            test_write_api(core, token, format!("auth/{}/role/{}/secret-id", path, role_name).as_str(), true, None)
-                .await;
+    pub async fn generate_secret_id(
+        core: &Core,
+        token: &str,
+        path: &str,
+        role_name: &str,
+    ) -> (String, String) {
+        let resp = test_write_api(
+            core,
+            token,
+            format!("auth/{}/role/{}/secret-id", path, role_name).as_str(),
+            true,
+            None,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let secret_id = resp_data["secret_id"].as_str().unwrap();
@@ -310,18 +344,32 @@ mod test {
     #[maybe_async::maybe_async]
     async fn test_approle(core: &Core, token: &str, path: &str, role_name: &str) {
         // Create a role
-        let resp = test_write_api(core, token, format!("auth/{}/role/{}", path, role_name).as_str(), true, None).await;
+        let resp = test_write_api(
+            core,
+            token,
+            format!("auth/{}/role/{}", path, role_name).as_str(),
+            true,
+            None,
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Get the role-id
-        let resp = test_read_api(core, token, format!("auth/{}/role/{}/role-id", path, role_name).as_str(), true).await;
+        let resp = test_read_api(
+            core,
+            token,
+            format!("auth/{}/role/{}/role-id", path, role_name).as_str(),
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data;
         let role_id = resp_data.unwrap()["role_id"].clone();
         let role_id = role_id.as_str().unwrap();
 
         // Create a secret-id
-        let (secret_id, secret_id_accessor) = generate_secret_id(core, token, path, role_name).await;
+        let (secret_id, secret_id_accessor) =
+            generate_secret_id(core, token, path, role_name).await;
 
         // Ensure login works
         let _ = test_login(core, path, role_id, &secret_id, true).await;
@@ -335,7 +383,11 @@ mod test {
         let resp = test_write_api(
             core,
             token,
-            format!("auth/{}/role/{}/secret-id-accessor/destroy", path, role_name).as_str(),
+            format!(
+                "auth/{}/role/{}/secret-id-accessor/destroy",
+                path, role_name
+            )
+            .as_str(),
             true,
             data,
         )
@@ -346,7 +398,8 @@ mod test {
         let _ = test_login(core, path, role_id, &secret_id, false).await;
 
         // Generate another secret ID
-        let (secret_id, _secret_id_accessor) = generate_secret_id(core, token, path, role_name).await;
+        let (secret_id, _secret_id_accessor) =
+            generate_secret_id(core, token, path, role_name).await;
 
         // Ensure login works
         let _ = test_login(core, path, role_id, &secret_id, true).await;
@@ -371,7 +424,8 @@ mod test {
         let _ = test_login(core, path, role_id, &secret_id, false).await;
 
         // Generate another secret ID
-        let (secret_id, _secret_id_accessor) = generate_secret_id(core, token, path, role_name).await;
+        let (secret_id, _secret_id_accessor) =
+            generate_secret_id(core, token, path, role_name).await;
 
         // Ensure login works
         let _ = test_login(core, path, role_id, &secret_id, true).await;
@@ -385,7 +439,12 @@ mod test {
         let resp = test_write_api(
             core,
             token,
-            format!("auth/{}/role/{}/secret-id/destroy", path, role_name.to_lowercase()).as_str(),
+            format!(
+                "auth/{}/role/{}/secret-id/destroy",
+                path,
+                role_name.to_lowercase()
+            )
+            .as_str(),
             true,
             data,
         )
@@ -396,7 +455,8 @@ mod test {
         let _ = test_login(core, path, role_id, &secret_id, false).await;
 
         // Generate another secret ID
-        let (secret_id, _secret_id_accessor) = generate_secret_id(core, token, path, role_name).await;
+        let (secret_id, _secret_id_accessor) =
+            generate_secret_id(core, token, path, role_name).await;
 
         // Ensure login works
         let _ = test_login(core, path, role_id, &secret_id, true).await;
@@ -410,7 +470,12 @@ mod test {
         let resp = test_write_api(
             core,
             token,
-            format!("auth/{}/role/{}/secret-id/destroy", path, role_name.to_uppercase()).as_str(),
+            format!(
+                "auth/{}/role/{}/secret-id/destroy",
+                path,
+                role_name.to_uppercase()
+            )
+            .as_str(),
             true,
             data,
         )
@@ -421,7 +486,8 @@ mod test {
         let _ = test_login(core, path, role_id, &secret_id, false).await;
 
         // Generate another secret ID
-        let (secret_id, _secret_id_accessor) = generate_secret_id(core, token, path, role_name).await;
+        let (secret_id, _secret_id_accessor) =
+            generate_secret_id(core, token, path, role_name).await;
 
         // Ensure login works
         let _ = test_login(core, path, role_id, &secret_id, true).await;
@@ -471,16 +537,27 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let resp =
-            test_write_api(core, token, format!("auth/{}/role/{}", path, role_name).as_str(), true, Some(data.clone()))
-                .await;
+        let resp = test_write_api(
+            core,
+            token,
+            format!("auth/{}/role/{}", path, role_name).as_str(),
+            true,
+            Some(data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Get the role field
         let resp = test_read_role(core, token, path, role_name).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["bind_secret_id"].as_bool().unwrap(), data["bind_secret_id"].as_bool().unwrap());
-        assert_eq!(resp_data["secret_id_num_uses"].as_i64().unwrap(), data["secret_id_num_uses"].as_i64().unwrap());
+        assert_eq!(
+            resp_data["bind_secret_id"].as_bool().unwrap(),
+            data["bind_secret_id"].as_bool().unwrap()
+        );
+        assert_eq!(
+            resp_data["secret_id_num_uses"].as_i64().unwrap(),
+            data["secret_id_num_uses"].as_i64().unwrap()
+        );
         assert_eq!(
             resp_data["secret_id_ttl"].as_u64().unwrap(),
             data["secret_id_ttl"].as_duration().unwrap().as_secs()
@@ -489,27 +566,47 @@ mod test {
             resp_data["token_policies"].as_comma_string_slice().unwrap(),
             data["token_policies"].as_comma_string_slice().unwrap()
         );
-        assert_eq!(resp_data["token_ttl"].as_u64().unwrap(), data["token_ttl"].as_duration().unwrap().as_secs());
+        assert_eq!(
+            resp_data["token_ttl"].as_u64().unwrap(),
+            data["token_ttl"].as_duration().unwrap().as_secs()
+        );
         assert_eq!(
             resp_data["token_max_ttl"].as_u64().unwrap(),
             data["token_max_ttl"].as_duration().unwrap().as_secs()
         );
-        assert_eq!(resp_data["token_num_uses"].as_i64().unwrap(), data["token_num_uses"].as_i64().unwrap());
-        assert_eq!(resp_data["token_type"].as_str().unwrap(), data["token_type"].as_str().unwrap());
+        assert_eq!(
+            resp_data["token_num_uses"].as_i64().unwrap(),
+            data["token_num_uses"].as_i64().unwrap()
+        );
+        assert_eq!(
+            resp_data["token_type"].as_str().unwrap(),
+            data["token_type"].as_str().unwrap()
+        );
 
         // Update the role
         data["token_num_uses"] = Value::from(0);
         data["token_type"] = Value::from("batch");
-        let resp =
-            test_write_api(core, token, format!("auth/{}/role/{}", path, role_name).as_str(), true, Some(data.clone()))
-                .await;
+        let resp = test_write_api(
+            core,
+            token,
+            format!("auth/{}/role/{}", path, role_name).as_str(),
+            true,
+            Some(data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Get the role field
         let resp = test_read_role(core, token, path, role_name).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["bind_secret_id"].as_bool().unwrap(), data["bind_secret_id"].as_bool().unwrap());
-        assert_eq!(resp_data["secret_id_num_uses"].as_i64().unwrap(), data["secret_id_num_uses"].as_i64().unwrap());
+        assert_eq!(
+            resp_data["bind_secret_id"].as_bool().unwrap(),
+            data["bind_secret_id"].as_bool().unwrap()
+        );
+        assert_eq!(
+            resp_data["secret_id_num_uses"].as_i64().unwrap(),
+            data["secret_id_num_uses"].as_i64().unwrap()
+        );
         assert_eq!(
             resp_data["secret_id_ttl"].as_u64().unwrap(),
             data["secret_id_ttl"].as_duration().unwrap().as_secs()
@@ -518,23 +615,39 @@ mod test {
             resp_data["token_policies"].as_comma_string_slice().unwrap(),
             data["token_policies"].as_comma_string_slice().unwrap()
         );
-        assert_eq!(resp_data["token_ttl"].as_u64().unwrap(), data["token_ttl"].as_duration().unwrap().as_secs());
+        assert_eq!(
+            resp_data["token_ttl"].as_u64().unwrap(),
+            data["token_ttl"].as_duration().unwrap().as_secs()
+        );
         assert_eq!(
             resp_data["token_max_ttl"].as_u64().unwrap(),
             data["token_max_ttl"].as_duration().unwrap().as_secs()
         );
-        assert_eq!(resp_data["token_num_uses"].as_i64().unwrap(), data["token_num_uses"].as_i64().unwrap());
-        assert_eq!(resp_data["token_type"].as_str().unwrap(), data["token_type"].as_str().unwrap());
+        assert_eq!(
+            resp_data["token_num_uses"].as_i64().unwrap(),
+            data["token_num_uses"].as_i64().unwrap()
+        );
+        assert_eq!(
+            resp_data["token_type"].as_str().unwrap(),
+            data["token_type"].as_str().unwrap()
+        );
 
         // Get the role-id
-        let resp = test_read_api(core, token, format!("auth/{}/role/{}/role-id", path, role_name).as_str(), true).await;
+        let resp = test_read_api(
+            core,
+            token,
+            format!("auth/{}/role/{}/role-id", path, role_name).as_str(),
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data;
         let role_id = resp_data.unwrap()["role_id"].clone();
         let role_id = role_id.as_str().unwrap();
 
         // Create a secret-id
-        let (secret_id, _secret_id_accessor) = generate_secret_id(core, token, path, role_name).await;
+        let (secret_id, _secret_id_accessor) =
+            generate_secret_id(core, token, path, role_name).await;
 
         // Ensure login works
         let _ = test_login(core, path, role_id, &secret_id, true).await;
@@ -545,9 +658,13 @@ mod test {
         println!("resp_data: {:?}", resp_data);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_approle_module() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_credential_approle_module").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_credential_approle_module").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle/").await;

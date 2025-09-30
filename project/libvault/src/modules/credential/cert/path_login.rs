@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use foreign_types::ForeignType;
 use glob::Pattern;
 use openssl::{
@@ -8,15 +8,16 @@ use openssl::{
     nid::Nid,
     stack::Stack,
     x509::{
+        X509, X509StoreContext, X509VerifyResult,
         store::{X509Store, X509StoreBuilder},
         verify::X509VerifyFlags,
-        X509StoreContext, X509VerifyResult, X509,
     },
 };
 use openssl_sys::{
-    ASN1_STRING_get0_data, ASN1_STRING_length, OBJ_obj2txt, X509_EXTENSION_get_data, X509_EXTENSION_get_object,
-    X509_get_ext, X509_get_ext_count, X509_V_ERR_CERT_HAS_EXPIRED, X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT,
-    X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY, XKU_ANYEKU, XKU_SSL_CLIENT,
+    ASN1_STRING_get0_data, ASN1_STRING_length, OBJ_obj2txt, X509_EXTENSION_get_data,
+    X509_EXTENSION_get_object, X509_V_ERR_CERT_HAS_EXPIRED, X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT,
+    X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY, X509_get_ext, X509_get_ext_count, XKU_ANYEKU,
+    XKU_SSL_CLIENT,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,11 +26,13 @@ use crate::{
     context::Context,
     errors::RvError,
     logical::{Auth, Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal, rv_error_response, rv_error_string,
+    new_fields, new_fields_internal, new_path, new_path_internal, rv_error_response,
+    rv_error_string,
     utils::{
         self,
         cert::{
-            deserialize_vec_x509, has_x509_ext_key_usage, has_x509_ext_key_usage_flag, is_ca_cert, serialize_vec_x509,
+            deserialize_vec_x509, has_x509_ext_key_usage, has_x509_ext_key_usage_flag, is_ca_cert,
+            serialize_vec_x509,
         },
         cidr::remote_addr_is_ok,
         ocsp::{self, OcspConfig},
@@ -47,7 +50,10 @@ struct Asn1StringData {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParsedCert {
     pub entry: CertEntry,
-    #[serde(serialize_with = "serialize_vec_x509", deserialize_with = "deserialize_vec_x509")]
+    #[serde(
+        serialize_with = "serialize_vec_x509",
+        deserialize_with = "deserialize_vec_x509"
+    )]
     pub certs: Vec<X509>,
 }
 
@@ -75,7 +81,11 @@ impl CertBackend {
 
 #[maybe_async::maybe_async]
 impl CertBackendInner {
-    pub async fn login(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn login(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let config = self.get_config(req).await?;
         if config.is_none() {
             return Err(RvError::ErrCredentailNotConfig);
@@ -102,11 +112,20 @@ impl CertBackendInner {
             .transpose()?
             .unwrap_or_else(|| "".into());
 
-        let serial_number = client_cert.serial_number().to_bn().and_then(|bn| bn.to_dec_str())?;
+        let serial_number = client_cert
+            .serial_number()
+            .to_bn()
+            .and_then(|bn| bn.to_dec_str())?;
         let sn = String::from_utf8_lossy(serial_number.as_bytes()).to_string();
 
-        let subject_key_id = client_cert.subject_key_id().map(|asn1_ref| asn1_ref.as_slice()).unwrap_or(b"");
-        let authority_key_id = client_cert.authority_key_id().map(|asn1_ref| asn1_ref.as_slice()).unwrap_or(b"");
+        let subject_key_id = client_cert
+            .subject_key_id()
+            .map(|asn1_ref| asn1_ref.as_slice())
+            .unwrap_or(b"");
+        let authority_key_id = client_cert
+            .authority_key_id()
+            .map(|asn1_ref| asn1_ref.as_slice())
+            .unwrap_or(b"");
 
         let skid_base64 = STANDARD.encode(subject_key_id);
         let akid_base64 = STANDARD.encode(authority_key_id);
@@ -116,35 +135,56 @@ impl CertBackendInner {
         let matched = self.verify_credentials(req).await?;
 
         if !matched.entry.token_bound_cidrs.is_empty() {
-            let token_bound_cidrs: Vec<Box<dyn SockAddr>> =
-                matched.entry.token_bound_cidrs.iter().map(|s| s.sock_addr.clone()).collect();
+            let token_bound_cidrs: Vec<Box<dyn SockAddr>> = matched
+                .entry
+                .token_bound_cidrs
+                .iter()
+                .map(|s| s.sock_addr.clone())
+                .collect();
             if !remote_addr_is_ok(&conn.peer_addr, &token_bound_cidrs) {
                 return Err(RvError::ErrPermissionDenied);
             }
         }
 
-        let mut auth = Auth { display_name: matched.entry.display_name.clone(), ..Default::default() };
+        let mut auth = Auth {
+            display_name: matched.entry.display_name.clone(),
+            ..Default::default()
+        };
 
-        auth.metadata.insert("cert_name".into(), matched.entry.name.clone());
+        auth.metadata
+            .insert("cert_name".into(), matched.entry.name.clone());
         auth.metadata.insert("common_name".into(), common_name);
         auth.metadata.insert("serial_number".into(), sn);
         auth.metadata.insert("subject_key_id".into(), skid_hex);
         auth.metadata.insert("authority_key_id".into(), akid_hex);
 
-        auth.metadata.extend(self.certificate_extensions_metadata(client_cert, &matched));
+        auth.metadata
+            .extend(self.certificate_extensions_metadata(client_cert, &matched));
 
-        auth.internal_data.insert("subject_key_id".into(), skid_base64);
-        auth.internal_data.insert("authority_key_id".into(), akid_base64);
+        auth.internal_data
+            .insert("subject_key_id".into(), skid_base64);
+        auth.internal_data
+            .insert("authority_key_id".into(), akid_base64);
 
         matched.entry.populate_token_auth(&mut auth);
 
-        let resp = Response { auth: Some(auth), ..Response::default() };
+        let resp = Response {
+            auth: Some(auth),
+            ..Response::default()
+        };
 
         Ok(Some(resp))
     }
 
-    pub async fn login_renew(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
-        let config = self.get_config(req).await?.ok_or(RvError::ErrCredentailNotConfig)?;
+    pub async fn login_renew(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let config = self
+            .get_config(req)
+            .await?
+            .ok_or(RvError::ErrCredentailNotConfig)?;
 
         if req.connection.is_none() {
             return Err(rv_error_response!("tls connection required"));
@@ -159,11 +199,15 @@ impl CertBackendInner {
             let subject_key_id = auth
                 .metadata
                 .get("subject_key_id")
-                .ok_or(rv_error_response!("invalid request, not found subject_key_id"))?;
-            let authority_key_id = auth
-                .metadata
-                .get("authority_key_id")
-                .ok_or(rv_error_response!("invalid request, not found authority_key_id"))?;
+                .ok_or(rv_error_response!(
+                    "invalid request, not found subject_key_id"
+                ))?;
+            let authority_key_id =
+                auth.metadata
+                    .get("authority_key_id")
+                    .ok_or(rv_error_response!(
+                        "invalid request, not found authority_key_id"
+                    ))?;
 
             let _matched = self.verify_credentials(req).await?;
 
@@ -176,9 +220,14 @@ impl CertBackendInner {
                 .and_then(|cert| cert.first())
                 .ok_or(rv_error_response!("no client certificate found"))?;
 
-            let cert_subject_key_id = client_cert.subject_key_id().map(|asn1_ref| asn1_ref.as_slice()).unwrap_or(b"");
-            let cert_authority_key_id =
-                client_cert.authority_key_id().map(|asn1_ref| asn1_ref.as_slice()).unwrap_or(b"");
+            let cert_subject_key_id = client_cert
+                .subject_key_id()
+                .map(|asn1_ref| asn1_ref.as_slice())
+                .unwrap_or(b"");
+            let cert_authority_key_id = client_cert
+                .authority_key_id()
+                .map(|asn1_ref| asn1_ref.as_slice())
+                .unwrap_or(b"");
 
             let skid_hex = utils::hex_encode_with_colon(cert_subject_key_id);
             let akid_hex = utils::hex_encode_with_colon(cert_authority_key_id);
@@ -192,8 +241,10 @@ impl CertBackendInner {
             }
         }
 
-        let cert_name =
-            auth.metadata.get("cert_name").ok_or(rv_error_response!("invalid request, not found cert_name"))?;
+        let cert_name = auth
+            .metadata
+            .get("cert_name")
+            .ok_or(rv_error_response!("invalid request, not found cert_name"))?;
 
         let cert = self.get_cert(req, cert_name.as_str()).await?;
         if cert.is_none() {
@@ -210,7 +261,10 @@ impl CertBackendInner {
         auth.ttl = cert.token_ttl;
         auth.max_ttl = cert.token_max_ttl;
 
-        Ok(Some(Response { auth: Some(auth), ..Response::default() }))
+        Ok(Some(Response {
+            auth: Some(auth),
+            ..Response::default()
+        }))
     }
 
     async fn verify_credentials(&self, req: &Request) -> Result<ParsedCert, RvError> {
@@ -227,10 +281,15 @@ impl CertBackendInner {
             .auth
             .as_ref()
             .and_then(|auth| auth.metadata.get("cert_name").cloned())
-            .or_else(|| req.get_data("name").ok().and_then(|name| name.as_str().map(|s| s.to_string())))
+            .or_else(|| {
+                req.get_data("name")
+                    .ok()
+                    .and_then(|name| name.as_str().map(|s| s.to_string()))
+            })
             .unwrap_or_default();
 
-        let (roots, trusted, trusted_non_ca, ocsp_config) = self.load_trusted_certs(req, &cert_name).await?;
+        let (roots, trusted, trusted_non_ca, ocsp_config) =
+            self.load_trusted_certs(req, &cert_name).await?;
 
         let trusted_chains = self.validate_cert(&roots, peer_tls_cert)?;
 
@@ -262,7 +321,9 @@ impl CertBackendInner {
                      verification:: {ret_err:?}"
                 )));
             }
-            return Err(rv_error_response!("invalid certificate or no client certificate supplied"));
+            return Err(rv_error_response!(
+                "invalid certificate or no client certificate supplied"
+            ));
         }
 
         for trust in trusted.iter() {
@@ -282,7 +343,9 @@ impl CertBackendInner {
             )));
         }
 
-        Err(rv_error_response!("no chain matching all constraints could be found for this login certificate"))
+        Err(rv_error_response!(
+            "no chain matching all constraints could be found for this login certificate"
+        ))
     }
 
     async fn load_trusted_certs(
@@ -290,8 +353,11 @@ impl CertBackendInner {
         req: &Request,
         cert_name: &str,
     ) -> Result<(X509Store, Vec<ParsedCert>, Vec<ParsedCert>, OcspConfig), RvError> {
-        let names: Vec<String> =
-            if !cert_name.is_empty() { vec![cert_name.to_string()] } else { req.storage_list("cert/").await? };
+        let names: Vec<String> = if !cert_name.is_empty() {
+            vec![cert_name.to_string()]
+        } else {
+            req.storage_list("cert/").await?
+        };
 
         let mut trusted: Vec<ParsedCert> = Vec::new();
         let mut trusted_non_ca: Vec<ParsedCert> = Vec::new();
@@ -309,7 +375,9 @@ impl CertBackendInner {
 
                 if entry.ocsp_enabled {
                     ocsp_config.enable = true;
-                    ocsp_config.servers_override.extend(entry.ocsp_servers_override.iter().cloned());
+                    ocsp_config
+                        .servers_override
+                        .extend(entry.ocsp_servers_override.iter().cloned());
                     ocsp_config.failure_mode = if entry.ocsp_fail_open {
                         ocsp::FailureMode::FailOpenTrue
                     } else {
@@ -332,7 +400,12 @@ impl CertBackendInner {
             }
         }
 
-        Ok((root_store_builder.build(), trusted, trusted_non_ca, ocsp_config))
+        Ok((
+            root_store_builder.build(),
+            trusted,
+            trusted_non_ca,
+            ocsp_config,
+        ))
     }
 
     fn validate_cert(&self, roots: &X509Store, peer_certs: &[X509]) -> Result<Vec<X509>, RvError> {
@@ -340,31 +413,36 @@ impl CertBackendInner {
             return Ok(Vec::new());
         }
         let mut stack = Stack::<X509>::new()?;
-        peer_certs.iter().skip(1).try_for_each(|crt| stack.push(crt.clone()))?;
+        peer_certs
+            .iter()
+            .skip(1)
+            .try_for_each(|crt| stack.push(crt.clone()))?;
 
         let mut context = X509StoreContext::new()?;
-        let (verified_res, verified_error, verified_chains) = context.init(roots, &peer_certs[0], &stack, |ctx| {
-            let ret = ctx.verify_cert()?;
-            let verified_chains: Vec<X509> = ctx
-                .chain()
-                .map(|chain| {
-                    chain
-                        .iter()
-                        .map(|crt| crt.to_owned())
-                        .filter(|crt| {
-                            !has_x509_ext_key_usage(crt)
-                                || has_x509_ext_key_usage_flag(crt, XKU_ANYEKU | XKU_SSL_CLIENT)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+        let (verified_res, verified_error, verified_chains) =
+            context.init(roots, &peer_certs[0], &stack, |ctx| {
+                let ret = ctx.verify_cert()?;
+                let verified_chains: Vec<X509> = ctx
+                    .chain()
+                    .map(|chain| {
+                        chain
+                            .iter()
+                            .map(|crt| crt.to_owned())
+                            .filter(|crt| {
+                                !has_x509_ext_key_usage(crt)
+                                    || has_x509_ext_key_usage_flag(crt, XKU_ANYEKU | XKU_SSL_CLIENT)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-            Ok((ret, ctx.error(), verified_chains))
-        })?;
+                Ok((ret, ctx.error(), verified_chains))
+            })?;
 
         if !verified_res {
             return match verified_error.as_raw() {
-                X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT | X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY => {
+                X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT
+                | X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY => {
                     if peer_certs[0].not_after() <= Asn1Time::days_from_now(0)? {
                         Err(rv_error_response!(&unsafe {
                             X509VerifyResult::from_raw(X509_V_ERR_CERT_HAS_EXPIRED).to_string()
@@ -409,7 +487,11 @@ impl CertBackendInner {
             return true;
         }
 
-        let common_name = match client_cert.subject_name().entries_by_nid(Nid::COMMONNAME).next() {
+        let common_name = match client_cert
+            .subject_name()
+            .entries_by_nid(Nid::COMMONNAME)
+            .next()
+        {
             Some(entry) => match entry.data().as_utf8() {
                 Ok(cn_utf8) => cn_utf8.to_string(),
                 Err(_) => return false,
@@ -428,15 +510,15 @@ impl CertBackendInner {
 
                     if let Some(sans) = &subject_alt_names {
                         for san in sans {
-                            if let Some(dnsname) = san.dnsname() {
-                                if pattern.matches(dnsname) {
-                                    return true;
-                                }
+                            if let Some(dnsname) = san.dnsname()
+                                && pattern.matches(dnsname)
+                            {
+                                return true;
                             }
-                            if let Some(email) = san.email() {
-                                if pattern.matches(email) {
-                                    return true;
-                                }
+                            if let Some(email) = san.email()
+                                && pattern.matches(email)
+                            {
+                                return true;
                             }
                         }
                     }
@@ -453,7 +535,11 @@ impl CertBackendInner {
             return true;
         }
 
-        let common_name = match client_cert.subject_name().entries_by_nid(Nid::COMMONNAME).next() {
+        let common_name = match client_cert
+            .subject_name()
+            .entries_by_nid(Nid::COMMONNAME)
+            .next()
+        {
             Some(entry) => match entry.data().as_utf8() {
                 Ok(cn_utf8) => cn_utf8.to_string(),
                 Err(_) => return false,
@@ -487,10 +573,10 @@ impl CertBackendInner {
                 Ok(pattern) => {
                     if let Some(sans) = &subject_alt_names {
                         for san in sans {
-                            if let Some(dnsname) = san.dnsname() {
-                                if pattern.matches(dnsname) {
-                                    return true;
-                                }
+                            if let Some(dnsname) = san.dnsname()
+                                && pattern.matches(dnsname)
+                            {
+                                return true;
                             }
                         }
                     }
@@ -514,10 +600,10 @@ impl CertBackendInner {
                 Ok(pattern) => {
                     if let Some(sans) = &subject_alt_names {
                         for san in sans {
-                            if let Some(email) = san.email() {
-                                if pattern.matches(email) {
-                                    return true;
-                                }
+                            if let Some(email) = san.email()
+                                && pattern.matches(email)
+                            {
+                                return true;
                             }
                         }
                     }
@@ -538,10 +624,12 @@ impl CertBackendInner {
 
         for allowed_uri in &config.entry.allowed_uri_sans {
             if let Ok(pattern) = Pattern::new(allowed_uri) {
-                if let Some(sans) = &subject_alt_names {
-                    if sans.iter().any(|san| san.uri().map_or(false, |uri| pattern.matches(uri))) {
-                        return true;
-                    }
+                if let Some(sans) = &subject_alt_names
+                    && sans
+                        .iter()
+                        .any(|san| san.uri().map_or(false, |uri| pattern.matches(uri)))
+                {
+                    return true;
                 }
             } else {
                 return false;
@@ -556,7 +644,11 @@ impl CertBackendInner {
             return true;
         }
 
-        let ou_name = match client_cert.subject_name().entries_by_nid(Nid::ORGANIZATIONALUNITNAME).next() {
+        let ou_name = match client_cert
+            .subject_name()
+            .entries_by_nid(Nid::ORGANIZATIONALUNITNAME)
+            .next()
+        {
             Some(entry) => match entry.data().as_utf8() {
                 Ok(ou_utf8) => ou_utf8.to_string(),
                 Err(_) => return false,
@@ -593,7 +685,8 @@ impl CertBackendInner {
 
                 let obj = X509_EXTENSION_get_object(ext);
                 let mut oid_buf = [0; 128];
-                let oid_len = OBJ_obj2txt(oid_buf.as_mut_ptr() as *mut _, oid_buf.len() as i32, obj, 1);
+                let oid_len =
+                    OBJ_obj2txt(oid_buf.as_mut_ptr() as *mut _, oid_buf.len() as i32, obj, 1);
                 let oid = std::str::from_utf8(&oid_buf[..oid_len as usize]).unwrap();
                 let ext_data = X509_EXTENSION_get_data(ext);
                 let ext_value = ASN1_STRING_get0_data(ext_data as *mut _);
@@ -635,7 +728,9 @@ impl CertBackendInner {
                 let is_match = client_ext_map
                     .get(req_ext[0])
                     .and_then(|client_ext_value| {
-                        Pattern::new(req_ext[1]).ok().filter(|pattern| pattern.matches(client_ext_value))
+                        Pattern::new(req_ext[1])
+                            .ok()
+                            .filter(|pattern| pattern.matches(client_ext_value))
                     })
                     .is_some();
 
@@ -648,7 +743,11 @@ impl CertBackendInner {
         true
     }
 
-    fn certificate_extensions_metadata(&self, client_cert: &X509, config: &ParsedCert) -> HashMap<String, String> {
+    fn certificate_extensions_metadata(
+        &self,
+        client_cert: &X509,
+        config: &ParsedCert,
+    ) -> HashMap<String, String> {
         let mut metadata_map: HashMap<String, String> = HashMap::new();
         if config.entry.allowed_metadata_extensions.is_empty() {
             return metadata_map;
@@ -667,7 +766,8 @@ impl CertBackendInner {
 
                 let obj = X509_EXTENSION_get_object(ext);
                 let mut oid_buf = [0; 128];
-                let oid_len = OBJ_obj2txt(oid_buf.as_mut_ptr() as *mut _, oid_buf.len() as i32, obj, 1);
+                let oid_len =
+                    OBJ_obj2txt(oid_buf.as_mut_ptr() as *mut _, oid_buf.len() as i32, obj, 1);
                 let oid = std::str::from_utf8(&oid_buf[..oid_len as usize]).unwrap();
                 if let Some(metadata_key) = allowed_oid_map.get(oid) {
                     let ext_data = X509_EXTENSION_get_data(ext);
@@ -707,10 +807,10 @@ impl CertBackendInner {
                 return false;
             }
 
-            if let Ok(bad_crls) = self.find_serial_in_crls(serial.unwrap()) {
-                if !bad_crls.is_empty() {
-                    return true;
-                }
+            if let Ok(bad_crls) = self.find_serial_in_crls(serial.unwrap())
+                && !bad_crls.is_empty()
+            {
+                return true;
             }
         }
 

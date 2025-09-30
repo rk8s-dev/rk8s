@@ -1,32 +1,35 @@
 use std::{
     default::Default,
-    env, fs,
+    fs,
     fs::File,
     io::Read,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 
+use crate::{
+    EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_LOAD_CONFIG_FAILURE, EXIT_CODE_OK, RustyVault,
+    cli::{command, config},
+    errors::RvError,
+    http,
+    metrics::{manager::MetricsManager, middleware::metrics_midleware},
+    storage,
+};
 use actix_web::{
+    App, HttpResponse, HttpServer,
     middleware::{self, from_fn},
-    web, App, HttpResponse, HttpServer,
+    web,
 };
 use anyhow::format_err;
 use clap::Parser;
 use derive_more::Deref;
 use openssl::{
     ssl::{SslAcceptor, SslFiletype, SslMethod, SslOptions, SslVerifyMode, SslVersion},
-    x509::{store::X509StoreBuilder, verify::X509VerifyFlags, X509},
+    x509::{X509, store::X509StoreBuilder, verify::X509VerifyFlags},
 };
 use sysexits::ExitCode;
-
-use crate::{
-    cli::{command, config},
-    errors::RvError,
-    http,
-    metrics::{manager::MetricsManager, middleware::metrics_midleware},
-    storage, RustyVault, EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_LOAD_CONFIG_FAILURE, EXIT_CODE_OK,
-};
+use tracing_log::LogTracer;
+use tracing_subscriber::EnvFilter;
 
 pub const WORK_DIR_PATH_DEFAULT: &str = "/tmp/rusty_vault";
 
@@ -77,8 +80,13 @@ impl Server {
             return Err(RvError::ErrConfigListenerNotFound);
         }
 
-        env::set_var("RUST_LOG", config.log_level.as_str());
-        env_logger::init();
+        LogTracer::init()?;
+        tracing_subscriber::fmt::fmt()
+            .with_env_filter(
+                EnvFilter::try_new(&config.log_level).unwrap_or(EnvFilter::new("INFO")),
+            )
+            .with_thread_ids(true)
+            .init();
 
         let (_, storage) = config.storage.iter().next().unwrap();
         let (_, listener) = config.listener.iter().next().unwrap();
@@ -127,7 +135,7 @@ impl Server {
                 .user(user.as_str())
                 .group(group.as_str())
                 .umask(0o027)
-                .stdout(log_file.try_clone().unwrap())
+                .stdout(log_file.try_clone()?)
                 .stderr(log_file)
                 .pid_file(pid_path.clone())
                 .chown_pid_file(true)
@@ -136,20 +144,27 @@ impl Server {
             match daemonize.start() {
                 Ok(_) => {
                     let pid = std::fs::read_to_string(pid_path)?;
-                    log::info!("The rusty_vault server daemon process started successfully, pid is {pid}");
+                    log::info!(
+                        "The rusty_vault server daemon process started successfully, pid is {pid}"
+                    );
                     log::debug!("run user: {user}, group: {group}");
                 }
                 Err(e) => log::error!("Error, {e}"),
             }
         }
 
-        log::debug!("config_path: {}, work_dir_path: {}", config_path.to_string_lossy(), work_dir.as_str());
+        log::debug!(
+            "config_path: {}, work_dir_path: {}",
+            config_path.to_string_lossy(),
+            work_dir.as_str()
+        );
 
         let server = actix_rt::System::new();
 
         let backend = storage::new_backend(storage.stype.as_str(), &storage.config).unwrap();
 
-        let metrics_manager = Arc::new(RwLock::new(MetricsManager::new(config.collection_interval)));
+        let metrics_manager =
+            Arc::new(RwLock::new(MetricsManager::new(config.collection_interval)));
         let system_metrics = metrics_manager.read().unwrap().system_metrics.clone();
 
         let rvault = RustyVault::new(backend, Some(&config))?;
@@ -182,10 +197,18 @@ impl Server {
             let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())?;
             builder
                 .set_private_key_file(key_file, SslFiletype::PEM)
-                .map_err(|err| format_err!("unable to read proxy key {} - {}", key_file.display(), err))?;
+                .map_err(|err| {
+                    format_err!("unable to read proxy key {} - {}", key_file.display(), err)
+                })?;
             builder
                 .set_certificate_chain_file(cert_file)
-                .map_err(|err| format_err!("unable to read proxy cert {} - {}", cert_file.display(), err))?;
+                .map_err(|err| {
+                    format_err!(
+                        "unable to read proxy cert {} - {}",
+                        cert_file.display(),
+                        err
+                    )
+                })?;
             builder.check_private_key()?;
 
             builder.set_min_proto_version(Some(listener.tls_min_version))?;
@@ -196,8 +219,9 @@ impl Server {
 
             if listener.tls_max_version == SslVersion::TLS1_3 {
                 builder.clear_options(SslOptions::NO_TLSV1_3);
-                builder
-                    .set_ciphersuites("TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256")?;
+                builder.set_ciphersuites(
+                    "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+                )?;
             }
 
             if !listener.tls_disable_client_certs {
@@ -205,7 +229,10 @@ impl Server {
             }
 
             if listener.tls_require_and_verify_client_cert {
-                builder.set_verify_callback(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT, move |p, _x| p);
+                builder.set_verify_callback(
+                    SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+                    move |p, _x| p,
+                );
 
                 if !listener.tls_client_ca_file.is_empty() {
                     let mut store = X509StoreBuilder::new()?;
@@ -215,7 +242,9 @@ impl Server {
                     client_ca_file.read_to_end(&mut client_ca_file_bytes)?;
                     let client_ca_x509s = X509::stack_from_pem(&client_ca_file_bytes)?;
 
-                    client_ca_x509s.iter().try_for_each(|cert| store.add_cert(cert.clone()))?;
+                    client_ca_x509s
+                        .iter()
+                        .try_for_each(|cert| store.add_cert(cert.clone()))?;
 
                     store.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
                     builder.set_verify_cert_store(store.build())?;

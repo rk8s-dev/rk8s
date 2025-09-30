@@ -17,7 +17,7 @@ impl XlineBackend {
             .get("endpoints")
             .and_then(|v| v.as_array())
             .and_then(|v| {
-                v.into_iter()
+                v.iter()
                     .map(|e| e.as_str().map(|e| e.to_string()))
                     .collect::<Option<Vec<_>>>()
             })
@@ -55,7 +55,7 @@ impl Backend for XlineBackend {
             .await?;
         Ok(resp
             .kvs()
-            .into_iter()
+            .iter()
             .map(|e| {
                 let key = String::from_utf8_lossy(e.key());
                 let key = key.trim_start_matches(prefix);
@@ -64,7 +64,7 @@ impl Backend for XlineBackend {
                     Some(idx) => &key[0..idx + 1],
                     None => key,
                 }
-                    .to_string()
+                .to_string()
             })
             .unique()
             .collect())

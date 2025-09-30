@@ -30,7 +30,7 @@ pub mod response;
 pub mod secret;
 
 pub use auth::Auth;
-pub use backend::{LogicalBackend, CTX_KEY_BACKEND_PATH};
+pub use backend::{CTX_KEY_BACKEND_PATH, LogicalBackend};
 pub use connection::Connection;
 pub use field::{Field, FieldType};
 pub use lease::Lease;

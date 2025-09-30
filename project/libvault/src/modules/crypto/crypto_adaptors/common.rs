@@ -4,8 +4,8 @@
 use openssl::symm::Cipher;
 
 use crate::modules::{
-    crypto::{AESKeySize, CipherMode},
     RvError,
+    crypto::{AESKeySize, CipherMode},
 };
 
 macro_rules! common_aes_set_aad {
@@ -88,7 +88,14 @@ macro_rules! common_aes_new {
             }
         }
 
-        return Ok(AES { alg: (k_size, c_mode), key: aes_key, iv: aes_iv, aad: None, ctx: None, tag: None });
+        return Ok(AES {
+            alg: (k_size, c_mode),
+            key: aes_key,
+            iv: aes_iv,
+            aad: None,
+            ctx: None,
+            tag: None,
+        });
     };
 }
 
@@ -98,7 +105,9 @@ macro_rules! common_get_key_iv {
     };
 }
 
-pub fn common_internal_get_cipher_alg(alg: &(AESKeySize, CipherMode)) -> Result<(Cipher, bool), RvError> {
+pub fn common_internal_get_cipher_alg(
+    alg: &(AESKeySize, CipherMode),
+) -> Result<(Cipher, bool), RvError> {
     let cipher;
     let mut aead = false;
 
@@ -137,8 +146,14 @@ macro_rules! common_aes_encrypt {
         } else {
             // aes_xxx_gcm's tag is at most 16-bytes long.
             let tag: &mut [u8] = &mut [0; 16];
-            let ciphertext =
-                encrypt_aead(cipher, &$aes.key, Some(&$aes.iv), &$aes.aad.clone().unwrap(), $plaintext, tag)?;
+            let ciphertext = encrypt_aead(
+                cipher,
+                &$aes.key,
+                Some(&$aes.iv),
+                &$aes.aad.clone().unwrap(),
+                $plaintext,
+                tag,
+            )?;
             $aes.tag = Some(tag.to_vec());
             return Ok(ciphertext.to_vec());
         }
@@ -188,7 +203,11 @@ macro_rules! common_aes_encrypt_update {
         if $aes.ctx.is_none() {
             // init adaptor ctx if it's not inited.
             let encrypter = Crypter::new(cipher, Mode::Encrypt, &$aes.key, Some(&$aes.iv))?;
-            let adaptor_ctx = AdaptorCTX { ctx: encrypter, tag_set: false, aad_set: false };
+            let adaptor_ctx = AdaptorCTX {
+                ctx: encrypter,
+                tag_set: false,
+                aad_set: false,
+            };
 
             $aes.ctx = Some(adaptor_ctx);
         }
@@ -208,7 +227,12 @@ macro_rules! common_aes_encrypt_update {
         // error information by unwrapping it.
         // we also can't use the question mark operatior since the error codes are differently
         // defined in RustyVault and underlying adaptor, such as rust-openssl.
-        let count = $aes.ctx.as_mut().unwrap().ctx.update(&$plaintext, &mut $ciphertext[..])?;
+        let count = $aes
+            .ctx
+            .as_mut()
+            .unwrap()
+            .ctx
+            .update(&$plaintext, &mut $ciphertext[..])?;
 
         return Ok(count);
     };
@@ -260,7 +284,11 @@ macro_rules! common_aes_decrypt_update {
         if $aes.ctx.is_none() {
             // init adaptor ctx if it's not inited.
             let encrypter = Crypter::new(cipher, Mode::Decrypt, &$aes.key, Some(&$aes.iv))?;
-            let adaptor_ctx = AdaptorCTX { ctx: encrypter, tag_set: false, aad_set: false };
+            let adaptor_ctx = AdaptorCTX {
+                ctx: encrypter,
+                tag_set: false,
+                aad_set: false,
+            };
 
             $aes.ctx = Some(adaptor_ctx);
         }
@@ -277,7 +305,13 @@ macro_rules! common_aes_decrypt_update {
 
         // do real jobs.
         // this Crypter::update returns a Result<usize, ErrorStack>, print detailed error if any.
-        match $aes.ctx.as_mut().unwrap().ctx.update(&$ciphertext, $plaintext) {
+        match $aes
+            .ctx
+            .as_mut()
+            .unwrap()
+            .ctx
+            .update(&$ciphertext, $plaintext)
+        {
             Ok(count) => {
                 return Ok(count);
             }

@@ -1,11 +1,11 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::{
     errors::RvError,
-    logical::{field::FieldTrait, Auth, Field, FieldType, Request},
+    logical::{Auth, Field, FieldType, Request, field::FieldTrait},
     new_fields, new_fields_internal,
     utils::{deserialize_duration, serialize_duration, sock_addr::SockAddrMarshaler},
 };
@@ -21,20 +21,36 @@ pub struct TokenParams {
     pub token_type: String,
 
     // The TTL to user for the token
-    #[serde(default, serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub token_ttl: Duration,
 
     // The max TTL to use for the token
-    #[serde(default, serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub token_max_ttl: Duration,
 
     // If set, the token entry will have an explicit maximum TTL set, rather than deferring to role/mount values
-    #[serde(default, serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub token_explicit_max_ttl: Duration,
 
     // If non-zero, tokens created using this role will be able to be renewed forever,
     // but will have a fixed renewal period of this value
-    #[serde(default, serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub token_period: Duration,
 
     // If set, core will not automatically add default to the policy list
@@ -121,37 +137,54 @@ or a string duration (e.g. "24h")."#
 
 impl TokenParams {
     pub fn new(token_type: &str) -> Self {
-        Self { token_type: token_type.to_string(), ..TokenParams::default() }
+        Self {
+            token_type: token_type.to_string(),
+            ..TokenParams::default()
+        }
     }
 
     pub fn parse_token_fields(&mut self, req: &Request) -> Result<(), RvError> {
         if let Ok(ttl_value) = req.get_data("token_ttl") {
-            self.token_ttl = ttl_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            self.token_ttl = ttl_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(max_ttl_value) = req.get_data("token_max_ttl") {
-            self.token_max_ttl = max_ttl_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            self.token_max_ttl = max_ttl_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(explicit_max_ttl_value) = req.get_data("token_explicit_max_ttl") {
-            self.token_explicit_max_ttl =
-                explicit_max_ttl_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            self.token_explicit_max_ttl = explicit_max_ttl_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(period_value) = req.get_data("token_period") {
-            self.token_period = period_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            self.token_period = period_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(no_default_policy_value) = req.get_data("token_no_default_policy") {
-            self.token_no_default_policy = no_default_policy_value.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
+            self.token_no_default_policy = no_default_policy_value
+                .as_bool()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(num_uses_value) = req.get_data("token_num_uses") {
-            self.token_num_uses = num_uses_value.as_u64().ok_or(RvError::ErrRequestFieldInvalid)?;
+            self.token_num_uses = num_uses_value
+                .as_u64()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(type_value) = req.get_data_or_default("token_type") {
-            let token_type = type_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
+            let token_type = type_value
+                .as_str()
+                .ok_or(RvError::ErrRequestFieldInvalid)?
+                .to_string();
             self.token_type = match token_type.as_str() {
                 "" => "default".to_string(),
                 "default-service" => "service".to_string(),
@@ -168,12 +201,15 @@ impl TokenParams {
         }
 
         if let Ok(policies_value) = req.get_data("token_policies") {
-            self.token_policies = policies_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            self.token_policies = policies_value
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(token_bound_cidrs_value) = req.get_data("token_bound_cidrs") {
-            let token_bound_cidrs =
-                token_bound_cidrs_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let token_bound_cidrs = token_bound_cidrs_value
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             self.token_bound_cidrs = token_bound_cidrs
                 .iter()
                 .map(|s| SockAddrMarshaler::from_str(s))
@@ -186,13 +222,28 @@ impl TokenParams {
     pub fn populate_token_data(&self, data: &mut Map<String, Value>) {
         data.insert("token_type".to_string(), json!(self.token_type.clone()));
         data.insert("token_ttl".to_string(), json!(self.token_ttl.as_secs()));
-        data.insert("token_max_ttl".to_string(), json!(self.token_max_ttl.as_secs()));
-        data.insert("token_explicit_max_ttl".to_string(), json!(self.token_explicit_max_ttl.as_secs()));
-        data.insert("token_period".to_string(), json!(self.token_period.as_secs()));
-        data.insert("token_no_default_policy".to_string(), json!(self.token_no_default_policy));
+        data.insert(
+            "token_max_ttl".to_string(),
+            json!(self.token_max_ttl.as_secs()),
+        );
+        data.insert(
+            "token_explicit_max_ttl".to_string(),
+            json!(self.token_explicit_max_ttl.as_secs()),
+        );
+        data.insert(
+            "token_period".to_string(),
+            json!(self.token_period.as_secs()),
+        );
+        data.insert(
+            "token_no_default_policy".to_string(),
+            json!(self.token_no_default_policy),
+        );
         data.insert("token_num_uses".to_string(), json!(self.token_num_uses));
         data.insert("token_policies".to_string(), json!(self.token_policies));
-        data.insert("token_bound_cidrs".to_string(), json!(self.token_bound_cidrs));
+        data.insert(
+            "token_bound_cidrs".to_string(),
+            json!(self.token_bound_cidrs),
+        );
     }
 
     pub fn populate_token_auth(&self, auth: &mut Auth) {
@@ -258,19 +309,44 @@ mod test {
         println!("token_params_map: {:?}", token_params_map);
 
         assert_eq!(req_body["token_type"], token_params_map["token_type"]);
-        assert_eq!(req_body["token_ttl"].as_int(), token_params_map["token_ttl"].as_int());
-        assert_eq!(req_body["token_max_ttl"].as_int(), token_params_map["token_max_ttl"].as_int());
-        assert_eq!(req_body["token_explicit_max_ttl"].as_int(), token_params_map["token_explicit_max_ttl"].as_int());
-        assert_eq!(req_body["token_no_default_policy"], token_params_map["token_no_default_policy"]);
-        assert_eq!(req_body["token_num_uses"].as_int(), token_params_map["token_num_uses"].as_int());
-        let token_policies = token_params_map["token_policies"]
-            .as_array()
-            .map(|vec| vec.iter().filter_map(|val| val.as_str().map(|s| s.to_string())).collect());
-        let token_bound_cidrs = token_params_map["token_bound_cidrs"]
-            .as_array()
-            .map(|vec| vec.iter().filter_map(|val| val.as_str().map(|s| s.to_string())).collect());
-        assert_eq!(req_body["token_policies"].as_comma_string_slice(), token_policies);
-        assert_eq!(req_body["token_bound_cidrs"].as_comma_string_slice(), token_bound_cidrs);
+        assert_eq!(
+            req_body["token_ttl"].as_int(),
+            token_params_map["token_ttl"].as_int()
+        );
+        assert_eq!(
+            req_body["token_max_ttl"].as_int(),
+            token_params_map["token_max_ttl"].as_int()
+        );
+        assert_eq!(
+            req_body["token_explicit_max_ttl"].as_int(),
+            token_params_map["token_explicit_max_ttl"].as_int()
+        );
+        assert_eq!(
+            req_body["token_no_default_policy"],
+            token_params_map["token_no_default_policy"]
+        );
+        assert_eq!(
+            req_body["token_num_uses"].as_int(),
+            token_params_map["token_num_uses"].as_int()
+        );
+        let token_policies = token_params_map["token_policies"].as_array().map(|vec| {
+            vec.iter()
+                .filter_map(|val| val.as_str().map(|s| s.to_string()))
+                .collect()
+        });
+        let token_bound_cidrs = token_params_map["token_bound_cidrs"].as_array().map(|vec| {
+            vec.iter()
+                .filter_map(|val| val.as_str().map(|s| s.to_string()))
+                .collect()
+        });
+        assert_eq!(
+            req_body["token_policies"].as_comma_string_slice(),
+            token_policies
+        );
+        assert_eq!(
+            req_body["token_bound_cidrs"].as_comma_string_slice(),
+            token_bound_cidrs
+        );
 
         let req_body = json!({
             "token_type": "service",
@@ -292,10 +368,25 @@ mod test {
         println!("token_params_map: {:?}", token_params_map);
 
         assert_eq!(req_body["token_type"], token_params_map["token_type"]);
-        assert_eq!(req_body["token_ttl"].as_int(), token_params_map["token_ttl"].as_int());
-        assert_eq!(req_body["token_max_ttl"].as_int(), token_params_map["token_max_ttl"].as_int());
-        assert_eq!(req_body["token_explicit_max_ttl"].as_int(), token_params_map["token_explicit_max_ttl"].as_int());
-        assert_eq!(req_body["token_no_default_policy"], token_params_map["token_no_default_policy"]);
-        assert_eq!(req_body["token_num_uses"].as_int(), token_params_map["token_num_uses"].as_int());
+        assert_eq!(
+            req_body["token_ttl"].as_int(),
+            token_params_map["token_ttl"].as_int()
+        );
+        assert_eq!(
+            req_body["token_max_ttl"].as_int(),
+            token_params_map["token_max_ttl"].as_int()
+        );
+        assert_eq!(
+            req_body["token_explicit_max_ttl"].as_int(),
+            token_params_map["token_explicit_max_ttl"].as_int()
+        );
+        assert_eq!(
+            req_body["token_no_default_policy"],
+            token_params_map["token_no_default_policy"]
+        );
+        assert_eq!(
+            req_body["token_num_uses"].as_int(),
+            token_params_map["token_num_uses"].as_int()
+        );
     }
 }

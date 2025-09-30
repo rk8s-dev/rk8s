@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use actix_web::{
-    cookie::{time::OffsetDateTime, Cookie},
+    HttpRequest, HttpResponse,
+    cookie::{Cookie, time::OffsetDateTime},
     http::{Method, StatusCode},
-    web, HttpRequest, HttpResponse,
+    web,
 };
 use humantime::parse_duration;
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,7 @@ use super::AUTH_COOKIE_NAME;
 use crate::{
     core::Core,
     errors::RvError,
-    http::{request_auth, response_error, response_json_ok, response_ok, Connection},
+    http::{Connection, request_auth, response_error, response_json_ok, response_ok},
     logical::{Connection as ReqConnection, Operation, Response},
 };
 
@@ -100,14 +101,14 @@ fn response_logical(resp: &Response, path: &str) -> Result<HttpResponse, RvError
     let mut cookie: Option<Cookie> = None;
     let mut no_content = true;
 
-    if let Some(ref secret) = &resp.secret {
+    if let Some(secret) = &resp.secret {
         logical_resp.lease_id.clone_from(&secret.lease_id);
         logical_resp.renewable = secret.lease.renewable;
         logical_resp.lease_duration = secret.lease.ttl.as_secs();
         no_content = false;
     }
 
-    if let Some(ref auth) = &resp.auth {
+    if let Some(auth) = &resp.auth {
         let mut expire_duration = parse_duration("365d")?;
         if logical_resp.lease_duration != 0 {
             expire_duration = Duration::from_secs(logical_resp.lease_duration);
@@ -115,7 +116,12 @@ fn response_logical(resp: &Response, path: &str) -> Result<HttpResponse, RvError
 
         if !path.starts_with("auth/token/") {
             let expire_time = OffsetDateTime::now_utc() + expire_duration;
-            cookie = Some(Cookie::build(AUTH_COOKIE_NAME, &auth.client_token).path("/").expires(expire_time).finish());
+            cookie = Some(
+                Cookie::build(AUTH_COOKIE_NAME, &auth.client_token)
+                    .path("/")
+                    .expires(expire_time)
+                    .finish(),
+            );
         }
 
         logical_resp.auth = Some(Auth {
@@ -129,8 +135,11 @@ fn response_logical(resp: &Response, path: &str) -> Result<HttpResponse, RvError
         no_content = false;
     }
 
-    if let Some(ref data) = &resp.data {
-        logical_resp.data = data.iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    if let Some(data) = &resp.data {
+        logical_resp.data = data
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
 
         no_content = false;
     }

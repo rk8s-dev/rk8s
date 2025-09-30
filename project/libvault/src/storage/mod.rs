@@ -24,12 +24,8 @@ use crate::errors::RvError;
 pub mod barrier;
 pub mod barrier_aes_gcm;
 pub mod barrier_view;
-#[cfg(feature = "storage_mysql")]
-pub mod mysql;
 pub mod physical;
-#[cfg(all(not(feature = "sync_handler"), feature = "storage_sqlx"))]
-pub mod sqlx;
-mod xline;
+pub mod xline;
 
 /// A trait that abstracts core methods for all storage barrier types.
 #[maybe_async::maybe_async]
@@ -55,7 +51,10 @@ impl StorageEntry {
     pub fn new(k: &str, v: &impl Serialize) -> Result<StorageEntry, RvError> {
         let data = serde_json::to_string(v)?;
 
-        Ok(StorageEntry { key: k.to_string(), value: data.into_bytes() })
+        Ok(StorageEntry {
+            key: k.to_string(),
+            value: data.into_bytes(),
+        })
     }
 }
 
@@ -85,16 +84,6 @@ pub fn new_backend(t: &str, conf: &HashMap<String, Value>) -> Result<Arc<dyn Bac
             let backend = physical::file::FileBackend::new(conf)?;
             Ok(Arc::new(backend))
         }
-        #[cfg(feature = "storage_mysql")]
-        "mysql" => {
-            let backend = mysql::mysql_backend::MysqlBackend::new(conf)?;
-            Ok(Arc::new(backend))
-        }
-        #[cfg(all(not(feature = "sync_handler"), feature = "storage_sqlx"))]
-        "sqlx" => {
-            let backend = sqlx::SqlxBackend::new(conf)?;
-            Ok(Arc::new(backend))
-        }
         "xline" => {
             let backend = xline::XlineBackend::new(conf)?;
             Ok(Arc::new(backend))
@@ -111,7 +100,7 @@ pub mod test {
     use serde_json::Value;
 
     use crate::{
-        storage::{new_backend, Backend, BackendEntry},
+        storage::{Backend, BackendEntry, new_backend},
         test_utils::TEST_DIR,
     };
 
@@ -121,7 +110,10 @@ pub mod test {
         assert!(fs::create_dir(&dir).is_ok());
 
         let mut conf: HashMap<String, Value> = HashMap::new();
-        conf.insert("path".to_string(), Value::String(dir.to_string_lossy().into_owned()));
+        conf.insert(
+            "path".to_string(),
+            Value::String(dir.to_string_lossy().into_owned()),
+        );
 
         let backend = new_backend("file", &conf);
         assert!(backend.is_ok());
@@ -151,7 +143,10 @@ pub mod test {
         assert_eq!(res.unwrap(), None);
 
         // Make an Entry
-        let entry = BackendEntry { key: "bar".to_string(), value: "test".as_bytes().to_vec() };
+        let entry = BackendEntry {
+            key: "bar".to_string(),
+            value: "test".as_bytes().to_vec(),
+        };
 
         let res = backend.put(&entry).await;
         assert!(res.is_ok());
@@ -191,9 +186,18 @@ pub mod test {
 
     #[maybe_async::maybe_async]
     pub async fn test_backend_list_prefix(backend: &dyn Backend) {
-        let entry1 = BackendEntry { key: "bar".to_string(), value: "test".as_bytes().to_vec() };
-        let entry2 = BackendEntry { key: "bar/foo".to_string(), value: "test".as_bytes().to_vec() };
-        let entry3 = BackendEntry { key: "bar/foo/goo".to_string(), value: "test".as_bytes().to_vec() };
+        let entry1 = BackendEntry {
+            key: "bar".to_string(),
+            value: "test".as_bytes().to_vec(),
+        };
+        let entry2 = BackendEntry {
+            key: "bar/foo".to_string(),
+            value: "test".as_bytes().to_vec(),
+        };
+        let entry3 = BackendEntry {
+            key: "bar/foo/goo".to_string(),
+            value: "test".as_bytes().to_vec(),
+        };
 
         let res = backend.put(&entry1).await;
         assert!(res.is_ok());

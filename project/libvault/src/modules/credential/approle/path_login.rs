@@ -1,15 +1,16 @@
 use std::{collections::HashMap, mem, sync::Arc, time::SystemTime};
 
 use super::{
+    AppRoleBackend, AppRoleBackendInner,
     path_role::RoleEntry,
     validation::{create_hmac, verify_cidr_role_secret_id_subset},
-    AppRoleBackend, AppRoleBackendInner,
 };
 use crate::{
     context::Context,
     errors::RvError,
     logical::{Auth, Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal, rv_error_response, rv_error_string,
+    new_fields, new_fields_internal, new_path, new_path_internal, rv_error_response,
+    rv_error_string,
     storage::StorageEntry,
     utils::cidr,
 };
@@ -53,7 +54,11 @@ endpoint."#
 
 #[maybe_async::maybe_async]
 impl AppRoleBackendInner {
-    pub async fn login(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn login(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let role_id = req.get_data_as_str("role_id")?;
 
         let role_id_entry = self.get_role_id(req, &role_id).await?;
@@ -85,14 +90,22 @@ impl AppRoleBackendInner {
             let secret_id_hmac = create_hmac(&role_entry.hmac_key, &secret_id)?;
             let role_name_hmac = create_hmac(&role_entry.hmac_key, &role_entry.name)?;
 
-            let entry_index = format!("{}{}/{}", &role_entry.secret_id_prefix, &role_name_hmac, &secret_id_hmac);
+            let entry_index = format!(
+                "{}{}/{}",
+                &role_entry.secret_id_prefix, &role_name_hmac, &secret_id_hmac
+            );
 
             let lock_entry = self.secret_id_locks.get_lock(&secret_id_hmac);
             let lock = lock_entry.lock.clone();
             let locked = lock.read_owned().await;
 
             let secret_id_entry = self
-                .get_secret_id_storage_entry(storage, &role_entry.secret_id_prefix, &role_name_hmac, &secret_id_hmac)
+                .get_secret_id_storage_entry(
+                    storage,
+                    &role_entry.secret_id_prefix,
+                    &role_name_hmac,
+                    &secret_id_hmac,
+                )
                 .await?
                 .ok_or(RvError::ErrResponse("invalid secret id".to_string()))?;
 
@@ -120,18 +133,26 @@ impl AppRoleBackendInner {
                 // the secret_id will remain to be valid as long as it is not expired.
 
                 // Ensure that the CIDRs on the secret id are still a subset of that of role's
-                verify_cidr_role_secret_id_subset(&secret_id_entry.cidr_list, &role_entry.secret_id_bound_cidrs)?;
+                verify_cidr_role_secret_id_subset(
+                    &secret_id_entry.cidr_list,
+                    &role_entry.secret_id_bound_cidrs,
+                )?;
 
                 if !secret_id_entry.cidr_list.is_empty() {
-                    let conn = req
-                        .connection
-                        .as_ref()
-                        .ok_or_else(|| RvError::ErrResponse("failed to get connection information".to_string()))?;
+                    let conn = req.connection.as_ref().ok_or_else(|| {
+                        RvError::ErrResponse("failed to get connection information".to_string())
+                    })?;
                     if conn.peer_addr.is_empty() {
-                        return Err(RvError::ErrResponse("failed to get connection information".to_string()));
+                        return Err(RvError::ErrResponse(
+                            "failed to get connection information".to_string(),
+                        ));
                     }
 
-                    let cidr_list_ref: Vec<&str> = secret_id_entry.cidr_list.iter().map(AsRef::as_ref).collect();
+                    let cidr_list_ref: Vec<&str> = secret_id_entry
+                        .cidr_list
+                        .iter()
+                        .map(AsRef::as_ref)
+                        .collect();
                     if !cidr::ip_belongs_to_cidrs(&conn.peer_addr, &cidr_list_ref)? {
                         return Err(RvError::ErrResponse(format!(
                             "source address {} unauthorized through CIDR restrictions on the secret ID",
@@ -176,18 +197,26 @@ impl AppRoleBackendInner {
                 }
 
                 // Ensure that the CIDRs on the secret ID are still a subset of that of role's
-                verify_cidr_role_secret_id_subset(&secret_id_entry.cidr_list, &role_entry.secret_id_bound_cidrs)?;
+                verify_cidr_role_secret_id_subset(
+                    &secret_id_entry.cidr_list,
+                    &role_entry.secret_id_bound_cidrs,
+                )?;
 
                 if !secret_id_entry.cidr_list.is_empty() {
-                    let conn = req
-                        .connection
-                        .as_ref()
-                        .ok_or_else(|| RvError::ErrResponse("failed to get connection information".to_string()))?;
+                    let conn = req.connection.as_ref().ok_or_else(|| {
+                        RvError::ErrResponse("failed to get connection information".to_string())
+                    })?;
                     if conn.peer_addr.is_empty() {
-                        return Err(RvError::ErrResponse("failed to get connection information".to_string()));
+                        return Err(RvError::ErrResponse(
+                            "failed to get connection information".to_string(),
+                        ));
                     }
 
-                    let cidr_list_ref: Vec<&str> = secret_id_entry.cidr_list.iter().map(AsRef::as_ref).collect();
+                    let cidr_list_ref: Vec<&str> = secret_id_entry
+                        .cidr_list
+                        .iter()
+                        .map(AsRef::as_ref)
+                        .collect();
                     if !cidr::ip_belongs_to_cidrs(&conn.peer_addr, &cidr_list_ref)? {
                         return Err(RvError::ErrResponse(format!(
                             "source address {} unauthorized through CIDR restrictions on the secret ID",
@@ -201,15 +230,20 @@ impl AppRoleBackendInner {
         }
 
         if !role_entry.secret_id_bound_cidrs.is_empty() {
-            let conn = req
-                .connection
-                .as_ref()
-                .ok_or_else(|| RvError::ErrResponse("failed to get connection information".to_string()))?;
+            let conn = req.connection.as_ref().ok_or_else(|| {
+                RvError::ErrResponse("failed to get connection information".to_string())
+            })?;
             if conn.peer_addr.is_empty() {
-                return Err(RvError::ErrResponse("failed to get connection information".to_string()));
+                return Err(RvError::ErrResponse(
+                    "failed to get connection information".to_string(),
+                ));
             }
 
-            let bound_cidrs_ref: Vec<&str> = role_entry.secret_id_bound_cidrs.iter().map(AsRef::as_ref).collect();
+            let bound_cidrs_ref: Vec<&str> = role_entry
+                .secret_id_bound_cidrs
+                .iter()
+                .map(AsRef::as_ref)
+                .collect();
             if !cidr::ip_belongs_to_cidrs(&conn.peer_addr, &bound_cidrs_ref)? {
                 return Err(RvError::ErrResponse(format!(
                     "source address {} unauthorized by CIDR restrictions on the secret ID",
@@ -220,17 +254,28 @@ impl AppRoleBackendInner {
 
         metadata.insert("role_name".to_string(), role_entry.name.clone());
 
-        let mut auth = Auth { metadata, ..Default::default() };
-        auth.internal_data.insert("role_name".to_string(), role_entry.name.clone());
+        let mut auth = Auth {
+            metadata,
+            ..Default::default()
+        };
+        auth.internal_data
+            .insert("role_name".to_string(), role_entry.name.clone());
 
         role_entry.populate_token_auth(&mut auth);
 
-        let resp = Response { auth: Some(auth), ..Response::default() };
+        let resp = Response {
+            auth: Some(auth),
+            ..Response::default()
+        };
 
         Ok(Some(resp))
     }
 
-    pub async fn login_renew(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn login_renew(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         if req.auth.is_none() {
             return Err(rv_error_string!("invalid request"));
         }
@@ -249,12 +294,18 @@ impl AppRoleBackendInner {
         let role = self
             .get_role(req, role_name)
             .await?
-            .ok_or(rv_error_response!(format!("role {} does not exist during renewal", role_name)))?;
+            .ok_or(rv_error_response!(format!(
+                "role {} does not exist during renewal",
+                role_name
+            )))?;
 
         auth.period = role.token_period;
         auth.ttl = role.token_ttl;
         auth.max_ttl = role.token_max_ttl;
 
-        Ok(Some(Response { auth: Some(auth), ..Response::default() }))
+        Ok(Some(Response {
+            auth: Some(auth),
+            ..Response::default()
+        }))
     }
 }

@@ -19,10 +19,14 @@ pub struct Locks {
 
 impl Locks {
     pub fn new() -> Self {
-        let mut locks = Self { locks: Vec::with_capacity(LOCK_COUNT) };
+        let mut locks = Self {
+            locks: Vec::with_capacity(LOCK_COUNT),
+        };
 
         for _ in 0..LOCK_COUNT {
-            locks.locks.push(Arc::new(LockEntry { lock: Arc::new(tokio::sync::RwLock::new(0)) }));
+            locks.locks.push(Arc::new(LockEntry {
+                lock: Arc::new(tokio::sync::RwLock::new(0)),
+            }));
         }
 
         locks
@@ -63,7 +67,10 @@ mod test {
 
     #[tokio::test]
     async fn test_locks_writer_reader() {
-        let data = Arc::new(MyTestData { lock: Locks::new(), num: RwLock::new(11) });
+        let data = Arc::new(MyTestData {
+            lock: Locks::new(),
+            num: RwLock::new(11),
+        });
 
         let data_writer = data.clone();
         let data_reader = data.clone();
@@ -89,7 +96,10 @@ mod test {
 
     #[tokio::test]
     async fn test_locks_reader_writer() {
-        let data = Arc::new(MyTestData { lock: Locks::new(), num: RwLock::new(11) });
+        let data = Arc::new(MyTestData {
+            lock: Locks::new(),
+            num: RwLock::new(11),
+        });
 
         let data_writer = data.clone();
         let data_reader = data.clone();
@@ -114,7 +124,10 @@ mod test {
 
     #[tokio::test]
     async fn test_locks_writer_writer() {
-        let data = Arc::new(MyTestData { lock: Locks::new(), num: RwLock::new(11) });
+        let data = Arc::new(MyTestData {
+            lock: Locks::new(),
+            num: RwLock::new(11),
+        });
 
         let data_writer1 = data.clone();
         let data_writer2 = data.clone();
@@ -139,7 +152,10 @@ mod test {
 
     #[tokio::test]
     async fn test_locks_reader_reader() {
-        let data = Arc::new(MyTestData { lock: Locks::new(), num: RwLock::new(11) });
+        let data = Arc::new(MyTestData {
+            lock: Locks::new(),
+            num: RwLock::new(11),
+        });
 
         let data_reader1 = data.clone();
         let data_reader2 = data.clone();

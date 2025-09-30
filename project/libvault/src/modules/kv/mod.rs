@@ -12,11 +12,12 @@ use crate::{
     core::Core,
     errors::RvError,
     logical::{
-        secret::Secret, Backend, Field, FieldType, LogicalBackend, Operation, Path, PathOperation, Request, Response,
+        Backend, Field, FieldType, LogicalBackend, Operation, Path, PathOperation, Request,
+        Response, secret::Secret,
     },
     modules::Module,
-    new_fields, new_fields_internal, new_logical_backend, new_logical_backend_internal, new_path, new_path_internal,
-    new_secret, new_secret_internal,
+    new_fields, new_fields_internal, new_logical_backend, new_logical_backend_internal, new_path,
+    new_path_internal, new_secret, new_secret_internal,
     storage::StorageEntry,
 };
 
@@ -49,7 +50,9 @@ pub struct KvBackend {
 
 impl KvBackend {
     pub fn new(core: Arc<Core>) -> Self {
-        Self { inner: Arc::new(KvBackendInner { core }) }
+        Self {
+            inner: Arc::new(KvBackendInner { core }),
+        }
     }
 
     pub fn new_backend(&self) -> LogicalBackend {
@@ -94,7 +97,11 @@ impl KvBackend {
 
 #[maybe_async::maybe_async]
 impl KvBackendInner {
-    pub async fn handle_read(&self, backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_read(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let entry = req.storage_get(&req.path).await?;
         if entry.is_none() {
             return Ok(None);
@@ -105,18 +112,18 @@ impl KvBackendInner {
         if let Some(ttl) = data.get("ttl") {
             if let Some(ttl_i64) = ttl.as_i64() {
                 ttl_duration = Some(Duration::from_secs(ttl_i64 as u64));
-            } else if let Some(ttl_str) = ttl.as_str() {
-                if let Ok(ttl_dur) = parse_duration(ttl_str) {
-                    ttl_duration = Some(ttl_dur);
-                }
+            } else if let Some(ttl_str) = ttl.as_str()
+                && let Ok(ttl_dur) = parse_duration(ttl_str)
+            {
+                ttl_duration = Some(ttl_dur);
             }
         } else if let Some(lease) = data.get("lease") {
             if let Some(lease_i64) = lease.as_i64() {
                 ttl_duration = Some(Duration::from_secs(lease_i64 as u64));
-            } else if let Some(lease_str) = lease.as_str() {
-                if let Ok(lease_dur) = parse_duration(lease_str) {
-                    ttl_duration = Some(lease_dur);
-                }
+            } else if let Some(lease_str) = lease.as_str()
+                && let Ok(lease_dur) = parse_duration(lease_str)
+            {
+                ttl_duration = Some(lease_dur);
             }
         }
 
@@ -133,37 +140,59 @@ impl KvBackendInner {
         Ok(Some(resp))
     }
 
-    pub async fn handle_write(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_write(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         if req.body.is_none() {
             return Err(RvError::ErrModuleKvDataFieldMissing);
         }
 
         let data = serde_json::to_string(req.body.as_ref().unwrap())?;
-        let entry = StorageEntry { key: req.path.clone(), value: data.into_bytes() };
+        let entry = StorageEntry {
+            key: req.path.clone(),
+            value: data.into_bytes(),
+        };
 
         req.storage_put(&entry).await?;
         Ok(None)
     }
 
-    pub async fn handle_delete(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_delete(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         req.storage_delete(&req.path).await?;
         Ok(None)
     }
 
-    pub async fn handle_list(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_list(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let keys = req.storage_list(&req.path).await?;
         let resp = Response::list_response(&keys);
         Ok(Some(resp))
     }
 
-    pub async fn handle_noop(&self, _backend: &dyn Backend, _req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_noop(
+        &self,
+        _backend: &dyn Backend,
+        _req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         Ok(None)
     }
 }
 
 impl KvModule {
     pub fn new(core: Arc<Core>) -> Self {
-        Self { name: "kv".to_string(), backend: Arc::new(KvBackend::new(core)) }
+        Self {
+            name: "kv".to_string(),
+            backend: Arc::new(KvBackend::new(core)),
+        }
     }
 }
 

@@ -28,11 +28,11 @@ use strum_macros::{Display as StrumDisplay, EnumIter, EnumString};
 use super::acl::ACLResults;
 use crate::{
     errors::RvError,
-    logical::{auth::PolicyInfo, Operation, Request, Response},
+    logical::{Operation, Request, Response, auth::PolicyInfo},
     rv_error_string,
     utils::{
         deserialize_duration,
-        string::{ensure_no_leading_slash, GlobContains},
+        string::{GlobContains, ensure_no_leading_slash},
     },
 };
 
@@ -229,77 +229,81 @@ impl Policy {
         let mut policy_config = PolicyConfig::default();
 
         for attribute in body.attributes() {
-            if attribute.key.as_str() == "name" {
-                if let Expression::String(name) = &attribute.expr {
-                    policy_config.name.clone_from(name);
-                }
+            if attribute.key.as_str() == "name"
+                && let Expression::String(name) = &attribute.expr
+            {
+                policy_config.name.clone_from(name);
             }
         }
 
         for block in body.blocks() {
-            if block.identifier() == "path" {
-                if let Some(path_label) = block.labels().first() {
-                    let path_str = path_label.as_str().to_string();
-                    if path_str.contains("+*") {
-                        return Err(rv_error_string!(&format!(
-                            "path {path_str}: invalid use of wildcards ('+*' is forbidden)"
-                        )));
+            if block.identifier() == "path"
+                && let Some(path_label) = block.labels().first()
+            {
+                let path_str = path_label.as_str().to_string();
+                if path_str.contains("+*") {
+                    return Err(rv_error_string!(&format!(
+                        "path {path_str}: invalid use of wildcards ('+*' is forbidden)"
+                    )));
+                }
+
+                let mut path_config: PolicyPathConfig = hcl::from_body(block.body().clone())?;
+                let allowed_parameters: HashMap<String, Vec<Value>> = path_config
+                    .allowed_parameters
+                    .iter()
+                    .map(|(key, value)| (key.to_lowercase(), value.clone()))
+                    .collect();
+                path_config.allowed_parameters = allowed_parameters;
+
+                let denied_parameters: HashMap<String, Vec<Value>> = path_config
+                    .denied_parameters
+                    .iter()
+                    .map(|(key, value)| (key.to_lowercase(), value.clone()))
+                    .collect();
+                path_config.denied_parameters = denied_parameters;
+
+                if let Some(existing_path) = policy_config.path.get_mut(&path_str) {
+                    // Collect new required parameters to be added
+                    let new_params: Vec<String> = path_config
+                        .required_parameters
+                        .into_iter()
+                        .filter(|x| !existing_path.required_parameters.contains(x))
+                        .collect();
+
+                    // Extend required_parameters with the new parameters
+                    existing_path.required_parameters.extend(new_params);
+
+                    // Merge allowed_parameters
+                    for (key, mut value) in path_config.allowed_parameters {
+                        if let Some(dst_vec) = existing_path.allowed_parameters.get_mut(&key) {
+                            if value.is_empty() {
+                                dst_vec.clear();
+                            } else if !dst_vec.is_empty() {
+                                dst_vec.append(&mut value);
+                            }
+                        } else {
+                            existing_path
+                                .allowed_parameters
+                                .insert(key.to_lowercase(), value);
+                        }
                     }
 
-                    let mut path_config: PolicyPathConfig = hcl::from_body(block.body().clone())?;
-                    let allowed_parameters: HashMap<String, Vec<Value>> = path_config
-                        .allowed_parameters
-                        .iter()
-                        .map(|(key, value)| (key.to_lowercase(), value.clone()))
-                        .collect();
-                    path_config.allowed_parameters = allowed_parameters;
-
-                    let denied_parameters: HashMap<String, Vec<Value>> = path_config
-                        .denied_parameters
-                        .iter()
-                        .map(|(key, value)| (key.to_lowercase(), value.clone()))
-                        .collect();
-                    path_config.denied_parameters = denied_parameters;
-
-                    if let Some(existing_path) = policy_config.path.get_mut(&path_str) {
-                        // Collect new required parameters to be added
-                        let new_params: Vec<String> = path_config
-                            .required_parameters
-                            .into_iter()
-                            .filter(|x| !existing_path.required_parameters.contains(x))
-                            .collect();
-
-                        // Extend required_parameters with the new parameters
-                        existing_path.required_parameters.extend(new_params);
-
-                        // Merge allowed_parameters
-                        for (key, mut value) in path_config.allowed_parameters {
-                            if let Some(dst_vec) = existing_path.allowed_parameters.get_mut(&key) {
-                                if value.is_empty() {
-                                    dst_vec.clear();
-                                } else if !dst_vec.is_empty() {
-                                    dst_vec.append(&mut value);
-                                }
-                            } else {
-                                existing_path.allowed_parameters.insert(key.to_lowercase(), value);
+                    // Merge denied_parameters
+                    for (key, mut value) in path_config.denied_parameters {
+                        if let Some(dst_vec) = existing_path.denied_parameters.get_mut(&key) {
+                            if value.is_empty() {
+                                dst_vec.clear();
+                            } else if !dst_vec.is_empty() {
+                                dst_vec.append(&mut value);
                             }
+                        } else {
+                            existing_path
+                                .denied_parameters
+                                .insert(key.to_lowercase(), value);
                         }
-
-                        // Merge denied_parameters
-                        for (key, mut value) in path_config.denied_parameters {
-                            if let Some(dst_vec) = existing_path.denied_parameters.get_mut(&key) {
-                                if value.is_empty() {
-                                    dst_vec.clear();
-                                } else if !dst_vec.is_empty() {
-                                    dst_vec.append(&mut value);
-                                }
-                            } else {
-                                existing_path.denied_parameters.insert(key.to_lowercase(), value);
-                            }
-                        }
-                    } else {
-                        policy_config.path.insert(path_str, path_config);
                     }
+                } else {
+                    policy_config.path.insert(path_str, path_config);
                 }
             }
         }
@@ -332,7 +336,9 @@ impl Policy {
                         rules.capabilities = vec![Capability::Deny];
                     }
                     OldPathPolicy::Read => {
-                        rules.capabilities.extend(vec![Capability::Read, Capability::List]);
+                        rules
+                            .capabilities
+                            .extend(vec![Capability::Read, Capability::List]);
                     }
                     OldPathPolicy::Write => {
                         rules.capabilities.extend(vec![
@@ -357,7 +363,10 @@ impl Policy {
             }
 
             let permissions = &mut rules.permissions;
-            permissions.capabilities_bitmap = rules.capabilities.iter().fold(0u32, |acc, cap| acc | cap.to_bits());
+            permissions.capabilities_bitmap = rules
+                .capabilities
+                .iter()
+                .fold(0u32, |acc, cap| acc | cap.to_bits());
             if permissions.capabilities_bitmap & Capability::Deny.to_bits() != 0 {
                 // If it's deny, don't include any other capability
                 permissions.capabilities_bitmap = Capability::Deny.to_bits();
@@ -367,9 +376,15 @@ impl Policy {
             permissions.min_wrapping_ttl = pc.min_wrapping_ttl;
             permissions.max_wrapping_ttl = pc.max_wrapping_ttl;
 
-            permissions.allowed_parameters.clone_from(&pc.allowed_parameters);
-            permissions.denied_parameters.clone_from(&pc.denied_parameters);
-            permissions.required_parameters.clone_from(&pc.required_parameters);
+            permissions
+                .allowed_parameters
+                .clone_from(&pc.allowed_parameters);
+            permissions
+                .denied_parameters
+                .clone_from(&pc.denied_parameters);
+            permissions
+                .required_parameters
+                .clone_from(&pc.required_parameters);
 
             self.paths.push(rules);
         }
@@ -402,7 +417,8 @@ impl Permissions {
         };
 
         if self.capabilities_bitmap & cap.to_bits() == 0
-            && (req.operation != Operation::Write || self.capabilities_bitmap & Capability::Create.to_bits() == 0)
+            && (req.operation != Operation::Write
+                || self.capabilities_bitmap & Capability::Create.to_bits() == 0)
         {
             return Ok(ret);
         }
@@ -433,15 +449,15 @@ impl Permissions {
             Operation::Read | Operation::Write => {
                 for parameter in self.required_parameters.iter() {
                     let key = parameter.to_lowercase();
-                    if let Some(data) = &req.data {
-                        if data.get(key.as_str()).is_some() {
-                            continue;
-                        }
+                    if let Some(data) = &req.data
+                        && data.get(key.as_str()).is_some()
+                    {
+                        continue;
                     }
-                    if let Some(body) = &req.body {
-                        if body.get(key.as_str()).is_some() {
-                            continue;
-                        }
+                    if let Some(body) = &req.body
+                        && body.get(key.as_str()).is_some()
+                    {
+                        continue;
                     }
 
                     return Ok(ret);
@@ -461,23 +477,30 @@ impl Permissions {
                 }
 
                 for (param_key, param_value) in req.data_iter() {
-                    if let Some(denied_parameters) = self.denied_parameters.get(param_key.to_lowercase().as_str()) {
-                        if denied_parameters.glob_contains(param_value) {
-                            return Ok(ret);
-                        }
+                    if let Some(denied_parameters) = self
+                        .denied_parameters
+                        .get(param_key.to_lowercase().as_str())
+                        && denied_parameters.glob_contains(param_value)
+                    {
+                        return Ok(ret);
                     }
                 }
 
                 let allowed_all = self.allowed_parameters.contains_key("*");
 
-                if self.allowed_parameters.is_empty() || (allowed_all && self.allowed_parameters.len() == 1) {
+                if self.allowed_parameters.is_empty()
+                    || (allowed_all && self.allowed_parameters.len() == 1)
+                {
                     ret.capabilities_bitmap = self.capabilities_bitmap;
                     ret.allowed = true;
                     return Ok(ret);
                 }
 
                 for (param_key, param_value) in req.data_iter() {
-                    if let Some(allowed_parameters) = self.allowed_parameters.get(param_key.to_lowercase().as_str()) {
+                    if let Some(allowed_parameters) = self
+                        .allowed_parameters
+                        .get(param_key.to_lowercase().as_str())
+                    {
                         if !allowed_parameters.glob_contains(param_value) {
                             return Ok(ret);
                         }
@@ -533,7 +556,8 @@ impl Permissions {
 
         if !other.allowed_parameters.is_empty() {
             if self.allowed_parameters.is_empty() {
-                self.allowed_parameters.clone_from(&other.allowed_parameters);
+                self.allowed_parameters
+                    .clone_from(&other.allowed_parameters);
             } else {
                 for (key, value) in other.allowed_parameters.iter() {
                     if let Some(dst_vec) = self.allowed_parameters.get_mut(key) {
@@ -578,15 +602,26 @@ impl Permissions {
         Ok(())
     }
 
-    pub fn add_granting_policy_to_map(&mut self, policy: &Policy, capabilities_bitmap: u32) -> Result<(), RvError> {
+    pub fn add_granting_policy_to_map(
+        &mut self,
+        policy: &Policy,
+        capabilities_bitmap: u32,
+    ) -> Result<(), RvError> {
         for cap in Capability::iter() {
             if cap.to_bits() & capabilities_bitmap == 0 {
                 continue;
             }
 
-            let pi = PolicyInfo { name: policy.name.clone(), policy_type: "acl".into(), ..Default::default() };
+            let pi = PolicyInfo {
+                name: policy.name.clone(),
+                policy_type: "acl".into(),
+                ..Default::default()
+            };
 
-            self.granting_policies_map.entry(cap.to_bits()).or_default().push(pi);
+            self.granting_policies_map
+                .entry(cap.to_bits())
+                .or_default()
+                .push(pi);
         }
 
         Ok(())
@@ -668,11 +703,20 @@ mod mod_policy_tests {
             policy.paths[0].permissions.capabilities_bitmap,
             Capability::Read.to_bits() | Capability::List.to_bits()
         );
-        assert_eq!(policy.paths[0].permissions.min_wrapping_ttl, Duration::from_secs(3600));
-        assert_eq!(policy.paths[0].permissions.max_wrapping_ttl, Duration::from_secs(86400));
+        assert_eq!(
+            policy.paths[0].permissions.min_wrapping_ttl,
+            Duration::from_secs(3600)
+        );
+        assert_eq!(
+            policy.paths[0].permissions.max_wrapping_ttl,
+            Duration::from_secs(86400)
+        );
         assert_eq!(policy.paths[0].permissions.allowed_parameters.len(), 1);
         assert_eq!(policy.paths[0].permissions.denied_parameters.len(), 1);
-        assert_eq!(policy.paths[0].permissions.required_parameters, vec!["param1", "param2"]);
+        assert_eq!(
+            policy.paths[0].permissions.required_parameters,
+            vec!["param1", "param2"]
+        );
     }
 
     #[test]
@@ -758,12 +802,21 @@ mod mod_policy_tests {
             policy.paths[i].permissions.capabilities_bitmap,
             Capability::Read.to_bits() | Capability::List.to_bits() | Capability::Create.to_bits()
         );
-        assert_eq!(policy.paths[i].permissions.min_wrapping_ttl, Duration::from_secs(3600));
-        assert_eq!(policy.paths[i].permissions.max_wrapping_ttl, Duration::from_secs(86400));
+        assert_eq!(
+            policy.paths[i].permissions.min_wrapping_ttl,
+            Duration::from_secs(3600)
+        );
+        assert_eq!(
+            policy.paths[i].permissions.max_wrapping_ttl,
+            Duration::from_secs(86400)
+        );
         assert_eq!(policy.paths[i].permissions.allowed_parameters.len(), 2);
         assert_eq!(policy.paths[i].permissions.denied_parameters.len(), 1);
         assert_eq!(policy.paths[i].permissions.required_parameters.len(), 0);
-        assert_eq!(policy.paths[i].capabilities, vec![Capability::Read, Capability::List, Capability::Create]);
+        assert_eq!(
+            policy.paths[i].capabilities,
+            vec![Capability::Read, Capability::List, Capability::Create]
+        );
         assert_eq!(policy.paths[i].has_segment_wildcards, false);
 
         assert_eq!(policy.paths[j].path, "secret/ak2");
@@ -775,14 +828,28 @@ mod mod_policy_tests {
                 | Capability::Create.to_bits()
                 | Capability::Update.to_bits()
         );
-        assert_eq!(policy.paths[j].permissions.min_wrapping_ttl, Duration::from_secs(3600 * 2));
-        assert_eq!(policy.paths[j].permissions.max_wrapping_ttl, Duration::from_secs(86400));
+        assert_eq!(
+            policy.paths[j].permissions.min_wrapping_ttl,
+            Duration::from_secs(3600 * 2)
+        );
+        assert_eq!(
+            policy.paths[j].permissions.max_wrapping_ttl,
+            Duration::from_secs(86400)
+        );
         assert_eq!(policy.paths[j].permissions.allowed_parameters.len(), 2);
         assert_eq!(policy.paths[j].permissions.denied_parameters.len(), 0);
-        assert_eq!(policy.paths[j].permissions.required_parameters, vec!["param1"]);
+        assert_eq!(
+            policy.paths[j].permissions.required_parameters,
+            vec!["param1"]
+        );
         assert_eq!(
             policy.paths[j].capabilities,
-            vec![Capability::Read, Capability::List, Capability::Create, Capability::Update]
+            vec![
+                Capability::Read,
+                Capability::List,
+                Capability::Create,
+                Capability::Update
+            ]
         );
         assert_eq!(policy.paths[j].has_segment_wildcards, false);
 
@@ -796,14 +863,29 @@ mod mod_policy_tests {
                 | Capability::Update.to_bits()
                 | Capability::Delete.to_bits()
         );
-        assert_eq!(policy.paths[k].permissions.min_wrapping_ttl, Duration::from_secs(3600 * 3));
-        assert_eq!(policy.paths[k].permissions.max_wrapping_ttl, Duration::from_secs(0));
+        assert_eq!(
+            policy.paths[k].permissions.min_wrapping_ttl,
+            Duration::from_secs(3600 * 3)
+        );
+        assert_eq!(
+            policy.paths[k].permissions.max_wrapping_ttl,
+            Duration::from_secs(0)
+        );
         assert_eq!(policy.paths[k].permissions.allowed_parameters.len(), 0);
         assert_eq!(policy.paths[k].permissions.denied_parameters.len(), 2);
-        assert_eq!(policy.paths[k].permissions.required_parameters, vec!["param1", "param2"]);
+        assert_eq!(
+            policy.paths[k].permissions.required_parameters,
+            vec!["param1", "param2"]
+        );
         assert_eq!(
             policy.paths[k].capabilities,
-            vec![Capability::Read, Capability::List, Capability::Create, Capability::Update, Capability::Delete]
+            vec![
+                Capability::Read,
+                Capability::List,
+                Capability::Create,
+                Capability::Update,
+                Capability::Delete
+            ]
         );
         assert_eq!(policy.paths[k].has_segment_wildcards, false);
     }

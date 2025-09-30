@@ -46,9 +46,15 @@ For security reasons, you can only view the certificate when reading this endpoi
 
 #[maybe_async::maybe_async]
 impl PkiBackendInner {
-    pub async fn write_path_ca(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn write_path_ca(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let pem_bundle_value = req.get_data("pem_bundle")?;
-        let pem_bundle = pem_bundle_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let pem_bundle = pem_bundle_value
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
 
         let items = pem::parse_many(pem_bundle)?;
         let mut key_found = false;
@@ -102,7 +108,10 @@ impl PkiBackendInner {
 
         self.store_ca_bundle(req, &cert_bundle).await?;
 
-        let entry = StorageEntry { key: "crl".to_string(), value: Vec::new() };
+        let entry = StorageEntry {
+            key: "crl".to_string(),
+            value: Vec::new(),
+        };
 
         req.storage_put(&entry).await?;
 
@@ -119,7 +128,11 @@ impl PkiBackendInner {
         Ok(ca_bundle)
     }
 
-    pub async fn store_ca_bundle(&self, req: &mut Request, ca_bundle: &CertBundle) -> Result<(), RvError> {
+    pub async fn store_ca_bundle(
+        &self,
+        req: &mut Request,
+        ca_bundle: &CertBundle,
+    ) -> Result<(), RvError> {
         let mut entry = StorageEntry::new("config/ca_bundle", ca_bundle)?;
 
         req.storage_put(&entry).await?;
@@ -129,7 +142,8 @@ impl PkiBackendInner {
         req.storage_put(&entry).await?;
 
         let serial_number_hex = ca_bundle.serial_number.replace(':', "-").to_lowercase();
-        self.store_cert(req, &serial_number_hex, &ca_bundle.certificate).await?;
+        self.store_cert(req, &serial_number_hex, &ca_bundle.certificate)
+            .await?;
 
         Ok(())
     }

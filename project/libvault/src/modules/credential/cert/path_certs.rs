@@ -9,16 +9,20 @@ use super::{CertBackend, CertBackendInner};
 use crate::{
     context::Context,
     errors::RvError,
-    logical::{field::FieldTrait, Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
+    logical::{
+        Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response,
+        field::FieldTrait,
+    },
     new_fields, new_fields_internal, new_path, new_path_internal, rv_error_response,
     storage::StorageEntry,
     utils::{
         cert::{
-            deserialize_vec_x509, has_x509_ext_key_usage, has_x509_ext_key_usage_flag, is_ca_cert, serialize_vec_x509,
+            deserialize_vec_x509, has_x509_ext_key_usage, has_x509_ext_key_usage_flag, is_ca_cert,
+            serialize_vec_x509,
         },
         deserialize_duration, serialize_duration,
         sock_addr::SockAddrMarshaler,
-        token_util::{token_fields, TokenParams},
+        token_util::{TokenParams, token_fields},
     },
 };
 
@@ -28,14 +32,26 @@ use crate::{
 pub struct CertEntry {
     pub name: String,
     pub display_name: String,
-    #[serde(serialize_with = "serialize_vec_x509", deserialize_with = "deserialize_vec_x509")]
+    #[serde(
+        serialize_with = "serialize_vec_x509",
+        deserialize_with = "deserialize_vec_x509"
+    )]
     pub certificate: Vec<X509>,
     pub policies: Vec<String>,
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub ttl: Duration,
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub max_ttl: Duration,
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub period: Duration,
     pub bound_cidrs: Vec<SockAddrMarshaler>,
     pub allowed_names: Vec<String>,
@@ -47,7 +63,10 @@ pub struct CertEntry {
     pub allowed_metadata_extensions: Vec<String>,
     pub required_extensions: Vec<String>,
     pub ocsp_enabled: bool,
-    #[serde(serialize_with = "serialize_vec_x509", deserialize_with = "deserialize_vec_x509")]
+    #[serde(
+        serialize_with = "serialize_vec_x509",
+        deserialize_with = "deserialize_vec_x509"
+    )]
     pub ocsp_ca_certificates: Vec<X509>,
     pub ocsp_servers_override: Vec<String>,
     pub ocsp_fail_open: bool,
@@ -264,13 +283,22 @@ impl CertBackendInner {
         Ok(Some(cert_entry))
     }
 
-    pub async fn set_cert(&self, req: &Request, name: &str, cert_entry: &CertEntry) -> Result<(), RvError> {
+    pub async fn set_cert(
+        &self,
+        req: &Request,
+        name: &str,
+        cert_entry: &CertEntry,
+    ) -> Result<(), RvError> {
         let entry = StorageEntry::new(format!("cert/{name}").as_str(), cert_entry)?;
 
         req.storage_put(&entry).await
     }
 
-    pub async fn read_cert(&self, _backend: &dyn Backend, req: &Request) -> Result<Option<Response>, RvError> {
+    pub async fn read_cert(
+        &self,
+        _backend: &dyn Backend,
+        req: &Request,
+    ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?.to_lowercase();
 
         let entry = self.get_cert(req, &name).await?;
@@ -301,7 +329,11 @@ impl CertBackendInner {
         Ok(Some(Response::data_response(Some(data.clone()))))
     }
 
-    pub async fn write_cert(&self, _backend: &dyn Backend, req: &Request) -> Result<Option<Response>, RvError> {
+    pub async fn write_cert(
+        &self,
+        _backend: &dyn Backend,
+        req: &Request,
+    ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?.to_lowercase();
 
         let mut cert_entry = CertEntry::default();
@@ -314,75 +346,97 @@ impl CertBackendInner {
         }
 
         if let Ok(certificate_raw) = req.get_data("certificate") {
-            let certificate = certificate_raw.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let certificate = certificate_raw
+                .as_str()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             cert_entry.certificate = X509::stack_from_pem(certificate.as_bytes())?;
         }
 
         if let Ok(ocsp_ca_certificates_raw) = req.get_data("ocsp_ca_certificates") {
-            let ocsp_ca_certificates = ocsp_ca_certificates_raw.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
-            cert_entry.ocsp_ca_certificates = X509::stack_from_pem(ocsp_ca_certificates.as_bytes())?;
+            let ocsp_ca_certificates = ocsp_ca_certificates_raw
+                .as_str()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.ocsp_ca_certificates =
+                X509::stack_from_pem(ocsp_ca_certificates.as_bytes())?;
         }
 
         if let Ok(ocsp_enabled_raw) = req.get_data("ocsp_enabled") {
-            cert_entry.ocsp_enabled = ocsp_enabled_raw.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.ocsp_enabled = ocsp_enabled_raw
+                .as_bool()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(ocsp_servers_override_raw) = req.get_data("ocsp_servers_override") {
-            cert_entry.ocsp_servers_override =
-                ocsp_servers_override_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.ocsp_servers_override = ocsp_servers_override_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(ocsp_fail_open_raw) = req.get_data("ocsp_fail_open") {
-            cert_entry.ocsp_fail_open = ocsp_fail_open_raw.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.ocsp_fail_open = ocsp_fail_open_raw
+                .as_bool()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(ocsp_query_all_servers_raw) = req.get_data("ocsp_query_all_servers") {
-            cert_entry.ocsp_query_all_servers =
-                ocsp_query_all_servers_raw.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.ocsp_query_all_servers = ocsp_query_all_servers_raw
+                .as_bool()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(display_name_raw) = req.get_data("display_name") {
-            cert_entry.display_name = display_name_raw.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
+            cert_entry.display_name = display_name_raw
+                .as_str()
+                .ok_or(RvError::ErrRequestFieldInvalid)?
+                .to_string();
         }
 
         if let Ok(allowed_names_raw) = req.get_data("allowed_names") {
-            cert_entry.allowed_names =
-                allowed_names_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.allowed_names = allowed_names_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(allowed_common_names_raw) = req.get_data("allowed_common_names") {
-            cert_entry.allowed_common_names =
-                allowed_common_names_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.allowed_common_names = allowed_common_names_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(allowed_dns_sans_raw) = req.get_data("allowed_dns_sans") {
-            cert_entry.allowed_dns_sans =
-                allowed_dns_sans_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.allowed_dns_sans = allowed_dns_sans_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(allowed_email_sans_raw) = req.get_data("allowed_email_sans") {
-            cert_entry.allowed_email_sans =
-                allowed_email_sans_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.allowed_email_sans = allowed_email_sans_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(allowed_uri_sans_raw) = req.get_data("allowed_uri_sans") {
-            cert_entry.allowed_uri_sans =
-                allowed_uri_sans_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.allowed_uri_sans = allowed_uri_sans_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(allowed_organizational_units_raw) = req.get_data("allowed_organizational_units") {
-            cert_entry.allowed_organizational_units =
-                allowed_organizational_units_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.allowed_organizational_units = allowed_organizational_units_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(required_extensions_raw) = req.get_data("required_extensions") {
-            cert_entry.required_extensions =
-                required_extensions_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.required_extensions = required_extensions_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if let Ok(allowed_metadata_extensions_raw) = req.get_data("allowed_metadata_extensions") {
-            cert_entry.allowed_metadata_extensions =
-                allowed_metadata_extensions_raw.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            cert_entry.allowed_metadata_extensions = allowed_metadata_extensions_raw
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         let old_token_policies = cert_entry.token_policies.clone();
@@ -396,7 +450,9 @@ impl CertBackendInner {
         if old_token_policies != cert_entry.token_policies {
             cert_entry.policies = cert_entry.token_policies.clone();
         } else if let Ok(policies_value) = req.get_data("policies") {
-            let policies = policies_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let policies = policies_value
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             cert_entry.policies.clone_from(&policies);
             cert_entry.token_policies = policies;
         }
@@ -404,7 +460,9 @@ impl CertBackendInner {
         if old_token_period != cert_entry.token_period {
             cert_entry.period = cert_entry.token_period;
         } else if let Ok(period_value) = req.get_data("period") {
-            let period = period_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let period = period_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             cert_entry.period = period;
             cert_entry.token_period = period;
         }
@@ -412,11 +470,15 @@ impl CertBackendInner {
         if old_token_ttl != cert_entry.token_ttl {
             cert_entry.ttl = cert_entry.token_ttl;
         } else if let Ok(ttl_value) = req.get_data("ttl") {
-            let ttl = ttl_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let ttl = ttl_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             cert_entry.ttl = ttl;
             cert_entry.token_ttl = ttl;
         } else if let Ok(lease_value) = req.get_data("lease") {
-            let lease = lease_value.as_u64().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let lease = lease_value
+                .as_u64()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             cert_entry.ttl = Duration::from_secs(lease);
             cert_entry.token_ttl = cert_entry.ttl;
         }
@@ -424,7 +486,9 @@ impl CertBackendInner {
         if old_token_max_ttl != cert_entry.token_max_ttl {
             cert_entry.max_ttl = cert_entry.token_max_ttl;
         } else if let Ok(max_ttl_value) = req.get_data("max_ttl") {
-            let max_ttl = max_ttl_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let max_ttl = max_ttl_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             cert_entry.max_ttl = max_ttl;
             cert_entry.token_max_ttl = max_ttl;
         }
@@ -432,7 +496,9 @@ impl CertBackendInner {
         if old_token_bound_cidrs != cert_entry.token_bound_cidrs {
             cert_entry.bound_cidrs = cert_entry.token_bound_cidrs.clone();
         } else if let Ok(bound_cidrs_value) = req.get_data("bound_cidrs") {
-            let bound_cidrs = bound_cidrs_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let bound_cidrs = bound_cidrs_value
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             cert_entry.bound_cidrs = bound_cidrs
                 .iter()
                 .map(|s| SockAddrMarshaler::from_str(s))
@@ -448,7 +514,10 @@ impl CertBackendInner {
 
         //If the certificate is not a CA cert, then ensure that x509.ExtKeyUsageClientAuth is set
         let cert = &cert_entry.certificate[0];
-        if !is_ca_cert(cert) && has_x509_ext_key_usage(cert) && !has_x509_ext_key_usage_flag(cert, XKU_SSL_CLIENT) {
+        if !is_ca_cert(cert)
+            && has_x509_ext_key_usage(cert)
+            && !has_x509_ext_key_usage_flag(cert, XKU_SSL_CLIENT)
+        {
             return Err(rv_error_response!(
                 "nonCA certificates should have TLS client authentication set as an extended key usage"
             ));
@@ -459,14 +528,22 @@ impl CertBackendInner {
         Ok(None)
     }
 
-    pub async fn delete_cert(&self, _backend: &dyn Backend, req: &Request) -> Result<Option<Response>, RvError> {
+    pub async fn delete_cert(
+        &self,
+        _backend: &dyn Backend,
+        req: &Request,
+    ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?.to_lowercase();
 
         req.storage_delete(format!("cert/{name}").as_str()).await?;
         Ok(None)
     }
 
-    pub async fn list_cert(&self, _backend: &dyn Backend, req: &Request) -> Result<Option<Response>, RvError> {
+    pub async fn list_cert(
+        &self,
+        _backend: &dyn Backend,
+        req: &Request,
+    ) -> Result<Option<Response>, RvError> {
         let certs = req.storage_list("cert/".to_string().as_str()).await?;
         let resp = Response::list_response(&certs);
         Ok(Some(resp))

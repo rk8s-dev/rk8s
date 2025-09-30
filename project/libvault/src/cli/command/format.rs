@@ -4,9 +4,9 @@ use clap::{Args, ValueEnum};
 use dashmap::DashMap;
 use derive_more::{Deref, Display};
 use lazy_static::lazy_static;
-use prettytable::{format::FormatBuilder, Cell, Row, Table};
+use prettytable::{Cell, Row, Table, format::FormatBuilder};
 use regex::Regex;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::{api::secret::Secret, errors::RvError, rv_error_string};
 
@@ -186,10 +186,15 @@ pub fn table_data_add_header(data: &Value, headers: &[&str]) -> Result<Value, Rv
     if let Value::Array(ref mut arr) = array {
         if data.is_object() {
             if headers.len() != 2 {
-                return Err(rv_error_string!("table_data_add_header failed: headers.len() != 2"));
+                return Err(rv_error_string!(
+                    "table_data_add_header failed: headers.len() != 2"
+                ));
             }
             arr.push(json!([headers[0], headers[1]]));
-            arr.push(json!([SEPS[headers[0].len().min(SEPS.len())], SEPS[headers[1].len().min(SEPS.len())]]));
+            arr.push(json!([
+                SEPS[headers[0].len().min(SEPS.len())],
+                SEPS[headers[1].len().min(SEPS.len())]
+            ]));
             let data_obj = data.as_object().unwrap();
             for (k, v) in data_obj.iter() {
                 arr.push(json!([k, v.clone()]));
@@ -213,12 +218,16 @@ pub fn table_data_add_header(data: &Value, headers: &[&str]) -> Result<Value, Rv
             for item in data_arr.iter() {
                 if item.is_array() {
                     if item.as_array().unwrap().len() != headers.len() {
-                        return Err(rv_error_string!("table_data_add_header failed: headers.len() != data[i].len()"));
+                        return Err(rv_error_string!(
+                            "table_data_add_header failed: headers.len() != data[i].len()"
+                        ));
                     }
                     arr.push(item.clone());
                 } else if item.is_object() {
                     if headers.len() != 2 {
-                        return Err(rv_error_string!("table_data_add_header failed: headers.len() != 2"));
+                        return Err(rv_error_string!(
+                            "table_data_add_header failed: headers.len() != 2"
+                        ));
                     }
 
                     let data_obj = item.as_object().unwrap();
@@ -227,7 +236,9 @@ pub fn table_data_add_header(data: &Value, headers: &[&str]) -> Result<Value, Rv
                     }
                 } else {
                     if headers.len() != 1 {
-                        return Err(rv_error_string!("table_data_add_header failed: headers.len() != 1"));
+                        return Err(rv_error_string!(
+                            "table_data_add_header failed: headers.len() != 1"
+                        ));
                     }
                     arr.push(item.clone());
                 }
@@ -269,7 +280,9 @@ impl Formatter for TableFormatter {
                         .map(|i| -> Cell {
                             Cell::new(
                                 i.as_str()
-                                    .map_or(i.to_string().as_str(), |s| if s.is_empty() { "n/a" } else { s })
+                                    .map_or(i.to_string().as_str(), |s| {
+                                        if s.is_empty() { "n/a" } else { s }
+                                    })
                                     .trim(),
                             )
                         })
@@ -282,14 +295,20 @@ impl Formatter for TableFormatter {
                             Cell::new(k),
                             Cell::new(
                                 v.as_str()
-                                    .map_or(v.to_string().as_str(), |s| if s.is_empty() { "n/a" } else { s })
+                                    .map_or(v.to_string().as_str(), |s| {
+                                        if s.is_empty() { "n/a" } else { s }
+                                    })
                                     .trim(),
                             ),
                         ]));
                     }
                 } else {
                     table.add_row(Row::new(vec![Cell::new(
-                        row.as_str().map_or(row.to_string().as_str(), |s| if s.is_empty() { "n/a" } else { s }).trim(),
+                        row.as_str()
+                            .map_or(row.to_string().as_str(), |s| {
+                                if s.is_empty() { "n/a" } else { s }
+                            })
+                            .trim(),
                     )]));
                 }
             }
@@ -299,7 +318,12 @@ impl Formatter for TableFormatter {
                 table.add_row(Row::new(vec![
                     Cell::new(k),
                     Cell::new(
-                        v.as_str().map_or(v.to_string().as_str(), |s| if s.is_empty() { "n/a" } else { s }).trim(),
+                        v.as_str()
+                            .map_or(
+                                v.to_string().as_str(),
+                                |s| if s.is_empty() { "n/a" } else { s },
+                            )
+                            .trim(),
                     ),
                 ]));
             }
@@ -320,8 +344,14 @@ impl OutputOptions {
 
     pub fn print_value(&self, value: &Value, title_casing: bool) -> Result<(), RvError> {
         let fm = self.format.to_string();
-        let formater = Formatters.get(&fm).ok_or(RvError::ErrString(format!("Invalid output format: {fm}")))?;
-        let data = if self.format == Format::Table && title_casing { &convert_keys(value) } else { value };
+        let formater = Formatters
+            .get(&fm)
+            .ok_or(RvError::ErrString(format!("Invalid output format: {fm}")))?;
+        let data = if self.format == Format::Table && title_casing {
+            &convert_keys(value)
+        } else {
+            value
+        };
 
         formater.output(data, None)
     }
@@ -332,28 +362,40 @@ impl OutputOptions {
         }
 
         let fm = self.format.to_string();
-        let formater = Formatters.get(&fm).ok_or(RvError::ErrString(format!("Invalid output format: {fm}")))?;
+        let formater = Formatters
+            .get(&fm)
+            .ok_or(RvError::ErrString(format!("Invalid output format: {fm}")))?;
 
-        let data = if fm == "table" { &table_data_add_header(value, &["Keys"])? } else { value };
+        let data = if fm == "table" {
+            &table_data_add_header(value, &["Keys"])?
+        } else {
+            value
+        };
 
         formater.output(data, None)
     }
 
     pub fn print_data(&self, value: &Value, field: Option<&str>) -> Result<(), RvError> {
         let fm = self.format.to_string();
-        let formater = Formatters.get(&fm).ok_or(RvError::ErrString(format!("Invalid output format: {fm}")))?;
+        let formater = Formatters
+            .get(&fm)
+            .ok_or(RvError::ErrString(format!("Invalid output format: {fm}")))?;
 
         let map = value["data"].as_object().unwrap();
 
         let data = if let Some(key) = field {
             if let Some(item) = map.get(key) {
                 if !item.is_string() {
-                    return Err(rv_error_string!(format!(r#"Field "{key}" not present in secret"#)));
+                    return Err(rv_error_string!(format!(
+                        r#"Field "{key}" not present in secret"#
+                    )));
                 }
                 let secret = item.as_str().unwrap();
                 Value::String(secret.to_string())
             } else {
-                return Err(rv_error_string!(format!(r#"Field "{key}" not present in secret"#)));
+                return Err(rv_error_string!(format!(
+                    r#"Field "{key}" not present in secret"#
+                )));
             }
         } else if self.format == Format::Table {
             table_data_add_header(&Value::Object(map.clone()), &["Key", "Value"])?
@@ -366,7 +408,9 @@ impl OutputOptions {
 
     pub fn print_secret(&self, secret: &Secret, _field: Option<&str>) -> Result<(), RvError> {
         let fm = self.format.to_string();
-        let formater = Formatters.get(&fm).ok_or(RvError::ErrString(format!("Invalid output format: {fm}")))?;
+        let formater = Formatters
+            .get(&fm)
+            .ok_or(RvError::ErrString(format!("Invalid output format: {fm}")))?;
 
         let value = if fm == "table" && secret.auth.is_some() {
             let auth = secret.auth.as_ref().unwrap();
@@ -382,7 +426,10 @@ impl OutputOptions {
             .unwrap()
             .clone();
             for (key, val) in auth.metadata.iter() {
-                v.insert(format!("token_meta_{key}").to_string(), Value::String(val.clone()));
+                v.insert(
+                    format!("token_meta_{key}").to_string(),
+                    Value::String(val.clone()),
+                );
             }
             let val = Value::Object(v);
             table_data_add_header(&val, &["Key", "Value"])?

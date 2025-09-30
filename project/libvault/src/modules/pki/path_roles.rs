@@ -4,11 +4,14 @@ use better_default::Default;
 use humantime::parse_duration;
 use serde::{Deserialize, Serialize};
 
-use super::{util::DEFAULT_MAX_TTL, PkiBackend, PkiBackendInner};
+use super::{PkiBackend, PkiBackendInner, util::DEFAULT_MAX_TTL};
 use crate::{
     context::Context,
     errors::RvError,
-    logical::{field::FieldTrait, Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
+    logical::{
+        Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response,
+        field::FieldTrait,
+    },
     new_fields, new_fields_internal, new_path, new_path_internal,
     storage::StorageEntry,
     utils::{deserialize_duration, serialize_duration},
@@ -16,12 +19,21 @@ use crate::{
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RoleEntry {
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub ttl: Duration,
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     #[default(DEFAULT_MAX_TTL)]
     pub max_ttl: Duration,
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub not_before_duration: Duration,
     #[default("rsa".to_string())]
     pub key_type: String,
@@ -304,7 +316,11 @@ for "generate_lease"."#
 
 #[maybe_async::maybe_async]
 impl PkiBackendInner {
-    pub async fn get_role(&self, req: &mut Request, name: &str) -> Result<Option<RoleEntry>, RvError> {
+    pub async fn get_role(
+        &self,
+        req: &mut Request,
+        name: &str,
+    ) -> Result<Option<RoleEntry>, RvError> {
         let key = format!("role/{name}");
         let storage_entry = req.storage_get(&key).await?;
         if storage_entry.is_none() {
@@ -316,11 +332,23 @@ impl PkiBackendInner {
         Ok(Some(role_entry))
     }
 
-    pub async fn read_path_role(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
-        let role_entry =
-            self.get_role(req, req.get_data("name")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?).await?;
+    pub async fn read_path_role(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let role_entry = self
+            .get_role(
+                req,
+                req.get_data("name")?
+                    .as_str()
+                    .ok_or(RvError::ErrRequestFieldInvalid)?,
+            )
+            .await?;
         let data = serde_json::to_value(role_entry)?;
-        Ok(Some(Response::data_response(Some(data.as_object().unwrap().clone()))))
+        Ok(Some(Response::data_response(Some(
+            data.as_object().unwrap().clone(),
+        ))))
     }
 
     pub async fn create_path_role(
@@ -339,14 +367,21 @@ impl PkiBackendInner {
         }
         let mut max_ttl = DEFAULT_MAX_TTL;
         if let Ok(max_ttl_value) = req.get_data("max_ttl") {
-            let max_ttl_str = max_ttl_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let max_ttl_str = max_ttl_value
+                .as_str()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             if !max_ttl_str.is_empty() {
                 max_ttl = parse_duration(max_ttl_str)?;
             }
         }
         let key_type_value = req.get_data_or_default("key_type")?;
-        let key_type = key_type_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let mut key_bits = req.get_data_or_default("key_bits")?.as_u64().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let key_type = key_type_value
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let mut key_bits = req
+            .get_data_or_default("key_bits")?
+            .as_u64()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
         match key_type {
             "rsa" => {
                 if key_bits == 0 {
@@ -381,46 +416,106 @@ impl PkiBackendInner {
             }
         }
 
-        let signature_bits =
-            req.get_data_or_default("signature_bits")?.as_u64().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let allow_localhost =
-            req.get_data_or_default("allow_localhost")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let allow_bare_domains =
-            req.get_data_or_default("allow_bare_domains")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let allow_subdomains =
-            req.get_data_or_default("allow_subdomains")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let allow_any_name =
-            req.get_data_or_default("allow_any_name")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let allow_ip_sans =
-            req.get_data_or_default("allow_ip_sans")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let server_flag = req.get_data_or_default("server_flag")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let client_flag = req.get_data_or_default("client_flag")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let use_csr_sans = req.get_data_or_default("use_csr_sans")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let use_csr_common_name =
-            req.get_data_or_default("use_csr_common_name")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let key_usage =
-            req.get_data_or_default("key_usage")?.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let ext_key_usage =
-            req.get_data_or_default("ext_key_usage")?.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let country = req.get_data_or_default("country")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
-        let province =
-            req.get_data_or_default("province")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
-        let locality =
-            req.get_data_or_default("locality")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
-        let organization =
-            req.get_data_or_default("organization")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
-        let ou = req.get_data_or_default("ou")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
-        let street_address =
-            req.get_data_or_default("street_address")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
-        let postal_code =
-            req.get_data_or_default("postal_code")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
-        let no_store = req.get_data_or_default("no_store")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let generate_lease =
-            req.get_data_or_default("generate_lease")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
-        let not_after =
-            req.get_data_or_default("not_after")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
-        let not_before_duration_u64 =
-            req.get_data_or_default("not_before_duration")?.as_u64().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let signature_bits = req
+            .get_data_or_default("signature_bits")?
+            .as_u64()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let allow_localhost = req
+            .get_data_or_default("allow_localhost")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let allow_bare_domains = req
+            .get_data_or_default("allow_bare_domains")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let allow_subdomains = req
+            .get_data_or_default("allow_subdomains")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let allow_any_name = req
+            .get_data_or_default("allow_any_name")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let allow_ip_sans = req
+            .get_data_or_default("allow_ip_sans")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let server_flag = req
+            .get_data_or_default("server_flag")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let client_flag = req
+            .get_data_or_default("client_flag")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let use_csr_sans = req
+            .get_data_or_default("use_csr_sans")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let use_csr_common_name = req
+            .get_data_or_default("use_csr_common_name")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let key_usage = req
+            .get_data_or_default("key_usage")?
+            .as_comma_string_slice()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let ext_key_usage = req
+            .get_data_or_default("ext_key_usage")?
+            .as_comma_string_slice()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let country = req
+            .get_data_or_default("country")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let province = req
+            .get_data_or_default("province")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let locality = req
+            .get_data_or_default("locality")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let organization = req
+            .get_data_or_default("organization")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let ou = req
+            .get_data_or_default("ou")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let street_address = req
+            .get_data_or_default("street_address")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let postal_code = req
+            .get_data_or_default("postal_code")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let no_store = req
+            .get_data_or_default("no_store")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let generate_lease = req
+            .get_data_or_default("generate_lease")?
+            .as_bool()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let not_after = req
+            .get_data_or_default("not_after")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let not_before_duration_u64 = req
+            .get_data_or_default("not_before_duration")?
+            .as_u64()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
         let not_before_duration = Duration::from_secs(not_before_duration_u64);
 
         let role_entry = RoleEntry {

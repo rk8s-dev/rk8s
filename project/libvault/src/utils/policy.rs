@@ -55,11 +55,21 @@ pub fn equivalent_policies(a: &Vec<String>, b: &Vec<String>) -> bool {
         return false;
     }
 
-    let mut filtered_sorted_a: Vec<String> =
-        a.iter().filter(|s| *s != "default").cloned().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
+    let mut filtered_sorted_a: Vec<String> = a
+        .iter()
+        .filter(|s| *s != "default")
+        .cloned()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
 
-    let mut filtered_sorted_b: Vec<String> =
-        b.iter().filter(|s| *s != "default").cloned().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
+    let mut filtered_sorted_b: Vec<String> = b
+        .iter()
+        .filter(|s| *s != "default")
+        .cloned()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
 
     filtered_sorted_a.sort();
     filtered_sorted_b.sort();
@@ -94,12 +104,31 @@ mod test {
         ];
 
         sanitize_policies(&mut policies2, true);
-        assert_eq!(policies2, vec!["admin".to_string(), "default".to_string(), "rooot".to_string()]);
+        assert_eq!(
+            policies2,
+            vec![
+                "admin".to_string(),
+                "default".to_string(),
+                "rooot".to_string()
+            ]
+        );
 
-        let mut policies3 = vec![String::from("rooot"), String::from("Admin"), String::from(""), String::from("Admin")];
+        let mut policies3 = vec![
+            String::from("rooot"),
+            String::from("Admin"),
+            String::from(""),
+            String::from("Admin"),
+        ];
 
         sanitize_policies(&mut policies3, true);
-        assert_eq!(policies3, vec!["admin".to_string(), "default".to_string(), "rooot".to_string()]);
+        assert_eq!(
+            policies3,
+            vec![
+                "admin".to_string(),
+                "default".to_string(),
+                "rooot".to_string()
+            ]
+        );
 
         let mut policies4 = vec![String::from("")];
 
@@ -116,7 +145,12 @@ mod test {
         sanitize_policies(&mut policies6, false);
         assert_eq!(policies6.len(), 0);
 
-        let mut policies7 = vec![String::from("rooot"), String::from("Admin"), String::from(""), String::from("Admin")];
+        let mut policies7 = vec![
+            String::from("rooot"),
+            String::from("Admin"),
+            String::from(""),
+            String::from("Admin"),
+        ];
 
         sanitize_policies(&mut policies7, false);
         assert_eq!(policies7, vec!["admin".to_string(), "rooot".to_string()]);

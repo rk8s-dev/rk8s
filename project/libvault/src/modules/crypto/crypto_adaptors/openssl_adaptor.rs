@@ -2,12 +2,14 @@
 
 use openssl::{
     rand::rand_priv_bytes,
-    symm::{decrypt, decrypt_aead, encrypt, encrypt_aead, Cipher, Crypter, Mode},
+    symm::{Cipher, Crypter, Mode, decrypt, decrypt_aead, encrypt, encrypt_aead},
 };
 
 use crate::{
     errors::RvError,
-    modules::crypto::{crypto_adaptors::common, AEADCipher, AESKeySize, BlockCipher, CipherMode, AES},
+    modules::crypto::{
+        AEADCipher, AES, AESKeySize, BlockCipher, CipherMode, crypto_adaptors::common,
+    },
 };
 
 pub struct AdaptorCTX {
@@ -49,7 +51,11 @@ impl BlockCipher for AES {
         common_aes_encrypt!(self, plaintext);
     }
 
-    fn encrypt_update(&mut self, plaintext: Vec<u8>, ciphertext: &mut Vec<u8>) -> Result<usize, RvError> {
+    fn encrypt_update(
+        &mut self,
+        plaintext: Vec<u8>,
+        ciphertext: &mut Vec<u8>,
+    ) -> Result<usize, RvError> {
         common_aes_encrypt_update!(self, plaintext, ciphertext);
     }
 
@@ -61,7 +67,11 @@ impl BlockCipher for AES {
         common_aes_decrypt!(self, ciphertext);
     }
 
-    fn decrypt_update(&mut self, ciphertext: Vec<u8>, plaintext: &mut Vec<u8>) -> Result<usize, RvError> {
+    fn decrypt_update(
+        &mut self,
+        ciphertext: Vec<u8>,
+        plaintext: &mut Vec<u8>,
+    ) -> Result<usize, RvError> {
         common_aes_decrypt_update!(self, ciphertext, plaintext);
     }
 

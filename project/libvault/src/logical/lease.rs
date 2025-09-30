@@ -22,7 +22,9 @@ pub struct Lease {
 
 impl Lease {
     pub fn new() -> Self {
-        Self { ..Default::default() }
+        Self {
+            ..Default::default()
+        }
     }
 
     pub fn ttl(&self) -> Duration {
@@ -155,7 +157,17 @@ mod mod_lease_tests {
 
     #[test]
     fn test_calculate_ttl() {
-        struct Case(&'static str, Duration, Duration, Duration, Duration, Duration, Duration, Duration, Duration);
+        struct Case(
+            &'static str,
+            Duration,
+            Duration,
+            Duration,
+            Duration,
+            Duration,
+            Duration,
+            Duration,
+            Duration,
+        );
 
         let cases = [
             Case(
@@ -294,7 +306,16 @@ mod mod_lease_tests {
 
         for case in cases.iter() {
             let now = round_to_hour(SystemTime::now());
-            let ttl = calculate_ttl(case.1, case.2, case.3, case.4, case.5, case.6, case.7, SystemTime::now());
+            let ttl = calculate_ttl(
+                case.1,
+                case.2,
+                case.3,
+                case.4,
+                case.5,
+                case.6,
+                case.7,
+                SystemTime::now(),
+            );
             if ttl.is_err() {
                 println!("bad case: {}", case.0);
             }

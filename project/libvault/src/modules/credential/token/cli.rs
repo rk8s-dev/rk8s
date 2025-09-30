@@ -6,10 +6,10 @@ use serde_json::{Map, Value};
 
 use crate::{
     api::{
+        HttpResponse,
         auth::LoginHandler,
         client::Client,
         secret::{Secret, SecretAuth},
-        HttpResponse,
     },
     errors::RvError,
     logical::field::FieldTrait,
@@ -33,19 +33,29 @@ impl LoginHandler for TokenCliHandler {
 
         token = token.trim().to_string();
         if token.is_empty() {
-            return Err(rv_error_string!("a token must be passed to auth, please view the help for more information"));
+            return Err(rv_error_string!(
+                "a token must be passed to auth, please view the help for more information"
+            ));
         }
 
         let lookup = if let Some(lookup_value) = data.get("lookup") {
-            lookup_value.as_bool_ex().ok_or(rv_error_string!("Failed to parse \"lookup\" as boolean"))?
+            lookup_value
+                .as_bool_ex()
+                .ok_or(rv_error_string!("Failed to parse \"lookup\" as boolean"))?
         } else {
             true
         };
 
         if !lookup {
-            let auth = SecretAuth { client_token: token.clone(), ..Default::default() };
+            let auth = SecretAuth {
+                client_token: token.clone(),
+                ..Default::default()
+            };
 
-            let resp = Secret { auth: Some(auth), ..Default::default() };
+            let resp = Secret {
+                auth: Some(auth),
+                ..Default::default()
+            };
             let ret = HttpResponse {
                 response_status: 200,
                 response_data: Some(serde_json::to_value(resp)?),
@@ -72,7 +82,10 @@ impl LoginHandler for TokenCliHandler {
             ..Default::default()
         };
 
-        let resp = Secret { auth: Some(auth), ..Default::default() };
+        let resp = Secret {
+            auth: Some(auth),
+            ..Default::default()
+        };
         let ret = HttpResponse {
             response_status: 200,
             response_data: Some(serde_json::to_value(resp)?),

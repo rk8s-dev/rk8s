@@ -7,7 +7,7 @@ use blake3;
 use chrono::prelude::*;
 use humantime::{format_rfc3339, parse_duration, parse_rfc3339};
 use openssl::hash::{Hasher, MessageDigest};
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashSet;
 
@@ -16,7 +16,6 @@ use crate::errors::RvError;
 pub mod cert;
 pub mod cidr;
 pub mod crypto;
-pub mod db;
 pub mod ip_sock_addr;
 pub mod key;
 pub mod kv_builder;
@@ -29,8 +28,6 @@ pub mod sock_addr;
 pub mod string;
 pub mod token_util;
 pub mod unix_sock_addr;
-
-pub use db::DatabaseName;
 
 /// A hash set that stores Blake3 hashes of arbitrary byte data.
 ///
@@ -415,8 +412,11 @@ pub fn asn1time_to_timestamp(time_str: &str) -> Result<i64, RvError> {
 
 pub fn hex_encode_with_colon(bytes: &[u8]) -> String {
     let hex_str = hex::encode(bytes);
-    let split_hex: Vec<String> =
-        hex_str.as_bytes().chunks(2).map(|chunk| String::from_utf8(chunk.to_vec()).unwrap()).collect();
+    let split_hex: Vec<String> = hex_str
+        .as_bytes()
+        .chunks(2)
+        .map(|chunk| String::from_utf8(chunk.to_vec()).unwrap())
+        .collect();
 
     split_hex.join(":")
 }
@@ -668,7 +668,8 @@ mod tests {
         assert!(!serialized.is_empty());
 
         // Deserialize
-        let deserialized: BHashSet = serde_json::from_str(&serialized).expect("Failed to deserialize");
+        let deserialized: BHashSet =
+            serde_json::from_str(&serialized).expect("Failed to deserialize");
 
         // Verify deserialized set has same properties
         assert_eq!(deserialized.len(), set.len());

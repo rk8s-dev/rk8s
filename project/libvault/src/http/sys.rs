@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use actix_web::{http::StatusCode, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, http::StatusCode, web};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use zeroize::{Zeroize, Zeroizing};
@@ -73,12 +73,20 @@ async fn response_seal_status(core: web::Data<Arc<Core>>) -> Result<HttpResponse
     let sealed = core.sealed();
     let seal_config = core.seal_config().await?;
 
-    let resp = SealStatusResponse { sealed, t: seal_config.secret_shares, n: seal_config.secret_threshold, progress };
+    let resp = SealStatusResponse {
+        sealed,
+        t: seal_config.secret_shares,
+        n: seal_config.secret_threshold,
+        progress,
+    };
 
     Ok(response_json_ok(None, resp))
 }
 
-async fn sys_init_get_request_handler(_req: HttpRequest, core: web::Data<Arc<Core>>) -> Result<HttpResponse, RvError> {
+async fn sys_init_get_request_handler(
+    _req: HttpRequest,
+    core: web::Data<Arc<Core>>,
+) -> Result<HttpResponse, RvError> {
     #[cfg(not(feature = "sync_handler"))]
     let inited = core.inited().await?;
     #[cfg(feature = "sync_handler")]
@@ -102,7 +110,10 @@ async fn sys_init_put_request_handler(
 ) -> Result<HttpResponse, RvError> {
     let payload = serde_json::from_slice::<InitRequest>(&body)?;
     body.clear();
-    let seal_config = SealConfig { secret_shares: payload.secret_shares, secret_threshold: payload.secret_threshold };
+    let seal_config = SealConfig {
+        secret_shares: payload.secret_shares,
+        secret_threshold: payload.secret_threshold,
+    };
 
     #[cfg(not(feature = "sync_handler"))]
     let result = core.init(&seal_config).await?;
@@ -131,7 +142,10 @@ async fn sys_seal_status_request_handler(
     }
 }
 
-async fn sys_seal_request_handler(_req: HttpRequest, core: web::Data<Arc<Core>>) -> Result<HttpResponse, RvError> {
+async fn sys_seal_request_handler(
+    _req: HttpRequest,
+    core: web::Data<Arc<Core>>,
+) -> Result<HttpResponse, RvError> {
     #[cfg(not(feature = "sync_handler"))]
     core.seal().await?;
     #[cfg(feature = "sync_handler")]
@@ -447,7 +461,9 @@ pub fn init_sys_service(cfg: &mut web::ServiceConfig) {
                     .route(web::post().to(sys_init_put_request_handler))
                     .route(web::put().to(sys_init_put_request_handler)),
             )
-            .service(web::resource("/seal-status").route(web::get().to(sys_seal_status_request_handler)))
+            .service(
+                web::resource("/seal-status").route(web::get().to(sys_seal_status_request_handler)),
+            )
             .service(
                 web::resource("/seal")
                     .route(web::post().to(sys_seal_request_handler))
@@ -470,7 +486,9 @@ pub fn init_sys_service(cfg: &mut web::ServiceConfig) {
                     .route(web::post().to(sys_remount_request_handler))
                     .route(web::put().to(sys_remount_request_handler)),
             )
-            .service(web::resource("/auth").route(web::get().to(sys_list_auth_mounts_request_handler)))
+            .service(
+                web::resource("/auth").route(web::get().to(sys_list_auth_mounts_request_handler)),
+            )
             .service(
                 web::resource("/auth/{path:.*}")
                     .route(web::get().to(sys_list_auth_mounts_request_handler))
@@ -484,7 +502,10 @@ pub fn init_sys_service(cfg: &mut web::ServiceConfig) {
                     .route(web::post().to(sys_write_policy_request_handler))
                     .route(web::delete().to(sys_delete_policy_request_handler)),
             )
-            .service(web::resource("/policies/acl").route(web::get().to(sys_list_policies_request_handler)))
+            .service(
+                web::resource("/policies/acl")
+                    .route(web::get().to(sys_list_policies_request_handler)),
+            )
             .service(
                 web::resource("/policies/acl/{name:.*}")
                     .route(web::get().to(sys_read_policies_request_handler))
@@ -492,7 +513,8 @@ pub fn init_sys_service(cfg: &mut web::ServiceConfig) {
                     .route(web::delete().to(sys_delete_policies_request_handler)),
             )
             .service(
-                web::resource("/internal/ui/mounts").route(web::get().to(sys_get_internal_ui_mounts_request_handler)),
+                web::resource("/internal/ui/mounts")
+                    .route(web::get().to(sys_get_internal_ui_mounts_request_handler)),
             )
             .service(
                 web::resource("/internal/ui/mounts/{name:.*}")

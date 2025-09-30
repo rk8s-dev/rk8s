@@ -7,7 +7,7 @@ use openssl::{
     rand::rand_bytes,
     rsa::{Padding, Rsa},
     sign::{Signer, Verifier},
-    symm::{decrypt, decrypt_aead, encrypt, encrypt_aead, Cipher},
+    symm::{Cipher, decrypt, decrypt_aead, encrypt, encrypt_aead},
 };
 use serde::{Deserialize, Serialize};
 
@@ -62,8 +62,17 @@ fn cipher_from_key_type_and_bits(key_type: &str, bits: u32) -> Result<Cipher, Rv
 
 impl KeyBundle {
     pub fn new(name: &str, key_type: &str, key_bits: u32) -> Self {
-        let bits = if key_bits == 0 { key_bits_default(key_type) } else { key_bits };
-        Self { name: name.to_string(), key_type: key_type.to_string(), bits, ..KeyBundle::default() }
+        let bits = if key_bits == 0 {
+            key_bits_default(key_type)
+        } else {
+            key_bits
+        };
+        Self {
+            name: name.to_string(),
+            key_type: key_type.to_string(),
+            bits,
+            ..KeyBundle::default()
+        }
     }
 
     pub fn generate(&mut self) -> Result<(), RvError> {
@@ -165,7 +174,11 @@ impl KeyBundle {
         Ok(verifier.verify(signature).unwrap_or(false))
     }
 
-    pub fn encrypt(&self, data: &[u8], extra: Option<EncryptExtraData>) -> Result<Vec<u8>, RvError> {
+    pub fn encrypt(
+        &self,
+        data: &[u8],
+        extra: Option<EncryptExtraData>,
+    ) -> Result<Vec<u8>, RvError> {
         match self.key_type.as_str() {
             "aes-gcm" | "sm4-gcm" | "sm4-ccm" => {
                 let cipher = cipher_from_key_type_and_bits(self.key_type.as_str(), self.bits)?;
@@ -174,13 +187,18 @@ impl KeyBundle {
                     _ => "".as_bytes(),
                 });
                 let mut tag = vec![0u8; 16];
-                let mut ciphertext = encrypt_aead(cipher, &self.key, Some(&self.iv), aad, data, &mut tag)?;
+                let mut ciphertext =
+                    encrypt_aead(cipher, &self.key, Some(&self.iv), aad, data, &mut tag)?;
                 ciphertext.extend_from_slice(&tag);
                 Ok(ciphertext)
             }
             "aes-cbc" | "aes-ecb" => {
                 let cipher = cipher_from_key_type_and_bits(self.key_type.as_str(), self.bits)?;
-                let iv = if self.key_type == "aes-ecb" { None } else { Some(self.iv.as_slice()) };
+                let iv = if self.key_type == "aes-ecb" {
+                    None
+                } else {
+                    Some(self.iv.as_slice())
+                };
                 Ok(encrypt(cipher, &self.key, iv, data)?)
             }
             "rsa" => {
@@ -207,7 +225,11 @@ impl KeyBundle {
         }
     }
 
-    pub fn decrypt(&self, data: &[u8], extra: Option<EncryptExtraData>) -> Result<Vec<u8>, RvError> {
+    pub fn decrypt(
+        &self,
+        data: &[u8],
+        extra: Option<EncryptExtraData>,
+    ) -> Result<Vec<u8>, RvError> {
         match self.key_type.as_str() {
             "aes-gcm" | "sm4-gcm" | "sm4-ccm" => {
                 let cipher = cipher_from_key_type_and_bits(self.key_type.as_str(), self.bits)?;
@@ -220,11 +242,22 @@ impl KeyBundle {
                     return Err(RvError::ErrPkiInternal);
                 }
                 let (ciphertext, tag) = data.split_at(data.len() - tag_len);
-                Ok(decrypt_aead(cipher, &self.key, Some(&self.iv), aad, ciphertext, tag)?)
+                Ok(decrypt_aead(
+                    cipher,
+                    &self.key,
+                    Some(&self.iv),
+                    aad,
+                    ciphertext,
+                    tag,
+                )?)
             }
             "aes-cbc" | "aes-ecb" => {
                 let cipher = cipher_from_key_type_and_bits(self.key_type.as_str(), self.bits)?;
-                let iv = if self.key_type == "aes-ecb" { None } else { Some(self.iv.as_slice()) };
+                let iv = if self.key_type == "aes-ecb" {
+                    None
+                } else {
+                    Some(self.iv.as_slice())
+                };
                 Ok(decrypt(cipher, &self.key, iv, data)?)
             }
             "rsa" => {
@@ -249,7 +282,10 @@ impl KeyBundle {
                     let _ = rsa_pri.private_decrypt(data, &mut buf, Padding::PKCS1)?;
                 }
 
-                let pos = buf.iter().position(|&x| x == 0).ok_or(RvError::ErrPkiInternal)?;
+                let pos = buf
+                    .iter()
+                    .position(|&x| x == 0)
+                    .ok_or(RvError::ErrPkiInternal)?;
                 buf.truncate(pos);
 
                 Ok(buf)
@@ -329,16 +365,28 @@ mod test {
         let mut key_bundle = KeyBundle::new("aes-gcm-128", "aes-gcm", 128);
         test_key_encrypt_decrypt(&mut key_bundle, None);
         test_key_encrypt_decrypt(&mut key_bundle, None);
-        test_key_encrypt_decrypt(&mut key_bundle, Some(EncryptExtraData::Aad("rusty_vault".as_bytes())));
+        test_key_encrypt_decrypt(
+            &mut key_bundle,
+            Some(EncryptExtraData::Aad("rusty_vault".as_bytes())),
+        );
         let mut key_bundle = KeyBundle::new("aes-gcm-192", "aes-gcm", 192);
         test_key_encrypt_decrypt(&mut key_bundle, None);
         test_key_encrypt_decrypt(&mut key_bundle, None);
-        test_key_encrypt_decrypt(&mut key_bundle, Some(EncryptExtraData::Aad("rusty_vault".as_bytes())));
+        test_key_encrypt_decrypt(
+            &mut key_bundle,
+            Some(EncryptExtraData::Aad("rusty_vault".as_bytes())),
+        );
         let mut key_bundle = KeyBundle::new("aes-gcm-256", "aes-gcm", 256);
         test_key_encrypt_decrypt(&mut key_bundle, None);
-        test_key_encrypt_decrypt(&mut key_bundle, Some(EncryptExtraData::Aad("rusty_vault".as_bytes())));
+        test_key_encrypt_decrypt(
+            &mut key_bundle,
+            Some(EncryptExtraData::Aad("rusty_vault".as_bytes())),
+        );
         test_key_encrypt_decrypt(&mut key_bundle, None);
-        test_key_encrypt_decrypt(&mut key_bundle, Some(EncryptExtraData::Aad("rusty_vault".as_bytes())));
+        test_key_encrypt_decrypt(
+            &mut key_bundle,
+            Some(EncryptExtraData::Aad("rusty_vault".as_bytes())),
+        );
 
         // test aes-cbc
         let mut key_bundle = KeyBundle::new("aes-cbc-128", "aes-cbc", 128);
@@ -364,12 +412,18 @@ mod test {
         let mut key_bundle = KeyBundle::new("sm4-gcm-128", "sm4-gcm", 128);
         test_key_encrypt_decrypt(&mut key_bundle, None);
         test_key_encrypt_decrypt(&mut key_bundle, None);
-        test_key_encrypt_decrypt(&mut key_bundle, Some(EncryptExtraData::Aad("rusty_vault".as_bytes())));
+        test_key_encrypt_decrypt(
+            &mut key_bundle,
+            Some(EncryptExtraData::Aad("rusty_vault".as_bytes())),
+        );
 
         // test sm4-ccm
         let mut key_bundle = KeyBundle::new("sm4-ccm-128", "sm4-ccm", 128);
         test_key_encrypt_decrypt(&mut key_bundle, None);
         test_key_encrypt_decrypt(&mut key_bundle, None);
-        test_key_encrypt_decrypt(&mut key_bundle, Some(EncryptExtraData::Aad("rusty_vault".as_bytes())));
+        test_key_encrypt_decrypt(
+            &mut key_bundle,
+            Some(EncryptExtraData::Aad("rusty_vault".as_bytes())),
+        );
     }
 }

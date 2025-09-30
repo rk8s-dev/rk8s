@@ -21,7 +21,11 @@ impl Logical<'_> {
         self.request_read(format!("/v1/{path}"))
     }
 
-    pub fn write(&self, path: &str, data: Option<Map<String, Value>>) -> Result<HttpResponse, RvError> {
+    pub fn write(
+        &self,
+        path: &str,
+        data: Option<Map<String, Value>>,
+    ) -> Result<HttpResponse, RvError> {
         self.request_write(format!("/v1/{path}"), data)
     }
 
@@ -37,7 +41,11 @@ impl Logical<'_> {
         Ok(ret)
     }
 
-    pub fn delete(&self, path: &str, data: Option<Map<String, Value>>) -> Result<HttpResponse, RvError> {
+    pub fn delete(
+        &self,
+        path: &str,
+        data: Option<Map<String, Value>>,
+    ) -> Result<HttpResponse, RvError> {
         self.request_delete(format!("/v1/{path}"), data)
     }
 }

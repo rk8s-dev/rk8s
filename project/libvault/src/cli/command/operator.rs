@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use sysexits::ExitCode;
 
 use super::{operator_init, operator_seal, operator_unseal};
-use crate::{cli::command::CommandExecutor, EXIT_CODE_INSUFFICIENT_PARAMS};
+use crate::{EXIT_CODE_INSUFFICIENT_PARAMS, cli::command::CommandExecutor};
 
 #[derive(Parser)]
 #[command(
@@ -49,7 +49,7 @@ impl Commands {
 impl Operator {
     #[inline]
     pub fn execute(&mut self) -> ExitCode {
-        if let Some(ref mut cmd) = &mut self.command {
+        if let Some(cmd) = &mut self.command {
             return cmd.execute();
         }
 

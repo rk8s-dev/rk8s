@@ -4,7 +4,7 @@ use openssl::{bn::BigNum, x509::X509Crl};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::{path_config::Config, CertBackend, CertBackendInner};
+use super::{CertBackend, CertBackendInner, path_config::Config};
 use crate::{
     context::Context,
     errors::RvError,
@@ -20,7 +20,10 @@ pub struct RevokedSerialInfo;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CDPInfo {
     pub url: String,
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub valid_until: Duration,
 }
 
@@ -130,15 +133,20 @@ impl CertBackendInner {
     ) -> Result<(), RvError> {
         self.update_crl_cache(req).await?;
 
-        let mut crl_info = CRLInfo { cdp, ..Default::default() };
+        let mut crl_info = CRLInfo {
+            cdp,
+            ..Default::default()
+        };
 
-        if let Some(crl) = x509crl {
-            if let Some(revoked_stack) = crl.get_revoked() {
-                for revoked in revoked_stack.iter() {
-                    let serial = revoked.serial_number().to_bn()?;
-                    let serial_str = serial.to_dec_str()?;
-                    crl_info.serials.insert(serial_str.to_lowercase(), RevokedSerialInfo {});
-                }
+        if let Some(crl) = x509crl
+            && let Some(revoked_stack) = crl.get_revoked()
+        {
+            for revoked in revoked_stack.iter() {
+                let serial = revoked.serial_number().to_bn()?;
+                let serial_str = serial.to_dec_str()?;
+                crl_info
+                    .serials
+                    .insert(serial_str.to_lowercase(), RevokedSerialInfo {});
             }
         }
 
@@ -150,7 +158,12 @@ impl CertBackendInner {
         Ok(())
     }
 
-    pub async fn fetch_crl(&self, req: &mut Request, name: &str, crl: CRLInfo) -> Result<(), RvError> {
+    pub async fn fetch_crl(
+        &self,
+        req: &mut Request,
+        name: &str,
+        crl: CRLInfo,
+    ) -> Result<(), RvError> {
         if crl.cdp.is_none() {
             return Err(RvError::ErrRequestInvalid);
         }
@@ -163,13 +176,21 @@ impl CertBackendInner {
         Ok(())
     }
 
-    pub async fn list_crl(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn list_crl(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let crls = req.storage_list("crls/").await?;
         let resp = Response::list_response(&crls);
         Ok(Some(resp))
     }
 
-    pub async fn read_crl(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn read_crl(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?.to_lowercase();
         if name.is_empty() {
             return Err(RvError::ErrRequestNoDataField);
@@ -186,10 +207,16 @@ impl CertBackendInner {
 
         let crl_data = serde_json::to_value(&*crl_info)?;
 
-        Ok(Some(Response::data_response(Some(crl_data.as_object().unwrap().clone()))))
+        Ok(Some(Response::data_response(Some(
+            crl_data.as_object().unwrap().clone(),
+        ))))
     }
 
-    pub async fn write_crl(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn write_crl(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?.to_lowercase();
         if name.is_empty() {
             return Err(RvError::ErrRequestNoDataField);
@@ -205,8 +232,14 @@ impl CertBackendInner {
                 return Err(RvError::ErrRequestInvalid);
             }
             let _ = Url::parse(url)?;
-            let cdp_info = CDPInfo { url: url.to_string(), ..Default::default() };
-            let crl_info = CRLInfo { cdp: Some(cdp_info), ..Default::default() };
+            let cdp_info = CDPInfo {
+                url: url.to_string(),
+                ..Default::default()
+            };
+            let crl_info = CRLInfo {
+                cdp: Some(cdp_info),
+                ..Default::default()
+            };
 
             self.fetch_crl(req, &name, crl_info).await?;
         } else {
@@ -216,7 +249,11 @@ impl CertBackendInner {
         Ok(None)
     }
 
-    pub async fn delete_crl(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn delete_crl(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?.to_lowercase();
         if name.is_empty() {
             return Err(RvError::ErrRequestNoDataField);
@@ -229,14 +266,18 @@ impl CertBackendInner {
             return Err(RvError::ErrRequestInvalid);
         }
 
-        req.storage_delete(format!("crls/{}", name.to_lowercase()).as_str()).await?;
+        req.storage_delete(format!("crls/{}", name.to_lowercase()).as_str())
+            .await?;
 
         self.crls.remove(&name);
 
         Ok(None)
     }
 
-    pub fn find_serial_in_crls(&self, serial: BigNum) -> Result<HashMap<String, RevokedSerialInfo>, RvError> {
+    pub fn find_serial_in_crls(
+        &self,
+        serial: BigNum,
+    ) -> Result<HashMap<String, RevokedSerialInfo>, RvError> {
         let serial_str = serial.to_dec_str()?;
         let mut ret: HashMap<String, RevokedSerialInfo> = HashMap::new();
         for item in self.crls.iter() {

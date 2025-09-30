@@ -1,7 +1,7 @@
 use std::{any::Any, str::FromStr, sync::Arc};
 
 use arc_swap::ArcSwap;
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use better_default::Default;
 use serde_json::{Map, Value};
 
@@ -34,7 +34,11 @@ pub struct PolicyModule {
 #[maybe_async::maybe_async]
 impl PolicyModule {
     pub fn new(core: Arc<Core>) -> Self {
-        Self { name: "policy".into(), core, policy_store: ArcSwap::new(Arc::new(PolicyStore::default())) }
+        Self {
+            name: "policy".into(),
+            core,
+            policy_store: ArcSwap::new(Arc::new(PolicyStore::default())),
+        }
     }
 
     pub async fn setup_policy(&self) -> Result<(), RvError> {
@@ -46,7 +50,11 @@ impl PolicyModule {
         _backend: &dyn Backend,
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
-        let mut policies = self.policy_store.load().list_policy(PolicyType::Acl).await?;
+        let mut policies = self
+            .policy_store
+            .load()
+            .list_policy(PolicyType::Acl)
+            .await?;
 
         // TODO: After the "namespace" feature is added here, it is necessary to determine whether it is the root
         // namespace before the root can be added.
@@ -67,7 +75,12 @@ impl PolicyModule {
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?;
-        if let Some(policy) = self.policy_store.load().get_policy(&name, PolicyType::Acl).await? {
+        if let Some(policy) = self
+            .policy_store
+            .load()
+            .get_policy(&name, PolicyType::Acl)
+            .await?
+        {
             let mut resp_data = Map::new();
             resp_data.insert("name".into(), Value::String(name));
 
@@ -85,7 +98,10 @@ impl PolicyModule {
 
             return Ok(Some(resp));
         }
-        Err(rv_error_response_status!(404, &format!("No policy named: {name}")))
+        Err(rv_error_response_status!(
+            404,
+            &format!("No policy named: {name}")
+        ))
     }
 
     pub async fn handle_policy_write(
@@ -94,7 +110,11 @@ impl PolicyModule {
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?;
-        let policy_str = req.get_data("policy")?.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
+        let policy_str = req
+            .get_data("policy")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
         let policy_raw = if let Ok(policy_bytes) = STANDARD.decode(&policy_str) {
             String::from_utf8_lossy(&policy_bytes).to_string()
         } else {
@@ -119,7 +139,10 @@ impl PolicyModule {
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
         let name = req.get_data_as_str("name")?;
-        self.policy_store.load().delete_policy(&name, PolicyType::Acl).await?;
+        self.policy_store
+            .load()
+            .delete_policy(&name, PolicyType::Acl)
+            .await?;
         Ok(None)
     }
 }
@@ -166,8 +189,8 @@ mod mod_policy_tests {
     use crate::{
         logical::{Operation, Request},
         test_utils::{
-            new_unseal_test_rusty_vault, test_delete_api, test_list_api, test_mount_api, test_mount_auth_api,
-            test_read_api, test_write_api, TestHttpServer,
+            TestHttpServer, new_unseal_test_rusty_vault, test_delete_api, test_list_api,
+            test_mount_api, test_mount_auth_api, test_read_api, test_write_api,
         },
     };
 
@@ -179,12 +202,23 @@ mod mod_policy_tests {
         .as_object()
         .cloned();
 
-        let resp = test_write_api(core, token, format!("sys/policy/{}", name).as_str(), true, data).await;
+        let resp = test_write_api(
+            core,
+            token,
+            format!("sys/policy/{}", name).as_str(),
+            true,
+            data,
+        )
+        .await;
         assert!(resp.is_ok());
     }
 
     #[maybe_async::maybe_async]
-    async fn test_read_policy(core: &Core, token: &str, name: &str) -> Result<Option<Response>, RvError> {
+    async fn test_read_policy(
+        core: &Core,
+        token: &str,
+        name: &str,
+    ) -> Result<Option<Response>, RvError> {
         let resp = test_read_api(core, token, format!("sys/policy/{}", name).as_str(), true).await;
         assert!(resp.is_ok());
         resp
@@ -192,7 +226,14 @@ mod mod_policy_tests {
 
     #[maybe_async::maybe_async]
     async fn test_delete_policy(core: &Core, token: &str, name: &str) {
-        let resp = test_delete_api(core, token, format!("sys/policy/{}", name).as_str(), true, None).await;
+        let resp = test_delete_api(
+            core,
+            token,
+            format!("sys/policy/{}", name).as_str(),
+            true,
+            None,
+        )
+        .await;
         assert!(resp.is_ok());
     }
 
@@ -214,8 +255,14 @@ mod mod_policy_tests {
         .as_object()
         .cloned();
 
-        let resp =
-            test_write_api(core, token, format!("auth/{}/users/{}", path, username).as_str(), true, user_data).await;
+        let resp = test_write_api(
+            core,
+            token,
+            format!("auth/{}/users/{}", path, username).as_str(),
+            true,
+            user_data,
+        )
+        .await;
         assert!(resp.is_ok());
     }
 
@@ -246,7 +293,10 @@ mod mod_policy_tests {
         resp
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_policy_curd_api() {
         let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_policy_curd_api").await;
 
@@ -280,13 +330,22 @@ mod mod_policy_tests {
         assert!(policies.data.is_some());
         let policies = policies.data.unwrap();
         assert_eq!(policies["keys"], json!(["default", policy1_name, "root"]));
-        assert_eq!(policies["policies"], json!(["default", policy1_name, "root"]));
+        assert_eq!(
+            policies["policies"],
+            json!(["default", policy1_name, "root"])
+        );
 
         // Delete
         test_delete_policy(&core, &root_token, policy1_name).await;
 
         // Read again
-        let policy1 = test_read_api(&core, &root_token, format!("sys/policy/{}", policy1_name).as_str(), false).await;
+        let policy1 = test_read_api(
+            &core,
+            &root_token,
+            format!("sys/policy/{}", policy1_name).as_str(),
+            false,
+        )
+        .await;
         let policy1 = policy1.unwrap_err();
         assert!(policy1.to_string().contains("status: 404,"));
         assert!(policy1.to_string().contains("No policy named: "));
@@ -299,7 +358,10 @@ mod mod_policy_tests {
         assert_eq!(policies["policies"], json!(["default", "root"]));
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_policy_http_api() {
         let mut test_http_server = TestHttpServer::new("test_policy_http_api", true).await;
 
@@ -309,12 +371,18 @@ mod mod_policy_tests {
         // List policies
         let ret = test_http_server.read("sys/policy", None);
         assert!(ret.is_ok());
-        assert_eq!(ret.unwrap().1, json!({"keys": ["default", "root"], "policies": ["default", "root"]}));
+        assert_eq!(
+            ret.unwrap().1,
+            json!({"keys": ["default", "root"], "policies": ["default", "root"]})
+        );
 
         // Read default policy
         let ret = test_http_server.read("sys/policy/default", None);
         assert!(ret.is_ok());
-        assert_eq!(ret.unwrap().1, json!({"name": "default", "rules": DEFAULT_POLICY}));
+        assert_eq!(
+            ret.unwrap().1,
+            json!({"name": "default", "rules": DEFAULT_POLICY})
+        );
 
         // Write policy1
         let policy1_hcl = r#"
@@ -333,7 +401,10 @@ mod mod_policy_tests {
         // Read policy1
         let ret = test_http_server.read("sys/policy/policy1", None);
         assert!(ret.is_ok());
-        assert_eq!(ret.unwrap().1, json!({"name": "policy1", "rules": policy1_hcl}));
+        assert_eq!(
+            ret.unwrap().1,
+            json!({"name": "policy1", "rules": policy1_hcl})
+        );
 
         // List policies again
         let ret = test_http_server.read("sys/policy", None);
@@ -350,12 +421,19 @@ mod mod_policy_tests {
         // List policies again
         let ret = test_http_server.read("sys/policy", None);
         assert!(ret.is_ok());
-        assert_eq!(ret.unwrap().1, json!({"keys": ["default", "root"], "policies": ["default", "root"]}));
+        assert_eq!(
+            ret.unwrap().1,
+            json!({"keys": ["default", "root"], "policies": ["default", "root"]})
+        );
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_policy_acl_check() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_policy_acl_check").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_policy_acl_check").await;
 
         let policy1_name = "policy1";
         let policy1_hcl = r#"
@@ -382,7 +460,16 @@ mod mod_policy_tests {
         test_mount_auth_api(&core, &root_token, "userpass", "up1").await;
 
         // Add user xxx with policy1, add user yyy with policy2
-        test_write_user(&core, &root_token, "up1", "xxx", "123qwe!@#", policy1_name, 0).await;
+        test_write_user(
+            &core,
+            &root_token,
+            "up1",
+            "xxx",
+            "123qwe!@#",
+            policy1_name,
+            0,
+        )
+        .await;
         let resp = test_user_login(&core, "up1", "xxx", "123qwe!@#", true).await;
         assert!(resp.is_ok());
         let xxx_token = resp.unwrap().unwrap().auth.unwrap().client_token;
@@ -445,7 +532,10 @@ mod mod_policy_tests {
         assert!(resp.is_err());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_policy_acl_check_with_policy_parameters() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_policy_acl_check_with_policy_parameters").await;
@@ -485,7 +575,16 @@ mod mod_policy_tests {
         test_mount_auth_api(&core, &root_token, "userpass", "up1").await;
 
         // Add user xxx with policy1
-        test_write_user(&core, &root_token, "up1", "xxx", "123qwe!@#", policy1_name, 0).await;
+        test_write_user(
+            &core,
+            &root_token,
+            "up1",
+            "xxx",
+            "123qwe!@#",
+            policy1_name,
+            0,
+        )
+        .await;
         let resp = test_user_login(&core, "up1", "xxx", "123qwe!@#", true).await;
         assert!(resp.is_ok());
         let xxx_token = resp.unwrap().unwrap().auth.unwrap().client_token;

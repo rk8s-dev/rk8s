@@ -79,7 +79,11 @@ impl CertBackendInner {
         req.storage_put(&entry).await
     }
 
-    pub async fn read_config(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn read_config(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let config = self.get_config(req).await?;
         if config.is_none() {
             return Ok(None);
@@ -87,10 +91,16 @@ impl CertBackendInner {
 
         let cfg_data = serde_json::to_value(config.unwrap())?;
 
-        Ok(Some(Response::data_response(Some(cfg_data.as_object().unwrap().clone()))))
+        Ok(Some(Response::data_response(Some(
+            cfg_data.as_object().unwrap().clone(),
+        ))))
     }
 
-    pub async fn write_config(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn write_config(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let config = self.get_config(req).await?;
         if config.is_none() {
             return Ok(None);
@@ -102,8 +112,11 @@ impl CertBackendInner {
             cfg.disable_binding = disable_binding_raw.as_bool().unwrap();
         }
 
-        if let Ok(enable_identity_alias_metadata_raw) = req.get_data("enable_identity_alias_metadata") {
-            cfg.enable_identity_alias_metadata = enable_identity_alias_metadata_raw.as_bool().unwrap();
+        if let Ok(enable_identity_alias_metadata_raw) =
+            req.get_data("enable_identity_alias_metadata")
+        {
+            cfg.enable_identity_alias_metadata =
+                enable_identity_alias_metadata_raw.as_bool().unwrap();
         }
 
         if let Ok(ocsp_cache_size_raw) = req.get_data("ocsp_cache_size") {

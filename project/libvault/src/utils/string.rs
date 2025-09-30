@@ -230,27 +230,57 @@ mod mod_string_tests {
         let mut strings4 = strings.clone();
 
         remove_duplicates(&mut strings1, true, true);
-        assert_eq!(strings1, vec!["orange".to_string(), "apple".to_string(), "banana".to_string()]);
+        assert_eq!(
+            strings1,
+            vec![
+                "orange".to_string(),
+                "apple".to_string(),
+                "banana".to_string()
+            ]
+        );
 
         remove_duplicates(&mut strings2, true, false);
         assert_eq!(
             strings2,
-            vec!["Orange".to_string(), "Apple".to_string(), "banana".to_string(), "orange".to_string()]
+            vec![
+                "Orange".to_string(),
+                "Apple".to_string(),
+                "banana".to_string(),
+                "orange".to_string()
+            ]
         );
 
         remove_duplicates(&mut strings3, false, true);
-        assert_eq!(strings3, vec!["apple".to_string(), "banana".to_string(), "orange".to_string()]);
+        assert_eq!(
+            strings3,
+            vec![
+                "apple".to_string(),
+                "banana".to_string(),
+                "orange".to_string()
+            ]
+        );
 
         remove_duplicates(&mut strings4, false, false);
         assert_eq!(
             strings4,
-            vec!["Apple".to_string(), "Orange".to_string(), "banana".to_string(), "orange".to_string()]
+            vec![
+                "Apple".to_string(),
+                "Orange".to_string(),
+                "banana".to_string(),
+                "orange".to_string()
+            ]
         );
     }
 
     #[test]
     fn test_glob_contains() {
-        let patterns: Vec<Value> = vec![json!("*abc*"), json!("*def"), json!("ghi*"), json!("jkl"), json!("m*n*o")];
+        let patterns: Vec<Value> = vec![
+            json!("*abc*"),
+            json!("*def"),
+            json!("ghi*"),
+            json!("jkl"),
+            json!("m*n*o"),
+        ];
         let empty_patterns: Vec<Value> = vec![];
 
         assert_eq!(empty_patterns.glob_contains(&json!("any_string")), true);
@@ -273,8 +303,13 @@ mod mod_string_tests {
         assert_eq!(patterns.glob_contains(&json!({"key": "value"})), false);
         assert_eq!(patterns.glob_contains(&json!([1, 2, 3])), false);
 
-        let mixed_patterns: Vec<Value> =
-            vec![json!("*abc*"), json!(42), json!(true), json!({"key": "value"}), json!([1, 2, 3])];
+        let mixed_patterns: Vec<Value> = vec![
+            json!("*abc*"),
+            json!(42),
+            json!(true),
+            json!({"key": "value"}),
+            json!([1, 2, 3]),
+        ];
 
         assert_eq!(mixed_patterns.glob_contains(&json!("defabcghi")), true); // *abc*
         assert_eq!(mixed_patterns.glob_contains(&json!(42)), true); // 42

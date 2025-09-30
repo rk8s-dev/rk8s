@@ -301,13 +301,6 @@ pub enum RvError {
         source: tokio::task::JoinError,
     },
 
-    #[cfg(all(not(feature = "sync_handler"), feature = "storage_sqlx"))]
-    #[error("Some sqlx error happened")]
-    SqlxError {
-        #[from]
-        source: sqlx::Error,
-    },
-
     #[error("Some string utf8 error happened, {:?}", .source)]
     StringUtf8Error {
         #[from]
@@ -320,26 +313,21 @@ pub enum RvError {
         source: lockfile::Error,
     },
 
-    /// Database Errors Begin
-    ///
-    #[error("Database type is not support now. Please try postgressql or mysql again.")]
-    ErrDatabaseTypeInvalid,
-    #[cfg(feature = "storage_mysql")]
-    #[error("Database connection pool ocurrs errors when creating， {:?}", .source)]
-    ErrConnectionPoolCreate {
-        #[from]
-        source: r2d2::Error,
-    },
-    #[error("Database connection info is invalid.")]
+    #[error("Database connection info invalid")]
     ErrDatabaseConnectionInfoInvalid,
-    #[cfg(feature = "storage_mysql")]
-    #[error("Failed to execute entry with database, {:?}", .source)]
-    ErrDatabaseExecuteEntry {
+
+    #[error("Some etcd client error happened, {:?}", .source)]
+    EtcdClientError {
         #[from]
-        source: diesel::result::Error,
+        source: etcd_client::Error,
     },
-    ///
-    /// Database Errors End
+
+    #[error("Failed to set logger")]
+    SetLoggerError {
+        #[from]
+        source: log::SetLoggerError,
+    },
+
     #[error(transparent)]
     ErrOther(#[from] anyhow::Error),
     #[error("Some error happend, response text: {0}")]
@@ -393,7 +381,10 @@ impl PartialEq for RvError {
             | (RvError::ErrCoreHandlerExist, RvError::ErrCoreHandlerExist)
             | (RvError::ErrPhysicalConfigItemMissing, RvError::ErrPhysicalConfigItemMissing)
             | (RvError::ErrPhysicalTypeInvalid, RvError::ErrPhysicalTypeInvalid)
-            | (RvError::ErrPhysicalBackendPrefixInvalid, RvError::ErrPhysicalBackendPrefixInvalid)
+            | (
+                RvError::ErrPhysicalBackendPrefixInvalid,
+                RvError::ErrPhysicalBackendPrefixInvalid,
+            )
             | (RvError::ErrPhysicalBackendKeyInvalid, RvError::ErrPhysicalBackendKeyInvalid)
             | (RvError::ErrBarrierKeySanityCheckFailed, RvError::ErrBarrierKeySanityCheckFailed)
             | (RvError::ErrBarrierAlreadyInit, RvError::ErrBarrierAlreadyInit)
@@ -461,7 +452,9 @@ impl PartialEq for RvError {
             | (RvError::ErrCredentailNotConfig, RvError::ErrCredentailNotConfig)
             | (RvError::ErrUnknown, RvError::ErrUnknown) => true,
             (RvError::ErrResponse(a), RvError::ErrResponse(b)) => a == b,
-            (RvError::ErrResponseStatus(sa, ta), RvError::ErrResponseStatus(sb, tb)) => sa == sb && ta == tb,
+            (RvError::ErrResponseStatus(sa, ta), RvError::ErrResponseStatus(sb, tb)) => {
+                sa == sb && ta == tb
+            }
             (RvError::ErrString(a), RvError::ErrString(b)) => a == b,
             _ => false,
         }

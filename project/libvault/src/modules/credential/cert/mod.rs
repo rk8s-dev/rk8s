@@ -21,7 +21,7 @@ use crate::{
     core::Core,
     errors::RvError,
     logical::{Backend, LogicalBackend},
-    modules::{auth::AuthModule, Module},
+    modules::{Module, auth::AuthModule},
     new_logical_backend, new_logical_backend_internal,
 };
 
@@ -63,8 +63,13 @@ pub struct CertBackend {
 
 impl CertBackend {
     pub fn new(core: Arc<Core>) -> Self {
-        let inner = CertBackendInner { core, crls: DashMap::new() };
-        Self { inner: Arc::new(inner) }
+        let inner = CertBackendInner {
+            core,
+            crls: DashMap::new(),
+        };
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 
     pub fn new_backend(&self) -> LogicalBackend {
@@ -89,7 +94,10 @@ impl CertBackend {
 
 impl CertModule {
     pub fn new(core: Arc<Core>) -> Self {
-        Self { name: "cert".to_string(), backend: Arc::new(CertBackend::new(core)) }
+        Self {
+            name: "cert".to_string(),
+            backend: Arc::new(CertBackend::new(core)),
+        }
     }
 }
 
@@ -134,12 +142,14 @@ impl Module for CertModule {
 mod test {
     use std::time::Duration;
 
-    use serde_json::{json, Map, Value};
+    use serde_json::{Map, Value, json};
 
     use super::*;
     use crate::{
         modules::auth::expiration::DEFAULT_LEASE_DURATION_SECS,
-        test_utils::{new_test_cert, new_test_cert_ext, new_test_crl, TestHttpServer, TestTlsClientAuth},
+        test_utils::{
+            TestHttpServer, TestTlsClientAuth, new_test_cert, new_test_cert_ext, new_test_crl,
+        },
     };
 
     #[derive(Default)]
@@ -194,7 +204,11 @@ mod test {
                 data.insert(key.clone(), value.clone());
             }
 
-            let ret = self.write(&format!("auth/{}/certs/{}", &self.mount_path, name), Some(data), None);
+            let ret = self.write(
+                &format!("auth/{}/certs/{}", &self.mount_path, name),
+                Some(data),
+                None,
+            );
             assert!(ret.is_ok());
             let (status, resp) = ret.unwrap();
             match expect_err {
@@ -218,7 +232,11 @@ mod test {
             .as_object()
             .cloned();
 
-            let ret = self.write(&format!("auth/{}/certs/{}", &self.mount_path, name), data, None);
+            let ret = self.write(
+                &format!("auth/{}/certs/{}", &self.mount_path, name),
+                data,
+                None,
+            );
             assert!(ret.is_ok());
             let (status, _) = ret.unwrap();
             assert!(status == 200 || status == 204);
@@ -233,7 +251,11 @@ mod test {
             .as_object()
             .cloned();
 
-            let ret = self.write(&format!("auth/{}/certs/{}", &self.mount_path, name), data, None);
+            let ret = self.write(
+                &format!("auth/{}/certs/{}", &self.mount_path, name),
+                data,
+                None,
+            );
             assert!(ret.is_ok());
             let (status, _) = ret.unwrap();
             assert!(status == 200 || status == 204);
@@ -249,7 +271,11 @@ mod test {
             .as_object()
             .cloned();
 
-            let ret = self.write(&format!("auth/{}/certs/{}", &self.mount_path, name), data, None);
+            let ret = self.write(
+                &format!("auth/{}/certs/{}", &self.mount_path, name),
+                data,
+                None,
+            );
             assert!(ret.is_ok());
             let (status, _) = ret.unwrap();
             assert!(status == 200 || status == 204);
@@ -266,7 +292,11 @@ mod test {
             .as_object()
             .cloned();
 
-            let ret = self.write(&format!("auth/{}/certs/{}", &self.mount_path, name), data, None);
+            let ret = self.write(
+                &format!("auth/{}/certs/{}", &self.mount_path, name),
+                data,
+                None,
+            );
             assert!(ret.is_ok());
             let (status, _) = ret.unwrap();
             assert!(status == 200 || status == 204);
@@ -305,7 +335,11 @@ mod test {
             })
             .as_object()
             .cloned();
-            let ret = self.login(&format!("auth/{}/login", &self.mount_path), data, Some(tls_client_auth));
+            let ret = self.login(
+                &format!("auth/{}/login", &self.mount_path),
+                data,
+                Some(tls_client_auth),
+            );
             assert!(ret.is_ok());
             let (status, resp) = ret.unwrap();
             match expect_err {
@@ -343,7 +377,11 @@ mod test {
             })
             .as_object()
             .cloned();
-            let ret = self.login(&format!("auth/{}/login", &self.mount_path), data, Some(tls_client_auth));
+            let ret = self.login(
+                &format!("auth/{}/login", &self.mount_path),
+                data,
+                Some(tls_client_auth),
+            );
             assert!(ret.is_ok());
             let (status, resp) = ret.unwrap();
             match expect_err {
@@ -374,7 +412,11 @@ mod test {
             })
             .as_object()
             .cloned();
-            let ret = self.write(&format!("auth/{}/crls/test", &self.mount_path), crl_data, None);
+            let ret = self.write(
+                &format!("auth/{}/crls/test", &self.mount_path),
+                crl_data,
+                None,
+            );
             assert!(ret.is_ok());
             let (status, _) = ret.unwrap();
             assert!(status == 200 || status == 204);
@@ -385,7 +427,13 @@ mod test {
 
             let (status, resp_data) = ret.unwrap();
             assert_eq!(status, 200);
-            assert_eq!(resp_data["data"]["keys"].as_array().expect("crl list is empty").len(), 1);
+            assert_eq!(
+                resp_data["data"]["keys"]
+                    .as_array()
+                    .expect("crl list is empty")
+                    .len(),
+                1
+            );
         }
 
         fn test_delete_crl(&self) {
@@ -400,14 +448,26 @@ mod test {
 
             let (status, resp_data) = ret.unwrap();
             assert_eq!(status, 200);
-            assert_eq!(resp_data["data"]["keys"].as_array().expect("crl list is empty").len(), 0);
+            assert_eq!(
+                resp_data["data"]["keys"]
+                    .as_array()
+                    .expect("crl list is empty")
+                    .len(),
+                0
+            );
         }
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_permitted_dns_domains_intermediate_ca() {
-        let mut test_http_server =
-            TestHttpServer::new("test_credential_cert_module_permitted_dns_domains_intermediate_ca", true).await;
+        let mut test_http_server = TestHttpServer::new(
+            "test_credential_cert_module_permitted_dns_domains_intermediate_ca",
+            true,
+        )
+        .await;
 
         let (intermediate_ca_cert, intermediate_ca_key) = new_test_cert(
             true,
@@ -449,20 +509,28 @@ mod test {
             None,
         );
 
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &leaf_cert, &leaf_key, None);
+        let _ =
+            test_http_server.test_login(&test_http_server.ca_cert_pem, &leaf_cert, &leaf_key, None);
 
         // TODO: testing pathLoginRenew for cert auth
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_non_ca_expiry() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_non_ca_expiry", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_non_ca_expiry", true).await;
 
         // mount /pki as a root CA
         let ret = test_http_server.mount("pki", "pki");
         assert!(ret.is_ok());
 
-        let (ca_cert, ca_key) = new_test_cert(true, true, true, "test-ca", None, None, None, None, None, None).unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true, true, true, "test-ca", None, None, None, None, None, None,
+        )
+        .unwrap();
 
         let (issued_cert, issued_key) = new_test_cert(
             false,
@@ -492,7 +560,12 @@ mod test {
         );
 
         // Login when the certificate is still valid. Login should succeed.
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &issued_cert, &issued_key, None);
+        let _ = test_http_server.test_login(
+            &test_http_server.ca_cert_pem,
+            &issued_cert,
+            &issued_key,
+            None,
+        );
 
         // Wait until the certificate expires
         std::thread::sleep(Duration::from_secs(6));
@@ -506,11 +579,18 @@ mod test {
         );
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_registered_non_ca_crl() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_registered_non_ca_crl", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_registered_non_ca_crl", true).await;
 
-        let (ca_cert, ca_key) = new_test_cert(true, true, true, "test-ca", None, None, None, None, None, None).unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true, true, true, "test-ca", None, None, None, None, None, None,
+        )
+        .unwrap();
 
         let (issued_cert, issued_key) = new_test_cert(
             false,
@@ -540,7 +620,12 @@ mod test {
         );
 
         // Login when the certificate is still valid. Login should succeed.
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &issued_cert, &issued_key, None);
+        let _ = test_http_server.test_login(
+            &test_http_server.ca_cert_pem,
+            &issued_cert,
+            &issued_key,
+            None,
+        );
 
         // Register a CRL containing the issued client certificate used above.
         test_http_server.test_write_crl(&issued_cert, &ca_cert, &ca_key);
@@ -554,11 +639,18 @@ mod test {
         );
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_crls() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_crls", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_crls", true).await;
 
-        let (ca_cert, ca_key) = new_test_cert(true, true, true, "test-ca", None, None, None, None, None, None).unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true, true, true, "test-ca", None, None, None, None, None, None,
+        )
+        .unwrap();
 
         let (issued_cert, issued_key) = new_test_cert(
             false,
@@ -579,13 +671,25 @@ mod test {
         assert!(ret.is_ok());
 
         // Register the CA certificate of the client key pair
-        test_http_server.test_write_cert("cert1", &ca_cert, "abc", &Allowed::default(), &Map::new(), None);
+        test_http_server.test_write_cert(
+            "cert1",
+            &ca_cert,
+            "abc",
+            &Allowed::default(),
+            &Map::new(),
+            None,
+        );
 
         // Login with the CA certificate should be successful.
         let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None);
 
         // Login with a client certificate issued by this CA certificate should also be successful.
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &issued_cert, &issued_key, None);
+        let _ = test_http_server.test_login(
+            &test_http_server.ca_cert_pem,
+            &issued_cert,
+            &issued_key,
+            None,
+        );
 
         // Register a CRL containing the issued client certificate used above.
         test_http_server.test_write_crl(&issued_cert, &ca_cert, &ca_key);
@@ -599,9 +703,18 @@ mod test {
         );
 
         // Register a different client CA certificate.
-        let (ca_cert, ca_key) =
-            new_test_cert(true, true, true, "test-ca2", None, None, None, None, None, None).unwrap();
-        test_http_server.test_write_cert("cert1", &ca_cert, "abc", &Allowed::default(), &Map::new(), None);
+        let (ca_cert, ca_key) = new_test_cert(
+            true, true, true, "test-ca2", None, None, None, None, None, None,
+        )
+        .unwrap();
+        test_http_server.test_write_cert(
+            "cert1",
+            &ca_cert,
+            "abc",
+            &Allowed::default(),
+            &Map::new(),
+            None,
+        );
 
         // Test login using a different client CA cert pair.
         let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None);
@@ -618,12 +731,19 @@ mod test {
         );
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_cert_writes() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_cert_writes", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_cert_writes", true).await;
 
         // CA cert
-        let (ca_cert, ca_key) = new_test_cert(true, true, true, "test-ca", None, None, None, None, None, None).unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true, true, true, "test-ca", None, None, None, None, None, None,
+        )
+        .unwrap();
 
         // Non CA cert
         let (non_ca_cert, _) = new_test_cert(
@@ -659,8 +779,22 @@ mod test {
         let ret = test_http_server.mount_auth("cert", "cert");
         assert!(ret.is_ok());
 
-        test_http_server.test_write_cert("cert1", &ca_cert, "abc", &Allowed::default(), &Map::new(), None);
-        test_http_server.test_write_cert("cert1", &non_ca_cert, "abc", &Allowed::default(), &Map::new(), None);
+        test_http_server.test_write_cert(
+            "cert1",
+            &ca_cert,
+            "abc",
+            &Allowed::default(),
+            &Map::new(),
+            None,
+        );
+        test_http_server.test_write_cert(
+            "cert1",
+            &non_ca_cert,
+            "abc",
+            &Allowed::default(),
+            &Map::new(),
+            None,
+        );
         test_http_server.test_write_cert(
             "cert1",
             &non_ca_cert2,
@@ -671,12 +805,19 @@ mod test {
         );
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_basic_ca() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_basic_ca", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_basic_ca", true).await;
 
         // CA cert
-        let (ca_cert, ca_key) = new_test_cert(true, true, true, "test-ca", None, None, None, None, None, None).unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true, true, true, "test-ca", None, None, None, None, None, None,
+        )
+        .unwrap();
 
         let (client_cert, client_key) = new_test_cert(
             false,
@@ -696,27 +837,62 @@ mod test {
         let ret = test_http_server.mount_auth("cert", "cert");
         assert!(ret.is_ok());
 
-        test_http_server.test_write_cert("web", &ca_cert, "foo", &Allowed::default(), &Map::new(), None);
+        test_http_server.test_write_cert(
+            "web",
+            &ca_cert,
+            "foo",
+            &Allowed::default(),
+            &Map::new(),
+            None,
+        );
 
         // Test a client trusted by a CA
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None);
-        let (_, resp) =
-            test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let _ = test_http_server.test_login(
+            &test_http_server.ca_cert_pem,
+            &client_cert,
+            &client_key,
+            None,
+        );
+        let (_, resp) = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
         assert_eq!(resp["auth"]["lease_duration"], 1000);
         assert_eq!(resp["auth"]["policies"], json!(["default", "foo"]));
 
         test_http_server.test_write_cert_lease("web", &ca_cert, "foo");
         test_http_server.test_write_cert_ttl("web", &ca_cert, "foo");
-        let (_, resp) =
-            test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let (_, resp) = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
         assert_eq!(resp["auth"]["lease_duration"], 900);
         assert_eq!(resp["auth"]["policies"], json!(["default", "foo"]));
 
         test_http_server.test_write_cert_max_ttl("web", &ca_cert, "foo");
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None);
+        let _ = test_http_server.test_login(
+            &test_http_server.ca_cert_pem,
+            &client_cert,
+            &client_key,
+            None,
+        );
         test_http_server.test_write_cert_no_lease("web", &ca_cert, "foo");
-        let (_, resp) =
-            test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let (_, resp) = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
         assert_eq!(resp["auth"]["lease_duration"], 900);
         assert_eq!(resp["auth"]["policies"], json!(["default", "foo"]));
 
@@ -724,17 +900,30 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "*.example.com".into(), ..Default::default() },
+            &Allowed {
+                names: "*.example.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "*.invalid.com".into(), ..Default::default() },
+            &Allowed {
+                names: "*.invalid.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -748,12 +937,19 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_basic_crls() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_basic_crls", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_basic_crls", true).await;
 
         // CA cert
-        let (ca_cert, ca_key) = new_test_cert(true, true, true, "test-ca", None, None, None, None, None, None).unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true, true, true, "test-ca", None, None, None, None, None, None,
+        )
+        .unwrap();
 
         let (client_cert, client_key) = new_test_cert(
             false,
@@ -775,9 +971,18 @@ mod test {
 
         test_http_server.test_write_cert_no_lease("web", &ca_cert, "foo");
 
-        let (_, resp) =
-            test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
-        assert_eq!(resp["auth"]["lease_duration"], DEFAULT_LEASE_DURATION_SECS.as_secs());
+        let (_, resp) = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            resp["auth"]["lease_duration"],
+            DEFAULT_LEASE_DURATION_SECS.as_secs()
+        );
         assert_eq!(resp["auth"]["policies"], json!(["default", "foo"]));
 
         test_http_server.test_write_crl(&ca_cert, &ca_cert, &ca_key);
@@ -795,15 +1000,28 @@ mod test {
 
         test_http_server.test_delete_crl();
 
-        let (_, resp) =
-            test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
-        assert_eq!(resp["auth"]["lease_duration"], DEFAULT_LEASE_DURATION_SECS.as_secs());
+        let (_, resp) = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            resp["auth"]["lease_duration"],
+            DEFAULT_LEASE_DURATION_SECS.as_secs()
+        );
         assert_eq!(resp["auth"]["policies"], json!(["default", "foo"]));
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_basic_single_cert() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_basic_single_cert", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_basic_single_cert", true).await;
 
         // CA cert
         let (ca_cert, ca_key) = new_test_cert(
@@ -824,25 +1042,42 @@ mod test {
         let ret = test_http_server.mount_auth("cert", "cert");
         assert!(ret.is_ok());
 
-        test_http_server.test_write_cert("web", &ca_cert, "foo", &Allowed::default(), &Map::new(), None);
-
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
-
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "example.com".into(), ..Default::default() },
+            &Allowed::default(),
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "invalid".into(), ..Default::default() },
+            &Allowed {
+                names: "example.com".into(),
+                ..Default::default()
+            },
+            &Map::new(),
+            None,
+        );
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
+
+        test_http_server.test_write_cert(
+            "web",
+            &ca_cert,
+            "foo",
+            &Allowed {
+                names: "invalid".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -859,17 +1094,25 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { common_names: "example.com".into(), ..Default::default() },
+            &Allowed {
+                common_names: "example.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { common_names: "invalid".into(), ..Default::default() },
+            &Allowed {
+                common_names: "invalid".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -886,7 +1129,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { ext: "1.2.3.4:invalid".into(), ..Default::default() },
+            &Allowed {
+                ext: "1.2.3.4:invalid".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -900,9 +1146,13 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_ext_single_cert() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_ext_single_cert", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_ext_single_cert", true).await;
 
         // CA cert
         let (ca_cert, ca_key) = new_test_cert_ext(
@@ -927,27 +1177,40 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { ext: "2.1.1.1:A UTF8String Extension".into(), ..Default::default() },
+            &Allowed {
+                ext: "2.1.1.1:A UTF8String Extension".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { ext: "2.1.1.1:*,2.1.1.2:A UTF8*".into(), ..Default::default() },
+            &Allowed {
+                ext: "2.1.1.1:*,2.1.1.2:A UTF8*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { ext: "1.2.3.45:*".into(), ..Default::default() },
+            &Allowed {
+                ext: "1.2.3.45:*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -964,7 +1227,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { ext: "2.1.1.1:The Wrong Value".into(), ..Default::default() },
+            &Allowed {
+                ext: "2.1.1.1:The Wrong Value".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -981,7 +1247,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { ext: "2.1.1.1:*,2.1.1.2:The Wrong Value".into(), ..Default::default() },
+            &Allowed {
+                ext: "2.1.1.1:*,2.1.1.2:The Wrong Value".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -998,7 +1267,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { ext: "2.1.1.1:".into(), ..Default::default() },
+            &Allowed {
+                ext: "2.1.1.1:".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1015,7 +1287,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { ext: "2.1.1.1:,2.1.1.2:*".into(), ..Default::default() },
+            &Allowed {
+                ext: "2.1.1.1:,2.1.1.2:*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1040,23 +1315,35 @@ mod test {
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "example.com".into(), ext: "2.1.1.1:*,2.1.1.2:A UTF8*".into(), ..Default::default() },
+            &Allowed {
+                names: "example.com".into(),
+                ext: "2.1.1.1:*,2.1.1.2:A UTF8*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "example.com".into(), ext: "1.2.3.45:*".into(), ..Default::default() },
+            &Allowed {
+                names: "example.com".into(),
+                ext: "1.2.3.45:*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1073,7 +1360,11 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "example.com".into(), ext: "2.1.1.1:The Wrong Value".into(), ..Default::default() },
+            &Allowed {
+                names: "example.com".into(),
+                ext: "2.1.1.1:The Wrong Value".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1111,7 +1402,11 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "invalid".into(), ext: "2.1.1.1:A UTF8String Extension".into(), ..Default::default() },
+            &Allowed {
+                names: "invalid".into(),
+                ext: "2.1.1.1:A UTF8String Extension".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1128,7 +1423,11 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "invalid".into(), ext: "2.1.1.1:*,2.1.1.2:A UTF8*".into(), ..Default::default() },
+            &Allowed {
+                names: "invalid".into(),
+                ext: "2.1.1.1:*,2.1.1.2:A UTF8*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1145,7 +1444,11 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "invalid".into(), ext: "1.2.3.45:*".into(), ..Default::default() },
+            &Allowed {
+                names: "invalid".into(),
+                ext: "1.2.3.45:*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1162,7 +1465,11 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "invalid".into(), ext: "2.1.1.1:The Wrong Value".into(), ..Default::default() },
+            &Allowed {
+                names: "invalid".into(),
+                ext: "2.1.1.1:The Wrong Value".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1179,7 +1486,11 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "invalid".into(), ext: "2.1.1.1:*,2.1.1.2:The Wrong Value".into(), ..Default::default() },
+            &Allowed {
+                names: "invalid".into(),
+                ext: "2.1.1.1:*,2.1.1.2:The Wrong Value".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1196,7 +1507,11 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "example.com".into(), ext: "hex:2.5.29.17:*87047F000002*".into(), ..Default::default() },
+            &Allowed {
+                names: "example.com".into(),
+                ext: "hex:2.5.29.17:*87047F000002*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1213,27 +1528,42 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "example.com".into(), ext: "hex:2.5.29.17:*87047F000001*".into(), ..Default::default() },
+            &Allowed {
+                names: "example.com".into(),
+                ext: "hex:2.5.29.17:*87047F000001*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { names: "example.com".into(), ext: "2.5.29.17:*".into(), ..Default::default() },
+            &Allowed {
+                names: "example.com".into(),
+                ext: "2.5.29.17:*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { metadata_ext: "2.1.1.1,1.2.3.45".into(), ..Default::default() },
+            &Allowed {
+                metadata_ext: "2.1.1.1,1.2.3.45".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1243,7 +1573,9 @@ mod test {
                 &test_http_server.ca_cert_pem,
                 &ca_cert,
                 &ca_key,
-                json!({"2-1-1-1":"A UTF8String Extension"}).as_object().unwrap(),
+                json!({"2-1-1-1":"A UTF8String Extension"})
+                    .as_object()
+                    .unwrap(),
                 None,
             )
             .unwrap();
@@ -1252,23 +1584,47 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { metadata_ext: "1.2.3.45".into(), ..Default::default() },
+            &Allowed {
+                metadata_ext: "1.2.3.45".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
         let _ = test_http_server
-            .test_login_with_metadata("web", &test_http_server.ca_cert_pem, &ca_cert, &ca_key, &Map::new(), None)
+            .test_login_with_metadata(
+                "web",
+                &test_http_server.ca_cert_pem,
+                &ca_cert,
+                &ca_key,
+                &Map::new(),
+                None,
+            )
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_dns_single_cert() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_dns_single_cert", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_dns_single_cert", true).await;
 
         // CA cert
-        let (ca_cert, ca_key) =
-            new_test_cert(true, true, true, "localhost", Some("localhost"), Some("127.0.0.1"), None, None, None, None)
-                .unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true,
+            true,
+            true,
+            "localhost",
+            Some("localhost"),
+            Some("127.0.0.1"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let (client_cert, client_key) = new_test_cert(
             false,
@@ -1292,27 +1648,50 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { dns: "example.com".into(), ..Default::default() },
+            &Allowed {
+                dns: "example.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { dns: "*ample.com".into(), ..Default::default() },
+            &Allowed {
+                dns: "*ample.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { dns: "notincert.com".into(), ..Default::default() },
+            &Allowed {
+                dns: "notincert.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1329,7 +1708,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { dns: "abc".into(), ..Default::default() },
+            &Allowed {
+                dns: "abc".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1346,7 +1728,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { dns: "*.example.com".into(), ..Default::default() },
+            &Allowed {
+                dns: "*.example.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1360,14 +1745,28 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_email_single_cert() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_email_single_cert", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_email_single_cert", true).await;
 
         // CA cert
-        let (ca_cert, ca_key) =
-            new_test_cert(true, true, true, "localhost", Some("localhost"), Some("127.0.0.1"), None, None, None, None)
-                .unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true,
+            true,
+            true,
+            "localhost",
+            Some("localhost"),
+            Some("127.0.0.1"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let (client_cert, client_key) = new_test_cert_ext(
             false,
@@ -1391,27 +1790,50 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { emails: "valid@example.com".into(), ..Default::default() },
+            &Allowed {
+                emails: "valid@example.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { emails: "*@example.com".into(), ..Default::default() },
+            &Allowed {
+                emails: "*@example.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { emails: "invalid@notincert.com".into(), ..Default::default() },
+            &Allowed {
+                emails: "invalid@notincert.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1428,7 +1850,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { emails: "abc".into(), ..Default::default() },
+            &Allowed {
+                emails: "abc".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1445,7 +1870,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { emails: "*.example.com".into(), ..Default::default() },
+            &Allowed {
+                emails: "*.example.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1459,14 +1887,28 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_uri_single_cert() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_uri_single_cert", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_uri_single_cert", true).await;
 
         // CA cert
-        let (ca_cert, ca_key) =
-            new_test_cert(true, true, true, "localhost", Some("localhost"), Some("127.0.0.1"), None, None, None, None)
-                .unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true,
+            true,
+            true,
+            "localhost",
+            Some("localhost"),
+            Some("127.0.0.1"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let (client_cert, client_key) = new_test_cert(
             false,
@@ -1491,27 +1933,50 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { uris: "spiffe://example.com/*".into(), ..Default::default() },
+            &Allowed {
+                uris: "spiffe://example.com/*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { uris: "spiffe://example.com/host".into(), ..Default::default() },
+            &Allowed {
+                uris: "spiffe://example.com/host".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { uris: "spiffe://example.com/invalid".into(), ..Default::default() },
+            &Allowed {
+                uris: "spiffe://example.com/invalid".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1528,7 +1993,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { uris: "abc".into(), ..Default::default() },
+            &Allowed {
+                uris: "abc".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1545,7 +2013,10 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { uris: "http://www.google.com".into(), ..Default::default() },
+            &Allowed {
+                uris: "http://www.google.com".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1559,9 +2030,13 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_ou_single_cert() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_ou_single_cert", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_ou_single_cert", true).await;
 
         // CA cert
         let (ca_cert, ca_key) = new_test_cert_ext(
@@ -1586,37 +2061,55 @@ mod test {
             "web",
             &ca_cert,
             "foo",
-            &Allowed { organizational_units: "engineering".into(), ..Default::default() },
+            &Allowed {
+                organizational_units: "engineering".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { organizational_units: "eng*".into(), ..Default::default() },
+            &Allowed {
+                organizational_units: "eng*".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { organizational_units: "engineering,finance".into(), ..Default::default() },
+            &Allowed {
+                organizational_units: "engineering,finance".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None).unwrap();
+        let _ = test_http_server
+            .test_login(&test_http_server.ca_cert_pem, &ca_cert, &ca_key, None)
+            .unwrap();
 
         test_http_server.test_write_cert(
             "web",
             &ca_cert,
             "foo",
-            &Allowed { organizational_units: "foo".into(), ..Default::default() },
+            &Allowed {
+                organizational_units: "foo".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1630,9 +2123,13 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_mixed_constraints() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_mixed_constraints", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_mixed_constraints", true).await;
 
         // CA cert
         let (ca_cert, ca_key) = new_test_cert_ext(
@@ -1667,12 +2164,22 @@ mod test {
         let ret = test_http_server.mount_auth("cert", "cert");
         assert!(ret.is_ok());
 
-        test_http_server.test_write_cert("1unconstrained", &ca_cert, "foo", &Allowed::default(), &Map::new(), None);
+        test_http_server.test_write_cert(
+            "1unconstrained",
+            &ca_cert,
+            "foo",
+            &Allowed::default(),
+            &Map::new(),
+            None,
+        );
         test_http_server.test_write_cert(
             "2matching",
             &ca_cert,
             "foo",
-            &Allowed { names: "*.example.com,whatever".into(), ..Default::default() },
+            &Allowed {
+                names: "*.example.com,whatever".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
@@ -1680,14 +2187,30 @@ mod test {
             "3invalid",
             &ca_cert,
             "foo",
-            &Allowed { names: "invalid".into(), ..Default::default() },
+            &Allowed {
+                names: "invalid".into(),
+                ..Default::default()
+            },
             &Map::new(),
             None,
         );
 
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
         let _ = test_http_server
-            .test_login_with_name("2matching", &test_http_server.ca_cert_pem, &client_cert, &client_key, None)
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
+        let _ = test_http_server
+            .test_login_with_name(
+                "2matching",
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
             .unwrap();
         let _ = test_http_server
             .test_login_with_name(
@@ -1700,9 +2223,13 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_untrusted() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_untrusted", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_untrusted", true).await;
 
         // CA cert
         let (ca_cert, ca_key) = new_test_cert_ext(
@@ -1747,14 +2274,28 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_valid_cidr() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_valid_cidr", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_valid_cidr", true).await;
 
         // CA cert
-        let (ca_cert, ca_key) =
-            new_test_cert(true, true, true, "localhost", Some("localhost"), Some("127.0.0.1"), None, None, None, None)
-                .unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true,
+            true,
+            true,
+            "localhost",
+            Some("localhost"),
+            Some("127.0.0.1"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let (client_cert, client_key) = new_test_cert(
             false,
@@ -1779,23 +2320,52 @@ mod test {
             &ca_cert,
             "foo",
             &Allowed::default(),
-            json!({"bound_cidrs": ["127.0.0.1", "128.252.0.0/16"]}).as_object().unwrap(),
+            json!({"bound_cidrs": ["127.0.0.1", "128.252.0.0/16"]})
+                .as_object()
+                .unwrap(),
             None,
         );
         let (_, resp) = test_http_server.test_read_cert("web").unwrap();
-        assert_eq!(resp["data"]["bound_cidrs"], json!(["127.0.0.1", "128.252.0.0/16"]));
-        assert_eq!(resp["data"]["token_bound_cidrs"], json!(["127.0.0.1", "128.252.0.0/16"]));
-        let _ = test_http_server.test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, None).unwrap();
+        assert_eq!(
+            resp["data"]["bound_cidrs"],
+            json!(["127.0.0.1", "128.252.0.0/16"])
+        );
+        assert_eq!(
+            resp["data"]["token_bound_cidrs"],
+            json!(["127.0.0.1", "128.252.0.0/16"])
+        );
+        let _ = test_http_server
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                None,
+            )
+            .unwrap();
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_credential_cert_module_invalid_cidr() {
-        let mut test_http_server = TestHttpServer::new("test_credential_cert_module_invalid_cidr", true).await;
+        let mut test_http_server =
+            TestHttpServer::new("test_credential_cert_module_invalid_cidr", true).await;
 
         // CA cert
-        let (ca_cert, ca_key) =
-            new_test_cert(true, true, true, "localhost", Some("localhost"), Some("127.0.0.1"), None, None, None, None)
-                .unwrap();
+        let (ca_cert, ca_key) = new_test_cert(
+            true,
+            true,
+            true,
+            "localhost",
+            Some("localhost"),
+            Some("127.0.0.1"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let (client_cert, client_key) = new_test_cert(
             false,
@@ -1820,14 +2390,27 @@ mod test {
             &ca_cert,
             "foo",
             &Allowed::default(),
-            json!({"bound_cidrs": ["127.0.0.2", "128.252.0.0/16"]}).as_object().unwrap(),
+            json!({"bound_cidrs": ["127.0.0.2", "128.252.0.0/16"]})
+                .as_object()
+                .unwrap(),
             None,
         );
         let (_, resp) = test_http_server.test_read_cert("web").unwrap();
-        assert_eq!(resp["data"]["bound_cidrs"], json!(["127.0.0.2", "128.252.0.0/16"]));
-        assert_eq!(resp["data"]["token_bound_cidrs"], json!(["127.0.0.2", "128.252.0.0/16"]));
+        assert_eq!(
+            resp["data"]["bound_cidrs"],
+            json!(["127.0.0.2", "128.252.0.0/16"])
+        );
+        assert_eq!(
+            resp["data"]["token_bound_cidrs"],
+            json!(["127.0.0.2", "128.252.0.0/16"])
+        );
         let _ = test_http_server
-            .test_login(&test_http_server.ca_cert_pem, &client_cert, &client_key, Some("Permission denied."))
+            .test_login(
+                &test_http_server.ca_cert_pem,
+                &client_cert,
+                &client_key,
+                Some("Permission denied."),
+            )
             .unwrap();
     }
 }

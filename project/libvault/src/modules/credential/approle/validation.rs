@@ -10,12 +10,18 @@ use better_default::Default;
 use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
 use serde::{Deserialize, Serialize};
 
-use super::{AppRoleBackendInner, SECRET_ID_ACCESSOR_LOCAL_PREFIX, SECRET_ID_ACCESSOR_PREFIX, SECRET_ID_LOCAL_PREFIX};
+use super::{
+    AppRoleBackendInner, SECRET_ID_ACCESSOR_LOCAL_PREFIX, SECRET_ID_ACCESSOR_PREFIX,
+    SECRET_ID_LOCAL_PREFIX,
+};
 use crate::{
     errors::RvError,
     modules::auth::expiration::MAX_LEASE_DURATION_SECS,
     storage::{Storage, StorageEntry},
-    utils::{self, deserialize_duration, deserialize_system_time, serialize_duration, serialize_system_time},
+    utils::{
+        self, deserialize_duration, deserialize_system_time, serialize_duration,
+        serialize_system_time,
+    },
 };
 
 const MAX_HMAC_INPUT_LENGTH: usize = 4096;
@@ -38,23 +44,35 @@ pub struct SecretIdStorageEntry {
 
     // Duration after which this secret_id should expire. This is capped by
     // the backend mount's max TTL value.
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub secret_id_ttl: Duration,
 
     // The time when the secret_id was created
-    #[serde(serialize_with = "serialize_system_time", deserialize_with = "deserialize_system_time")]
+    #[serde(
+        serialize_with = "serialize_system_time",
+        deserialize_with = "deserialize_system_time"
+    )]
     #[default(SystemTime::now())]
     pub creation_time: SystemTime,
 
     // The time when the secret_id becomes eligible for tidy operation.
     // Tidying is performed by the PeriodicFunc of the backend which is 1
     // minute apart.
-    #[serde(serialize_with = "serialize_system_time", deserialize_with = "deserialize_system_time")]
+    #[serde(
+        serialize_with = "serialize_system_time",
+        deserialize_with = "deserialize_system_time"
+    )]
     #[default(SystemTime::now())]
     pub expiration_time: SystemTime,
 
     // The time representing the last time this storage entry was modified
-    #[serde(serialize_with = "serialize_system_time", deserialize_with = "deserialize_system_time")]
+    #[serde(
+        serialize_with = "serialize_system_time",
+        deserialize_with = "deserialize_system_time"
+    )]
     #[default(SystemTime::now())]
     pub last_updated_time: SystemTime,
 
@@ -182,20 +200,34 @@ impl AppRoleBackendInner {
             let _locked = lock_entry.lock.read().await;
 
             let entry = self
-                .get_secret_id_storage_entry(storage, role_secret_id_prefix, &role_name_hmac, &secret_id_hmac)
+                .get_secret_id_storage_entry(
+                    storage,
+                    role_secret_id_prefix,
+                    &role_name_hmac,
+                    &secret_id_hmac,
+                )
                 .await?;
             if entry.is_some() {
-                return Err(RvError::ErrResponse("secret_id is already registered".to_string()));
+                return Err(RvError::ErrResponse(
+                    "secret_id is already registered".to_string(),
+                ));
             }
         }
         {
             let _locked = lock_entry.lock.write().await;
 
             let entry = self
-                .get_secret_id_storage_entry(storage, role_secret_id_prefix, &role_name_hmac, &secret_id_hmac)
+                .get_secret_id_storage_entry(
+                    storage,
+                    role_secret_id_prefix,
+                    &role_name_hmac,
+                    &secret_id_hmac,
+                )
                 .await?;
             if entry.is_some() {
-                return Err(RvError::ErrResponse("secret_id is already registered".to_string()));
+                return Err(RvError::ErrResponse(
+                    "secret_id is already registered".to_string(),
+                ));
             }
 
             let now = SystemTime::now();
@@ -207,7 +239,13 @@ impl AppRoleBackendInner {
                 secret_entry.expiration_time = now + ttl;
             }
 
-            self.create_secret_id_accessor_entry(storage, secret_entry, &secret_id_hmac, role_secret_id_prefix).await?;
+            self.create_secret_id_accessor_entry(
+                storage,
+                secret_entry,
+                &secret_id_hmac,
+                role_secret_id_prefix,
+            )
+            .await?;
 
             self.set_secret_id_storage_entry(
                 storage,
@@ -244,12 +282,16 @@ impl AppRoleBackendInner {
         role_secret_id_prefix: &str,
     ) -> Result<Option<SecretIdAccessorStorageEntry>, RvError> {
         if secret_id_accessor.is_empty() {
-            return Err(RvError::ErrResponse("missing secret id accessor".to_string()));
+            return Err(RvError::ErrResponse(
+                "missing secret id accessor".to_string(),
+            ));
         }
 
         let salt = self.salt.load();
         if salt.is_none() {
-            return Err(RvError::ErrResponse("approle module not initialized".to_string()));
+            return Err(RvError::ErrResponse(
+                "approle module not initialized".to_string(),
+            ));
         }
 
         let salt_id = salt.as_ref().unwrap().salt_id(secret_id_accessor)?;
@@ -289,7 +331,9 @@ impl AppRoleBackendInner {
 
         let salt = self.salt.load();
         if salt.is_none() {
-            return Err(RvError::ErrResponse("approle module not initialized".to_string()));
+            return Err(RvError::ErrResponse(
+                "approle module not initialized".to_string(),
+            ));
         }
 
         let salt_id = salt.as_ref().unwrap().salt_id(&entry.secret_id_accessor)?;
@@ -301,12 +345,16 @@ impl AppRoleBackendInner {
 
         let entry_index = format!("{accessor_prefix}{salt_id}");
 
-        let lock_entry = self.secret_id_accessor_locks.get_lock(&entry.secret_id_accessor);
+        let lock_entry = self
+            .secret_id_accessor_locks
+            .get_lock(&entry.secret_id_accessor);
         let _locked = lock_entry.lock.write().await;
 
         let entry = StorageEntry::new(
             &entry_index,
-            &SecretIdAccessorStorageEntry { secret_id_hmac: secret_id_hmac.to_string() },
+            &SecretIdAccessorStorageEntry {
+                secret_id_hmac: secret_id_hmac.to_string(),
+            },
         )?;
 
         storage.put(&entry).await
@@ -321,7 +369,9 @@ impl AppRoleBackendInner {
     ) -> Result<(), RvError> {
         let salt = self.salt.load();
         if salt.is_none() {
-            return Err(RvError::ErrResponse("approle module not initialized".to_string()));
+            return Err(RvError::ErrResponse(
+                "approle module not initialized".to_string(),
+            ));
         }
 
         let salt_id = salt.as_ref().unwrap().salt_id(secret_id_accessor)?;
@@ -368,7 +418,9 @@ pub fn create_hmac(key: &str, value: &str) -> Result<String, RvError> {
     }
 
     if value.len() > MAX_HMAC_INPUT_LENGTH {
-        return Err(RvError::ErrResponse(format!("value is longer than maximum of {MAX_HMAC_INPUT_LENGTH} bytes")));
+        return Err(RvError::ErrResponse(format!(
+            "value is longer than maximum of {MAX_HMAC_INPUT_LENGTH} bytes"
+        )));
     }
 
     let pkey = PKey::hmac(key.as_bytes())?;
@@ -385,7 +437,13 @@ pub fn verify_cidr_role_secret_id_subset(
     if !secret_id_cidrs.is_empty() && !role_bound_cidr_list.is_empty() {
         let cidr_list: Vec<String> = role_bound_cidr_list
             .iter()
-            .map(|cidr| if cidr.contains('/') { cidr.clone() } else { format!("{cidr}/32") })
+            .map(|cidr| {
+                if cidr.contains('/') {
+                    cidr.clone()
+                } else {
+                    format!("{cidr}/32")
+                }
+            })
             .collect();
 
         let cidr_list_ref: Vec<&str> = cidr_list.iter().map(String::as_str).collect();

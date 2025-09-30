@@ -57,9 +57,16 @@ impl TokenAuth<'_> {
         self.request_write("/v1/auth/token/create-orphan", data.as_object().cloned())
     }
 
-    pub fn create_with_role(&self, input: &TokenInput, role_name: &str) -> Result<HttpResponse, RvError> {
+    pub fn create_with_role(
+        &self,
+        input: &TokenInput,
+        role_name: &str,
+    ) -> Result<HttpResponse, RvError> {
         let data = serde_json::to_value(input)?;
-        self.request_write(format!("/v1/auth/token/create/{role_name}"), data.as_object().cloned())
+        self.request_write(
+            format!("/v1/auth/token/create/{role_name}"),
+            data.as_object().cloned(),
+        )
     }
 
     pub fn lookup(&self, token: &str) -> Result<HttpResponse, RvError> {
@@ -103,7 +110,11 @@ impl TokenAuth<'_> {
         self.request_write("/v1/auth/token/renew-self", data.as_object().cloned())
     }
 
-    pub fn renew_token_as_self(&self, token: &str, increment: u32) -> Result<HttpResponse, RvError> {
+    pub fn renew_token_as_self(
+        &self,
+        token: &str,
+        increment: u32,
+    ) -> Result<HttpResponse, RvError> {
         let mut client = self.client.clone();
         client.token = token.to_string();
         let data = serde_json::json!({

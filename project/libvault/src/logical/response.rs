@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use better_default::Default;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::{
     errors::RvError,
-    logical::{secret::SecretData, Auth},
+    logical::{Auth, secret::SecretData},
 };
 
 lazy_static! {
@@ -33,7 +33,9 @@ pub struct Response {
 
 impl Response {
     pub fn new() -> Self {
-        Self { ..Default::default() }
+        Self {
+            ..Default::default()
+        }
     }
 
     pub fn data_response(data: Option<Map<String, Value>>) -> Self {

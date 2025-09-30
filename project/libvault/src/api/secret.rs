@@ -61,10 +61,10 @@ impl Secret {
     }
 
     pub fn token_id(&self) -> Result<String, RvError> {
-        if let Some(auth) = &self.auth {
-            if !auth.client_token.is_empty() {
-                return Ok(auth.client_token.clone());
-            }
+        if let Some(auth) = &self.auth
+            && !auth.client_token.is_empty()
+        {
+            return Ok(auth.client_token.clone());
         }
 
         let Some(id_value) = self.data.get("id") else {
@@ -79,10 +79,10 @@ impl Secret {
     }
 
     pub fn token_accessor(&self) -> Result<String, RvError> {
-        if let Some(auth) = &self.auth {
-            if !auth.accessor.is_empty() {
-                return Ok(auth.accessor.clone());
-            }
+        if let Some(auth) = &self.auth
+            && !auth.accessor.is_empty()
+        {
+            return Ok(auth.accessor.clone());
         }
 
         let Some(accessor_value) = self.data.get("accessor") else {
@@ -90,17 +90,19 @@ impl Secret {
         };
 
         let Some(accessor) = accessor_value.as_str() else {
-            return Err(rv_error_string!("token accessor found but in the wrong format"));
+            return Err(rv_error_string!(
+                "token accessor found but in the wrong format"
+            ));
         };
 
         Ok(accessor.to_string())
     }
 
     pub fn token_policies(&self) -> Result<Vec<String>, RvError> {
-        if let Some(auth) = &self.auth {
-            if !auth.policies.is_empty() {
-                return Ok(auth.policies.clone());
-            }
+        if let Some(auth) = &self.auth
+            && !auth.policies.is_empty()
+        {
+            return Ok(auth.policies.clone());
         }
 
         let Some(policies_value) = self.data.get("policies") else {
@@ -108,10 +110,15 @@ impl Secret {
         };
 
         let Some(policies) = policies_value.as_array() else {
-            return Err(rv_error_string!("token policies found but in the wrong format"));
+            return Err(rv_error_string!(
+                "token policies found but in the wrong format"
+            ));
         };
 
-        Ok(policies.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        Ok(policies
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect())
     }
 
     pub fn token_ttl(&self) -> Result<u64, RvError> {
@@ -131,18 +138,23 @@ impl Secret {
     }
 
     pub fn token_metadata(&self) -> Result<HashMap<String, String>, RvError> {
-        if let Some(auth) = &self.auth {
-            if !auth.metadata.is_empty() {
-                return Ok(auth.metadata.clone());
-            }
+        if let Some(auth) = &self.auth
+            && !auth.metadata.is_empty()
+        {
+            return Ok(auth.metadata.clone());
         }
 
         if let Some(data) = self.data.get("metadata") {
             let Some(metadata) = data.as_object() else {
-                return Err(rv_error_string!("token metadata found but in the wrong format"));
+                return Err(rv_error_string!(
+                    "token metadata found but in the wrong format"
+                ));
             };
 
-            return Ok(metadata.into_iter().map(|(k, v)| (k.to_string(), value_to_string(v))).collect());
+            return Ok(metadata
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), value_to_string(v)))
+                .collect());
         }
 
         if let Some(data) = self.data.get("meta") {
@@ -150,7 +162,10 @@ impl Secret {
                 return Err(rv_error_string!("token meta found but in the wrong format"));
             };
 
-            return Ok(meta.into_iter().map(|(k, v)| (k.to_string(), value_to_string(v))).collect());
+            return Ok(meta
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), value_to_string(v)))
+                .collect());
         }
 
         Ok(HashMap::new())

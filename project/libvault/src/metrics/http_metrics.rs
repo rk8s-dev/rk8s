@@ -6,15 +6,17 @@ use prometheus_client::{
     metrics::{
         counter::Counter,
         family::Family,
-        histogram::{linear_buckets, Histogram},
+        histogram::{Histogram, linear_buckets},
     },
     registry::Registry,
 };
 
 pub const HTTP_REQUEST_COUNT: &str = "http_request_count";
-pub const HTTP_REQUEST_COUNT_HELP: &str = "Number of HTTP requests received, labeled by method and status";
+pub const HTTP_REQUEST_COUNT_HELP: &str =
+    "Number of HTTP requests received, labeled by method and status";
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "http_request_duration_seconds";
-pub const HTTP_REQUEST_DURATION_SECONDS_HELP: &str = "Duration of HTTP requests, labeled by method and status";
+pub const HTTP_REQUEST_DURATION_SECONDS_HELP: &str =
+    "Duration of HTTP requests, labeled by method and status";
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum MetricsMethod {
@@ -55,14 +57,26 @@ pub struct HttpMetrics {
 impl HttpMetrics {
     pub fn new(registry: &mut Registry) -> Self {
         let requests = Family::<HttpLabel, Counter>::default();
-        let histogram =
-            Family::<HttpLabel, Histogram>::new_with_constructor(|| Histogram::new(linear_buckets(0.1, 0.1, 10)));
+        let histogram = Family::<HttpLabel, Histogram>::new_with_constructor(|| {
+            Histogram::new(linear_buckets(0.1, 0.1, 10))
+        });
 
-        registry.register(HTTP_REQUEST_COUNT, HTTP_REQUEST_COUNT_HELP, requests.clone());
+        registry.register(
+            HTTP_REQUEST_COUNT,
+            HTTP_REQUEST_COUNT_HELP,
+            requests.clone(),
+        );
 
-        registry.register(HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUEST_DURATION_SECONDS_HELP, histogram.clone());
+        registry.register(
+            HTTP_REQUEST_DURATION_SECONDS,
+            HTTP_REQUEST_DURATION_SECONDS_HELP,
+            histogram.clone(),
+        );
 
-        Self { requests, histogram }
+        Self {
+            requests,
+            histogram,
+        }
     }
 
     pub fn increment_request_count(&self, label: &HttpLabel) {
@@ -97,8 +111,10 @@ mod tests {
         let lines: Vec<&str> = raw.split('\n').collect();
         let mut i = 0;
         let mut counter_map: HashMap<String, HashMap<String, u32>> = HashMap::new();
-        let name_label_re =
-            Regex::new(r#"\bpath="(?P<path>[^"]+)",method="(?P<method>[^"]+)",status="(?P<status>[^"]+)""#).unwrap();
+        let name_label_re = Regex::new(
+            r#"\bpath="(?P<path>[^"]+)",method="(?P<method>[^"]+)",status="(?P<status>[^"]+)""#,
+        )
+        .unwrap();
 
         while i < lines.len() {
             let line = lines[i];
@@ -135,12 +151,20 @@ mod tests {
         counter_map
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_http_request() {
         let server = TestHttpServer::new_with_prometheus("test_http_request", false).await;
         let root_token = &server.root_token;
 
-        let path = ["v1/secret/password-0", "v1/secret/password-1", "v1/secret/password-2", "v1/secret"];
+        let path = [
+            "v1/secret/password-0",
+            "v1/secret/password-1",
+            "v1/secret/password-2",
+            "v1/secret",
+        ];
         let mock = [
             vec![(DELETE, 2)],
             vec![(POST, 3), (GET, 5), (PUT, 7), (DELETE, 9)],
@@ -165,15 +189,21 @@ mod tests {
                         .as_object()
                         .unwrap()
                         .clone();
-                        let (_, _) = server.request(method, path, Some(data), Some(root_token), None).unwrap();
+                        let (_, _) = server
+                            .request(method, path, Some(data), Some(root_token), None)
+                            .unwrap();
                     } else {
-                        let (_, _) = server.request(method, path, None, Some(root_token), None).unwrap();
+                        let (_, _) = server
+                            .request(method, path, None, Some(root_token), None)
+                            .unwrap();
                     }
                 }
             }
         }
 
-        let (status, resp) = server.request_prometheus("GET", "metrics", None, Some(root_token), None).unwrap();
+        let (status, resp) = server
+            .request_prometheus("GET", "metrics", None, Some(root_token), None)
+            .unwrap();
         assert_eq!(status, 200);
 
         let counter_map = parse_counter(resp["metrics"].as_str().unwrap());

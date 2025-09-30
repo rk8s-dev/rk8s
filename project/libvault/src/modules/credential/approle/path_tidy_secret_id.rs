@@ -1,8 +1,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
     time::SystemTime,
 };
@@ -10,13 +10,14 @@ use std::{
 use go_defer::defer;
 
 use super::{
-    validation::SecretIdAccessorStorageEntry, AppRoleBackend, AppRoleBackendInner, SECRET_ID_ACCESSOR_LOCAL_PREFIX,
+    AppRoleBackend, AppRoleBackendInner, SECRET_ID_ACCESSOR_LOCAL_PREFIX,
     SECRET_ID_ACCESSOR_PREFIX, SECRET_ID_LOCAL_PREFIX, SECRET_ID_PREFIX,
+    validation::SecretIdAccessorStorageEntry,
 };
 use crate::{
     context::Context,
     errors::RvError,
-    logical::{Backend, Operation, Path, PathOperation, Request, Response, CTX_KEY_BACKEND_PATH},
+    logical::{Backend, CTX_KEY_BACKEND_PATH, Operation, Path, PathOperation, Request, Response},
     new_path, new_path_internal,
     storage::Storage,
 };
@@ -40,7 +41,8 @@ this endpoint will trigger the clean-up action, without waiting for the backend'
 "#
         });
 
-        path.ctx.set(CTX_KEY_BACKEND_PATH_INNER, approle_backend_ref2);
+        path.ctx
+            .set(CTX_KEY_BACKEND_PATH_INNER, approle_backend_ref2);
 
         path
     }
@@ -73,14 +75,18 @@ impl AppRoleBackendInner {
             let accessor_hashes = storage.list(accessor_id_prefix_to_use).await?;
 
             let mut skip_hashes: HashMap<String, bool> = HashMap::new();
-            let mut accessor_entry_by_hash: HashMap<String, SecretIdAccessorStorageEntry> = HashMap::new();
+            let mut accessor_entry_by_hash: HashMap<String, SecretIdAccessorStorageEntry> =
+                HashMap::new();
             for accessor_hash in accessor_hashes.iter() {
-                let Some(storage_entry) = storage.get(&format!("{accessor_id_prefix_to_use}{accessor_hash}")).await?
+                let Some(storage_entry) = storage
+                    .get(&format!("{accessor_id_prefix_to_use}{accessor_hash}"))
+                    .await?
                 else {
                     continue;
                 };
 
-                let ret: SecretIdAccessorStorageEntry = serde_json::from_slice(storage_entry.value.as_slice())?;
+                let ret: SecretIdAccessorStorageEntry =
+                    serde_json::from_slice(storage_entry.value.as_slice())?;
                 accessor_entry_by_hash.insert(accessor_hash.clone(), ret);
             }
 
@@ -98,7 +104,12 @@ impl AppRoleBackendInner {
                 let _locked = lock_entry.lock.write().await;
 
                 let secret_id_storage_entry = self
-                    .get_secret_id_storage_entry(s, secret_id_prefix_to_use, role_name_hmac, secret_id_hmac)
+                    .get_secret_id_storage_entry(
+                        s,
+                        secret_id_prefix_to_use,
+                        role_name_hmac,
+                        secret_id_hmac,
+                    )
                     .await?
                     .ok_or(RvError::ErrResponse(format!(
                         "entry for secret id was nil, secret_id_hmac: {secret_id_hmac}"
@@ -115,8 +126,13 @@ impl AppRoleBackendInner {
                     .await?
                     .is_none()
                 {
-                    self.delete_secret_id_storage_entry(s, secret_id_prefix_to_use, role_name_hmac, secret_id_hmac)
-                        .await?;
+                    self.delete_secret_id_storage_entry(
+                        s,
+                        secret_id_prefix_to_use,
+                        role_name_hmac,
+                        secret_id_hmac,
+                    )
+                    .await?;
                     return Ok(());
                 }
 
@@ -131,8 +147,13 @@ impl AppRoleBackendInner {
                     )
                     .await?;
 
-                    self.delete_secret_id_storage_entry(s, secret_id_prefix_to_use, role_name_hmac, secret_id_hmac)
-                        .await?;
+                    self.delete_secret_id_storage_entry(
+                        s,
+                        secret_id_prefix_to_use,
+                        role_name_hmac,
+                        secret_id_hmac,
+                    )
+                    .await?;
 
                     return Ok(());
                 }
@@ -154,8 +175,13 @@ impl AppRoleBackendInner {
                 let key = format!("{secret_id_prefix_to_use}{role_name_hmac}/");
                 let secret_id_hmacs = s.list(&key).await?;
                 for secret_id_hmac in secret_id_hmacs.iter() {
-                    secret_id_cleanup_func(secret_id_hmac, role_name_hmac, secret_id_prefix_to_use, &mut skip_hashes)
-                        .await?;
+                    secret_id_cleanup_func(
+                        secret_id_hmac,
+                        role_name_hmac,
+                        secret_id_prefix_to_use,
+                        &mut skip_hashes,
+                    )
+                    .await?;
                 }
             }
 
@@ -175,7 +201,9 @@ impl AppRoleBackendInner {
                 }
 
                 for (accessor_hash, accessor_entry) in accessor_entry_by_hash.iter() {
-                    let lock_entry = self.secret_id_locks.get_lock(&accessor_entry.secret_id_hmac);
+                    let lock_entry = self
+                        .secret_id_locks
+                        .get_lock(&accessor_entry.secret_id_hmac);
                     let _locked = lock_entry.lock.write().await;
 
                     // Don't clean up accessor index entry if secretid cleanup func
@@ -198,7 +226,9 @@ impl AppRoleBackendInner {
             Ok(())
         };
         #[cfg(feature = "sync_handler")]
-        let tidy_func = move |secret_id_prefix_to_use: &str, accessor_id_prefix_to_use: &str| -> Result<(), RvError> {
+        let tidy_func = move |secret_id_prefix_to_use: &str,
+                              accessor_id_prefix_to_use: &str|
+              -> Result<(), RvError> {
             log::info!("listing accessors, prefix: {accessor_id_prefix_to_use}");
             // List all the accessors and add them all to a map
             // These hashes are the result of salting the accessor id.
@@ -206,13 +236,17 @@ impl AppRoleBackendInner {
             let accessor_hashes = storage.list(accessor_id_prefix_to_use)?;
 
             let mut skip_hashes: HashMap<String, bool> = HashMap::new();
-            let mut accessor_entry_by_hash: HashMap<String, SecretIdAccessorStorageEntry> = HashMap::new();
+            let mut accessor_entry_by_hash: HashMap<String, SecretIdAccessorStorageEntry> =
+                HashMap::new();
             for accessor_hash in accessor_hashes.iter() {
-                let Some(storage_entry) = storage.get(&format!("{accessor_id_prefix_to_use}{accessor_hash}"))? else {
+                let Some(storage_entry) =
+                    storage.get(&format!("{accessor_id_prefix_to_use}{accessor_hash}"))?
+                else {
                     continue;
                 };
 
-                let ret: SecretIdAccessorStorageEntry = serde_json::from_slice(storage_entry.value.as_slice())?;
+                let ret: SecretIdAccessorStorageEntry =
+                    serde_json::from_slice(storage_entry.value.as_slice())?;
                 accessor_entry_by_hash.insert(accessor_hash.clone(), ret);
             }
 
@@ -230,7 +264,12 @@ impl AppRoleBackendInner {
                 let _locked = lock_entry.lock.write();
 
                 let secret_id_storage_entry = self
-                    .get_secret_id_storage_entry(s, secret_id_prefix_to_use, role_name_hmac, secret_id_hmac)?
+                    .get_secret_id_storage_entry(
+                        s,
+                        secret_id_prefix_to_use,
+                        role_name_hmac,
+                        secret_id_hmac,
+                    )?
                     .ok_or(RvError::ErrResponse(format!(
                         "entry for secret id was nil, secret_id_hmac: {secret_id_hmac}"
                     )))?;
@@ -245,7 +284,12 @@ impl AppRoleBackendInner {
                     )?
                     .is_none()
                 {
-                    self.delete_secret_id_storage_entry(s, secret_id_prefix_to_use, role_name_hmac, secret_id_hmac)?;
+                    self.delete_secret_id_storage_entry(
+                        s,
+                        secret_id_prefix_to_use,
+                        role_name_hmac,
+                        secret_id_hmac,
+                    )?;
                     return Ok(());
                 }
 
@@ -259,7 +303,12 @@ impl AppRoleBackendInner {
                         secret_id_prefix_to_use,
                     )?;
 
-                    self.delete_secret_id_storage_entry(s, secret_id_prefix_to_use, role_name_hmac, secret_id_hmac)?;
+                    self.delete_secret_id_storage_entry(
+                        s,
+                        secret_id_prefix_to_use,
+                        role_name_hmac,
+                        secret_id_hmac,
+                    )?;
 
                     return Ok(());
                 }
@@ -281,7 +330,12 @@ impl AppRoleBackendInner {
                 let key = format!("{secret_id_prefix_to_use}{role_name_hmac}/");
                 let secret_id_hmacs = s.list(&key)?;
                 for secret_id_hmac in secret_id_hmacs.iter() {
-                    secret_id_cleanup_func(secret_id_hmac, role_name_hmac, secret_id_prefix_to_use, &mut skip_hashes)?;
+                    secret_id_cleanup_func(
+                        secret_id_hmac,
+                        role_name_hmac,
+                        secret_id_prefix_to_use,
+                        &mut skip_hashes,
+                    )?;
                 }
             }
 
@@ -301,7 +355,9 @@ impl AppRoleBackendInner {
                 }
 
                 for (accessor_hash, accessor_entry) in accessor_entry_by_hash.iter() {
-                    let lock_entry = self.secret_id_locks.get_lock(&accessor_entry.secret_id_hmac);
+                    let lock_entry = self
+                        .secret_id_locks
+                        .get_lock(&accessor_entry.secret_id_hmac);
                     let _locked = lock_entry.lock.write();
 
                     // Don't clean up accessor index entry if secretid cleanup func
@@ -337,18 +393,29 @@ impl AppRoleBackendInner {
         }
 
         #[cfg(not(feature = "sync_handler"))]
-        if let Err(err) = tidy_func_cloned(SECRET_ID_LOCAL_PREFIX, SECRET_ID_ACCESSOR_LOCAL_PREFIX).await {
+        if let Err(err) =
+            tidy_func_cloned(SECRET_ID_LOCAL_PREFIX, SECRET_ID_ACCESSOR_LOCAL_PREFIX).await
+        {
             log::error!("error tidying local secret IDs, error: {err}");
         }
         #[cfg(feature = "sync_handler")]
-        if let Err(err) = tidy_func_cloned(SECRET_ID_LOCAL_PREFIX, SECRET_ID_ACCESSOR_LOCAL_PREFIX) {
+        if let Err(err) = tidy_func_cloned(SECRET_ID_LOCAL_PREFIX, SECRET_ID_ACCESSOR_LOCAL_PREFIX)
+        {
             log::error!("error tidying local secret IDs, error: {err}");
         }
     }
 
-    pub fn tidy_secret_id(&self, backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub fn tidy_secret_id(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let mut resp = Response::new();
-        if self.tidy_secret_id_cas_guard.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        if self
+            .tidy_secret_id_cas_guard
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             resp.add_warning("Tidy operation already in progress");
             return Ok(Some(resp));
         }
@@ -407,7 +474,7 @@ mod test {
     };
 
     use super::{
-        super::{path_role::RoleEntry, AppRoleModule},
+        super::{AppRoleModule, path_role::RoleEntry},
         *,
     };
     use crate::{
@@ -419,7 +486,8 @@ mod test {
     #[actix_rt::test]
     async fn test_approle_tidy_dangling_accessors_normal() {
         #[cfg(feature = "sync_handler")]
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_tidy_dangling_accessors_normal");
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_tidy_dangling_accessors_normal");
         #[cfg(not(feature = "sync_handler"))]
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_tidy_dangling_accessors_normal").await;
@@ -430,7 +498,10 @@ mod test {
         #[cfg(not(feature = "sync_handler"))]
         test_mount_auth_api(&core, &root_token, "approle", "approle/").await;
 
-        let approle_module = core.module_manager.get_module::<AppRoleModule>("approle").unwrap();
+        let approle_module = core
+            .module_manager
+            .get_module::<AppRoleModule>("approle")
+            .unwrap();
 
         // Create a role
         let mut req = Request::new("/auth/approle/role1");
@@ -446,7 +517,9 @@ mod test {
             ..Default::default()
         };
         #[cfg(not(feature = "sync_handler"))]
-        let resp = approle_module.set_role(&mut req, "role1", &role_entry, "").await;
+        let resp = approle_module
+            .set_role(&mut req, "role1", &role_entry, "")
+            .await;
         #[cfg(feature = "sync_handler")]
         let resp = approle_module.set_role(&mut req, "role1", &role_entry, "");
         assert!(resp.is_ok());
@@ -467,7 +540,9 @@ mod test {
         assert!(mock_backend.init().is_ok());
 
         #[cfg(not(feature = "sync_handler"))]
-        let resp = approle_module.write_role_secret_id(&mock_backend, &mut req).await;
+        let resp = approle_module
+            .write_role_secret_id(&mock_backend, &mut req)
+            .await;
         #[cfg(feature = "sync_handler")]
         let resp = approle_module.write_role_secret_id(&mock_backend, &mut req);
         assert!(resp.is_ok());
@@ -483,7 +558,9 @@ mod test {
 
         let entry = StorageEntry::new(
             "accessor/invalid1",
-            &SecretIdAccessorStorageEntry { secret_id_hmac: "samplesecretidhmac".to_string() },
+            &SecretIdAccessorStorageEntry {
+                secret_id_hmac: "samplesecretidhmac".to_string(),
+            },
         )
         .unwrap();
 
@@ -495,7 +572,9 @@ mod test {
 
         let entry = StorageEntry::new(
             "accessor/invalid2",
-            &SecretIdAccessorStorageEntry { secret_id_hmac: "samplesecretidhmac2".to_string() },
+            &SecretIdAccessorStorageEntry {
+                secret_id_hmac: "samplesecretidhmac2".to_string(),
+            },
         )
         .unwrap();
 
@@ -537,7 +616,8 @@ mod test {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_tidy_dangling_accessors_race").await;
         #[cfg(feature = "sync_handler")]
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_tidy_dangling_accessors_race");
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_tidy_dangling_accessors_race");
 
         // Mount approle auth to path: auth/approle
         #[cfg(feature = "sync_handler")]
@@ -545,7 +625,10 @@ mod test {
         #[cfg(not(feature = "sync_handler"))]
         test_mount_auth_api(&core, &root_token, "approle", "approle/").await;
 
-        let approle_module = core.module_manager.get_module::<AppRoleModule>("approle").unwrap();
+        let approle_module = core
+            .module_manager
+            .get_module::<AppRoleModule>("approle")
+            .unwrap();
 
         let mut mock_backend = approle_module.new_backend();
         assert!(mock_backend.init().is_ok());
@@ -564,7 +647,9 @@ mod test {
             ..Default::default()
         };
         #[cfg(not(feature = "sync_handler"))]
-        let resp = approle_module.set_role(&mut req, "role1", &role_entry, "").await;
+        let resp = approle_module
+            .set_role(&mut req, "role1", &role_entry, "")
+            .await;
         #[cfg(feature = "sync_handler")]
         let resp = approle_module.set_role(&mut req, "role1", &role_entry, "");
         assert!(resp.is_ok());
@@ -581,7 +666,9 @@ mod test {
 
         req.storage = core.get_system_view().map(|arc| arc as Arc<dyn Storage>);
         #[cfg(not(feature = "sync_handler"))]
-        let resp = approle_module.write_role_secret_id(&mock_backend, &mut req).await;
+        let resp = approle_module
+            .write_role_secret_id(&mock_backend, &mut req)
+            .await;
         #[cfg(feature = "sync_handler")]
         let resp = approle_module.write_role_secret_id(&mock_backend, &mut req);
         assert!(resp.is_ok());
@@ -592,7 +679,10 @@ mod test {
 
         while start.elapsed() < Duration::new(5, 0) {
             if start.elapsed() > Duration::from_millis(100)
-                && approle_module.tidy_secret_id_cas_guard.load(Ordering::SeqCst) == 0
+                && approle_module
+                    .tidy_secret_id_cas_guard
+                    .load(Ordering::SeqCst)
+                    == 0
             {
                 req.operation = Operation::Write;
                 req.path = "tidy/secret-id".to_string();
@@ -605,7 +695,10 @@ mod test {
 
             actix_rt::spawn(async move {
                 let core = core_cloned2.clone();
-                let approle_module = core.module_manager.get_module::<AppRoleModule>("approle").unwrap();
+                let approle_module = core
+                    .module_manager
+                    .get_module::<AppRoleModule>("approle")
+                    .unwrap();
                 let mut req = Request::new("auth/approle/role/role1/secret-id");
                 req.operation = Operation::Write;
                 req.client_token = token.clone();
@@ -627,7 +720,9 @@ mod test {
 
             let entry = StorageEntry::new(
                 format!("accessor/invalid{}", *num).as_str(),
-                &SecretIdAccessorStorageEntry { secret_id_hmac: "samplesecretidhmac".to_string() },
+                &SecretIdAccessorStorageEntry {
+                    secret_id_hmac: "samplesecretidhmac".to_string(),
+                },
             )
             .unwrap();
 
@@ -644,7 +739,11 @@ mod test {
         assert!(req.ctx.wait_task_finish().await.is_ok());
 
         // Wait for tidy to finish
-        while approle_module.tidy_secret_id_cas_guard.load(Ordering::SeqCst) != 0 {
+        while approle_module
+            .tidy_secret_id_cas_guard
+            .load(Ordering::SeqCst)
+            != 0
+        {
             thread::sleep(Duration::from_micros(100));
         }
 
@@ -680,9 +779,12 @@ mod test {
         assert_eq!(role_hmacs.len(), 1);
 
         #[cfg(not(feature = "sync_handler"))]
-        let secret_ids = req.storage_list(format!("{}{}", SECRET_ID_PREFIX, role_hmacs[0]).as_str()).await;
+        let secret_ids = req
+            .storage_list(format!("{}{}", SECRET_ID_PREFIX, role_hmacs[0]).as_str())
+            .await;
         #[cfg(feature = "sync_handler")]
-        let secret_ids = req.storage_list(format!("{}{}", SECRET_ID_PREFIX, role_hmacs[0]).as_str());
+        let secret_ids =
+            req.storage_list(format!("{}{}", SECRET_ID_PREFIX, role_hmacs[0]).as_str());
         assert!(secret_ids.is_ok());
         let secret_ids = secret_ids.unwrap();
         assert_eq!(secret_ids.len(), *num);

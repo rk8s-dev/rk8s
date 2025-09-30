@@ -4,7 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::{collections::HashMap, fmt, sync::Arc};
 
-use super::{request::Request, response::Response, Backend, Field, Operation};
+use super::{Backend, Field, Operation, request::Request, response::Response};
 use crate::{context::Context, errors::RvError};
 
 #[cfg(not(feature = "sync_handler"))]
@@ -15,7 +15,8 @@ type PathOperationHandler = dyn for<'a> Fn(
     + Send
     + Sync;
 #[cfg(feature = "sync_handler")]
-type PathOperationHandler = dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
+type PathOperationHandler =
+    dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
 
 #[derive(Debug, Clone)]
 pub struct Path {
@@ -34,7 +35,9 @@ pub struct PathOperation {
 
 impl fmt::Debug for PathOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PathOperation").field("op", &self.op).finish()
+        f.debug_struct("PathOperation")
+            .field("op", &self.op)
+            .finish()
     }
 }
 
@@ -58,14 +61,24 @@ impl Path {
 impl PathOperation {
     #[cfg(not(feature = "sync_handler"))]
     pub fn new() -> Self {
-        Self { op: Operation::Read, handler: Arc::new(|_backend, _req| Box::pin(async move { Ok(None) })) }
+        Self {
+            op: Operation::Read,
+            handler: Arc::new(|_backend, _req| Box::pin(async move { Ok(None) })),
+        }
     }
     #[cfg(feature = "sync_handler")]
     pub fn new() -> Self {
-        Self { op: Operation::Read, handler: Arc::new(|_backend, _req| Ok(None)) }
+        Self {
+            op: Operation::Read,
+            handler: Arc::new(|_backend, _req| Ok(None)),
+        }
     }
 
-    pub async fn handle_request(&self, backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn handle_request(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         (self.handler)(backend, req).await
     }
 }
@@ -219,7 +232,10 @@ mod test {
     use super::{super::FieldType, *};
 
     #[maybe_async::maybe_async]
-    pub async fn my_test_read_handler(_backend: &dyn Backend, _req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn my_test_read_handler(
+        _backend: &dyn Backend,
+        _req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         Ok(None)
     }
 

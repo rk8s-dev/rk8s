@@ -25,18 +25,20 @@ use crate::{
     module_manager::ModuleManager,
     modules::auth::AuthModule,
     mount::{
-        MountTable, MountsMonitor, MountsRouter, CORE_MOUNT_CONFIG_PATH, LOGICAL_BARRIER_PREFIX, SYSTEM_BARRIER_PREFIX,
+        CORE_MOUNT_CONFIG_PATH, LOGICAL_BARRIER_PREFIX, MountTable, MountsMonitor, MountsRouter,
+        SYSTEM_BARRIER_PREFIX,
     },
     router::Router,
-    shamir::{ShamirSecret, SHAMIR_OVERHEAD},
+    shamir::{SHAMIR_OVERHEAD, ShamirSecret},
     storage::{
-        barrier::SecurityBarrier, barrier_aes_gcm, barrier_view::BarrierView, physical, Backend as PhysicalBackend,
-        BackendEntry as PhysicalBackendEntry,
+        Backend as PhysicalBackend, BackendEntry as PhysicalBackendEntry, barrier::SecurityBarrier,
+        barrier_aes_gcm, barrier_view::BarrierView, physical,
     },
     utils::BHashSet,
 };
 
-pub type LogicalBackendNewFunc = dyn Fn(Arc<Core>) -> Result<Arc<dyn Backend>, RvError> + Send + Sync;
+pub type LogicalBackendNewFunc =
+    dyn Fn(Arc<Core>) -> Result<Arc<dyn Backend>, RvError> + Send + Sync;
 
 const SEAL_CONFIG_PATH: &str = "core/seal-config";
 const DEPRECATED_UNSEAL_KEY_SET_PATH: &str = "core/used-unseal-keys-set";
@@ -92,7 +94,13 @@ pub struct Core {
 
 impl Default for CoreState {
     fn default() -> Self {
-        Self { system_view: None, sealed: true, unseal_key_shares: Vec::new(), hmac_key: Vec::new(), kek: Vec::new() }
+        Self {
+            system_view: None,
+            sealed: true,
+            unseal_key_shares: Vec::new(),
+            hmac_key: Vec::new(),
+            kek: Vec::new(),
+        }
     }
 }
 
@@ -184,7 +192,9 @@ impl Core {
         let deprecated_key_set = BHashSet::default();
         let pe = PhysicalBackendEntry {
             key: DEPRECATED_UNSEAL_KEY_SET_PATH.to_string(),
-            value: serde_json::to_string(&deprecated_key_set)?.as_bytes().to_vec(),
+            value: serde_json::to_string(&deprecated_key_set)?
+                .as_bytes()
+                .to_vec(),
         };
         self.physical.put(&pe).await?;
 
@@ -195,7 +205,10 @@ impl Core {
         // Initialize the barrier
         barrier.init(kek.deref().as_slice()).await?;
 
-        let mut init_result = InitResult { secret_shares: Zeroizing::new(Vec::new()), root_token: String::new() };
+        let mut init_result = InitResult {
+            secret_shares: Zeroizing::new(Vec::new()),
+            root_token: String::new(),
+        };
 
         // Unseal the barrier
         barrier.unseal(kek.deref().as_slice()).await?;
@@ -204,13 +217,19 @@ impl Core {
         let mut state = (*self.state.load_full()).clone();
 
         state.hmac_key = barrier.derive_hmac_key()?;
-        state.system_view = Some(Arc::new(BarrierView::new(barrier.clone(), SYSTEM_BARRIER_PREFIX)));
+        state.system_view = Some(Arc::new(BarrierView::new(
+            barrier.clone(),
+            SYSTEM_BARRIER_PREFIX,
+        )));
         state.sealed = false;
         state.kek = kek.deref().clone();
         self.state.store(Arc::new(state));
 
         if seal_config.secret_shares == 1 {
-            init_result.secret_shares.deref_mut().push(kek.deref().clone());
+            init_result
+                .secret_shares
+                .deref_mut()
+                .push(kek.deref().clone());
         } else {
             init_result.secret_shares = self.generate_unseal_keys().await?;
         }
@@ -226,7 +245,13 @@ impl Core {
 
         // Generate a new root token
         if let Some(auth_module) = self.module_manager.get_module::<AuthModule>("auth") {
-            let te = auth_module.token_store.load().as_ref().unwrap().root_token().await?;
+            let te = auth_module
+                .token_store
+                .load()
+                .as_ref()
+                .unwrap()
+                .root_token()
+                .await?;
             init_result.root_token = te.id;
         } else {
             log::error!("get auth module failed!");
@@ -242,11 +267,18 @@ impl Core {
         self.state.load().system_view.clone()
     }
 
-    pub fn get_logical_backend(&self, logical_type: &str) -> Result<Arc<LogicalBackendNewFunc>, RvError> {
+    pub fn get_logical_backend(
+        &self,
+        logical_type: &str,
+    ) -> Result<Arc<LogicalBackendNewFunc>, RvError> {
         self.mounts_router.get_backend(logical_type)
     }
 
-    pub fn add_logical_backend(&self, logical_type: &str, backend: Arc<LogicalBackendNewFunc>) -> Result<(), RvError> {
+    pub fn add_logical_backend(
+        &self,
+        logical_type: &str,
+        backend: Arc<LogicalBackendNewFunc>,
+    ) -> Result<(), RvError> {
         self.mounts_router.add_backend(logical_type, backend)
     }
 
@@ -276,7 +308,10 @@ impl Core {
 
     pub fn add_auth_handler(&self, auth_handler: Arc<dyn AuthHandler>) -> Result<(), RvError> {
         let auth_handlers = self.auth_handlers.load();
-        if auth_handlers.iter().any(|h| h.name() == auth_handler.name()) {
+        if auth_handlers
+            .iter()
+            .any(|h| h.name() == auth_handler.name())
+        {
             return Err(RvError::ErrCoreHandlerExist);
         }
 
@@ -360,10 +395,10 @@ impl Core {
         }
 
         let mut deprecated_key_set = self.deprecated_unseal_keys_set().await;
-        if let Ok(deprecated_key_set) = &deprecated_key_set {
-            if deprecated_key_set.contains(key) {
-                return Err(RvError::ErrBarrierKeyDeprecated);
-            }
+        if let Ok(deprecated_key_set) = &deprecated_key_set
+            && deprecated_key_set.contains(key)
+        {
+            return Err(RvError::ErrBarrierKeyDeprecated);
         }
 
         state.unseal_key_shares.push(key.to_vec());
@@ -394,7 +429,10 @@ impl Core {
         let unseal_key_shares = Zeroizing::new(state.unseal_key_shares.clone());
         state.unseal_key_shares.clear();
         state.hmac_key = self.barrier.derive_hmac_key()?;
-        state.system_view = Some(Arc::new(BarrierView::new(self.barrier.clone(), SYSTEM_BARRIER_PREFIX)));
+        state.system_view = Some(Arc::new(BarrierView::new(
+            self.barrier.clone(),
+            SYSTEM_BARRIER_PREFIX,
+        )));
         state.sealed = false;
         state.kek = kek.deref().clone();
         self.state.store(Arc::new(state));
@@ -411,18 +449,18 @@ impl Core {
             return Err(e);
         }
 
-        if once {
-            if let Ok(deprecated_key_set) = &mut deprecated_key_set {
-                for key in unseal_key_shares.iter() {
-                    deprecated_key_set.insert(key);
-                }
-
-                let pe = PhysicalBackendEntry {
-                    key: DEPRECATED_UNSEAL_KEY_SET_PATH.to_string(),
-                    value: serde_json::to_string(deprecated_key_set)?.as_bytes().to_vec(),
-                };
-                self.physical.put(&pe).await?;
+        if once && let Ok(deprecated_key_set) = &mut deprecated_key_set {
+            for key in unseal_key_shares.iter() {
+                deprecated_key_set.insert(key);
             }
+
+            let pe = PhysicalBackendEntry {
+                key: DEPRECATED_UNSEAL_KEY_SET_PATH.to_string(),
+                value: serde_json::to_string(deprecated_key_set)?
+                    .as_bytes()
+                    .to_vec(),
+            };
+            self.physical.put(&pe).await?;
         }
 
         Ok(true)
@@ -528,7 +566,11 @@ impl Core {
         }
 
         let config = self.seal_config().await?;
-        ShamirSecret::split(kek.as_slice(), config.secret_shares, config.secret_threshold)
+        ShamirSecret::split(
+            kek.as_slice(),
+            config.secret_shares,
+            config.secret_threshold,
+        )
     }
 
     async fn post_unseal(&self) -> Result<(), RvError> {
@@ -536,10 +578,15 @@ impl Core {
 
         // Perform initial setup
         self.mounts_router
-            .load_or_default(self.barrier.as_storage(), Some(&self.state.load().hmac_key), self.mount_entry_hmac_level)
+            .load_or_default(
+                self.barrier.as_storage(),
+                Some(&self.state.load().hmac_key),
+                self.mount_entry_hmac_level,
+            )
             .await?;
 
-        self.mounts_router.setup(self.self_ptr.upgrade().unwrap().clone())?;
+        self.mounts_router
+            .setup(self.self_ptr.upgrade().unwrap().clone())?;
 
         self.module_manager.init(self).await?;
 
@@ -581,10 +628,12 @@ impl Core {
                 Err(e) => err = Some(e),
             }
 
-            if err.is_none() {
-                if let Err(e) = self.handle_post_route_phase(&handlers, req, &mut resp).await {
-                    err = Some(e)
-                }
+            if err.is_none()
+                && let Err(e) = self
+                    .handle_post_route_phase(&handlers, req, &mut resp)
+                    .await
+            {
+                err = Some(e)
             }
         }
 
@@ -701,9 +750,13 @@ mod test {
         let _ = new_unseal_test_rusty_vault("test_core_init");
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_generate_unseal_keys_basic() {
-        let (_rvault, core, _) = new_unseal_test_rusty_vault("test_generate_unseal_keys_basic").await;
+        let (_rvault, core, _) =
+            new_unseal_test_rusty_vault("test_generate_unseal_keys_basic").await;
 
         // Test that generate_unseal_keys works when unsealed
         let result = core.generate_unseal_keys().await;
@@ -726,9 +779,13 @@ mod test {
         }
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_generate_unseal_keys_when_sealed() {
-        let (_rvault, core, _) = new_unseal_test_rusty_vault("test_generate_unseal_keys_when_sealed").await;
+        let (_rvault, core, _) =
+            new_unseal_test_rusty_vault("test_generate_unseal_keys_when_sealed").await;
 
         // Seal the vault
         let seal_result = core.seal().await;
@@ -739,9 +796,13 @@ mod test {
         assert!(result.is_err());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_generate_unseal_keys_multiple_calls() {
-        let (_rvault, core, _) = new_unseal_test_rusty_vault("test_generate_unseal_keys_multiple_calls").await;
+        let (_rvault, core, _) =
+            new_unseal_test_rusty_vault("test_generate_unseal_keys_multiple_calls").await;
 
         // Generate keys multiple times
         let keys1 = core.generate_unseal_keys().await.unwrap();
@@ -757,7 +818,10 @@ mod test {
         assert_ne!(keys2[0], keys3[0]);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_unseal_once_basic() {
         let (_rvault, core, _) = new_unseal_test_rusty_vault("test_unseal_once_basic").await;
 
@@ -791,9 +855,13 @@ mod test {
         assert_ne!(initial_keys[0], new_keys[0]);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_unseal_once_insufficient_keys() {
-        let (_rvault, core, _) = new_unseal_test_rusty_vault("test_unseal_once_insufficient_keys").await;
+        let (_rvault, core, _) =
+            new_unseal_test_rusty_vault("test_unseal_once_insufficient_keys").await;
 
         // Get initial keys
         let initial_keys = core.generate_unseal_keys().await.unwrap();
@@ -809,9 +877,13 @@ mod test {
         assert!(core.sealed());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_unseal_once_key_deprecation() {
-        let (_rvault, core, _) = new_unseal_test_rusty_vault("test_unseal_once_key_deprecation").await;
+        let (_rvault, core, _) =
+            new_unseal_test_rusty_vault("test_unseal_once_key_deprecation").await;
 
         // Get initial keys
         let initial_keys = core.generate_unseal_keys().await.unwrap();
@@ -870,9 +942,13 @@ mod test {
         assert_eq!(new_keys2.len(), seal_config.secret_shares as usize);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_unseal_once_when_already_unsealed() {
-        let (_rvault, core, _) = new_unseal_test_rusty_vault("test_unseal_once_when_already_unsealed").await;
+        let (_rvault, core, _) =
+            new_unseal_test_rusty_vault("test_unseal_once_when_already_unsealed").await;
 
         // Get keys for testing
         let keys = core.generate_unseal_keys().await.unwrap();
@@ -882,9 +958,13 @@ mod test {
         assert!(result.is_err());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_unseal_once_forward_secrecy() {
-        let (_rvault, core, _) = new_unseal_test_rusty_vault("test_unseal_once_forward_secrecy").await;
+        let (_rvault, core, _) =
+            new_unseal_test_rusty_vault("test_unseal_once_forward_secrecy").await;
 
         // Get initial keys
         let keys1 = core.generate_unseal_keys().await.unwrap();

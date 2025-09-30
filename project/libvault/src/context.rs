@@ -20,7 +20,11 @@ pub struct Context {
 
 impl Context {
     pub fn new() -> Self {
-        Self { data_map: DashMap::new(), data_map_mut: DashMap::new(), ..Default::default() }
+        Self {
+            data_map: DashMap::new(),
+            data_map_mut: DashMap::new(),
+            ..Default::default()
+        }
     }
 
     pub fn set_mut(&self, key: &str, data: Arc<RwLock<dyn Any + Send + Sync>>) {

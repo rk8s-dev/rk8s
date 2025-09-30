@@ -3,16 +3,20 @@ use std::{collections::HashMap, mem, sync::Arc, time::Duration};
 use better_default::Default;
 use derive_more::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
-    validation::{create_hmac, verify_cidr_role_secret_id_subset, SecretIdStorageEntry},
-    AppRoleBackend, AppRoleBackendInner, HMAC_INPUT_LEN_MAX, SECRET_ID_LOCAL_PREFIX, SECRET_ID_PREFIX,
+    AppRoleBackend, AppRoleBackendInner, HMAC_INPUT_LEN_MAX, SECRET_ID_LOCAL_PREFIX,
+    SECRET_ID_PREFIX,
+    validation::{SecretIdStorageEntry, create_hmac, verify_cidr_role_secret_id_subset},
 };
 use crate::{
     context::Context,
     errors::RvError,
-    logical::{field::FieldTrait, Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
+    logical::{
+        Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response,
+        field::FieldTrait,
+    },
     new_fields, new_fields_internal, new_path, new_path_internal,
     storage::StorageEntry,
     utils::{
@@ -20,7 +24,7 @@ use crate::{
         policy::sanitize_policies,
         serialize_duration,
         sock_addr::SockAddrMarshaler,
-        token_util::{token_fields, TokenParams},
+        token_util::{TokenParams, token_fields},
     },
 };
 
@@ -63,7 +67,11 @@ pub struct RoleEntry {
 
     // Deprecated: A constraint, if set, specifies the CIDR blocks from which logins should be
     // allowed, please use secret_id_bound_cidrs instead.
-    #[serde(rename = "bound_cidr_list_list", skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(
+        rename = "bound_cidr_list_list",
+        skip_serializing_if = "Vec::is_empty",
+        default
+    )]
     pub bound_cidr_list: Vec<String>,
 
     // A constraint, if set, specifies the CIDR blocks from which logins should be allowed
@@ -71,9 +79,15 @@ pub struct RoleEntry {
 
     // Duration (less than the backend mount's max TTL) after which a secret_id generated against
     // the role will expire
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub secret_id_ttl: Duration,
-    #[serde(serialize_with = "serialize_duration", deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     // Period, if set, indicates that the token generated using this role should never expire. The
     // token should be renewed within the duration specified by this value. The renewal duration
     // will be fixed if the value is not modified on the role. If the `Period` in the role is
@@ -100,7 +114,9 @@ impl RoleEntry {
             return Ok(());
         }
 
-        Err(RvError::ErrResponse("at least one constraint should be enabled on the role".to_string()))
+        Err(RvError::ErrResponse(
+            "at least one constraint should be enabled on the role".to_string(),
+        ))
     }
 }
 
@@ -919,7 +935,11 @@ or 'secret_id_ttl' option on the role, and/or the backend mount's maximum TTL va
 #[allow(clippy::assigning_clones)]
 #[maybe_async::maybe_async]
 impl AppRoleBackendInner {
-    pub async fn get_role_id(&self, req: &mut Request, role_id: &str) -> Result<Option<RoleIdEntry>, RvError> {
+    pub async fn get_role_id(
+        &self,
+        req: &mut Request,
+        role_id: &str,
+    ) -> Result<Option<RoleIdEntry>, RvError> {
         if role_id.is_empty() {
             return Err(RvError::ErrResponse("missing role_id".to_string()));
         }
@@ -930,7 +950,9 @@ impl AppRoleBackendInner {
         }
 
         let salt_id = salt.as_ref().unwrap().salt_id(role_id)?;
-        let storage_entry = req.storage_get(format!("role_id/{salt_id}").as_str()).await?;
+        let storage_entry = req
+            .storage_get(format!("role_id/{salt_id}").as_str())
+            .await?;
         if storage_entry.is_none() {
             return Ok(None);
         }
@@ -969,12 +991,17 @@ impl AppRoleBackendInner {
 
         let salt_id = salt.salt_id(role_id)?;
 
-        req.storage_delete(format!("role_id/{salt_id}").as_str()).await?;
+        req.storage_delete(format!("role_id/{salt_id}").as_str())
+            .await?;
 
         Ok(())
     }
 
-    pub async fn get_role(&self, req: &mut Request, name: &str) -> Result<Option<RoleEntry>, RvError> {
+    pub async fn get_role(
+        &self,
+        req: &mut Request,
+        name: &str,
+    ) -> Result<Option<RoleEntry>, RvError> {
         let key = format!("role/{}", name.to_lowercase());
         let storage_entry = req.storage_get(&key).await?;
         if storage_entry.is_none() {
@@ -994,13 +1021,18 @@ impl AppRoleBackendInner {
         }
 
         if !role_entry.bound_cidr_list_old.is_empty() {
-            role_entry.secret_id_bound_cidrs =
-                role_entry.bound_cidr_list_old.split(',').map(|s| s.to_string()).collect();
+            role_entry.secret_id_bound_cidrs = role_entry
+                .bound_cidr_list_old
+                .split(',')
+                .map(|s| s.to_string())
+                .collect();
             role_entry.bound_cidr_list_old.clear();
         }
 
         if !role_entry.bound_cidr_list.is_empty() {
-            role_entry.secret_id_bound_cidrs.clone_from(&role_entry.bound_cidr_list);
+            role_entry
+                .secret_id_bound_cidrs
+                .clone_from(&role_entry.bound_cidr_list);
             role_entry.bound_cidr_list.clear();
         }
 
@@ -1028,10 +1060,10 @@ impl AppRoleBackendInner {
 
         role_entry.validate_role_constraints()?;
 
-        if let Some(role_id_entry) = self.get_role_id(req, &role_entry.role_id).await? {
-            if role_id_entry.name.as_str() != name {
-                return Err(RvError::ErrResponse("role_id already in use".to_string()));
-            }
+        if let Some(role_id_entry) = self.get_role_id(req, &role_entry.role_id).await?
+            && role_id_entry.name.as_str() != name
+        {
+            return Err(RvError::ErrResponse("role_id already in use".to_string()));
         }
 
         let mut create_role_id = true;
@@ -1044,29 +1076,49 @@ impl AppRoleBackendInner {
             }
         }
 
-        let entry = StorageEntry::new(format!("role/{}", name.to_lowercase()).as_str(), role_entry)?;
+        let entry =
+            StorageEntry::new(format!("role/{}", name.to_lowercase()).as_str(), role_entry)?;
 
         req.storage_put(&entry).await?;
 
         if create_role_id {
-            return self.set_role_id(req, &role_entry.role_id, &RoleIdEntry { name: name.to_string() }).await;
+            return self
+                .set_role_id(
+                    req,
+                    &role_entry.role_id,
+                    &RoleIdEntry {
+                        name: name.to_string(),
+                    },
+                )
+                .await;
         }
 
         Ok(())
     }
 
-    pub async fn list_role(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn list_role(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let roles = req.storage_list("role/").await?;
         Ok(Some(Response::list_response(&roles)))
     }
 
-    pub async fn write_role(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn write_role(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let role_name_value = req.get_data("role_name")?;
-        let role_name = role_name_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let role_name = role_name_value
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
 
         if role_name.len() > HMAC_INPUT_LEN_MAX {
             return Err(RvError::ErrResponse(
-                format!("role_name is longer than maximum of {HMAC_INPUT_LEN_MAX} bytes").to_string(),
+                format!("role_name is longer than maximum of {HMAC_INPUT_LEN_MAX} bytes")
+                    .to_string(),
             ));
         }
 
@@ -1094,7 +1146,9 @@ impl AppRoleBackendInner {
         if old_token_policies != role_entry.token_policies {
             role_entry.policies = role_entry.token_policies.clone();
         } else if let Ok(policies_value) = req.get_data("policies") {
-            let policies = policies_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let policies = policies_value
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             role_entry.policies.clone_from(&policies);
             role_entry.token_policies = policies;
         }
@@ -1102,13 +1156,17 @@ impl AppRoleBackendInner {
         if old_token_period != role_entry.token_period {
             role_entry.period = role_entry.token_period;
         } else if let Ok(period_value) = req.get_data("period") {
-            let period = period_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let period = period_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             role_entry.period = period;
             role_entry.token_period = period;
         }
 
         if let Ok(local_secret_ids_value) = req.get_data("local_secret_ids") {
-            let local_secret_ids = local_secret_ids_value.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
+            let local_secret_ids = local_secret_ids_value
+                .as_bool()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             if local_secret_ids {
                 if !create {
                     return Err(RvError::ErrResponse(
@@ -1122,58 +1180,89 @@ impl AppRoleBackendInner {
         let previous_role_id = role_entry.role_id.clone();
 
         if let Ok(role_id_value) = req.get_data("role_id") {
-            role_entry.role_id = role_id_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?.to_string();
+            role_entry.role_id = role_id_value
+                .as_str()
+                .ok_or(RvError::ErrRequestFieldInvalid)?
+                .to_string();
         } else if create {
             role_entry.role_id = utils::generate_uuid();
         }
 
         if role_entry.role_id.is_empty() {
-            return Err(RvError::ErrResponse("invalid role_id supplied, or failed to generate a role_id".to_string()));
+            return Err(RvError::ErrResponse(
+                "invalid role_id supplied, or failed to generate a role_id".to_string(),
+            ));
         }
 
         if let Ok(bind_secret_id_value) = req.get_data("bind_secret_id") {
-            role_entry.bind_secret_id = bind_secret_id_value.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
+            role_entry.bind_secret_id = bind_secret_id_value
+                .as_bool()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         } else if create {
-            role_entry.bind_secret_id =
-                req.get_data_or_default("bind_secret_id")?.as_bool().ok_or(RvError::ErrRequestFieldInvalid)?;
+            role_entry.bind_secret_id = req
+                .get_data_or_default("bind_secret_id")?
+                .as_bool()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
-        if let Ok(bound_cidr_list_value) = req.get_data_or_next(&["secret_id_bound_cidrs", "bound_cidr_list"]) {
-            role_entry.secret_id_bound_cidrs =
-                bound_cidr_list_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+        if let Ok(bound_cidr_list_value) =
+            req.get_data_or_next(&["secret_id_bound_cidrs", "bound_cidr_list"])
+        {
+            role_entry.secret_id_bound_cidrs = bound_cidr_list_value
+                .as_comma_string_slice()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if !role_entry.secret_id_bound_cidrs.is_empty() {
-            let cidrs: Vec<&str> = role_entry.secret_id_bound_cidrs.iter().map(AsRef::as_ref).collect();
+            let cidrs: Vec<&str> = role_entry
+                .secret_id_bound_cidrs
+                .iter()
+                .map(AsRef::as_ref)
+                .collect();
             if !utils::cidr::validate_cidrs(&cidrs)? {
                 return Err(RvError::ErrResponse("invalid CIDR blocks".to_string()));
             }
         }
 
         if let Ok(secret_id_num_uses_value) = req.get_data("secret_id_num_uses") {
-            role_entry.secret_id_num_uses = secret_id_num_uses_value.as_int().ok_or(RvError::ErrRequestFieldInvalid)?;
+            role_entry.secret_id_num_uses = secret_id_num_uses_value
+                .as_int()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         } else if create {
-            role_entry.secret_id_num_uses =
-                req.get_data_or_default("secret_id_num_uses")?.as_int().ok_or(RvError::ErrRequestFieldInvalid)?;
+            role_entry.secret_id_num_uses = req
+                .get_data_or_default("secret_id_num_uses")?
+                .as_int()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         if role_entry.secret_id_num_uses < 0 {
-            return Err(RvError::ErrResponse("secret_id_num_uses cannot be negative".to_string()));
+            return Err(RvError::ErrResponse(
+                "secret_id_num_uses cannot be negative".to_string(),
+            ));
         }
 
         if let Ok(secret_id_ttl_value) = req.get_data("secret_id_ttl") {
-            role_entry.secret_id_ttl = secret_id_ttl_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            role_entry.secret_id_ttl = secret_id_ttl_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         } else if create {
-            role_entry.secret_id_ttl =
-                req.get_data_or_default("secret_id_ttl")?.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            role_entry.secret_id_ttl = req
+                .get_data_or_default("secret_id_ttl")?
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
-        self.set_role(req, &role_entry.name, &role_entry, &previous_role_id).await?;
+        self.set_role(req, &role_entry.name, &role_entry, &previous_role_id)
+            .await?;
 
         Ok(None)
     }
 
-    pub async fn read_role(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn read_role(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let role_name = req.get_data_as_str("role_name")?;
 
         let lock_entry = self.role_locks.get_lock(&role_name);
@@ -1224,7 +1313,14 @@ impl AppRoleBackendInner {
                 // Check again if the index is missing
                 if self.get_role_id(req, &entry.role_id).await?.is_none() {
                     // Create a new inde
-                    self.set_role_id(req, &entry.role_id, &RoleIdEntry { name: entry.name.clone() }).await?;
+                    self.set_role_id(
+                        req,
+                        &entry.role_id,
+                        &RoleIdEntry {
+                            name: entry.name.clone(),
+                        },
+                    )
+                    .await?;
                     resp.add_warning("Role identifier was missing an index back to role name");
                 }
             }
@@ -1235,7 +1331,11 @@ impl AppRoleBackendInner {
         Ok(None)
     }
 
-    pub async fn delete_role(&self, _backend: &dyn Backend, req: &mut Request) -> Result<Option<Response>, RvError> {
+    pub async fn delete_role(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
         let role_name = req.get_data_as_str("role_name")?;
 
         let lock_entry = self.role_locks.get_lock(&role_name);
@@ -1244,12 +1344,18 @@ impl AppRoleBackendInner {
         if let Some(entry) = self.get_role(req, &role_name).await? {
             let storage = req.storage.as_ref().unwrap();
 
-            self.flush_role_secrets(Arc::as_ref(storage), &entry.name, &entry.hmac_key, &entry.secret_id_prefix)
-                .await?;
+            self.flush_role_secrets(
+                Arc::as_ref(storage),
+                &entry.name,
+                &entry.hmac_key,
+                &entry.secret_id_prefix,
+            )
+            .await?;
 
             self.delete_role_id(req, &entry.role_id).await?;
 
-            req.storage_delete(format!("role/{}", role_name.to_lowercase()).as_str()).await?;
+            req.storage_delete(format!("role/{}", role_name.to_lowercase()).as_str())
+                .await?;
         }
 
         Ok(None)
@@ -1291,7 +1397,9 @@ impl AppRoleBackendInner {
         let role_name = req.get_data_as_str("role_name")?;
 
         let token_policies_value = req.get_data_or_next(&["token_policies", "policies"])?;
-        let mut token_policies = token_policies_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let mut token_policies = token_policies_value
+            .as_comma_string_slice()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
 
         let lock_entry = self.role_locks.get_lock(&role_name);
         let _locked = lock_entry.lock.write().await;
@@ -1337,7 +1445,11 @@ impl AppRoleBackendInner {
         self.read_role_field(req, "local_secret_ids").await
     }
 
-    pub async fn read_role_field(&self, req: &mut Request, field: &str) -> Result<Option<Response>, RvError> {
+    pub async fn read_role_field(
+        &self,
+        req: &mut Request,
+        field: &str,
+    ) -> Result<Option<Response>, RvError> {
         let role_name = req.get_data_as_str("role_name")?;
 
         let lock_entry = self.role_locks.get_lock(&role_name);
@@ -1416,13 +1528,19 @@ impl AppRoleBackendInner {
                     return Err(RvError::ErrResponse("unrecognized field".to_string()));
                 }
             };
-            Ok(Some(Response::data_response(Some(data.as_object().unwrap().clone()))))
+            Ok(Some(Response::data_response(Some(
+                data.as_object().unwrap().clone(),
+            ))))
         } else {
             Ok(None)
         }
     }
 
-    pub async fn update_role_field(&self, req: &mut Request, field: &str) -> Result<Option<Response>, RvError> {
+    pub async fn update_role_field(
+        &self,
+        req: &mut Request,
+        field: &str,
+    ) -> Result<Option<Response>, RvError> {
         let role_name = req.get_data_as_str("role_name")?;
 
         let field_value = match field {
@@ -1434,14 +1552,18 @@ impl AppRoleBackendInner {
 
         match field {
             "bound_cidr_list" | "secret_id_bound_cidrs" | "token_bound_cidrs" => {
-                cidr_list = field_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+                cidr_list = field_value
+                    .as_comma_string_slice()
+                    .ok_or(RvError::ErrRequestFieldInvalid)?;
                 if cidr_list.is_empty() {
                     return Err(RvError::ErrResponse(format!("missing {field}").to_string()));
                 }
 
                 let cidrs: Vec<&str> = cidr_list.iter().map(AsRef::as_ref).collect();
                 if !utils::cidr::validate_cidrs(&cidrs)? {
-                    return Err(RvError::ErrResponse("failed to validate CIDR blocks".to_string()));
+                    return Err(RvError::ErrResponse(
+                        "failed to validate CIDR blocks".to_string(),
+                    ));
                 }
             }
             _ => {}
@@ -1464,42 +1586,65 @@ impl AppRoleBackendInner {
                         .collect::<Result<Vec<SockAddrMarshaler>, _>>()?;
                 }
                 "bind_secret_id" => {
-                    role.bind_secret_id = field_value.as_bool().ok_or(RvError::ErrLogicalOperationUnsupported)?;
+                    role.bind_secret_id = field_value
+                        .as_bool()
+                        .ok_or(RvError::ErrLogicalOperationUnsupported)?;
                 }
                 "secret_id_num_uses" => {
-                    role.secret_id_num_uses = field_value.as_int().ok_or(RvError::ErrLogicalOperationUnsupported)?;
+                    role.secret_id_num_uses = field_value
+                        .as_int()
+                        .ok_or(RvError::ErrLogicalOperationUnsupported)?;
                     if role.secret_id_num_uses < 0 {
-                        return Err(RvError::ErrResponse("secret_id_num_uses cannot be negative".to_string()));
+                        return Err(RvError::ErrResponse(
+                            "secret_id_num_uses cannot be negative".to_string(),
+                        ));
                     }
                 }
                 "role_id" => {
                     previous_role_id.clone_from(&role.role_id);
-                    role.role_id = field_value.as_str().ok_or(RvError::ErrLogicalOperationUnsupported)?.to_string();
+                    role.role_id = field_value
+                        .as_str()
+                        .ok_or(RvError::ErrLogicalOperationUnsupported)?
+                        .to_string();
                     if role.role_id.as_str() == "" {
                         return Err(RvError::ErrResponse("missing role_id".to_string()));
                     }
                 }
                 "secret_id_ttl" => {
-                    role.secret_id_ttl = field_value.as_duration().ok_or(RvError::ErrLogicalOperationUnsupported)?;
+                    role.secret_id_ttl = field_value
+                        .as_duration()
+                        .ok_or(RvError::ErrLogicalOperationUnsupported)?;
                 }
                 "token_period" | "period" => {
-                    role.token_period = field_value.as_duration().ok_or(RvError::ErrLogicalOperationUnsupported)?;
+                    role.token_period = field_value
+                        .as_duration()
+                        .ok_or(RvError::ErrLogicalOperationUnsupported)?;
                     role.period = role.token_period;
                 }
                 "token_num_uses" => {
-                    role.token_num_uses = field_value.as_u64().ok_or(RvError::ErrLogicalOperationUnsupported)?;
+                    role.token_num_uses = field_value
+                        .as_u64()
+                        .ok_or(RvError::ErrLogicalOperationUnsupported)?;
                 }
                 "token_ttl" => {
-                    role.token_ttl = field_value.as_duration().ok_or(RvError::ErrLogicalOperationUnsupported)?;
-                    if role.token_max_ttl.as_secs() > 0 && role.token_ttl.as_secs() > role.token_max_ttl.as_secs() {
+                    role.token_ttl = field_value
+                        .as_duration()
+                        .ok_or(RvError::ErrLogicalOperationUnsupported)?;
+                    if role.token_max_ttl.as_secs() > 0
+                        && role.token_ttl.as_secs() > role.token_max_ttl.as_secs()
+                    {
                         return Err(RvError::ErrResponse(
                             "token_ttl should not be greater than token_max_ttl".to_string(),
                         ));
                     }
                 }
                 "token_max_ttl" => {
-                    role.token_max_ttl = field_value.as_duration().ok_or(RvError::ErrLogicalOperationUnsupported)?;
-                    if role.token_max_ttl.as_secs() > 0 && role.token_ttl.as_secs() > role.token_max_ttl.as_secs() {
+                    role.token_max_ttl = field_value
+                        .as_duration()
+                        .ok_or(RvError::ErrLogicalOperationUnsupported)?;
+                    if role.token_max_ttl.as_secs() > 0
+                        && role.token_ttl.as_secs() > role.token_max_ttl.as_secs()
+                    {
                         return Err(RvError::ErrResponse(
                             "token_max_ttl should not be greater than token_ttl".to_string(),
                         ));
@@ -1510,7 +1655,8 @@ impl AppRoleBackendInner {
                 }
             }
 
-            self.set_role(req, &role_name, &role, &previous_role_id).await?;
+            self.set_role(req, &role_name, &role, &previous_role_id)
+                .await?;
         } else {
             return Err(RvError::ErrLogicalPathUnsupported);
         }
@@ -1518,7 +1664,11 @@ impl AppRoleBackendInner {
         Ok(None)
     }
 
-    pub async fn delete_role_field(&self, req: &mut Request, field: &str) -> Result<Option<Response>, RvError> {
+    pub async fn delete_role_field(
+        &self,
+        req: &mut Request,
+        field: &str,
+    ) -> Result<Option<Response>, RvError> {
         let role_name = req.get_data_as_str("role_name")?;
 
         let lock_entry = self.role_locks.get_lock(&role_name);
@@ -1859,7 +2009,10 @@ impl AppRoleBackendInner {
 
             let mut list_items: Vec<String> = Vec::with_capacity(secret_id_hmacs.len());
             for secret_id_hmac in secret_id_hmacs.iter() {
-                let entry_index = format!("{}{}/{}", role.secret_id_prefix, role_name_hmac, secret_id_hmac);
+                let entry_index = format!(
+                    "{}{}/{}",
+                    role.secret_id_prefix, role_name_hmac, secret_id_hmac
+                );
 
                 // secret_id locks are not indexed by secret_id itself.
                 // This is because secret_id are not stored in plaintext
@@ -1872,18 +2025,22 @@ impl AppRoleBackendInner {
                 let storage_entry = req.storage_get(&entry_index).await?;
                 if storage_entry.is_none() {
                     return Err(RvError::ErrResponse(
-                        "storage entry for SecretID is present but no content found at the index".to_string(),
+                        "storage entry for SecretID is present but no content found at the index"
+                            .to_string(),
                     ));
                 }
                 let entry = storage_entry.unwrap();
-                let secret_id_entry: SecretIdStorageEntry = serde_json::from_slice(entry.value.as_slice())?;
+                let secret_id_entry: SecretIdStorageEntry =
+                    serde_json::from_slice(entry.value.as_slice())?;
                 list_items.push(secret_id_entry.secret_id_accessor);
             }
 
             return Ok(Some(Response::list_response(&list_items)));
         }
 
-        Err(RvError::ErrResponse(format!("role {role_name} does not exist")))
+        Err(RvError::ErrResponse(format!(
+            "role {role_name} does not exist"
+        )))
     }
 
     pub async fn update_role_secret_id_common(
@@ -1902,22 +2059,30 @@ impl AppRoleBackendInner {
 
         let role = self.get_role(req, &role_name).await?;
         if role.is_none() {
-            return Err(RvError::ErrResponse(format!("role {role_name} does not exist")));
+            return Err(RvError::ErrResponse(format!(
+                "role {role_name} does not exist"
+            )));
         }
 
         let role = role.unwrap();
 
         if !role.bind_secret_id {
-            return Err(RvError::ErrResponse("bind_secret_id is not set on the role".to_string()));
+            return Err(RvError::ErrResponse(
+                "bind_secret_id is not set on the role".to_string(),
+            ));
         }
 
         let cidr_list_value = req.get_data_or_default("cidr_list")?;
-        let cidr_list = cidr_list_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let cidr_list = cidr_list_value
+            .as_comma_string_slice()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
         // Validate the list of CIDR blocks
         if !cidr_list.is_empty() {
             let cidrs: Vec<&str> = cidr_list.iter().map(AsRef::as_ref).collect();
             if !utils::cidr::validate_cidrs(&cidrs)? {
-                return Err(RvError::ErrResponse("failed to validate CIDR blocks".to_string()));
+                return Err(RvError::ErrResponse(
+                    "failed to validate CIDR blocks".to_string(),
+                ));
             }
         }
 
@@ -1925,30 +2090,41 @@ impl AppRoleBackendInner {
         verify_cidr_role_secret_id_subset(&cidr_list, &role.secret_id_bound_cidrs)?;
 
         let token_bound_cidrs_value = req.get_data_or_default("token_bound_cidrs")?;
-        let token_bound_cidrs =
-            token_bound_cidrs_value.as_comma_string_slice().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let token_bound_cidrs = token_bound_cidrs_value
+            .as_comma_string_slice()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
         // Validate the list of CIDR blocks
         if !token_bound_cidrs.is_empty() {
             let cidrs: Vec<&str> = token_bound_cidrs.iter().map(AsRef::as_ref).collect();
             if !utils::cidr::validate_cidrs(&cidrs)? {
-                return Err(RvError::ErrResponse("failed to validate CIDR blocks".to_string()));
+                return Err(RvError::ErrResponse(
+                    "failed to validate CIDR blocks".to_string(),
+                ));
             }
         }
 
         // Ensure that the token CIDRs on the secret ID are a subset of that of role's
-        let role_token_bound_cidrs =
-            role.token_bound_cidrs.iter().map(|s| s.sock_addr.to_string()).collect::<Vec<String>>();
+        let role_token_bound_cidrs = role
+            .token_bound_cidrs
+            .iter()
+            .map(|s| s.sock_addr.to_string())
+            .collect::<Vec<String>>();
         verify_cidr_role_secret_id_subset(&token_bound_cidrs, &role_token_bound_cidrs)?;
 
         // Check whether or not specified num_uses is defined, otherwise fallback to role's secret_id_num_uses
         let num_uses: i64;
         if let Ok(num_uses_value) = req.get_data("num_uses") {
-            num_uses = num_uses_value.as_i64().ok_or(RvError::ErrRequestFieldInvalid)?;
+            num_uses = num_uses_value
+                .as_i64()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             if num_uses < 0 {
-                return Err(RvError::ErrResponse("num_uses cannot be negative".to_string()));
+                return Err(RvError::ErrResponse(
+                    "num_uses cannot be negative".to_string(),
+                ));
             }
             // If the specified num_uses is higher than the role's secret_id_num_uses, throw an error rather than implicitly overriding
-            if role.secret_id_num_uses > 0 && (num_uses == 0 || num_uses > role.secret_id_num_uses) {
+            if role.secret_id_num_uses > 0 && (num_uses == 0 || num_uses > role.secret_id_num_uses)
+            {
                 return Err(RvError::ErrResponse(
                     "num_uses cannot be higher than the role's secret_id_num_uses".to_string(),
                 ));
@@ -1960,11 +2136,16 @@ impl AppRoleBackendInner {
         // Check whether or not specified ttl is defined, otherwise fallback to role's secret_id_ttl
         let ttl: Duration;
         if let Ok(ttl_value) = req.get_data("ttl") {
-            ttl = ttl_value.as_duration().ok_or(RvError::ErrRequestFieldInvalid)?;
+            ttl = ttl_value
+                .as_duration()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
             if (ttl.as_secs() == 0 && role.secret_id_ttl.as_secs() > 0)
-                || (role.secret_id_ttl.as_secs() > 0 && ttl.as_secs() > role.secret_id_ttl.as_secs())
+                || (role.secret_id_ttl.as_secs() > 0
+                    && ttl.as_secs() > role.secret_id_ttl.as_secs())
             {
-                return Err(RvError::ErrResponse("ttl cannot be longer than the role's secret_id_ttl".to_string()));
+                return Err(RvError::ErrResponse(
+                    "ttl cannot be longer than the role's secret_id_ttl".to_string(),
+                ));
             }
         } else {
             ttl = role.secret_id_ttl;
@@ -1979,7 +2160,9 @@ impl AppRoleBackendInner {
         };
 
         if let Ok(metadata_value) = req.get_data("metadata") {
-            secret_id_storage.metadata = metadata_value.as_map().ok_or(RvError::ErrRequestFieldInvalid)?;
+            secret_id_storage.metadata = metadata_value
+                .as_map()
+                .ok_or(RvError::ErrRequestFieldInvalid)?;
         }
 
         let storage = Arc::as_ref(req.storage.as_ref().unwrap());
@@ -2000,7 +2183,9 @@ impl AppRoleBackendInner {
             "secret_id_num_uses": secret_id_storage.secret_id_num_uses,
         });
 
-        Ok(Some(Response::data_response(resp_data.as_object().cloned())))
+        Ok(Some(Response::data_response(
+            resp_data.as_object().cloned(),
+        )))
     }
 
     pub async fn write_role_secret_id(
@@ -2025,7 +2210,9 @@ impl AppRoleBackendInner {
 
         let role = self.get_role(req, &role_name).await?;
         if role.is_none() {
-            return Err(RvError::ErrResponse(format!("role {role_name} does not exist")));
+            return Err(RvError::ErrResponse(format!(
+                "role {role_name} does not exist"
+            )));
         }
 
         let role = role.unwrap();
@@ -2033,20 +2220,33 @@ impl AppRoleBackendInner {
         let role_name_hmac = create_hmac(&role.hmac_key, &role.name)?;
         let secret_id_hmac = create_hmac(&role.hmac_key, &secret_id)?;
 
-        let entry_index = format!("{}{}/{}", role.secret_id_prefix, role_name_hmac, secret_id_hmac);
+        let entry_index = format!(
+            "{}{}/{}",
+            role.secret_id_prefix, role_name_hmac, secret_id_hmac
+        );
 
         let lock_entry = self.secret_id_locks.get_lock(&secret_id_hmac);
         let _locked = lock_entry.lock.write().await;
 
         let storage = Arc::as_ref(req.storage.as_ref().unwrap());
 
-        if let Some(secret_id_entry) =
-            self.get_secret_id_storage_entry(storage, &role.secret_id_prefix, &role_name_hmac, &secret_id_hmac).await?
+        if let Some(secret_id_entry) = self
+            .get_secret_id_storage_entry(
+                storage,
+                &role.secret_id_prefix,
+                &role_name_hmac,
+                &secret_id_hmac,
+            )
+            .await?
         {
             // If a secret ID entry does not have a corresponding accessor
             // entry, revoke the secret ID immediately
             let accessor_entry = self
-                .get_secret_id_accessor_entry(storage, &secret_id_entry.secret_id_accessor, &role.secret_id_prefix)
+                .get_secret_id_accessor_entry(
+                    storage,
+                    &secret_id_entry.secret_id_accessor,
+                    &role.secret_id_prefix,
+                )
                 .await?;
             if accessor_entry.is_none() {
                 req.storage_delete(&entry_index).await?;
@@ -2054,7 +2254,9 @@ impl AppRoleBackendInner {
             }
 
             let data = serde_json::to_value(&secret_id_entry)?;
-            return Ok(Some(Response::data_response(Some(data.as_object().unwrap().clone()))));
+            return Ok(Some(Response::data_response(Some(
+                data.as_object().unwrap().clone(),
+            ))));
         }
 
         Ok(None)
@@ -2081,7 +2283,9 @@ impl AppRoleBackendInner {
 
         let role = self.get_role(req, &role_name).await?;
         if role.is_none() {
-            return Err(RvError::ErrResponse(format!("role {role_name} does not exist")));
+            return Err(RvError::ErrResponse(format!(
+                "role {role_name} does not exist"
+            )));
         }
 
         let role = role.unwrap();
@@ -2089,19 +2293,32 @@ impl AppRoleBackendInner {
         let role_name_hmac = create_hmac(&role.hmac_key, &role.name)?;
         let secret_id_hmac = create_hmac(&role.hmac_key, &secret_id)?;
 
-        let entry_index = format!("{}{}/{}", role.secret_id_prefix, role_name_hmac, secret_id_hmac);
+        let entry_index = format!(
+            "{}{}/{}",
+            role.secret_id_prefix, role_name_hmac, secret_id_hmac
+        );
 
         let lock_entry = self.secret_id_locks.get_lock(&secret_id_hmac);
         let _locked = lock_entry.lock.write().await;
 
         let storage = Arc::as_ref(req.storage.as_ref().unwrap());
 
-        if let Some(secret_id_entry) =
-            self.get_secret_id_storage_entry(storage, &role.secret_id_prefix, &role_name_hmac, &secret_id_hmac).await?
+        if let Some(secret_id_entry) = self
+            .get_secret_id_storage_entry(
+                storage,
+                &role.secret_id_prefix,
+                &role_name_hmac,
+                &secret_id_hmac,
+            )
+            .await?
         {
             // Delete the accessor of the secret_id first
-            self.delete_secret_id_accessor_entry(storage, &secret_id_entry.secret_id_accessor, &role.secret_id_prefix)
-                .await?;
+            self.delete_secret_id_accessor_entry(
+                storage,
+                &secret_id_entry.secret_id_accessor,
+                &role.secret_id_prefix,
+            )
+            .await?;
 
             // Delete the storage entry that corresponds to the secret_id
             storage.delete(&entry_index).await?;
@@ -2123,19 +2340,24 @@ impl AppRoleBackendInner {
 
         let role = self.get_role(req, &role_name).await?;
         if role.is_none() {
-            return Err(RvError::ErrResponse(format!("role {role_name} does not exist")));
+            return Err(RvError::ErrResponse(format!(
+                "role {role_name} does not exist"
+            )));
         }
 
         let role = role.unwrap();
 
         let storage = Arc::as_ref(req.storage.as_ref().unwrap());
 
-        if let Some(accessor_entry) =
-            self.get_secret_id_accessor_entry(storage, &secret_id_accessor, &role.secret_id_prefix).await?
+        if let Some(accessor_entry) = self
+            .get_secret_id_accessor_entry(storage, &secret_id_accessor, &role.secret_id_prefix)
+            .await?
         {
             let role_name_hmac = create_hmac(&role.hmac_key, &role.name)?;
 
-            let lock_entry = self.secret_id_locks.get_lock(&accessor_entry.secret_id_hmac);
+            let lock_entry = self
+                .secret_id_locks
+                .get_lock(&accessor_entry.secret_id_hmac);
             let _locked = lock_entry.lock.read().await;
 
             if let Some(secret_id_entry) = self
@@ -2148,12 +2370,16 @@ impl AppRoleBackendInner {
                 .await?
             {
                 let data = serde_json::to_value(secret_id_entry)?;
-                return Ok(Some(Response::data_response(Some(data.as_object().unwrap().clone()))));
+                return Ok(Some(Response::data_response(Some(
+                    data.as_object().unwrap().clone(),
+                ))));
             }
         } else {
             return Err(RvError::ErrResponseStatus(
                 404,
-                format!("failed to find accessor entry for secret_id_accessor: {secret_id_accessor}"),
+                format!(
+                    "failed to find accessor entry for secret_id_accessor: {secret_id_accessor}"
+                ),
             ));
         }
 
@@ -2165,7 +2391,8 @@ impl AppRoleBackendInner {
         backend: &dyn Backend,
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
-        self.delete_role_secret_id_accessor_destory(backend, req).await
+        self.delete_role_secret_id_accessor_destory(backend, req)
+            .await
     }
 
     pub async fn delete_role_secret_id_accessor_destory(
@@ -2185,19 +2412,24 @@ impl AppRoleBackendInner {
 
         let role = self.get_role(req, &role_name).await?;
         if role.is_none() {
-            return Err(RvError::ErrResponse(format!("role {role_name} does not exist")));
+            return Err(RvError::ErrResponse(format!(
+                "role {role_name} does not exist"
+            )));
         }
 
         let role = role.unwrap();
 
         let storage = Arc::as_ref(req.storage.as_ref().unwrap());
 
-        if let Some(accessor_entry) =
-            self.get_secret_id_accessor_entry(storage, &secret_id_accessor, &role.secret_id_prefix).await?
+        if let Some(accessor_entry) = self
+            .get_secret_id_accessor_entry(storage, &secret_id_accessor, &role.secret_id_prefix)
+            .await?
         {
             let role_name_hmac = create_hmac(&role.hmac_key, &role.name)?;
 
-            let lock_entry = self.secret_id_locks.get_lock(&accessor_entry.secret_id_hmac);
+            let lock_entry = self
+                .secret_id_locks
+                .get_lock(&accessor_entry.secret_id_hmac);
             let _locked = lock_entry.lock.write().await;
 
             // Verify we have a valid secret_id storage entry
@@ -2217,18 +2449,28 @@ impl AppRoleBackendInner {
                 ));
             }
 
-            let entry_index = format!("{}{}/{}", role.secret_id_prefix, role_name_hmac, &accessor_entry.secret_id_hmac);
+            let entry_index = format!(
+                "{}{}/{}",
+                role.secret_id_prefix, role_name_hmac, &accessor_entry.secret_id_hmac
+            );
 
             let storage = Arc::as_ref(req.storage.as_ref().unwrap());
 
             // Delete the accessor of the secret_id first
-            self.delete_secret_id_accessor_entry(storage, &secret_id_accessor, &role.secret_id_prefix).await?;
+            self.delete_secret_id_accessor_entry(
+                storage,
+                &secret_id_accessor,
+                &role.secret_id_prefix,
+            )
+            .await?;
 
             storage.delete(&entry_index).await?;
         } else {
             return Err(RvError::ErrResponseStatus(
                 404,
-                format!("failed to find accessor entry for secret_id_accessor: {secret_id_accessor}"),
+                format!(
+                    "failed to find accessor entry for secret_id_accessor: {secret_id_accessor}"
+                ),
             ));
         }
 
@@ -2240,7 +2482,8 @@ impl AppRoleBackendInner {
         _backend: &dyn Backend,
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
-        self.update_role_secret_id_common(req, req.get_data("secret_id")?.as_str().unwrap_or("")).await
+        self.update_role_secret_id_common(req, req.get_data("secret_id")?.as_str().unwrap_or(""))
+            .await
     }
 }
 
@@ -2248,12 +2491,12 @@ impl AppRoleBackendInner {
 mod test {
     use std::{default::Default, sync::Arc};
 
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::{
         super::{
-            test::{generate_secret_id, test_delete_role, test_login, test_write_role},
             AppRoleModule, SECRET_ID_PREFIX,
+            test::{generate_secret_id, test_delete_role, test_login, test_write_role},
         },
         *,
     };
@@ -2262,14 +2505,18 @@ mod test {
         modules::auth::expiration::MAX_LEASE_DURATION_SECS,
         storage::Storage,
         test_utils::{
-            new_unseal_test_rusty_vault, test_delete_api, test_list_api, test_mount_auth_api, test_read_api,
-            test_write_api,
+            new_unseal_test_rusty_vault, test_delete_api, test_list_api, test_mount_auth_api,
+            test_read_api, test_write_api,
         },
     };
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_read_local_secret_ids() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_read_local_secret_ids").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_read_local_secret_ids").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -2283,18 +2530,38 @@ mod test {
         .unwrap()
         .clone();
 
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole", true, Some(data.clone())).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole",
+            true,
+            Some(data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Get the role field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/testrole/local-secret-ids", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole/local-secret-ids",
+            true,
+        )
+        .await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["local_secret_ids"].as_bool().unwrap(), data["local_secret_ids"].as_bool().unwrap());
+        assert_eq!(
+            resp_data["local_secret_ids"].as_bool().unwrap(),
+            data["local_secret_ids"].as_bool().unwrap()
+        );
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_local_non_secret_ids() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_local_non_secret_ids").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_local_non_secret_ids").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -2307,7 +2574,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole1", true, data).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1",
+            true,
+            data,
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Create another role without setting local_secret_ids
@@ -2317,43 +2591,83 @@ mod test {
         })
         .as_object()
         .cloned();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole2", true, data).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole2",
+            true,
+            data,
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Create secret IDs on testrole1
         let len = 10;
         for _i in 0..len {
-            let ret = test_write_api(&core, &root_token, "auth/approle/role/testrole1/secret-id", true, None).await;
+            let ret = test_write_api(
+                &core,
+                &root_token,
+                "auth/approle/role/testrole1/secret-id",
+                true,
+                None,
+            )
+            .await;
             assert!(ret.is_ok());
         }
 
         // Check the number of secret IDs generated
-        let resp = test_list_api(&core, &root_token, "auth/approle/role/testrole1/secret-id", true).await;
+        let resp = test_list_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1/secret-id",
+            true,
+        )
+        .await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert!(resp_data["keys"].is_array());
         assert_eq!(resp_data["keys"].as_array().unwrap().len(), len);
 
         // Create secret IDs on testrole2
         for _i in 0..len {
-            let ret = test_write_api(&core, &root_token, "auth/approle/role/testrole2/secret-id", true, None).await;
+            let ret = test_write_api(
+                &core,
+                &root_token,
+                "auth/approle/role/testrole2/secret-id",
+                true,
+                None,
+            )
+            .await;
             assert!(ret.is_ok());
         }
 
         // Check the number of secret IDs generated
-        let resp = test_list_api(&core, &root_token, "auth/approle/role/testrole2/secret-id", true).await;
+        let resp = test_list_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole2/secret-id",
+            true,
+        )
+        .await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert!(resp_data["keys"].is_array());
         assert_eq!(resp_data["keys"].as_array().unwrap().len(), len);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_upgrade_secret_id_prefix() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_upgrade_secret_id_prefix").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_upgrade_secret_id_prefix").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
 
-        let approle_module = core.module_manager.get_module::<AppRoleModule>("approle").unwrap();
+        let approle_module = core
+            .module_manager
+            .get_module::<AppRoleModule>("approle")
+            .unwrap();
 
         let mut req = Request::new("/auth/approle/testrole");
         req.operation = Operation::Write;
@@ -2366,7 +2680,9 @@ mod test {
             bound_cidr_list_old: "127.0.0.1/18,192.178.1.2/24".to_string(),
             ..Default::default()
         };
-        let resp = approle_module.set_role(&mut req, "testrole", &role_entry, "").await;
+        let resp = approle_module
+            .set_role(&mut req, "testrole", &role_entry, "")
+            .await;
         assert!(resp.is_ok());
 
         // Reading the role entry should upgrade it to contain secret_id_prefix
@@ -2389,7 +2705,10 @@ mod test {
         assert!(!resp_data["local_secret_ids"].as_bool().unwrap());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_local_secret_id_immutablility() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_local_secret_id_immutablility").await;
@@ -2406,16 +2725,34 @@ mod test {
         })
         .as_object()
         .cloned();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole", true, data.clone()).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole",
+            true,
+            data.clone(),
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Attempt to modify local_secret_ids should fail
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/testrole", false, data.clone()).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole",
+            false,
+            data.clone(),
+        )
+        .await;
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_upgrade_bound_cidr_list() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_upgrade_bound_cidr_list").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_upgrade_bound_cidr_list").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -2429,18 +2766,38 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole", true, Some(data.clone())).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole",
+            true,
+            Some(data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Read the role and check that the bound_cidr_list is set properly
         let resp = test_read_api(&core, &root_token, "auth/approle/role/testrole", true).await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        let expected: Vec<Value> =
-            data["bound_cidr_list"].as_comma_string_slice().unwrap().iter().map(|s| Value::String(s.clone())).collect();
-        assert_eq!(resp_data["secret_id_bound_cidrs"].as_array().unwrap().clone(), expected);
+        let expected: Vec<Value> = data["bound_cidr_list"]
+            .as_comma_string_slice()
+            .unwrap()
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        assert_eq!(
+            resp_data["secret_id_bound_cidrs"]
+                .as_array()
+                .unwrap()
+                .clone(),
+            expected
+        );
 
-        let approle_module = core.module_manager.get_module::<AppRoleModule>("approle").unwrap();
+        let approle_module = core
+            .module_manager
+            .get_module::<AppRoleModule>("approle")
+            .unwrap();
 
         let mut req = Request::new("/auth/approle/testrole");
         req.operation = Operation::Write;
@@ -2455,9 +2812,15 @@ mod test {
             secret_id_prefix: SECRET_ID_PREFIX.to_string(),
             ..Default::default()
         };
-        let resp = approle_module.set_role(&mut req, "testrole", &role_entry, "").await;
+        let resp = approle_module
+            .set_role(&mut req, "testrole", &role_entry, "")
+            .await;
         assert!(resp.is_ok());
-        let expected: Vec<String> = role_entry.bound_cidr_list_old.split(',').map(|s| s.to_string()).collect();
+        let expected: Vec<String> = role_entry
+            .bound_cidr_list_old
+            .split(',')
+            .map(|s| s.to_string())
+            .collect();
 
         // Read the role. The upgrade code should have migrated the old type to the new type
         let resp = approle_module.get_role(&mut req, "testrole").await;
@@ -2473,21 +2836,35 @@ mod test {
         })
         .as_object()
         .cloned();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole/secret-id", true, data).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole/secret-id",
+            true,
+            data,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let secret_id = resp_data["secret_id"].as_str().unwrap();
         assert_ne!(secret_id, "");
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_name_lower_casing() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_name_lower_casing").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_name_lower_casing").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
 
-        let approle_module = core.module_manager.get_module::<AppRoleModule>("approle").unwrap();
+        let approle_module = core
+            .module_manager
+            .get_module::<AppRoleModule>("approle")
+            .unwrap();
 
         let mut req = Request::new("/auth/approle/testrole");
         req.operation = Operation::Write;
@@ -2502,7 +2879,9 @@ mod test {
             secret_id_prefix: SECRET_ID_PREFIX.to_string(),
             ..Default::default()
         };
-        let resp = approle_module.set_role(&mut req, "testRoleName", &role_entry, "").await;
+        let resp = approle_module
+            .set_role(&mut req, "testRoleName", &role_entry, "")
+            .await;
         assert!(resp.is_ok());
 
         req.operation = Operation::Write;
@@ -2512,7 +2891,9 @@ mod test {
         req.storage = core.get_system_view().map(|arc| arc as Arc<dyn Storage>);
 
         let mock_backend = approle_module.new_backend();
-        let resp = approle_module.write_role_secret_id(&mock_backend, &mut req).await;
+        let resp = approle_module
+            .write_role_secret_id(&mock_backend, &mut req)
+            .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let secret_id = resp_data["secret_id"].as_str().unwrap();
@@ -2539,7 +2920,9 @@ mod test {
         req.body = None;
         let _resp = core.handle_request(&mut req).await;
         req.storage = core.get_system_view().map(|arc| arc as Arc<dyn Storage>);
-        let resp = approle_module.write_role_secret_id(&mock_backend, &mut req).await;
+        let resp = approle_module
+            .write_role_secret_id(&mock_backend, &mut req)
+            .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let secret_id = resp_data["secret_id"].as_str().unwrap();
@@ -2576,16 +2959,36 @@ mod test {
         })
         .as_object()
         .cloned();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testRoleName", true, data).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testRoleName",
+            true,
+            data,
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Create secret id with lower cased role name
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrolename/secret-id", true, None).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrolename/secret-id",
+            true,
+            None,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let secret_id = resp_data["secret_id"].as_str().unwrap();
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/testrolename/role-id", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrolename/role-id",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let role_id = resp_data["role_id"].as_str().unwrap();
@@ -2599,26 +3002,45 @@ mod test {
         })
         .as_object()
         .cloned();
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrolename/secret-id/lookup", true, data).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrolename/secret-id/lookup",
+            true,
+            data,
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Listing of secret IDs should work in case-insensitive manner
-        let resp = test_list_api(&core, &root_token, "auth/approle/role/testrolename/secret-id", true).await;
+        let resp = test_list_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrolename/secret-id",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let keys = resp_data["keys"].as_array().unwrap();
         assert_eq!(keys.len(), 1);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_read_set_index() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_read_set_index").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_read_set_index").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
 
-        let approle_module = core.module_manager.get_module::<AppRoleModule>("approle").unwrap();
+        let approle_module = core
+            .module_manager
+            .get_module::<AppRoleModule>("approle")
+            .unwrap();
         let mock_backend = approle_module.new_backend();
 
         // Create a role
@@ -2632,7 +3054,9 @@ mod test {
             secret_id_prefix: SECRET_ID_PREFIX.to_string(),
             ..Default::default()
         };
-        let resp = approle_module.set_role(&mut req, "testrole", &role_entry, "").await;
+        let resp = approle_module
+            .set_role(&mut req, "testrole", &role_entry, "")
+            .await;
         assert!(resp.is_ok());
 
         // Get the role ID
@@ -2641,7 +3065,9 @@ mod test {
         req.client_token = root_token.to_string();
         let _resp = core.handle_request(&mut req).await;
         req.storage = core.get_system_view().map(|arc| arc as Arc<dyn Storage>);
-        let resp = approle_module.read_role_role_id(&mock_backend, &mut req).await;
+        let resp = approle_module
+            .read_role_role_id(&mock_backend, &mut req)
+            .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let role_id = resp_data["role_id"].as_str().unwrap();
@@ -2664,7 +3090,10 @@ mod test {
         let resp = approle_module.read_role(&mock_backend, &mut req).await;
         assert!(resp.is_ok());
         let resp = resp.unwrap().unwrap();
-        assert!(resp.warnings.contains(&"Role identifier was missing an index back to role name".to_string()));
+        assert!(
+            resp.warnings
+                .contains(&"Role identifier was missing an index back to role name".to_string())
+        );
 
         // Check if the index has been successfully created
         req.storage = core.get_system_view().map(|arc| arc as Arc<dyn Storage>);
@@ -2681,15 +3110,20 @@ mod test {
         })
         .as_object()
         .cloned();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole", true, data).await;
+        let resp =
+            test_write_api(&core, &root_token, "auth/approle/role/testrole", true, data).await;
         assert!(resp.is_ok());
         let resp = test_read_api(&core, &root_token, "auth/approle/role/testrole", true).await;
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_cidr_subset() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_cidr_subset").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_cidr_subset").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -2702,8 +3136,14 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrole1", true, Some(role_data.clone())).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1",
+            true,
+            Some(role_data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/testrole", true).await;
@@ -2725,17 +3165,34 @@ mod test {
         .await;
         assert!(resp.is_err());
 
-        role_data["bound_cidr_list"] = Value::from("192.168.27.29/16,172.245.30.40/24,10.20.30.40/30");
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole1", true, Some(role_data)).await;
+        role_data["bound_cidr_list"] =
+            Value::from("192.168.27.29/16,172.245.30.40/24,10.20.30.40/30");
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1",
+            true,
+            Some(role_data),
+        )
+        .await;
         assert!(resp.is_ok());
 
         secret_data["cidr_list"] = Value::from("192.168.27.29/20,172.245.30.40/25,10.20.30.40/32");
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrole1/secret-id", true, Some(secret_data)).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1/secret-id",
+            true,
+            Some(secret_data),
+        )
+        .await;
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_token_bound_cidr_subset_32_mask() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_token_bound_cidr_subset_32_mask").await;
@@ -2750,7 +3207,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole1", true, role_data).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1",
+            true,
+            role_data,
+        )
+        .await;
         assert!(resp.is_ok());
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/testrole", true).await;
@@ -2773,14 +3237,24 @@ mod test {
         assert!(resp.is_ok());
 
         secret_data["token_bound_cidrs"] = Value::from("127.0.0.1/24");
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrole1/secret-id", false, Some(secret_data)).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1/secret-id",
+            false,
+            Some(secret_data),
+        )
+        .await;
         assert!(resp.is_err());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_constraints() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_constraints").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_constraints").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -2793,43 +3267,88 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrole1", true, Some(role_data.clone())).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1",
+            true,
+            Some(role_data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Set bound_cidr_list alone by explicitly disabling bind_secret_id
         role_data.insert("bind_secret_id".to_string(), Value::from(false));
         role_data.insert("token_bound_cidrs".to_string(), Value::from("0.0.0.0/0"));
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrole1", true, Some(role_data.clone())).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1",
+            true,
+            Some(role_data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
 
         // Remove both constraints
         role_data["bind_secret_id"] = Value::from(false);
         role_data["token_bound_cidrs"] = Value::from("");
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrole1", false, Some(role_data.clone())).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1",
+            false,
+            Some(role_data.clone()),
+        )
+        .await;
         assert!(resp.is_err());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_update_role_id() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_update_role_id").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_update_role_id").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
 
-        test_write_role(&core, &root_token, "approle", "testrole1", "role-id-123", "a,b", true).await;
+        test_write_role(
+            &core,
+            &root_token,
+            "approle",
+            "testrole1",
+            "role-id-123",
+            "a,b",
+            true,
+        )
+        .await;
 
         let role_id_data = json!({
             "role_id": "customroleid",
         })
         .as_object()
         .cloned();
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole1/role-id", true, role_id_data).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1/role-id",
+            true,
+            role_id_data,
+        )
+        .await;
         assert!(resp.is_ok());
 
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/testrole1/secret-id", true, None).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1/secret-id",
+            true,
+            None,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let secret_id = resp_data["secret_id"].as_str().unwrap();
@@ -2841,22 +3360,71 @@ mod test {
         let _ = test_login(&core, "approle", "customroleid", secret_id, true).await;
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_id_uniqueness() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_id_uniqueness").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_id_uniqueness").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
 
-        test_write_role(&core, &root_token, "approle", "testrole1", "role-id-123", "a,b", true).await;
+        test_write_role(
+            &core,
+            &root_token,
+            "approle",
+            "testrole1",
+            "role-id-123",
+            "a,b",
+            true,
+        )
+        .await;
 
-        test_write_role(&core, &root_token, "approle", "testrole2", "role-id-123", "a,b", false).await;
+        test_write_role(
+            &core,
+            &root_token,
+            "approle",
+            "testrole2",
+            "role-id-123",
+            "a,b",
+            false,
+        )
+        .await;
 
-        test_write_role(&core, &root_token, "approle", "testrole2", "role-id-456", "a,b", true).await;
+        test_write_role(
+            &core,
+            &root_token,
+            "approle",
+            "testrole2",
+            "role-id-456",
+            "a,b",
+            true,
+        )
+        .await;
 
-        test_write_role(&core, &root_token, "approle", "testrole2", "role-id-123", "a,b", false).await;
+        test_write_role(
+            &core,
+            &root_token,
+            "approle",
+            "testrole2",
+            "role-id-123",
+            "a,b",
+            false,
+        )
+        .await;
 
-        test_write_role(&core, &root_token, "approle", "testrole1", "role-id-456", "a,b", false).await;
+        test_write_role(
+            &core,
+            &root_token,
+            "approle",
+            "testrole1",
+            "role-id-456",
+            "a,b",
+            false,
+        )
+        .await;
 
         let mut role_id_data = json!({
             "role_id": "role-id-456",
@@ -2886,21 +3454,35 @@ mod test {
         assert!(resp.is_err());
 
         role_id_data["role_id"] = Value::from("role-id-2000");
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrole2/role-id", true, Some(role_id_data.clone()))
-                .await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole2/role-id",
+            true,
+            Some(role_id_data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
 
         role_id_data["role_id"] = Value::from("role-id-1000");
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/testrole1/role-id", true, Some(role_id_data.clone()))
-                .await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/testrole1/role-id",
+            true,
+            Some(role_id_data.clone()),
+        )
+        .await;
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_delete_secret_id() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_delete_secret_id").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_delete_secret_id").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -2911,17 +3493,32 @@ mod test {
         let _ = generate_secret_id(&core, &root_token, "approle", "role1").await;
         let _ = generate_secret_id(&core, &root_token, "approle", "role1").await;
 
-        let resp = test_list_api(&core, &root_token, "auth/approle/role/role1/secret-id", true).await;
+        let resp = test_list_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let keys = resp_data["keys"].as_array().unwrap();
         assert_eq!(keys.len(), 3);
 
         test_delete_role(&core, &root_token, "approle", "role1").await;
-        let _ = test_list_api(&core, &root_token, "auth/approle/role/role1/secret-id", false).await;
+        let _ = test_list_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id",
+            false,
+        )
+        .await;
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_lookup_and_destroy_role_secret_id() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_lookup_and_destroy_role_secret_id").await;
@@ -2956,15 +3553,25 @@ mod test {
             secret_id_data.clone(),
         )
         .await;
-        let resp =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/secret-id/lookup", true, secret_id_data).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id/lookup",
+            true,
+            secret_id_data,
+        )
+        .await;
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_lookup_and_destroy_role_secret_id_accessor() {
         let (_rvault, core, root_token) =
-            new_unseal_test_rusty_vault("test_approle_lookup_and_destroy_role_secret_id_accessor").await;
+            new_unseal_test_rusty_vault("test_approle_lookup_and_destroy_role_secret_id_accessor")
+                .await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -2973,7 +3580,13 @@ mod test {
 
         let _ = generate_secret_id(&core, &root_token, "approle", "role1").await;
 
-        let resp = test_list_api(&core, &root_token, "auth/approle/role/role1/secret-id", true).await;
+        let resp = test_list_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let keys = resp_data["keys"].as_array().unwrap();
@@ -3003,12 +3616,20 @@ mod test {
             hmac_data.clone(),
         )
         .await;
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/secret-id-accessor/lookup", false, hmac_data)
-                .await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-accessor/lookup",
+            false,
+            hmac_data,
+        )
+        .await;
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_lookup_role_secret_id_accessor() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_lookup_role_secret_id_accessor").await;
@@ -3023,15 +3644,24 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _resp =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/secret-id-accessor/lookup", false, hmac_data)
-                .await;
+        let _resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-accessor/lookup",
+            false,
+            hmac_data,
+        )
+        .await;
         // TODO: resp should ok
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_list_role_secret_id() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_list_role_secret_id").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_list_role_secret_id").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -3045,16 +3675,26 @@ mod test {
         let _ = generate_secret_id(&core, &root_token, "approle", "role1").await;
         let _ = generate_secret_id(&core, &root_token, "approle", "role1").await;
 
-        let resp = test_list_api(&core, &root_token, "auth/approle/role/role1/secret-id/", true).await;
+        let resp = test_list_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id/",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let keys = resp_data["keys"].as_array().unwrap();
         assert_eq!(keys.len(), 5);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_list_role() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_list_role").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_list_role").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -3075,7 +3715,10 @@ mod test {
         assert_eq!(expect.as_array().unwrap().clone(), keys);
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_secret_id_without_fields() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_without_fields").await;
@@ -3093,9 +3736,23 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, Some(role_data.clone())).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            Some(role_data.clone()),
+        )
+        .await;
 
-        let resp = test_write_api(&core, &root_token, "auth/approle/role/role1/secret-id", true, None).await;
+        let resp = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id",
+            true,
+            None,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let secret_id = resp_data["secret_id"].as_str().unwrap();
@@ -3103,7 +3760,10 @@ mod test {
         let secret_id_num_uses = resp_data["secret_id_num_uses"].as_int().unwrap();
         assert_ne!(secret_id, "");
         assert_eq!(secret_id_ttl, role_data["secret_id_ttl"].as_int().unwrap());
-        assert_eq!(secret_id_num_uses, role_data["secret_id_num_uses"].as_int().unwrap());
+        assert_eq!(
+            secret_id_num_uses,
+            role_data["secret_id_num_uses"].as_int().unwrap()
+        );
 
         let secret_id_data = json!({
             "secret_id": "abcd123",
@@ -3126,10 +3786,16 @@ mod test {
         let secret_id_num_uses = resp_data["secret_id_num_uses"].as_int().unwrap();
         assert_eq!(secret_id, secret_id_data["secret_id"].as_str().unwrap());
         assert_eq!(secret_id_ttl, role_data["secret_id_ttl"].as_int().unwrap());
-        assert_eq!(secret_id_num_uses, role_data["secret_id_num_uses"].as_int().unwrap());
+        assert_eq!(
+            secret_id_num_uses,
+            role_data["secret_id_num_uses"].as_int().unwrap()
+        );
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_secret_id_with_valid_fields() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_with_valid_fields").await;
@@ -3146,7 +3812,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, role_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            role_data,
+        )
+        .await;
 
         let cases = vec![
             json!({"name": "finite num_uses and ttl", "payload": {"secret_id": "finite", "ttl": 5, "num_uses": 5}}),
@@ -3172,7 +3845,10 @@ mod test {
             let secret_id_num_uses = resp_data["secret_id_num_uses"].as_int().unwrap();
             assert_ne!(secret_id, "");
             assert_eq!(secret_id_ttl, secret_id_data["ttl"].as_int().unwrap());
-            assert_eq!(secret_id_num_uses, secret_id_data["num_uses"].as_int().unwrap());
+            assert_eq!(
+                secret_id_num_uses,
+                secret_id_data["num_uses"].as_int().unwrap()
+            );
 
             let resp = test_write_api(
                 &core,
@@ -3189,11 +3865,17 @@ mod test {
             let secret_id_num_uses = resp_data["secret_id_num_uses"].as_int().unwrap();
             assert_eq!(secret_id, secret_id_data["secret_id"].as_str().unwrap());
             assert_eq!(secret_id_ttl, secret_id_data["ttl"].as_int().unwrap());
-            assert_eq!(secret_id_num_uses, secret_id_data["num_uses"].as_int().unwrap());
+            assert_eq!(
+                secret_id_num_uses,
+                secret_id_data["num_uses"].as_int().unwrap()
+            );
         }
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_secret_id_with_invalid_fields() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_with_invalid_fields").await;
@@ -3307,9 +3989,13 @@ mod test {
         }
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_crud() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_crud").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_crud").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -3325,7 +4011,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, req_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            req_data,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -3361,7 +4054,14 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, Some(req_data.clone())).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -3399,16 +4099,31 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/role-id", true, Some(req_data.clone())).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/role-id",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/role-id", true).await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["role_id"].as_str().unwrap(), req_data["role_id"].as_str().unwrap());
+        assert_eq!(
+            resp_data["role_id"].as_str().unwrap(),
+            req_data["role_id"].as_str().unwrap()
+        );
 
         // RUD for bind_secret_id field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/bind-secret-id", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/bind-secret-id",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
 
         let req_data = json!({
@@ -3417,24 +4132,52 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/bind-secret-id", true, Some(req_data.clone()))
-                .await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/bind-secret-id",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/bind-secret-id", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/bind-secret-id",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["bind_secret_id"].as_bool().unwrap(), req_data["bind_secret_id"].as_bool().unwrap());
+        assert_eq!(
+            resp_data["bind_secret_id"].as_bool().unwrap(),
+            req_data["bind_secret_id"].as_bool().unwrap()
+        );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/bind-secret-id", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/bind-secret-id",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/bind-secret-id", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/bind-secret-id",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["bind_secret_id"].as_bool().unwrap(), true);
 
         // RUD for policies field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/policies", true).await;
+        let resp =
+            test_read_api(&core, &root_token, "auth/approle/role/role1/policies", true).await;
         assert!(resp.is_ok());
 
         let req_data = json!({
@@ -3443,10 +4186,17 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/policies", true, Some(req_data.clone())).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/policies",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/policies", true).await;
+        let resp =
+            test_read_api(&core, &root_token, "auth/approle/role/role1/policies", true).await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(
@@ -3458,15 +4208,35 @@ mod test {
             req_data["policies"].as_comma_string_slice().unwrap()
         );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/policies", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/policies",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/policies", true).await;
+        let resp =
+            test_read_api(&core, &root_token, "auth/approle/role/role1/policies", true).await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["token_policies"].as_comma_string_slice().unwrap().len(), 0);
+        assert_eq!(
+            resp_data["token_policies"]
+                .as_comma_string_slice()
+                .unwrap()
+                .len(),
+            0
+        );
 
         // RUD for secret-id-num-uses field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-num-uses", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-num-uses",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
 
         let req_data = json!({
@@ -3484,20 +4254,48 @@ mod test {
         )
         .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-num-uses", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-num-uses",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["secret_id_num_uses"].as_int().unwrap(), req_data["secret_id_num_uses"].as_int().unwrap());
+        assert_eq!(
+            resp_data["secret_id_num_uses"].as_int().unwrap(),
+            req_data["secret_id_num_uses"].as_int().unwrap()
+        );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/secret-id-num-uses", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-num-uses",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-num-uses", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-num-uses",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["secret_id_num_uses"].as_int().unwrap(), 0);
 
         // RUD for secret_id_ttl field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
 
         let req_data = json!({
@@ -3506,24 +4304,57 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/secret-id-ttl", true, Some(req_data.clone()))
-                .await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-ttl",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["secret_id_ttl"].as_int().unwrap(), req_data["secret_id_ttl"].as_int().unwrap());
+        assert_eq!(
+            resp_data["secret_id_ttl"].as_int().unwrap(),
+            req_data["secret_id_ttl"].as_int().unwrap()
+        );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/secret-id-ttl", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-ttl",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["secret_id_ttl"].as_int().unwrap(), 0);
 
         // RUD for token-num-uses field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-num-uses", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-num-uses",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["token_num_uses"].as_int().unwrap(), 600);
@@ -3534,18 +4365,45 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/token-num-uses", true, Some(req_data.clone()))
-                .await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-num-uses",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-num-uses", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-num-uses",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["token_num_uses"].as_int().unwrap(), req_data["token_num_uses"].as_int().unwrap());
+        assert_eq!(
+            resp_data["token_num_uses"].as_int().unwrap(),
+            req_data["token_num_uses"].as_int().unwrap()
+        );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/token-num-uses", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-num-uses",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-num-uses", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-num-uses",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["token_num_uses"].as_int().unwrap(), 0);
@@ -3560,15 +4418,31 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/period", true, Some(req_data.clone())).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/period",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/period", true).await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["period"].as_int().unwrap(), req_data["period"].as_int().unwrap());
+        assert_eq!(
+            resp_data["period"].as_int().unwrap(),
+            req_data["period"].as_int().unwrap()
+        );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/period", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/period",
+            true,
+            None,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/period", true).await;
         assert!(resp.is_ok());
@@ -3576,7 +4450,13 @@ mod test {
         assert_eq!(resp_data["token_period"].as_int().unwrap(), 0);
 
         // RUD for token_ttl field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["token_ttl"].as_int().unwrap(), 4000);
@@ -3587,23 +4467,57 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/token-ttl", true, Some(req_data.clone())).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-ttl",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["token_ttl"].as_int().unwrap(), req_data["token_ttl"].as_int().unwrap());
+        assert_eq!(
+            resp_data["token_ttl"].as_int().unwrap(),
+            req_data["token_ttl"].as_int().unwrap()
+        );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/token-ttl", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-ttl",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["token_ttl"].as_int().unwrap(), 0);
 
         // RUD for token_max_ttl field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-max-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-max-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["token_max_ttl"].as_int().unwrap(), 5000);
@@ -3614,18 +4528,45 @@ mod test {
         .as_object()
         .unwrap()
         .clone();
-        let _ =
-            test_write_api(&core, &root_token, "auth/approle/role/role1/token-max-ttl", true, Some(req_data.clone()))
-                .await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-max-ttl",
+            true,
+            Some(req_data.clone()),
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-max-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-max-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["token_max_ttl"].as_int().unwrap(), req_data["token_max_ttl"].as_int().unwrap());
+        assert_eq!(
+            resp_data["token_max_ttl"].as_int().unwrap(),
+            req_data["token_max_ttl"].as_int().unwrap()
+        );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/token-max-ttl", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-max-ttl",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-max-ttl", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-max-ttl",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(resp_data["token_max_ttl"].as_int().unwrap(), 0);
@@ -3636,9 +4577,13 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_token_bound_cidrs_crud() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_token_bound_cidrs_crud").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_token_bound_cidrs_crud").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -3655,7 +4600,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, req_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            req_data,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -3689,7 +4641,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, req_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            req_data,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -3714,12 +4673,22 @@ mod test {
         assert_eq!(expected.as_object().unwrap().clone(), resp_data);
 
         // RUD for secret-id-bound-cidrs field
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-bound-cidrs", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-bound-cidrs",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(
-            resp_data["secret_id_bound_cidrs"].as_comma_string_slice().unwrap(),
-            expected["secret_id_bound_cidrs"].as_comma_string_slice().unwrap()
+            resp_data["secret_id_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap(),
+            expected["secret_id_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap()
         );
 
         let req_data = json!({
@@ -3737,31 +4706,70 @@ mod test {
         )
         .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-bound-cidrs", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-bound-cidrs",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(
-            resp_data["secret_id_bound_cidrs"].as_comma_string_slice().unwrap(),
-            req_data["secret_id_bound_cidrs"].as_comma_string_slice().unwrap()
+            resp_data["secret_id_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap(),
+            req_data["secret_id_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap()
         );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/secret-id-bound-cidrs", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-bound-cidrs",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/secret-id-bound-cidrs", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-bound-cidrs",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["secret_id_bound_cidrs"].as_comma_string_slice().unwrap().len(), 0);
+        assert_eq!(
+            resp_data["secret_id_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap()
+                .len(),
+            0
+        );
 
         // RUD for token-bound-cidrs field
         let expected = json!({
             "token_bound_cidrs":     ["127.0.0.1", "127.0.0.1/16"],
         });
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-bound-cidrs", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-bound-cidrs",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(
-            resp_data["token_bound_cidrs"].as_comma_string_slice().unwrap(),
-            expected["token_bound_cidrs"].as_comma_string_slice().unwrap()
+            resp_data["token_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap(),
+            expected["token_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap()
         );
 
         let req_data = json!({
@@ -3779,20 +4787,49 @@ mod test {
         )
         .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-bound-cidrs", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-bound-cidrs",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         assert_eq!(
-            resp_data["token_bound_cidrs"].as_comma_string_slice().unwrap(),
-            req_data["token_bound_cidrs"].as_comma_string_slice().unwrap()
+            resp_data["token_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap(),
+            req_data["token_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap()
         );
 
-        let _ = test_delete_api(&core, &root_token, "auth/approle/role/role1/token-bound-cidrs", true, None).await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-bound-cidrs",
+            true,
+            None,
+        )
+        .await;
 
-        let resp = test_read_api(&core, &root_token, "auth/approle/role/role1/token-bound-cidrs", true).await;
+        let resp = test_read_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/token-bound-cidrs",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
-        assert_eq!(resp_data["token_bound_cidrs"].as_comma_string_slice().unwrap().len(), 0);
+        assert_eq!(
+            resp_data["token_bound_cidrs"]
+                .as_comma_string_slice()
+                .unwrap()
+                .len(),
+            0
+        );
 
         // Delete test for role
         test_delete_role(&core, &root_token, "approle", "role1").await;
@@ -3800,9 +4837,13 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_token_type_crud() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_token_type_crud").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_token_type_crud").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -3818,7 +4859,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, req_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            req_data,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -3853,7 +4901,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, req_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            req_data,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -3883,9 +4938,13 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_token_util_upgrade() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_token_util_upgrade").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_token_util_upgrade").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -3901,7 +4960,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, req_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            req_data,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -3937,7 +5003,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, req_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            req_data,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -3973,7 +5046,14 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ = test_write_api(&core, &root_token, "auth/approle/role/role1", true, req_data).await;
+        let _ = test_write_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1",
+            true,
+            req_data,
+        )
+        .await;
 
         let resp = test_read_api(&core, &root_token, "auth/approle/role/role1", true).await;
         let resp_data = resp.unwrap().unwrap().data.unwrap();
@@ -4003,9 +5083,13 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_secret_id_with_ttl() {
-        let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_approle_role_secret_id_with_ttl").await;
+        let (_rvault, core, root_token) =
+            new_unseal_test_rusty_vault("test_approle_role_secret_id_with_ttl").await;
 
         // Mount approle auth to path: auth/approle
         test_mount_auth_api(&core, &root_token, "approle", "approle").await;
@@ -4055,7 +5139,10 @@ mod test {
         }
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_approle_role_secret_id_accessor_cross_delete() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_accessor_cross_delete").await;
@@ -4072,7 +5159,13 @@ mod test {
         let _ = generate_secret_id(&core, &root_token, "approle", "role2").await;
 
         // Get role2 secretID Accessor
-        let resp = test_list_api(&core, &root_token, "auth/approle/role/role2/secret-id", true).await;
+        let resp = test_list_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role2/secret-id",
+            true,
+        )
+        .await;
         assert!(resp.is_ok());
         let resp_data = resp.unwrap().unwrap().data.unwrap();
         let keys = resp_data["keys"].as_array().unwrap();
@@ -4086,8 +5179,13 @@ mod test {
         })
         .as_object()
         .cloned();
-        let _ =
-            test_delete_api(&core, &root_token, "auth/approle/role/role1/secret-id-accessor/destroy", false, hmac_data)
-                .await;
+        let _ = test_delete_api(
+            &core,
+            &root_token,
+            "auth/approle/role/role1/secret-id-accessor/destroy",
+            false,
+            hmac_data,
+        )
+        .await;
     }
 }

@@ -9,7 +9,7 @@ use std::{
 
 use ipnetwork::IpNetwork;
 
-use super::sock_addr::{new_sock_addr, SockAddr, SockAddrType};
+use super::sock_addr::{SockAddr, SockAddrType, new_sock_addr};
 use crate::errors::RvError;
 
 pub fn is_ip_addr(addr: &dyn SockAddr) -> bool {
@@ -49,7 +49,9 @@ pub fn ip_belongs_to_cidrs(ip_addr: &str, cidrs: &[&str]) -> Result<bool, RvErro
     }
 
     if cidrs.is_empty() {
-        return Err(RvError::ErrResponse("missing CIDR blocks to be checked against".to_string()));
+        return Err(RvError::ErrResponse(
+            "missing CIDR blocks to be checked against".to_string(),
+        ));
     }
 
     for cidr in cidrs.iter() {
@@ -63,15 +65,20 @@ pub fn ip_belongs_to_cidrs(ip_addr: &str, cidrs: &[&str]) -> Result<bool, RvErro
 
 pub fn validate_cidr_string(cidr_list: &str, separator: &str) -> Result<bool, RvError> {
     if cidr_list.is_empty() {
-        return Err(RvError::ErrResponse("missing CIDR list that needs validation".to_string()));
+        return Err(RvError::ErrResponse(
+            "missing CIDR list that needs validation".to_string(),
+        ));
     }
 
     if separator.is_empty() {
         return Err(RvError::ErrResponse("missing separator".to_string()));
     }
 
-    let cidrs_set: HashSet<&str> =
-        cidr_list.split(separator).map(|cidr| cidr.trim()).filter(|cidr| !cidr.is_empty()).collect();
+    let cidrs_set: HashSet<&str> = cidr_list
+        .split(separator)
+        .map(|cidr| cidr.trim())
+        .filter(|cidr| !cidr.is_empty())
+        .collect();
 
     let cidrs: Vec<&str> = cidrs_set.into_iter().collect();
 
@@ -80,7 +87,9 @@ pub fn validate_cidr_string(cidr_list: &str, separator: &str) -> Result<bool, Rv
 
 pub fn validate_cidrs(cidrs: &[&str]) -> Result<bool, RvError> {
     if cidrs.is_empty() {
-        return Err(RvError::ErrResponse("missing CIDR blocks that needs validation".to_string()));
+        return Err(RvError::ErrResponse(
+            "missing CIDR blocks that needs validation".to_string(),
+        ));
     }
 
     for cidr in cidrs.iter() {
@@ -92,25 +101,33 @@ pub fn validate_cidrs(cidrs: &[&str]) -> Result<bool, RvError> {
 
 pub fn subset(cidr1: &str, cidr2: &str) -> Result<bool, RvError> {
     if cidr1.is_empty() {
-        return Err(RvError::ErrResponse("missing CIDR to be checked against".to_string()));
+        return Err(RvError::ErrResponse(
+            "missing CIDR to be checked against".to_string(),
+        ));
     }
 
     if cidr2.is_empty() {
-        return Err(RvError::ErrResponse("missing CIDR that needs to be checked".to_string()));
+        return Err(RvError::ErrResponse(
+            "missing CIDR that needs to be checked".to_string(),
+        ));
     }
 
     let ipnet1 = IpNetwork::from_str(cidr1)?;
     let mask_len1 = ipnet1.prefix();
 
     if !is_ip_addr_zero(&ipnet1.ip()) && mask_len1 == 0 {
-        return Err(RvError::ErrResponse("CIDR to be checked against is not in its canonical form".to_string()));
+        return Err(RvError::ErrResponse(
+            "CIDR to be checked against is not in its canonical form".to_string(),
+        ));
     }
 
     let ipnet2 = IpNetwork::from_str(cidr2)?;
     let mask_len2 = ipnet2.prefix();
 
     if !is_ip_addr_zero(&ipnet2.ip()) && mask_len2 == 0 {
-        return Err(RvError::ErrResponse("CIDR that needs to be checked is not in its canonical form".to_string()));
+        return Err(RvError::ErrResponse(
+            "CIDR that needs to be checked is not in its canonical form".to_string(),
+        ));
     }
 
     /*
@@ -134,11 +151,15 @@ pub fn subset(cidr1: &str, cidr2: &str) -> Result<bool, RvError> {
  */
 pub fn subset_blocks(cidr_blocks1: &[&str], cidr_blocks2: &[&str]) -> Result<bool, RvError> {
     if cidr_blocks1.is_empty() {
-        return Err(RvError::ErrResponse("missing CIDR blocks to be checked against".to_string()));
+        return Err(RvError::ErrResponse(
+            "missing CIDR blocks to be checked against".to_string(),
+        ));
     }
 
     if cidr_blocks2.is_empty() {
-        return Err(RvError::ErrResponse("missing CIDR blocks that needs to be checked".to_string()));
+        return Err(RvError::ErrResponse(
+            "missing CIDR blocks that needs to be checked".to_string(),
+        ));
     }
 
     // Check if all the elements of cidr_blocks2 is a subset of at least one

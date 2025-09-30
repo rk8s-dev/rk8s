@@ -1,11 +1,13 @@
 use std::sync::{Arc, RwLock};
 
-use actix_web::{web, HttpResponse};
+use actix_web::{HttpResponse, web};
 use prometheus_client::encoding::text::encode;
 
 use crate::metrics::manager::MetricsManager;
 
-pub async fn metrics_handler(metrics_manager: web::Data<Arc<RwLock<MetricsManager>>>) -> HttpResponse {
+pub async fn metrics_handler(
+    metrics_manager: web::Data<Arc<RwLock<MetricsManager>>>,
+) -> HttpResponse {
     let m = metrics_manager.read().unwrap();
     let registry = m.registry.lock().unwrap();
 
@@ -15,7 +17,9 @@ pub async fn metrics_handler(metrics_manager: web::Data<Arc<RwLock<MetricsManage
         return HttpResponse::InternalServerError().finish();
     }
 
-    HttpResponse::Ok().content_type("text/plain; version=0.0.4").body(buffer)
+    HttpResponse::Ok()
+        .content_type("text/plain; version=0.0.4")
+        .body(buffer)
 }
 
 pub fn init_metrics_service(cfg: &mut web::ServiceConfig) {

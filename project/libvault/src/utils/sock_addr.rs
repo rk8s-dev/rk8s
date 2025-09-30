@@ -130,7 +130,9 @@ pub fn new_sock_addr(s: &str) -> Result<Box<dyn SockAddr>, RvError> {
         return Ok(Box::new(ip));
     }
 
-    Err(RvError::ErrResponse(format!("Unable to convert {s} to an IPv4 or IPv6 address, or a UNIX Socket")))
+    Err(RvError::ErrResponse(format!(
+        "Unable to convert {s} to an IPv4 or IPv6 address, or a UNIX Socket"
+    )))
 }
 
 #[cfg(test)]

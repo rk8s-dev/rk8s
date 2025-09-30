@@ -38,23 +38,44 @@ pub struct Request {
 #[maybe_async::maybe_async]
 impl Request {
     pub fn new<S: Into<String>>(path: S) -> Self {
-        Self { path: path.into(), ..Default::default() }
+        Self {
+            path: path.into(),
+            ..Default::default()
+        }
     }
 
     pub fn new_read_request<S: Into<String>>(path: S) -> Self {
-        Self { operation: Operation::Read, path: path.into(), ..Default::default() }
+        Self {
+            operation: Operation::Read,
+            path: path.into(),
+            ..Default::default()
+        }
     }
 
     pub fn new_write_request<S: Into<String>>(path: S, body: Option<Map<String, Value>>) -> Self {
-        Self { operation: Operation::Write, path: path.into(), body, ..Default::default() }
+        Self {
+            operation: Operation::Write,
+            path: path.into(),
+            body,
+            ..Default::default()
+        }
     }
 
     pub fn new_delete_request<S: Into<String>>(path: S, body: Option<Map<String, Value>>) -> Self {
-        Self { operation: Operation::Delete, path: path.into(), body, ..Default::default() }
+        Self {
+            operation: Operation::Delete,
+            path: path.into(),
+            body,
+            ..Default::default()
+        }
     }
 
     pub fn new_list_request<S: Into<String>>(path: S) -> Self {
-        Self { operation: Operation::List, path: path.into(), ..Default::default() }
+        Self {
+            operation: Operation::List,
+            path: path.into(),
+            ..Default::default()
+        }
     }
 
     pub fn new_revoke_request<S: Into<String>>(
@@ -62,7 +83,13 @@ impl Request {
         secret: Option<SecretData>,
         data: Option<Map<String, Value>>,
     ) -> Self {
-        Self { operation: Operation::Revoke, path: path.into(), secret, data, ..Default::default() }
+        Self {
+            operation: Operation::Revoke,
+            path: path.into(),
+            secret,
+            data,
+            ..Default::default()
+        }
     }
 
     pub fn new_renew_request<S: Into<String>>(
@@ -70,7 +97,13 @@ impl Request {
         secret: Option<SecretData>,
         data: Option<Map<String, Value>>,
     ) -> Self {
-        Self { operation: Operation::Renew, path: path.into(), secret, data, ..Default::default() }
+        Self {
+            operation: Operation::Renew,
+            path: path.into(),
+            secret,
+            data,
+            ..Default::default()
+        }
     }
 
     pub fn new_renew_auth_request<S: Into<String>>(
@@ -78,7 +111,13 @@ impl Request {
         auth: Option<Auth>,
         data: Option<Map<String, Value>>,
     ) -> Self {
-        Self { operation: Operation::Renew, path: path.into(), auth, data, ..Default::default() }
+        Self {
+            operation: Operation::Renew,
+            path: path.into(),
+            auth,
+            data,
+            ..Default::default()
+        }
     }
 
     pub fn bind_handler(&mut self, handler: Arc<dyn Handler>) {
@@ -97,22 +136,22 @@ impl Request {
             return Err(RvError::ErrRequestNoDataField);
         };
 
-        if let Some(data) = self.data.as_ref() {
-            if let Some(value) = data.get(key) {
-                if !field.check_data_type(value) {
-                    return Err(RvError::ErrRequestFieldInvalid);
-                }
-                return Ok(value.clone());
+        if let Some(data) = self.data.as_ref()
+            && let Some(value) = data.get(key)
+        {
+            if !field.check_data_type(value) {
+                return Err(RvError::ErrRequestFieldInvalid);
             }
+            return Ok(value.clone());
         }
 
-        if let Some(body) = self.body.as_ref() {
-            if let Some(value) = body.get(key) {
-                if !field.check_data_type(value) {
-                    return Err(RvError::ErrRequestFieldInvalid);
-                }
-                return Ok(value.clone());
+        if let Some(body) = self.body.as_ref()
+            && let Some(value) = body.get(key)
+        {
+            if !field.check_data_type(value) {
+                return Err(RvError::ErrRequestFieldInvalid);
             }
+            return Ok(value.clone());
         }
 
         if default {
@@ -176,13 +215,16 @@ impl Request {
     }
 
     pub fn get_data_as_str(&self, key: &str) -> Result<String, RvError> {
-        self.get_data(key)?.as_str().ok_or(RvError::ErrRequestFieldInvalid).and_then(|s| {
-            if s.trim().is_empty() {
-                Err(RvError::ErrResponse(format!("missing {key}")))
-            } else {
-                Ok(s.trim().to_string())
-            }
-        })
+        self.get_data(key)?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)
+            .and_then(|s| {
+                if s.trim().is_empty() {
+                    Err(RvError::ErrResponse(format!("missing {key}")))
+                } else {
+                    Ok(s.trim().to_string())
+                }
+            })
     }
 
     pub fn get_field_default_or_zero(&self, key: &str) -> Result<Value, RvError> {
@@ -203,20 +245,18 @@ impl Request {
 
     //TODO: the sensitive data is still in the memory. Need to totally resolve this in `serde_json` someday.
     pub fn clear_data(&mut self, key: &str) {
-        if let Some(data) = self.data.as_mut() {
-            if let Some(secret_str) = data.get_mut(key) {
-                if let Value::String(ref mut s) = *secret_str {
-                    "".clone_into(s);
-                }
-            }
+        if let Some(data) = self.data.as_mut()
+            && let Some(secret_str) = data.get_mut(key)
+            && let Value::String(ref mut s) = *secret_str
+        {
+            "".clone_into(s);
         }
 
-        if let Some(body) = self.body.as_mut() {
-            if let Some(secret_str) = body.get_mut(key) {
-                if let Value::String(ref mut s) = *secret_str {
-                    "".clone_into(s);
-                }
-            }
+        if let Some(body) = self.body.as_mut()
+            && let Some(secret_str) = body.get_mut(key)
+            && let Value::String(ref mut s) = *secret_str
+        {
+            "".clone_into(s);
         }
     }
 

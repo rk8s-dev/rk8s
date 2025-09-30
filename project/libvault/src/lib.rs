@@ -34,16 +34,13 @@ use crate::{
     logical::{Request, Response},
     modules::{
         auth::AuthModule,
-        credential::{approle::AppRoleModule, cert::CertModule, userpass::UserPassModule},
+        credential::{approle::AppRoleModule, cert::CertModule},
         pki::PkiModule,
         policy::PolicyModule,
     },
     mount::MountsMonitor,
     storage::Backend,
 };
-
-#[cfg(feature = "storage_mysql")]
-extern crate diesel;
 
 pub mod api;
 pub mod cli;
@@ -58,8 +55,6 @@ pub mod module_manager;
 pub mod modules;
 pub mod mount;
 pub mod router;
-#[cfg(feature = "storage_mysql")]
-pub mod schema;
 pub mod shamir;
 pub mod storage;
 pub mod utils;
@@ -101,7 +96,10 @@ impl RustyVault {
         let core = core.wrap();
 
         if core.mounts_monitor_interval > 0 {
-            core.mounts_monitor.store(Some(Arc::new(MountsMonitor::new(core.clone(), core.mounts_monitor_interval))));
+            core.mounts_monitor.store(Some(Arc::new(MountsMonitor::new(
+                core.clone(),
+                core.mounts_monitor_interval,
+            ))));
         }
 
         core.module_manager.set_default_modules(core.clone())?;
@@ -117,10 +115,6 @@ impl RustyVault {
         // add pki_module
         let pki_module = PkiModule::new(core.clone());
         core.module_manager.add_module(Arc::new(pki_module))?;
-
-        // add credential module: userpass
-        let userpass_module = UserPassModule::new(core.clone());
-        core.module_manager.add_module(Arc::new(userpass_module))?;
 
         // add credential module: approle
         let approle_module = AppRoleModule::new(core.clone());
@@ -144,7 +138,10 @@ impl RustyVault {
             }
         }
 
-        Ok(Self { core: ArcSwap::new(core), token: ArcSwap::new(Arc::new(String::new())) })
+        Ok(Self {
+            core: ArcSwap::new(core),
+            token: ArcSwap::new(Arc::new(String::new())),
+        })
     }
 
     pub async fn init(&self, seal_config: &core::SealConfig) -> Result<core::InitResult, RvError> {
@@ -224,11 +221,25 @@ impl RustyVault {
         .as_object()
         .cloned();
 
-        self.write::<String>(token.map(|t| t.into()), format!("sys/mounts/{}", path.into()), data).await
+        self.write::<String>(
+            token.map(|t| t.into()),
+            format!("sys/mounts/{}", path.into()),
+            data,
+        )
+        .await
     }
 
-    pub async fn unmount<S: Into<String>>(&self, token: Option<S>, path: S) -> Result<Option<Response>, RvError> {
-        self.delete::<String>(token.map(|t| t.into()), format!("sys/mounts/{}", path.into()), None).await
+    pub async fn unmount<S: Into<String>>(
+        &self,
+        token: Option<S>,
+        path: S,
+    ) -> Result<Option<Response>, RvError> {
+        self.delete::<String>(
+            token.map(|t| t.into()),
+            format!("sys/mounts/{}", path.into()),
+            None,
+        )
+        .await
     }
 
     pub async fn remount<S: Into<String>>(
@@ -244,7 +255,8 @@ impl RustyVault {
         .as_object()
         .cloned();
 
-        self.write::<String>(token.map(|t| t.into()), "sys/remount".to_string(), data).await
+        self.write::<String>(token.map(|t| t.into()), "sys/remount".to_string(), data)
+            .await
     }
 
     pub async fn enable_auth<S: Into<String>>(
@@ -259,11 +271,25 @@ impl RustyVault {
         .as_object()
         .cloned();
 
-        self.write::<String>(token.map(|t| t.into()), format!("sys/auth/{}", path.into()), data).await
+        self.write::<String>(
+            token.map(|t| t.into()),
+            format!("sys/auth/{}", path.into()),
+            data,
+        )
+        .await
     }
 
-    pub async fn disable_auth<S: Into<String>>(&self, token: Option<S>, path: S) -> Result<Option<Response>, RvError> {
-        self.delete::<String>(token.map(|t| t.into()), format!("sys/auth/{}", path.into()), None).await
+    pub async fn disable_auth<S: Into<String>>(
+        &self,
+        token: Option<S>,
+        path: S,
+    ) -> Result<Option<Response>, RvError> {
+        self.delete::<String>(
+            token.map(|t| t.into()),
+            format!("sys/auth/{}", path.into()),
+            None,
+        )
+        .await
     }
 
     pub async fn login<S: Into<String>>(
@@ -274,11 +300,11 @@ impl RustyVault {
         let mut login_success = false;
         let mut req = Request::new_write_request(path, data);
         let resp = self.core.load().handle_request(&mut req).await?;
-        if let Some(response) = resp.as_ref() {
-            if let Some(auth) = response.auth.as_ref() {
-                self.token.store(Arc::new(auth.client_token.clone()));
-                login_success = true;
-            }
+        if let Some(response) = resp.as_ref()
+            && let Some(auth) = response.auth.as_ref()
+        {
+            self.token.store(Arc::new(auth.client_token.clone()));
+            login_success = true;
         }
 
         Ok((resp, login_success))
@@ -288,9 +314,15 @@ impl RustyVault {
         self.core.load().handle_request(req).await
     }
 
-    pub async fn read<S: Into<String>>(&self, token: Option<S>, path: &str) -> Result<Option<Response>, RvError> {
+    pub async fn read<S: Into<String>>(
+        &self,
+        token: Option<S>,
+        path: &str,
+    ) -> Result<Option<Response>, RvError> {
         let mut req = Request::new_read_request(path);
-        req.client_token = token.map(Into::into).unwrap_or_else(|| self.token.load().as_ref().clone());
+        req.client_token = token
+            .map(Into::into)
+            .unwrap_or_else(|| self.token.load().as_ref().clone());
         self.request(&mut req).await
     }
 
@@ -301,7 +333,9 @@ impl RustyVault {
         data: Option<Map<String, Value>>,
     ) -> Result<Option<Response>, RvError> {
         let mut req = Request::new_write_request(path, data);
-        req.client_token = token.map(Into::into).unwrap_or_else(|| self.token.load().as_ref().clone());
+        req.client_token = token
+            .map(Into::into)
+            .unwrap_or_else(|| self.token.load().as_ref().clone());
         self.request(&mut req).await
     }
 
@@ -312,13 +346,21 @@ impl RustyVault {
         data: Option<Map<String, Value>>,
     ) -> Result<Option<Response>, RvError> {
         let mut req = Request::new_delete_request(path, data);
-        req.client_token = token.map(Into::into).unwrap_or_else(|| self.token.load().as_ref().clone());
+        req.client_token = token
+            .map(Into::into)
+            .unwrap_or_else(|| self.token.load().as_ref().clone());
         self.request(&mut req).await
     }
 
-    pub async fn list<S: Into<String>>(&self, token: Option<S>, path: S) -> Result<Option<Response>, RvError> {
+    pub async fn list<S: Into<String>>(
+        &self,
+        token: Option<S>,
+        path: S,
+    ) -> Result<Option<Response>, RvError> {
         let mut req = Request::new_list_request(path);
-        req.client_token = token.map(Into::into).unwrap_or_else(|| self.token.load().as_ref().clone());
+        req.client_token = token
+            .map(Into::into)
+            .unwrap_or_else(|| self.token.load().as_ref().clone());
         self.request(&mut req).await
     }
 }

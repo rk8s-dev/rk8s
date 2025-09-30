@@ -7,8 +7,8 @@ use std::{collections::HashMap, fmt, fs, path::Path};
 use better_default::Default;
 use openssl::ssl::SslVersion;
 use serde::{
-    de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
 };
 use serde_json::Value;
 
@@ -110,7 +110,7 @@ pub struct Storage {
     pub config: HashMap<String, Value>,
 }
 
-static STORAGE_TYPE_KEYWORDS: &[&str] = &["file", "mysql", "xline"];
+static STORAGE_TYPE_KEYWORDS: &[&str] = &["file", "xline"];
 
 fn default_bool_true() -> bool {
     true
@@ -213,13 +213,18 @@ where
             return Err(serde::de::Error::custom("Invalid listener key"));
         }
 
-        if !listener.tls_disable && (listener.tls_cert_file.is_empty() || listener.tls_key_file.is_empty()) {
+        if !listener.tls_disable
+            && (listener.tls_cert_file.is_empty() || listener.tls_key_file.is_empty())
+        {
             return Err(serde::de::Error::custom(
                 "when tls_disable is false, tls_cert_file and tls_key_file must be configured",
             ));
         }
 
-        if !listener.tls_disable && listener.tls_require_and_verify_client_cert && listener.tls_disable_client_certs {
+        if !listener.tls_disable
+            && listener.tls_require_and_verify_client_cert
+            && listener.tls_disable_client_certs
+        {
             return Err(serde::de::Error::custom(
                 "'tls_disable_client_certs' and 'tls_require_and_verify_client_cert' are mutually exclusive",
             ));
@@ -277,11 +282,11 @@ fn load_config_dir(dir: &str) -> Result<Config, RvError> {
                 continue;
             }
 
-            if let Some(ext) = path.extension() {
-                if ext == "hcl" || ext == "json" {
-                    let filename = path.to_string_lossy().into_owned();
-                    paths.push(filename);
-                }
+            if let Some(ext) = path.extension()
+                && (ext == "hcl" || ext == "json")
+            {
+                let filename = path.to_string_lossy().into_owned();
+                paths.push(filename);
             }
         }
     }
@@ -321,8 +326,14 @@ fn load_config_file(path: &str) -> Result<Config, RvError> {
 }
 
 fn set_config_type_field(config: &mut Config) -> Result<(), RvError> {
-    config.storage.iter_mut().for_each(|(key, value)| value.stype.clone_from(key));
-    config.listener.iter_mut().for_each(|(key, value)| value.ltype.clone_from(key));
+    config
+        .storage
+        .iter_mut()
+        .for_each(|(key, value)| value.stype.clone_from(key));
+    config
+        .listener
+        .iter_mut()
+        .for_each(|(key, value)| value.ltype.clone_from(key));
     Ok(())
 }
 
@@ -430,7 +441,10 @@ mod test {
         assert_eq!(json_config.daemon, false);
         assert_eq!(json_config.daemon_user.as_str(), "");
         assert_eq!(json_config.daemon_group.as_str(), "");
-        assert_eq!(json_config.mount_entry_hmac_level, MountEntryHMACLevel::None);
+        assert_eq!(
+            json_config.mount_entry_hmac_level,
+            MountEntryHMACLevel::None
+        );
 
         let (_, listener) = json_config.listener.iter().next().unwrap();
         assert!(listener.tls_disable);
@@ -494,7 +508,10 @@ mod test {
         assert!(config.is_ok());
         let hcl_config = config.unwrap();
         println!("hcl config: {:?}", hcl_config);
-        assert_eq!(hcl_config.mount_entry_hmac_level, MountEntryHMACLevel::Compat);
+        assert_eq!(
+            hcl_config.mount_entry_hmac_level,
+            MountEntryHMACLevel::Compat
+        );
 
         let (_, listener) = hcl_config.listener.iter().next().unwrap();
         assert!(listener.tls_disable);

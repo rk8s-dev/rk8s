@@ -124,7 +124,10 @@ impl Router {
         }
     }
 
-    pub fn matching_mount_entry(&self, path: &str) -> Result<Option<Arc<RwLock<MountEntry>>>, RvError> {
+    pub fn matching_mount_entry(
+        &self,
+        path: &str,
+    ) -> Result<Option<Arc<RwLock<MountEntry>>>, RvError> {
         let root = self.root.read()?;
         if let Some(entry) = root.get_ancestor(path) {
             let router_entry = entry.value().unwrap();
@@ -263,7 +266,11 @@ fn new_radix_from_paths(paths: &[String]) -> Trie<String, bool> {
     for path in paths {
         // Check if this is a prefix or exact match
         let prefix_match = path.ends_with('*');
-        let path = if prefix_match { &path[..path.len() - 1] } else { path };
+        let path = if prefix_match {
+            &path[..path.len() - 1]
+        } else {
+            path
+        };
 
         radix_paths.insert(path.to_string(), prefix_match);
     }

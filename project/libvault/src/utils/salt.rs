@@ -4,7 +4,7 @@
 use better_default::Default;
 use derivative::Derivative;
 use openssl::{
-    hash::{hash, MessageDigest},
+    hash::{MessageDigest, hash},
     nid::Nid,
     pkey::PKey,
     sign::Signer,
@@ -42,7 +42,10 @@ pub struct Config {
 
 #[maybe_async::maybe_async]
 impl Salt {
-    pub async fn new(storage: Option<&dyn Storage>, config: Option<&Config>) -> Result<Self, RvError> {
+    pub async fn new(
+        storage: Option<&dyn Storage>,
+        config: Option<&Config>,
+    ) -> Result<Self, RvError> {
         let mut salt = Salt::default();
         if let Some(c) = config {
             if salt.config.location != c.location && !c.location.is_empty() {
@@ -63,7 +66,10 @@ impl Salt {
                 salt.salt = String::from_utf8_lossy(&raw.value).to_string();
                 salt.generated = false;
             } else {
-                let entry = StorageEntry { key: salt.config.location.clone(), value: salt.salt.as_bytes().to_vec() };
+                let entry = StorageEntry {
+                    key: salt.config.location.clone(),
+                    value: salt.salt.as_bytes().to_vec(),
+                };
 
                 s.put(&entry).await?;
             }
@@ -119,7 +125,7 @@ impl Salt {
 mod test {
     use std::sync::Arc;
 
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, thread_rng};
 
     use super::*;
     use crate::{
@@ -127,7 +133,10 @@ mod test {
         test_utils::new_test_backend,
     };
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_salt() {
         // init the storage backend
         let backend = new_test_backend("test_salt");

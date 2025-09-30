@@ -30,18 +30,18 @@ use serde::{Deserialize, Serialize};
 use stretto::Cache;
 
 use super::{
-    acl::{ACLResults, ACL},
-    policy::SentinelPolicy,
     Policy, PolicyType,
+    acl::{ACL, ACLResults},
+    policy::SentinelPolicy,
 };
 use crate::{
     core::Core,
     errors::RvError,
     handler::AuthHandler,
-    logical::{auth::PolicyResults, Operation, Request},
+    logical::{Operation, Request, auth::PolicyResults},
     router::Router,
     rv_error_response_status, rv_error_string,
-    storage::{barrier_view::BarrierView, Storage, StorageEntry},
+    storage::{Storage, StorageEntry, barrier_view::BarrierView},
 };
 
 // POLICY_ACL_SUB_PATH is the sub-path used for the policy store view. This is
@@ -173,8 +173,11 @@ TODO
 "#;
 
 lazy_static! {
-    pub static ref IMMUTABLE_POLICIES: Vec<&'static str> =
-        vec!["root", RESPONSE_WRAPPING_POLICY_NAME, CONTROL_GROUP_POLICY_NAME,];
+    pub static ref IMMUTABLE_POLICIES: Vec<&'static str> = vec![
+        "root",
+        RESPONSE_WRAPPING_POLICY_NAME,
+        CONTROL_GROUP_POLICY_NAME,
+    ];
     pub static ref NON_ASSIGNABLE_POLICIES: Vec<&'static str> =
         vec![RESPONSE_WRAPPING_POLICY_NAME, CONTROL_GROUP_POLICY_NAME,];
 }
@@ -252,11 +255,15 @@ impl PolicyStore {
         );
 
         for key in keys.iter() {
-            policy_store.policy_type_map.insert(policy_store.cache_key(key.as_str()), PolicyType::Acl);
+            policy_store
+                .policy_type_map
+                .insert(policy_store.cache_key(key.as_str()), PolicyType::Acl);
         }
 
         // Special-case root; doesn't exist on disk but does need to be found
-        policy_store.policy_type_map.insert(policy_store.cache_key("root"), PolicyType::Acl);
+        policy_store
+            .policy_type_map
+            .insert(policy_store.cache_key("root"), PolicyType::Acl);
 
         Ok(policy_store.wrap())
     }
@@ -296,7 +303,11 @@ impl PolicyStore {
 
     // Get a policy from the policy store.
     // This function retrieves the policy from the appropriate view, checks the cache, and handles policy type mapping.
-    pub async fn get_policy(&self, name: &str, policy_type: PolicyType) -> Result<Option<Arc<Policy>>, RvError> {
+    pub async fn get_policy(
+        &self,
+        name: &str,
+        policy_type: PolicyType,
+    ) -> Result<Option<Arc<Policy>>, RvError> {
         let name = self.sanitize_name(name);
         let index = self.cache_key(&name);
         let mut policy_type = policy_type;
@@ -314,7 +325,7 @@ impl PolicyStore {
                             return Err(rv_error_string!(format!(
                                 "invalid type of policy in type map: {}",
                                 policy_type
-                            )))
+                            )));
                         }
                     }
                 } else {
@@ -325,14 +336,17 @@ impl PolicyStore {
             }
         };
 
-        if let Some(lru) = cache {
-            if let Some(p) = lru.get(&index) {
-                return Ok(Some(p.value().clone()));
-            }
+        if let Some(lru) = cache
+            && let Some(p) = lru.get(&index)
+        {
+            return Ok(Some(p.value().clone()));
         }
 
         if policy_type == PolicyType::Acl && name == "root" {
-            let p = Arc::new(Policy { name: "root".into(), ..Default::default() });
+            let p = Arc::new(Policy {
+                name: "root".into(),
+                ..Default::default()
+            });
             if let Some(lru) = cache {
                 lru.insert(index.clone(), p.clone(), 1);
             }
@@ -340,7 +354,10 @@ impl PolicyStore {
         }
 
         if view.is_none() {
-            return Err(rv_error_string!(format!("unable to get the barrier subview for policy type {}", policy_type)));
+            return Err(rv_error_string!(format!(
+                "unable to get the barrier subview for policy type {}",
+                policy_type
+            )));
         }
 
         let view = view.unwrap();
@@ -413,10 +430,16 @@ impl PolicyStore {
         match policy_type {
             PolicyType::Acl => {
                 if IMMUTABLE_POLICIES.contains(&name.as_str()) {
-                    return Err(rv_error_response_status!(400, format!("cannot delete {} policy", name)));
+                    return Err(rv_error_response_status!(
+                        400,
+                        format!("cannot delete {} policy", name)
+                    ));
                 }
                 if name == "default" {
-                    return Err(rv_error_response_status!(400, "cannot delete default policy"));
+                    return Err(rv_error_response_status!(
+                        400,
+                        "cannot delete default policy"
+                    ));
                 }
                 view.delete(&name).await?;
                 self.remove_token_policy_cache(&index)?;
@@ -443,10 +466,16 @@ impl PolicyStore {
 
     /// Load an ACL policy into the policy store.
     /// This function retrieves the policy if it exists, validates immutability, and sets the policy.
-    pub async fn load_acl_policy(&self, policy_name: &str, policy_text: &str) -> Result<(), RvError> {
+    pub async fn load_acl_policy(
+        &self,
+        policy_name: &str,
+        policy_text: &str,
+    ) -> Result<(), RvError> {
         let name = self.sanitize_name(policy_name);
         let policy = self.get_policy(&name, PolicyType::Acl).await?;
-        if policy.is_some() && (!IMMUTABLE_POLICIES.contains(&name.as_str()) || policy_text == policy.unwrap().raw) {
+        if policy.is_some()
+            && (!IMMUTABLE_POLICIES.contains(&name.as_str()) || policy_text == policy.unwrap().raw)
+        {
             return Ok(());
         }
 
@@ -459,9 +488,12 @@ impl PolicyStore {
 
     /// Load default ACL policies into the policy store.
     pub async fn load_default_acl_policy(&self) -> Result<(), RvError> {
-        self.load_acl_policy(DEFAULT_POLICY_NAME, DEFAULT_POLICY).await?;
-        self.load_acl_policy(RESPONSE_WRAPPING_POLICY_NAME, RESPONSE_WRAPPING_POLICY).await?;
-        self.load_acl_policy(CONTROL_GROUP_POLICY_NAME, CONTROL_GROUP_POLICY).await?;
+        self.load_acl_policy(DEFAULT_POLICY_NAME, DEFAULT_POLICY)
+            .await?;
+        self.load_acl_policy(RESPONSE_WRAPPING_POLICY_NAME, RESPONSE_WRAPPING_POLICY)
+            .await?;
+        self.load_acl_policy(CONTROL_GROUP_POLICY_NAME, CONTROL_GROUP_POLICY)
+            .await?;
         Ok(())
     }
 
@@ -474,7 +506,10 @@ impl PolicyStore {
     ) -> Result<ACL, RvError> {
         let mut all_policies: Vec<Arc<Policy>> = vec![];
         for policy_name in policy_names.iter() {
-            if let Some(policy) = self.get_policy(policy_name.as_str(), PolicyType::Token).await? {
+            if let Some(policy) = self
+                .get_policy(policy_name.as_str(), PolicyType::Token)
+                .await?
+            {
                 all_policies.push(policy);
             }
         }
@@ -505,7 +540,9 @@ impl PolicyStore {
                 let rgp_view = self.get_rgp_view()?;
                 let rgp = rgp_view.get(&policy.name).await?;
                 if rgp.is_some() {
-                    return Err(rv_error_string!("cannot reuse policy names between ACLs and RGPs"));
+                    return Err(rv_error_string!(
+                        "cannot reuse policy names between ACLs and RGPs"
+                    ));
                 }
 
                 view.put(&entry).await?;
@@ -518,7 +555,9 @@ impl PolicyStore {
                 let acl_view = self.get_acl_view()?;
                 let acl = acl_view.get(&policy.name).await?;
                 if acl.is_some() {
-                    return Err(rv_error_string!("cannot reuse policy names between ACLs and RGPs"));
+                    return Err(rv_error_string!(
+                        "cannot reuse policy names between ACLs and RGPs"
+                    ));
                 }
 
                 self.handle_sentinel_policy(policy.as_ref(), view, &entry)?;
@@ -546,29 +585,35 @@ impl PolicyStore {
     fn get_acl_view(&self) -> Result<Arc<BarrierView>, RvError> {
         match &self.acl_view {
             Some(view) => Ok(view.clone()),
-            None => Err(rv_error_string!("unable to get the barrier subview for policy type acl")),
+            None => Err(rv_error_string!(
+                "unable to get the barrier subview for policy type acl"
+            )),
         }
     }
 
     fn get_rgp_view(&self) -> Result<Arc<BarrierView>, RvError> {
         match &self.rgp_view {
             Some(view) => Ok(view.clone()),
-            None => Err(rv_error_string!("unable to get the barrier subview for policy type rpg")),
+            None => Err(rv_error_string!(
+                "unable to get the barrier subview for policy type rpg"
+            )),
         }
     }
 
     fn get_egp_view(&self) -> Result<Arc<BarrierView>, RvError> {
         match &self.egp_view {
             Some(view) => Ok(view.clone()),
-            None => Err(rv_error_string!("unable to get the barrier subview for policy type epg")),
+            None => Err(rv_error_string!(
+                "unable to get the barrier subview for policy type epg"
+            )),
         }
     }
 
     fn save_token_policy_cache(&self, index: String, policy: Arc<Policy>) -> Result<(), RvError> {
-        if let Some(lru) = &self.token_policies_lru {
-            if !lru.insert(index, policy, 1) {
-                return Err(rv_error_string!("save token policy cache failed!"));
-            }
+        if let Some(lru) = &self.token_policies_lru
+            && !lru.insert(index, policy, 1)
+        {
+            return Err(rv_error_string!("save token policy cache failed!"));
         }
 
         Ok(())
@@ -583,10 +628,10 @@ impl PolicyStore {
     }
 
     fn save_egp_cache(&self, index: String, policy: Arc<Policy>) -> Result<(), RvError> {
-        if let Some(lru) = &self.egp_lru {
-            if !lru.insert(index, policy, 1) {
-                return Err(rv_error_string!("save token policy cache failed!"));
-            }
+        if let Some(lru) = &self.egp_lru
+            && !lru.insert(index, policy, 1)
+        {
+            return Err(rv_error_string!("save token policy cache failed!"));
         }
 
         Ok(())
@@ -609,7 +654,11 @@ impl PolicyStore {
         Ok(())
     }
 
-    fn invalidate_sentinal_policy(&self, _policy_type: PolicyType, _index: &str) -> Result<(), RvError> {
+    fn invalidate_sentinal_policy(
+        &self,
+        _policy_type: PolicyType,
+        _index: &str,
+    ) -> Result<(), RvError> {
         Ok(())
     }
 
@@ -640,7 +689,9 @@ impl AuthHandler for PolicyStore {
         let is_root_path = self.router.is_root_path(&req.path)?;
 
         if req.auth.is_none() && is_root_path {
-            return Err(rv_error_string!("cannot access root path in unauthenticated request"));
+            return Err(rv_error_string!(
+                "cannot access root path in unauthenticated request"
+            ));
         }
 
         let mut acl_result = ACLResults::default();
@@ -656,12 +707,17 @@ impl AuthHandler for PolicyStore {
 
         if let Some(auth) = &mut req.auth {
             if is_root_path && !acl_result.root_privs && req.operation != Operation::Help {
-                return Err(rv_error_string!("cannot access root path in unauthenticated request"));
+                return Err(rv_error_string!(
+                    "cannot access root path in unauthenticated request"
+                ));
             }
 
             let allowed = acl_result.allowed;
 
-            auth.policy_results = Some(PolicyResults { allowed, granting_policies: acl_result.granting_policies });
+            auth.policy_results = Some(PolicyResults {
+                allowed,
+                granting_policies: acl_result.granting_policies,
+            });
 
             if !allowed {
                 log::warn!(
@@ -682,9 +738,13 @@ mod mod_policy_store_tests {
     use super::{super::policy::Capability, *};
     use crate::test_utils::new_unseal_test_rusty_vault;
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_policy_store_crud() {
-        let (_rvault, core, _root_token) = new_unseal_test_rusty_vault("test_policy_store_crud").await;
+        let (_rvault, core, _root_token) =
+            new_unseal_test_rusty_vault("test_policy_store_crud").await;
 
         let policy_store = PolicyStore::new(&core).await.unwrap();
 
@@ -713,12 +773,18 @@ mod mod_policy_store_tests {
         assert!(result.is_ok());
 
         // Verify the policy is set
-        let retrieved_policy = policy_store.get_policy(policy1_name, PolicyType::Acl).await.unwrap();
+        let retrieved_policy = policy_store
+            .get_policy(policy1_name, PolicyType::Acl)
+            .await
+            .unwrap();
         assert!(retrieved_policy.is_some());
         let retrieved_policy = retrieved_policy.unwrap();
         assert_eq!(retrieved_policy.name, policy1_name);
         assert_eq!(retrieved_policy.raw, policy1_hcl);
-        let retrieved_policy = policy_store.get_policy(policy2_name, PolicyType::Acl).await.unwrap();
+        let retrieved_policy = policy_store
+            .get_policy(policy2_name, PolicyType::Acl)
+            .await
+            .unwrap();
         assert!(retrieved_policy.is_some());
         let retrieved_policy = retrieved_policy.unwrap();
         assert_eq!(retrieved_policy.name, policy2_name);
@@ -730,9 +796,14 @@ mod mod_policy_store_tests {
         assert!(policies.contains(&policy2_name.to_string()));
 
         // Delete the policy
-        let result = policy_store.delete_policy(policy1_name, PolicyType::Acl).await;
+        let result = policy_store
+            .delete_policy(policy1_name, PolicyType::Acl)
+            .await;
         assert!(result.is_ok());
-        let retrieved_policy = policy_store.get_policy(policy1_name, PolicyType::Acl).await.unwrap();
+        let retrieved_policy = policy_store
+            .get_policy(policy1_name, PolicyType::Acl)
+            .await
+            .unwrap();
         assert!(retrieved_policy.is_none());
 
         // List policies again
@@ -741,9 +812,13 @@ mod mod_policy_store_tests {
         assert!(policies.contains(&policy2_name.to_string()));
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_policy_load_default() {
-        let (_rvault, core, _root_token) = new_unseal_test_rusty_vault("test_policy_load_default").await;
+        let (_rvault, core, _root_token) =
+            new_unseal_test_rusty_vault("test_policy_load_default").await;
 
         let policy_store = PolicyStore::new(&core).await.unwrap();
 
@@ -751,30 +826,50 @@ mod mod_policy_store_tests {
         policy_store.load_default_acl_policy().await.unwrap();
 
         // Verify the default policies are loaded
-        let default_policy = policy_store.get_policy("default", PolicyType::Acl).await.unwrap();
+        let default_policy = policy_store
+            .get_policy("default", PolicyType::Acl)
+            .await
+            .unwrap();
         assert!(default_policy.is_some());
 
-        let response_wrapping_policy = policy_store.get_policy("response-wrapping", PolicyType::Acl).await.unwrap();
+        let response_wrapping_policy = policy_store
+            .get_policy("response-wrapping", PolicyType::Acl)
+            .await
+            .unwrap();
         assert!(response_wrapping_policy.is_some());
 
-        let control_group_policy = policy_store.get_policy("control-group", PolicyType::Acl).await.unwrap();
+        let control_group_policy = policy_store
+            .get_policy("control-group", PolicyType::Acl)
+            .await
+            .unwrap();
         assert!(control_group_policy.is_some());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_policy_root() {
         let (_, core, _) = new_unseal_test_rusty_vault("test_policy_root").await;
 
         let policy_store = PolicyStore::new(&core).await.unwrap();
 
         // Get should return a special policy
-        let root_policy = policy_store.get_policy("root", PolicyType::Token).await.unwrap();
+        let root_policy = policy_store
+            .get_policy("root", PolicyType::Token)
+            .await
+            .unwrap();
         assert!(root_policy.is_some());
         let root_policy = root_policy.unwrap();
         assert_eq!(root_policy.name, "root");
 
         // Set should fail
-        let result = policy_store.set_policy(Policy { name: "root".into(), ..Default::default() }).await;
+        let result = policy_store
+            .set_policy(Policy {
+                name: "root".into(),
+                ..Default::default()
+            })
+            .await;
         assert!(result.is_err());
 
         // Delete should fail
@@ -782,7 +877,10 @@ mod mod_policy_store_tests {
         assert!(result.is_err());
     }
 
-    #[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+    #[maybe_async::test(
+        feature = "sync_handler",
+        async(all(not(feature = "sync_handler")), tokio::test)
+    )]
     async fn test_policy_new_acl() {
         let (_, core, _) = new_unseal_test_rusty_vault("test_policy_new_acl").await;
 
@@ -814,15 +912,27 @@ mod mod_policy_store_tests {
         policy_store.load_default_acl_policy().await.unwrap();
 
         // Create a new ACL
-        let acl = policy_store.new_acl(&vec![policy1_name.to_string(), policy2_name.to_string()], None).await.unwrap();
+        let acl = policy_store
+            .new_acl(
+                &vec![policy1_name.to_string(), policy2_name.to_string()],
+                None,
+            )
+            .await
+            .unwrap();
 
         // Verify the ACL contains the policies
         assert_eq!(
-            acl.prefix_rules.get_ancestor_value("secret/data/test1/kk/vv").unwrap().capabilities_bitmap,
+            acl.prefix_rules
+                .get_ancestor_value("secret/data/test1/kk/vv")
+                .unwrap()
+                .capabilities_bitmap,
             Capability::Read.to_bits() | Capability::List.to_bits()
         );
         assert_eq!(
-            acl.exact_rules.get("secret/data/test2").unwrap().capabilities_bitmap,
+            acl.exact_rules
+                .get("secret/data/test2")
+                .unwrap()
+                .capabilities_bitmap,
             Capability::Create.to_bits() | Capability::Delete.to_bits()
         );
     }

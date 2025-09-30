@@ -4,7 +4,7 @@
 use clap::{Parser, Subcommand};
 use sysexits::ExitCode;
 
-use crate::{cli::command::CommandExecutor, EXIT_CODE_INSUFFICIENT_PARAMS, VERSION};
+use crate::{EXIT_CODE_INSUFFICIENT_PARAMS, VERSION, cli::command::CommandExecutor};
 
 pub mod command;
 pub mod config;
@@ -27,14 +27,6 @@ pub enum Commands {
     Server(command::server::Server),
     Status(command::status::Status),
     Operator(command::operator::Operator),
-    Read(command::read::Read),
-    Write(command::write::Write),
-    Delete(command::delete::Delete),
-    List(command::list::List),
-    Login(command::login::Login),
-    Auth(command::auth::Auth),
-    Policy(command::policy::Policy),
-    Secrets(command::secrets::Secrets),
 }
 
 impl Commands {
@@ -43,14 +35,6 @@ impl Commands {
             Commands::Server(server) => server.execute(),
             Commands::Status(status) => status.execute(),
             Commands::Operator(operator) => operator.execute(),
-            Commands::Read(read) => read.execute(),
-            Commands::Write(write) => write.execute(),
-            Commands::Delete(delete) => delete.execute(),
-            Commands::List(list) => list.execute(),
-            Commands::Login(login) => login.execute(),
-            Commands::Auth(auth) => auth.execute(),
-            Commands::Policy(policy) => policy.execute(),
-            Commands::Secrets(secrets) => secrets.execute(),
         }
     }
 }
@@ -59,7 +43,7 @@ impl Cli {
     /// Do real jobs.
     #[inline]
     pub fn run(&mut self) -> ExitCode {
-        if let Some(ref mut cmd) = &mut self.command {
+        if let Some(cmd) = &mut self.command {
             return cmd.execute();
         }
 

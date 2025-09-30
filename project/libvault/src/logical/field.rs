@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, time::Duration};
 use enum_map::Enum;
 use humantime::parse_duration;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use strum::{Display, EnumString};
 
 use crate::errors::RvError;
@@ -81,10 +81,10 @@ impl FieldTrait for Value {
             return true;
         }
 
-        if let Some(secs_str) = self.as_str() {
-            if secs_str.parse::<u64>().ok().is_some() || parse_duration(secs_str).is_ok() {
-                return true;
-            }
+        if let Some(secs_str) = self.as_str()
+            && (secs_str.parse::<u64>().ok().is_some() || parse_duration(secs_str).is_ok())
+        {
+            return true;
         }
 
         false
@@ -211,7 +211,14 @@ impl FieldTrait for Value {
 
         let value = self.as_str();
         if value.is_some() {
-            return Some(value.unwrap().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
+            return Some(
+                value
+                    .unwrap()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+            );
         }
 
         None
@@ -231,7 +238,8 @@ impl FieldTrait for Value {
         }
 
         if let Some(value) = self.as_str() {
-            let map: HashMap<String, String> = serde_json::from_str(value).unwrap_or(HashMap::new());
+            let map: HashMap<String, String> =
+                serde_json::from_str(value).unwrap_or(HashMap::new());
             return Some(map);
         }
 
@@ -241,7 +249,12 @@ impl FieldTrait for Value {
 
 impl Field {
     pub fn new() -> Self {
-        Self { required: false, field_type: FieldType::Str, default: json!(null), description: String::new() }
+        Self {
+            required: false,
+            field_type: FieldType::Str,
+            default: json!(null),
+            description: String::new(),
+        }
     }
 
     pub fn check_data_type(&self, data: &Value) -> bool {
@@ -362,7 +375,7 @@ impl fmt::Debug for Field {
 
 #[cfg(test)]
 mod test {
-    use serde_json::{json, Number, Value};
+    use serde_json::{Number, Value, json};
 
     use super::*;
 
@@ -371,12 +384,18 @@ mod test {
         let mut field = Field::new();
         field.default = json!("foo");
         assert!(field.get_default().is_ok());
-        assert_eq!(field.get_default().unwrap(), Value::String("foo".to_string()));
+        assert_eq!(
+            field.get_default().unwrap(),
+            Value::String("foo".to_string())
+        );
         field.field_type = FieldType::Int;
         assert!(field.get_default().is_err());
         field.default = json!(443);
         assert!(field.get_default().is_ok());
-        assert_eq!(field.get_default().unwrap(), Value::Number(Number::from(443)));
+        assert_eq!(
+            field.get_default().unwrap(),
+            Value::Number(Number::from(443))
+        );
         field.field_type = FieldType::Bool;
         assert!(field.get_default().is_err());
         field.default = json!(false);
@@ -408,22 +427,49 @@ mod test {
         field.default = json!("10");
         println!("{:?}", field.get_default());
         assert!(field.get_default().is_ok());
-        assert_eq!(field.get_default().unwrap().as_duration().unwrap(), Duration::from_secs(10));
+        assert_eq!(
+            field.get_default().unwrap().as_duration().unwrap(),
+            Duration::from_secs(10)
+        );
         field.field_type = FieldType::CommaStringSlice;
         field.default = json!([1, 2, 3]);
         assert!(field.get_default().is_ok());
         let val_int = json!([1, 2, 3]);
         let val_str = vec!["1", "2", "3"];
         let val = field.get_default().unwrap();
-        assert_eq!(val.as_comma_string_slice(), Some(val_str.iter().map(|&s| s.to_string()).collect::<Vec<String>>()));
+        assert_eq!(
+            val.as_comma_string_slice(),
+            Some(
+                val_str
+                    .iter()
+                    .map(|&s| s.to_string())
+                    .collect::<Vec<String>>()
+            )
+        );
         assert_eq!(val, val_int);
         field.default = json!("a,b,c");
         let val_str = vec!["a", "b", "c"];
         let val = field.get_default().unwrap();
-        assert_eq!(val.as_comma_string_slice(), Some(val_str.iter().map(|&s| s.to_string()).collect::<Vec<String>>()));
+        assert_eq!(
+            val.as_comma_string_slice(),
+            Some(
+                val_str
+                    .iter()
+                    .map(|&s| s.to_string())
+                    .collect::<Vec<String>>()
+            )
+        );
         field.default = json!("a ,, b , c,");
         let val = field.get_default().unwrap();
-        assert_eq!(val.as_comma_string_slice(), Some(val_str.iter().map(|&s| s.to_string()).collect::<Vec<String>>()));
+        assert_eq!(
+            val.as_comma_string_slice(),
+            Some(
+                val_str
+                    .iter()
+                    .map(|&s| s.to_string())
+                    .collect::<Vec<String>>()
+            )
+        );
     }
 
     #[test]
@@ -456,35 +502,61 @@ mod test {
         assert!(val.is_comma_string_slice());
         assert_eq!(
             val.as_comma_string_slice(),
-            Some(vec!["aa".to_string(), "bb".to_string(), "cc".to_string(), "dd".to_string()])
+            Some(vec![
+                "aa".to_string(),
+                "bb".to_string(),
+                "cc".to_string(),
+                "dd".to_string()
+            ])
         );
 
         val = json!(["aaa", " bbb", "ccc ", " ddd"]);
         assert!(val.is_comma_string_slice());
         assert_eq!(
             val.as_comma_string_slice(),
-            Some(vec!["aaa".to_string(), "bbb".to_string(), "ccc".to_string(), "ddd".to_string()])
+            Some(vec![
+                "aaa".to_string(),
+                "bbb".to_string(),
+                "ccc".to_string(),
+                "ddd".to_string()
+            ])
         );
 
         val = json!([11, 22, 33, 44]);
         assert!(val.is_comma_string_slice());
         assert_eq!(
             val.as_comma_string_slice(),
-            Some(vec!["11".to_string(), "22".to_string(), "33".to_string(), "44".to_string()])
+            Some(vec![
+                "11".to_string(),
+                "22".to_string(),
+                "33".to_string(),
+                "44".to_string()
+            ])
         );
 
         val = json!([11, "aa22", 33, 44]);
         assert!(val.is_comma_string_slice());
         assert_eq!(
             val.as_comma_string_slice(),
-            Some(vec!["11".to_string(), "aa22".to_string(), "33".to_string(), "44".to_string()])
+            Some(vec![
+                "11".to_string(),
+                "aa22".to_string(),
+                "33".to_string(),
+                "44".to_string()
+            ])
         );
 
         val = json!("aa, bb, cc ,dd, , 88,");
         assert!(val.is_comma_string_slice());
         assert_eq!(
             val.as_comma_string_slice(),
-            Some(vec!["aa".to_string(), "bb".to_string(), "cc".to_string(), "dd".to_string(), "88".to_string()])
+            Some(vec![
+                "aa".to_string(),
+                "bb".to_string(),
+                "cc".to_string(),
+                "dd".to_string(),
+                "88".to_string()
+            ])
         );
 
         let mut map: HashMap<String, String> = HashMap::new();

@@ -27,7 +27,7 @@ use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
-    modules::crypto::{AEADCipher, AESKeySize, BlockCipher, CipherMode, AES},
+    modules::crypto::{AEADCipher, AES, AESKeySize, BlockCipher, CipherMode},
     shamir::ShamirSecret,
     utils::BHashSet,
 };
@@ -199,16 +199,34 @@ where
 
         let serialized = serde_json::to_vec(&data).unwrap();
 
-        let now_ms = Utc::now().timestamp_millis().to_string().as_bytes().to_vec();
+        let now_ms = Utc::now()
+            .timestamp_millis()
+            .to_string()
+            .as_bytes()
+            .to_vec();
 
-        let mut aes_encrypter = AES::new(true, Some(AESKeySize::AES256), Some(CipherMode::GCM), None, None)
+        let mut aes_encrypter = AES::new(
+            true,
+            Some(AESKeySize::AES256),
+            Some(CipherMode::GCM),
+            None,
+            None,
+        )
+        .map_err(|_| SealBoxError::EncryptionFailed)?;
+
+        aes_encrypter
+            .set_aad(now_ms.clone())
+            .map_err(|_| SealBoxError::EncryptionFailed)?;
+        let encrypted = aes_encrypter
+            .encrypt(&serialized)
             .map_err(|_| SealBoxError::EncryptionFailed)?;
 
-        aes_encrypter.set_aad(now_ms.clone()).map_err(|_| SealBoxError::EncryptionFailed)?;
-        let encrypted = aes_encrypter.encrypt(&serialized).map_err(|_| SealBoxError::EncryptionFailed)?;
-
         let mut tag: [u8; 16] = [0; 16];
-        tag[..16].copy_from_slice(&aes_encrypter.get_tag().map_err(|_| SealBoxError::EncryptionFailed)?);
+        tag[..16].copy_from_slice(
+            &aes_encrypter
+                .get_tag()
+                .map_err(|_| SealBoxError::EncryptionFailed)?,
+        );
 
         let mut key: [u8; 32] = [0; 32];
         key[..32].copy_from_slice(&aes_encrypter.get_key_iv().0);
@@ -332,12 +350,19 @@ where
         )
         .map_err(|_| SealBoxError::DecryptionFailed)?;
 
-        aes_decrypter.set_aad(self.aad.to_vec()).map_err(|_| SealBoxError::DecryptionFailed)?;
-        aes_decrypter.set_tag(self.tag.to_vec()).map_err(|_| SealBoxError::DecryptionFailed)?;
+        aes_decrypter
+            .set_aad(self.aad.to_vec())
+            .map_err(|_| SealBoxError::DecryptionFailed)?;
+        aes_decrypter
+            .set_tag(self.tag.to_vec())
+            .map_err(|_| SealBoxError::DecryptionFailed)?;
 
-        let decrypted = aes_decrypter.decrypt(&self.sealed_data).map_err(|_| SealBoxError::DecryptionFailed)?;
+        let decrypted = aes_decrypter
+            .decrypt(&self.sealed_data)
+            .map_err(|_| SealBoxError::DecryptionFailed)?;
 
-        let value: T = serde_json::from_slice(&decrypted).map_err(|_| SealBoxError::DecryptionFailed)?;
+        let value: T =
+            serde_json::from_slice(&decrypted).map_err(|_| SealBoxError::DecryptionFailed)?;
 
         let key: [u8; 32] = key.try_into().map_err(|_| SealBoxError::UnsealFailed)?;
 
@@ -424,11 +449,11 @@ where
     /// systems or when implementing strict access control policies.
     pub fn unseal_once(&mut self, unseal_key: &[u8]) -> Result<(), SealBoxError> {
         let ret = self.do_unseal(unseal_key);
-        if ret.is_ok() {
-            if let Some(shares) = self.shares.as_ref() {
-                for share in shares.iter() {
-                    self.deprecated_shares.insert(share);
-                }
+        if ret.is_ok()
+            && let Some(shares) = self.shares.as_ref()
+        {
+            for share in shares.iter() {
+                self.deprecated_shares.insert(share);
             }
         }
 
@@ -513,7 +538,11 @@ mod tests {
 
     #[test]
     fn test_sealbox_new() {
-        let test_data = TestData { message: "Hello, SealBox!".to_string(), number: 42, flag: true };
+        let test_data = TestData {
+            message: "Hello, SealBox!".to_string(),
+            number: 42,
+            flag: true,
+        };
 
         let sealbox = SealBox::new(test_data.clone(), 2, 3);
         assert!(sealbox.is_ok());
@@ -527,7 +556,11 @@ mod tests {
 
     #[test]
     fn test_sealbox_unseal_success() {
-        let test_data = TestData { message: "Test message".to_string(), number: 123, flag: false };
+        let test_data = TestData {
+            message: "Test message".to_string(),
+            number: 123,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
@@ -543,7 +576,10 @@ mod tests {
         assert!(sealbox.key.is_none());
         assert!(sealbox.value.is_none());
 
-        assert!(matches!(sealbox.unseal(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         assert!(sealbox.unseal(&shares[1]).is_ok());
 
         assert!(sealbox.is_unsealed());
@@ -553,22 +589,36 @@ mod tests {
 
     #[test]
     fn test_sealbox_unseal_insufficient_shares() {
-        let test_data = TestData { message: "Test message".to_string(), number: 123, flag: false };
+        let test_data = TestData {
+            message: "Test message".to_string(),
+            number: 123,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data, 3, 5).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
 
         sealbox.seal();
 
-        assert!(matches!(sealbox.unseal(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
-        assert!(matches!(sealbox.unseal(&shares[1]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
+        assert!(matches!(
+            sealbox.unseal(&shares[1]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
 
         assert!(!sealbox.is_unsealed());
     }
 
     #[test]
     fn test_sealbox_unseal_invalid_shares() {
-        let test_data = TestData { message: "Test message".to_string(), number: 123, flag: false };
+        let test_data = TestData {
+            message: "Test message".to_string(),
+            number: 123,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data, 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
@@ -576,13 +626,23 @@ mod tests {
         sealbox.seal();
 
         let invalid_share = vec![0u8; 32];
-        assert!(matches!(sealbox.unseal(&invalid_share).unwrap_err(), SealBoxError::Unsealing));
-        assert!(matches!(sealbox.unseal(&shares[0]).unwrap_err(), SealBoxError::UnsealFailed));
+        assert!(matches!(
+            sealbox.unseal(&invalid_share).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
+        assert!(matches!(
+            sealbox.unseal(&shares[0]).unwrap_err(),
+            SealBoxError::UnsealFailed
+        ));
     }
 
     #[test]
     fn test_sealbox_seal() {
-        let test_data = TestData { message: "Test message".to_string(), number: 123, flag: false };
+        let test_data = TestData {
+            message: "Test message".to_string(),
+            number: 123,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data, 2, 3).unwrap();
 
@@ -599,22 +659,39 @@ mod tests {
 
     #[test]
     fn test_sealbox_already_unsealed() {
-        let test_data = TestData { message: "Test message".to_string(), number: 123, flag: false };
+        let test_data = TestData {
+            message: "Test message".to_string(),
+            number: 123,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data, 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
 
-        assert!(matches!(sealbox.unseal(&shares[0]).unwrap_err(), SealBoxError::NotSealed));
-        assert!(matches!(sealbox.unseal(&shares[1]).unwrap_err(), SealBoxError::NotSealed));
+        assert!(matches!(
+            sealbox.unseal(&shares[0]).unwrap_err(),
+            SealBoxError::NotSealed
+        ));
+        assert!(matches!(
+            sealbox.unseal(&shares[1]).unwrap_err(),
+            SealBoxError::NotSealed
+        ));
 
         assert!(sealbox.is_unsealed());
 
-        assert!(matches!(sealbox.unseal(&shares[2]).unwrap_err(), SealBoxError::NotSealed));
+        assert!(matches!(
+            sealbox.unseal(&shares[2]).unwrap_err(),
+            SealBoxError::NotSealed
+        ));
     }
 
     #[test]
     fn test_sealbox_get_mut() {
-        let test_data = TestData { message: "Original message".to_string(), number: 100, flag: true };
+        let test_data = TestData {
+            message: "Original message".to_string(),
+            number: 100,
+            flag: true,
+        };
 
         let mut sealbox = SealBox::new(test_data, 2, 3).unwrap();
 
@@ -654,7 +731,10 @@ mod tests {
 
         sealbox.seal();
 
-        assert!(matches!(sealbox.unseal(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         assert!(sealbox.unseal(&shares[1]).is_ok());
 
         let retrieved_data = sealbox.get().unwrap();
@@ -663,11 +743,24 @@ mod tests {
 
     #[test]
     fn test_sealbox_edge_cases() {
-        let empty_data = TestData { message: "".to_string(), number: 0, flag: false };
+        let empty_data = TestData {
+            message: "".to_string(),
+            number: 0,
+            flag: false,
+        };
 
-        assert!(matches!(SealBox::new(empty_data.clone(), 1, 1), Err(SealBoxError::ShamirSecretSplitFailed)));
-        assert!(matches!(SealBox::new(empty_data.clone(), 2, 1), Err(SealBoxError::ShamirSecretSplitFailed)));
-        assert!(matches!(SealBox::new(empty_data.clone(), 1, 2), Err(SealBoxError::ShamirSecretSplitFailed)));
+        assert!(matches!(
+            SealBox::new(empty_data.clone(), 1, 1),
+            Err(SealBoxError::ShamirSecretSplitFailed)
+        ));
+        assert!(matches!(
+            SealBox::new(empty_data.clone(), 2, 1),
+            Err(SealBoxError::ShamirSecretSplitFailed)
+        ));
+        assert!(matches!(
+            SealBox::new(empty_data.clone(), 1, 2),
+            Err(SealBoxError::ShamirSecretSplitFailed)
+        ));
 
         assert!(SealBox::new(empty_data.clone(), 2, 2).is_ok());
         assert!(SealBox::new(empty_data.clone(), 3, 3).is_ok());
@@ -675,7 +768,11 @@ mod tests {
 
     #[test]
     fn test_sealbox_serialization() {
-        let test_data = TestData { message: "Serialization test".to_string(), number: 42, flag: true };
+        let test_data = TestData {
+            message: "Serialization test".to_string(),
+            number: 42,
+            flag: true,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 2, 3).unwrap();
 
@@ -699,7 +796,11 @@ mod tests {
 
     #[test]
     fn test_unseal_once_basic() {
-        let test_data = TestData { message: "Unseal once test".to_string(), number: 999, flag: true };
+        let test_data = TestData {
+            message: "Unseal once test".to_string(),
+            number: 999,
+            flag: true,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
@@ -709,7 +810,10 @@ mod tests {
         assert!(!sealbox.is_unsealed());
 
         // First share should return Unsealing error
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
 
         // Second share should successfully unseal
         assert!(sealbox.unseal_once(&shares[1]).is_ok());
@@ -722,44 +826,70 @@ mod tests {
 
     #[test]
     fn test_unseal_once_share_deprecation() {
-        let test_data = TestData { message: "Share deprecation test".to_string(), number: 777, flag: false };
+        let test_data = TestData {
+            message: "Share deprecation test".to_string(),
+            number: 777,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
 
         // Seal and unseal once
         sealbox.seal();
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         assert!(sealbox.unseal_once(&shares[1]).is_ok());
 
         // Seal again
         sealbox.seal();
 
         // Previously used shares should be deprecated
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
-        assert!(matches!(sealbox.unseal_once(&shares[1]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[1]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
 
         // Only unused shares should work
-        assert!(matches!(sealbox.unseal_once(&shares[2]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[2]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         // Need a fresh share since we only have 3 shares total and 2 are deprecated
         // This demonstrates that once shares are used in unseal_once, they cannot be reused
     }
 
     #[test]
     fn test_unseal_once_vs_unseal_behavior() {
-        let test_data = TestData { message: "Behavior comparison".to_string(), number: 555, flag: true };
+        let test_data = TestData {
+            message: "Behavior comparison".to_string(),
+            number: 555,
+            flag: true,
+        };
 
         // Test regular unseal (allows reuse)
         let mut sealbox1 = SealBox::new(test_data.clone(), 2, 3).unwrap();
         let shares1 = sealbox1.generate_shares().unwrap().clone();
 
         sealbox1.seal();
-        assert!(matches!(sealbox1.unseal(&shares1[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox1.unseal(&shares1[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         assert!(sealbox1.unseal(&shares1[1]).is_ok());
 
         sealbox1.seal();
         // Same shares can be reused with regular unseal
-        assert!(matches!(sealbox1.unseal(&shares1[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox1.unseal(&shares1[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         assert!(sealbox1.unseal(&shares1[1]).is_ok());
 
         // Test unseal_once (prevents reuse)
@@ -767,18 +897,31 @@ mod tests {
         let shares2 = sealbox2.generate_shares().unwrap().clone();
 
         sealbox2.seal();
-        assert!(matches!(sealbox2.unseal_once(&shares2[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox2.unseal_once(&shares2[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         assert!(sealbox2.unseal_once(&shares2[1]).is_ok());
 
         sealbox2.seal();
         // Same shares cannot be reused with unseal_once
-        assert!(matches!(sealbox2.unseal_once(&shares2[0]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
-        assert!(matches!(sealbox2.unseal_once(&shares2[1]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
+        assert!(matches!(
+            sealbox2.unseal_once(&shares2[0]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
+        assert!(matches!(
+            sealbox2.unseal_once(&shares2[1]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
     }
 
     #[test]
     fn test_unseal_once_insufficient_shares() {
-        let test_data = TestData { message: "Insufficient shares test".to_string(), number: 333, flag: false };
+        let test_data = TestData {
+            message: "Insufficient shares test".to_string(),
+            number: 333,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 3, 5).unwrap(); // Need 3 shares
         let shares = sealbox.generate_shares().unwrap().clone();
@@ -786,10 +929,16 @@ mod tests {
         sealbox.seal();
 
         // Try with only 1 share
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
 
         // Try with 2 shares (still insufficient)
-        assert!(matches!(sealbox.unseal_once(&shares[1]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[1]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
 
         // With 3 shares, should succeed
         assert!(sealbox.unseal_once(&shares[2]).is_ok());
@@ -797,18 +946,37 @@ mod tests {
 
         // All used shares should be deprecated
         sealbox.seal();
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
-        assert!(matches!(sealbox.unseal_once(&shares[1]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
-        assert!(matches!(sealbox.unseal_once(&shares[2]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[1]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[2]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
 
         // Only unused shares should work
-        assert!(matches!(sealbox.unseal_once(&shares[3]).unwrap_err(), SealBoxError::Unsealing));
-        assert!(matches!(sealbox.unseal_once(&shares[4]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[3]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[4]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
     }
 
     #[test]
     fn test_unseal_once_already_unsealed() {
-        let test_data = TestData { message: "Already unsealed test".to_string(), number: 111, flag: true };
+        let test_data = TestData {
+            message: "Already unsealed test".to_string(),
+            number: 111,
+            flag: true,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
@@ -817,12 +985,19 @@ mod tests {
         assert!(sealbox.is_unsealed());
 
         // Should return NotSealed error
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::NotSealed));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::NotSealed
+        ));
     }
 
     #[test]
     fn test_unseal_once_invalid_shares() {
-        let test_data = TestData { message: "Invalid shares test".to_string(), number: 888, flag: false };
+        let test_data = TestData {
+            message: "Invalid shares test".to_string(),
+            number: 888,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
@@ -833,15 +1008,25 @@ mod tests {
         let mut corrupted_share = shares[0].clone();
         corrupted_share[0] ^= 0xFF; // Flip bits to corrupt the share
 
-        assert!(matches!(sealbox.unseal_once(&corrupted_share).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&corrupted_share).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
 
         // Try with valid share after corruption attempt
-        assert!(matches!(sealbox.unseal_once(&shares[1]).unwrap_err(), SealBoxError::DecryptionFailed));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[1]).unwrap_err(),
+            SealBoxError::DecryptionFailed
+        ));
     }
 
     #[test]
     fn test_unseal_once_share_cleanup() {
-        let test_data = TestData { message: "Share cleanup test".to_string(), number: 444, flag: true };
+        let test_data = TestData {
+            message: "Share cleanup test".to_string(),
+            number: 444,
+            flag: true,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
@@ -849,7 +1034,10 @@ mod tests {
         sealbox.seal();
 
         // Add first share
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
 
         // Verify shares are being collected internally (can't directly access private field)
         // But we can test the behavior: adding another share should complete the unsealing
@@ -858,38 +1046,69 @@ mod tests {
         // After successful unsealing, internal shares should be cleared
         // This is verified by the fact that the shares are deprecated
         sealbox.seal();
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
-        assert!(matches!(sealbox.unseal_once(&shares[1]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[1]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
     }
 
     #[test]
     fn test_unseal_once_mixed_with_regular_unseal() {
-        let test_data = TestData { message: "Mixed unseal test".to_string(), number: 666, flag: false };
+        let test_data = TestData {
+            message: "Mixed unseal test".to_string(),
+            number: 666,
+            flag: false,
+        };
 
         let mut sealbox = SealBox::new(test_data.clone(), 2, 3).unwrap();
         let shares = sealbox.generate_shares().unwrap().clone();
 
         // First, use regular unseal
         sealbox.seal();
-        assert!(matches!(sealbox.unseal(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         assert!(sealbox.unseal(&shares[1]).is_ok());
 
         // Then use unseal_once - should work since shares weren't deprecated by regular unseal
         sealbox.seal();
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         assert!(sealbox.unseal_once(&shares[1]).is_ok());
 
         // Now shares should be deprecated
         sealbox.seal();
-        assert!(matches!(sealbox.unseal_once(&shares[0]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
-        assert!(matches!(sealbox.unseal_once(&shares[1]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[0]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
+        assert!(matches!(
+            sealbox.unseal_once(&shares[1]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
 
         // But regular unseal should also respect deprecation
-        assert!(matches!(sealbox.unseal(&shares[0]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
-        assert!(matches!(sealbox.unseal(&shares[1]).unwrap_err(), SealBoxError::UnsealKeyDeprecated));
+        assert!(matches!(
+            sealbox.unseal(&shares[0]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
+        assert!(matches!(
+            sealbox.unseal(&shares[1]).unwrap_err(),
+            SealBoxError::UnsealKeyDeprecated
+        ));
 
         // Only unused share should work
-        assert!(matches!(sealbox.unseal(&shares[2]).unwrap_err(), SealBoxError::Unsealing));
+        assert!(matches!(
+            sealbox.unseal(&shares[2]).unwrap_err(),
+            SealBoxError::Unsealing
+        ));
         // Need another share but we've used them all in this test scenario
     }
 }

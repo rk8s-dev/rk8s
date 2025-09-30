@@ -61,17 +61,18 @@ fn main() {
         Err(_) => return,
     };
 
-    if let Some(bin_table_value) = cargo_toml.get("bin") {
-        if let Some(bin_table_array) = bin_table_value.as_array() {
-            for bin_entry in bin_table_array {
-                if let Some(bin_entry_table) = bin_entry.as_table() {
-                    if let Some(name_value) = bin_entry_table.get("name") {
-                        if let Some(name_str) = name_value.as_str() {
-                            println!("cargo:rustc-env=CARGO_BIN_NAME={name_str}");
-                        }
-                    }
-                }
-            }
-        }
-    }
+    cargo_toml
+        .get("bin")
+        .and_then(|bin_table_value| bin_table_value.as_array())
+        .map(|bin_table_array| {
+            bin_table_array.iter().for_each(|bin_entry| {
+                bin_entry
+                    .as_table()
+                    .and_then(|bin_entry_table| bin_entry_table.get("name"))
+                    .and_then(|name_value| name_value.as_str())
+                    .map(|name_str| println!("cargo:rustc-env=CARGO_BIN_NAME={name_str}"))
+                    .unwrap_or(())
+            })
+        })
+        .unwrap_or(());
 }
