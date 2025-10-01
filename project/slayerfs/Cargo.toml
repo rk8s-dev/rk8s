@@ -22,6 +22,8 @@ hex = "0.4"
 moka = { version = "0.12", features = ["future"] }
 dirs = "6"
 sha2 = "0.10"
+anyhow = "1.0.100"
+tempfile = "3"
 
 
 [dev-dependencies]

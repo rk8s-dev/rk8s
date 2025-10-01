@@ -3,21 +3,18 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-filegroup(
-    name = "slayerfs-vendor",
-    srcs = glob(["**/**"]),
-    out = "vendor",
-)
-
 cargo.rust_binary(
     name = "slayerfs",
-    srcs = [":slayerfs-vendor"],
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
     crate = "slayerfs",
-    crate_root = "vendor/src/main.rs",
+    crate_root = "src/main.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "slayerfs",
-        "CARGO_MANIFEST_DIR": "vendor",
+        "CARGO_MANIFEST_DIR": ".",
         "CARGO_PKG_AUTHORS": "rk8s-dev team",
         "CARGO_PKG_DESCRIPTION": "High-performance Rust & Layers-aware Distributed Filesystem",
         "CARGO_PKG_NAME": "slayerfs",
@@ -28,15 +25,18 @@ cargo.rust_binary(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    named_deps = {
+        "async_trait": "//third-party/rust/crates/async-trait/0.1.89:async-trait",
+        "aws_config": "//third-party/rust/crates/aws-config/1.8.6:aws-config",
+        "aws_sdk_s3": "//third-party/rust/crates/aws-sdk-s3/1.106.0:aws-sdk-s3",
+        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/async-trait/0.1.89:async-trait",
-        "//third-party/rust/crates/aws-config/1.8.6:aws-config",
-        "//third-party/rust/crates/aws-sdk-s3/1.106.0:aws-sdk-s3",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
         "//third-party/rust/crates/base64/0.21.7:base64",
         "//third-party/rust/crates/bytes/1.10.1:bytes",
         "//third-party/rust/crates/dirs/6.0.0:dirs",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
         "//third-party/rust/crates/futures/0.3.31:futures",
         "//third-party/rust/crates/hex/0.4.3:hex",
         "//third-party/rust/crates/libc/0.2.176:libc",
@@ -44,19 +44,23 @@ cargo.rust_binary(
         "//third-party/rust/crates/moka/0.12.11:moka",
         "//third-party/rust/crates/rfuse3/0.0.3:rfuse3",
         "//third-party/rust/crates/sha2/0.10.9:sha2",
+        "//third-party/rust/crates/tempfile/3.23.0:tempfile",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
     ],
 )
 
 cargo.rust_library(
     name = "libslayerfs",
-    srcs = [":slayerfs-vendor"],
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
     crate = "slayerfs",
-    crate_root = "vendor/src/lib.rs",
+    crate_root = "src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "slayerfs",
-        "CARGO_MANIFEST_DIR": "vendor",
+        "CARGO_MANIFEST_DIR": ".",
         "CARGO_PKG_AUTHORS": "rk8s-dev team",
         "CARGO_PKG_DESCRIPTION": "High-performance Rust & Layers-aware Distributed Filesystem",
         "CARGO_PKG_NAME": "slayerfs",
@@ -67,15 +71,18 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    named_deps = {
+        "async_trait": "//third-party/rust/crates/async-trait/0.1.89:async-trait",
+        "aws_config": "//third-party/rust/crates/aws-config/1.8.6:aws-config",
+        "aws_sdk_s3": "//third-party/rust/crates/aws-sdk-s3/1.106.0:aws-sdk-s3",
+        "futures_util": "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+    },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/async-trait/0.1.89:async-trait",
-        "//third-party/rust/crates/aws-config/1.8.6:aws-config",
-        "//third-party/rust/crates/aws-sdk-s3/1.106.0:aws-sdk-s3",
+        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
         "//third-party/rust/crates/base64/0.21.7:base64",
         "//third-party/rust/crates/bytes/1.10.1:bytes",
         "//third-party/rust/crates/dirs/6.0.0:dirs",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
         "//third-party/rust/crates/futures/0.3.31:futures",
         "//third-party/rust/crates/hex/0.4.3:hex",
         "//third-party/rust/crates/libc/0.2.176:libc",
@@ -83,6 +90,7 @@ cargo.rust_library(
         "//third-party/rust/crates/moka/0.12.11:moka",
         "//third-party/rust/crates/rfuse3/0.0.3:rfuse3",
         "//third-party/rust/crates/sha2/0.10.9:sha2",
+        "//third-party/rust/crates/tempfile/3.23.0:tempfile",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
     ],
 )

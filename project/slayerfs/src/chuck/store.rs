@@ -3,11 +3,13 @@
 use super::chunk::ChunkLayout;
 use crate::{
     cadapter::client::{ObjectBackend, ObjectClient},
-    chuck::cache::CacheItem,
+    chuck::cache::{ChunksCache, ChunksCacheConfig},
 };
+use anyhow;
 use async_trait::async_trait;
+use futures::executor::block_on;
 use hex::encode;
-use libc::{KEYCTL_CAPS0_CAPABILITIES, SYS_remap_file_pages};
+use libc::{KEYCTL_CAPS0_CAPABILITIES, SYS_remap_file_pages, VM_VFS_CACHE_PRESSURE};
 use moka::{Entry, ops::compute::Op};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf};
@@ -111,8 +113,7 @@ impl BlockStore for InMemoryBlockStore {
 /// 通过 cadapter::client 后端实现的 BlockStore（键空间：chunks/{chunk_id}/{block_index}）。
 pub struct ObjectBlockStore<B: ObjectBackend> {
     client: ObjectClient<B>,
-    block_cache: moka::future::Cache<String, CacheItem>,
-    cache_dir: PathBuf,
+    block_cache: ChunksCache,
 }
 
 impl<B: ObjectBackend> ObjectBlockStore<B> {
@@ -121,160 +122,33 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
 
         let _ = fs::create_dir_all(cache_dir.clone());
 
+        let block_cache = block_on(ChunksCache::new_with_config(ChunksCacheConfig::default()))
+            .map_err(|e| anyhow::anyhow!("Failed to create cache: {}", e))
+            .unwrap();
         Self {
             client,
-            block_cache: moka::future::Cache::new(10_000),
-            cache_dir,
+            block_cache,
         }
+    }
+    /// Creates a new ObjectBlockStore with custom cache configuration
+    #[allow(dead_code)]
+    pub fn new_with_config(
+        client: ObjectClient<B>,
+        config: ChunksCacheConfig,
+    ) -> anyhow::Result<Self> {
+        let cache_dir = dirs::cache_dir().unwrap().join("slayerfs");
+        let _ = fs::create_dir_all(cache_dir.clone());
+
+        let block_cache = block_on(ChunksCache::new_with_config(config))
+            .map_err(|e| anyhow::anyhow!("Failed to create cache: {}", e))?;
+        Ok(Self {
+            client,
+            block_cache,
+        })
     }
 
     fn key_for(chunk_id: i64, block_index: u32) -> String {
         format!("chunks/{chunk_id}/{block_index}")
-    }
-
-    fn file_name_from_key(key: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(key.as_bytes());
-        encode(hasher.finalize())
-    }
-    async fn handle_existing_cache_entry(
-        &self,
-        cache_entry: &Entry<String, CacheItem>, // 假设 CacheEntry 类型
-        key: &str,
-        start: usize,
-        end: usize,
-        buf: &mut [u8],
-    ) -> Op<CacheItem> {
-        let local_etag = cache_entry.value().etag.clone();
-        let remote_etag = self.client.get_etag(key).await.unwrap();
-        let mut file_path = cache_entry.value().file_path.clone();
-
-        if local_etag == remote_etag {
-            self.read_from_valid_cache(file_path.clone(), start, buf, key)
-                .await
-        } else {
-            file_path = self.cache_dir.join(Self::file_name_from_key(key));
-            self.fetch_from_object_store(key, start, end, buf, file_path.clone())
-                .await
-        };
-
-        Op::Put(CacheItem {
-            file_path,
-            etag: remote_etag,
-        })
-    }
-
-    async fn handle_new_cache_entry(
-        &self,
-        key: &str,
-        start: usize,
-        end: usize,
-        buf: &mut [u8],
-        layout: ChunkLayout,
-    ) -> Op<CacheItem> {
-        let file_path = self.cache_dir.join(Self::file_name_from_key(key));
-        let object = self
-            .fetch_object_or_zero(key, layout.block_size as usize)
-            .await;
-        let etag = self.client.get_etag(key).await.unwrap();
-
-        buf.copy_from_slice(&object[start..end]);
-        self.write_to_cache_async(file_path.clone(), object).await;
-
-        Op::Put(CacheItem { file_path, etag })
-    }
-
-    async fn read_from_valid_cache(
-        &self,
-        file_path: PathBuf,
-        start: usize,
-        buf: &mut [u8],
-        key: &str,
-    ) {
-        let mut file = match tokio::fs::File::open(file_path.clone()).await {
-            Ok(file) => file,
-            Err(e) => {
-                panic!("failed to open cache file: {e}");
-            }
-        };
-
-        if let Err(e) = file.seek(SeekFrom::Start(start as u64)).await {
-            panic!("failed to seek in cache file: {e}");
-        }
-
-        match file.read_exact(buf).await {
-            Ok(_) => {
-                // println!("hits");
-            }
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                println!("cache file corrupted, falling back to object store");
-                self.handle_corrupted_cache(key, start, buf.len(), buf, file_path)
-                    .await;
-            }
-            Err(e) => {
-                panic!("failed to read from cache file: {e}");
-            }
-        }
-    }
-
-    async fn handle_corrupted_cache(
-        &self,
-        key: &str,
-        start: usize,
-        len: usize,
-        buf: &mut [u8],
-        file_path: PathBuf,
-    ) {
-        let object = self.fetch_object_or_zero(key, len).await;
-
-        if start + len <= object.len() {
-            buf.copy_from_slice(&object[start..start + len]);
-        } else {
-            // Handle case where requested range exceeds object size
-            buf.fill(0);
-        }
-
-        self.write_to_cache_async(file_path, object).await;
-    }
-
-    async fn fetch_from_object_store(
-        &self,
-        key: &str,
-        start: usize,
-        end: usize,
-        buf: &mut [u8],
-        file_path: PathBuf,
-    ) {
-        let object = self.fetch_object_or_zero(key, end - start).await;
-        buf.copy_from_slice(&object[start..end]);
-        self.write_to_cache_async(file_path, object).await;
-    }
-
-    async fn fetch_object_or_zero(&self, key: &str, default_size: usize) -> Vec<u8> {
-        match self.client.get_object(key).await.unwrap() {
-            Some(obj) => obj,
-            None => vec![0u8; default_size],
-        }
-    }
-
-    async fn write_to_cache_async(&self, file_path: PathBuf, data: Vec<u8>) {
-        tokio::spawn(async move {
-            if let Ok(mut file) = tokio::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&file_path)
-                .await
-            {
-                if let Err(e) = file.seek(SeekFrom::Start(0)).await {
-                    eprintln!("Failed to seek in file {}: {}", file_path.display(), e);
-                    return;
-                }
-                if let Err(e) = file.write_all(&data).await {
-                    eprintln!("Failed to write to file {}: {}", file_path.display(), e);
-                }
-            }
-        });
     }
 }
 
@@ -322,21 +196,29 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         let start = offset_in_block as usize;
         let end = start + len;
         let mut buf = vec![0u8; len];
+        let _ = layout;
 
-        let entry = self.block_cache.entry(key.clone());
-
-        entry
-            .and_compute_with(async |item| match item {
-                Some(cache_entry) => {
-                    self.handle_existing_cache_entry(&cache_entry, &key, start, end, &mut buf)
-                        .await
-                }
-                None => {
-                    self.handle_new_cache_entry(&key, start, end, &mut buf, layout)
-                        .await
-                }
-            })
-            .await;
+        let etag = self
+            .client
+            .get_etag(&key)
+            .await
+            .unwrap_or_else(|_| "default_etag".to_string());
+        let cache_key = format!("{}{}", key, etag);
+        match self.block_cache.get(&cache_key).await {
+            Some(block) => {
+                buf.copy_from_slice(&block[start..end]);
+            }
+            None => {
+                let block = self
+                    .client
+                    .get_object(&key)
+                    .await
+                    .unwrap()
+                    .unwrap_or_else(|| vec![0u8; len]);
+                buf.copy_from_slice(&block[start..end]);
+                self.block_cache.insert(&cache_key, &block).await.unwrap();
+            }
+        }
 
         buf
     }
