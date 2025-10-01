@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "pest_generator-vendor",
     urls = ["https://static.crates.io/crates/pest_generator/pest_generator-2.8.2.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "pest_generator",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "pest_generator-2.8.2",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "pest_generator",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "pest_generator",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Dragoș Tiselice <dragostiselice@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "pest code generator",
         "CARGO_PKG_NAME": "pest_generator",
@@ -32,6 +47,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["std"],
+<<<<<<< HEAD
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/pest/2.8.2:pest",
@@ -39,5 +55,16 @@ cargo.rust_library(
         "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
         "//third-party/rust/crates/quote/1.0.40:quote",
         "//third-party/rust/crates/syn/2.0.106:syn",
+=======
+    named_deps = {
+        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
+    },
+    visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/pest/2.8.2:pest-2.8.2",
+        "//third-party/rust/crates/pest_meta/2.8.2:pest_meta-2.8.2",
+        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
+        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+>>>>>>> 2d354858 (chore: some dept)
     ],
 )

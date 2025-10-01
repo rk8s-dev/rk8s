@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "serde_derive-vendor",
     urls = ["https://static.crates.io/crates/serde_derive/serde_derive-1.0.226.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "serde_derive",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "serde_derive-1.0.226",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "serde_derive",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "serde_derive",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Erick Tryzelaar <erick.tryzelaar@gmail.com>:David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Macros 1.1 implementation of #[derive(Serialize, Deserialize)]",
         "CARGO_PKG_NAME": "serde_derive",
@@ -33,10 +48,20 @@ cargo.rust_library(
     },
     features = ["default"],
     proc_macro = True,
+<<<<<<< HEAD
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
         "//third-party/rust/crates/quote/1.0.40:quote",
         "//third-party/rust/crates/syn/2.0.106:syn",
+=======
+    named_deps = {
+        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
+    },
+    visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
+        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+>>>>>>> 2d354858 (chore: some dept)
     ],
 )

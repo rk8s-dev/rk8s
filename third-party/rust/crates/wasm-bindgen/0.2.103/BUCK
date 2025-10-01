@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "wasm-bindgen-vendor",
     urls = ["https://static.crates.io/crates/wasm-bindgen/wasm-bindgen-0.2.103.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "wasm-bindgen",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "wasm-bindgen-0.2.103",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "wasm-bindgen",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm-bindgen",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
         "CARGO_PKG_DESCRIPTION": "Easy support for interacting between JS and Rust.\n",
         "CARGO_PKG_NAME": "wasm-bindgen",
@@ -30,7 +45,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "2",
         "CARGO_PKG_VERSION_PATCH": "103",
         "CARGO_PKG_VERSION_PRE": "",
+<<<<<<< HEAD
         "OUT_DIR": "$(location :wasm-bindgen-build-script-run[out_dir])",
+=======
+        "OUT_DIR": "$(location :wasm-bindgen-0.2.103-build-script-run[out_dir])",
+>>>>>>> 2d354858 (chore: some dept)
     },
     features = [
         "default",
@@ -38,6 +57,7 @@ cargo.rust_library(
         "rustversion",
         "std",
     ],
+<<<<<<< HEAD
     rustc_flags = ["@$(location :wasm-bindgen-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
@@ -46,10 +66,23 @@ cargo.rust_library(
         "//third-party/rust/crates/rustversion/1.0.22:rustversion",
         "//third-party/rust/crates/wasm-bindgen-macro/0.2.103:wasm-bindgen-macro",
         "//third-party/rust/crates/wasm-bindgen-shared/0.2.103:wasm-bindgen-shared",
+=======
+    rustc_flags = ["@$(location :wasm-bindgen-0.2.103-build-script-run[rustc_flags])"],
+    named_deps = {
+        "cfg_if": "//third-party/rust/crates/cfg-if/1.0.3:cfg-if-1.0.3",
+        "wasm_bindgen_macro": "//third-party/rust/crates/wasm-bindgen-macro/0.2.103:wasm-bindgen-macro-0.2.103",
+        "wasm_bindgen_shared": "//third-party/rust/crates/wasm-bindgen-shared/0.2.103:wasm-bindgen-shared-0.2.103",
+    },
+    visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/once_cell/1.21.3:once_cell-1.21.3",
+        "//third-party/rust/crates/rustversion/1.0.22:rustversion-1.0.22",
+>>>>>>> 2d354858 (chore: some dept)
     ],
 )
 
 cargo.rust_binary(
+<<<<<<< HEAD
     name = "wasm-bindgen-build-script-build",
     srcs = [":wasm-bindgen-vendor"],
     crate = "build-script-build",
@@ -58,6 +91,19 @@ cargo.rust_binary(
     env = {
         "CARGO_CRATE_NAME": "wasm-bindgen",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+    name = "wasm-bindgen-0.2.103-build-script-build",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "build-script-build",
+    crate_root = "build.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "wasm-bindgen",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
         "CARGO_PKG_DESCRIPTION": "Easy support for interacting between JS and Rust.\n",
         "CARGO_PKG_NAME": "wasm-bindgen",
@@ -78,9 +124,15 @@ cargo.rust_binary(
 )
 
 buildscript_run(
+<<<<<<< HEAD
     name = "wasm-bindgen-build-script-run",
     package_name = "wasm-bindgen",
     buildscript_rule = ":wasm-bindgen-build-script-build",
+=======
+    name = "wasm-bindgen-0.2.103-build-script-run",
+    package_name = "wasm-bindgen",
+    buildscript_rule = ":wasm-bindgen-0.2.103-build-script-build",
+>>>>>>> 2d354858 (chore: some dept)
     features = [
         "default",
         "msrv",
@@ -88,5 +140,9 @@ buildscript_run(
         "std",
     ],
     version = "0.2.103",
+<<<<<<< HEAD
     manifest_dir = ":wasm-bindgen-vendor",
+=======
+    local_manifest_dir = "**",
+>>>>>>> 2d354858 (chore: some dept)
 )

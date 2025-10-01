@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "find-msvc-tools-vendor",
     urls = ["https://static.crates.io/crates/find-msvc-tools/find-msvc-tools-0.1.2.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "find-msvc-tools",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "find-msvc-tools-0.1.2",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "find-msvc-tools",
+    crate_root = "src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "find-msvc-tools",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Find windows-specific tools, read MSVC versions from the registry and from COM interfaces",
         "CARGO_PKG_NAME": "find-msvc-tools",

@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "web-sys-vendor",
     urls = ["https://static.crates.io/crates/web-sys/web-sys-0.3.80.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "web-sys",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "web-sys-0.3.80",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "web-sys",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "web-sys",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
         "CARGO_PKG_DESCRIPTION": "Bindings for all Web APIs, a procedurally generated crate from WebIDL\n",
         "CARGO_PKG_NAME": "web-sys",
@@ -76,9 +91,17 @@ cargo.rust_library(
         "default",
         "std",
     ],
+<<<<<<< HEAD
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/js-sys/0.3.80:js-sys",
         "//third-party/rust/crates/wasm-bindgen/0.2.103:wasm-bindgen",
     ],
+=======
+    named_deps = {
+        "js_sys": "//third-party/rust/crates/js-sys/0.3.80:js-sys-0.3.80",
+        "wasm_bindgen": "//third-party/rust/crates/wasm-bindgen/0.2.103:wasm-bindgen-0.2.103",
+    },
+    visibility = ["PUBLIC"],
+>>>>>>> 2d354858 (chore: some dept)
 )

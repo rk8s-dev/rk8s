@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "serde-vendor",
     urls = ["https://static.crates.io/crates/serde/serde-1.0.226.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "serde",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "serde-1.0.226",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "serde",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "serde",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Erick Tryzelaar <erick.tryzelaar@gmail.com>:David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A generic serialization/deserialization framework",
         "CARGO_PKG_NAME": "serde",
@@ -30,7 +45,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "0",
         "CARGO_PKG_VERSION_PATCH": "226",
         "CARGO_PKG_VERSION_PRE": "",
+<<<<<<< HEAD
         "OUT_DIR": "$(location :serde-build-script-run[out_dir])",
+=======
+        "OUT_DIR": "$(location :serde-1.0.226-build-script-run[out_dir])",
+>>>>>>> 2d354858 (chore: some dept)
     },
     features = [
         "alloc",
@@ -40,15 +59,24 @@ cargo.rust_library(
         "serde_derive",
         "std",
     ],
+<<<<<<< HEAD
     rustc_flags = ["@$(location :serde-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/serde_core/1.0.226:serde_core",
         "//third-party/rust/crates/serde_derive/1.0.226:serde_derive",
+=======
+    rustc_flags = ["@$(location :serde-1.0.226-build-script-run[rustc_flags])"],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/serde_core/1.0.226:serde_core-1.0.226",
+        "//third-party/rust/crates/serde_derive/1.0.226:serde_derive-1.0.226",
+>>>>>>> 2d354858 (chore: some dept)
     ],
 )
 
 cargo.rust_binary(
+<<<<<<< HEAD
     name = "serde-build-script-build",
     srcs = [":serde-vendor"],
     crate = "build-script-build",
@@ -57,6 +85,19 @@ cargo.rust_binary(
     env = {
         "CARGO_CRATE_NAME": "serde",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+    name = "serde-1.0.226-build-script-build",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "build-script-build",
+    crate_root = "build.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "serde",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Erick Tryzelaar <erick.tryzelaar@gmail.com>:David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A generic serialization/deserialization framework",
         "CARGO_PKG_NAME": "serde",
@@ -79,6 +120,7 @@ cargo.rust_binary(
 )
 
 buildscript_run(
+<<<<<<< HEAD
     name = "serde-build-script-run",
     package_name = "serde",
     buildscript_rule = ":serde-build-script-build",
@@ -89,6 +131,11 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "226",
         "CARGO_PKG_VERSION_PRE": "",
     },
+=======
+    name = "serde-1.0.226-build-script-run",
+    package_name = "serde",
+    buildscript_rule = ":serde-1.0.226-build-script-build",
+>>>>>>> 2d354858 (chore: some dept)
     features = [
         "alloc",
         "default",
@@ -98,5 +145,9 @@ buildscript_run(
         "std",
     ],
     version = "1.0.226",
+<<<<<<< HEAD
     manifest_dir = ":serde-vendor",
+=======
+    local_manifest_dir = "**",
+>>>>>>> 2d354858 (chore: some dept)
 )

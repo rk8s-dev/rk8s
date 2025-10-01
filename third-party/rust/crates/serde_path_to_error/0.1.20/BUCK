@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "serde_path_to_error-vendor",
     urls = ["https://static.crates.io/crates/serde_path_to_error/serde_path_to_error-0.1.20.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "serde_path_to_error",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "serde_path_to_error-0.1.20",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "serde_path_to_error",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "serde_path_to_error",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "Path to the element that failed to deserialize",
         "CARGO_PKG_NAME": "serde_path_to_error",
@@ -33,7 +48,12 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
+<<<<<<< HEAD
         "//third-party/rust/crates/itoa/1.0.15:itoa",
         "//third-party/rust/crates/serde_core/1.0.226:serde_core",
+=======
+        "//third-party/rust/crates/itoa/1.0.15:itoa-1.0.15",
+        "//third-party/rust/crates/serde_core/1.0.226:serde_core-1.0.226",
+>>>>>>> 2d354858 (chore: some dept)
     ],
 )

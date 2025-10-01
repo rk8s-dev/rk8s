@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "windows-result-vendor",
     urls = ["https://static.crates.io/crates/windows-result/windows-result-0.4.0.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "windows-result",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "windows-result-0.4.0",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "windows-result",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "windows-result",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Windows error handling",
         "CARGO_PKG_NAME": "windows-result",
@@ -32,6 +47,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["std"],
+<<<<<<< HEAD
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/windows-link/0.2.0:windows-link"],
+=======
+    named_deps = {
+        "windows_link": "//third-party/rust/crates/windows-link/0.2.0:windows-link-0.2.0",
+    },
+    visibility = ["PUBLIC"],
+>>>>>>> 2d354858 (chore: some dept)
 )

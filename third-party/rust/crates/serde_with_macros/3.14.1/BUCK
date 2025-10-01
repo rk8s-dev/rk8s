@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "serde_with_macros-vendor",
     urls = ["https://static.crates.io/crates/serde_with_macros/serde_with_macros-3.14.1.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "serde_with_macros",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "serde_with_macros-3.14.1",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "serde_with_macros",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "serde_with_macros",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Jonas Bushart",
         "CARGO_PKG_DESCRIPTION": "proc-macro library for serde_with",
         "CARGO_PKG_NAME": "serde_with_macros",
@@ -32,11 +47,22 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     proc_macro = True,
+<<<<<<< HEAD
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/darling/0.21.3:darling",
         "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
         "//third-party/rust/crates/quote/1.0.40:quote",
         "//third-party/rust/crates/syn/2.0.106:syn",
+=======
+    named_deps = {
+        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
+    },
+    visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/darling/0.21.3:darling-0.21.3",
+        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
+        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
+>>>>>>> 2d354858 (chore: some dept)
     ],
 )

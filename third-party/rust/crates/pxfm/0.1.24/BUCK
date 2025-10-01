@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "pxfm-vendor",
     urls = ["https://static.crates.io/crates/pxfm/pxfm-0.1.24.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "pxfm",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "pxfm-0.1.24",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "pxfm",
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "pxfm",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Radzivon Bartoshyk",
         "CARGO_PKG_DESCRIPTION": "Fast and accurate math",
         "CARGO_PKG_NAME": "pxfm",
@@ -31,6 +46,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "24",
         "CARGO_PKG_VERSION_PRE": "",
     },
+<<<<<<< HEAD
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/num-traits/0.2.19:num-traits"],
+=======
+    named_deps = {
+        "num_traits": "//third-party/rust/crates/num-traits/0.2.19:num-traits-0.2.19",
+    },
+    visibility = ["PUBLIC"],
+>>>>>>> 2d354858 (chore: some dept)
 )

@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "clap_builder-vendor",
     urls = ["https://static.crates.io/crates/clap_builder/clap_builder-4.5.48.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "clap_builder",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "clap_builder-4.5.48",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "clap_builder",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "clap_builder",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "A simple to use, efficient, and full-featured Command Line Argument Parser",
         "CARGO_PKG_NAME": "clap_builder",
@@ -43,9 +58,16 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
+<<<<<<< HEAD
         "//third-party/rust/crates/anstream/0.6.20:anstream",
         "//third-party/rust/crates/anstyle/1.0.11:anstyle",
         "//third-party/rust/crates/clap_lex/0.7.5:clap_lex",
         "//third-party/rust/crates/strsim/0.11.1:strsim",
+=======
+        "//third-party/rust/crates/anstream/0.6.20:anstream-0.6.20",
+        "//third-party/rust/crates/anstyle/1.0.11:anstyle-1.0.11",
+        "//third-party/rust/crates/clap_lex/0.7.5:clap_lex-0.7.5",
+        "//third-party/rust/crates/strsim/0.11.1:strsim-0.11.1",
+>>>>>>> 2d354858 (chore: some dept)
     ],
 )

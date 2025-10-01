@@ -3,6 +3,7 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
+<<<<<<< HEAD
 http_archive(
     name = "tokio-rustls-vendor",
     urls = ["https://static.crates.io/crates/tokio-rustls/tokio-rustls-0.26.3.crate"],
@@ -21,6 +22,20 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "tokio-rustls",
         "CARGO_MANIFEST_DIR": "vendor",
+=======
+cargo.rust_library(
+    name = "tokio-rustls-0.26.3",
+    srcs = glob(
+        include = ["**/**"],
+        exclude = ["BUCK"],
+    ),
+    crate = "tokio-rustls",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "tokio-rustls",
+        "CARGO_MANIFEST_DIR": ".",
+>>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Asynchronous TLS/SSL streams for Tokio using Rustls.",
         "CARGO_PKG_NAME": "tokio-rustls",
@@ -34,7 +49,12 @@ cargo.rust_library(
     features = ["tls12"],
     visibility = ["PUBLIC"],
     deps = [
+<<<<<<< HEAD
         "//third-party/rust/crates/rustls/0.23.32:rustls",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
+=======
+        "//third-party/rust/crates/rustls/0.23.32:rustls-0.23.32",
+        "//third-party/rust/crates/tokio/1.47.1:tokio-1.47.1",
+>>>>>>> 2d354858 (chore: some dept)
     ],
 )
