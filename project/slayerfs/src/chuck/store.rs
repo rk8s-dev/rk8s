@@ -182,6 +182,9 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             .put_object(&key, &buf)
             .await
             .expect("object store put failed");
+
+        let cache_key = format!("{}{}", key, etag);
+        self.block_cache.remove(&cache_key);
     }
 
     async fn read_block_range(
