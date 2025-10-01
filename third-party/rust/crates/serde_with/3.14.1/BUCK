@@ -3,7 +3,6 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-<<<<<<< HEAD
 http_archive(
     name = "serde_with-vendor",
     urls = ["https://static.crates.io/crates/serde_with/serde_with-3.14.1.crate"],
@@ -22,20 +21,6 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "serde_with",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-cargo.rust_library(
-    name = "serde_with-3.14.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "serde_with",
-    crate_root = "src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "serde_with",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Jonas Bushart:Marcin Kaźmierczak",
         "CARGO_PKG_DESCRIPTION": "Custom de/serialization functions for Rust's serde",
         "CARGO_PKG_NAME": "serde_with",
@@ -53,7 +38,6 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
-<<<<<<< HEAD
         "chrono_0_4": "//third-party/rust/crates/chrono/0.4.42:chrono",
         "indexmap_1": "//third-party/rust/crates/indexmap/1.9.3:indexmap",
         "indexmap_2": "//third-party/rust/crates/indexmap/2.11.4:indexmap",
@@ -69,22 +53,5 @@ cargo.rust_library(
         "//third-party/rust/crates/serde_derive/1.0.226:serde_derive",
         "//third-party/rust/crates/serde_json/1.0.145:serde_json",
         "//third-party/rust/crates/serde_with_macros/3.14.1:serde_with_macros",
-=======
-        "chrono_0_4": "//third-party/rust/crates/chrono/0.4.42:chrono-0.4.42",
-        "indexmap_1": "//third-party/rust/crates/indexmap/1.9.3:indexmap-1.9.3",
-        "indexmap_2": "//third-party/rust/crates/indexmap/2.11.4:indexmap-2.11.4",
-        "schemars_0_9": "//third-party/rust/crates/schemars/0.9.0:schemars-0.9.0",
-        "schemars_1": "//third-party/rust/crates/schemars/1.0.4:schemars-1.0.4",
-        "time_0_3": "//third-party/rust/crates/time/0.3.44:time-0.3.44",
-    },
-    visibility = ["PUBLIC"],
-    deps = [
-        "//third-party/rust/crates/base64/0.22.1:base64-0.22.1",
-        "//third-party/rust/crates/hex/0.4.3:hex-0.4.3",
-        "//third-party/rust/crates/serde/1.0.226:serde-1.0.226",
-        "//third-party/rust/crates/serde_derive/1.0.226:serde_derive-1.0.226",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json-1.0.145",
-        "//third-party/rust/crates/serde_with_macros/3.14.1:serde_with_macros-3.14.1",
->>>>>>> 2d354858 (chore: some dept)
     ],
 )

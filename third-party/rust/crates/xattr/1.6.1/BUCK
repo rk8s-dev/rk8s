@@ -3,7 +3,6 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-<<<<<<< HEAD
 http_archive(
     name = "xattr-vendor",
     urls = ["https://static.crates.io/crates/xattr/xattr-1.6.1.crate"],
@@ -22,20 +21,6 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "xattr",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-cargo.rust_library(
-    name = "xattr-1.6.1",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "xattr",
-    crate_root = "src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "xattr",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Steven Allen <steven@stebalien.com>",
         "CARGO_PKG_DESCRIPTION": "unix extended filesystem attributes",
         "CARGO_PKG_NAME": "xattr",
@@ -51,9 +36,5 @@ cargo.rust_library(
         "unsupported",
     ],
     visibility = ["PUBLIC"],
-<<<<<<< HEAD
     deps = ["//third-party/rust/crates/rustix/1.1.2:rustix"],
-=======
-    deps = ["//third-party/rust/crates/rustix/1.1.2:rustix-1.1.2"],
->>>>>>> 2d354858 (chore: some dept)
 )

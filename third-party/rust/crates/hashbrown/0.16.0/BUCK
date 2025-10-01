@@ -3,7 +3,6 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-<<<<<<< HEAD
 http_archive(
     name = "hashbrown-vendor",
     urls = ["https://static.crates.io/crates/hashbrown/hashbrown-0.16.0.crate"],
@@ -22,20 +21,6 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "hashbrown",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-cargo.rust_library(
-    name = "hashbrown-0.16.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "hashbrown",
-    crate_root = "src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "hashbrown",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Amanieu d'Antras <amanieu@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A Rust port of Google's SwissTable hash map",
         "CARGO_PKG_NAME": "hashbrown",
