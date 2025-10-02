@@ -7,7 +7,7 @@
 
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
-use crate::meta::{InMemoryMetaStore, MetaStore};
+use crate::meta::{MetaStore, create_meta_store_from_url};
 use crate::vfs::fs::{DirEntry, FileAttr, VFS};
 
 /// SDK 客户端（泛型后端）。
@@ -17,9 +17,9 @@ pub struct Client<S: BlockStore, M: MetaStore> {
 
 #[allow(unused)]
 impl<S: BlockStore, M: MetaStore> Client<S, M> {
-    pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Self {
-        let fs = VFS::new(layout, store, meta).await;
-        Self { fs }
+    pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, String> {
+        let fs = VFS::new(layout, store, meta).await?;
+        Ok(Self { fs })
     }
 
     pub async fn mkdir_p(&self, path: &str) -> Result<(), String> {
@@ -80,9 +80,10 @@ use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
 use crate::chuck::store::ObjectBlockStore;
 use std::path::Path;
+use std::sync::Arc;
 
 #[allow(dead_code)]
-pub type LocalClient = Client<ObjectBlockStore<LocalFsBackend>, InMemoryMetaStore>;
+pub type LocalClient = Client<ObjectBlockStore<LocalFsBackend>, Arc<dyn MetaStore>>;
 
 #[allow(dead_code)]
 impl LocalClient {
@@ -90,8 +91,15 @@ impl LocalClient {
     pub async fn new_local<P: AsRef<Path>>(root: P, layout: ChunkLayout) -> Self {
         let client = ObjectClient::new(LocalFsBackend::new(root));
         let store = ObjectBlockStore::new(client);
-        let meta = InMemoryMetaStore::new();
-        Client::new(layout, store, meta).await
+
+        let meta = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .expect("Failed to create meta store");
+
+        let fs = VFS::new(layout, store, meta)
+            .await
+            .expect("Failed to create VFS");
+        Client { fs }
     }
 }
 

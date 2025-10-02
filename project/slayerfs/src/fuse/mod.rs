@@ -40,7 +40,7 @@ mod mount_tests {
     use crate::chuck::chunk::ChunkLayout;
     use crate::chuck::store::ObjectBlockStore;
     use crate::fuse::mount::mount_vfs_unprivileged;
-    use crate::meta::InMemoryMetaStore;
+    use crate::meta::create_meta_store_from_url;
     use std::fs;
     use std::io::Write;
     use std::time::Duration as StdDuration;
@@ -57,8 +57,12 @@ mod mount_tests {
         let tmp_data = tempfile::tempdir().expect("tmp data");
         let client = ObjectClient::new(LocalFsBackend::new(tmp_data.path()));
         let store = ObjectBlockStore::new(client);
-        let meta = InMemoryMetaStore::new();
-        let fs = VFS::new(layout, store, meta).await;
+
+        let meta = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .expect("create meta store");
+
+        let fs = VFS::new(layout, store, meta).await.expect("create VFS");
 
         // 准备挂载点
         let mnt = tempfile::tempdir().expect("tmp mount");
@@ -181,11 +185,13 @@ where
         offset: u64,
         size: u32,
     ) -> FuseResult<ReplyData> {
-        let Some(path) = self.path_of(ino as i64) else {
+        // Verify inode exists
+        if self.stat_ino(ino as i64).await.is_none() {
             return Err(libc::ENOENT.into());
         };
+
         let data = self
-            .read(&path, offset, size as usize)
+            .read_ino(ino as i64, offset, size as usize)
             .await
             .map_err(|_| libc::EIO)?;
         Ok(ReplyData {
@@ -265,7 +271,7 @@ where
         _fh: u64,
         offset: i64,
     ) -> FuseResult<ReplyDirectory<Self::DirEntryStream<'a>>> {
-        let entries = match self.readdir_ino(ino as i64) {
+        let entries = match self.readdir_ino(ino as i64).await {
             None => {
                 if self.stat_ino(ino as i64).await.is_some() {
                     return Err(libc::ENOTDIR.into());
@@ -324,7 +330,7 @@ where
         offset: u64,
         _lock_owner: u64,
     ) -> FuseResult<ReplyDirectoryPlus<Self::DirEntryPlusStream<'a>>> {
-        let entries = match self.readdir_ino(ino as i64) {
+        let entries = match self.readdir_ino(ino as i64).await {
             None => {
                 if self.stat_ino(ino as i64).await.is_some() {
                     return Err(libc::ENOTDIR.into());

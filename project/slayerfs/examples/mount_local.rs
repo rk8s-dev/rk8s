@@ -3,7 +3,7 @@ use slayerfs::cadapter::localfs::LocalFsBackend;
 use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::ObjectBlockStore;
 use slayerfs::fuse::mount::mount_vfs_unprivileged;
-use slayerfs::meta::InMemoryMetaStore;
+use slayerfs::meta::create_meta_store_from_url;
 use slayerfs::vfs::fs::VFS;
 
 #[tokio::main(flavor = "current_thread")]
@@ -40,8 +40,12 @@ async fn main() {
         let layout = ChunkLayout::default();
         let client = ObjectClient::new(LocalFsBackend::new(std::path::Path::new(&data_dir)));
         let store = ObjectBlockStore::new(client);
-        let meta = InMemoryMetaStore::new();
-        let fs = VFS::new(layout, store, meta).await;
+
+        // Create meta store using memory SQLite
+        let meta = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .expect("create meta store");
+        let fs = VFS::new(layout, store, meta).await.expect("create VFS");
 
         // Ensure mount point exists
         if let Err(e) = std::fs::create_dir_all(&mount_point) {

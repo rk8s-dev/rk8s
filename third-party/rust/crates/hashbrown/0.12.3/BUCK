@@ -31,6 +31,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["raw"],
+    features = [
+        "ahash",
+        "default",
+        "inline-more",
+        "raw",
+    ],
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/ahash/0.7.8:ahash"],
 )

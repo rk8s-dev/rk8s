@@ -32,5 +32,4 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/windows_x86_64_gnu/0.53.0:windows_x86_64_gnu"],
 )

@@ -24,28 +24,36 @@ impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
     }
 
     /// 创建文件，返回 inode 编号。
-    pub async fn create(&mut self) -> i64 {
-        let mut tx = self.meta.begin().await;
-        let ino = tx.alloc_inode().await;
-        tx.commit().await.expect("meta commit");
-        ino
+    pub async fn create(&mut self, filename: String) -> Result<i64, String> {
+        let root_ino = self.meta.root_ino();
+        let ino = self
+            .meta
+            .create_file(root_ino, filename)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(ino)
     }
 
     /// 在指定文件的某个 chunk 上写入（偏移为 chunk 内偏移）。
-    pub async fn pwrite_chunk(&mut self, _ino: i64, chunk_id: i64, off_in_chunk: u64, data: &[u8]) {
+    pub async fn pwrite_chunk(
+        &mut self,
+        ino: i64,
+        chunk_id: i64,
+        off_in_chunk: u64,
+        data: &[u8],
+    ) -> Result<(), String> {
         // 写数据
-        {
-            let mut writer = ChunkWriter::new(self.layout, chunk_id, &mut self.store);
-            let slice = writer.write(off_in_chunk, data).await;
-            // 记录元数据（本简化实现：记录 slice，并更新 size= max(size, off+len)）。
-            let mut tx = self.meta.begin().await;
-            tx.record_slice(_ino, slice).await.expect("record slice");
-            let new_size = off_in_chunk + data.len() as u64; // 简化: 使用 chunk 内偏移近似文件大小
-            tx.update_inode_size(_ino, new_size)
-                .await
-                .expect("update size");
-            tx.commit().await.expect("meta commit");
-        }
+        let mut writer = ChunkWriter::new(self.layout, chunk_id, &mut self.store);
+        let slice = writer.write(off_in_chunk, data).await;
+
+        // 简化: 使用 chunk 内偏移近似文件大小
+        let new_size = off_in_chunk + data.len() as u64;
+        self.meta
+            .set_file_size(ino, new_size)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(())
     }
 
     /// 在指定文件的某个 chunk 上读取（偏移为 chunk 内偏移）。
@@ -67,7 +75,7 @@ mod tests {
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
     use crate::chuck::store::ObjectBlockStore;
-    use crate::meta::InMemoryMetaStore;
+    use crate::meta::create_meta_store_from_url;
 
     #[tokio::test]
     async fn test_simple_vfs_write_read() {
@@ -75,10 +83,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
         let store = ObjectBlockStore::new(client);
-        let meta = InMemoryMetaStore::new();
+
+        let meta = create_meta_store_from_url("sqlite::memory:").await.unwrap();
         let mut vfs = SimpleVfs::new(layout, store, meta);
 
-        let ino = vfs.create().await;
+        let ino = vfs.create("test_file.txt".to_string()).await.unwrap();
         let chunk_id = 1i64;
         let half = (layout.block_size / 2) as usize;
         let len = layout.block_size as usize + half;
@@ -86,7 +95,9 @@ mod tests {
         for (i, b) in data.iter_mut().enumerate().take(len) {
             *b = (i % 251) as u8;
         }
-        vfs.pwrite_chunk(ino, chunk_id, half as u64, &data).await;
+        vfs.pwrite_chunk(ino, chunk_id, half as u64, &data)
+            .await
+            .unwrap();
         let out = vfs.pread_chunk(ino, chunk_id, half as u64, len).await;
         assert_eq!(out, data);
     }

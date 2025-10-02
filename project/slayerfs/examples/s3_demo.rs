@@ -7,7 +7,7 @@ use slayerfs::cadapter::client::ObjectClient;
 use slayerfs::cadapter::s3::{S3Backend, S3Config};
 use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::ObjectBlockStore;
-use slayerfs::meta::InMemoryMetaStore;
+use slayerfs::meta::create_meta_store_from_url;
 use slayerfs::vfs::sdk::Client;
 use std::error::Error;
 
@@ -51,10 +51,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let layout = ChunkLayout::default();
 
     // Create memory metadata store (for demo purposes)
-    let meta_store = InMemoryMetaStore::new();
+    let meta_store = create_meta_store_from_url("sqlite::memory:")
+        .await
+        .expect("create meta store");
 
     // Create VFS client
-    let mut client = Client::new(layout, block_store, meta_store).await;
+    let mut client = Client::new(layout, block_store, meta_store)
+        .await
+        .expect("create vfs fail.");
 
     // Test basic operations
     println!("Testing basic S3 operations...");

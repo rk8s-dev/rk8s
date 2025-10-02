@@ -41,6 +41,7 @@ cargo.rust_library(
         "indexmap",
         "limit",
         "load",
+        "load-shed",
         "log",
         "make",
         "pin-project-lite",

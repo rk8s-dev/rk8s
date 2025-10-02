@@ -34,6 +34,7 @@ cargo.rust_library(
     features = [
         "_rt-tokio",
         "_tls-rustls-ring-webpki",
+        "bigdecimal",
         "chrono",
         "default",
         "derive",
@@ -41,7 +42,9 @@ cargo.rust_library(
         "macros",
         "migrate",
         "postgres",
+        "rust_decimal",
         "sqlite",
+        "time",
         "uuid",
     ],
     proc_macro = True,

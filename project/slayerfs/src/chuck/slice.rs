@@ -35,7 +35,7 @@ pub struct BlockSpan {
 }
 
 /// Slice 的基本描述（位于某个 chunk 内的连续范围）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SliceDesc {
     pub slice_id: i64,
     pub chunk_id: i64,

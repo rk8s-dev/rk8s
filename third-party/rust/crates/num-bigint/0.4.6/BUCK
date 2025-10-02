@@ -31,6 +31,10 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "6",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "default",
+        "std",
+    ],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/num-integer/0.1.46:num-integer",

@@ -3,7 +3,6 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-<<<<<<< HEAD
 http_archive(
     name = "wasm-bindgen-macro-support-vendor",
     urls = ["https://static.crates.io/crates/wasm-bindgen-macro-support/wasm-bindgen-macro-support-0.2.103.crate"],
@@ -22,20 +21,6 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "wasm-bindgen-macro-support",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-cargo.rust_library(
-    name = "wasm-bindgen-macro-support-0.2.103",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "wasm-bindgen-macro-support",
-    crate_root = "src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wasm-bindgen-macro-support",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
         "CARGO_PKG_DESCRIPTION": "The part of the implementation of the `#[wasm_bindgen]` attribute that is not in the shared backend crate\n",
         "CARGO_PKG_NAME": "wasm-bindgen-macro-support",
@@ -46,7 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "103",
         "CARGO_PKG_VERSION_PRE": "",
     },
-<<<<<<< HEAD
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
@@ -54,16 +38,5 @@ cargo.rust_library(
         "//third-party/rust/crates/syn/2.0.106:syn",
         "//third-party/rust/crates/wasm-bindgen-backend/0.2.103:wasm-bindgen-backend",
         "//third-party/rust/crates/wasm-bindgen-shared/0.2.103:wasm-bindgen-shared",
-=======
-    named_deps = {
-        "proc_macro2": "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2-1.0.101",
-        "wasm_bindgen_backend": "//third-party/rust/crates/wasm-bindgen-backend/0.2.103:wasm-bindgen-backend-0.2.103",
-        "wasm_bindgen_shared": "//third-party/rust/crates/wasm-bindgen-shared/0.2.103:wasm-bindgen-shared-0.2.103",
-    },
-    visibility = ["PUBLIC"],
-    deps = [
-        "//third-party/rust/crates/quote/1.0.40:quote-1.0.40",
-        "//third-party/rust/crates/syn/2.0.106:syn-2.0.106",
->>>>>>> 2d354858 (chore: some dept)
     ],
 )

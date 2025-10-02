@@ -6,6 +6,7 @@ use crate::chuck::store::BlockStore;
 use crate::chuck::util::{ChunkSpan, split_file_range_into_chunks};
 use crate::chuck::writer::ChunkWriter;
 use crate::meta::MetaStore;
+use crate::meta::entities::content_meta::EntryType;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -13,6 +14,15 @@ use std::sync::Mutex;
 pub enum FileType {
     File,
     Dir,
+}
+
+impl From<EntryType> for FileType {
+    fn from(entry_type: EntryType) -> Self {
+        match entry_type {
+            EntryType::File => FileType::File,
+            EntryType::Directory => FileType::Dir,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -160,32 +170,79 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
     /// 按 inode 返回属性（kind 来自命名空间，size 来自 MetaStore）
     pub async fn stat_ino(&self, ino: i64) -> Option<FileAttr> {
         let kind = { self.ns.lock().unwrap().nodes.get(&ino).map(|v| v.kind)? };
-        let size = self
-            .meta
-            .get_inode_meta(ino)
-            .await
-            .map(|m| m.size)
-            .unwrap_or(0);
-        Some(FileAttr { ino, size, kind })
+        let meta_attr = self.meta.stat(ino).await.ok().flatten()?;
+        Some(FileAttr {
+            ino,
+            size: meta_attr.size,
+            kind,
+        })
     }
 
     /// 按 inode 列目录项；非目录或不存在返回 None
-    pub fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
-        let ns = self.ns.lock().unwrap();
-        let vnode = ns.nodes.get(&ino)?;
-        if vnode.kind != FileType::Dir {
-            return None;
+    pub async fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
+        {
+            let ns = self.ns.lock().unwrap();
+            if let Some(vnode) = ns.nodes.get(&ino) {
+                if vnode.kind != FileType::Dir {
+                    return None;
+                }
+
+                if !vnode.children.is_empty() {
+                    let mut entries = Vec::new();
+                    for (name, &child_ino) in &vnode.children {
+                        if let Some(child_node) = ns.nodes.get(&child_ino) {
+                            entries.push(DirEntry {
+                                name: name.clone(),
+                                ino: child_ino,
+                                kind: child_node.kind,
+                            });
+                        }
+                    }
+                    return Some(entries);
+                }
+            }
         }
-        let mut out = Vec::with_capacity(vnode.children.len());
-        for (name, &child_ino) in &vnode.children {
-            let child = ns.nodes.get(&child_ino)?;
-            out.push(DirEntry {
-                name: name.clone(),
-                ino: child_ino,
-                kind: child.kind,
-            });
+
+        let meta_entries = match self.meta.readdir(ino).await {
+            Ok(entries) => entries,
+            Err(_) => return None,
+        };
+
+        {
+            let mut ns = self.ns.lock().unwrap();
+
+            ns.nodes
+                .entry(ino)
+                .or_insert_with(|| VNode::dir("".to_string(), None));
+
+            if let Some(vnode) = ns.nodes.get_mut(&ino) {
+                vnode.children.clear();
+
+                for entry in &meta_entries {
+                    vnode.children.insert(entry.name.clone(), entry.ino);
+                }
+            }
+
+            for entry in &meta_entries {
+                ns.nodes.insert(
+                    entry.ino,
+                    match entry.kind {
+                        FileType::Dir => VNode::dir(entry.name.clone(), Some(ino)),
+                        FileType::File => VNode::file(entry.name.clone(), Some(ino)),
+                    },
+                );
+            }
         }
-        Some(out)
+
+        let entries: Vec<DirEntry> = meta_entries
+            .into_iter()
+            .map(|e| DirEntry {
+                name: e.name,
+                ino: e.ino,
+                kind: e.kind,
+            })
+            .collect();
+        Some(entries)
     }
 
     /// 创建 VFS，自动分配根目录 inode。
@@ -193,29 +250,31 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
     /// - 分配并注册根目录 inode（/）。
     /// - 初始化内存命名空间（nodes + 路径索引）。
     /// - 约束：根目录的 parent 为 None。
-    pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Self {
+    pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, String> {
+        meta.initialize().await.map_err(|e| e.to_string())?;
+
         let mut nodes = HashMap::new();
         let mut lookup = HashMap::new();
-        // 分配根目录 inode
-        let root_ino = {
-            let mut tx = meta.begin().await;
-            let ino = tx.alloc_inode().await;
-            tx.commit().await.expect("meta commit root");
-            ino
-        };
-        nodes.insert(root_ino, VNode::dir("/".into(), None));
+
+        let root_ino = meta.root_ino();
+        nodes.insert(root_ino, VNode::dir("".into(), None)); // 根目录名为空
         lookup.insert("/".into(), root_ino);
+
         // 设定 chunk_id 计算的基数，避免与 chunk 索引冲突（简化实现）。
         let base = 1_000_000_000i64;
         let ns = Namespace { nodes, lookup };
-        Self {
+        let vfs = Self {
             layout,
             store: tokio::sync::Mutex::new(store),
             meta,
             base,
             ns: Mutex::new(ns),
             root: root_ino,
-        }
+        };
+
+        let _ = vfs.readdir("/").await;
+
+        Ok(vfs)
     }
 
     /// 规范化路径（内部）：
@@ -278,12 +337,11 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
                 continue;
             }
             // 新目录 inode
-            let ino = {
-                let mut tx = self.meta.begin().await;
-                let ino = tx.alloc_inode().await;
-                tx.commit().await.map_err(|e| e.to_string())?;
-                ino
-            };
+            let ino = self
+                .meta
+                .mkdir(cur_ino, part.to_string())
+                .await
+                .map_err(|e| e.to_string())?;
             {
                 let mut ns = self.ns.lock().unwrap();
                 ns.nodes
@@ -338,12 +396,11 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
                 Ok(ino)
             };
         }
-        let ino = {
-            let mut tx = self.meta.begin().await;
-            let ino = tx.alloc_inode().await;
-            tx.commit().await.map_err(|e| e.to_string())?;
-            ino
-        };
+        let ino = self
+            .meta
+            .create_file(dir_ino, name.clone())
+            .await
+            .map_err(|e| e.to_string())?;
         {
             let mut ns = self.ns.lock().unwrap();
             ns.nodes
@@ -363,36 +420,85 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         let path = Self::norm_path(path);
         let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }?;
         let kind = { self.ns.lock().unwrap().nodes.get(&ino).map(|v| v.kind)? };
-        let size = self
-            .meta
-            .get_inode_meta(ino)
-            .await
-            .map(|m| m.size)
-            .unwrap_or(0);
-        Some(FileAttr { ino, size, kind })
+        let meta_attr = self.meta.stat(ino).await.ok().flatten()?;
+        Some(FileAttr {
+            ino,
+            size: meta_attr.size,
+            kind,
+        })
     }
 
     /// 列举目录：
     /// - 返回目录项列表；路径不存在或非目录返回 None。
-    /// - 不包含 "." 与 ".."（可按需添加）。
+    /// - 不包含 "." 与".."（可按需添加）。
     pub async fn readdir(&self, path: &str) -> Option<Vec<DirEntry>> {
         let path = Self::norm_path(path);
-        let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }?;
-        let ns = self.ns.lock().unwrap();
-        let vnode = ns.nodes.get(&ino)?;
-        if vnode.kind != FileType::Dir {
-            return None;
+
+        let ino = self.ns.lock().unwrap().lookup.get(&path).cloned()?;
+
+        {
+            let ns = self.ns.lock().unwrap();
+            if let Some(vnode) = ns.nodes.get(&ino) {
+                if vnode.kind != FileType::Dir {
+                    return None;
+                }
+
+                if !vnode.children.is_empty() {
+                    let mut entries = Vec::new();
+                    for (name, &child_ino) in &vnode.children {
+                        if let Some(child_node) = ns.nodes.get(&child_ino) {
+                            entries.push(DirEntry {
+                                name: name.clone(),
+                                ino: child_ino,
+                                kind: child_node.kind,
+                            });
+                        }
+                    }
+                    return Some(entries);
+                }
+            }
         }
-        let mut out = Vec::new();
-        for (name, &child_ino) in &vnode.children {
-            let child = ns.nodes.get(&child_ino)?;
-            out.push(DirEntry {
-                name: name.clone(),
-                ino: child_ino,
-                kind: child.kind,
-            });
+
+        let meta_entries = self.meta.readdir(ino).await.ok()?;
+
+        {
+            let mut ns = self.ns.lock().unwrap();
+
+            if let Some(vnode) = ns.nodes.get_mut(&ino) {
+                vnode.children.clear();
+
+                for entry in &meta_entries {
+                    vnode.children.insert(entry.name.clone(), entry.ino);
+                }
+            }
+
+            for entry in &meta_entries {
+                let child_path = if path == "/" {
+                    format!("/{}", entry.name)
+                } else {
+                    format!("{}/{}", path, entry.name)
+                };
+
+                ns.nodes.insert(
+                    entry.ino,
+                    match entry.kind {
+                        FileType::Dir => VNode::dir(entry.name.clone(), Some(ino)),
+                        FileType::File => VNode::file(entry.name.clone(), Some(ino)),
+                    },
+                );
+                ns.lookup.insert(child_path, entry.ino);
+            }
         }
-        Some(out)
+
+        let entries: Vec<DirEntry> = meta_entries
+            .into_iter()
+            .map(|e| DirEntry {
+                name: e.name,
+                ino: e.ino,
+                kind: e.kind,
+            })
+            .collect();
+        Some(entries)
     }
 
     /// 路径是否存在。
@@ -527,11 +633,10 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         let path = Self::norm_path(path);
         let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }
             .ok_or_else(|| "not found".to_string())?;
-        let mut tx = self.meta.begin().await;
-        tx.update_inode_size(ino, size)
+        self.meta
+            .set_file_size(ino, size)
             .await
-            .map_err(|e| e.to_string())?;
-        tx.commit().await.map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())
     }
 
     /// 写文件（按文件偏移），内部映射到多个 Chunk 写入。
@@ -555,21 +660,16 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         }
         // 一次性更新 size
         let new_size = offset + data.len() as u64;
-        let mut tx = self.meta.begin().await;
-        tx.update_inode_size(ino, new_size)
+        self.meta
+            .set_file_size(ino, new_size)
             .await
             .map_err(|e| e.to_string())?;
-        tx.commit().await.map_err(|e| e.to_string())?;
         Ok(data.len())
     }
 
     /// 读文件（按文件偏移）。
-    /// 读取：跨 Chunk 聚合读取。
-    /// - 对未写入区域返回 0 填充；len=0 返回空向量。
-    pub async fn read(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, String> {
-        let path = Self::norm_path(path);
-        let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }
-            .ok_or_else(|| "not found".to_string())?;
+    /// Read by inode directly
+    pub async fn read_ino(&self, ino: i64, offset: u64, len: usize) -> Result<Vec<u8>, String> {
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -585,6 +685,14 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         }
         Ok(out)
     }
+
+    /// Read by path (convenience method that uses read_ino internally)
+    pub async fn read(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, String> {
+        let path = Self::norm_path(path);
+        let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }
+            .ok_or_else(|| "not found".to_string())?;
+        self.read_ino(ino, offset, len).await
+    }
 }
 
 #[cfg(test)]
@@ -593,7 +701,7 @@ mod tests {
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
     use crate::chuck::store::ObjectBlockStore;
-    use crate::meta::InMemoryMetaStore;
+    use crate::meta::create_meta_store_from_url;
 
     #[tokio::test]
     async fn test_fs_mkdir_create_write_read_readdir() {
@@ -601,8 +709,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
         let store = ObjectBlockStore::new(client);
-        let meta = InMemoryMetaStore::new();
-        let fs = VFS::new(layout, store, meta).await;
+
+        let meta = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let fs = VFS::new(layout, store, meta).await.unwrap();
 
         fs.mkdir_p("/a/b").await.expect("mkdir_p");
         fs.create_file("/a/b/hello.txt").await.expect("create");
@@ -638,8 +747,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
         let store = ObjectBlockStore::new(client);
-        let meta = InMemoryMetaStore::new();
-        let fs = VFS::new(layout, store, meta).await;
+
+        let meta = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let fs = VFS::new(layout, store, meta).await.unwrap();
 
         fs.mkdir_p("/a/b").await.unwrap();
         fs.create_file("/a/b/t.txt").await.unwrap();

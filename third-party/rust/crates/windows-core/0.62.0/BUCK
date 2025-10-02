@@ -3,7 +3,6 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-<<<<<<< HEAD
 http_archive(
     name = "windows-core-vendor",
     urls = ["https://static.crates.io/crates/windows-core/windows-core-0.62.0.crate"],
@@ -22,20 +21,6 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "windows-core",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-cargo.rust_library(
-    name = "windows-core-0.62.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "windows-core",
-    crate_root = "src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "windows-core",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Core type support for COM and Windows",
         "CARGO_PKG_NAME": "windows-core",
@@ -50,7 +35,6 @@ cargo.rust_library(
         "default",
         "std",
     ],
-<<<<<<< HEAD
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/windows-implement/0.60.0:windows-implement",
@@ -59,14 +43,4 @@ cargo.rust_library(
         "//third-party/rust/crates/windows-result/0.4.0:windows-result",
         "//third-party/rust/crates/windows-strings/0.5.0:windows-strings",
     ],
-=======
-    named_deps = {
-        "windows_implement": "//third-party/rust/crates/windows-implement/0.60.0:windows-implement-0.60.0",
-        "windows_interface": "//third-party/rust/crates/windows-interface/0.59.1:windows-interface-0.59.1",
-        "windows_link": "//third-party/rust/crates/windows-link/0.2.0:windows-link-0.2.0",
-        "windows_result": "//third-party/rust/crates/windows-result/0.4.0:windows-result-0.4.0",
-        "windows_strings": "//third-party/rust/crates/windows-strings/0.5.0:windows-strings-0.5.0",
-    },
-    visibility = ["PUBLIC"],
->>>>>>> 2d354858 (chore: some dept)
 )

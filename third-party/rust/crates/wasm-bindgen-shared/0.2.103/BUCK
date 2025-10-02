@@ -3,7 +3,6 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-<<<<<<< HEAD
 http_archive(
     name = "wasm-bindgen-shared-vendor",
     urls = ["https://static.crates.io/crates/wasm-bindgen-shared/wasm-bindgen-shared-0.2.103.crate"],
@@ -22,20 +21,6 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "wasm-bindgen-shared",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-cargo.rust_library(
-    name = "wasm-bindgen-shared-0.2.103",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "wasm-bindgen-shared",
-    crate_root = "src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wasm-bindgen-shared",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
         "CARGO_PKG_DESCRIPTION": "Shared support between wasm-bindgen and wasm-bindgen cli, an internal\ndependency.\n",
         "CARGO_PKG_LINKS": "wasm_bindgen",
@@ -46,7 +31,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "2",
         "CARGO_PKG_VERSION_PATCH": "103",
         "CARGO_PKG_VERSION_PRE": "",
-<<<<<<< HEAD
         "OUT_DIR": "$(location :wasm-bindgen-shared-build-script-run[out_dir])",
     },
     rustc_flags = ["@$(location :wasm-bindgen-shared-build-script-run[rustc_flags])"],
@@ -63,29 +47,6 @@ cargo.rust_binary(
     env = {
         "CARGO_CRATE_NAME": "wasm-bindgen-shared",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-        "OUT_DIR": "$(location :wasm-bindgen-shared-0.2.103-build-script-run[out_dir])",
-    },
-    rustc_flags = ["@$(location :wasm-bindgen-shared-0.2.103-build-script-run[rustc_flags])"],
-    named_deps = {
-        "unicode_ident": "//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident-1.0.19",
-    },
-    visibility = ["PUBLIC"],
-)
-
-cargo.rust_binary(
-    name = "wasm-bindgen-shared-0.2.103-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "build-script-build",
-    crate_root = "build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wasm-bindgen-shared",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "The wasm-bindgen Developers",
         "CARGO_PKG_DESCRIPTION": "Shared support between wasm-bindgen and wasm-bindgen cli, an internal\ndependency.\n",
         "CARGO_PKG_LINKS": "wasm_bindgen",
@@ -101,17 +62,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-<<<<<<< HEAD
     name = "wasm-bindgen-shared-build-script-run",
     package_name = "wasm-bindgen-shared",
     buildscript_rule = ":wasm-bindgen-shared-build-script-build",
     version = "0.2.103",
     manifest_dir = ":wasm-bindgen-shared-vendor",
-=======
-    name = "wasm-bindgen-shared-0.2.103-build-script-run",
-    package_name = "wasm-bindgen-shared",
-    buildscript_rule = ":wasm-bindgen-shared-0.2.103-build-script-build",
-    version = "0.2.103",
-    local_manifest_dir = "**",
->>>>>>> 2d354858 (chore: some dept)
 )

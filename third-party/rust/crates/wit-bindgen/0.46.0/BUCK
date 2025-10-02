@@ -3,7 +3,6 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-<<<<<<< HEAD
 http_archive(
     name = "wit-bindgen-vendor",
     urls = ["https://static.crates.io/crates/wit-bindgen/wit-bindgen-0.46.0.crate"],
@@ -22,20 +21,6 @@ cargo.rust_library(
     env = {
         "CARGO_CRATE_NAME": "wit-bindgen",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-cargo.rust_library(
-    name = "wit-bindgen-0.46.0",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "wit-bindgen",
-    crate_root = "src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wit-bindgen",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "Rust bindings generator and runtime support for WIT and the component model.\nUsed when compiling Rust programs to the component model.\n",
         "CARGO_PKG_NAME": "wit-bindgen",
@@ -45,20 +30,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "46",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
-<<<<<<< HEAD
         "OUT_DIR": "$(location :wit-bindgen-build-script-run[out_dir])",
     },
     rustc_flags = ["@$(location :wit-bindgen-build-script-run[rustc_flags])"],
-=======
-        "OUT_DIR": "$(location :wit-bindgen-0.46.0-build-script-run[out_dir])",
-    },
-    rustc_flags = ["@$(location :wit-bindgen-0.46.0-build-script-run[rustc_flags])"],
->>>>>>> 2d354858 (chore: some dept)
     visibility = ["PUBLIC"],
 )
 
 cargo.rust_binary(
-<<<<<<< HEAD
     name = "wit-bindgen-build-script-build",
     srcs = [":wit-bindgen-vendor"],
     crate = "build-script-build",
@@ -67,19 +45,6 @@ cargo.rust_binary(
     env = {
         "CARGO_CRATE_NAME": "wit-bindgen",
         "CARGO_MANIFEST_DIR": "vendor",
-=======
-    name = "wit-bindgen-0.46.0-build-script-build",
-    srcs = glob(
-        include = ["**/**"],
-        exclude = ["BUCK"],
-    ),
-    crate = "build-script-build",
-    crate_root = "build.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "wit-bindgen",
-        "CARGO_MANIFEST_DIR": ".",
->>>>>>> 2d354858 (chore: some dept)
         "CARGO_PKG_AUTHORS": "Alex Crichton <alex@alexcrichton.com>",
         "CARGO_PKG_DESCRIPTION": "Rust bindings generator and runtime support for WIT and the component model.\nUsed when compiling Rust programs to the component model.\n",
         "CARGO_PKG_NAME": "wit-bindgen",
@@ -94,17 +59,9 @@ cargo.rust_binary(
 )
 
 buildscript_run(
-<<<<<<< HEAD
     name = "wit-bindgen-build-script-run",
     package_name = "wit-bindgen",
     buildscript_rule = ":wit-bindgen-build-script-build",
     version = "0.46.0",
     manifest_dir = ":wit-bindgen-vendor",
-=======
-    name = "wit-bindgen-0.46.0-build-script-run",
-    package_name = "wit-bindgen",
-    buildscript_rule = ":wit-bindgen-0.46.0-build-script-build",
-    version = "0.46.0",
-    local_manifest_dir = "**",
->>>>>>> 2d354858 (chore: some dept)
 )

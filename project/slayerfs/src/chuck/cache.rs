@@ -9,7 +9,6 @@ use std::{
 use anyhow::anyhow;
 use dirs::cache_dir;
 use sha2::{Digest, Sha256, digest::KeyInit};
-use tempfile::tempdir;
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
@@ -481,7 +480,7 @@ mod tests {
         // 存储前检查目录为空（除了可能的系统文件）
         let mut entries = fs::read_dir(&storage.base_dir).await.unwrap();
         let mut initial_count = 0;
-        while let Some(_) = entries.next_entry().await.unwrap() {
+        while entries.next_entry().await.unwrap().is_some() {
             initial_count += 1;
         }
 
@@ -490,7 +489,7 @@ mod tests {
         // 检查文件确实被创建
         let mut entries = fs::read_dir(&storage.base_dir).await.unwrap();
         let mut final_count = 0;
-        while let Some(_) = entries.next_entry().await.unwrap() {
+        while entries.next_entry().await.unwrap().is_some() {
             final_count += 1;
         }
         assert_eq!(final_count, initial_count + 1);

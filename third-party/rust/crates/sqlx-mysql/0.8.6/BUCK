@@ -33,11 +33,14 @@ cargo.rust_library(
     },
     features = [
         "any",
+        "bigdecimal",
         "chrono",
         "json",
         "migrate",
         "offline",
+        "rust_decimal",
         "serde",
+        "time",
         "uuid",
     ],
     named_deps = {
@@ -47,6 +50,7 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/atoi/2.0.0:atoi",
         "//third-party/rust/crates/base64/0.22.1:base64",
+        "//third-party/rust/crates/bigdecimal/0.4.8:bigdecimal",
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
         "//third-party/rust/crates/byteorder/1.5.0:byteorder",
         "//third-party/rust/crates/bytes/1.10.1:bytes",
@@ -70,6 +74,7 @@ cargo.rust_library(
         "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding",
         "//third-party/rust/crates/rand/0.8.5:rand",
         "//third-party/rust/crates/rsa/0.9.8:rsa",
+        "//third-party/rust/crates/rust_decimal/1.38.0:rust_decimal",
         "//third-party/rust/crates/serde/1.0.226:serde",
         "//third-party/rust/crates/sha1/0.10.6:sha1",
         "//third-party/rust/crates/sha2/0.10.9:sha2",
@@ -77,6 +82,7 @@ cargo.rust_library(
         "//third-party/rust/crates/sqlx-core/0.8.6:sqlx-core",
         "//third-party/rust/crates/stringprep/0.1.5:stringprep",
         "//third-party/rust/crates/thiserror/2.0.16:thiserror",
+        "//third-party/rust/crates/time/0.3.44:time",
         "//third-party/rust/crates/tracing/0.1.41:tracing",
         "//third-party/rust/crates/uuid/1.18.1:uuid",
         "//third-party/rust/crates/whoami/1.6.1:whoami",
