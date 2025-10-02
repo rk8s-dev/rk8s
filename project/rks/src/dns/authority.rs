@@ -197,7 +197,9 @@ impl XlineAuthority {
                                         let ip_only = ip_str.split('/').next().unwrap();
                                         let ip = ip_only.parse().ok();
                                         let pod_ip_with_dashes = ip_only.replace('.', "-");
-                                        info!("DNS server insert PodRecord: {pod_ip_with_dashes}, ns: {ns}");
+                                        info!(
+                                            "DNS server insert PodRecord: {pod_ip_with_dashes}, ns: {ns}"
+                                        );
                                         pod_cache.write().await.insert(
                                             (ns.clone(), pod_ip_with_dashes.clone()),
                                             PodRecord {
@@ -215,7 +217,8 @@ impl XlineAuthority {
                                             serde_yaml::from_slice::<PodTask>(kv.value())
                                         {
                                             let ns = pod.metadata.namespace.clone();
-                                            let ip_str = pod.status.pod_ip.clone().unwrap_or_default();
+                                            let ip_str = 
+                                                pod.status.pod_ip.clone().unwrap_or_default();
                                             let ip_only = ip_str.split('/').next().unwrap();
                                             let pod_ip_with_dashes = ip_only.replace('.', "-");
                                             info!(
