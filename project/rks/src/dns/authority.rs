@@ -103,22 +103,24 @@ impl Authority for XlineAuthority {
         }
 
         if let Some((pod_name, ns)) = parse_pod_query(name, &self.origin) {
+            info!("DNS lookup the pod_name: {pod_name}, ns: {ns}");
             let cache = self.object_cache.pod_cache.read().await;
             if let Some(pod) = cache.get(&(ns, pod_name))
                 && rtype == RecordType::A
                 && let Some(ip) = pod.pod_ip
             {
+                info!("DNS find the Record: {pod:?}");
                 let mut set = RecordSet::new(name.clone().into(), RecordType::A, 30);
                 set.insert(
                     Record::from_rdata(name.clone().into(), 30, RData::A(ip.into())),
                     0,
                 );
-                info!("DNS find the Record: {set:?}");
                 return LookupControlFlow::Continue(Ok(LookupRecords::Records {
                     lookup_options,
                     records: Arc::new(set),
                 }));
             }
+            info!("DNS not find the Record");
         }
 
         LookupControlFlow::Continue(Ok(LookupRecords::Empty))
@@ -133,9 +135,10 @@ impl XlineAuthority {
         for pod in pods {
             let ns = pod.metadata.namespace.clone();
             let ip_str = pod.status.pod_ip.clone().unwrap_or_default();
-            let ip = ip_str.parse().ok();
-            let pod_ip_with_dashes = ip_str.replace('.', "-");
-            info!("DNS server insert PodRecord : {pod_ip_with_dashes}");
+            let ip_only = ip_str.split('/').next().unwrap();
+            let ip = ip_only.parse().ok();
+            let pod_ip_with_dashes = ip_only.replace('.', "-");
+            info!("DNS server insert PodRecord: {pod_ip_with_dashes}, ns: {ns}");
             pod_cache.insert(
                 (ns.clone(), pod_ip_with_dashes.clone()),
                 PodRecord {
@@ -145,6 +148,7 @@ impl XlineAuthority {
                 },
             );
         }
+        info!("DNS server init_from_store pod_cache: {pod_cache:?}");
         drop(pod_cache);
 
         let services = store.list_services().await?;
@@ -190,9 +194,10 @@ impl XlineAuthority {
                                     {
                                         let ns = pod.metadata.namespace.clone();
                                         let ip_str = pod.status.pod_ip.clone().unwrap_or_default();
-                                        let ip = ip_str.parse().ok();
-                                        let pod_ip_with_dashes = ip_str.replace('.', "-");
-                                        info!("DNS server insert PodRecord : {pod_ip_with_dashes}");
+                                        let ip_only = ip_str.split('/').next().unwrap();
+                                        let ip = ip_only.parse().ok();
+                                        let pod_ip_with_dashes = ip_only.replace('.', "-");
+                                        info!("DNS server insert PodRecord: {pod_ip_with_dashes}, ns: {ns}");
                                         pod_cache.write().await.insert(
                                             (ns.clone(), pod_ip_with_dashes.clone()),
                                             PodRecord {
@@ -210,9 +215,9 @@ impl XlineAuthority {
                                             serde_yaml::from_slice::<PodTask>(kv.value())
                                         {
                                             let ns = pod.metadata.namespace.clone();
-                                            let ip_str =
-                                                pod.status.pod_ip.clone().unwrap_or_default();
-                                            let pod_ip_with_dashes = ip_str.replace('.', "-");
+                                            let ip_str = pod.status.pod_ip.clone().unwrap_or_default();
+                                            let ip_only = ip_str.split('/').next().unwrap();
+                                            let pod_ip_with_dashes = ip_only.replace('.', "-");
                                             info!(
                                                 "DNS server delete PodRecord : {pod_ip_with_dashes}"
                                             );
