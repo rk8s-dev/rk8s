@@ -65,4 +65,16 @@ impl ObjectBackend for RustfsLikeBackend {
             Err(e) => Err(Box::new(e)),
         }
     }
+
+    async fn delete_object(
+        &self,
+        key: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let path = self.path_for(key);
+        match fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(Box::new(e)),
+        }
+    }
 }

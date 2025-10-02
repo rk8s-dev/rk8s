@@ -3,6 +3,7 @@
 .vscode
 .zed
 .buckal
+*.code-workspace
 
 # Mac
 .DS_Store
@@ -11,4 +12,6 @@
 /buck-out
 /build
 
-*.code-workspace
+# Claude Code
+CLAUDE.md
+.claude

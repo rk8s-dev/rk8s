@@ -15,6 +15,10 @@ pub trait ObjectBackend: Send + Sync {
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>>;
     async fn get_etag(&self, key: &str)
     -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+    async fn delete_object(
+        &self,
+        key: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
 pub struct ObjectClient<B: ObjectBackend> {
@@ -46,5 +50,12 @@ impl<B: ObjectBackend> ObjectClient<B> {
         key: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         self.backend.get_etag(key).await
+    }
+
+    pub async fn delete_object(
+        &self,
+        key: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.backend.delete_object(key).await
     }
 }

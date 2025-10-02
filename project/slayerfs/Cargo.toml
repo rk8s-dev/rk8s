@@ -24,7 +24,12 @@ dirs = "6"
 sha2 = "0.10"
 anyhow = "1.0.100"
 tempfile = "3"
+env_logger = "0.10"
 
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "s3_demo"
+path = "src/examples/s3_demo.rs"
