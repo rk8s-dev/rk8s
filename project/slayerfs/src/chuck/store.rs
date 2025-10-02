@@ -36,6 +36,14 @@ pub trait BlockStore {
         len: usize,
         layout: ChunkLayout,
     ) -> Vec<u8>;
+
+    #[allow(dead_code)]
+    async fn delete_block_range(
+        &mut self,
+        chunk_id: i64,
+        block_index: u32,
+        len: usize,
+    ) -> anyhow::Result<()>;
 }
 
 #[allow(dead_code)]
@@ -107,6 +115,21 @@ impl BlockStore for InMemoryBlockStore {
             let _ = layout; // 抑制未使用
             vec![0u8; len]
         }
+    }
+
+    // Delete the block range [block_index,blcok_inde + len)
+    async fn delete_block_range(
+        &mut self,
+        chunk_id: i64,
+        block_index: u32,
+        len: usize,
+    ) -> anyhow::Result<()> {
+        let start = block_index;
+        let end = start + len as u32;
+        for i in start..end {
+            self.map.remove(&(chunk_id, i));
+        }
+        Ok(())
     }
 }
 
@@ -229,6 +252,23 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         }
 
         buf
+    }
+
+    async fn delete_block_range(
+        &mut self,
+        chunk_id: i64,
+        block_index: u32,
+        len: usize,
+    ) -> anyhow::Result<()> {
+        let start = block_index;
+        let end = start + len as u32;
+
+        for i in start..end {
+            let key = Self::key_for(chunk_id, i);
+            self.client.delete_object(&key).await.unwrap();
+        }
+
+        Ok(())
     }
 }
 
