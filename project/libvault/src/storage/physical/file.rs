@@ -158,10 +158,7 @@ mod test {
     use super::super::super::test::{test_backend_curd, test_backend_list_prefix};
     use crate::test_utils::new_test_backend;
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_file_backend() {
         let backend = new_test_backend("test_file_backend");
 

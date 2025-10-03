@@ -104,7 +104,6 @@ serial_test = "3.2"
 default = ["crypto_adaptor_openssl"]
 crypto_adaptor_openssl = ["dep:openssl", "dep:openssl-sys"]
 crypto_adaptor_tongsuo = ["dep:openssl", "dep:openssl-sys"]
-sync_handler = ["maybe-async/is_sync"]
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5"

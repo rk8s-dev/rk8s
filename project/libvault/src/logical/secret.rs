@@ -1,6 +1,4 @@
-#[cfg(not(feature = "sync_handler"))]
-use std::{future::Future, pin::Pin};
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use derive_more::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
@@ -9,16 +7,12 @@ use serde_json::{Map, Value};
 use super::{Backend, Request, Response, lease::Lease};
 use crate::errors::RvError;
 
-#[cfg(not(feature = "sync_handler"))]
 type SecretOperationHandler = dyn for<'a> Fn(
         &'a dyn Backend,
         &'a mut Request,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Response>, RvError>> + Send + 'a>>
     + Send
     + Sync;
-#[cfg(feature = "sync_handler")]
-type SecretOperationHandler =
-    dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
 
 #[derive(Debug, Clone, Eq, Default, PartialEq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SecretData {
@@ -148,7 +142,6 @@ impl SecretBuilder {
         self
     }
 
-    #[cfg(not(feature = "sync_handler"))]
     pub fn renew_handler<H>(mut self, handler: H) -> Self
     where
         H: for<'a> Fn(
@@ -164,21 +157,6 @@ impl SecretBuilder {
         self
     }
 
-    #[cfg(feature = "sync_handler")]
-    pub fn renew_handler<H>(mut self, handler: H) -> Self
-    where
-        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.secret
-            .renew_handler
-            .replace(Arc::new(move |backend, req| handler(backend, req)));
-        self
-    }
-
-    #[cfg(not(feature = "sync_handler"))]
     pub fn revoke_handler<H>(mut self, handler: H) -> Self
     where
         H: for<'a> Fn(
@@ -193,21 +171,6 @@ impl SecretBuilder {
         self.secret.revoke_handler = Some(Arc::new(handler));
         self
     }
-
-    #[cfg(feature = "sync_handler")]
-    pub fn revoke_handler<H>(mut self, handler: H) -> Self
-    where
-        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.secret
-            .revoke_handler
-            .replace(Arc::new(move |backend, req| handler(backend, req)));
-        self
-    }
-
     pub fn build(self) -> Secret {
         self.secret
     }
@@ -250,7 +213,6 @@ mod test {
     fn test_logical_secret() {
         let t = Arc::new(MyTest::new());
 
-        #[cfg(not(feature = "sync_handler"))]
         let secret = {
             let renew = Arc::clone(&t);
 
@@ -262,18 +224,6 @@ mod test {
                     Box::pin(async move { renew.noop(backend, req).await })
                 })
                 .revoke_handler(|backend, req| Box::pin(async move { noop(backend, req).await }))
-                .build()
-        };
-
-        #[cfg(feature = "sync_handler")]
-        let secret = {
-            let renew = Arc::clone(&t);
-
-            Secret::builder()
-                .secret_type("kv")
-                .default_duration_secs(60)
-                .renew_handler(move |backend, req| renew.noop(backend, req))
-                .revoke_handler(noop)
                 .build()
         };
 

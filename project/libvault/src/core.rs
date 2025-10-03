@@ -750,10 +750,7 @@ mod test {
         let _ = new_unseal_test_rusty_vault("test_core_init");
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_generate_unseal_keys_basic() {
         let (_rvault, core, _) =
             new_unseal_test_rusty_vault("test_generate_unseal_keys_basic").await;
@@ -779,10 +776,7 @@ mod test {
         }
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_generate_unseal_keys_when_sealed() {
         let (_rvault, core, _) =
             new_unseal_test_rusty_vault("test_generate_unseal_keys_when_sealed").await;
@@ -796,10 +790,7 @@ mod test {
         assert!(result.is_err());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_generate_unseal_keys_multiple_calls() {
         let (_rvault, core, _) =
             new_unseal_test_rusty_vault("test_generate_unseal_keys_multiple_calls").await;
@@ -818,10 +809,7 @@ mod test {
         assert_ne!(keys2[0], keys3[0]);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_unseal_once_basic() {
         let (_rvault, core, _) = new_unseal_test_rusty_vault("test_unseal_once_basic").await;
 
@@ -855,10 +843,7 @@ mod test {
         assert_ne!(initial_keys[0], new_keys[0]);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_unseal_once_insufficient_keys() {
         let (_rvault, core, _) =
             new_unseal_test_rusty_vault("test_unseal_once_insufficient_keys").await;
@@ -877,10 +862,7 @@ mod test {
         assert!(core.sealed());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_unseal_once_key_deprecation() {
         let (_rvault, core, _) =
             new_unseal_test_rusty_vault("test_unseal_once_key_deprecation").await;
@@ -942,10 +924,7 @@ mod test {
         assert_eq!(new_keys2.len(), seal_config.secret_shares as usize);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_unseal_once_when_already_unsealed() {
         let (_rvault, core, _) =
             new_unseal_test_rusty_vault("test_unseal_once_when_already_unsealed").await;
@@ -958,10 +937,7 @@ mod test {
         assert!(result.is_err());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_unseal_once_forward_secrecy() {
         let (_rvault, core, _) =
             new_unseal_test_rusty_vault("test_unseal_once_forward_secrecy").await;

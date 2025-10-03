@@ -1,20 +1,11 @@
 use super::{Backend, Field, Operation, field::IntoFieldArc, request::Request, response::Response};
 use crate::{context::Context, errors::RvError};
-#[cfg(not(feature = "sync_handler"))]
-use std::future::Future;
-#[cfg(not(feature = "sync_handler"))]
-use std::pin::Pin;
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{collections::HashMap, fmt, future::Future, pin::Pin, sync::Arc};
 
-#[cfg(not(feature = "sync_handler"))]
 pub type PathOperationFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Option<Response>, RvError>> + Send + 'a>>;
-#[cfg(not(feature = "sync_handler"))]
 type PathOperationHandler =
     dyn for<'a> Fn(&'a dyn Backend, &'a mut Request) -> PathOperationFuture<'a> + Send + Sync;
-#[cfg(feature = "sync_handler")]
-type PathOperationHandler =
-    dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
 
 #[derive(Debug, Clone)]
 pub struct Path {
@@ -37,17 +28,9 @@ impl Default for Path {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PathBuilder {
     path: Path,
-}
-
-impl Default for PathBuilder {
-    fn default() -> Self {
-        Self {
-            path: Path::default(),
-        }
-    }
 }
 
 impl PathBuilder {
@@ -88,24 +71,9 @@ impl PathBuilder {
         self
     }
 
-    #[cfg(not(feature = "sync_handler"))]
     pub fn operation<H>(mut self, op: Operation, handler: H) -> Self
     where
         H: for<'a> Fn(&'a dyn Backend, &'a mut Request) -> PathOperationFuture<'a>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.path
-            .operations
-            .push(PathOperation::with_handler(op, handler));
-        self
-    }
-
-    #[cfg(feature = "sync_handler")]
-    pub fn operation<H>(mut self, op: Operation, handler: H) -> Self
-    where
-        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
             + Send
             + Sync
             + 'static,
@@ -141,7 +109,6 @@ impl fmt::Debug for PathOperation {
 }
 
 impl PathOperation {
-    #[cfg(not(feature = "sync_handler"))]
     pub fn with_handler<H>(op: Operation, handler: H) -> Self
     where
         H: for<'a> Fn(&'a dyn Backend, &'a mut Request) -> PathOperationFuture<'a>
@@ -153,19 +120,6 @@ impl PathOperation {
             op,
             handler: Arc::new(handler),
         }
-    }
-
-    #[cfg(feature = "sync_handler")]
-    pub fn with_handler<H>(op: Operation, handler: H) -> Self
-    where
-        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let handler = Arc::new(move |backend, req| handler(backend, req));
-
-        Self { op, handler }
     }
 }
 
@@ -188,18 +142,10 @@ impl Path {
 
 #[maybe_async::maybe_async]
 impl PathOperation {
-    #[cfg(not(feature = "sync_handler"))]
     pub fn new() -> Self {
         Self {
             op: Operation::Read,
             handler: Arc::new(|_backend, _req| Box::pin(async move { Ok(None) })),
-        }
-    }
-    #[cfg(feature = "sync_handler")]
-    pub fn new() -> Self {
-        Self {
-            op: Operation::Read,
-            handler: Arc::new(|_backend, _req| Ok(None)),
         }
     }
 
@@ -225,7 +171,6 @@ mod test {
     }
 
     #[test]
-    #[cfg(not(feature = "sync_handler"))]
     fn test_logical_path() {
         let path = Path::builder()
             .pattern("/aa")
@@ -247,42 +192,6 @@ mod test {
             .operation(Operation::Write, |_backend, _req| {
                 Box::pin(async move { Err(RvError::ErrUnknown) })
             })
-            .help("testhelp")
-            .build();
-
-        assert_eq!(&path.pattern, "/aa");
-        assert_eq!(&path.help, "testhelp");
-        assert!(path.fields.get("mytype").is_some());
-        assert_eq!(path.fields["mytype"].field_type, FieldType::Int);
-        assert_eq!(path.fields["mytype"].description, "haha");
-        assert!(path.fields.get("mypath").is_some());
-        assert_eq!(path.fields["mypath"].field_type, FieldType::Str);
-        assert_eq!(path.fields["mypath"].description, "hehe");
-        assert!(path.fields.get("xxfield").is_none());
-        assert_eq!(path.operations[0].op, Operation::Read);
-        assert_eq!(path.operations[1].op, Operation::Write);
-        assert_eq!(path.operations.len(), 2);
-    }
-
-    #[test]
-    #[cfg(feature = "sync_handler")]
-    fn test_logical_path() {
-        let path = Path::builder()
-            .pattern("/aa")
-            .field(
-                "mytype",
-                Field::builder()
-                    .field_type(FieldType::Int)
-                    .description("haha"),
-            )
-            .field(
-                "mypath",
-                Field::builder()
-                    .field_type(FieldType::Str)
-                    .description("hehe"),
-            )
-            .operation(Operation::Read, my_test_read_handler)
-            .operation(Operation::Write, |_backend, _req| Err(RvError::ErrUnknown))
             .help("testhelp")
             .build();
 

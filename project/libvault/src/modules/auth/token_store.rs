@@ -3,9 +3,7 @@
 //! logical backend interface through the `TokenStore` struct. Additionally, it implements
 //! the `Handler` trait to provide authentication and authorization functionality at
 //! different stages of request handling, such as pre-routing and post-routing.
-#[cfg(not(feature = "sync_handler"))]
 use std::future::Future;
-#[cfg(not(feature = "sync_handler"))]
 use std::pin::Pin;
 
 use std::{
@@ -190,7 +188,6 @@ impl TokenStore {
             .upgrade()
             .expect("token store weak reference should be valid");
 
-        #[cfg(not(feature = "sync_handler"))]
         let backend = {
             let create_path = PathBuilder::new()
                 .pattern("create*")
@@ -349,149 +346,6 @@ impl TokenStore {
                         let handler = handler.clone();
                         Box::pin(async move { handler.auth_renew(backend, req).await })
                     }
-                })
-                .root_paths(vec!["revoke-orphan/*"])
-                .build()
-        };
-
-        #[cfg(feature = "sync_handler")]
-        let backend = {
-            let create_path = PathBuilder::new()
-                .pattern("create*")
-                .field(
-                    "num_uses",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Int)
-                        .description("Max number of uses for this token"),
-                )
-                .field(
-                    "period",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Str)
-                        .description("Renew period"),
-                )
-                .field(
-                    "ttl",
-                    FieldBuilder::new()
-                        .field_type(FieldType::DurationSecond)
-                        .description("Time to live for this token"),
-                )
-                .field(
-                    "renewable",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Bool)
-                        .default_value(true)
-                        .description(
-                            "Allow token to be renewed past its initial TTL up to system/mount maximum TTL",
-                        ),
-                )
-                .field(
-                    "policies",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Array)
-                        .description("List of policies for the token"),
-                )
-                .operation(Operation::Write, {
-                    let handler = store.clone();
-                    move |backend, req| handler.clone().handle_create(backend, req)
-                })
-                .help("The token create path is used to create new tokens.")
-                .build();
-
-            let lookup_path = PathBuilder::new()
-                .pattern("lookup/(?P<token>.+)")
-                .field(
-                    "token",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Str)
-                        .description("Token to lookup"),
-                )
-                .operation(Operation::Read, {
-                    let handler = store.clone();
-                    move |backend, req| handler.clone().handle_lookup(backend, req)
-                })
-                .help("This endpoint will lookup a token and its properties.")
-                .build();
-
-            let lookup_self_path = PathBuilder::new()
-                .pattern("lookup-self$")
-                .field(
-                    "token",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Str)
-                        .description("Token to lookup"),
-                )
-                .operation(Operation::Read, {
-                    let handler = store.clone();
-                    move |backend, req| handler.clone().handle_lookup_self(backend, req)
-                })
-                .help("This endpoint will lookup a token and its properties.")
-                .build();
-
-            let revoke_path = PathBuilder::new()
-                .pattern("revoke/(?P<token>.+)")
-                .field(
-                    "token",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Str)
-                        .description("Token to revoke"),
-                )
-                .operation(Operation::Write, {
-                    let handler = store.clone();
-                    move |backend, req| handler.clone().handle_revoke_tree(backend, req)
-                })
-                .help("This endpoint will delete the token and all of its child tokens.")
-                .build();
-
-            let revoke_orphan_path = PathBuilder::new()
-                .pattern("revoke-orphan/(?P<token>.+)")
-                .field(
-                    "token",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Str)
-                        .description("Token to revoke (request body)"),
-                )
-                .operation(Operation::Write, {
-                    let handler = store.clone();
-                    move |backend, req| handler.clone().handle_revoke_orphan(backend, req)
-                })
-                .help("This endpoint will delete the token and orphan its child tokens.")
-                .build();
-
-            let renew_path = PathBuilder::new()
-                .pattern("renew/(?P<token>.+)")
-                .field(
-                    "token",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Str)
-                        .description("Token to renew (request body)"),
-                )
-                .field(
-                    "increment",
-                    FieldBuilder::new()
-                        .field_type(FieldType::Int)
-                        .description("The desired increment in seconds to the token expiration"),
-                )
-                .operation(Operation::Write, {
-                    let handler = store.clone();
-                    move |backend, req| handler.clone().handle_renew(backend, req)
-                })
-                .help("This endpoint will renew the token and prevent expiration.")
-                .build();
-
-            LogicalBackend::builder()
-                .help(AUTH_TOKEN_HELP)
-                .paths(vec![
-                    create_path,
-                    lookup_path,
-                    lookup_self_path,
-                    revoke_path,
-                    revoke_orphan_path,
-                    renew_path,
-                ])
-                .auth_renew_handler({
-                    let handler = store.clone();
-                    move |backend, req| handler.clone().auth_renew(backend, req)
                 })
                 .root_paths(vec!["revoke-orphan/*"])
                 .build()
@@ -696,7 +550,6 @@ impl TokenStore {
         self.revoke_tree_salted(self.salt_id(id).as_str()).await
     }
 
-    #[cfg(not(feature = "sync_handler"))]
     pub fn revoke_tree_salted(
         &self,
         salted_id: &str,
@@ -717,22 +570,6 @@ impl TokenStore {
 
             Ok(())
         })
-    }
-
-    #[cfg(feature = "sync_handler")]
-    pub fn revoke_tree_salted(&self, salted_id: &str) -> Result<(), RvError> {
-        let Some(view) = self.view.as_ref() else {
-            return Err(RvError::ErrModuleNotInit);
-        };
-
-        let path = format!("{TOKEN_PARENT_PREFIX}{salted_id}/");
-
-        let children = view.list(&path)?;
-        for child in children.iter() {
-            self.revoke_tree_salted(child)?;
-        }
-
-        self.revoke_salted(salted_id)
     }
 
     pub async fn handle_create(
@@ -1211,19 +1048,13 @@ mod mod_token_store_tests {
                 .replace("\\", "_")
                 .replace(".", "_");
             println!("init_test_rusty_vault, name: {}", name);
-            #[cfg(not(feature = "sync_handler"))]
             let (_, core, _) = new_unseal_test_rusty_vault(&name).await;
-            #[cfg(feature = "sync_handler")]
-            let (_, core, _) = new_unseal_test_rusty_vault(&name);
 
             let expiration = ExpirationManager::new(&core).unwrap().wrap();
-            #[cfg(not(feature = "sync_handler"))]
             let token_store = TokenStore::new(&core, expiration.clone())
                 .await
                 .unwrap()
                 .wrap();
-            #[cfg(feature = "sync_handler")]
-            let token_store = TokenStore::new(&core, expiration.clone()).unwrap().wrap();
 
             expiration.set_token_store(&token_store).unwrap();
 
@@ -1261,10 +1092,7 @@ mod mod_token_store_tests {
         }
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_token_create_and_lookup() {
         let token_store = mock_token_store!();
 
@@ -1284,10 +1112,7 @@ mod mod_token_store_tests {
         assert_eq!(looked_up_entry.policies, entry.policies);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_token_revoke() {
         let token_store = mock_token_store!();
 
@@ -1306,10 +1131,7 @@ mod mod_token_store_tests {
         assert!(result.is_none());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_token_revoke_tree() {
         let token_store = mock_token_store!();
 
@@ -1339,10 +1161,7 @@ mod mod_token_store_tests {
         assert!(child_result.is_none());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_token_handle_create_request() {
         let token_store = mock_token_store!();
         let mock_backend = MockBackend(());

@@ -443,10 +443,7 @@ mod test {
         assert_eq!(plaintext.as_bytes(), res.unwrap());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_barrier_aes256_gcm() {
         let backend = new_test_backend("test_barriew_aes256_gcm");
 
@@ -484,10 +481,7 @@ mod test {
         assert!(sealed.unwrap());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_barrier_storage_api() {
         let backend = new_test_backend("test_barriew_storage_api");
 

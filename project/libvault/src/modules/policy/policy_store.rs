@@ -738,10 +738,7 @@ mod mod_policy_store_tests {
     use super::{super::policy::Capability, *};
     use crate::test_utils::new_unseal_test_rusty_vault;
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_policy_store_crud() {
         let (_rvault, core, _root_token) =
             new_unseal_test_rusty_vault("test_policy_store_crud").await;
@@ -812,10 +809,7 @@ mod mod_policy_store_tests {
         assert!(policies.contains(&policy2_name.to_string()));
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_policy_load_default() {
         let (_rvault, core, _root_token) =
             new_unseal_test_rusty_vault("test_policy_load_default").await;
@@ -845,10 +839,7 @@ mod mod_policy_store_tests {
         assert!(control_group_policy.is_some());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_policy_root() {
         let (_, core, _) = new_unseal_test_rusty_vault("test_policy_root").await;
 
@@ -877,10 +868,7 @@ mod mod_policy_store_tests {
         assert!(result.is_err());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_policy_new_acl() {
         let (_, core, _) = new_unseal_test_rusty_vault("test_policy_new_acl").await;
 

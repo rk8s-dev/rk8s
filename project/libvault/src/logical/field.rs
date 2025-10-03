@@ -404,7 +404,7 @@ impl FieldBuilder {
     }
 
     pub fn default_value(mut self, default: impl Serialize) -> Self {
-        self.field.default = serde_json::to_value(default).unwrap_or_else(|_| json!(null));
+        self.field.default = serde_json::to_value(default).unwrap_or(Value::Null);
         self.field.required = false;
         self
     }

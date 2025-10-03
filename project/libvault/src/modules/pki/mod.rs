@@ -86,45 +86,25 @@ impl PkiBackend {
             .path(self.keys_encrypt_path())
             .path(self.keys_decrypt_path());
 
-        #[cfg(not(feature = "sync_handler"))]
-        {
-            let secret = SecretBuilder::new()
-                .secret_type("pki")
-                .revoke_handler({
-                    let handler = self.inner.clone();
-                    move |backend, req| {
-                        let handler = handler.clone();
-                        Box::pin(async move { handler.revoke_secret_creds(backend, req).await })
-                    }
-                })
-                .renew_handler({
-                    let handler = self.inner.clone();
-                    move |backend, req| {
-                        let handler = handler.clone();
-                        Box::pin(async move { handler.renew_secret_creds(backend, req).await })
-                    }
-                })
-                .build();
+        let secret = SecretBuilder::new()
+            .secret_type("pki")
+            .revoke_handler({
+                let handler = self.inner.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.revoke_secret_creds(backend, req).await })
+                }
+            })
+            .renew_handler({
+                let handler = self.inner.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.renew_secret_creds(backend, req).await })
+                }
+            })
+            .build();
 
-            return builder.secret(secret).build();
-        }
-
-        #[cfg(feature = "sync_handler")]
-        {
-            let secret = SecretBuilder::new()
-                .secret_type("pki")
-                .revoke_handler({
-                    let handler = self.inner.clone();
-                    move |backend, req| handler.clone().revoke_secret_creds(backend, req)
-                })
-                .renew_handler({
-                    let handler = self.inner.clone();
-                    move |backend, req| handler.clone().renew_secret_creds(backend, req)
-                })
-                .build();
-
-            builder.secret(secret).build()
-        }
+        builder.secret(secret).build()
     }
 }
 
@@ -508,10 +488,7 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
 2k24wuH7oUtLlvf05p4cqfEx
 -----END PRIVATE KEY-----"#;
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_pki_config_ca() {
         let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_pki_config_ca").await;
         let token = &root_token;
@@ -544,10 +521,7 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         );
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_pki_config_role() {
         let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_pki_config_role").await;
         let token = &root_token;
@@ -584,10 +558,7 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         assert_eq!(role_data["no_store"].as_bool().unwrap(), false);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_pki_issue_cert() {
         let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_pki_issue_cert").await;
         let token = &root_token;
@@ -702,10 +673,7 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         );
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_pki_generate_root() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_pki_generate_root").await;
@@ -731,10 +699,7 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
     }
 
     #[cfg(feature = "crypto_adaptor_tongsuo")]
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_pki_sm2_generate_root() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_pki_sm2_generate_root").await;
@@ -1084,10 +1049,7 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         assert!(resp.is_err());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_pki_generate_key() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_pki_generate_key").await;
@@ -1734,10 +1696,7 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         .await;
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_pki_import_key() {
         let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_pki_import_key").await;
         let token = &root_token;

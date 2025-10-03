@@ -60,7 +60,6 @@ impl KvBackend {
         let kv_backend_renew = self.inner.clone();
         let kv_backend_revoke = self.inner.clone();
 
-        #[cfg(not(feature = "sync_handler"))]
         let path_operations = vec![
             PathOperation::with_handler(Operation::Read, {
                 let handler = kv_backend_read.clone();
@@ -92,26 +91,6 @@ impl KvBackend {
             }),
         ];
 
-        #[cfg(feature = "sync_handler")]
-        let path_operations = vec![
-            PathOperation::with_handler(Operation::Read, {
-                let handler = kv_backend_read.clone();
-                move |backend, req| handler.handle_read(backend, req)
-            }),
-            PathOperation::with_handler(Operation::Write, {
-                let handler = kv_backend_write.clone();
-                move |backend, req| handler.handle_write(backend, req)
-            }),
-            PathOperation::with_handler(Operation::Delete, {
-                let handler = kv_backend_delete.clone();
-                move |backend, req| handler.handle_delete(backend, req)
-            }),
-            PathOperation::with_handler(Operation::List, {
-                let handler = kv_backend_list.clone();
-                move |backend, req| handler.handle_list(backend, req)
-            }),
-        ];
-
         let path = PathBuilder::new()
             .pattern(".*")
             .field(
@@ -127,7 +106,6 @@ impl KvBackend {
             )
             .build();
 
-        #[cfg(not(feature = "sync_handler"))]
         let secret = SecretBuilder::new()
             .secret_type("kv")
             .renew_handler({
@@ -143,19 +121,6 @@ impl KvBackend {
                     let handler = handler.clone();
                     Box::pin(async move { handler.handle_noop(backend, req).await })
                 }
-            })
-            .build();
-
-        #[cfg(feature = "sync_handler")]
-        let secret = SecretBuilder::new()
-            .secret_type("kv")
-            .renew_handler({
-                let handler = kv_backend_renew.clone();
-                move |backend, req| handler.handle_read(backend, req)
-            })
-            .revoke_handler({
-                let handler = kv_backend_revoke.clone();
-                move |backend, req| handler.handle_noop(backend, req)
             })
             .build();
 

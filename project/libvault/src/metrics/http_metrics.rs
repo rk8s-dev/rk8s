@@ -151,10 +151,7 @@ mod tests {
         counter_map
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_http_request() {
         let server = TestHttpServer::new_with_prometheus("test_http_request", false).await;
         let root_token = &server.root_token;

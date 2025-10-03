@@ -80,9 +80,6 @@ async fn logical_request_handler(
             r.operation = Operation::List;
         }
     }
-    #[cfg(feature = "sync_handler")]
-    let ret = core.handle_request(&mut r)?;
-    #[cfg(not(feature = "sync_handler"))]
     let ret = core.handle_request(&mut r).await?;
 
     match ret {

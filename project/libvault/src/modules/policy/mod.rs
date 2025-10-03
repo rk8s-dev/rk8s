@@ -234,10 +234,7 @@ mod mod_policy_tests {
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_policy_curd_api() {
         let (_rvault, core, root_token) = new_unseal_test_rusty_vault("test_policy_curd_api").await;
 
@@ -299,10 +296,7 @@ mod mod_policy_tests {
         assert_eq!(policies["policies"], json!(["default", "root"]));
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_policy_http_api() {
         let mut test_http_server = TestHttpServer::new("test_policy_http_api", true).await;
 

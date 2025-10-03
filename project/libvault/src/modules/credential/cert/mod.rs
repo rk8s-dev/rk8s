@@ -82,28 +82,15 @@ impl CertBackend {
             .path(self.crl_list_path())
             .path(self.login_path());
 
-        #[cfg(not(feature = "sync_handler"))]
-        {
-            return builder
-                .auth_renew_handler({
-                    let handler = self.inner.clone();
-                    move |backend, req| {
-                        let handler = handler.clone();
-                        Box::pin(async move { handler.login_renew(backend, req).await })
-                    }
-                })
-                .build();
-        }
-
-        #[cfg(feature = "sync_handler")]
-        {
-            builder
-                .auth_renew_handler({
-                    let handler = self.inner.clone();
-                    move |backend, req| handler.clone().login_renew(backend, req)
-                })
-                .build()
-        }
+        builder
+            .auth_renew_handler({
+                let handler = self.inner.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.login_renew(backend, req).await })
+                }
+            })
+            .build()
     }
 }
 
@@ -473,10 +460,7 @@ mod test {
         }
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_permitted_dns_domains_intermediate_ca() {
         let mut test_http_server = TestHttpServer::new(
             "test_credential_cert_module_permitted_dns_domains_intermediate_ca",
@@ -530,10 +514,7 @@ mod test {
         // TODO: testing pathLoginRenew for cert auth
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_non_ca_expiry() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_non_ca_expiry", true).await;
@@ -594,10 +575,7 @@ mod test {
         );
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_registered_non_ca_crl() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_registered_non_ca_crl", true).await;
@@ -654,10 +632,7 @@ mod test {
         );
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_crls() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_crls", true).await;
@@ -746,10 +721,7 @@ mod test {
         );
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_cert_writes() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_cert_writes", true).await;
@@ -820,10 +792,7 @@ mod test {
         );
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_basic_ca() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_basic_ca", true).await;
@@ -952,10 +921,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_basic_crls() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_basic_crls", true).await;
@@ -1030,10 +996,7 @@ mod test {
         assert_eq!(resp["auth"]["policies"], json!(["default", "foo"]));
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_basic_single_cert() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_basic_single_cert", true).await;
@@ -1161,10 +1124,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_ext_single_cert() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_ext_single_cert", true).await;
@@ -1618,10 +1578,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_dns_single_cert() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_dns_single_cert", true).await;
@@ -1760,10 +1717,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_email_single_cert() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_email_single_cert", true).await;
@@ -1902,10 +1856,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_uri_single_cert() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_uri_single_cert", true).await;
@@ -2045,10 +1996,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_ou_single_cert() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_ou_single_cert", true).await;
@@ -2138,10 +2086,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_mixed_constraints() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_mixed_constraints", true).await;
@@ -2238,10 +2183,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_untrusted() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_untrusted", true).await;
@@ -2289,10 +2231,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_valid_cidr() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_valid_cidr", true).await;
@@ -2359,10 +2298,7 @@ mod test {
             .unwrap();
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_cert_module_invalid_cidr() {
         let mut test_http_server =
             TestHttpServer::new("test_credential_cert_module_invalid_cidr", true).await;

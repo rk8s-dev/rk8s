@@ -462,13 +462,14 @@ impl MountsMonitor {
                             let mut changed = false;
                             let tables = mount_tables.read().unwrap();
                             for table in tables.iter() {
-                                #[cfg(not(feature = "sync_handler"))]
-                                match table.load(core.barrier.as_storage(), Some(&core.state.load().hmac_key), core.mount_entry_hmac_level).await {
-                                    Ok(Some(())) => changed = true,
-                                    _ => continue,
-                                }
-                                #[cfg(feature = "sync_handler")]
-                                match table.load(core.barrier.as_storage(), Some(&core.state.load().hmac_key), core.mount_entry_hmac_level) {
+                                match table
+                                    .load(
+                                        core.barrier.as_storage(),
+                                        Some(&core.state.load().hmac_key),
+                                        core.mount_entry_hmac_level,
+                                    )
+                                    .await
+                                {
                                     Ok(Some(())) => changed = true,
                                     _ => continue,
                                 }

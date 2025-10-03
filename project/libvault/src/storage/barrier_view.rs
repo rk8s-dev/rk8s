@@ -127,10 +127,7 @@ mod test {
     use super::{super::*, *};
     use crate::test_utils::new_test_backend;
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_new_barrier_view() {
         let backend = new_test_backend("test_new_barrier_view");
 

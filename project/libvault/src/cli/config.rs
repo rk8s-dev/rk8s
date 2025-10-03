@@ -282,11 +282,11 @@ fn load_config_dir(dir: &str) -> Result<Config, RvError> {
                 continue;
             }
 
-            if let Some(ext) = path.extension() {
-                if ext == "hcl" || ext == "json" {
-                    let filename = path.to_string_lossy().into_owned();
-                    paths.push(filename);
-                }
+            if let Some(ext) = path.extension()
+                && (ext == "hcl" || ext == "json")
+            {
+                let filename = path.to_string_lossy().into_owned();
+                paths.push(filename);
             }
         }
     }

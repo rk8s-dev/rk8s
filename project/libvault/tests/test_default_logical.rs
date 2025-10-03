@@ -411,10 +411,7 @@ async fn test_sys_logical_backend(core: &Core, token: &str) {
     test_sys_raw_api_feature(core, token).await;
 }
 
-#[maybe_async::test(
-    feature = "sync_handler",
-    async(all(not(feature = "sync_handler")), tokio::test)
-)]
+#[tokio::test]
 async fn test_default_logical() {
     use libvault::RustyVault;
 

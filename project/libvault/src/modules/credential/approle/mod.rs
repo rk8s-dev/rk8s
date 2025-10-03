@@ -119,28 +119,15 @@ impl AppRoleBackend {
             .path(self.role_path())
             .path(self.tidy_secret_id_path());
 
-        #[cfg(not(feature = "sync_handler"))]
-        {
-            return builder
-                .auth_renew_handler({
-                    let handler = self.inner.clone();
-                    move |backend, req| {
-                        let handler = handler.clone();
-                        Box::pin(async move { handler.login_renew(backend, req).await })
-                    }
-                })
-                .build();
-        }
-
-        #[cfg(feature = "sync_handler")]
-        {
-            builder
-                .auth_renew_handler({
-                    let handler = self.inner.clone();
-                    move |backend, req| handler.clone().login_renew(backend, req)
-                })
-                .build()
-        }
+        builder
+            .auth_renew_handler({
+                let handler = self.inner.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.login_renew(backend, req).await })
+                }
+            })
+            .build()
     }
 }
 
@@ -671,10 +658,7 @@ mod test {
         println!("resp_data: {:?}", resp_data);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_credential_approle_module() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_credential_approle_module").await;

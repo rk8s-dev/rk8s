@@ -205,9 +205,6 @@ pub async fn handle_request(
     core: web::Data<Arc<Core>>,
     req: &mut Request,
 ) -> Result<HttpResponse, RvError> {
-    #[cfg(feature = "sync_handler")]
-    let resp = core.handle_request(req)?;
-    #[cfg(not(feature = "sync_handler"))]
     let resp = core.handle_request(req).await?;
     if resp.is_none() {
         Ok(response_ok(None, None))

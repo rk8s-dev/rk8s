@@ -2867,10 +2867,7 @@ mod test {
         },
     };
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_read_local_secret_ids() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_read_local_secret_ids").await;
@@ -2912,10 +2909,7 @@ mod test {
         );
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_local_non_secret_ids() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_local_non_secret_ids").await;
@@ -3010,10 +3004,7 @@ mod test {
         assert_eq!(resp_data["keys"].as_array().unwrap().len(), len);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_upgrade_secret_id_prefix() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_upgrade_secret_id_prefix").await;
@@ -3062,10 +3053,7 @@ mod test {
         assert!(!resp_data["local_secret_ids"].as_bool().unwrap());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_local_secret_id_immutablility() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_local_secret_id_immutablility").await;
@@ -3103,10 +3091,7 @@ mod test {
         .await;
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_upgrade_bound_cidr_list() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_upgrade_bound_cidr_list").await;
@@ -3207,10 +3192,7 @@ mod test {
         assert_ne!(secret_id, "");
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_name_lower_casing() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_name_lower_casing").await;
@@ -3383,10 +3365,7 @@ mod test {
         assert_eq!(keys.len(), 1);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_read_set_index() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_read_set_index").await;
@@ -3474,10 +3453,7 @@ mod test {
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_cidr_subset() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_cidr_subset").await;
@@ -3546,10 +3522,7 @@ mod test {
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_token_bound_cidr_subset_32_mask() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_token_bound_cidr_subset_32_mask").await;
@@ -3605,10 +3578,7 @@ mod test {
         assert!(resp.is_err());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_constraints() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_constraints").await;
@@ -3661,10 +3631,7 @@ mod test {
         assert!(resp.is_err());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_update_role_id() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_update_role_id").await;
@@ -3717,10 +3684,7 @@ mod test {
         let _ = test_login(&core, "approle", "customroleid", secret_id, true).await;
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_id_uniqueness() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_id_uniqueness").await;
@@ -3833,10 +3797,7 @@ mod test {
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_delete_secret_id() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_delete_secret_id").await;
@@ -3872,10 +3833,7 @@ mod test {
         .await;
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_lookup_and_destroy_role_secret_id() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_lookup_and_destroy_role_secret_id").await;
@@ -3921,10 +3879,7 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_lookup_and_destroy_role_secret_id_accessor() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_lookup_and_destroy_role_secret_id_accessor")
@@ -3983,10 +3938,7 @@ mod test {
         .await;
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_lookup_role_secret_id_accessor() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_lookup_role_secret_id_accessor").await;
@@ -4012,10 +3964,7 @@ mod test {
         // TODO: resp should ok
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_list_role_secret_id() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_list_role_secret_id").await;
@@ -4045,10 +3994,7 @@ mod test {
         assert_eq!(keys.len(), 5);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_list_role() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_list_role").await;
@@ -4072,10 +4018,7 @@ mod test {
         assert_eq!(expect.as_array().unwrap().clone(), keys);
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_secret_id_without_fields() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_without_fields").await;
@@ -4149,10 +4092,7 @@ mod test {
         );
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_secret_id_with_valid_fields() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_with_valid_fields").await;
@@ -4229,10 +4169,7 @@ mod test {
         }
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_secret_id_with_invalid_fields() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_with_invalid_fields").await;
@@ -4346,10 +4283,7 @@ mod test {
         }
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_crud() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_crud").await;
@@ -4934,10 +4868,7 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_token_bound_cidrs_crud() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_token_bound_cidrs_crud").await;
@@ -5194,10 +5125,7 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_token_type_crud() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_token_type_crud").await;
@@ -5295,10 +5223,7 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_token_util_upgrade() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_token_util_upgrade").await;
@@ -5440,10 +5365,7 @@ mod test {
         assert!(resp.unwrap().is_none());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_secret_id_with_ttl() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_with_ttl").await;
@@ -5496,10 +5418,7 @@ mod test {
         }
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_approle_role_secret_id_accessor_cross_delete() {
         let (_rvault, core, root_token) =
             new_unseal_test_rusty_vault("test_approle_role_secret_id_accessor_cross_delete").await;
