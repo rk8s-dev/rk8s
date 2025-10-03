@@ -1,0 +1,12 @@
+{
+  "common_name": "rk8s Root CA",
+  "organization": "RK8S",
+  "ou": "Platform",
+  "country": "CN",
+  "province": "ZJ",
+  "locality": "Hangzhou",
+  "ttl": "87600h",
+  "key_type": "rsa",
+  "key_bits": 4096,
+  "exported": "exported"
+}

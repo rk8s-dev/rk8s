@@ -28,7 +28,6 @@ use openssl::{
     x509::{X509, store::X509StoreBuilder, verify::X509VerifyFlags},
 };
 use sysexits::ExitCode;
-use tracing_log::LogTracer;
 use tracing_subscriber::EnvFilter;
 
 pub const WORK_DIR_PATH_DEFAULT: &str = "/tmp/rusty_vault";
@@ -80,7 +79,6 @@ impl Server {
             return Err(RvError::ErrConfigListenerNotFound);
         }
 
-        LogTracer::init()?;
         tracing_subscriber::fmt::fmt()
             .with_env_filter(
                 EnvFilter::try_new(&config.log_level).unwrap_or(EnvFilter::new("info")),

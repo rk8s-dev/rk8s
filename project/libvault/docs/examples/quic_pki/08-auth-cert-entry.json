@@ -1,0 +1,8 @@
+{
+  "display_name": "quic-clients",
+  "policies": ["default"],
+  "certificate": "<paste-root-ca-pem-with-newlines-escaped>",
+  "allowed_common_names": "*.svc.cluster.local",
+  "token_ttl": "12h",
+  "token_max_ttl": "72h"
+}

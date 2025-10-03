@@ -1,0 +1,6 @@
+{
+  "common_name": "server.svc.cluster.local",
+  "alt_names": "server.svc.cluster.local,server",
+  "ip_sans": "10.10.0.5",
+  "ttl": "12h"
+}

@@ -13,12 +13,31 @@ use crate::{
     errors::RvError,
 };
 
+pub mod auth;
+pub mod auth_disable;
+pub mod auth_enable;
+pub mod auth_help;
+pub mod auth_list;
+pub mod auth_move;
 pub mod delete;
 pub mod format;
+pub mod list;
+pub mod login;
 pub mod operator;
 pub mod operator_init;
 pub mod operator_seal;
 pub mod operator_unseal;
+pub mod policy;
+pub mod policy_delete;
+pub mod policy_list;
+pub mod policy_read;
+pub mod policy_write;
+pub mod read;
+pub mod secrets;
+pub mod secrets_disable;
+pub mod secrets_enable;
+pub mod secrets_list;
+pub mod secrets_move;
 pub mod server;
 pub mod status;
 pub mod write;
