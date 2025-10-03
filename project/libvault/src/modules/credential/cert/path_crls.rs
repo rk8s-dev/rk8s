@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use openssl::{bn::BigNum, x509::X509Crl};
 use serde::{Deserialize, Serialize};
@@ -6,10 +6,8 @@ use url::Url;
 
 use super::{CertBackend, CertBackendInner, path_config::Config};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal,
+    logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
     storage::StorageEntry,
     utils::{deserialize_duration, serialize_duration},
 };
@@ -39,32 +37,57 @@ impl CertBackend {
         let cert_backend_ref2 = self.inner.clone();
         let cert_backend_ref3 = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"crls/(?P<name>\w[\w-]+\w)",
-            fields: {
-                "name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "The name of the certificate."
-                },
-                "crl": {
-                    field_type: FieldType::Str,
-                    description: r#"The public CRL that should be trusted to attest to certificates' validity statuses.
+        Path::builder()
+            .pattern(r"crls/(?P<name>\w[\w-]+\w)")
+            .field(
+                "name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("The name of the certificate."),
+            )
+            .field(
+                "crl",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description(
+                        r#"The public CRL that should be trusted to attest to certificates' validity statuses.
     May be DER or PEM encoded. Note: the expiration time
     is ignored; if the CRL is no longer valid, delete it
-    using the same name as specified here."#
-                },
-                "url": {
-                    field_type: FieldType::Str,
-                    description: "The URL of a CRL distribution point.  Only one of 'crl' or 'url' parameters should be specified."
+    using the same name as specified here."#,
+                    ),
+            )
+            .field(
+                "url",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description(
+                        "The URL of a CRL distribution point.  Only one of 'crl' or 'url' parameters should be specified.",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = cert_backend_ref1.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_crl(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: cert_backend_ref1.read_crl},
-                {op: Operation::Write, handler: cert_backend_ref2.write_crl},
-                {op: Operation::Delete, handler: cert_backend_ref3.delete_crl}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = cert_backend_ref2.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_crl(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = cert_backend_ref3.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_crl(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 This endpoint allows you to list, create, read, update, and delete the Certificate
 Revocation Lists checked during authentication, and/or CRL Distribution Point
 URLs.
@@ -77,21 +100,25 @@ in which none of the serials are revoked by any CRL -- allows authentication.
 This allows authentication to succeed when interim parts of one chain have been
 revoked; for instance, if a certificate is signed by two intermediate CAs due to
 one of them expiring.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     pub fn crl_list_path(&self) -> Path {
         let cert_backend_ref = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"crls/?$",
-            operations: [
-                {op: Operation::List, handler: cert_backend_ref.list_crl}
-            ],
-            help: r#"
+        Path::builder()
+            .pattern(r"crls/?$")
+            .operation(Operation::List, {
+                let handler = cert_backend_ref.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.list_crl(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 This endpoint allows you to list, create, read, update, and delete the Certificate
 Revocation Lists checked during authentication, and/or CRL Distribution Point
 URLs.
@@ -104,10 +131,9 @@ in which none of the serials are revoked by any CRL -- allows authentication.
 This allows authentication to succeed when interim parts of one chain have been
 revoked; for instance, if a certificate is signed by two intermediate CAs due to
 one of them expiring.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 }
 

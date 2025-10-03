@@ -183,7 +183,7 @@ impl FromStr for Policy {
     ///
     /// ```
     /// use std::str::FromStr;
-    /// use rusty_vault::modules::policy::Policy;
+    /// use libvault::modules::policy::Policy;
     ///
     /// let policy_str = r#"
     /// path "secret/*" {
@@ -649,7 +649,7 @@ impl Permissions {
 /// # Examples
 ///
 /// ```
-/// use rusty_vault::modules::policy::policy::{Capability, to_granting_capabilities};
+/// use libvault::modules::policy::policy::{Capability, to_granting_capabilities};
 ///
 /// let bitmask = Capability::Read.to_bits() | Capability::Update.to_bits();
 /// let capabilities = to_granting_capabilities(bitmask);

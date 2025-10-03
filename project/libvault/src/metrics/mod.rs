@@ -1,4 +1,4 @@
-//! The `rusty_vault::metrics` module instruments RustyVault with Prometheus, allowing it to capture performance metrics.
+//! The `libvault::metrics` module instruments RustyVault with Prometheus, allowing it to capture performance metrics.
 //!
 //! # Methodology
 //!

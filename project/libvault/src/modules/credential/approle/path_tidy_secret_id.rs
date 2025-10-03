@@ -15,10 +15,8 @@ use super::{
     validation::SecretIdAccessorStorageEntry,
 };
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Backend, CTX_KEY_BACKEND_PATH, Operation, Path, PathOperation, Request, Response},
-    new_path, new_path_internal,
+    logical::{Backend, CTX_KEY_BACKEND_PATH, Operation, Path, Request, Response},
     storage::Storage,
 };
 
@@ -26,24 +24,26 @@ pub const CTX_KEY_BACKEND_PATH_INNER: &str = "backend.path.inner";
 
 impl AppRoleBackend {
     pub fn tidy_secret_id_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
+        let backend_handle = self.inner.clone();
+        let backend_store = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"tidy/secret-id$",
-            operations: [
-                {op: Operation::Write, handler: approle_backend_ref1.handle_tidy_secret_id}
-            ],
-            help: r#"
-SecretIDs will have expiration time attached to them. The periodic function
-of the backend will look for expired entries and delete them. This happens once in a minute. Invoking
-this endpoint will trigger the clean-up action, without waiting for the backend's periodic function.
-"#
-        });
+        let path = Path::builder()
+            .pattern(r"tidy/secret-id$")
+            .operation(Operation::Write, {
+                let handler = backend_handle.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.handle_tidy_secret_id(backend, req).await })
+                }
+            })
+            .help(
+                r#"SecretIDs will have expiration time attached to them. The periodic function\n
+                    of the backend will look for expired entries and delete them. This happens once in a minute. Invoking\n
+                    this endpoint will trigger the clean-up action, without waiting for the backend's periodic function.\n"#,
+            )
+            .build();
 
-        path.ctx
-            .set(CTX_KEY_BACKEND_PATH_INNER, approle_backend_ref2);
-
+        path.ctx.set(CTX_KEY_BACKEND_PATH_INNER, backend_store);
         path
     }
 }

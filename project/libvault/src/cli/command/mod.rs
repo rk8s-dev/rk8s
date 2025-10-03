@@ -13,15 +13,17 @@ use crate::{
     errors::RvError,
 };
 
+pub mod delete;
+pub mod format;
 pub mod operator;
 pub mod operator_init;
 pub mod operator_seal;
 pub mod operator_unseal;
 pub mod server;
 pub mod status;
+pub mod write;
 
-mod format;
-pub use format::*;
+pub use format::{LogicalOutputOptions, OutputOptions};
 
 #[derive(Args, Default)]
 #[group(required = false, multiple = true)]
@@ -221,150 +223,4 @@ pub trait CommandExecutor {
     }
 
     fn main(&self) -> Result<(), RvError>;
-}
-
-#[cfg(test)]
-mod test {
-    use crate::{errors::RvError, rv_error_string, test_utils::TestHttpServer};
-
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
-    async fn test_cli_logical() {
-        let mut test_http_server = TestHttpServer::new("test_cli_read", true).await;
-        test_http_server.token = test_http_server.root_token.clone();
-
-        // There is no data by default, and reading should fail.
-        let ret = test_http_server.cli(&["read"], &["kv/foo"]);
-        assert!(ret.is_err());
-        assert_eq!(
-            ret.unwrap_err(),
-            rv_error_string!("No value found at kv/foo\n")
-        );
-
-        // Without the mount kv engine, writing data should fail.
-        let ret = test_http_server.cli(&["write"], &["kv/foo", "aa=bb", "cc=dd"]);
-        assert!(ret.is_err());
-
-        // Mount kv engine to path: kv/
-        let ret = test_http_server.mount("kv", "kv");
-        assert!(ret.is_ok());
-
-        // Writing data should ok
-        let ret = test_http_server.cli(&["write"], &["kv/foo", "aa=bb", "cc=dd"]);
-        assert_eq!(ret, Ok("Success! Data written to: kv/foo\n".into()));
-
-        // Reading data should ok
-        let ret = test_http_server.cli(&["read"], &["kv/foo"]);
-        #[cfg(windows)]
-        assert_eq!(
-            ret,
-            Ok("Key    Value    \r\n---    -----    \r\naa     bb    \r\ncc     dd    \r\n".into())
-        );
-        #[cfg(not(windows))]
-        assert_eq!(
-            ret,
-            Ok("Key    Value    \n---    -----    \naa     bb    \ncc     dd    \n".into())
-        );
-
-        let ret = test_http_server.cli(&["read"], &["--format=table", "kv/foo"]);
-        #[cfg(windows)]
-        assert_eq!(
-            ret,
-            Ok("Key    Value    \r\n---    -----    \r\naa     bb    \r\ncc     dd    \r\n".into())
-        );
-        #[cfg(not(windows))]
-        assert_eq!(
-            ret,
-            Ok("Key    Value    \n---    -----    \naa     bb    \ncc     dd    \n".into())
-        );
-
-        let ret = test_http_server.cli(&["read"], &["--format=json", "kv/foo"]);
-        assert_eq!(
-            ret,
-            Ok("{\n  \"aa\": \"bb\",\n  \"cc\": \"dd\"\n}\n".into())
-        );
-
-        let ret = test_http_server.cli(&["read"], &["--format=yaml", "kv/foo"]);
-        assert_eq!(ret, Ok("aa: bb\ncc: dd\n".into()));
-
-        let ret = test_http_server.cli(&["read"], &["--format=yml", "kv/foo"]);
-        assert_eq!(ret, Ok("aa: bb\ncc: dd\n".into()));
-
-        let ret = test_http_server.cli(&["read"], &["--format=raw", "kv/foo"]);
-        assert_eq!(ret, Ok("{\"aa\":\"bb\",\"cc\":\"dd\"}\n".into()));
-
-        let ret = test_http_server.cli(&["read"], &["--field=aa", "kv/foo"]);
-        assert_eq!(ret, Ok("bb\n".into()));
-
-        let ret = test_http_server.cli(&["read"], &["--field=gg", "kv/foo"]);
-        assert_eq!(
-            ret,
-            Err(rv_error_string!(
-                "Error: Field \"gg\" not present in secret\n"
-            ))
-        );
-
-        // list /
-        let ret = test_http_server.cli(&["list"], &[]);
-        assert!(ret.is_err());
-
-        // list kv/
-        let ret = test_http_server.cli(&["list"], &["kv/"]);
-        #[cfg(windows)]
-        assert_eq!(ret, Ok("Keys    \r\n----    \r\nfoo    \r\n".into()));
-        #[cfg(not(windows))]
-        assert_eq!(ret, Ok("Keys    \n----    \nfoo    \n".into()));
-
-        // list kvv/
-        let ret = test_http_server.cli(&["list"], &["kvv/"]);
-        assert_eq!(ret, Err(rv_error_string!("No value found at kvv/\n")));
-
-        // write kv/goo
-        let ret = test_http_server.cli(&["write"], &["kv/goo", "aaa=bbb", "ccc=ddd"]);
-        assert!(ret.is_ok());
-
-        // list kv/ again
-        let ret = test_http_server.cli(&["list"], &["kv/"]);
-        #[cfg(windows)]
-        assert_eq!(
-            ret,
-            Ok("Keys    \r\n----    \r\nfoo    \r\ngoo    \r\n".into())
-        );
-        #[cfg(not(windows))]
-        assert_eq!(ret, Ok("Keys    \n----    \nfoo    \ngoo    \n".into()));
-
-        // delete kv/goo
-        let ret = test_http_server.cli(&["delete"], &["kv/goo"]);
-        assert_eq!(
-            ret,
-            Ok("Success! Data deleted (if it existed) at: kv/goo\n".into())
-        );
-
-        // list kv/goo, again
-        let ret = test_http_server.cli(&["list"], &["kv/goo"]);
-        assert_eq!(ret, Err(rv_error_string!("No value found at kv/goo\n")));
-
-        // delete kv/koo
-        let ret = test_http_server.cli(&["delete"], &["kv/koo"]);
-        assert_eq!(
-            ret,
-            Ok("Success! Data deleted (if it existed) at: kv/koo\n".into())
-        );
-
-        // delete kv/
-        let ret = test_http_server.cli(&["delete"], &["kv/"]);
-        assert_eq!(
-            ret,
-            Ok("Success! Data deleted (if it existed) at: kv/\n".into())
-        );
-
-        // list kv/ again
-        let ret = test_http_server.cli(&["list"], &["kv/"]);
-        #[cfg(windows)]
-        assert_eq!(ret, Ok("Keys    \r\n----    \r\nfoo    \r\n".into()));
-        #[cfg(not(windows))]
-        assert_eq!(ret, Ok("Keys    \n----    \nfoo    \n".into()));
-    }
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, time::Duration};
+use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
 
 use enum_map::Enum;
 use humantime::parse_duration;
@@ -257,6 +257,14 @@ impl Field {
         }
     }
 
+    pub fn builder() -> FieldBuilder {
+        FieldBuilder::new()
+    }
+
+    pub fn into_arc(self) -> Arc<Field> {
+        Arc::new(self)
+    }
+
     pub fn check_data_type(&self, data: &Value) -> bool {
         match &self.field_type {
             FieldType::SecretStr | FieldType::Str => data.is_string(),
@@ -359,6 +367,99 @@ impl Field {
                 Err(RvError::ErrRustDowncastFailed)
             }
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct FieldBuilder {
+    field: Field,
+}
+
+impl Default for FieldBuilder {
+    fn default() -> Self {
+        Self {
+            field: Field::new(),
+        }
+    }
+}
+
+impl FieldBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn required(mut self, required: bool) -> Self {
+        self.field.required = required;
+        self
+    }
+
+    pub fn field_type(mut self, field_type: FieldType) -> Self {
+        self.field.field_type = field_type;
+        self
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.field.description = description.into();
+        self
+    }
+
+    pub fn default_value(mut self, default: impl Serialize) -> Self {
+        self.field.default = serde_json::to_value(default).unwrap_or_else(|_| json!(null));
+        self.field.required = false;
+        self
+    }
+
+    pub fn build(self) -> Field {
+        self.field
+    }
+
+    pub fn build_arc(self) -> Arc<Field> {
+        Arc::new(self.field)
+    }
+}
+
+pub trait IntoFieldArc {
+    fn into_field_arc(self) -> Arc<Field>;
+}
+
+impl IntoFieldArc for Arc<Field> {
+    fn into_field_arc(self) -> Arc<Field> {
+        self
+    }
+}
+
+impl IntoFieldArc for Field {
+    fn into_field_arc(self) -> Arc<Field> {
+        self.into_arc()
+    }
+}
+
+impl IntoFieldArc for FieldBuilder {
+    fn into_field_arc(self) -> Arc<Field> {
+        self.build_arc()
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct FieldsBuilder {
+    fields: HashMap<String, Arc<Field>>,
+}
+
+impl FieldsBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn field<F>(mut self, name: impl Into<String>, field: F) -> Self
+    where
+        F: IntoFieldArc,
+    {
+        self.fields.insert(name.into(), field.into_field_arc());
+        self
+    }
+
+    pub fn build(self) -> HashMap<String, Arc<Field>> {
+        self.fields
     }
 }
 

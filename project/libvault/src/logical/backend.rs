@@ -6,7 +6,11 @@ use regex::Regex;
 use serde_json::{Map, Value};
 
 use super::{
-    Backend, FieldType, Operation, path::Path, request::Request, response::Response, secret::Secret,
+    Backend, FieldType, Operation,
+    path::{Path, PathBuilder},
+    request::Request,
+    response::Response,
+    secret::{Secret, SecretBuilder},
 };
 use crate::{context::Context, errors::RvError};
 
@@ -140,6 +144,10 @@ impl LogicalBackend {
         }
     }
 
+    pub fn builder() -> LogicalBackendBuilder {
+        LogicalBackendBuilder::new()
+    }
+
     pub async fn handle_auth_renew(&self, req: &mut Request) -> Result<Option<Response>, RvError> {
         let Some(auth_renew_handler) = self.auth_renew_handler.as_ref() else {
             log::error!("this auth type doesn't support renew");
@@ -222,65 +230,181 @@ impl LogicalBackend {
     }
 }
 
-#[macro_export]
-macro_rules! new_logical_backend {
-    ($($tt:tt)*) => {
-        new_logical_backend_internal!($($tt)*)
-    };
+pub trait IntoPathArc {
+    fn into_path_arc(self) -> Arc<Path>;
 }
 
-#[macro_export]
-#[doc(hidden)]
-macro_rules! new_logical_backend_internal {
-    (@object $object:ident () {}) => {
-    };
-    (@object $object:ident () {paths: [$($path:tt),*], $($rest:tt)*}) => {
-        $(
-            $object.paths.push(Arc::new(new_path!($path)));
-        )*
-        new_logical_backend_internal!(@object $object () {$($rest)*});
-    };
-    (@object $object:ident () {unauth_paths: [$($unauth:expr),*], $($rest:tt)*}) => {
-        $object.unauth_paths = Arc::new(vec![$($unauth.to_string()),*]);
-        new_logical_backend_internal!(@object $object () {$($rest)*});
-    };
-    (@object $object:ident () {root_paths: [$($root:expr),*], $($rest:tt)*}) => {
-        $object.root_paths = Arc::new(vec![$($root.to_string()),*]);
-        new_logical_backend_internal!(@object $object () {$($rest)*});
-    };
-    (@object $object:ident () {help: $help:expr, $($rest:tt)*}) => {
-        $object.help = $help.to_string();
-        new_logical_backend_internal!(@object $object () {$($rest)*});
-    };
-    (@object $object:ident () {secrets: [$($secrets:tt),* $(,)?], $($rest:tt)*}) => {
-        $(
-            $object.secrets.push(Arc::new(new_secret!($secrets)));
-        )*
-        new_logical_backend_internal!(@object $object () {$($rest)*});
-    };
-    (@object $object:ident () {auth_renew_handler: $handler_obj:ident$(.$handler_method:ident)*, $($rest:tt)*}) => {
-        $object.auth_renew_handler = Some(Arc::new(move |backend, req| {
-            let self_ = $handler_obj.clone();
-            #[cfg(not(feature = "sync_handler"))]
-            {
-                Box::pin(async move {
-                    self_$(.$handler_method)*(backend, req).await
-                })
-            }
-            #[cfg(feature = "sync_handler")]
-            {
-                self_$(.$handler_method)*(backend, req)
-            }
-        }));
-        new_logical_backend_internal!(@object $object () {$($rest)*});
-    };
-    ({ $($tt:tt)+ }) => {
-        {
-            let mut backend = LogicalBackend::new();
-            new_logical_backend_internal!(@object backend () {$($tt)+});
-            backend
+impl IntoPathArc for Arc<Path> {
+    fn into_path_arc(self) -> Arc<Path> {
+        self
+    }
+}
+
+impl IntoPathArc for Path {
+    fn into_path_arc(self) -> Arc<Path> {
+        Arc::new(self)
+    }
+}
+
+impl IntoPathArc for PathBuilder {
+    fn into_path_arc(self) -> Arc<Path> {
+        Arc::new(self.build())
+    }
+}
+
+pub trait IntoSecretArc {
+    fn into_secret_arc(self) -> Arc<Secret>;
+}
+
+impl IntoSecretArc for Arc<Secret> {
+    fn into_secret_arc(self) -> Arc<Secret> {
+        self
+    }
+}
+
+impl IntoSecretArc for Secret {
+    fn into_secret_arc(self) -> Arc<Secret> {
+        Arc::new(self)
+    }
+}
+
+impl IntoSecretArc for SecretBuilder {
+    fn into_secret_arc(self) -> Arc<Secret> {
+        self.build_arc()
+    }
+}
+
+#[derive(Clone)]
+pub struct LogicalBackendBuilder {
+    backend: LogicalBackend,
+}
+
+impl Default for LogicalBackendBuilder {
+    fn default() -> Self {
+        Self {
+            backend: LogicalBackend::new(),
         }
-    };
+    }
+}
+
+impl LogicalBackendBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn context(mut self, ctx: Arc<Context>) -> Self {
+        self.backend.ctx = ctx;
+        self
+    }
+
+    pub fn help(mut self, help: impl Into<String>) -> Self {
+        self.backend.help = help.into();
+        self
+    }
+
+    pub fn path<P>(mut self, path: P) -> Self
+    where
+        P: IntoPathArc,
+    {
+        self.backend.paths.push(path.into_path_arc());
+        self
+    }
+
+    pub fn paths<I, P>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: IntoPathArc,
+    {
+        self.backend
+            .paths
+            .extend(paths.into_iter().map(|p| p.into_path_arc()));
+        self
+    }
+
+    pub fn secret<S>(mut self, secret: S) -> Self
+    where
+        S: IntoSecretArc,
+    {
+        self.backend.secrets.push(secret.into_secret_arc());
+        self
+    }
+
+    pub fn secrets<I, S>(mut self, secrets: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: IntoSecretArc,
+    {
+        self.backend
+            .secrets
+            .extend(secrets.into_iter().map(|s| s.into_secret_arc()));
+        self
+    }
+
+    pub fn unauth_paths<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.backend.unauth_paths = Arc::new(paths.into_iter().map(Into::into).collect());
+        self
+    }
+
+    pub fn add_unauth_path(mut self, path: impl Into<String>) -> Self {
+        Arc::make_mut(&mut self.backend.unauth_paths).push(path.into());
+        self
+    }
+
+    pub fn root_paths<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.backend.root_paths = Arc::new(paths.into_iter().map(Into::into).collect());
+        self
+    }
+
+    pub fn add_root_path(mut self, path: impl Into<String>) -> Self {
+        Arc::make_mut(&mut self.backend.root_paths).push(path.into());
+        self
+    }
+
+    #[cfg(not(feature = "sync_handler"))]
+    pub fn auth_renew_handler<H>(mut self, handler: H) -> Self
+    where
+        H: for<'a> Fn(
+                &'a dyn Backend,
+                &'a mut Request,
+            ) -> Pin<
+                Box<dyn Future<Output = Result<Option<Response>, RvError>> + Send + 'a>,
+            > + Send
+            + Sync
+            + 'static,
+    {
+        self.backend.auth_renew_handler = Some(Arc::new(handler));
+        self
+    }
+
+    #[cfg(feature = "sync_handler")]
+    pub fn auth_renew_handler<H>(mut self, handler: H) -> Self
+    where
+        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.backend
+            .auth_renew_handler
+            .replace(Arc::new(move |backend, req| handler(backend, req)));
+        self
+    }
+
+    pub fn build(self) -> LogicalBackend {
+        self.backend
+    }
+
+    pub fn build_arc(self) -> Arc<LogicalBackend> {
+        Arc::new(self.backend)
+    }
 }
 
 #[cfg(test)]
@@ -291,9 +415,8 @@ mod test {
 
     use super::*;
     use crate::{
-        logical::{Field, FieldType, PathOperation, field::FieldTrait},
-        new_fields, new_fields_internal, new_path, new_path_internal, new_secret,
-        new_secret_internal, storage,
+        logical::{FieldBuilder, FieldType, PathBuilder, SecretBuilder, field::FieldTrait},
+        storage,
         test_utils::new_test_backend,
     };
 
@@ -357,72 +480,80 @@ mod test {
 
         let barrier = storage::barrier_aes_gcm::AESGCMBarrier::new(backend.clone());
 
-        let mut logical_backend = new_logical_backend!({
-            paths: [
-                {
-                    pattern: "/(?P<bar>.+?)",
-                    fields: {
-                        "mytype": {
-                            field_type: FieldType::Int,
-                            description: "haha"
-                        },
-                        "mypath": {
-                            field_type: FieldType::Str,
-                            description: "hehe"
-                        },
-                        "mypassword": {
-                            field_type: FieldType::SecretStr,
-                            description: "password"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, raw_handler: async move |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError>
-                            {
-                                Ok(None)
-                            }
-                        },
-                        {op: Operation::Write, raw_handler: async move |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                Ok(Some(Response::new()))
-                            }
-                        },
-                        {op: Operation::Delete, raw_handler: async move |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                Err(RvError::ErrUnknown)
-                            }
-                        }
-                    ]
-                },
-                {
-                    pattern: "/(?P<foo>.+?)/(?P<goo>.+)",
-                    fields: {
-                        "myflag": {
-                            field_type: FieldType::Bool,
-                            description: "hoho"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, raw_handler: async move |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                 Ok(None)
-                             }
-                        }
-                    ]
+        let path_one = PathBuilder::new()
+            .pattern("/(?P<bar>.+?)")
+            .field(
+                "mytype",
+                FieldBuilder::new()
+                    .field_type(FieldType::Int)
+                    .description("haha"),
+            )
+            .field(
+                "mypath",
+                FieldBuilder::new()
+                    .field_type(FieldType::Str)
+                    .description("hehe"),
+            )
+            .field(
+                "mypassword",
+                FieldBuilder::new()
+                    .field_type(FieldType::SecretStr)
+                    .description("password"),
+            )
+            .operation(Operation::Read, |_backend, _req| {
+                Box::pin(async { Ok(None) })
+            })
+            .operation(Operation::Write, |_backend, _req| {
+                Box::pin(async { Ok(Some(Response::new())) })
+            })
+            .operation(Operation::Delete, |_backend, _req| {
+                Box::pin(async { Err(RvError::ErrUnknown) })
+            })
+            .build();
+
+        let path_two = PathBuilder::new()
+            .pattern("/(?P<foo>.+?)/(?P<goo>.+)")
+            .field(
+                "myflag",
+                FieldBuilder::new()
+                    .field_type(FieldType::Bool)
+                    .description("hoho"),
+            )
+            .operation(Operation::Read, |_backend, _req| {
+                Box::pin(async { Ok(None) })
+            })
+            .build();
+
+        let secret_kv = SecretBuilder::new()
+            .secret_type("kv")
+            .default_duration_secs(60)
+            .renew_handler(|backend, req| Box::pin(renew_noop_handler(backend, req)))
+            .revoke_handler(|backend, req| Box::pin(revoke_noop_handler(backend, req)))
+            .build();
+
+        let secret_test = SecretBuilder::new()
+            .secret_type("test")
+            .default_duration_secs(120)
+            .renew_handler(|backend, req| Box::pin(renew_noop_handler(backend, req)))
+            .revoke_handler(|backend, req| Box::pin(revoke_noop_handler(backend, req)))
+            .build();
+
+        let mut logical_backend = LogicalBackend::builder()
+            .path(path_one)
+            .path(path_two)
+            .secret(secret_kv)
+            .secret(secret_test)
+            .auth_renew_handler({
+                let t = t.clone();
+                move |backend, req| {
+                    let handler = t.clone();
+                    Box::pin(async move { handler.noop(backend, req).await })
                 }
-            ],
-            secrets: [{
-                secret_type: "kv",
-                default_duration: 60,
-                renew_handler: renew_noop_handler,
-                revoke_handler: revoke_noop_handler,
-            }, {
-                secret_type: "test",
-                default_duration: 120,
-                renew_handler: renew_noop_handler,
-                revoke_handler: revoke_noop_handler,
-            }],
-            auth_renew_handler: t.noop,
-            unauth_paths: ["/login"],
-            root_paths: ["/"],
-            help: "help content",
-        });
+            })
+            .unauth_paths(["/login"])
+            .root_paths(["/"])
+            .help("help content")
+            .build();
 
         let mut req = Request::new("/");
 
@@ -579,72 +710,72 @@ mod test {
 
         let barrier = storage::barrier_aes_gcm::AESGCMBarrier::new(backend.clone());
 
-        let mut logical_backend = new_logical_backend!({
-            paths: [
-                {
-                    pattern: "/(?P<bar>.+?)",
-                    fields: {
-                        "mytype": {
-                            field_type: FieldType::Int,
-                            description: "haha"
-                        },
-                        "mypath": {
-                            field_type: FieldType::Str,
-                            description: "hehe"
-                        },
-                        "mypassword": {
-                            field_type: FieldType::SecretStr,
-                            description: "password"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, raw_handler: |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError>
-                            {
-                                Ok(None)
-                            }
-                        },
-                        {op: Operation::Write, raw_handler: |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                Ok(Some(Response::new()))
-                            }
-                        },
-                        {op: Operation::Delete, raw_handler: |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                Err(RvError::ErrUnknown)
-                            }
-                        }
-                    ]
-                },
-                {
-                    pattern: "/(?P<foo>.+?)/(?P<goo>.+)",
-                    fields: {
-                        "myflag": {
-                            field_type: FieldType::Bool,
-                            description: "hoho"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, raw_handler: |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                 Ok(None)
-                             }
-                        }
-                    ]
+        let path_one = PathBuilder::new()
+            .pattern("/(?P<bar>.+?)")
+            .field(
+                "mytype",
+                FieldBuilder::new()
+                    .field_type(FieldType::Int)
+                    .description("haha"),
+            )
+            .field(
+                "mypath",
+                FieldBuilder::new()
+                    .field_type(FieldType::Str)
+                    .description("hehe"),
+            )
+            .field(
+                "mypassword",
+                FieldBuilder::new()
+                    .field_type(FieldType::SecretStr)
+                    .description("password"),
+            )
+            .operation(Operation::Read, |_backend, _req| Ok(None))
+            .operation(Operation::Write, |_backend, _req| Ok(Some(Response::new())))
+            .operation(Operation::Delete, |_backend, _req| Err(RvError::ErrUnknown))
+            .build();
+
+        let path_two = PathBuilder::new()
+            .pattern("/(?P<foo>.+?)/(?P<goo>.+)")
+            .field(
+                "myflag",
+                FieldBuilder::new()
+                    .field_type(FieldType::Bool)
+                    .description("hoho"),
+            )
+            .operation(Operation::Read, |_backend, _req| Ok(None))
+            .build();
+
+        let secret_kv = SecretBuilder::new()
+            .secret_type("kv")
+            .default_duration_secs(60)
+            .renew_handler(|backend, req| renew_noop_handler(backend, req))
+            .revoke_handler(|backend, req| revoke_noop_handler(backend, req))
+            .build();
+
+        let secret_test = SecretBuilder::new()
+            .secret_type("test")
+            .default_duration_secs(120)
+            .renew_handler(|backend, req| renew_noop_handler(backend, req))
+            .revoke_handler(|backend, req| revoke_noop_handler(backend, req))
+            .build();
+
+        let mut logical_backend = LogicalBackend::builder()
+            .path(path_one)
+            .path(path_two)
+            .secret(secret_kv)
+            .secret(secret_test)
+            .auth_renew_handler({
+                let t = t.clone();
+                move |backend, req| {
+                    let handler = t.clone();
+                    handler.noop(backend, req)
                 }
-            ],
-            secrets: [{
-                secret_type: "kv",
-                default_duration: 60,
-                renew_handler: renew_noop_handler,
-                revoke_handler: revoke_noop_handler,
-            }, {
-                secret_type: "test",
-                default_duration: 120,
-                renew_handler: renew_noop_handler,
-                revoke_handler: revoke_noop_handler,
-            }],
-            auth_renew_handler: t.noop,
-            unauth_paths: ["/login"],
-            root_paths: ["/"],
-            help: "help content",
-        });
+            })
+            .unauth_paths(["/login"])
+            .root_paths(["/"])
+            .help("help content")
+            .build();
 
         let mut req = Request::new("/");
 
@@ -786,130 +917,160 @@ mod test {
 
         let barrier = storage::barrier_aes_gcm::AESGCMBarrier::new(backend.clone());
 
-        let mut logical_backend = new_logical_backend!({
-            paths: [
-                {
-                    pattern: "/1/(?P<bar>[^/.]+?)",
-                    fields: {
-                        "mytype": {
-                            field_type: FieldType::Int,
-                            description: "haha"
-                        },
-                        "mypath": {
-                            field_type: FieldType::Str,
-                            description: "hehe"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, raw_handler: async move |_backend: &dyn Backend, req: &mut Request| -> Result<Option<Response>, RvError> {
-                                let _bar = req.get_data("bar")?;
-                                Ok(None)
-                            }
-                        }
-                    ]
-                },
-                {
-                    pattern: "/2/(?P<foo>.+?)/(?P<goo>.+)",
-                    fields: {
-                        "myflag": {
-                            field_type: FieldType::Bool,
-                            description: "hoho"
-                        },
-                        "foo": {
-                            field_type: FieldType::Str,
-                            description: "foo"
-                        },
-                        "goo": {
-                            field_type: FieldType::Int,
-                            description: "goo"
-                        },
-                        "array": {
-                            field_type: FieldType::Array,
-                            required: true,
-                            description: "array"
-                        },
-                        "array_default": {
-                            field_type: FieldType::Array,
-                            default: "[]",
-                            description: "array default"
-                        },
-                        "bool": {
-                            field_type: FieldType::Bool,
-                            description: "boolean"
-                        },
-                        "bool_default": {
-                            field_type: FieldType::Bool,
-                            default: true,
-                            description: "boolean default"
-                        },
-                        "comma": {
-                            field_type: FieldType::CommaStringSlice,
-                            description: "comma string slice"
-                        },
-                        "comma_default": {
-                            field_type: FieldType::CommaStringSlice,
-                            default: "",
-                            description: "comma string slice"
-                        },
-                        "map": {
-                            field_type: FieldType::Map,
-                            description: "map"
-                        },
-                        "map_default": {
-                            field_type: FieldType::Map,
-                            default: {},
-                            description: "map"
-                        },
-                        "duration": {
-                            field_type: FieldType::DurationSecond,
-                            description: "duration"
-                        },
-                        "duration_default": {
-                            field_type: FieldType::DurationSecond,
-                            default: 50,
-                            description: "duration"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, raw_handler: async move |_backend: &dyn Backend, req: &mut Request| -> Result<Option<Response>, RvError> {
-                                let _foo = req.get_data("foo")?;
-                                let _goo = req.get_data("goo")?;
-                                Ok(None)
-                             }
-                        },
-                        {op: Operation::Write, raw_handler: async move |_backend: &dyn Backend, req: &mut Request| -> Result<Option<Response>, RvError> {
-                                let array_val = req.get_data("array")?;
-                                let array_default_val = req.get_data_or_default("array_default")?;
-                                let bool_val = req.get_data("bool")?;
-                                let bool_default_val = req.get_data_or_default("bool_default")?;
-                                let comma_val = req.get_data("comma")?;
-                                let comma_default_val = req.get_data_or_default("comma_default")?;
-                                let map_val = req.get_data("map")?;
-                                let map_default_val = req.get_data_or_default("map_default")?;
-                                let duration_val = req.get_data("duration")?;
-                                let duration_default_val = req.get_data_or_default("duration_default")?;
-                                let data = json!({
-                                    "array": array_val,
-                                    "array_default": array_default_val,
-                                    "bool": bool_val,
-                                    "bool_default": bool_default_val,
-                                    "comma": comma_val.as_comma_string_slice().unwrap(),
-                                    "comma_default": comma_default_val.as_comma_string_slice().unwrap(),
-                                    "map": map_val,
-                                    "map_default": map_default_val,
-                                    "duration": duration_val.as_duration().unwrap().as_secs(),
-                                    "duration_default": duration_default_val.as_duration().unwrap().as_secs(),
-                                })
-                                .as_object()
-                                .cloned();
-                                Ok(Some(Response::data_response(data)))
-                             }
-                        }
-                    ]
-                }
-            ],
-            help: "help content",
-        });
+        let path_one = PathBuilder::new()
+            .pattern("/1/(?P<bar>[^/.]+?)")
+            .field(
+                "mytype",
+                FieldBuilder::new()
+                    .field_type(FieldType::Int)
+                    .description("haha"),
+            )
+            .field(
+                "mypath",
+                FieldBuilder::new()
+                    .field_type(FieldType::Str)
+                    .description("hehe"),
+            )
+            .operation(Operation::Write, |_backend, req| {
+                Box::pin(async move {
+                    let _bar = req.get_data("bar")?;
+                    Ok(None)
+                })
+            })
+            .build();
+
+        let path_two = PathBuilder::new()
+            .pattern("/2/(?P<foo>.+?)/(?P<goo>.+)")
+            .field(
+                "myflag",
+                FieldBuilder::new()
+                    .field_type(FieldType::Bool)
+                    .description("hoho"),
+            )
+            .field(
+                "foo",
+                FieldBuilder::new()
+                    .field_type(FieldType::Str)
+                    .description("foo"),
+            )
+            .field(
+                "goo",
+                FieldBuilder::new()
+                    .field_type(FieldType::Int)
+                    .description("goo"),
+            )
+            .field(
+                "array",
+                FieldBuilder::new()
+                    .field_type(FieldType::Array)
+                    .required(true)
+                    .description("array"),
+            )
+            .field(
+                "array_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::Array)
+                    .default_value(json!([]))
+                    .description("array default"),
+            )
+            .field(
+                "bool",
+                FieldBuilder::new()
+                    .field_type(FieldType::Bool)
+                    .description("boolean"),
+            )
+            .field(
+                "bool_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::Bool)
+                    .default_value(true)
+                    .description("boolean default"),
+            )
+            .field(
+                "comma",
+                FieldBuilder::new()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description("comma string slice"),
+            )
+            .field(
+                "comma_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::CommaStringSlice)
+                    .default_value("")
+                    .description("comma string slice"),
+            )
+            .field(
+                "map",
+                FieldBuilder::new()
+                    .field_type(FieldType::Map)
+                    .description("map"),
+            )
+            .field(
+                "map_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::Map)
+                    .default_value(json!({}))
+                    .description("map"),
+            )
+            .field(
+                "duration",
+                FieldBuilder::new()
+                    .field_type(FieldType::DurationSecond)
+                    .description("duration"),
+            )
+            .field(
+                "duration_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::DurationSecond)
+                    .default_value(50)
+                    .description("duration"),
+            )
+            .operation(Operation::Read, |_backend, req| {
+                Box::pin(async move {
+                    let _foo = req.get_data("foo")?;
+                    let _goo = req.get_data("goo")?;
+                    Ok(None)
+                })
+            })
+            .operation(Operation::Write, |_backend, req| {
+                Box::pin(async move {
+                    let array_val = req.get_data("array")?;
+                    let array_default_val = req.get_data_or_default("array_default")?;
+                    let bool_val = req.get_data("bool")?;
+                    let bool_default_val = req.get_data_or_default("bool_default")?;
+                    let comma_val = req.get_data("comma")?;
+                    let comma_default_val = req.get_data_or_default("comma_default")?;
+                    let map_val = req.get_data("map")?;
+                    let map_default_val = req.get_data_or_default("map_default")?;
+                    let duration_val = req.get_data("duration")?;
+                    let duration_default_val = req.get_data_or_default("duration_default")?;
+                    let data = json!({
+                        "array": array_val,
+                        "array_default": array_default_val,
+                        "bool": bool_val,
+                        "bool_default": bool_default_val,
+                        "comma": comma_val.as_comma_string_slice().unwrap(),
+                        "comma_default": comma_default_val.as_comma_string_slice().unwrap(),
+                        "map": map_val,
+                        "map_default": map_default_val,
+                        "duration": duration_val.as_duration().unwrap().as_secs(),
+                        "duration_default": duration_default_val
+                            .as_duration()
+                            .unwrap()
+                            .as_secs(),
+                    })
+                    .as_object()
+                    .cloned();
+                    Ok(Some(Response::data_response(data)))
+                })
+            })
+            .build();
+
+        let mut logical_backend = LogicalBackend::builder()
+            .path(path_one)
+            .path(path_two)
+            .help("help content")
+            .build();
 
         assert!(logical_backend.init().is_ok());
 
@@ -1059,130 +1220,151 @@ mod test {
 
         let barrier = storage::barrier_aes_gcm::AESGCMBarrier::new(backend.clone());
 
-        let mut logical_backend = new_logical_backend!({
-            paths: [
-                {
-                    pattern: "/1/(?P<bar>[^/.]+?)",
-                    fields: {
-                        "mytype": {
-                            field_type: FieldType::Int,
-                            description: "haha"
-                        },
-                        "mypath": {
-                            field_type: FieldType::Str,
-                            description: "hehe"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, raw_handler: |_backend: &dyn Backend, req: &mut Request| -> Result<Option<Response>, RvError> {
-                                let _bar = req.get_data("bar")?;
-                                Ok(None)
-                            }
-                        }
-                    ]
-                },
-                {
-                    pattern: "/2/(?P<foo>.+?)/(?P<goo>.+)",
-                    fields: {
-                        "myflag": {
-                            field_type: FieldType::Bool,
-                            description: "hoho"
-                        },
-                        "foo": {
-                            field_type: FieldType::Str,
-                            description: "foo"
-                        },
-                        "goo": {
-                            field_type: FieldType::Int,
-                            description: "goo"
-                        },
-                        "array": {
-                            field_type: FieldType::Array,
-                            required: true,
-                            description: "array"
-                        },
-                        "array_default": {
-                            field_type: FieldType::Array,
-                            default: "[]",
-                            description: "array default"
-                        },
-                        "bool": {
-                            field_type: FieldType::Bool,
-                            description: "boolean"
-                        },
-                        "bool_default": {
-                            field_type: FieldType::Bool,
-                            default: true,
-                            description: "boolean default"
-                        },
-                        "comma": {
-                            field_type: FieldType::CommaStringSlice,
-                            description: "comma string slice"
-                        },
-                        "comma_default": {
-                            field_type: FieldType::CommaStringSlice,
-                            default: "",
-                            description: "comma string slice"
-                        },
-                        "map": {
-                            field_type: FieldType::Map,
-                            description: "map"
-                        },
-                        "map_default": {
-                            field_type: FieldType::Map,
-                            default: {},
-                            description: "map"
-                        },
-                        "duration": {
-                            field_type: FieldType::DurationSecond,
-                            description: "duration"
-                        },
-                        "duration_default": {
-                            field_type: FieldType::DurationSecond,
-                            default: 50,
-                            description: "duration"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, raw_handler: |_backend: &dyn Backend, req: &mut Request| -> Result<Option<Response>, RvError> {
-                                let _foo = req.get_data("foo")?;
-                                let _goo = req.get_data("goo")?;
-                                Ok(None)
-                             }
-                        },
-                        {op: Operation::Write, raw_handler: |_backend: &dyn Backend, req: &mut Request| -> Result<Option<Response>, RvError> {
-                                let array_val = req.get_data("array")?;
-                                let array_default_val = req.get_data_or_default("array_default")?;
-                                let bool_val = req.get_data("bool")?;
-                                let bool_default_val = req.get_data_or_default("bool_default")?;
-                                let comma_val = req.get_data("comma")?;
-                                let comma_default_val = req.get_data_or_default("comma_default")?;
-                                let map_val = req.get_data("map")?;
-                                let map_default_val = req.get_data_or_default("map_default")?;
-                                let duration_val = req.get_data("duration")?;
-                                let duration_default_val = req.get_data_or_default("duration_default")?;
-                                let data = json!({
-                                    "array": array_val,
-                                    "array_default": array_default_val,
-                                    "bool": bool_val,
-                                    "bool_default": bool_default_val,
-                                    "comma": comma_val.as_comma_string_slice().unwrap(),
-                                    "comma_default": comma_default_val.as_comma_string_slice().unwrap(),
-                                    "map": map_val,
-                                    "map_default": map_default_val,
-                                    "duration": duration_val.as_duration().unwrap().as_secs(),
-                                    "duration_default": duration_default_val.as_duration().unwrap().as_secs(),
-                                })
-                                .as_object()
-                                .cloned();
-                                Ok(Some(Response::data_response(data)))
-                             }
-                        }
-                    ]
-                }
-            ],
-            help: "help content",
-        });
+        let path_one = PathBuilder::new()
+            .pattern("/1/(?P<bar>[^/.]+?)")
+            .field(
+                "mytype",
+                FieldBuilder::new()
+                    .field_type(FieldType::Int)
+                    .description("haha"),
+            )
+            .field(
+                "mypath",
+                FieldBuilder::new()
+                    .field_type(FieldType::Str)
+                    .description("hehe"),
+            )
+            .operation(Operation::Write, |_backend, req| {
+                let _bar = req.get_data("bar")?;
+                Ok(None)
+            })
+            .build();
+
+        let path_two = PathBuilder::new()
+            .pattern("/2/(?P<foo>.+?)/(?P<goo>.+)")
+            .field(
+                "myflag",
+                FieldBuilder::new()
+                    .field_type(FieldType::Bool)
+                    .description("hoho"),
+            )
+            .field(
+                "foo",
+                FieldBuilder::new()
+                    .field_type(FieldType::Str)
+                    .description("foo"),
+            )
+            .field(
+                "goo",
+                FieldBuilder::new()
+                    .field_type(FieldType::Int)
+                    .description("goo"),
+            )
+            .field(
+                "array",
+                FieldBuilder::new()
+                    .field_type(FieldType::Array)
+                    .required(true)
+                    .description("array"),
+            )
+            .field(
+                "array_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::Array)
+                    .default_value(json!([]))
+                    .description("array default"),
+            )
+            .field(
+                "bool",
+                FieldBuilder::new()
+                    .field_type(FieldType::Bool)
+                    .description("boolean"),
+            )
+            .field(
+                "bool_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::Bool)
+                    .default_value(true)
+                    .description("boolean default"),
+            )
+            .field(
+                "comma",
+                FieldBuilder::new()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description("comma string slice"),
+            )
+            .field(
+                "comma_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::CommaStringSlice)
+                    .default_value("")
+                    .description("comma string slice"),
+            )
+            .field(
+                "map",
+                FieldBuilder::new()
+                    .field_type(FieldType::Map)
+                    .description("map"),
+            )
+            .field(
+                "map_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::Map)
+                    .default_value(json!({}))
+                    .description("map"),
+            )
+            .field(
+                "duration",
+                FieldBuilder::new()
+                    .field_type(FieldType::DurationSecond)
+                    .description("duration"),
+            )
+            .field(
+                "duration_default",
+                FieldBuilder::new()
+                    .field_type(FieldType::DurationSecond)
+                    .default_value(50)
+                    .description("duration"),
+            )
+            .operation(Operation::Read, |_backend, req| {
+                let _foo = req.get_data("foo")?;
+                let _goo = req.get_data("goo")?;
+                Ok(None)
+            })
+            .operation(Operation::Write, |_backend, req| {
+                let array_val = req.get_data("array")?;
+                let array_default_val = req.get_data_or_default("array_default")?;
+                let bool_val = req.get_data("bool")?;
+                let bool_default_val = req.get_data_or_default("bool_default")?;
+                let comma_val = req.get_data("comma")?;
+                let comma_default_val = req.get_data_or_default("comma_default")?;
+                let map_val = req.get_data("map")?;
+                let map_default_val = req.get_data_or_default("map_default")?;
+                let duration_val = req.get_data("duration")?;
+                let duration_default_val = req.get_data_or_default("duration_default")?;
+                let data = json!({
+                    "array": array_val,
+                    "array_default": array_default_val,
+                    "bool": bool_val,
+                    "bool_default": bool_default_val,
+                    "comma": comma_val.as_comma_string_slice().unwrap(),
+                    "comma_default": comma_default_val.as_comma_string_slice().unwrap(),
+                    "map": map_val,
+                    "map_default": map_default_val,
+                    "duration": duration_val.as_duration().unwrap().as_secs(),
+                    "duration_default": duration_default_val.as_duration().unwrap().as_secs(),
+                })
+                .as_object()
+                .cloned();
+                Ok(Some(Response::data_response(data)))
+            })
+            .build();
+
+        let mut logical_backend = LogicalBackend::builder()
+            .path(path_one)
+            .path(path_two)
+            .help("help content")
+            .build();
 
         assert!(logical_backend.init().is_ok());
 

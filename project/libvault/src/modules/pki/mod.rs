@@ -1,4 +1,4 @@
-//! The `rusty_vault::pki` module implements public key cryptography features, including
+//! The `libvault::pki` module implements public key cryptography features, including
 //! manipulating certificates as a CA or encrypting a piece of data by using a public key.
 
 use std::{
@@ -12,9 +12,8 @@ use derive_more::Deref;
 use crate::{
     core::Core,
     errors::RvError,
-    logical::{Backend, LogicalBackend, Request, Response, secret::Secret},
+    logical::{Backend, LogicalBackend, Request, Response, SecretBuilder},
     modules::Module,
-    new_logical_backend, new_logical_backend_internal, new_secret, new_secret_internal,
 };
 
 pub mod field;
@@ -65,39 +64,67 @@ impl PkiBackend {
     }
 
     pub fn new_backend(&self) -> LogicalBackend {
-        let pki_backend_ref1 = self.inner.clone();
-        let pki_backend_ref2 = self.inner.clone();
+        let builder = LogicalBackend::builder()
+            .help(PKI_BACKEND_HELP)
+            .root_paths(["config/*", "revoke/*", "crl/rotate"])
+            .unauth_paths(["cert/*", "ca/pem", "ca", "crl", "crl/pem"])
+            .path(self.roles_path())
+            .path(self.config_ca_path())
+            .path(self.root_generate_path())
+            .path(self.root_delete_path())
+            .path(self.fetch_ca_path())
+            .path(self.fetch_crl_path())
+            .path(self.fetch_cert_path())
+            .path(self.fetch_cert_crl_path())
+            .path(self.issue_path())
+            .path(self.revoke_path())
+            .path(self.crl_rotate_path())
+            .path(self.keys_generate_path())
+            .path(self.keys_import_path())
+            .path(self.keys_sign_path())
+            .path(self.keys_verify_path())
+            .path(self.keys_encrypt_path())
+            .path(self.keys_decrypt_path());
 
-        let mut backend = new_logical_backend!({
-            root_paths: ["config/*", "revoke/*", "crl/rotate"],
-            unauth_paths: ["cert/*", "ca/pem", "ca", "crl", "crl/pem"],
-            secrets: [{
-                secret_type: "pki",
-                revoke_handler: pki_backend_ref1.revoke_secret_creds,
-                renew_handler: pki_backend_ref2.renew_secret_creds,
-            }],
-            help: PKI_BACKEND_HELP,
-        });
+        #[cfg(not(feature = "sync_handler"))]
+        {
+            let secret = SecretBuilder::new()
+                .secret_type("pki")
+                .revoke_handler({
+                    let handler = self.inner.clone();
+                    move |backend, req| {
+                        let handler = handler.clone();
+                        Box::pin(async move { handler.revoke_secret_creds(backend, req).await })
+                    }
+                })
+                .renew_handler({
+                    let handler = self.inner.clone();
+                    move |backend, req| {
+                        let handler = handler.clone();
+                        Box::pin(async move { handler.renew_secret_creds(backend, req).await })
+                    }
+                })
+                .build();
 
-        backend.paths.push(Arc::new(self.roles_path()));
-        backend.paths.push(Arc::new(self.config_ca_path()));
-        backend.paths.push(Arc::new(self.root_generate_path()));
-        backend.paths.push(Arc::new(self.root_delete_path()));
-        backend.paths.push(Arc::new(self.fetch_ca_path()));
-        backend.paths.push(Arc::new(self.fetch_crl_path()));
-        backend.paths.push(Arc::new(self.fetch_cert_path()));
-        backend.paths.push(Arc::new(self.fetch_cert_crl_path()));
-        backend.paths.push(Arc::new(self.issue_path()));
-        backend.paths.push(Arc::new(self.revoke_path()));
-        backend.paths.push(Arc::new(self.crl_rotate_path()));
-        backend.paths.push(Arc::new(self.keys_generate_path()));
-        backend.paths.push(Arc::new(self.keys_import_path()));
-        backend.paths.push(Arc::new(self.keys_sign_path()));
-        backend.paths.push(Arc::new(self.keys_verify_path()));
-        backend.paths.push(Arc::new(self.keys_encrypt_path()));
-        backend.paths.push(Arc::new(self.keys_decrypt_path()));
+            return builder.secret(secret).build();
+        }
 
-        backend
+        #[cfg(feature = "sync_handler")]
+        {
+            let secret = SecretBuilder::new()
+                .secret_type("pki")
+                .revoke_handler({
+                    let handler = self.inner.clone();
+                    move |backend, req| handler.clone().revoke_secret_creds(backend, req)
+                })
+                .renew_handler({
+                    let handler = self.inner.clone();
+                    move |backend, req| handler.clone().renew_secret_creds(backend, req)
+                })
+                .build();
+
+            builder.secret(secret).build()
+        }
     }
 }
 

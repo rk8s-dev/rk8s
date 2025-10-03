@@ -5,38 +5,47 @@ use super::{
     path_role::RoleEntry,
     validation::{create_hmac, verify_cidr_role_secret_id_subset},
 };
+use crate::logical::{FieldBuilder, FieldsBuilder};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Auth, Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal, rv_error_response,
-    rv_error_string,
+    logical::{Auth, Backend, FieldType, Operation, Path, Request, Response},
+    rv_error_response, rv_error_string,
     storage::StorageEntry,
     utils::cidr,
 };
 
 impl AppRoleBackend {
     pub fn login_path(&self) -> Path {
-        let approle_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"login$",
-            fields: {
-                "role_id": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Unique identifier of the Role. Required to be supplied when the 'bind_secret_id' constraint is set."
-                },
-                "secret_id": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "SecretID belong to the App role"
+        Path::builder()
+            .pattern(r"login$")
+            .fields(
+                FieldsBuilder::new()
+                    .field(
+                        "role_id",
+                        FieldBuilder::new()
+                            .field_type(FieldType::Str)
+                            .required(true)
+                            .description("Unique identifier of the Role. Required to be supplied when the 'bind_secret_id' constraint is set.")
+                    )
+                    .field(
+                        "secret_id",
+                        FieldBuilder::new()
+                            .field_type(FieldType::Str)
+                            .required(true)
+                            .description("SecretID belong to the App role")
+                    )
+                    .build()
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.login(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: approle_backend_ref.login}
-            ],
-            help: r#"
+            })
+            .help(r#"
 While the credential 'role_id' is required at all times,
 other credentials required depends on the properties App role
 to which the 'role_id' belongs to. The 'bind_secret_id'
@@ -45,10 +54,8 @@ constraint (enabled by default) on the App role requires the
 
 'role_id' is fetched using the 'role/<role_name>/role_id'
 endpoint and 'secret_id' is fetched using the 'role/<role_name>/secret_id'
-endpoint."#
-        });
-
-        path
+endpoint."#)
+            .build()
     }
 }
 

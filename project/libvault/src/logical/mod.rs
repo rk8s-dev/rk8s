@@ -1,4 +1,4 @@
-//! The `rusty_vault::logical` is a low level module that defines 'backend' and relevant data
+//! The `libvault::logical` is a low level module that defines 'backend' and relevant data
 //! structures such as `Path`, `Request`, etc and traits.
 //!
 //! The term 'backend' is generic in RustyVault. It represents for a module that provides real
@@ -8,7 +8,7 @@
 //!
 //! Since modules may have common attributes, a specific data structure named `LogicalBackend` is
 //! also defined in this module. Other RustyVault modules can instantiate a `LogicalBackend`
-//! object and implement `rusty_vault::logical::Backend` trait for it. Thus, this module can be
+//! object and implement `libvault::logical::Backend` trait for it. Thus, this module can be
 //! included in the API routing process.
 
 use std::sync::Arc;
@@ -30,14 +30,16 @@ pub mod response;
 pub mod secret;
 
 pub use auth::Auth;
-pub use backend::{CTX_KEY_BACKEND_PATH, LogicalBackend};
+pub use backend::{
+    CTX_KEY_BACKEND_PATH, IntoPathArc, IntoSecretArc, LogicalBackend, LogicalBackendBuilder,
+};
 pub use connection::Connection;
-pub use field::{Field, FieldType};
+pub use field::{Field, FieldBuilder, FieldType, FieldsBuilder, IntoFieldArc};
 pub use lease::Lease;
-pub use path::{Path, PathOperation};
+pub use path::{Path, PathBuilder, PathOperation};
 pub use request::Request;
 pub use response::Response;
-pub use secret::{Secret, SecretData};
+pub use secret::{Secret, SecretBuilder, SecretData};
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, EnumString, Display, Enum, Serialize, Deserialize)]
 pub enum Operation {

@@ -1,37 +1,41 @@
-use std::{collections::HashMap, sync::Arc};
-
 use super::{PkiBackend, PkiBackendInner};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal,
+    logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
 };
 
 impl PkiBackend {
     pub fn config_crl_path(&self) -> Path {
-        let pki_backend_ref1 = self.inner.clone();
-        let pki_backend_ref2 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
 
-        let path = new_path!({
-            pattern: "config/crl",
-            fields: {
-                "expiry": {
-                    field_type: FieldType::Str,
-                    default: "72h",
-                    description: "The amount of time the generated CRL should be valid; defaults to 72 hours"
+        Path::builder()
+            .pattern("config/crl")
+            .field(
+                "expiry",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .default_value("72h")
+                    .description(
+                        "The amount of time the generated CRL should be valid; defaults to 72 hours",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_path_crl(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: pki_backend_ref1.read_path_crl},
-                {op: Operation::Write, handler: pki_backend_ref2.write_path_crl}
-            ],
-            help: r#"
-This endpoint allows configuration of the CRL lifetime.
-                "#
-        });
-
-        path
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_path_crl(backend, req).await })
+                }
+            })
+            .help("This endpoint allows configuration of the CRL lifetime.")
+            .build()
     }
 }
 

@@ -1,26 +1,27 @@
-use std::{collections::HashMap, sync::Arc};
-
 use serde_json::{Value, json};
 
 use super::{PkiBackend, PkiBackendInner, field, util};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Backend, Operation, Path, PathOperation, Request, Response},
-    new_path, new_path_internal, utils,
+    logical::{Backend, Operation, Path, Request, Response},
+    utils,
 };
 
 impl PkiBackend {
     pub fn root_generate_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let mut path = new_path!({
-            pattern: r"root/generate/(?P<exported>.+)",
-            operations: [
-                {op: Operation::Write, handler: pki_backend_ref.generate_root}
-            ],
-            help: "Generate a new CA certificate and private key used for signing."
-        });
+        let mut path = Path::builder()
+            .pattern(r"root/generate/(?P<exported>.+)")
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.generate_root(backend, req).await })
+                }
+            })
+            .help("Generate a new CA certificate and private key used for signing.")
+            .build();
 
         path.fields.extend(field::ca_common_fields());
         path.fields.extend(field::ca_key_generation_fields());
@@ -30,17 +31,19 @@ impl PkiBackend {
     }
 
     pub fn root_delete_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"root",
-            operations: [
-                {op: Operation::Delete, handler: pki_backend_ref.delete_root}
-            ],
-            help: "Deletes the root CA key to allow a new one to be generated."
-        });
-
-        path
+        Path::builder()
+            .pattern(r"root")
+            .operation(Operation::Delete, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_root(backend, req).await })
+                }
+            })
+            .help("Deletes the root CA key to allow a new one to be generated.")
+            .build()
     }
 }
 

@@ -1,15 +1,22 @@
 use std::{collections::HashMap, env, fs};
 
 use go_defer::defer;
-use rusty_vault::{
+use libvault::{
+    RustyVault,
     core::{Core, SealConfig},
     logical::{Operation, Request},
-    storage, RustyVault,
+    storage,
 };
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 #[maybe_async::maybe_async]
-async fn test_read_api(core: &Core, token: &str, path: &str, is_ok: bool, expect: Option<Map<String, Value>>) {
+async fn test_read_api(
+    core: &Core,
+    token: &str,
+    path: &str,
+    is_ok: bool,
+    expect: Option<Map<String, Value>>,
+) {
     let mut req = Request::new(path);
     req.operation = Operation::Read;
     req.client_token = token.to_string();
@@ -18,7 +25,10 @@ async fn test_read_api(core: &Core, token: &str, path: &str, is_ok: bool, expect
     if expect.is_some() {
         let resp = resp.unwrap();
         assert!(resp.is_some());
-        assert_eq!(resp.unwrap().data.as_ref().unwrap(), expect.as_ref().unwrap());
+        assert_eq!(
+            resp.unwrap().data.as_ref().unwrap(),
+            expect.as_ref().unwrap()
+        );
     } else if is_ok {
         let resp = resp.unwrap();
         assert!(resp.is_none());
@@ -26,7 +36,13 @@ async fn test_read_api(core: &Core, token: &str, path: &str, is_ok: bool, expect
 }
 
 #[maybe_async::maybe_async]
-async fn test_write_api(core: &Core, token: &str, path: &str, is_ok: bool, data: Option<Map<String, Value>>) {
+async fn test_write_api(
+    core: &Core,
+    token: &str,
+    path: &str,
+    is_ok: bool,
+    data: Option<Map<String, Value>>,
+) {
     let mut req = Request::new(path);
     req.operation = Operation::Write;
     req.client_token = token.to_string();
@@ -189,7 +205,14 @@ async fn test_sys_mount_feature(core: &Core, token: &str) {
     .as_object()
     .unwrap()
     .clone();
-    test_write_api(core, token, "sys/mounts/kv/", true, Some(mount_data.clone())).await;
+    test_write_api(
+        core,
+        token,
+        "sys/mounts/kv/",
+        true,
+        Some(mount_data.clone()),
+    )
+    .await;
 
     // test api: "mounts/kv" with path conflict
     test_write_api(core, token, "sys/mounts/kv/", false, Some(mount_data)).await;
@@ -266,7 +289,12 @@ async fn test_sys_raw_api_feature(core: &Core, token: &str) {
     let data = resp.unwrap().data;
     assert!(data.is_some());
     assert_ne!(data.as_ref().unwrap().len(), 0);
-    assert!(data.as_ref().unwrap()["value"].as_str().unwrap().starts_with('{'));
+    assert!(
+        data.as_ref().unwrap()["value"]
+            .as_str()
+            .unwrap()
+            .starts_with('{')
+    );
 
     // test raw write
     let test_data = json!({
@@ -286,7 +314,10 @@ async fn test_sys_raw_api_feature(core: &Core, token: &str) {
     let resp = resp.unwrap();
     let data = resp.unwrap().data;
     assert!(data.is_some());
-    assert_eq!(data.as_ref().unwrap()["value"].as_str().unwrap(), test_data["value"].as_str().unwrap());
+    assert_eq!(
+        data.as_ref().unwrap()["value"].as_str().unwrap(),
+        test_data["value"].as_str().unwrap()
+    );
 
     // test raw delete
     test_delete_api(core, token, "sys/raw/test", true).await;
@@ -380,9 +411,12 @@ async fn test_sys_logical_backend(core: &Core, token: &str) {
     test_sys_raw_api_feature(core, token).await;
 }
 
-#[maybe_async::test(feature = "sync_handler", async(all(not(feature = "sync_handler")), tokio::test))]
+#[maybe_async::test(
+    feature = "sync_handler",
+    async(all(not(feature = "sync_handler")), tokio::test)
+)]
 async fn test_default_logical() {
-    use rusty_vault::RustyVault;
+    use libvault::RustyVault;
 
     let dir = env::temp_dir().join("rusty_vault_core_init");
     let _ = fs::remove_dir_all(&dir);
@@ -395,14 +429,20 @@ async fn test_default_logical() {
     println!("root_token: {:?}", root_token);
 
     let mut conf: HashMap<String, Value> = HashMap::new();
-    conf.insert("path".to_string(), Value::String(dir.to_string_lossy().into_owned()));
+    conf.insert(
+        "path".to_string(),
+        Value::String(dir.to_string_lossy().into_owned()),
+    );
 
     let backend = storage::new_backend("file", &conf).unwrap();
 
     let rvault = RustyVault::new(backend, None).unwrap();
     let core = rvault.core.load();
 
-    let seal_config = SealConfig { secret_shares: 10, secret_threshold: 5 };
+    let seal_config = SealConfig {
+        secret_shares: 10,
+        secret_threshold: 5,
+    };
 
     let result = rvault.init(&seal_config).await;
     assert!(result.is_ok());

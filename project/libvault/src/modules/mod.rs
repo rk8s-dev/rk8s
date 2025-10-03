@@ -1,5 +1,5 @@
-//! `rusty_vault::modules` contains a set of real RustyVault modules. Each sub module needs to
-//! implement the `rusty_vault::modules::Module` trait defined here and then the module
+//! `libvault::modules` contains a set of real RustyVault modules. Each sub module needs to
+//! implement the `libvault::modules::Module` trait defined here and then the module
 //! could be added to module manager.
 //!
 //! It's important for the developers who want to implement a new RustyVault module themselves to

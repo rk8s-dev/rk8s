@@ -1,4 +1,4 @@
-//! The `rusty_vault::core` module implements several key functions that are
+//! The `libvault::core` module implements several key functions that are
 //! in charge of the whole process of RustyVault. For instance, to seal or unseal the RustyVault we
 //! have the `seal()` and `unseal()` functions in this module. Also, the `handle_request()`
 //! function in this module is to route an API call to its correct backend and get the result back
@@ -470,7 +470,7 @@ impl Core {
         self.do_unseal(key, false).await
     }
 
-    /// Unseals the rusty_vault once and immediately generates new unseal keys.
+    /// Unseals the libvault once and immediately generates new unseal keys.
     ///
     /// This method performs a one-time unseal operation that automatically invalidates
     /// the used unseal keys and generates a fresh set of keys for future use. This is
@@ -534,7 +534,7 @@ impl Core {
     /// Generates new unseal keys using Shamir's Secret Sharing.
     ///
     /// This method creates a new set of unseal keys by splitting the current Key Encryption Key (KEK)
-    /// using Shamir's Secret Sharing scheme. The generated keys can be used to unseal the rusty_vault
+    /// using Shamir's Secret Sharing scheme. The generated keys can be used to unseal the libvault
     /// in the future. This is typically called after a successful unseal operation to provide
     /// new keys for the next seal/unseal cycle.
     ///
@@ -553,7 +553,7 @@ impl Core {
     /// - Generated keys are cryptographically independent of previous keys
     ///
     /// # Usage
-    /// This method should only be called when the rusty_vault is unsealed and a valid KEK exists.
+    /// This method should only be called when the libvault is unsealed and a valid KEK exists.
     /// It's commonly used in key rotation scenarios or after unseal_once operations.
     pub async fn generate_unseal_keys(&self) -> Result<Zeroizing<Vec<Vec<u8>>>, RvError> {
         if self.state.load().sealed {

@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use humantime::parse_duration;
 use openssl::{asn1::Asn1Time, x509::X509NameBuilder};
@@ -10,57 +6,71 @@ use serde_json::{Map, Value, json};
 
 use super::{PkiBackend, PkiBackendInner};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal, utils,
+    logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
+    utils,
     utils::cert,
 };
 
 impl PkiBackend {
     pub fn issue_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"issue/(?P<role>\w[\w-]+\w)",
-            fields: {
-                "role": {
-                    field_type: FieldType::Str,
-                    description: "The desired role with configuration for this request"
-                },
-                "common_name": {
-                    field_type: FieldType::Str,
-                    description: r#"
-        The requested common name; if you want more than one, specify the alternative names in the alt_names map"#
-                },
-                "alt_names": {
-                    required: false,
-                    field_type: FieldType::Str,
-                    description: r#"
-        The requested Subject Alternative Names, if any, in a comma-delimited list"#
-                },
-                "ip_sans": {
-                    required: false,
-                    field_type: FieldType::Str,
-                    description: r#"The requested IP SANs, if any, in a common-delimited list"#
-                },
-                "ttl": {
-                    required: false,
-                    field_type: FieldType::Str,
-                    description: r#"Specifies requested Time To Live"#
+        Path::builder()
+            .pattern(r"issue/(?P<role>\w[\w-]+\w)")
+            .field(
+                "role",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("The desired role with configuration for this request"),
+            )
+            .field(
+                "common_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description(
+                        r#"
+        The requested common name; if you want more than one, specify the alternative names in the alt_names map"#,
+                    ),
+            )
+            .field(
+                "alt_names",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description(
+                        r#"
+        The requested Subject Alternative Names, if any, in a comma-delimited list"#,
+                    ),
+            )
+            .field(
+                "ip_sans",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description(
+                        r#"The requested IP SANs, if any, in a common-delimited list"#,
+                    ),
+            )
+            .field(
+                "ttl",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Specifies requested Time To Live"),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.issue_cert(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: pki_backend_ref.issue_cert}
-            ],
-            help: r#"
+            })
+            .help(
+                r#"
 This path allows requesting certificates to be issued according to the
 policy of the given role. The certificate will only be issued if the
 requested common name is allowed by the role policy.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 }
 

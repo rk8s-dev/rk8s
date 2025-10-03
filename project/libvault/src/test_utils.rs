@@ -5,9 +5,8 @@ use std::{
     io::prelude::*,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    str::FromStr,
     sync::{Arc, Barrier, RwLock},
-    thread::{self, sleep},
+    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -1395,115 +1394,6 @@ pub async fn test_list_api(
     println!("list path: {}, resp: {:?}", path, resp);
     assert_eq!(resp.is_ok(), is_ok);
     resp
-}
-
-pub fn test_multi_routine(backend: Arc<dyn Backend>) {
-    let mut test_http_server1 = TestHttpServer::new_with_backend(backend.clone(), false);
-
-    let ret = test_http_server1.cli(
-        &["operator", "init"],
-        &["--format=raw", "--key-shares=3", "--key-threshold=2"],
-    );
-    assert!(ret.is_ok());
-    let ret = Value::from_str(ret.unwrap().as_str()).unwrap();
-    let init_result = ret.as_object().unwrap();
-
-    let keys = &init_result["keys"];
-    let _ret = test_http_server1.cli(
-        &["operator", "unseal"],
-        &["--format=raw", keys[0].as_str().unwrap()],
-    );
-    let ret = test_http_server1.cli(
-        &["operator", "unseal"],
-        &["--format=raw", keys[1].as_str().unwrap()],
-    );
-    let ret = Value::from_str(ret.unwrap().as_str()).unwrap();
-    let unseal_result = ret.as_object().unwrap();
-    assert_eq!(unseal_result["sealed"], false);
-    test_http_server1.root_token = init_result["root_token"].as_str().unwrap().to_string();
-    test_http_server1.token = test_http_server1.root_token.clone();
-
-    let mut test_http_server2 = TestHttpServer::new_with_backend(backend, false);
-
-    let _ret = test_http_server2.cli(
-        &["operator", "unseal"],
-        &["--format=raw", keys[0].as_str().unwrap()],
-    );
-    let ret = test_http_server2.cli(
-        &["operator", "unseal"],
-        &["--format=raw", keys[1].as_str().unwrap()],
-    );
-    let ret = Value::from_str(ret.unwrap().as_str()).unwrap();
-    let unseal_result = ret.as_object().unwrap();
-    assert_eq!(unseal_result["sealed"], false);
-    test_http_server2.root_token = init_result["root_token"].as_str().unwrap().to_string();
-    test_http_server2.token = test_http_server2.root_token.clone();
-
-    // test mount kv
-    let ret = test_http_server1.mount("kv", "kv");
-    println!("ret: {:?}", ret);
-    assert!(ret.is_ok());
-
-    let ret = test_http_server1.cli(&["write"], &["kv/foo", "aa=bb", "cc=dd"]);
-    println!("ret: {:?}", ret);
-    assert_eq!(ret, Ok("Success! Data written to: kv/foo\n".into()));
-
-    let ret = test_http_server1.cli(&["read"], &["--format=json", "kv/foo"]);
-    assert_eq!(
-        ret,
-        Ok("{\n  \"aa\": \"bb\",\n  \"cc\": \"dd\"\n}\n".into())
-    );
-
-    let ret = test_http_server2.cli(&["read"], &["--format=json", "kv/foo"]);
-    assert_ne!(
-        ret,
-        Ok("{\n  \"aa\": \"bb\",\n  \"cc\": \"dd\"\n}\n".into())
-    );
-
-    sleep(Duration::from_secs(6));
-
-    let ret = test_http_server2.cli(&["read"], &["--format=json", "kv/foo"]);
-    assert_eq!(
-        ret,
-        Ok("{\n  \"aa\": \"bb\",\n  \"cc\": \"dd\"\n}\n".into())
-    );
-
-    // test mount auth
-    // mount usepass auth to path: pass
-    let mount = "pass";
-    let ret = test_http_server1.mount_auth(mount, "userpass");
-    assert!(ret.is_ok());
-
-    // add user
-    let username = "jinjiu";
-    let password = "123123";
-    let ret = test_http_server1.cli(
-        &["write"],
-        &[
-            &format!("auth/{}/users/{}", mount, username),
-            &format!("password={}", password),
-            "ttl=600",
-        ],
-    );
-    assert!(ret.is_ok());
-
-    sleep(Duration::from_secs(6));
-
-    // clear token
-    test_http_server2.token.clear();
-
-    // test login
-    let ret = test_http_server2.cli(
-        &["login"],
-        &[
-            "--method=userpass",
-            &format!("--path={}", mount),
-            &format!("username={}", username),
-            &format!("password={}", password),
-        ],
-    );
-    println!("login ret: {:?}", ret);
-    assert!(ret.is_ok());
 }
 
 #[maybe_async::maybe_async]

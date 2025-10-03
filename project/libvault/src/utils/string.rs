@@ -13,7 +13,7 @@ use serde_json::Value;
 ///
 /// # Example:
 /// ```
-/// use rusty_vault::utils::string::remove_duplicates;
+/// use libvault::utils::string::remove_duplicates;
 ///
 /// let mut strings = vec![String::from("Apple"), String::from("apple"), String::from("Banana"), String::from("")];
 /// remove_duplicates(&mut strings, true, true);
@@ -53,7 +53,7 @@ pub fn remove_duplicates(strings: &mut Vec<String>, stable: bool, lowercase: boo
 ///
 /// # Example:
 /// ```
-/// use rusty_vault::utils::string::ensure_trailing_slash;
+/// use libvault::utils::string::ensure_trailing_slash;
 ///
 /// assert_eq!(ensure_trailing_slash("example/path"), "example/path/");
 /// assert_eq!(ensure_trailing_slash("example/path/"), "example/path/");
@@ -82,7 +82,7 @@ pub fn ensure_trailing_slash(s: &str) -> String {
 ///
 /// # Example:
 /// ```
-/// use rusty_vault::utils::string::ensure_no_trailing_slash;
+/// use libvault::utils::string::ensure_no_trailing_slash;
 ///
 /// assert_eq!(ensure_no_trailing_slash("example/path/"), "example/path");
 /// assert_eq!(ensure_no_trailing_slash("example/path"), "example/path");
@@ -111,7 +111,7 @@ pub fn ensure_no_trailing_slash(s: &str) -> String {
 ///
 /// # Example:
 /// ```
-/// use rusty_vault::utils::string::ensure_no_leading_slash;
+/// use libvault::utils::string::ensure_no_leading_slash;
 ///
 /// assert_eq!(ensure_no_leading_slash("/example/path"), "example/path");
 /// assert_eq!(ensure_no_leading_slash("example/path"), "example/path");
@@ -146,7 +146,7 @@ pub fn ensure_no_leading_slash(s: &str) -> String {
 ///
 /// # Example:
 /// ```
-/// use rusty_vault::utils::string::globbed_strings_match;
+/// use libvault::utils::string::globbed_strings_match;
 ///
 /// assert_eq!(globbed_strings_match("*abc*", "xabcx"), true);
 /// assert_eq!(globbed_strings_match("*abc", "xabc"), true);

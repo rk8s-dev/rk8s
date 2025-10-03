@@ -816,12 +816,10 @@ mod mod_expiration_tests {
     use crate::{
         context::Context,
         logical::{
-            Backend, Field, FieldType, Lease, LogicalBackend, Operation, Path, PathOperation,
-            Secret,
+            Backend, FieldBuilder, FieldType, Lease, LogicalBackend, Operation, PathBuilder,
+            PathOperation, Secret, SecretBuilder,
         },
         mount::{MOUNT_TABLE_TYPE, MountEntry},
-        new_fields, new_fields_internal, new_logical_backend, new_logical_backend_internal,
-        new_path, new_path_internal, new_secret, new_secret_internal,
         test_utils::{NoopBackend, new_unseal_test_rusty_vault},
     };
 
@@ -943,108 +941,107 @@ mod mod_expiration_tests {
         let secret_cloned = secret.clone();
 
         #[cfg(not(feature = "sync_handler"))]
-        let new_backend_fn = move || -> LogicalBackend {
-            let mut mock_logical_backend = new_logical_backend!({
-                paths: [
-                    {
-                        pattern: "/(?P<bar>.+?)",
-                        fields: {
-                            "mytype": {
-                                field_type: FieldType::Int,
-                                description: "haha"
-                            },
-                            "mypath": {
-                                field_type: FieldType::Str,
-                                description: "hehe"
-                            },
-                            "mypassword": {
-                                field_type: FieldType::SecretStr,
-                                description: "password"
-                            }
-                        },
-                        operations: [
-                            {op: Operation::Read, raw_handler: async move |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError>
-                                {
-                                    Ok(None)
-                                }
-                            },
-                            {op: Operation::Write, raw_handler: async move |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                    Ok(Some(Response::new()))
-                                }
-                            },
-                            {op: Operation::Delete, raw_handler: async move |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                    Err(RvError::ErrUnknown)
-                                }
-                            }
-                        ]
-                    }
-                ],
-                secrets: [{
-                    secret_type: "kv",
-                    default_duration: 60,
-                    renew_handler: renew_noop_handler,
-                    revoke_handler: revoke_noop_handler,
-                }],
-                unauth_paths: ["/login"],
-                root_paths: ["/"],
-                help: "help content",
-            });
+        let new_backend_fn = {
+            let secret = secret.clone();
+            move || {
+                let path = PathBuilder::new()
+                    .pattern("/(?P<bar>.+?)")
+                    .field(
+                        "mytype",
+                        FieldBuilder::new()
+                            .field_type(FieldType::Int)
+                            .description("haha"),
+                    )
+                    .field(
+                        "mypath",
+                        FieldBuilder::new()
+                            .field_type(FieldType::Str)
+                            .description("hehe"),
+                    )
+                    .field(
+                        "mypassword",
+                        FieldBuilder::new()
+                            .field_type(FieldType::SecretStr)
+                            .description("password"),
+                    )
+                    .operation(Operation::Read, |_backend, _req| {
+                        Box::pin(async { Ok(None) })
+                    })
+                    .operation(Operation::Write, |_backend, _req| {
+                        Box::pin(async { Ok(Some(Response::new())) })
+                    })
+                    .operation(Operation::Delete, |_backend, _req| {
+                        Box::pin(async { Err(RvError::ErrUnknown) })
+                    })
+                    .build();
 
-            mock_logical_backend.secrets.push(secret.clone());
+                let secret_kv = SecretBuilder::new()
+                    .secret_type("kv")
+                    .default_duration_secs(60)
+                    .renew_handler(|backend, req| Box::pin(renew_noop_handler(backend, req)))
+                    .revoke_handler(|backend, req| Box::pin(revoke_noop_handler(backend, req)))
+                    .build();
 
-            mock_logical_backend
+                let mut backend = LogicalBackend::builder()
+                    .path(path)
+                    .secret(secret_kv)
+                    .unauth_paths(["/login"])
+                    .root_paths(["/"])
+                    .help("help content")
+                    .build();
+
+                backend.secrets.push(secret.clone());
+                backend
+            }
         };
+
         #[cfg(feature = "sync_handler")]
-        let new_backend_fn = move || -> LogicalBackend {
-            let mut mock_logical_backend = new_logical_backend!({
-                paths: [
-                    {
-                        pattern: "/(?P<bar>.+?)",
-                        fields: {
-                            "mytype": {
-                                field_type: FieldType::Int,
-                                description: "haha"
-                            },
-                            "mypath": {
-                                field_type: FieldType::Str,
-                                description: "hehe"
-                            },
-                            "mypassword": {
-                                field_type: FieldType::SecretStr,
-                                description: "password"
-                            }
-                        },
-                        operations: [
-                            {op: Operation::Read, raw_handler: |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError>
-                                {
-                                    Ok(None)
-                                }
-                            },
-                            {op: Operation::Write, raw_handler: |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                    Ok(Some(Response::new()))
-                                }
-                            },
-                            {op: Operation::Delete, raw_handler: |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                                    Err(RvError::ErrUnknown)
-                                }
-                            }
-                        ]
-                    }
-                ],
-                secrets: [{
-                    secret_type: "kv",
-                    default_duration: 60,
-                    renew_handler: renew_noop_handler,
-                    revoke_handler: revoke_noop_handler,
-                }],
-                unauth_paths: ["/login"],
-                root_paths: ["/"],
-                help: "help content",
-            });
+        let new_backend_fn = {
+            let secret = secret.clone();
+            move || {
+                let path = PathBuilder::new()
+                    .pattern("/(?P<bar>.+?)")
+                    .field(
+                        "mytype",
+                        FieldBuilder::new()
+                            .field_type(FieldType::Int)
+                            .description("haha"),
+                    )
+                    .field(
+                        "mypath",
+                        FieldBuilder::new()
+                            .field_type(FieldType::Str)
+                            .description("hehe"),
+                    )
+                    .field(
+                        "mypassword",
+                        FieldBuilder::new()
+                            .field_type(FieldType::SecretStr)
+                            .description("password"),
+                    )
+                    .operation(Operation::Read, |_backend, _req| Ok(None))
+                    .operation(Operation::Write, |_backend, _req| Ok(Some(Response::new())))
+                    .operation(Operation::Delete, |_backend, _req| Err(RvError::ErrUnknown))
+                    .build();
 
-            mock_logical_backend.secrets.push(secret.clone());
+                let secret_kv = SecretBuilder::new()
+                    .secret_type("kv")
+                    .default_duration_secs(60)
+                    .renew_handler(|backend, req| renew_noop_handler(backend, req))
+                    .revoke_handler(|backend, req| revoke_noop_handler(backend, req))
+                    .build();
 
-            mock_logical_backend
+                let mut backend = LogicalBackend::builder()
+                    .path(path)
+                    .secret(secret_kv)
+                    .unauth_paths(["/login"])
+                    .root_paths(["/"])
+                    .help("help content")
+                    .build();
+
+                backend.secrets.push(secret.clone());
+                backend
+            }
         };
 
         core.add_logical_backend(

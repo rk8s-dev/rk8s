@@ -9,12 +9,12 @@
 //! Users can use an HTTP client tool (curl, e.g.) to send commands to a running RustyVault server and
 //! then have relevant secret management features.
 //!
-//! The second working mode, which works as a typical Rust crate called `rusty_vault`, allows Rust
+//! The second working mode, which works as a typical Rust crate called `libvault`, allows Rust
 //! application developers to integrate RustyVault easily into their own applications to have the
 //! ability of secrets management such as secure key/vaule storage, public key cryptography, data
 //! encryption and so forth.
 //!
-//! This is the official documentation of crate `rusty_vault`, and it's mainly for developers.
+//! This is the official documentation of crate `libvault`, and it's mainly for developers.
 //! Once again, if you are looking for how to use the RustyVault server via a set of RESTful API,
 //! then you may prefer the RustyVault's [RESTful API documentation].
 //!
@@ -76,7 +76,7 @@ pub const EXIT_CODE_INSUFFICIENT_PARAMS: sysexits::ExitCode = sysexits::ExitCode
 /// Build timestamp in UTC
 pub const BUILD_TIME: &str = build_time::build_time_utc!();
 
-/// rusty_vault version
+/// libvault version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub struct RustyVault {

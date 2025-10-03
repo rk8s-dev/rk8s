@@ -1,4 +1,4 @@
-//! The `rusty_vault::cli` module is used to serve the RustyVault application.
+//! The `libvault::cli` module is used to serve the RustyVault application.
 //! This module basically accepts options from command-line and starts a server up.
 
 use clap::{Parser, Subcommand};
@@ -27,6 +27,8 @@ pub enum Commands {
     Server(command::server::Server),
     Status(command::status::Status),
     Operator(command::operator::Operator),
+    Write(command::write::Write),
+    Delete(command::delete::Delete),
 }
 
 impl Commands {
@@ -35,6 +37,8 @@ impl Commands {
             Commands::Server(server) => server.execute(),
             Commands::Status(status) => status.execute(),
             Commands::Operator(operator) => operator.execute(),
+            Commands::Write(write) => write.execute(),
+            Commands::Delete(delete) => delete.execute(),
         }
     }
 }

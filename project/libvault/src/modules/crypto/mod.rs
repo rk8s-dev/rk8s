@@ -1,4 +1,4 @@
-//! The rusty_vault::crypto module abstracts a set of generic cryptography methods. These methods
+//! The libvault::crypto module abstracts a set of generic cryptography methods. These methods
 //! are used by other modules in RustyVault.
 //!
 //! This module depends on underlying cryptography library. One crypto adaptors MUST be specified
@@ -123,7 +123,7 @@ pub struct SM4 {
 /// ## One-shot encryption and decryption
 ///
 /// ~~~
-/// use rusty_vault::modules::crypto::{AES, AESKeySize, CipherMode, BlockCipher};
+/// use libvault::modules::crypto::{AES, AESKeySize, CipherMode, BlockCipher};
 ///
 /// let data = b"The best way to not feel hopeless is to get up and do something.".to_vec();
 /// let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F".to_vec();
@@ -144,7 +144,7 @@ pub struct SM4 {
 ///
 #[cfg_attr(feature = "crypto_adaptor_tongsuo", doc = "~~~")]
 #[cfg_attr(not(feature = "crypto_adaptor_tongsuo"), doc = "~~~ignore")]
-/// use rusty_vault::modules::crypto::{SM4, CipherMode, BlockCipher};
+/// use libvault::modules::crypto::{SM4, CipherMode, BlockCipher};
 ///
 /// let data: [&[u8]; 2] = [b"The best way to not feel hopeless ",
 ///                         b"is to get up and do something."];
@@ -196,7 +196,7 @@ pub struct SM4 {
 /// ## Use an auto-generated key
 ///
 /// ~~~
-/// use rusty_vault::modules::crypto::{AES, AESKeySize, CipherMode, BlockCipher};
+/// use libvault::modules::crypto::{AES, AESKeySize, CipherMode, BlockCipher};
 ///
 /// let data = b"The best way to not feel hopeless is to get up and do something.".to_vec();
 /// let mut aes_encrypter = AES::new(true, Some(AESKeySize::AES128),
@@ -269,7 +269,7 @@ pub trait BlockCipher {
 /// # One-shot encryption and decryption using AEAD cipher
 ///
 /// ~~~
-/// use rusty_vault::modules::crypto::{AES, AESKeySize, CipherMode, BlockCipher, AEADCipher};
+/// use libvault::modules::crypto::{AES, AESKeySize, CipherMode, BlockCipher, AEADCipher};
 ///
 /// let data = b"The best way to not feel hopeless is to get up and do something.".to_vec();
 /// let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F".to_vec();
@@ -301,7 +301,7 @@ pub trait BlockCipher {
 #[cfg_attr(feature = "crypto_adaptor_tongsuo", doc = "~~~")]
 #[cfg_attr(not(feature = "crypto_adaptor_tongsuo"), doc = "~~~ignore")]
 /// ~~~
-/// use rusty_vault::modules::crypto::{SM4, CipherMode, BlockCipher, AEADCipher};
+/// use libvault::modules::crypto::{SM4, CipherMode, BlockCipher, AEADCipher};
 ///
 /// let data: [&[u8]; 2] = [b"The best way to not feel hopeless ",
 ///                         b"is to get up and do something."];

@@ -3,19 +3,17 @@
 
 use std::{
     any::Any,
-    collections::HashMap,
     sync::{Arc, Weak},
 };
 
 use serde_json::{Map, Value, from_value, json};
 
 use crate::{
-    context::Context,
     core::Core,
     errors::RvError,
     logical::{
-        Backend, Field, FieldType, LogicalBackend, Operation, Path, PathOperation, Request,
-        Response, field::FieldTrait,
+        Backend, FieldBuilder, FieldType, FieldsBuilder, LogicalBackend, Operation, PathBuilder,
+        Request, Response, field::FieldTrait,
     },
     modules::{
         Module,
@@ -23,8 +21,7 @@ use crate::{
         policy::{PolicyModule, acl::ACL},
     },
     mount::{MOUNT_TABLE_TYPE, MountEntry},
-    new_fields, new_fields_internal, new_logical_backend, new_logical_backend_internal, new_path,
-    new_path_internal, rv_error_response_status,
+    rv_error_response_status,
     storage::StorageEntry,
 };
 
@@ -68,280 +65,981 @@ impl SystemBackend {
     }
 
     pub fn new_backend(&self) -> LogicalBackend {
-        let sys_backend_mount_table = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_mount_write = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_mount_delete = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_remount = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_renew = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_revoke = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_revoke_prefix = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_auth_table = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_auth_enable = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_auth_disable = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policy_list1 = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policy_list2 = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policy_read = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policy_write = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policy_delete = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policies_list1 = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policies_list2 = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policies_read = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policies_write = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_policies_delete = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_audit_table = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_audit_enable = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_audit_disable = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_raw_read = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_raw_write = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_raw_delete = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_internal_ui_mounts_read = self.self_ptr.upgrade().unwrap().clone();
-        let sys_backend_internal_ui_mount_read = self.self_ptr.upgrade().unwrap().clone();
+        let builder = LogicalBackend::builder()
+            .help(SYSTEM_BACKEND_HELP)
+            .root_paths([
+                "mounts/*",
+                "auth/*",
+                "remount",
+                "policy",
+                "policy/*",
+                "audit",
+                "audit/*",
+                "seal",
+                "raw/*",
+                "revoke-prefix/*",
+            ])
+            .unauth_paths([
+                "internal/ui/mounts",
+                "internal/ui/mounts/*",
+                "init",
+                "seal-status",
+                "unseal",
+            ]);
 
-        let backend = new_logical_backend!({
-            paths: [
-                {
-                    pattern: "mounts$",
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_mount_table.handle_mount_table}
-                    ]
-                },
-                {
-                    pattern: "mounts/(?P<path>.+)",
-                    fields: {
-                        "path": {
-                            field_type: FieldType::Str,
-                            description: r#"The path to mount to. Example: "aws/east""#
-                        },
-                        "type": {
-                            field_type: FieldType::Str,
-                            description: r#"The type of the backend. Example: "kv""#
-                        },
-                        "description": {
-                            field_type: FieldType::Str,
-                            default: "",
-                            description: r#"User-friendly description for this mount."#
-                        },
-                        "options": {
-                            field_type: FieldType::Map,
-                            required: false,
-                            description: r#"The options to pass into the backend. Should be a json object with string keys and values."#
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, handler: sys_backend_mount_write.handle_mount},
-                        {op: Operation::Delete, handler: sys_backend_mount_delete.handle_unmount}
-                    ]
-                },
-                {
-                    pattern: "remount",
-                    fields: {
-                        "from": {
-                            field_type: FieldType::Str
-                        },
-                        "to": {
-                            field_type: FieldType::Str
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, handler: sys_backend_remount.handle_remount}
-                    ]
-                },
-                {
-                    pattern: "renew/(?P<lease_id>.+)",
-                    fields: {
-                        "lease_id": {
-                            field_type: FieldType::Str,
-                            description: "The lease identifier to renew. This is included with a lease."
-                        },
-                        "increment": {
-                            field_type: FieldType::Int,
-                            description: "The desired increment in seconds to the lease"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, handler: sys_backend_renew.handle_renew}
-                    ]
-                },
-                {
-                    pattern: "revoke/(?P<lease_id>.+)",
-                    fields: {
-                        "lease_id": {
-                            field_type: FieldType::Str,
-                            description: "The lease identifier to renew. This is included with a lease."
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, handler: sys_backend_revoke.handle_revoke}
-                    ]
-                },
-                {
-                    pattern: "revoke-prefix/(?P<prefix>.+)",
-                    fields: {
-                        "prefix": {
-                            field_type: FieldType::Str,
-                            description: r#"The path to revoke keys under. Example: "prod/aws/ops""#
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, handler: sys_backend_revoke_prefix.handle_revoke_prefix}
-                    ]
-                },
-                {
-                    pattern: "auth$",
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_auth_table.handle_auth_table}
-                    ]
-                },
-                {
-                    pattern: "auth/(?P<path>.+)",
-                    fields: {
-                        "path": {
-                            field_type: FieldType::Str,
-                            description: r#"The path to mount to. Cannot be delimited. Example: "user""#
-                        },
-                        "type": {
-                            field_type: FieldType::Str,
-                            description: r#"The type of the backend. Example: "userpass""#
-                        },
-                        "description": {
-                            field_type: FieldType::Str,
-                            default: "",
-                            description: r#"User-friendly description for this crential backend."#
-                        },
-                        "options": {
-                            field_type: FieldType::Map,
-                            required: false,
-                            description: r#"The options to pass into the backend. Should be a json object with string keys and values."#
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, handler: sys_backend_auth_enable.handle_auth_enable},
-                        {op: Operation::Delete, handler: sys_backend_auth_disable.handle_auth_disable}
-                    ]
-                },
-                {
-                    pattern: "policy/?$",
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_policy_list1.handle_policy_list},
-                        {op: Operation::List, handler: sys_backend_policy_list2.handle_policy_list}
-                    ]
-                },
-                {
-                    pattern: "policy/(?P<name>.+)",
-                    fields: {
-                        "name": {
-                            field_type: FieldType::Str,
-                            description: r#"The name of the policy. Example: "ops""#
-                        },
-                        "policy": {
-                            field_type: FieldType::Str,
-                            description: r#"The rules of the policy. Either given in HCL or JSON format."#
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_policy_read.handle_policy_read},
-                        {op: Operation::Write, handler: sys_backend_policy_write.handle_policy_write},
-                        {op: Operation::Delete, handler: sys_backend_policy_delete.handle_policy_delete}
-                    ]
-                },
-                {
-                    pattern: "policies/acl/?$",
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_policies_list1.handle_policy_list},
-                        {op: Operation::List, handler: sys_backend_policies_list2.handle_policy_list}
-                    ]
-                },
-                {
-                    pattern: "policies/acl/(?P<name>.+)",
-                    fields: {
-                        "name": {
-                            field_type: FieldType::Str,
-                            description: r#"The name of the policy. Example: "ops""#
-                        },
-                        "policy": {
-                            field_type: FieldType::Str,
-                            description: r#"The rules of the policy. Either given in HCL or JSON format."#
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_policies_read.handle_policy_read},
-                        {op: Operation::Write, handler: sys_backend_policies_write.handle_policy_write},
-                        {op: Operation::Delete, handler: sys_backend_policies_delete.handle_policy_delete}
-                    ]
-                },
-                {
-                    pattern: "audit$",
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_audit_table.handle_audit_table}
-                    ]
-                },
-                {
-                    pattern: "audit/(?P<path>.+)",
-                    fields: {
-                        "path": {
-                            field_type: FieldType::Str,
-                            description: r#"The name of the backend. Cannot be delimited. Example: "mysql""#
-                        },
-                        "type": {
-                            field_type: FieldType::Str,
-                            description: r#"The type of the backend. Example: "mysql""#
-                        },
-                        "description": {
-                            required: false,
-                            field_type: FieldType::Str,
-                            description: r#"User-friendly description for this audit backend."#
-                        },
-                        "options": {
-                            field_type: FieldType::Map,
-                            description: r#"Configuration options for the audit backend."#
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Write, handler: sys_backend_audit_enable.handle_audit_enable},
-                        {op: Operation::Delete, handler: sys_backend_audit_disable.handle_audit_disable}
-                    ]
-                },
-                {
-                    pattern: "raw/(?P<path>.+)",
-                    fields: {
-                        "path": {
-                            field_type: FieldType::Str
-                        },
-                        "value": {
-                            field_type: FieldType::Str
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_raw_read.handle_raw_read},
-                        {op: Operation::Write, handler: sys_backend_raw_write.handle_raw_write},
-                        {op: Operation::Delete, handler: sys_backend_raw_delete.handle_raw_delete}
-                    ]
-                },
-                {
-                    pattern: "internal/ui/mounts",
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_internal_ui_mounts_read.handle_internal_ui_mounts_read}
-                    ]
-                },
-                {
-                    pattern: "internal/ui/mounts/(?P<path>.+)",
-                    fields: {
-                        "path": {
-                            field_type: FieldType::Str,
-                            description: r#"The path of the mount."#
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, handler: sys_backend_internal_ui_mount_read.handle_internal_ui_mount_read}
-                    ]
-                }
-            ],
-            root_paths: ["mounts/*", "auth/*", "remount", "policy", "policy/*", "audit", "audit/*", "seal", "raw/*", "revoke-prefix/*"],
-            unauth_paths: ["internal/ui/mounts", "internal/ui/mounts/*", "init", "seal-status", "unseal"],
-            help: SYSTEM_BACKEND_HELP,
-        });
+        #[cfg(not(feature = "sync_handler"))]
+        {
+            let backend = self
+                .self_ptr
+                .upgrade()
+                .expect("system backend weak reference should be valid");
 
-        backend
+            let mut paths = Vec::new();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("mounts$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_mount_table(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            let mount_fields = FieldsBuilder::new()
+                .field(
+                    "path",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(r#"The path to mount to. Example: "aws/east""#),
+                )
+                .field(
+                    "type",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(r#"The type of the backend. Example: "kv""#),
+                )
+                .field(
+                    "description",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .default_value("")
+                        .description("User-friendly description for this mount."),
+                )
+                .field(
+                    "options",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Map)
+                        .description(
+                            "The options to pass into the backend. Should be a json object with string keys and values.",
+                        ),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("mounts/(?P<path>.+)")
+                    .fields(mount_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_mount(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_unmount(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            let remount_fields = FieldsBuilder::new()
+                .field("from", FieldBuilder::new().field_type(FieldType::Str))
+                .field("to", FieldBuilder::new().field_type(FieldType::Str))
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("remount")
+                    .fields(remount_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_remount(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            let renew_fields = FieldsBuilder::new()
+                .field(
+                    "lease_id",
+                    FieldBuilder::new().field_type(FieldType::Str).description(
+                        "The lease identifier to renew. This is included with a lease.",
+                    ),
+                )
+                .field(
+                    "increment",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Int)
+                        .description("The desired increment in seconds to the lease"),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("renew/(?P<lease_id>.+)")
+                    .fields(renew_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_renew(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("revoke/(?P<lease_id>.+)")
+                    .field(
+                        "lease_id",
+                        FieldBuilder::new().field_type(FieldType::Str).description(
+                            "The lease identifier to renew. This is included with a lease.",
+                        ),
+                    )
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_revoke(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("revoke-prefix/(?P<prefix>.+)")
+                    .field(
+                        "prefix",
+                        FieldBuilder::new().field_type(FieldType::Str).description(
+                            r#"The path to revoke keys under. Example: "prod/aws/ops""#,
+                        ),
+                    )
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(
+                                async move { handler.handle_revoke_prefix(backend, req).await },
+                            )
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("auth$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_auth_table(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            let auth_fields = FieldsBuilder::new()
+                .field(
+                    "path",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(
+                            r#"The path to mount to. Cannot be delimited. Example: "user""#,
+                        ),
+                )
+                .field(
+                    "type",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(
+                            r#"The type of the backend. Example: "userpass""#,
+                        ),
+                )
+                .field(
+                    "description",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .default_value("")
+                        .description(
+                            "User-friendly description for this crential backend.",
+                        ),
+                )
+                .field(
+                    "options",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Map)
+                        .description(
+                            "The options to pass into the backend. Should be a json object with string keys and values.",
+                        ),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("auth/(?P<path>.+)")
+                    .fields(auth_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_auth_enable(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_auth_disable(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("policy/?$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_policy_list(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::List, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_policy_list(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            let policy_fields = FieldsBuilder::new()
+                .field(
+                    "name",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(r#"The name of the policy. Example: "ops""#),
+                )
+                .field(
+                    "policy",
+                    FieldBuilder::new().field_type(FieldType::Str).description(
+                        r#"The rules of the policy. Either given in HCL or JSON format."#,
+                    ),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("policy/(?P<name>.+)")
+                    .fields(policy_fields.clone())
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_policy_read(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_policy_write(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(
+                                async move { handler.handle_policy_delete(backend, req).await },
+                            )
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("policies/acl/?$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_policy_list(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::List, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_policy_list(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("policies/acl/(?P<name>.+)")
+                    .fields(policy_fields)
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_policy_read(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_policy_write(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(
+                                async move { handler.handle_policy_delete(backend, req).await },
+                            )
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("audit$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_audit_table(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            let audit_fields = FieldsBuilder::new()
+                .field(
+                    "path",
+                    FieldBuilder::new().field_type(FieldType::Str).description(
+                        r#"The name of the backend. Cannot be delimited. Example: "mysql""#,
+                    ),
+                )
+                .field(
+                    "type",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(r#"The type of the backend. Example: "mysql""#),
+                )
+                .field(
+                    "description",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description("User-friendly description for this audit backend."),
+                )
+                .field(
+                    "options",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Map)
+                        .description("Configuration options for the audit backend."),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("audit/(?P<path>.+)")
+                    .fields(audit_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_audit_enable(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(
+                                async move { handler.handle_audit_disable(backend, req).await },
+                            )
+                        }
+                    })
+                    .build(),
+            );
+
+            let raw_fields = FieldsBuilder::new()
+                .field("path", FieldBuilder::new().field_type(FieldType::Str))
+                .field("value", FieldBuilder::new().field_type(FieldType::Str))
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("raw/(?P<path>.+)")
+                    .fields(raw_fields)
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_raw_read(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_raw_write(backend, req).await })
+                        }
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move { handler.handle_raw_delete(backend, req).await })
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("internal/ui/mounts")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move {
+                                handler.handle_internal_ui_mounts_read(backend, req).await
+                            })
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("internal/ui/mounts/(?P<path>.+)")
+                    .field(
+                        "path",
+                        FieldBuilder::new()
+                            .field_type(FieldType::Str)
+                            .description("The path of the mount."),
+                    )
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            let handler = handler.clone();
+
+                            Box::pin(async move {
+                                handler.handle_internal_ui_mount_read(backend, req).await
+                            })
+                        }
+                    })
+                    .build(),
+            );
+
+            return builder.paths(paths).build();
+        }
+
+        #[cfg(feature = "sync_handler")]
+        {
+            let backend = self
+                .self_ptr
+                .upgrade()
+                .expect("system backend weak reference should be valid");
+
+            let mut paths = Vec::new();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("mounts$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_mount_table(backend, req)
+                    })
+                    .build(),
+            );
+
+            let mount_fields = FieldsBuilder::new()
+                .field(
+                    "path",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(r#"The path to mount to. Example: "aws/east""#),
+                )
+                .field(
+                    "type",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(r#"The type of the backend. Example: "kv""#),
+                )
+                .field(
+                    "description",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .default_value("")
+                        .description("User-friendly description for this mount."),
+                )
+                .field(
+                    "options",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Map)
+                        .description(
+                            "The options to pass into the backend. Should be a json object with string keys and values.",
+                        ),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("mounts/(?P<path>.+)")
+                    .fields(mount_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_mount(backend, req)
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_unmount(backend, req)
+                    })
+                    .build(),
+            );
+
+            let remount_fields = FieldsBuilder::new()
+                .field("from", FieldBuilder::new().field_type(FieldType::Str))
+                .field("to", FieldBuilder::new().field_type(FieldType::Str))
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("remount")
+                    .fields(remount_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_remount(backend, req)
+                    })
+                    .build(),
+            );
+
+            let renew_fields = FieldsBuilder::new()
+                .field(
+                    "lease_id",
+                    FieldBuilder::new().field_type(FieldType::Str).description(
+                        "The lease identifier to renew. This is included with a lease.",
+                    ),
+                )
+                .field(
+                    "increment",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Int)
+                        .description("The desired increment in seconds to the lease"),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("renew/(?P<lease_id>.+)")
+                    .fields(renew_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_renew(backend, req)
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("revoke/(?P<lease_id>.+)")
+                    .field(
+                        "lease_id",
+                        FieldBuilder::new().field_type(FieldType::Str).description(
+                            "The lease identifier to renew. This is included with a lease.",
+                        ),
+                    )
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_revoke(backend, req)
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("revoke-prefix/(?P<prefix>.+)")
+                    .field(
+                        "prefix",
+                        FieldBuilder::new().field_type(FieldType::Str).description(
+                            r#"The path to revoke keys under. Example: "prod/aws/ops""#,
+                        ),
+                    )
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_revoke_prefix(backend, req)
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("auth$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_auth_table(backend, req)
+                    })
+                    .build(),
+            );
+
+            let auth_fields = FieldsBuilder::new()
+                .field(
+                    "path",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(
+                            r#"The path to mount to. Cannot be delimited. Example: "user""#,
+                        ),
+                )
+                .field(
+                    "type",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(
+                            r#"The type of the backend. Example: "userpass""#,
+                        ),
+                )
+                .field(
+                    "description",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .default_value("")
+                        .description(
+                            "User-friendly description for this crential backend.",
+                        ),
+                )
+                .field(
+                    "options",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Map)
+                        .description(
+                            "The options to pass into the backend. Should be a json object with string keys and values.",
+                        ),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("auth/(?P<path>.+)")
+                    .fields(auth_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_auth_enable(backend, req)
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_auth_disable(backend, req)
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("policy/?$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_list(backend, req)
+                    })
+                    .operation(Operation::List, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_list(backend, req)
+                    })
+                    .build(),
+            );
+
+            let policy_fields = FieldsBuilder::new()
+                .field(
+                    "name",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(r#"The name of the policy. Example: "ops""#),
+                )
+                .field(
+                    "policy",
+                    FieldBuilder::new().field_type(FieldType::Str).description(
+                        r#"The rules of the policy. Either given in HCL or JSON format."#,
+                    ),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("policy/(?P<name>.+)")
+                    .fields(policy_fields.clone())
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_read(backend, req)
+                    })
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_write(backend, req)
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_delete(backend, req)
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("policies/acl/?$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_list(backend, req)
+                    })
+                    .operation(Operation::List, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_list(backend, req)
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("policies/acl/(?P<name>.+)")
+                    .fields(policy_fields)
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_read(backend, req)
+                    })
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_write(backend, req)
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_policy_delete(backend, req)
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("audit$")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_audit_table(backend, req)
+                    })
+                    .build(),
+            );
+
+            let audit_fields = FieldsBuilder::new()
+                .field(
+                    "path",
+                    FieldBuilder::new().field_type(FieldType::Str).description(
+                        r#"The name of the backend. Cannot be delimited. Example: "mysql""#,
+                    ),
+                )
+                .field(
+                    "type",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description(r#"The type of the backend. Example: "mysql""#),
+                )
+                .field(
+                    "description",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Str)
+                        .description("User-friendly description for this audit backend."),
+                )
+                .field(
+                    "options",
+                    FieldBuilder::new()
+                        .field_type(FieldType::Map)
+                        .description("Configuration options for the audit backend."),
+                )
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("audit/(?P<path>.+)")
+                    .fields(audit_fields)
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_audit_enable(backend, req)
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_audit_disable(backend, req)
+                    })
+                    .build(),
+            );
+
+            let raw_fields = FieldsBuilder::new()
+                .field("path", FieldBuilder::new().field_type(FieldType::Str))
+                .field("value", FieldBuilder::new().field_type(FieldType::Str))
+                .build();
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("raw/(?P<path>.+)")
+                    .fields(raw_fields)
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_raw_read(backend, req)
+                    })
+                    .operation(Operation::Write, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_raw_write(backend, req)
+                    })
+                    .operation(Operation::Delete, {
+                        let handler = backend.clone();
+
+                        move |backend, req| handler.clone().handle_raw_delete(backend, req)
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("internal/ui/mounts")
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            handler.clone().handle_internal_ui_mounts_read(backend, req)
+                        }
+                    })
+                    .build(),
+            );
+
+            paths.push(
+                PathBuilder::new()
+                    .pattern("internal/ui/mounts/(?P<path>.+)")
+                    .field(
+                        "path",
+                        FieldBuilder::new()
+                            .field_type(FieldType::Str)
+                            .description("The path of the mount."),
+                    )
+                    .operation(Operation::Read, {
+                        let handler = backend.clone();
+
+                        move |backend, req| {
+                            handler.clone().handle_internal_ui_mount_read(backend, req)
+                        }
+                    })
+                    .build(),
+            );
+
+            builder.paths(paths).build()
+        }
     }
 
     pub async fn handle_mount_table(

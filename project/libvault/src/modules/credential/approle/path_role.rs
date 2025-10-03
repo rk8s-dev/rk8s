@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem, sync::Arc, time::Duration};
+use std::{mem, sync::Arc, time::Duration};
 
 use better_default::Default;
 use derive_more::{Deref, DerefMut};
@@ -11,13 +11,8 @@ use super::{
     validation::{SecretIdStorageEntry, create_hmac, verify_cidr_role_secret_id_subset},
 };
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{
-        Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response,
-        field::FieldTrait,
-    },
-    new_fields, new_fields_internal, new_path, new_path_internal,
+    logical::{Backend, Field, FieldType, Operation, Path, Request, Response, field::FieldTrait},
     storage::StorageEntry,
     utils::{
         self, deserialize_duration,
@@ -125,15 +120,19 @@ impl AppRoleBackend {
     //
     // role/ - For listing all the registered roles
     pub fn role_path(&self) -> Path {
-        let approle_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let mut path = new_path!({
-            pattern: r"role/?",
-            operations: [
-                {op: Operation::List, handler: approle_backend_ref.list_role}
-            ],
-            help: "Lists all the roles registered with the backend."
-        });
+        let mut path = Path::builder()
+            .pattern(r"role/?")
+            .operation(Operation::List, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.list_role(backend, req).await })
+                }
+            })
+            .help("Lists all the roles registered with the backend.")
+            .build();
 
         path.fields.extend(token_fields());
 
@@ -142,71 +141,115 @@ impl AppRoleBackend {
 
     // role/<role_name> - For registering a role
     pub fn role_name_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let mut path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "bind_secret_id": {
-                    field_type: FieldType::Bool,
-                    default: true,
-                    description: "Impose secret_id to be presented when logging in using this role. Defaults to 'true'."
-                },
-                "bound_cidr_list": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"Use "secret_id_bound_cidrs" instead."#
-                },
-                "secret_id_bound_cidrs": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"Comma separated string or list of CIDR blocks.
-                    If set, specifies the blocks of IP addresses which can perform the login operation."#
-                },
-                "secret_id_num_uses": {
-                    field_type: FieldType::Int,
-                    required: false,
-                    description: r#"Number of times a SecretID can access the role, after which the SecretID
-        will expire. Defaults to 0 meaning that the the secret_id is of unlimited use."#
-                },
-                "secret_id_ttl": {
-                    field_type: FieldType::DurationSecond,
-                    required: false,
-                    description: r#"Duration in seconds after which the issued SecretID should expire. Defaults to 0, meaning no expiration."#
-                },
-                "policies": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: "Use token_policies instead. If this and token_policies are both speicified, only token_policies will be used."
-                },
-                "period": {
-                    field_type: FieldType::DurationSecond,
-                    default: 0,
-                    description: "Use token_period instead. If this and token_period are both speicified, only token_period will be used."
-                },
-                "role_id": {
-                    field_type: FieldType::Str,
-                    description: "Identifier of the role. Defaults to a UUID."
-                },
-                "local_secret_ids": {
-                    field_type: FieldType::Bool,
-                    default: false,
-                    description: "If set, the secret IDs generated using this role will be cluster local. This can only be set during role creation and once set, it can't be reset later."
+        let mut path = Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "bind_secret_id",
+                Field::builder()
+                    .field_type(FieldType::Bool)
+                    .default_value(true)
+                    .description(
+                        "Impose secret_id to be presented when logging in using this role. Defaults to 'true'.",
+                    ),
+            )
+            .field(
+                "bound_cidr_list",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description("Use \"secret_id_bound_cidrs\" instead."),
+            )
+            .field(
+                "secret_id_bound_cidrs",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        r#"Comma separated string or list of CIDR blocks.
+                    If set, specifies the blocks of IP addresses which can perform the login operation."#,
+                    ),
+            )
+            .field(
+                "secret_id_num_uses",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .description(
+                        r#"Number of times a SecretID can access the role, after which the SecretID
+        will expire. Defaults to 0 meaning that the the secret_id is of unlimited use."#,
+                    ),
+            )
+            .field(
+                "secret_id_ttl",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .description(
+                        "Duration in seconds after which the issued SecretID should expire. Defaults to 0, meaning no expiration.",
+                    ),
+            )
+            .field(
+                "policies",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "Use token_policies instead. If this and token_policies are both speicified, only token_policies will be used.",
+                    ),
+            )
+            .field(
+                "period",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .default_value(0)
+                    .description(
+                        "Use token_period instead. If this and token_period are both speicified, only token_period will be used.",
+                    ),
+            )
+            .field(
+                "role_id",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Identifier of the role. Defaults to a UUID."),
+            )
+            .field(
+                "local_secret_ids",
+                Field::builder()
+                    .field_type(FieldType::Bool)
+                    .default_value(false)
+                    .description(
+                        "If set, the secret IDs generated using this role will be cluster local. This can only be set during role creation and once set, it can't be reset later.",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 A role can represent a service, a machine or anything that can be IDed.
 The set of policies on the role defines access to the role, meaning, any
 Vault token with a policy set that is a superset of the policies on the
@@ -216,8 +259,9 @@ to be generated against only this specific role, it can be done via
 The properties of the SecretID created against the role and the properties
 of the token issued with the SecretID generated against the role, can be
 configured using the fields of this endpoint.
-                "#
-        });
+                "#,
+            )
+            .build();
 
         path.fields.extend(token_fields());
 
@@ -226,682 +270,995 @@ configured using the fields of this endpoint.
 
     // role/<role_name>/policies - For updating the param
     pub fn role_policies_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/policies$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "policies": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: "Use token_policies instead. If this and token_policies are both speicified, only token_policies will be used."
-                },
-                "token_policies": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: true,
-                    description: "Comma-separated list of policies"
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/policies$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "policies",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "Use token_policies instead. If this and token_policies are both speicified, only token_policies will be used.",
+                    ),
+            )
+            .field(
+                "token_policies",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .required(true)
+                    .description("Comma-separated list of policies"),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_policies(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_policies},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_policies},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_policies}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_policies(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_policies(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 A comma-delimited set of Vault policies that defines access to the role.
 All the Vault tokens with policies that encompass the policy set
 defined on the role, can access the role.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/local-secret-ids - For reading the param
     pub fn role_local_secret_ids_path(&self) -> Path {
-        let approle_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/local-secret-ids$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/local-secret-ids$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .operation(Operation::Read, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_local_secret_ids(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref.read_role_local_secret_ids}
-            ],
-            help: r#"If set, the secret IDs generated using this role will be cluster local.
+            })
+            .help(
+                r#"If set, the secret IDs generated using this role will be cluster local.
 This can only be set during role creation and once set, it can't be reset later.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/bound-cidr-list - For updating the param
     pub fn role_bound_cidr_list_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/bound-cidr-list$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "bound_cidr_list": {
-                    field_type: FieldType::CommaStringSlice,
-                    description: r#"Comma separated string or list of CIDR blocks.
-        If set, specifies the blocks of IP addresses which can perform the login operation."#
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/bound-cidr-list$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "bound_cidr_list",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        r#"Comma separated string or list of CIDR blocks.
+        If set, specifies the blocks of IP addresses which can perform the login operation."#,
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_bound_cidr_list(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_bound_cidr_list},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_bound_cidr_list},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_bound_cidr_list}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_bound_cidr_list(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_bound_cidr_list(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 During login, the IP address of the client will be checked to see if it
 belongs to the CIDR blocks specified. If CIDR blocks were set and if the
 IP is not encompassed by it, login fails
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/secret-id-bound-cidrs - For updating the param
     pub fn role_secret_id_bound_cidrs_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/secret-id-bound-cidrs$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "secret_id_bound_cidrs": {
-                    field_type: FieldType::CommaStringSlice,
-                    description: r#"Comma separated string or list of CIDR blocks.
-        If set, specifies the blocks of IP addresses which can perform the login operation."#
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/secret-id-bound-cidrs$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "secret_id_bound_cidrs",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        r#"Comma separated string or list of CIDR blocks.
+        If set, specifies the blocks of IP addresses which can perform the login operation."#,
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(
+                        async move { handler.read_role_secret_id_bound_cidrs(backend, req).await },
+                    )
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_secret_id_bound_cidrs},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_secret_id_bound_cidrs},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_secret_id_bound_cidrs}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(
+                        async move { handler.write_role_secret_id_bound_cidrs(backend, req).await },
+                    )
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move {
+                        handler
+                            .delete_role_secret_id_bound_cidrs(backend, req)
+                            .await
+                    })
+                }
+            })
+            .help(
+                r#"
 During login, the IP address of the client will be checked to see if it
 belongs to the CIDR blocks specified. If CIDR blocks were set and if the
 IP is not encompassed by it, login fails
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/token-bound-cidrs - For updating the param
     pub fn role_token_bound_cidrs_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/token-bound-cidrs$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "token_bound_cidrs": {
-                    field_type: FieldType::CommaStringSlice,
-                    description: r#"Comma separated string or list of CIDR blocks. If set, specifies the blocks of IP addresses which can use the returned token. Should be a subset of the token CIDR blocks listed on the role, if any."#
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/token-bound-cidrs$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "token_bound_cidrs",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "Comma separated string or list of CIDR blocks. If set, specifies the blocks of IP addresses which can use the returned token. Should be a subset of the token CIDR blocks listed on the role, if any.",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_token_bound_cidrs(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_token_bound_cidrs},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_token_bound_cidrs},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_token_bound_cidrs}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_token_bound_cidrs(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_token_bound_cidrs(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 During use of the returned token, the IP address of the client will be checked to see if it
 belongs to the CIDR blocks specified. If CIDR blocks were set and if the
 IP is not encompassed by it, token use fails
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/bind-secret-id - For updating the param
     pub fn role_bind_secret_id_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/bind-secret-id$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "bind_secret_id": {
-                    field_type: FieldType::Bool,
-                    default: true,
-                    description: "Impose secret_id to be presented when logging in using this role. Defaults to 'true'."
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/bind-secret-id$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "bind_secret_id",
+                Field::builder()
+                    .field_type(FieldType::Bool)
+                    .default_value(true)
+                    .description(
+                        "Impose secret_id to be presented when logging in using this role. Defaults to 'true'.",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_bind_secret_id(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_bind_secret_id},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_bind_secret_id},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_bind_secret_id}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_bind_secret_id(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_bind_secret_id(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 By setting this to 'true', during login the field 'secret_id' becomes a mandatory argument.
 The value of 'secret_id' can be retrieved using 'role/<role_name>/secret-id' endpoint.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/secret-id-num-users - For updating the param
     pub fn role_secret_id_num_uses_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/secret-id-num-uses$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "secret_id_num_uses": {
-                    field_type: FieldType::Int,
-                    default: 0,
-                    description: "Number of times a secret ID can access the role, after which the SecretID will expire. Defaults to 0 meaning that the secret ID is of unlimited use."
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/secret-id-num-uses$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "secret_id_num_uses",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .default_value(0)
+                    .description(
+                        "Number of times a secret ID can access the role, after which the SecretID will expire. Defaults to 0 meaning that the secret ID is of unlimited use.",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_secret_id_num_uses(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_secret_id_num_uses},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_secret_id_num_uses},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_secret_id_num_uses}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_secret_id_num_uses(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_secret_id_num_uses(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 If a SecretID is generated/assigned against a role using the
 'role/<role_name>/secret-id' or 'role/<role_name>/custom-secret-id' endpoint,
 then the number of times this SecretID can be used is defined by this option.
 However, this option may be overriden by the request's 'num_uses' field.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/secret-id-ttl - For updating the param
     pub fn role_secret_id_ttl_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/secret-id-ttl$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "secret_id_ttl": {
-                    field_type: FieldType::Int,
-                    default: 0,
-                    description: "Duration in seconds after which the issued secret ID should expire. Defaults to 0, meaning no expiration."
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/secret-id-ttl$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "secret_id_ttl",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .default_value(0)
+                    .description(
+                        "Duration in seconds after which the issued secret ID should expire. Defaults to 0, meaning no expiration.",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_secret_id_ttl(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_secret_id_ttl},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_secret_id_ttl},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_secret_id_ttl}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_secret_id_ttl(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_secret_id_ttl(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 If a SecretID is generated/assigned against a role using the
 'role/<role_name>/secret-id' or 'role/<role_name>/custom-secret-id' endpoint,
 then the lifetime of this SecretID is defined by this option.
 However, this option may be overridden by the request's 'ttl' field.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/period - For updating the param
     pub fn role_period_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/period$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "period": {
-                    field_type: FieldType::DurationSecond,
-                    default: 0,
-                    description: "Use token_period instead. If this and token_period are both speicified, only token_period will be used."
-                },
-                "token_period": {
-                    field_type: FieldType::DurationSecond,
-                    description: "If set, tokens created via this role will have no max lifetime; instead, their renewal period will be fixed to this value."
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/period$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "period",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .default_value(0)
+                    .description(
+                        "Use token_period instead. If this and token_period are both speicified, only token_period will be used.",
+                    ),
+            )
+            .field(
+                "token_period",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .description(
+                        "If set, tokens created via this role will have no max lifetime; instead, their renewal period will be fixed to this value.",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_period(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_period},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_period},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_period}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_period(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_period(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 If set,  indicates that the token generated using this role
 should never expire. The token should be renewed within the
 duration specified by this value. The renewal duration will
 be fixed. If the Period in the role is modified, the token
 will pick up the new value during its next renewal.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/token-num-uses - For updating the param
     pub fn role_token_num_uses_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/token-num-uses$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "token_num_uses": {
-                    field_type: FieldType::Int,
-                    default: 0,
-                    description: "The maximum number of times a token may be used, a value of zero means unlimited"
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/token-num-uses$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "token_num_uses",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .default_value(0)
+                    .description(
+                        "The maximum number of times a token may be used, a value of zero means unlimited",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_token_num_uses(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_token_num_uses},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_token_num_uses},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_token_num_uses}
-            ],
-            help: "By default, this will be set to zero, indicating that the issued"
-        });
-
-        path
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_token_num_uses(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_token_num_uses(backend, req).await })
+                }
+            })
+            .help("By default, this will be set to zero, indicating that the issued")
+            .build()
     }
 
     // role/<role_name>/token-ttl - For updating the param
     pub fn role_token_ttl_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/token-ttl$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "token_ttl": {
-                    field_type: FieldType::DurationSecond,
-                    description: "The initial ttl of the token to generate"
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/token-ttl$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "token_ttl",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .description("The initial ttl of the token to generate"),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_token_ttl(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_token_ttl},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_token_ttl},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_token_ttl}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_token_ttl(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_token_ttl(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 If SecretIDs are generated against the role, using 'role/<role_name>/secret-id' or the
 'role/<role_name>/custom-secret-id' endpoints, and if those SecretIDs are used
 to perform the login operation, then the value of 'token-ttl' defines the
 lifetime of the token issued, before which the token needs to be renewed.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/token-max-ttl - For updating the param
     pub fn role_token_max_ttl_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
-        let approle_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/token-max-ttl$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "token_max_ttl": {
-                    field_type: FieldType::DurationSecond,
-                    description: "The maximum lifetime of the generated token"
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/token-max-ttl$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "token_max_ttl",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .description("The maximum lifetime of the generated token"),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_token_max_ttl(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_token_max_ttl},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_token_max_ttl},
-                {op: Operation::Delete, handler: approle_backend_ref3.delete_role_token_max_ttl}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_token_max_ttl(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_token_max_ttl(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 If SecretIDs are generated against the role using 'role/<role_name>/secret-id'
 or the 'role/<role_name>/custom-secret-id' endpoints, and if those SecretIDs
 are used to perform the login operation, then the value of 'token-max-ttl'
 defines the maximum lifetime of the tokens issued, after which the tokens
 cannot be renewed. A reauthentication is required after this duration.
 This value will be capped by the backend mount's maximum TTL value.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     // role/<role_name>/role-id - For updating the param
     pub fn role_role_id_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/role-id$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "role_id": {
-                    field_type: FieldType::Str,
-                    description: "Identifier of the role. Defaults to a UUID."
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/role-id$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "role_id",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Identifier of the role. Defaults to a UUID."),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_role_role_id(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: approle_backend_ref1.read_role_role_id},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_role_id}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_role_id(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 If login is performed from an role, then its 'role_id' should be presented
 as a credential during the login. This 'role_id' can be retrieved using
-this endpoint."#
-        });
-
-        path
+this endpoint."#,
+            )
+            .build()
     }
 
     // role/<role_name>/secret-id - For issuing a secret_id against a role, also to list the secret_id_accessors
     pub fn role_secret_id_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
+        let backend_list = self.inner.clone();
+        let backend_write = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/secret-id/?$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "metadata": {
-                    field_type: FieldType::Str,
-                    description: r#"Metadata to be tied to the SecretID. This should be a JSON
-        formatted string containing the metadata in key value pairs."#
-                },
-                "cidr_list": {
-                    field_type: FieldType::CommaStringSlice,
-                    description: r#"Comma separated string or list of CIDR blocks enforcing secret IDs to be used from
-specific set of IP addresses. If 'bound_cidr_list' is set on the role, then the
-list of CIDR blocks listed here should be a subset of the CIDR blocks listed on
-the role."#
-                },
-                "token_bound_cidrs": {
-                    field_type: FieldType::CommaStringSlice,
-                    description: r#"List of CIDR blocks. If set, specifies the blocks of IP addresses which can use the returned token. Should be a subset of the token CIDR blocks listed on the role, if any."#
-                },
-                "num_uses": {
-                    field_type: FieldType::Int,
-                    description: r#"Number of times this SecretID can be used, after which the SecretID expires.
-        Overrides secret_id_num_uses role option when supplied. May not be higher than role's secret_id_num_uses."#
-                },
-                "ttl": {
-                    field_type: FieldType::DurationSecond,
-                    description: r#"Duration in seconds after which this SecretID expires.
-        Overrides secret_id_ttl role option when supplied. May not be longer than role's secret_id_ttl."#
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/secret-id/?$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "metadata",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Metadata to be tied to the SecretID. This should be a JSON formatted string containing the metadata in key value pairs."),
+            )
+            .field(
+                "cidr_list",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description("Comma separated string or list of CIDR blocks enforcing secret IDs to be used from specific set of IP addresses. If 'bound_cidr_list' is set on the role, then the list of CIDR blocks listed here should be a subset of the CIDR blocks listed on the role."),
+            )
+            .field(
+                "token_bound_cidrs",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description("List of CIDR blocks. If set, specifies the blocks of IP addresses which can use the returned token. Should be a subset of the token CIDR blocks listed on the role, if any."),
+            )
+            .field(
+                "num_uses",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .description("Number of times this SecretID can be used, after which the SecretID expires. Overrides secret_id_num_uses role option when supplied. May not be higher than role's secret_id_num_uses."),
+            )
+            .field(
+                "ttl",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .description("Duration in seconds after which this SecretID expires. Overrides secret_id_ttl role option when supplied. May not be longer than role's secret_id_ttl."),
+            )
+            .operation(Operation::List, {
+                let handler = backend_list.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.list_role_secret_id(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::List, handler: approle_backend_ref1.list_role_secret_id},
-                {op: Operation::Write, handler: approle_backend_ref2.write_role_secret_id}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_secret_id(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 The SecretID generated using this endpoint will be scoped to access
 just this role and none else. The properties of this SecretID will be
 based on the options set on the role. It will expire after a period
 defined by the 'ttl' field or 'secret_id_ttl' option on the role,
-and/or the backend mount's maximum TTL value."#
-        });
-
-        path
+and/or the backend mount's maximum TTL value."#,
+            )
+            .build()
     }
 
     // role/<role_name>/secret-id/lookup - For reading the properties of a secret_id
     pub fn role_secret_id_lookup_path(&self) -> Path {
-        let approle_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/secret-id/lookup/?$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "secret_id": {
-                    field_type: FieldType::Str,
-                    description: "SecretID attached to the role."
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/secret-id/lookup/?$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "secret_id",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("SecretID attached to the role."),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_secret_id_lookup(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: approle_backend_ref.write_role_secret_id_lookup}
-            ],
-            help: "This endpoint is used to read the properties of a secret_id associated to a role."
-        });
-
-        path
+            })
+            .help(
+                "This endpoint is used to read the properties of a secret_id associated to a role.",
+            )
+            .build()
     }
 
     // role/<role_name>/secret-id/destroy - For deleting a secret_id
     pub fn role_secret_id_destroy_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/secret-id/destroy/?$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "secret_id": {
-                    field_type: FieldType::Str,
-                    description: "SecretID attached to the role."
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/secret-id/destroy/?$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "secret_id",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("SecretID attached to the role."),
+            )
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_secret_id_destory(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: approle_backend_ref1.write_role_secret_id_destory},
-                {op: Operation::Delete, handler: approle_backend_ref2.delete_role_secret_id_destory}
-            ],
-            help: "This endpoint is used to delete the properties of a secret_id associated to a role."
-        });
-
-        path
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_role_secret_id_destory(backend, req).await })
+                }
+            })
+            .help("This endpoint is used to delete the properties of a secret_id associated to a role.")
+            .build()
     }
 
     // role/<role_name>/secret-id-accessor/lookup - For reading secret_id using accessor
     pub fn role_secret_id_accessor_lookup_path(&self) -> Path {
-        let approle_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/secret-id-accessor/lookup/?$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "secret_id_accessor": {
-                    field_type: FieldType::Str,
-                    description: "Accessor of the SecretID"
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/secret-id-accessor/lookup/?$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "secret_id_accessor",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Accessor of the SecretID"),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move {
+                        handler
+                            .write_role_secret_id_accessor_lookup(backend, req)
+                            .await
+                    })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: approle_backend_ref.write_role_secret_id_accessor_lookup}
-            ],
-            help: r#"
+            })
+            .help(
+                r#"
 This is particularly useful to lookup the non-expiring 'secret_id's.
 The list operation on the 'role/<role_name>/secret-id' endpoint will return
 the 'secret_id_accessor's. This endpoint can be used to read the properties
 of the secret. If the 'secret_id_num_uses' field in the response is 0, it
-represents a non-expiring 'secret_id'."#
-        });
-
-        path
+represents a non-expiring 'secret_id'."#,
+            )
+            .build()
     }
 
     // role/<role_name>/secret-id-accessor/destroy - For deleting secret_id using accessor
     pub fn role_secret_id_accessor_destroy_path(&self) -> Path {
-        let approle_backend_ref1 = self.inner.clone();
-        let approle_backend_ref2 = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/secret-id-accessor/destroy/?$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "secret_id_accessor": {
-                    field_type: FieldType::Str,
-                    description: "Accessor of the SecretID"
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/secret-id-accessor/destroy/?$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "secret_id_accessor",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Accessor of the SecretID"),
+            )
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move {
+                        handler
+                            .write_role_secret_id_accessor_destory(backend, req)
+                            .await
+                    })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: approle_backend_ref1.write_role_secret_id_accessor_destory},
-                {op: Operation::Delete, handler: approle_backend_ref2.delete_role_secret_id_accessor_destory}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move {
+                        handler
+                            .delete_role_secret_id_accessor_destory(backend, req)
+                            .await
+                    })
+                }
+            })
+            .help(
+                r#"
 This is particularly useful to clean-up the non-expiring 'secret_id's.
 The list operation on the 'role/<role_name>/secret-id' endpoint will return
 the 'secret_id_accessor's. This endpoint can be used to read the properties
 of the secret. If the 'secret_id_num_uses' field in the response is 0, it
-represents a non-expiring 'secret_id'."#
-        });
-
-        path
+represents a non-expiring 'secret_id'."#,
+            )
+            .build()
     }
 
     // role/<role_name>/custom-secret-id - For assigning a custom SecretID against a role
     pub fn role_custom_secret_id_path(&self) -> Path {
-        let approle_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"role/(?P<role_name>\w[\w-]+\w)/custom-secret-id$",
-            fields: {
-                "role_name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "Name of the role."
-                },
-                "secret_id": {
-                    field_type: FieldType::Str,
-                    description: "SecretID to be attached to the role."
-                },
-                "metadata": {
-                    field_type: FieldType::Str,
-                    description: r#"Metadata to be tied to the SecretID. This should be a JSON
-        formatted string containing the metadata in key value pairs."#
-                },
-                "cidr_list": {
-                    field_type: FieldType::CommaStringSlice,
-                    description: r#"Comma separated string or list of CIDR blocks enforcing secret IDs to be used from
-specific set of IP addresses. If 'bound_cidr_list' is set on the role, then the
-list of CIDR blocks listed here should be a subset of the CIDR blocks listed on
-the role."#
-                },
-                "token_bound_cidrs": {
-                    field_type: FieldType::CommaStringSlice,
-                    description: r#"List of CIDR blocks. If set, specifies the blocks of IP addresses which can use the returned token. Should be a subset of the token CIDR blocks listed on the role, if any."#
-                },
-                "num_uses": {
-                    field_type: FieldType::Int,
-                    description: r#"Number of times this SecretID can be used, after which the SecretID expires.
-        Overrides secret_id_num_uses role option when supplied. May not be higher than role's secret_id_num_uses."#
-                },
-                "ttl": {
-                    field_type: FieldType::DurationSecond,
-                    description: r#"Duration in seconds after which this SecretID expires.
-        Overrides secret_id_ttl role option when supplied. May not be longer than role's secret_id_ttl."#
+        Path::builder()
+            .pattern(r"role/(?P<role_name>\w[\w-]+\w)/custom-secret-id$")
+            .field(
+                "role_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Name of the role."),
+            )
+            .field(
+                "secret_id",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("SecretID to be attached to the role."),
+            )
+            .field(
+                "metadata",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Metadata to be tied to the SecretID. This should be a JSON formatted string containing the metadata in key value pairs."),
+            )
+            .field(
+                "cidr_list",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description("Comma separated string or list of CIDR blocks enforcing secret IDs to be used from specific set of IP addresses. If 'bound_cidr_list' is set on the role, then the list of CIDR blocks listed here should be a subset of the CIDR blocks listed on the role."),
+            )
+            .field(
+                "token_bound_cidrs",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description("List of CIDR blocks. If set, specifies the blocks of IP addresses which can use the returned token. Should be a subset of the token CIDR blocks listed on the role, if any."),
+            )
+            .field(
+                "num_uses",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .description("Number of times this SecretID can be used, after which the SecretID expires. Overrides secret_id_num_uses role option when supplied. May not be higher than role's secret_id_num_uses."),
+            )
+            .field(
+                "ttl",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .description("Duration in seconds after which this SecretID expires. Overrides secret_id_ttl role option when supplied. May not be longer than role's secret_id_ttl."),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_role_custom_secret_id(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: approle_backend_ref.write_role_custom_secret_id}
-            ],
-            help: r#"
+            })
+            .help(
+                r#"
 This option is not recommended unless there is a specific need
 to do so. This will assign a client supplied SecretID to be used to access
 the role. This SecretID will behave similarly to the SecretIDs generated by
 the backend. The properties of this SecretID will be based on the options
 set on the role. It will expire after a period defined by the 'ttl' field
-or 'secret_id_ttl' option on the role, and/or the backend mount's maximum TTL value."#
-        });
-
-        path
+or 'secret_id_ttl' option on the role, and/or the backend mount's maximum TTL value."#,
+            )
+            .build()
     }
 
     pub fn role_paths(&self) -> Vec<Path> {

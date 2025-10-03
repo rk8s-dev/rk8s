@@ -1,9 +1,9 @@
-//! The `rusty_vault::handler` module basically defines the `Handler` trait.
+//! The `libvault::handler` module basically defines the `Handler` trait.
 //!
 //! The `Handler` trait includes a set of 'hook points' that are performed during the process of an
 //! API request from the user.
 //!
-//! The `Handler` trait should be implemented in other module, such as the `rusty_vault::router`
+//! The `Handler` trait should be implemented in other module, such as the `libvault::router`
 //! for instance.
 
 use std::sync::Arc;

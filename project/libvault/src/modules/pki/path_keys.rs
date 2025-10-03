@@ -1,14 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
-
 use openssl::{ec::EcKey, rsa::Rsa};
 use serde_json::{Value, json};
 
 use super::{PkiBackend, PkiBackendInner};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal,
+    logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
     storage::StorageEntry,
     utils::key::{EncryptExtraData, KeyBundle},
 };
@@ -17,197 +13,243 @@ const PKI_CONFIG_KEY_PREFIX: &str = "config/key/";
 
 impl PkiBackend {
     pub fn keys_generate_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"keys/generate/(exported|internal)",
-            fields: {
-                "key_name": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "key name"
-                },
-                "key_bits": {
-                    field_type: FieldType::Int,
-                    default: 0,
-                    description: r#"
+        Path::builder()
+            .pattern(r"keys/generate/(exported|internal)")
+            .field(
+                "key_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("key name"),
+            )
+            .field(
+                "key_bits",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .default_value(0)
+                    .description(
+                        r#"
 The number of bits to use. Allowed values are 0 (universal default); with rsa
 key_type: 2048 (default), 3072, or 4096; with ec key_type: 224, 256 (default),
-384, or 521; ignored with ed25519."#
-                },
-                "key_type": {
-                    field_type: FieldType::Str,
-                    default: "rsa",
-                    description: r#"The type of key to use; defaults to RSA. "rsa""#
+384, or 521; ignored with ed25519."#,
+                    ),
+            )
+            .field(
+                "key_type",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .default_value("rsa")
+                    .description("The type of key to use; defaults to RSA. \"rsa\""),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.generate_key(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: pki_backend_ref.generate_key}
-            ],
-            help: r#"
+            })
+            .help(
+                r#"
 This endpoint will generate a new key pair of the specified type (internal, exported)
 used for sign,verify,encrypt,decrypt.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     pub fn keys_import_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"keys/import",
-            fields: {
-                "key_name": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "key name"
-                },
-                "key_type": {
-                    field_type: FieldType::Str,
-                    default: "rsa",
-                    description: r#"The type of key to use; defaults to RSA. "rsa""#
-                },
-                "pem_bundle": {
-                    field_type: FieldType::Str,
-                    description: "PEM-format, unencrypted secret"
-                },
-                "hex_bundle": {
-                    field_type: FieldType::Str,
-                    description: "Hex-format, unencrypted secret"
-                },
-                "iv": {
-                    field_type: FieldType::Str,
-                    description: "IV for aes-gcm/aes-cbc"
+        Path::builder()
+            .pattern(r"keys/import")
+            .field(
+                "key_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("key name"),
+            )
+            .field(
+                "key_type",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .default_value("rsa")
+                    .description("The type of key to use; defaults to RSA. \"rsa\""),
+            )
+            .field(
+                "pem_bundle",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("PEM-format, unencrypted secret"),
+            )
+            .field(
+                "hex_bundle",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Hex-format, unencrypted secret"),
+            )
+            .field(
+                "iv",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("IV for aes-gcm/aes-cbc"),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.import_key(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: pki_backend_ref.import_key}
-            ],
-            help: "Import the specified key."
-        });
-
-        path
+            })
+            .help("Import the specified key.")
+            .build()
     }
 
     pub fn keys_sign_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"keys/sign",
-            fields: {
-                "key_name": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "key name"
-                },
-                "data": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "Data that needs to be signed"
+        Path::builder()
+            .pattern(r"keys/sign")
+            .field(
+                "key_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("key name"),
+            )
+            .field(
+                "data",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Data that needs to be signed"),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.key_sign(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: pki_backend_ref.key_sign}
-            ],
-            help: "Data Signatures."
-        });
-
-        path
+            })
+            .help("Data Signatures.")
+            .build()
     }
 
     pub fn keys_verify_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"keys/verify",
-            fields: {
-                "key_name": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "key name"
-                },
-                "data": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "Data that needs to be verified"
-                },
-                "signature": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "Signature data"
+        Path::builder()
+            .pattern(r"keys/verify")
+            .field(
+                "key_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("key name"),
+            )
+            .field(
+                "data",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Data that needs to be verified"),
+            )
+            .field(
+                "signature",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Signature data"),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.key_verify(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: pki_backend_ref.key_verify}
-            ],
-            help: "Data verification."
-        });
-
-        path
+            })
+            .help("Data verification.")
+            .build()
     }
 
     pub fn keys_encrypt_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"keys/encrypt",
-            fields: {
-                "key_name": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "key name"
-                },
-                "data": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "Data that needs to be encrypted"
-                },
-                "aad": {
-                    field_type: FieldType::Str,
-                    default: "",
-                    description: "Additional Authenticated Data can be provided for aes-gcm/cbc encryption"
+        Path::builder()
+            .pattern(r"keys/encrypt")
+            .field(
+                "key_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("key name"),
+            )
+            .field(
+                "data",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Data that needs to be encrypted"),
+            )
+            .field(
+                "aad",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .default_value("")
+                    .description(
+                        "Additional Authenticated Data can be provided for aes-gcm/cbc encryption",
+                    ),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.key_encrypt(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: pki_backend_ref.key_encrypt}
-            ],
-            help: "Data encryption."
-        });
-
-        path
+            })
+            .help("Data encryption.")
+            .build()
     }
 
     pub fn keys_decrypt_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"keys/decrypt",
-            fields: {
-                "key_name": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "key name"
-                },
-                "data": {
-                    required: true,
-                    field_type: FieldType::Str,
-                    description: "Data that needs to be decrypted"
-                },
-                "aad": {
-                    field_type: FieldType::Str,
-                    default: "",
-                    description: "Additional Authenticated Data can be provided for aes-gcm/cbc decryption"
+        Path::builder()
+            .pattern(r"keys/decrypt")
+            .field(
+                "key_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("key name"),
+            )
+            .field(
+                "data",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Data that needs to be decrypted"),
+            )
+            .field(
+                "aad",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .default_value("")
+                    .description(
+                        "Additional Authenticated Data can be provided for aes-gcm/cbc decryption",
+                    ),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.key_decrypt(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: pki_backend_ref.key_decrypt}
-            ],
-            help: "Data decryption."
-        });
-
-        path
+            })
+            .help("Data decryption.")
+            .build()
     }
 }
 

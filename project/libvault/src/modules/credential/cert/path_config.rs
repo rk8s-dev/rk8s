@@ -1,13 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
-
 use serde::{Deserialize, Serialize};
 
 use super::{CertBackend, CertBackendInner};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal,
+    logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
     storage::StorageEntry,
 };
 
@@ -20,43 +16,63 @@ pub struct Config {
 
 impl CertBackend {
     pub fn config_path(&self) -> Path {
-        let cert_backend_ref1 = self.inner.clone();
-        let cert_backend_ref2 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"config",
-            fields: {
-                "disable_binding": {
-                    field_type: FieldType::Bool,
-                    default: false,
-                    description: r#"If set, during renewal, skips the matching of presented client identity with the client identity used during login. Defaults to false."#
-                },
-                "enable_identity_alias_metadata": {
-                    field_type: FieldType::Bool,
-                    default: false,
-                    description: r#"If set, metadata of the certificate including the metadata corresponding to allowed_metadata_extensions will be stored in the alias. Defaults to false."#
-                },
-                "ocsp_cache_size": {
-                    field_type: FieldType::Int,
-                    default: 100,
-                    description: "The size of the in memory OCSP response cache, shared by all configured certs"
+        Path::builder()
+            .pattern(r"config")
+            .field(
+                "disable_binding",
+                Field::builder()
+                    .field_type(FieldType::Bool)
+                    .default_value(false)
+                    .description(
+                        r#"If set, during renewal, skips the matching of presented client identity with the client identity used during login. Defaults to false."#,
+                    ),
+            )
+            .field(
+                "enable_identity_alias_metadata",
+                Field::builder()
+                    .field_type(FieldType::Bool)
+                    .default_value(false)
+                    .description(
+                        r#"If set, metadata of the certificate including the metadata corresponding to allowed_metadata_extensions will be stored in the alias. Defaults to false."#,
+                    ),
+            )
+            .field(
+                "ocsp_cache_size",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .default_value(100)
+                    .description(
+                        "The size of the in memory OCSP response cache, shared by all configured certs",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_config(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: cert_backend_ref1.read_config},
-                {op: Operation::Write, handler: cert_backend_ref2.write_config}
-            ],
-            help: r#"
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_config(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 This endpoint allows you to create, read, update, and delete trusted certificates
 that are allowed to authenticate.
 
 Deleting a certificate will not revoke auth for prior authenticated connections.
 To do this, do a revoke on "login". If you don'log need to revoke login immediately,
 then the next renew will cause the lease to expire.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 }
 

@@ -1,23 +1,20 @@
 //! The secure key-value object storage module. The user can use this module to store arbitary data
 //! into RustyVault. The data stored in RustyVault is encrypted.
 
-use std::{any::Any, collections::HashMap, sync::Arc, time::Duration};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use derive_more::Deref;
 use humantime::parse_duration;
 use serde_json::{Map, Value};
 
 use crate::{
-    context::Context,
     core::Core,
     errors::RvError,
     logical::{
-        Backend, Field, FieldType, LogicalBackend, Operation, Path, PathOperation, Request,
-        Response, secret::Secret,
+        Backend, FieldBuilder, FieldType, LogicalBackend, Operation, PathBuilder, PathOperation,
+        Request, Response, SecretBuilder,
     },
     modules::Module,
-    new_fields, new_fields_internal, new_logical_backend, new_logical_backend_internal, new_path,
-    new_path_internal, new_secret, new_secret_internal,
     storage::StorageEntry,
 };
 
@@ -63,35 +60,110 @@ impl KvBackend {
         let kv_backend_renew = self.inner.clone();
         let kv_backend_revoke = self.inner.clone();
 
-        let backend = new_logical_backend!({
-            paths: [
-                {
-                    pattern: ".*",
-                    fields: {
-                        "ttl": {
-                            field_type: FieldType::Int,
-                            default: "",
-                            description: "Lease time for this key when read. Ex: 1h"
-                        }
-                    },
-                    operations: [
-                        {op: Operation::Read, handler: kv_backend_read.handle_read},
-                        {op: Operation::Write, handler: kv_backend_write.handle_write},
-                        {op: Operation::Delete, handler: kv_backend_delete.handle_delete},
-                        {op: Operation::List, handler: kv_backend_list.handle_list}
-                    ],
-                    help: "Pass-through secret storage to the physical backend, allowing you to read/write arbitrary data into secret storage."
+        #[cfg(not(feature = "sync_handler"))]
+        let path_operations = vec![
+            PathOperation::with_handler(Operation::Read, {
+                let handler = kv_backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.handle_read(backend, req).await })
                 }
-            ],
-            secrets: [{
-                secret_type: "kv",
-                renew_handler: kv_backend_renew.handle_read,
-                revoke_handler: kv_backend_revoke.handle_noop,
-            }],
-            help: KV_BACKEND_HELP,
-        });
+            }),
+            PathOperation::with_handler(Operation::Write, {
+                let handler = kv_backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.handle_write(backend, req).await })
+                }
+            }),
+            PathOperation::with_handler(Operation::Delete, {
+                let handler = kv_backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.handle_delete(backend, req).await })
+                }
+            }),
+            PathOperation::with_handler(Operation::List, {
+                let handler = kv_backend_list.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.handle_list(backend, req).await })
+                }
+            }),
+        ];
 
-        backend
+        #[cfg(feature = "sync_handler")]
+        let path_operations = vec![
+            PathOperation::with_handler(Operation::Read, {
+                let handler = kv_backend_read.clone();
+                move |backend, req| handler.handle_read(backend, req)
+            }),
+            PathOperation::with_handler(Operation::Write, {
+                let handler = kv_backend_write.clone();
+                move |backend, req| handler.handle_write(backend, req)
+            }),
+            PathOperation::with_handler(Operation::Delete, {
+                let handler = kv_backend_delete.clone();
+                move |backend, req| handler.handle_delete(backend, req)
+            }),
+            PathOperation::with_handler(Operation::List, {
+                let handler = kv_backend_list.clone();
+                move |backend, req| handler.handle_list(backend, req)
+            }),
+        ];
+
+        let path = PathBuilder::new()
+            .pattern(".*")
+            .field(
+                "ttl",
+                FieldBuilder::new()
+                    .field_type(FieldType::Int)
+                    .default_value("")
+                    .description("Lease time for this key when read. Ex: 1h"),
+            )
+            .operations(path_operations)
+            .help(
+                "Pass-through secret storage to the physical backend, allowing you to read/write arbitrary data into secret storage.",
+            )
+            .build();
+
+        #[cfg(not(feature = "sync_handler"))]
+        let secret = SecretBuilder::new()
+            .secret_type("kv")
+            .renew_handler({
+                let handler = kv_backend_renew.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.handle_read(backend, req).await })
+                }
+            })
+            .revoke_handler({
+                let handler = kv_backend_revoke.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.handle_noop(backend, req).await })
+                }
+            })
+            .build();
+
+        #[cfg(feature = "sync_handler")]
+        let secret = SecretBuilder::new()
+            .secret_type("kv")
+            .renew_handler({
+                let handler = kv_backend_renew.clone();
+                move |backend, req| handler.handle_read(backend, req)
+            })
+            .revoke_handler({
+                let handler = kv_backend_revoke.clone();
+                move |backend, req| handler.handle_noop(backend, req)
+            })
+            .build();
+
+        LogicalBackend::builder()
+            .path(path)
+            .secret(secret)
+            .help(KV_BACKEND_HELP)
+            .build()
     }
 }
 

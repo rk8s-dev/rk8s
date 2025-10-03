@@ -5,8 +5,7 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     errors::RvError,
-    logical::{Auth, Field, FieldType, Request, field::FieldTrait},
-    new_fields, new_fields_internal,
+    logical::{Auth, Field, FieldType, FieldsBuilder, Request, field::FieldTrait},
     utils::{deserialize_duration, serialize_duration, sock_addr::SockAddrMarshaler},
 };
 
@@ -87,52 +86,78 @@ impl Default for TokenParams {
 }
 
 pub fn token_fields() -> HashMap<String, Arc<Field>> {
-    let fields = new_fields!({
-        "token_type": {
-            field_type: FieldType::Str,
-            default: "default",
-            description: "The type of token to generate, service or batch"
-        },
-        "token_ttl": {
-            field_type: FieldType::DurationSecond,
-            description: "The initial ttl of the token to generate"
-        },
-        "token_max_ttl": {
-            field_type: FieldType::DurationSecond,
-            description: "The maximum lifetime of the generated token"
-        },
-        "token_explicit_max_ttl": {
-            field_type: FieldType::DurationSecond,
-            description: r#"If set, tokens created via this role carry an explicit maximum TTL.
+    FieldsBuilder::new()
+        .field(
+            "token_type",
+            Field::builder()
+                .field_type(FieldType::Str)
+                .default_value("default")
+                .description("The type of token to generate, service or batch"),
+        )
+        .field(
+            "token_ttl",
+            Field::builder()
+                .field_type(FieldType::DurationSecond)
+                .description("The initial ttl of the token to generate"),
+        )
+        .field(
+            "token_max_ttl",
+            Field::builder()
+                .field_type(FieldType::DurationSecond)
+                .description("The maximum lifetime of the generated token"),
+        )
+        .field(
+            "token_explicit_max_ttl",
+            Field::builder()
+                .field_type(FieldType::DurationSecond)
+                .description(
+                    r#"If set, tokens created via this role carry an explicit maximum TTL.
 During renewal, the current maximum TTL values of the role and the mount are not checked for changes,
-and any updates to these values will have no effect on the token being renewed."#
-        },
-        "token_period": {
-            field_type: FieldType::DurationSecond,
-            description: r#"If set, tokens created via this role will have no max lifetime;
+and any updates to these values will have no effect on the token being renewed."#,
+                ),
+        )
+        .field(
+            "token_period",
+            Field::builder()
+                .field_type(FieldType::DurationSecond)
+                .description(
+                    r#"If set, tokens created via this role will have no max lifetime;
 instead, their renewal period will be fixed to this value.  This takes an integer number of seconds,
-or a string duration (e.g. "24h")."#
-        },
-        "token_no_default_policy": {
-            field_type: FieldType::Bool,
-            description: "If true, the 'default' policy will not automatically be added to generated tokens"
-        },
-        "token_policies": {
-            field_type: FieldType::CommaStringSlice,
-            description: "Comma-separated list of policies"
-        },
-        "token_bound_cidrs": {
-            field_type: FieldType::CommaStringSlice,
-            required: false,
-            description: r#"Comma separated string or JSON list of CIDR blocks. If set, specifies the blocks of IP addresses which are allowed to use the generated token."#
-        },
-        "token_num_uses": {
-            field_type: FieldType::Int,
-            description: "The maximum number of times a token may be used, a value of zero means unlimited"
-        }
-    });
-
-    fields
+or a string duration (e.g. "24h")."#,
+                ),
+        )
+        .field(
+            "token_no_default_policy",
+            Field::builder()
+                .field_type(FieldType::Bool)
+                .description(
+                    "If true, the 'default' policy will not automatically be added to generated tokens",
+                ),
+        )
+        .field(
+            "token_policies",
+            Field::builder()
+                .field_type(FieldType::CommaStringSlice)
+                .description("Comma-separated list of policies"),
+        )
+        .field(
+            "token_bound_cidrs",
+            Field::builder()
+                .field_type(FieldType::CommaStringSlice)
+                .required(false)
+                .description(
+                    r#"Comma separated string or JSON list of CIDR blocks. If set, specifies the blocks of IP addresses which are allowed to use the generated token."#,
+                ),
+        )
+        .field(
+            "token_num_uses",
+            Field::builder()
+                .field_type(FieldType::Int)
+                .description(
+                    "The maximum number of times a token may be used, a value of zero means unlimited",
+                ),
+        )
+        .build()
 }
 
 impl TokenParams {

@@ -10,7 +10,7 @@
 use std::process::ExitCode;
 
 use clap::{CommandFactory, Parser};
-use rusty_vault::cli::Cli;
+use libvault::cli::Cli;
 
 fn main() -> ExitCode {
     let mut cli = Cli::parse();

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::time::Duration;
 
 use derive_more::{Deref, DerefMut};
 use openssl::x509::X509;
@@ -7,13 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{CertBackend, CertBackendInner};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{
-        Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response,
-        field::FieldTrait,
-    },
-    new_fields, new_fields_internal, new_path, new_path_internal, rv_error_response,
+    logical::{Backend, Field, FieldType, Operation, Path, Request, Response, field::FieldTrait},
+    rv_error_response,
     storage::StorageEntry,
     utils::{
         cert::{
@@ -79,157 +75,211 @@ pub struct CertEntry {
 
 impl CertBackend {
     pub fn certs_path(&self) -> Path {
-        let cert_backend_ref1 = self.inner.clone();
-        let cert_backend_ref2 = self.inner.clone();
-        let cert_backend_ref3 = self.inner.clone();
+        let backend_read = self.inner.clone();
+        let backend_write = self.inner.clone();
+        let backend_delete = self.inner.clone();
 
-        let mut path = new_path!({
-            pattern: r"certs/(?P<name>\w[\w-]+\w)",
-            fields: {
-                "name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "The name of the certificate."
-                },
-                "certificate": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "The public certificate that should be trusted. Must be x509 PEM encoded."
-                },
-                "ocsp_enabled": {
-                    field_type: FieldType::Bool,
-                    default: false,
-                    description: "Whether to attempt OCSP verification of certificates at login"
-                },
-                "ocsp_ca_certificates": {
-                    field_type: FieldType::Str,
-                    required: false,
-                    description: "Any additional CA certificates needed to communicate with OCSP servers"
-                },
-                "ocsp_servers_override": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated list of OCSP server addresses.
-If unset, the OCSP server is determined from the AuthorityInformationAccess extension on
-the certificate being inspected."#
-                },
-                "ocsp_fail_open": {
-                    field_type: FieldType::Bool,
-                    default: false,
-                    description: r#"If set to true, if an OCSP revocation cannot
-be made successfully, login will proceed rather than failing.  If false, failing
-to get an OCSP status fails the request."#
-                },
-                "ocsp_query_all_servers": {
-                    field_type: FieldType::Bool,
-                    default: false,
-                    description: r#"If set to true, rather than accepting the first
-successful OCSP response, query all servers and consider the certificate valid
-only if all servers agree."#
-                },
-                "allowed_names": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated list of names.
-At least one must exist in either the Common Name or SANs. Supports globbing.
-This parameter is deprecated, please use allowed_common_names, allowed_dns_sans,
-allowed_email_sans, allowed_uri_sans."#
-                },
-                "allowed_common_names": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated list of names.
-        At least one must exist in the Common Name. Supports globbing."#
-                },
-                "allowed_dns_sans": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated list of DNS names.
-        At least one must exist in the SANs. Supports globbing."#
-                },
-                "allowed_email_sans": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated list of Email Addresses.
-        At least one must exist in the SANs. Supports globbing."#
-                },
-                "allowed_uri_sans": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated list of URIs.
-        At least one must exist in the SANs. Supports globbing."#
-                },
-                "allowed_organizational_units": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated list of Organizational Units names.
-        At least one must exist in the OU field."#
-                },
-                "required_extensions": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated string or array of extensions
-formatted as "oid:value". Expects the extension value to be some type of ASN1 encoded string.
-All values much match. Supports globbing on "value"."#
-                },
-                "allowed_metadata_extensions": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: r#"A comma-separated string or array of oid extensions.
-Upon successful authentication, these extensions will be added as metadata if they are present
-in the certificate. The metadata key will be the string consisting of the oid numbers
-separated by a dash (-) instead of a dot (.) to allow usage in ACL templates."#
-                },
-                "policies": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: "Use token_policies instead. If this and token_policies are both speicified, only token_policies will be used."
-                },
-                "lease": {
-                    field_type: FieldType::Int,
-                    required: false,
-                    description: "Use token_ttl instead. If this and token_ttl are both speicified, only token_ttl will be used."
-                },
-                "ttl": {
-                    field_type: FieldType::DurationSecond,
-                    required: false,
-                    description: "Use token_ttl instead. If this and token_ttl are both speicified, only token_ttl will be used."
-                },
-                "max_ttl": {
-                    field_type: FieldType::DurationSecond,
-                    required: false,
-                    description: "Use token_max_ttl instead. If this and token_max_ttl are both speicified, only token_max_ttl will be used."
-                },
-                "period": {
-                    field_type: FieldType::DurationSecond,
-                    default: 0,
-                    description: "Use token_period instead. If this and token_period are both speicified, only token_period will be used."
-                },
-                "bound_cidrs": {
-                    field_type: FieldType::CommaStringSlice,
-                    required: false,
-                    description: "Use token_bound_cidrs instead. If this and token_bound_cidrs are both speicified, only token_bound_cidrs will be used."
-                },
-                "display_name": {
-                    field_type: FieldType::Str,
-                    required: false,
-                    description: "The display name to use for clients using this certificate."
+        let mut path = Path::builder()
+            .pattern(r"certs/(?P<name>\w[\w-]+\w)")
+            .field(
+                "name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("The name of the certificate."),
+            )
+            .field(
+                "certificate",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description(
+                        "The public certificate that should be trusted. Must be x509 PEM encoded.",
+                    ),
+            )
+            .field(
+                "ocsp_enabled",
+                Field::builder()
+                    .field_type(FieldType::Bool)
+                    .default_value(false)
+                    .description("Whether to attempt OCSP verification of certificates at login"),
+            )
+            .field(
+                "ocsp_ca_certificates",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Any additional CA certificates needed to communicate with OCSP servers"),
+            )
+            .field(
+                "ocsp_servers_override",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated list of OCSP server addresses.\nIf unset, the OCSP server is determined from the AuthorityInformationAccess extension on\nthe certificate being inspected.",
+                    ),
+            )
+            .field(
+                "ocsp_fail_open",
+                Field::builder()
+                    .field_type(FieldType::Bool)
+                    .default_value(false)
+                    .description(
+                        "If set to true, if an OCSP revocation cannot\nbe made successfully, login will proceed rather than failing.  If false, failing\nto get an OCSP status fails the request.",
+                    ),
+            )
+            .field(
+                "ocsp_query_all_servers",
+                Field::builder()
+                    .field_type(FieldType::Bool)
+                    .default_value(false)
+                    .description(
+                        "If set to true, rather than accepting the first\nsuccessful OCSP response, query all servers and consider the certificate valid\nonly if all servers agree.",
+                    ),
+            )
+            .field(
+                "allowed_names",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated list of names.\nAt least one must exist in either the Common Name or SANs. Supports globbing.\nThis parameter is deprecated, please use allowed_common_names, allowed_dns_sans,\nallowed_email_sans, allowed_uri_sans.",
+                    ),
+            )
+            .field(
+                "allowed_common_names",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated list of names.\n        At least one must exist in the Common Name. Supports globbing.",
+                    ),
+            )
+            .field(
+                "allowed_dns_sans",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated list of DNS names.\n        At least one must exist in the SANs. Supports globbing.",
+                    ),
+            )
+            .field(
+                "allowed_email_sans",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated list of Email Addresses.\n        At least one must exist in the SANs. Supports globbing.",
+                    ),
+            )
+            .field(
+                "allowed_uri_sans",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated list of URIs.\n        At least one must exist in the SANs. Supports globbing.",
+                    ),
+            )
+            .field(
+                "allowed_organizational_units",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated list of Organizational Units names.\n        At least one must exist in the OU field.",
+                    ),
+            )
+            .field(
+                "required_extensions",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated string or array of extensions\nformatted as \"oid:value\". Expects the extension value to be some type of ASN1 encoded string.\nAll values much match. Supports globbing on \"value\".",
+                    ),
+            )
+            .field(
+                "allowed_metadata_extensions",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "A comma-separated string or array of oid extensions.\nUpon successful authentication, these extensions will be added as metadata if they are present\nin the certificate. The metadata key will be the string consisting of the oid numbers\nseparated by a dash (-) instead of a dot (.) to allow usage in ACL templates.",
+                    ),
+            )
+            .field(
+                "policies",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "Use token_policies instead. If this and token_policies are both speicified, only token_policies will be used.",
+                    ),
+            )
+            .field(
+                "lease",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .description(
+                        "Use token_ttl instead. If this and token_ttl are both speicified, only token_ttl will be used.",
+                    ),
+            )
+            .field(
+                "ttl",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .description(
+                        "Use token_ttl instead. If this and token_ttl are both speicified, only token_ttl will be used.",
+                    ),
+            )
+            .field(
+                "max_ttl",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .description(
+                        "Use token_max_ttl instead. If this and token_max_ttl are both speicified, only token_max_ttl will be used.",
+                    ),
+            )
+            .field(
+                "period",
+                Field::builder()
+                    .field_type(FieldType::DurationSecond)
+                    .default_value(0)
+                    .description(
+                        "Use token_period instead. If this and token_period are both speicified, only token_period will be used.",
+                    ),
+            )
+            .field(
+                "bound_cidrs",
+                Field::builder()
+                    .field_type(FieldType::CommaStringSlice)
+                    .description(
+                        "Use token_bound_cidrs instead. If this and token_bound_cidrs are both speicified, only token_bound_cidrs will be used.",
+                    ),
+            )
+            .field(
+                "display_name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("The display name to use for clients using this certificate."),
+            )
+            .operation(Operation::Read, {
+                let handler = backend_read.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_cert(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: cert_backend_ref1.read_cert},
-                {op: Operation::Write, handler: cert_backend_ref2.write_cert},
-                {op: Operation::Delete, handler: cert_backend_ref3.delete_cert}
-            ],
-            help: r#"
-This endpoint allows you to create, read, update, and delete trusted certificates
-that are allowed to authenticate.
-
-Deleting a certificate will not revoke auth for prior authenticated connections.
-To do this, do a revoke on "login". If you don't need to revoke login immediately,
-then the next renew will cause the lease to expire.
-                "#
-        });
+            })
+            .operation(Operation::Write, {
+                let handler = backend_write.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.write_cert(backend, req).await })
+                }
+            })
+            .operation(Operation::Delete, {
+                let handler = backend_delete.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.delete_cert(backend, req).await })
+                }
+            })
+            .help(
+                "\nThis endpoint allows you to create, read, update, and delete trusted certificates\nthat are allowed to authenticate.\n\nDeleting a certificate will not revoke auth for prior authenticated connections.\nTo do this, do a revoke on \"login\". If you don't need to revoke login immediately,\nthen the next renew will cause the lease to expire.\n                ",
+            )
+            .build();
 
         path.fields.extend(token_fields());
 
@@ -239,15 +289,17 @@ then the next renew will cause the lease to expire.
     pub fn certs_list_path(&self) -> Path {
         let cert_backend_ref = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"certs/?",
-            operations: [
-                {op: Operation::List, handler: cert_backend_ref.list_cert}
-            ],
-            help: r#"This endpoint allows you to list certs"#
-        });
-
-        path
+        Path::builder()
+            .pattern(r"certs/?")
+            .operation(Operation::List, {
+                let handler = cert_backend_ref.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.list_cert(backend, req).await })
+                }
+            })
+            .help("This endpoint allows you to list certs")
+            .build()
     }
 }
 

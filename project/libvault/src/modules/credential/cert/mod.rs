@@ -22,7 +22,6 @@ use crate::{
     errors::RvError,
     logical::{Backend, LogicalBackend},
     modules::{Module, auth::AuthModule},
-    new_logical_backend, new_logical_backend_internal,
 };
 
 pub mod cli;
@@ -73,22 +72,38 @@ impl CertBackend {
     }
 
     pub fn new_backend(&self) -> LogicalBackend {
-        let cert_backend_ref = self.inner.clone();
+        let builder = LogicalBackend::builder()
+            .help(CERT_BACKEND_HELP)
+            .unauth_paths(["login"])
+            .path(self.config_path())
+            .path(self.certs_path())
+            .path(self.certs_list_path())
+            .path(self.crl_path())
+            .path(self.crl_list_path())
+            .path(self.login_path());
 
-        let mut backend = new_logical_backend!({
-            unauth_paths: ["login"],
-            auth_renew_handler: cert_backend_ref.login_renew,
-            help: CERT_BACKEND_HELP,
-        });
+        #[cfg(not(feature = "sync_handler"))]
+        {
+            return builder
+                .auth_renew_handler({
+                    let handler = self.inner.clone();
+                    move |backend, req| {
+                        let handler = handler.clone();
+                        Box::pin(async move { handler.login_renew(backend, req).await })
+                    }
+                })
+                .build();
+        }
 
-        backend.paths.push(Arc::new(self.config_path()));
-        backend.paths.push(Arc::new(self.certs_path()));
-        backend.paths.push(Arc::new(self.certs_list_path()));
-        backend.paths.push(Arc::new(self.crl_path()));
-        backend.paths.push(Arc::new(self.crl_list_path()));
-        backend.paths.push(Arc::new(self.login_path()));
-
-        backend
+        #[cfg(feature = "sync_handler")]
+        {
+            builder
+                .auth_renew_handler({
+                    let handler = self.inner.clone();
+                    move |backend, req| handler.clone().login_renew(backend, req)
+                })
+                .build()
+        }
     }
 }
 

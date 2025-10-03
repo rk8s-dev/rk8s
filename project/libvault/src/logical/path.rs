@@ -1,19 +1,17 @@
+use super::{Backend, Field, Operation, field::IntoFieldArc, request::Request, response::Response};
+use crate::{context::Context, errors::RvError};
 #[cfg(not(feature = "sync_handler"))]
 use std::future::Future;
 #[cfg(not(feature = "sync_handler"))]
 use std::pin::Pin;
 use std::{collections::HashMap, fmt, sync::Arc};
 
-use super::{Backend, Field, Operation, request::Request, response::Response};
-use crate::{context::Context, errors::RvError};
-
 #[cfg(not(feature = "sync_handler"))]
-type PathOperationHandler = dyn for<'a> Fn(
-        &'a dyn Backend,
-        &'a mut Request,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Response>, RvError>> + Send + 'a>>
-    + Send
-    + Sync;
+pub type PathOperationFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<Response>, RvError>> + Send + 'a>>;
+#[cfg(not(feature = "sync_handler"))]
+type PathOperationHandler =
+    dyn for<'a> Fn(&'a dyn Backend, &'a mut Request) -> PathOperationFuture<'a> + Send + Sync;
 #[cfg(feature = "sync_handler")]
 type PathOperationHandler =
     dyn Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError> + Send + Sync;
@@ -25,6 +23,107 @@ pub struct Path {
     pub fields: HashMap<String, Arc<Field>>,
     pub operations: Vec<PathOperation>,
     pub help: String,
+}
+
+impl Default for Path {
+    fn default() -> Self {
+        Self {
+            ctx: Arc::new(Context::new()),
+            pattern: String::new(),
+            fields: HashMap::new(),
+            operations: Vec::new(),
+            help: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PathBuilder {
+    path: Path,
+}
+
+impl Default for PathBuilder {
+    fn default() -> Self {
+        Self {
+            path: Path::default(),
+        }
+    }
+}
+
+impl PathBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn context(mut self, ctx: Arc<Context>) -> Self {
+        self.path.ctx = ctx;
+        self
+    }
+
+    pub fn pattern(mut self, pattern: impl Into<String>) -> Self {
+        self.path.pattern = pattern.into();
+        self
+    }
+
+    pub fn help(mut self, help: impl Into<String>) -> Self {
+        self.path.help = help.into();
+        self
+    }
+
+    pub fn fields(mut self, fields: HashMap<String, Arc<Field>>) -> Self {
+        self.path.fields = fields;
+        self
+    }
+
+    pub fn field<F>(mut self, name: impl Into<String>, field: F) -> Self
+    where
+        F: IntoFieldArc,
+    {
+        self.path.fields.insert(name.into(), field.into_field_arc());
+        self
+    }
+
+    pub fn operations(mut self, operations: Vec<PathOperation>) -> Self {
+        self.path.operations = operations;
+        self
+    }
+
+    #[cfg(not(feature = "sync_handler"))]
+    pub fn operation<H>(mut self, op: Operation, handler: H) -> Self
+    where
+        H: for<'a> Fn(&'a dyn Backend, &'a mut Request) -> PathOperationFuture<'a>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.path
+            .operations
+            .push(PathOperation::with_handler(op, handler));
+        self
+    }
+
+    #[cfg(feature = "sync_handler")]
+    pub fn operation<H>(mut self, op: Operation, handler: H) -> Self
+    where
+        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.path
+            .operations
+            .push(PathOperation::with_handler(op, handler));
+        self
+    }
+
+    pub fn operation_entry(mut self, operation: PathOperation) -> Self {
+        self.path.operations.push(operation);
+        self
+    }
+
+    pub fn build(self) -> Path {
+        self.path
+    }
 }
 
 #[derive(Clone)]
@@ -41,15 +140,45 @@ impl fmt::Debug for PathOperation {
     }
 }
 
+impl PathOperation {
+    #[cfg(not(feature = "sync_handler"))]
+    pub fn with_handler<H>(op: Operation, handler: H) -> Self
+    where
+        H: for<'a> Fn(&'a dyn Backend, &'a mut Request) -> PathOperationFuture<'a>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self {
+            op,
+            handler: Arc::new(handler),
+        }
+    }
+
+    #[cfg(feature = "sync_handler")]
+    pub fn with_handler<H>(op: Operation, handler: H) -> Self
+    where
+        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let handler = Arc::new(move |backend, req| handler(backend, req));
+
+        Self { op, handler }
+    }
+}
+
 impl Path {
     pub fn new(pattern: &str) -> Self {
         Self {
-            ctx: Arc::new(Context::new()),
             pattern: pattern.to_string(),
-            fields: HashMap::new(),
-            operations: Vec::new(),
-            help: String::new(),
+            ..Self::default()
         }
+    }
+
+    pub fn builder() -> PathBuilder {
+        PathBuilder::new()
     }
 
     pub fn get_field(&self, key: &str) -> Option<Arc<Field>> {
@@ -83,150 +212,6 @@ impl PathOperation {
     }
 }
 
-#[macro_export]
-macro_rules! new_fields {
-    ($($tt:tt)*) => {
-        new_fields_internal!($($tt)*)
-    };
-}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! new_fields_internal {
-    (@object $object:ident field_type: $field_type:expr) => {
-        $object.field_type = $field_type;
-    };
-    (@object $object:ident required: $required:expr) => {
-        $object.required = $required;
-    };
-    (@object $object:ident default: $default:expr) => {
-        let val = serde_json::json!($default);
-        $object.default = val;
-        $object.required = false;
-    };
-    (@object $object:ident description: $description:expr) => {
-        $object.description = $description.to_string();
-    };
-    (@object $object:ident field_tt: {$($key:ident: $value:expr),*}) => {
-        {
-            let mut field = Field::new();
-
-            $(
-                new_fields_internal!(@object field $key: $value);
-            )*
-
-            field
-        }
-    };
-    (@object $object:ident $($field_name:tt: $field_tt:tt),*) => {
-        $(
-            $object.insert($field_name.to_string(),
-                           Arc::new(new_fields_internal!(@object $object field_tt: $field_tt)));
-        )*
-    };
-    ({ $($tt:tt)+ }) => {
-        {
-            let mut fields = HashMap::new();
-            new_fields_internal!(@object fields $($tt)+);
-            fields
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! new_path {
-    ($($tt:tt)*) => {
-        new_path_internal!($($tt)*)
-    };
-}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! new_path_internal {
-    (@object $object:ident pattern: $pattern:expr) => {
-        $object.pattern = $pattern.to_string();
-    };
-    (@object $object:ident help: $help:expr) => {
-        $object.help = $help.to_string();
-    };
-    (@object $object:ident
-        fields: {
-            $($tt:tt)+
-        }
-    ) => {
-        $object.fields = new_fields!({ $($tt)+ });
-    };
-    (@object $object:ident op: $op:expr) => {
-        $object.op = $op;
-    };
-    (@operation $operation:ident []) => {
-    };
-    (@operation $object:ident [{op: $op:expr, handler: $handler_obj:ident$(.$handler_method:ident)*} $($rest:tt)*]) => {
-        let mut path_op = PathOperation::new();
-
-        path_op.op = $op;
-        path_op.handler = Arc::new(move |backend, req| {
-            let self_ = $handler_obj.clone();
-            #[cfg(not(feature = "sync_handler"))]
-            {
-                Box::pin(async move {
-                    self_$(.$handler_method)*(backend, req).await
-                })
-            }
-            #[cfg(feature = "sync_handler")]
-            self_$(.$handler_method)*(backend, req)
-        });
-
-        $object.operations.push(path_op);
-
-        new_path_internal!(@operation $object [$($rest)*]);
-    };
-    (@operation $object:ident [{op: $op:expr, raw_handler: $handler:expr} $($rest:tt)*]) => {
-        let mut path_op = PathOperation::new();
-
-        path_op.op = $op;
-        path_op.handler = Arc::new(|backend, req| {
-            #[cfg(not(feature = "sync_handler"))]
-            {
-                Box::pin(async move {
-                    $handler(backend, req).await
-                })
-            }
-            #[cfg(feature = "sync_handler")]
-            $handler(backend, req)
-        });
-
-        $object.operations.push(path_op);
-
-        new_path_internal!(@operation $object [$($rest)*]);
-    };
-    (@object $object:ident
-        operations: [
-            $($operation:tt),* $(,)?
-        ]
-    ) => {
-        new_path_internal!(@operation $object [$($operation)*]);
-    };
-    (@object $object:ident () $($key:ident: $value:tt),*) => {
-        $(
-            new_path_internal!(@object $object $key: $value);
-        )*
-    };
-    ({ $($tt:tt)+ }) => {
-        {
-            let mut path = Path {
-                ctx: Arc::new(Context::new()),
-                pattern: String::new(),
-                fields: HashMap::new(),
-                operations: Vec::new(),
-                help: String::new(),
-            };
-            new_path_internal!(@object path () $($tt)+);
-            path
-        }
-    };
-}
-
 #[cfg(test)]
 mod test {
     use super::{super::FieldType, *};
@@ -242,27 +227,28 @@ mod test {
     #[test]
     #[cfg(not(feature = "sync_handler"))]
     fn test_logical_path() {
-        let path: Path = new_path!({
-            pattern: "/aa",
-            fields: {
-                "mytype": {
-                    field_type: FieldType::Int,
-                    description: "haha"
-                },
-                "mypath": {
-                    field_type: FieldType::Str,
-                    description: "hehe"
-                }
-            },
-            operations: [
-                {op: Operation::Read, handler: my_test_read_handler},
-                {op: Operation::Write, raw_handler: async move |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                        Err(RvError::ErrUnknown)
-                    }
-                }
-            ],
-            help: "testhelp"
-        });
+        let path = Path::builder()
+            .pattern("/aa")
+            .field(
+                "mytype",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .description("haha"),
+            )
+            .field(
+                "mypath",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("hehe"),
+            )
+            .operation(Operation::Read, |backend, req| {
+                Box::pin(my_test_read_handler(backend, req))
+            })
+            .operation(Operation::Write, |_backend, _req| {
+                Box::pin(async move { Err(RvError::ErrUnknown) })
+            })
+            .help("testhelp")
+            .build();
 
         assert_eq!(&path.pattern, "/aa");
         assert_eq!(&path.help, "testhelp");
@@ -281,27 +267,24 @@ mod test {
     #[test]
     #[cfg(feature = "sync_handler")]
     fn test_logical_path() {
-        let path: Path = new_path!({
-            pattern: "/aa",
-            fields: {
-                "mytype": {
-                    field_type: FieldType::Int,
-                    description: "haha"
-                },
-                "mypath": {
-                    field_type: FieldType::Str,
-                    description: "hehe"
-                }
-            },
-            operations: [
-                {op: Operation::Read, handler: my_test_read_handler},
-                {op: Operation::Write, raw_handler: |_backend: &dyn Backend, _req: &mut Request| -> Result<Option<Response>, RvError> {
-                        Err(RvError::ErrUnknown)
-                    }
-                }
-            ],
-            help: "testhelp"
-        });
+        let path = Path::builder()
+            .pattern("/aa")
+            .field(
+                "mytype",
+                Field::builder()
+                    .field_type(FieldType::Int)
+                    .description("haha"),
+            )
+            .field(
+                "mypath",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("hehe"),
+            )
+            .operation(Operation::Read, my_test_read_handler)
+            .operation(Operation::Write, |_backend, _req| Err(RvError::ErrUnknown))
+            .help("testhelp")
+            .build();
 
         assert_eq!(&path.pattern, "/aa");
         assert_eq!(&path.help, "testhelp");

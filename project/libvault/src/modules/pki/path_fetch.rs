@@ -1,14 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
-
 use openssl::x509::X509;
 use serde_json::json;
 
 use super::{PkiBackend, PkiBackendInner};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal,
+    logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
     storage::StorageEntry,
     utils::cert::CertBundle,
 };
@@ -16,77 +12,95 @@ use crate::{
 #[maybe_async::maybe_async]
 impl PkiBackend {
     pub fn fetch_ca_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: "ca(/pem)?",
-            operations: [
-                {op: Operation::Read, handler: pki_backend_ref.read_path_fetch_ca}
-            ],
-            help: r#"
+        Path::builder()
+            .pattern("ca(/pem)?")
+            .operation(Operation::Read, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_path_fetch_ca(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 This allows certificates to be fetched. If using the fetch/ prefix any non-revoked certificate can be fetched.
 Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     pub fn fetch_crl_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: "crl(/pem)?",
-            operations: [
-                {op: Operation::Read, handler: pki_backend_ref.read_path_fetch_crl}
-            ],
-            help: r#"
+        Path::builder()
+            .pattern("crl(/pem)?")
+            .operation(Operation::Read, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_path_fetch_crl(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 This allows certificates to be fetched. If using the fetch/ prefix any non-revoked certificate can be fetched.
 Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     pub fn fetch_cert_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"cert/(?P<serial>[0-9A-Fa-f-:]+)",
-            fields: {
-                "serial": {
-                    field_type: FieldType::Str,
-                    description: "Certificate serial number, in colon- or hyphen-separated octal"
+        Path::builder()
+            .pattern(r"cert/(?P<serial>[0-9A-Fa-f-:]+)")
+            .field(
+                "serial",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description(
+                        "Certificate serial number, in colon- or hyphen-separated octal",
+                    ),
+            )
+            .operation(Operation::Read, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_path_fetch_cert(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Read, handler: pki_backend_ref.read_path_fetch_cert}
-            ],
-            help: r#"
+            })
+            .help(
+                r#"
 This allows certificates to be fetched. If using the fetch/ prefix any non-revoked certificate can be fetched.
 Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 
     pub fn fetch_cert_crl_path(&self) -> Path {
-        let pki_backend_ref = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: "cert/crl",
-            operations: [
-                {op: Operation::Read, handler: pki_backend_ref.read_path_fetch_cert_crl}
-            ],
-            help: r#"
+        Path::builder()
+            .pattern("cert/crl")
+            .operation(Operation::Read, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_path_fetch_cert_crl(backend, req).await })
+                }
+            })
+            .help(
+                r#"
 This allows certificates to be fetched. If using the fetch/ prefix any non-revoked certificate can be fetched.
 Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
-                "#
-        });
-
-        path
+                "#,
+            )
+            .build()
     }
 }
 

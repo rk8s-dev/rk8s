@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use foreign_types::ForeignType;
@@ -23,11 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{CertBackend, CertBackendInner, CertEntry};
 use crate::{
-    context::Context,
     errors::RvError,
-    logical::{Auth, Backend, Field, FieldType, Operation, Path, PathOperation, Request, Response},
-    new_fields, new_fields_internal, new_path, new_path_internal, rv_error_response,
-    rv_error_string,
+    logical::{Auth, Backend, Field, FieldType, Operation, Path, Request, Response},
+    rv_error_response, rv_error_string,
     utils::{
         self,
         cert::{
@@ -41,12 +39,6 @@ use crate::{
     },
 };
 
-#[derive(Debug, Deserialize, Serialize)]
-struct Asn1StringData {
-    #[serde(rename = "value")]
-    value: String,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParsedCert {
     pub entry: CertEntry,
@@ -59,23 +51,25 @@ pub struct ParsedCert {
 
 impl CertBackend {
     pub fn login_path(&self) -> Path {
-        let cert_backend_ref1 = self.inner.clone();
+        let backend = self.inner.clone();
 
-        let path = new_path!({
-            pattern: r"login",
-            fields: {
-                "name": {
-                    field_type: FieldType::Str,
-                    required: true,
-                    description: "The name of the certificate role to authenticate against."
+        Path::builder()
+            .pattern(r"login")
+            .field(
+                "name",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("The name of the certificate role to authenticate against."),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.login(backend, req).await })
                 }
-            },
-            operations: [
-                {op: Operation::Write, handler: cert_backend_ref1.login}
-            ]
-        });
-
-        path
+            })
+            .build()
     }
 }
 

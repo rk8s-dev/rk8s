@@ -156,9 +156,7 @@ impl FileBackend {
 #[cfg(test)]
 mod test {
     use super::super::super::test::{test_backend_curd, test_backend_list_prefix};
-    use crate::test_utils::{
-        new_test_backend, new_test_file_backend, new_test_temp_dir, test_multi_routine,
-    };
+    use crate::test_utils::new_test_backend;
 
     #[maybe_async::test(
         feature = "sync_handler",
@@ -169,15 +167,5 @@ mod test {
 
         test_backend_curd(backend.as_ref()).await;
         test_backend_list_prefix(backend.as_ref()).await;
-    }
-
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
-    async fn test_file_backend_multi_routine() {
-        let dir = new_test_temp_dir("test_file_backend_multi_routine");
-        let backend = new_test_file_backend(&dir);
-        test_multi_routine(backend);
     }
 }

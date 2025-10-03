@@ -9,12 +9,12 @@
 //! Users can use an HTTP client tool (curl, e.g.) to send commands to a running RustyVault server and
 //! then have relevant secret management features.
 //!
-//! The second working mode, which works as a typical Rust crate called `rusty_vault`, allows Rust
+//! The second working mode, which works as a typical Rust crate called `libvault`, allows Rust
 //! application developers to integrate RustyVault easily into their own applications to have the
 //! ability of secrets management such as secure key/vaule storage, public key cryptography, data
 //! encryption and so forth.
 //!
-//! This is the official documentation of crate `rusty_vault`, and it's mainly for developers.
+//! This is the official documentation of crate `libvault`, and it's mainly for developers.
 //! Once again, if you are looking for how to use the RustyVault server via a set of RESTful API,
 //! then you may prefer the RustyVault's [RESTful API documentation].
 //!
@@ -73,7 +73,7 @@ pub enum CryptoError {
     /// This error is automatically converted from `crate::errors::RvError`
     /// and typically occurs when the cryptographic operation interacts
     /// with other parts of the RustyVault system.
-    #[error("Some rusty_vault error happened, {:?}", .source)]
+    #[error("Some libvault error happened, {:?}", .source)]
     RvError {
         #[from]
         source: crate::errors::RvError,

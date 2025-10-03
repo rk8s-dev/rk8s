@@ -31,11 +31,33 @@ pub struct SecretData {
     pub internal_data: Map<String, Value>,
 }
 
+#[derive(Clone)]
 pub struct Secret {
     pub secret_type: String,
     pub default_duration: Duration,
     pub renew_handler: Option<Arc<SecretOperationHandler>>,
     pub revoke_handler: Option<Arc<SecretOperationHandler>>,
+}
+
+impl Secret {
+    pub fn new() -> Self {
+        Self {
+            secret_type: String::new(),
+            default_duration: Duration::from_secs(0),
+            renew_handler: None,
+            revoke_handler: None,
+        }
+    }
+
+    pub fn builder() -> SecretBuilder {
+        SecretBuilder::new()
+    }
+}
+
+impl Default for Secret {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[maybe_async::maybe_async]
@@ -99,66 +121,100 @@ impl Secret {
     }
 }
 
-#[macro_export]
-macro_rules! new_secret {
-    ($($tt:tt)*) => {
-        new_secret_internal!($($tt)*)
-    };
+#[derive(Default, Clone)]
+pub struct SecretBuilder {
+    secret: Secret,
 }
 
-#[macro_export]
-#[doc(hidden)]
-macro_rules! new_secret_internal {
-    (@object $object:ident () {}) => {
-    };
-    (@object $object:ident () {secret_type: $secret_type:expr, $($rest:tt)*}) => {
-        $object.secret_type = $secret_type.to_string();
-        new_secret_internal!(@object $object () {$($rest)*});
-    };
-    (@object $object:ident () {default_duration: $duration:expr, $($rest:tt)*}) => {
-        $object.default_duration = Duration::new($duration, 0);
-        new_secret_internal!(@object $object () {$($rest)*});
-    };
-    (@object $object:ident () {renew_handler: $handler_obj:ident$(.$handler_method:ident)*, $($rest:tt)*}) => {
-        $object.renew_handler = Some(Arc::new(move |backend, req| {
-            let self_ = $handler_obj.clone();
-            #[cfg(not(feature = "sync_handler"))]
-            {
-                Box::pin(async move {
-                    self_$(.$handler_method)*(backend, req).await
-                })
-            }
-            #[cfg(feature = "sync_handler")]
-            self_$(.$handler_method)*(backend, req)
-        }));
-        new_secret_internal!(@object $object () {$($rest)*});
-    };
-    (@object $object:ident () {revoke_handler: $handler_obj:ident$(.$handler_method:ident)*, $($rest:tt)*}) => {
-        $object.revoke_handler = Some(Arc::new(move |backend, req| {
-            let self_ = $handler_obj.clone();
-            #[cfg(not(feature = "sync_handler"))]
-            {
-                Box::pin(async move {
-                    self_$(.$handler_method)*(backend, req).await
-                })
-            }
-            #[cfg(feature = "sync_handler")]
-            self_$(.$handler_method)*(backend, req)
-        }));
-        new_secret_internal!(@object $object () {$($rest)*});
-    };
-    ({ $($tt:tt)+ }) => {
-        {
-            let mut secret = Secret {
-                secret_type: String::new(),
-                default_duration: Duration::new(0, 0),
-                renew_handler: None,
-                revoke_handler: None,
-            };
-            new_secret_internal!(@object secret () {$($tt)+});
-            secret
+impl SecretBuilder {
+    pub fn new() -> Self {
+        Self {
+            secret: Secret::new(),
         }
-    };
+    }
+
+    pub fn secret_type(mut self, secret_type: impl Into<String>) -> Self {
+        self.secret.secret_type = secret_type.into();
+        self
+    }
+
+    pub fn default_duration(mut self, duration: Duration) -> Self {
+        self.secret.default_duration = duration;
+        self
+    }
+
+    pub fn default_duration_secs(mut self, duration_secs: u64) -> Self {
+        self.secret.default_duration = Duration::from_secs(duration_secs);
+        self
+    }
+
+    #[cfg(not(feature = "sync_handler"))]
+    pub fn renew_handler<H>(mut self, handler: H) -> Self
+    where
+        H: for<'a> Fn(
+                &'a dyn Backend,
+                &'a mut Request,
+            ) -> Pin<
+                Box<dyn Future<Output = Result<Option<Response>, RvError>> + Send + 'a>,
+            > + Send
+            + Sync
+            + 'static,
+    {
+        self.secret.renew_handler = Some(Arc::new(handler));
+        self
+    }
+
+    #[cfg(feature = "sync_handler")]
+    pub fn renew_handler<H>(mut self, handler: H) -> Self
+    where
+        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.secret
+            .renew_handler
+            .replace(Arc::new(move |backend, req| handler(backend, req)));
+        self
+    }
+
+    #[cfg(not(feature = "sync_handler"))]
+    pub fn revoke_handler<H>(mut self, handler: H) -> Self
+    where
+        H: for<'a> Fn(
+                &'a dyn Backend,
+                &'a mut Request,
+            ) -> Pin<
+                Box<dyn Future<Output = Result<Option<Response>, RvError>> + Send + 'a>,
+            > + Send
+            + Sync
+            + 'static,
+    {
+        self.secret.revoke_handler = Some(Arc::new(handler));
+        self
+    }
+
+    #[cfg(feature = "sync_handler")]
+    pub fn revoke_handler<H>(mut self, handler: H) -> Self
+    where
+        H: Fn(&dyn Backend, &mut Request) -> Result<Option<Response>, RvError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.secret
+            .revoke_handler
+            .replace(Arc::new(move |backend, req| handler(backend, req)));
+        self
+    }
+
+    pub fn build(self) -> Secret {
+        self.secret
+    }
+
+    pub fn build_arc(self) -> Arc<Secret> {
+        Arc::new(self.secret)
+    }
 }
 
 #[cfg(test)]
@@ -194,15 +250,35 @@ mod test {
     fn test_logical_secret() {
         let t = Arc::new(MyTest::new());
 
-        let secret: Secret = new_secret!({
-            secret_type: "kv",
-            default_duration: 60,
-            renew_handler: t.noop,
-            revoke_handler: noop,
-        });
+        #[cfg(not(feature = "sync_handler"))]
+        let secret = {
+            let renew = Arc::clone(&t);
+
+            Secret::builder()
+                .secret_type("kv")
+                .default_duration_secs(60)
+                .renew_handler(move |backend, req| {
+                    let renew = Arc::clone(&renew);
+                    Box::pin(async move { renew.noop(backend, req).await })
+                })
+                .revoke_handler(|backend, req| Box::pin(async move { noop(backend, req).await }))
+                .build()
+        };
+
+        #[cfg(feature = "sync_handler")]
+        let secret = {
+            let renew = Arc::clone(&t);
+
+            Secret::builder()
+                .secret_type("kv")
+                .default_duration_secs(60)
+                .renew_handler(move |backend, req| renew.noop(backend, req))
+                .revoke_handler(noop)
+                .build()
+        };
 
         assert_eq!(&secret.secret_type, "kv");
-        assert_eq!(secret.default_duration, Duration::new(60, 0));
+        assert_eq!(secret.default_duration, Duration::from_secs(60));
         assert!(secret.renew_handler.is_some());
         assert!(secret.revoke_handler.is_some());
     }

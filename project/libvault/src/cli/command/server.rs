@@ -1,20 +1,12 @@
 use std::{
     default::Default,
-    fs,
+    env, fs,
     fs::File,
     io::Read,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 
-use crate::{
-    EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_LOAD_CONFIG_FAILURE, EXIT_CODE_OK, RustyVault,
-    cli::{command, config},
-    errors::RvError,
-    http,
-    metrics::{manager::MetricsManager, middleware::metrics_midleware},
-    storage,
-};
 use actix_web::{
     App, HttpResponse, HttpServer,
     middleware::{self, from_fn},
@@ -28,8 +20,15 @@ use openssl::{
     x509::{X509, store::X509StoreBuilder, verify::X509VerifyFlags},
 };
 use sysexits::ExitCode;
-use tracing_log::LogTracer;
-use tracing_subscriber::EnvFilter;
+
+use crate::{
+    EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_LOAD_CONFIG_FAILURE, EXIT_CODE_OK, RustyVault,
+    cli::{command, config},
+    errors::RvError,
+    http,
+    metrics::{manager::MetricsManager, middleware::metrics_midleware},
+    storage,
+};
 
 pub const WORK_DIR_PATH_DEFAULT: &str = "/tmp/rusty_vault";
 
@@ -80,13 +79,10 @@ impl Server {
             return Err(RvError::ErrConfigListenerNotFound);
         }
 
-        LogTracer::init()?;
-        tracing_subscriber::fmt::fmt()
-            .with_env_filter(
-                EnvFilter::try_new(&config.log_level).unwrap_or(EnvFilter::new("INFO")),
-            )
-            .with_thread_ids(true)
-            .init();
+        unsafe {
+            env::set_var("RUST_LOG", config.log_level.as_str());
+        }
+        env_logger::init();
 
         let (_, storage) = config.storage.iter().next().unwrap();
         let (_, listener) = config.listener.iter().next().unwrap();
@@ -135,7 +131,7 @@ impl Server {
                 .user(user.as_str())
                 .group(group.as_str())
                 .umask(0o027)
-                .stdout(log_file.try_clone()?)
+                .stdout(log_file.try_clone().unwrap())
                 .stderr(log_file)
                 .pid_file(pid_path.clone())
                 .chown_pid_file(true)

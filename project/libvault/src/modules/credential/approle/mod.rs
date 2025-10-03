@@ -54,7 +54,6 @@ use crate::{
     errors::RvError,
     logical::{Backend, LogicalBackend},
     modules::{Module, auth::AuthModule},
-    new_logical_backend, new_logical_backend_internal,
     utils::{locks::Locks, salt::Salt},
 };
 
@@ -112,22 +111,36 @@ impl AppRoleBackend {
     }
 
     pub fn new_backend(&self) -> LogicalBackend {
-        let approle_backend_ref = self.inner.clone();
+        let builder = LogicalBackend::builder()
+            .help(APPROLE_BACKEND_HELP)
+            .unauth_paths(["login"])
+            .paths(self.role_paths())
+            .path(self.login_path())
+            .path(self.role_path())
+            .path(self.tidy_secret_id_path());
 
-        let mut backend = new_logical_backend!({
-            unauth_paths: ["login"],
-            auth_renew_handler: approle_backend_ref.login_renew,
-            help: APPROLE_BACKEND_HELP,
-        });
+        #[cfg(not(feature = "sync_handler"))]
+        {
+            return builder
+                .auth_renew_handler({
+                    let handler = self.inner.clone();
+                    move |backend, req| {
+                        let handler = handler.clone();
+                        Box::pin(async move { handler.login_renew(backend, req).await })
+                    }
+                })
+                .build();
+        }
 
-        let role_paths = self.role_paths();
-        backend.paths.extend(role_paths.into_iter().map(Arc::new));
-        backend.paths.push(Arc::new(self.login_path()));
-
-        backend.paths.push(Arc::new(self.role_path()));
-        backend.paths.push(Arc::new(self.tidy_secret_id_path()));
-
-        backend
+        #[cfg(feature = "sync_handler")]
+        {
+            builder
+                .auth_renew_handler({
+                    let handler = self.inner.clone();
+                    move |backend, req| handler.clone().login_renew(backend, req)
+                })
+                .build()
+        }
     }
 }
 
