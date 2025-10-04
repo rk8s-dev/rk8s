@@ -2,12 +2,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use humantime::parse_duration;
 use openssl::{asn1::Asn1Time, x509::X509NameBuilder};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
-use super::{PkiBackend, PkiBackendInner};
+use super::{PkiBackend, PkiBackendInner, types};
 use crate::{
     errors::RvError,
     logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
+    modules::{RequestExt, ResponseExt},
     utils,
     utils::cert,
 };
@@ -81,20 +82,16 @@ impl PkiBackendInner {
         backend: &dyn Backend,
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
+        let payload: types::IssueCertificateRequest = req.parse_json()?;
+
         let mut common_names = Vec::new();
 
-        let common_name_value = req.get_data_or_default("common_name")?;
-        let common_name = common_name_value
-            .as_str()
-            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let common_name = payload.common_name.unwrap_or_default();
         if !common_name.is_empty() {
-            common_names.push(common_name.to_string());
+            common_names.push(common_name.clone());
         }
 
-        if let Ok(alt_names_value) = req.get_data("alt_names") {
-            let alt_names = alt_names_value
-                .as_str()
-                .ok_or(RvError::ErrRequestFieldInvalid)?;
+        if let Some(alt_names) = payload.alt_names {
             if !alt_names.is_empty() {
                 for v in alt_names.split(',') {
                     common_names.push(v.to_string());
@@ -117,10 +114,7 @@ impl PkiBackendInner {
         let role_entry = role.unwrap();
 
         let mut ip_sans = Vec::new();
-        if let Ok(ip_sans_value) = req.get_data("ip_sans") {
-            let ip_sans_str = ip_sans_value
-                .as_str()
-                .ok_or(RvError::ErrRequestFieldInvalid)?;
+        if let Some(ip_sans_str) = payload.ip_sans {
             if !ip_sans_str.is_empty() {
                 for v in ip_sans_str.split(',') {
                     ip_sans.push(v.to_string());
@@ -132,9 +126,8 @@ impl PkiBackendInner {
         let not_before = SystemTime::now() - Duration::from_secs(10);
         let mut not_after = not_before + parse_duration("30d").unwrap();
 
-        if let Ok(ttl_value) = req.get_data("ttl") {
-            let ttl = ttl_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
-            let ttl_dur = parse_duration(ttl)?;
+        if let Some(ttl) = payload.ttl {
+            let ttl_dur = parse_duration(ttl.as_str())?;
             let req_ttl_not_after_dur = SystemTime::now() + ttl_dur;
             let req_ttl_not_after = Asn1Time::from_unix(
                 req_ttl_not_after_dur.duration_since(UNIX_EPOCH)?.as_secs() as i64,
@@ -181,7 +174,7 @@ impl PkiBackendInner {
         }
         if !common_name.is_empty() {
             subject_name
-                .append_entry_by_text("CN", common_name)
+                .append_entry_by_text("CN", &common_name)
                 .unwrap();
         }
         let subject = subject_name.build();
@@ -216,17 +209,18 @@ impl PkiBackendInner {
             .collect::<Vec<String>>()
             .join("");
 
-        let resp_data = json!({
-            "expiration": cert_expiration,
-            "issuing_ca": String::from_utf8_lossy(&ca_bundle.certificate.to_pem()?),
-            "ca_chain": ca_chain_pem,
-            "certificate": String::from_utf8_lossy(&cert_bundle.certificate.to_pem()?),
-            "private_key": String::from_utf8_lossy(&cert_bundle.private_key.private_key_to_pem_pkcs8()?),
-            "private_key_type": cert_bundle.private_key_type.clone(),
-            "serial_number": cert_bundle.serial_number.clone(),
-        })
-        .as_object()
-        .cloned();
+        let response = types::IssueCertificateResponse {
+            certificate: String::from_utf8_lossy(&cert_bundle.certificate.to_pem()?).to_string(),
+            private_key: String::from_utf8_lossy(
+                &cert_bundle.private_key.private_key_to_pem_pkcs8()?,
+            )
+            .to_string(),
+            private_key_type: cert_bundle.private_key_type.clone(),
+            serial_number: cert_bundle.serial_number.clone(),
+            issuing_ca: String::from_utf8_lossy(&ca_bundle.certificate.to_pem()?).to_string(),
+            ca_chain: ca_chain_pem,
+            expiration: cert_expiration,
+        };
 
         if role_entry.generate_lease {
             let mut secret_data: Map<String, Value> = Map::new();
@@ -238,7 +232,7 @@ impl PkiBackendInner {
             let mut resp = backend
                 .secret("pki")
                 .unwrap()
-                .response(resp_data, Some(secret_data));
+                .response(response.to_map()?, Some(secret_data));
             let secret = resp.secret.as_mut().unwrap();
 
             let now_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
@@ -248,7 +242,7 @@ impl PkiBackendInner {
 
             Ok(Some(resp))
         } else {
-            Ok(Some(Response::data_response(resp_data)))
+            Ok(Some(Response::data_response(response.to_map()?)))
         }
     }
 }

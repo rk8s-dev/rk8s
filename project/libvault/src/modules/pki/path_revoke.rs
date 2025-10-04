@@ -1,7 +1,8 @@
-use super::{PkiBackend, PkiBackendInner};
+use super::{PkiBackend, PkiBackendInner, types};
 use crate::{
     errors::RvError,
     logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
+    modules::RequestExt,
 };
 
 impl PkiBackend {
@@ -57,8 +58,9 @@ impl PkiBackendInner {
     pub async fn revoke_cert(
         &self,
         _backend: &dyn Backend,
-        _req: &mut Request,
+        req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
+        let _payload: types::RevokeCertificateRequest = req.parse_json()?;
         Ok(None)
     }
 

@@ -200,6 +200,11 @@ pub enum RvError {
         #[from]
         source: serde_yaml::Error,
     },
+    #[error("HTTP client error: {source}")]
+    Reqwest {
+        #[from]
+        source: reqwest::Error,
+    },
     #[error("Some openssl error happened, {:?}", .source)]
     OpenSSL {
         #[from]

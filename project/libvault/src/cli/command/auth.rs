@@ -10,9 +10,7 @@ use crate::{
     EXIT_CODE_INSUFFICIENT_PARAMS,
     api::auth::LoginHandler,
     cli::command::CommandExecutor,
-    modules::credential::{
-        cert::cli::CertAuthCliHandler, token::cli::TokenCliHandler,
-    },
+    modules::credential::{cert::cli::CertAuthCliHandler, token::cli::TokenCliHandler},
 };
 
 lazy_static! {

@@ -1,1 +1,0 @@
-cp -r docs/* versioned_docs/version-0.12.x/

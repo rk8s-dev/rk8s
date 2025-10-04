@@ -5,9 +5,11 @@
 //! It's important for the developers who want to implement a new RustyVault module themselves to
 //! get the `trait Module` implemented correctly.
 
+use crate::{core::Core, errors::RvError, logical::Request};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_json::{Map, Value};
 use std::{any::Any, sync::Arc};
-
-use crate::{core::Core, errors::RvError};
 
 pub mod auth;
 pub mod credential;
@@ -16,6 +18,45 @@ pub mod kv;
 pub mod pki;
 pub mod policy;
 pub mod system;
+
+pub trait RequestExt {
+    fn parse_json<T>(&self) -> Result<T, RvError>
+    where
+        T: DeserializeOwned;
+}
+
+impl RequestExt for Request {
+    fn parse_json<T>(&self) -> Result<T, RvError>
+    where
+        T: DeserializeOwned,
+    {
+        let map = if let Some(body) = self.body.clone() {
+            body
+        } else if let Some(data) = self.data.clone() {
+            data
+        } else {
+            Map::new()
+        };
+
+        serde_json::from_value(Value::Object(map)).map_err(Into::into)
+    }
+}
+
+pub trait ResponseExt {
+    fn to_map(&self) -> Result<Option<Map<String, Value>>, RvError>;
+}
+
+impl<T> ResponseExt for T
+where
+    T: Serialize,
+{
+    fn to_map(&self) -> Result<Option<Map<String, Value>>, RvError> {
+        match serde_json::to_value(self)? {
+            Value::Object(map) => Ok(Some(map)),
+            _ => Ok(None),
+        }
+    }
+}
 
 #[maybe_async::maybe_async]
 pub trait Module: Any + Send + Sync {

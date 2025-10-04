@@ -127,6 +127,16 @@ impl TLSConfigBuilder {
     }
 }
 
+impl TLSConfig {
+    pub fn client_config(&self) -> &ClientConfig {
+        &self.client_config
+    }
+
+    pub fn clone_inner(&self) -> ClientConfig {
+        self.client_config.clone()
+    }
+}
+
 impl Client {
     pub fn new() -> Self {
         Client::default()
@@ -158,7 +168,7 @@ impl Client {
             .timeout(Duration::from_secs(30));
 
         if let Some(tls_config) = &self.tls_config {
-            agent = agent.tls_config(Arc::new(tls_config.client_config.clone()));
+            agent = agent.tls_config(Arc::new(tls_config.clone_inner()));
         }
 
         self.http_client = agent.build();

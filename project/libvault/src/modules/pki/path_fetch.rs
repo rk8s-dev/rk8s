@@ -1,10 +1,10 @@
 use openssl::x509::X509;
-use serde_json::json;
 
-use super::{PkiBackend, PkiBackendInner};
+use super::{PkiBackend, PkiBackendInner, types};
 use crate::{
     errors::RvError,
     logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
+    modules::ResponseExt,
     storage::StorageEntry,
     utils::cert::CertBundle,
 };
@@ -118,15 +118,15 @@ impl PkiBackendInner {
             .map(|pem| String::from_utf8_lossy(&pem).to_string())
             .collect::<Vec<String>>()
             .join("");
-        let resp_data = json!({
-            "ca_chain": ca_chain_pem,
-            "certificate": String::from_utf8_lossy(&cert_bundle.certificate.to_pem()?),
-            "serial_number": cert_bundle.serial_number.clone(),
-        })
-        .as_object()
-        .cloned();
 
-        Ok(Some(Response::data_response(resp_data)))
+        let response = types::FetchCaResponse {
+            certificate: String::from_utf8_lossy(&cert_bundle.certificate.to_pem()?).to_string(),
+            ca_chain: Some(ca_chain_pem),
+            issuing_ca: None,
+            serial_number: Some(cert_bundle.serial_number.clone()),
+        };
+
+        Ok(Some(Response::data_response(response.to_map()?)))
     }
 
     pub async fn read_path_fetch_ca(
@@ -171,15 +171,13 @@ impl PkiBackendInner {
         ca_chain_pem =
             ca_chain_pem + &String::from_utf8_lossy(&ca_bundle.certificate.to_pem().unwrap());
 
-        let resp_data = json!({
-            "ca_chain": ca_chain_pem,
-            "certificate": String::from_utf8_lossy(&cert.to_pem()?),
-            "serial_number": serial_number,
-        })
-        .as_object()
-        .cloned();
+        let response = types::FetchCertificateResponse {
+            ca_chain: ca_chain_pem,
+            certificate: String::from_utf8_lossy(&cert.to_pem()?).to_string(),
+            serial_number: serial_number.to_string(),
+        };
 
-        Ok(Some(Response::data_response(resp_data)))
+        Ok(Some(Response::data_response(response.to_map()?)))
     }
 
     pub async fn read_path_fetch_cert_crl(

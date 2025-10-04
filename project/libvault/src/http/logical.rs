@@ -19,7 +19,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Auth {
+pub(crate) struct Auth {
     client_token: String,
     policies: Vec<String>,
     metadata: HashMap<String, String>,
@@ -28,7 +28,7 @@ struct Auth {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct LogicalResponse {
+pub(crate) struct LogicalResponse {
     renewable: bool,
     lease_id: String,
     lease_duration: u64,

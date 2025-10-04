@@ -4,10 +4,11 @@ use openssl::{
 };
 use pem;
 
-use super::{PkiBackend, PkiBackendInner};
+use super::{PkiBackend, PkiBackendInner, types};
 use crate::{
     errors::RvError,
     logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
+    modules::RequestExt,
     storage::StorageEntry,
     utils::{cert, cert::CertBundle},
 };
@@ -51,10 +52,8 @@ impl PkiBackendInner {
         _backend: &dyn Backend,
         req: &mut Request,
     ) -> Result<Option<Response>, RvError> {
-        let pem_bundle_value = req.get_data("pem_bundle")?;
-        let pem_bundle = pem_bundle_value
-            .as_str()
-            .ok_or(RvError::ErrRequestFieldInvalid)?;
+        let payload: types::ConfigCaRequest = req.parse_json()?;
+        let pem_bundle = payload.pem_bundle.as_str();
 
         let items = pem::parse_many(pem_bundle)?;
         let mut key_found = false;

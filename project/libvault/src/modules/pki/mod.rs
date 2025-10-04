@@ -25,6 +25,7 @@ pub mod path_keys;
 pub mod path_revoke;
 pub mod path_roles;
 pub mod path_root;
+pub mod types;
 pub mod util;
 
 static PKI_BACKEND_HELP: &str = r#"
