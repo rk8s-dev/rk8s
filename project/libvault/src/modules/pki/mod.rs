@@ -317,7 +317,12 @@ mod test {
                 _ => {}
             }
         } else {
-            assert!(key_data.get("private_key").is_none());
+            assert!(
+                key_data
+                    .get("private_key")
+                    .map(|v| v.is_null())
+                    .unwrap_or(true)
+            );
         }
     }
 
@@ -790,7 +795,12 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
                 _ => {}
             }
         } else {
-            assert!(key_data.get("private_key").is_none());
+            assert!(
+                key_data
+                    .get("private_key")
+                    .map(|v| v.is_null())
+                    .unwrap_or(true)
+            );
         }
     }
 

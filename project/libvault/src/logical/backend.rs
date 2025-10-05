@@ -388,7 +388,7 @@ impl LogicalBackendBuilder {
 
 #[cfg(test)]
 mod test {
-    use std::{sync::Arc, time::Duration};
+    use std::sync::Arc;
 
     use serde_json::json;
 

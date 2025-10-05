@@ -4,6 +4,7 @@ use clap::Parser;
 use derive_more::Deref;
 use rpassword::read_password;
 use sysexits::ExitCode;
+use tokio::runtime::Builder;
 
 use crate::{
     EXIT_CODE_INSUFFICIENT_PARAMS, EXIT_CODE_OK,
@@ -45,10 +46,19 @@ pub struct Unseal {
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Unseal {
     #[inline]
     fn execute(&mut self) -> ExitCode {
-        match self.main() {
+        let runtime = match Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("Error: failed to create async runtime: {e}");
+                std::process::exit(EXIT_CODE_INSUFFICIENT_PARAMS.into());
+            }
+        };
+
+        match runtime.block_on(self.main()) {
             Ok(_) => EXIT_CODE_OK,
             Err(e) => {
                 eprintln!("Error: {e}");
@@ -57,7 +67,7 @@ impl CommandExecutor for Unseal {
         }
     }
 
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
@@ -72,7 +82,7 @@ impl CommandExecutor for Unseal {
             value
         };
 
-        match sys.unseal(&key) {
+        match sys.unseal(&key).await {
             Ok(ret) => {
                 if ret.response_status == 200 {
                     self.output

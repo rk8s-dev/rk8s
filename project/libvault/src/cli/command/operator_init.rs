@@ -1,6 +1,7 @@
 use clap::Parser;
 use derive_more::Deref;
 use sysexits::ExitCode;
+use tokio::runtime::Builder;
 
 use crate::{
     EXIT_CODE_OK,
@@ -62,20 +63,28 @@ less than or equal to -key-shares."#
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Init {
     #[inline]
     fn execute(&mut self) -> ExitCode {
-        match self.main() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|e| {
+                eprintln!("Error: failed to create async runtime: {e}");
+                std::process::exit(2);
+            });
+
+        match runtime.block_on(self.main()) {
             Ok(_) => EXIT_CODE_OK,
             Err(e) => {
                 eprintln!("Error: {e}");
-                // TODO
                 std::process::exit(2);
             }
         }
     }
 
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         if self.key_threshold > self.key_shares {
             return Err(rv_error_string!(
                 "invalid seal configuration: threshold cannot be larger than shares"
@@ -90,7 +99,7 @@ impl CommandExecutor for Init {
             secret_threshold: self.key_threshold,
         };
 
-        match sys.init(&init_req) {
+        match sys.init(&init_req).await {
             Ok(ret) => {
                 if ret.response_status == 200 {
                     self.output

@@ -5,17 +5,17 @@ use serde_json::Value;
 
 use crate::errors::RvError;
 
-pub mod async_client;
 pub mod auth;
 pub mod auth_token;
 pub mod client;
 pub mod logical;
 pub mod secret;
 pub mod sys;
+pub mod tls;
 pub mod types;
 
-pub use async_client::AsyncClient;
 pub use client::Client;
+pub use tls::{TLSConfig, TLSConfigBuilder};
 pub use types::{ApiResponse, AuthResponse, GenericResponse};
 
 #[derive(Debug, Clone, Default)]

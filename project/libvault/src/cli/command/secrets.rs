@@ -63,10 +63,7 @@ mod test {
 
     use crate::test_utils::TestHttpServer;
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_cli_secrets_list() {
         let mut test_http_server = TestHttpServer::new("test_cli_secrets_list", true).await;
         test_http_server.token = test_http_server.root_token.clone();
@@ -81,10 +78,7 @@ mod test {
         assert_eq!(list["sys/"]["type"], Value::String("system".into()));
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_cli_secret_enable_disable() {
         let mut test_http_server =
             TestHttpServer::new("test_cli_secret_enable_disable", true).await;
@@ -146,10 +140,7 @@ mod test {
         assert!(list.get("kv1").is_none());
     }
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_cli_secret_move() {
         let mut test_http_server = TestHttpServer::new("test_cli_secret_move", true).await;
         test_http_server.token = test_http_server.root_token.clone();

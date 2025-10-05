@@ -1,147 +1,183 @@
-use std::{collections::HashMap, fs, io::BufReader, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
-use better_default::Default;
-use rustls::{
-    ALL_VERSIONS, ClientConfig, RootCertStore,
-    pki_types::{PrivateKeyDer, pem::PemObject},
-};
-use serde_json::{Map, Value};
-use ureq::AgentBuilder;
-use webpki_roots::TLS_SERVER_ROOTS;
+use reqwest::{Client as ReqwestClient, Method};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use super::HttpResponse;
-use crate::{errors::RvError, utils::cert::DisabledVerifier};
+use crate::{
+    api::{
+        tls::{TLSConfig, TLSConfigBuilder},
+        types::ApiResponse,
+    },
+    errors::RvError,
+    http::AUTH_HEADER_NAME,
+};
 
 #[derive(Clone)]
-pub struct TLSConfig {
-    client_config: ClientConfig,
-}
-
-#[derive(Default, Clone)]
-pub struct TLSConfigBuilder {
-    pub server_ca_pem: Option<Vec<u8>>,
-    pub client_cert_pem: Option<Vec<u8>>,
-    pub client_key_pem: Option<Vec<u8>>,
-    pub tls_server_name: Option<String>,
-    pub insecure: bool,
-}
-
-#[derive(Default, Clone)]
 pub struct Client {
-    #[default("https://127.0.0.1:8200".into())]
-    pub address: String,
-    pub token: String,
-    #[default(HashMap::new())]
-    pub headers: HashMap<String, String>,
-    pub tls_config: Option<TLSConfig>,
-    #[default(ureq::Agent::new())]
-    pub http_client: ureq::Agent,
+    address: String,
+    token: String,
+    headers: HashMap<String, String>,
+    http_client: ReqwestClient,
 }
 
-impl TLSConfigBuilder {
-    pub fn new() -> Self {
-        TLSConfigBuilder::default()
-    }
-
-    pub fn with_server_ca_path(mut self, server_ca_path: &PathBuf) -> Result<Self, RvError> {
-        let cert_data = fs::read(server_ca_path)?;
-        self.server_ca_pem = Some(cert_data);
-        Ok(self)
-    }
-
-    pub fn with_server_ca_pem(mut self, server_ca_pem: &str) -> Self {
-        self.server_ca_pem = Some(server_ca_pem.as_bytes().to_vec());
-        self
-    }
-
-    pub fn with_client_cert_path(
-        mut self,
-        client_cert_path: &PathBuf,
-        client_key_path: &PathBuf,
-    ) -> Result<Self, RvError> {
-        let cert_data = fs::read(client_cert_path)?;
-        self.client_cert_pem = Some(cert_data);
-
-        let key_data = fs::read(client_key_path)?;
-        self.client_key_pem = Some(key_data);
-
-        Ok(self)
-    }
-
-    pub fn with_client_cert_pem(mut self, client_cert_pem: &str, client_key_pem: &str) -> Self {
-        self.client_cert_pem = Some(client_cert_pem.as_bytes().to_vec());
-        self.client_key_pem = Some(client_key_pem.as_bytes().to_vec());
-
-        self
-    }
-
-    pub fn with_insecure(mut self, insecure: bool) -> Self {
-        self.insecure = insecure;
-
-        self
-    }
-
-    pub fn build(self) -> Result<TLSConfig, RvError> {
-        let provider = rustls::crypto::CryptoProvider::get_default()
-            .cloned()
-            .unwrap_or(Arc::new(rustls::crypto::ring::default_provider()));
-
-        let builder = ClientConfig::builder_with_provider(provider.clone())
-            .with_protocol_versions(ALL_VERSIONS)
-            .expect("all TLS versions");
-
-        let builder = if self.insecure {
-            log::debug!("Certificate verification disabled");
-            builder
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(DisabledVerifier))
-        } else if let Some(server_ca) = &self.server_ca_pem {
-            let mut cert_reader = BufReader::new(&server_ca[..]);
-            let root_certs =
-                rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
-
-            let mut root_store = RootCertStore::empty();
-            let (_added, _ignored) = root_store.add_parsable_certificates(root_certs);
-            builder.with_root_certificates(root_store)
-        } else {
-            let root_store = RootCertStore {
-                roots: TLS_SERVER_ROOTS.to_vec(),
-            };
-            builder.with_root_certificates(root_store)
-        };
-
-        let client_config = if let (Some(client_cert_pem), Some(client_key_pem)) =
-            (&self.client_cert_pem, &self.client_key_pem)
-        {
-            let mut cert_reader = BufReader::new(&client_cert_pem[..]);
-            let client_certs =
-                rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
-            let client_key = PrivateKeyDer::from_pem_slice(client_key_pem)?;
-
-            builder.with_client_auth_cert(client_certs, client_key)?
-        } else {
-            builder.with_no_client_auth()
-        };
-
-        Ok(TLSConfig { client_config })
-    }
-}
-
-impl TLSConfig {
-    pub fn client_config(&self) -> &ClientConfig {
-        &self.client_config
-    }
-
-    pub fn clone_inner(&self) -> ClientConfig {
-        self.client_config.clone()
-    }
+#[derive(Default)]
+pub struct ClientBuilder {
+    address: String,
+    token: String,
+    headers: HashMap<String, String>,
+    tls_config: Option<TLSConfig>,
 }
 
 impl Client {
-    pub fn new() -> Self {
-        Client::default()
+    pub fn builder() -> ClientBuilder {
+        ClientBuilder {
+            address: "https://127.0.0.1:8200".into(),
+            token: String::new(),
+            headers: HashMap::new(),
+            tls_config: None,
+        }
     }
 
+    pub fn new() -> Self {
+        Self::builder()
+            .build()
+            .expect("failed to construct default async client")
+    }
+
+    pub fn clone_with_token(&self, token: &str) -> Self {
+        let mut cloned = self.clone();
+        cloned.token = token.into();
+        cloned
+    }
+
+    async fn request_http<S: Into<String>, T: Serialize>(
+        &self,
+        method: &str,
+        path: S,
+        data: Option<T>,
+    ) -> Result<HttpResponse, RvError> {
+        let path = path.into();
+        let url = if path.starts_with('/') {
+            format!("{}{}", self.address, path)
+        } else {
+            format!("{}/{}", self.address, path)
+        };
+
+        let req_method = match method.to_ascii_uppercase().as_str() {
+            "GET" => Method::GET,
+            "POST" => Method::POST,
+            "PUT" => Method::PUT,
+            "DELETE" => Method::DELETE,
+            "LIST" => Method::from_bytes(b"LIST").expect("LIST method"),
+            other => Method::from_bytes(other.as_bytes()).expect("http method"),
+        };
+
+        let mut req = self.http_client.request(req_method, &url);
+        req = req.header("Accept", "application/json");
+
+        for (k, v) in &self.headers {
+            req = req.header(k.as_str(), v);
+        }
+
+        let skip_token = path.ends_with("/login");
+        if !skip_token && !self.token.is_empty() {
+            req = req.header(AUTH_HEADER_NAME, &self.token);
+        }
+
+        if let Some(body) = data {
+            req = req.json(&body);
+        }
+
+        let response = match req.send().await {
+            Ok(resp) => resp,
+            Err(err) => panic!("async HTTP request failed: {err:?}"),
+        };
+        let status = response.status();
+        let mut http_resp = HttpResponse {
+            method: method.to_string(),
+            url,
+            response_status: status.as_u16(),
+            response_data: None,
+        };
+
+        if status != reqwest::StatusCode::NO_CONTENT {
+            let bytes = response.bytes().await?;
+            if !bytes.is_empty() {
+                http_resp.response_data = Some(serde_json::from_slice(&bytes)?);
+            }
+        }
+
+        Ok(http_resp)
+    }
+
+    pub async fn request_raw<S: Into<String>, T: Serialize>(
+        &self,
+        method: &str,
+        path: S,
+        data: Option<T>,
+    ) -> Result<HttpResponse, RvError> {
+        self.request_http(method, path, data).await
+    }
+
+    pub async fn request<S: Into<String>, T: Serialize, R: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: S,
+        data: Option<T>,
+    ) -> Result<ApiResponse<R>, RvError> {
+        let http_resp = self.request_http(method, path, data).await?;
+        let api_resp = http_resp.parse::<R>()?;
+        Ok(api_resp)
+    }
+
+    pub async fn request_list<S: Into<String>, R: DeserializeOwned>(
+        &self,
+        path: S,
+    ) -> Result<ApiResponse<R>, RvError> {
+        self.request::<_, (), R>("LIST", path, None).await
+    }
+
+    pub async fn request_read<S: Into<String>, R: DeserializeOwned>(
+        &self,
+        path: S,
+    ) -> Result<ApiResponse<R>, RvError> {
+        self.request::<_, (), R>("GET", path, None).await
+    }
+
+    pub async fn request_get<S: Into<String>, R: DeserializeOwned>(
+        &self,
+        path: S,
+    ) -> Result<ApiResponse<R>, RvError> {
+        self.request::<_, (), R>("GET", path, None).await
+    }
+
+    pub async fn request_write<S: Into<String>, T: Serialize, R: DeserializeOwned>(
+        &self,
+        path: S,
+        data: Option<T>,
+    ) -> Result<ApiResponse<R>, RvError> {
+        self.request("POST", path, data).await
+    }
+
+    pub async fn request_put<S: Into<String>, T: Serialize, R: DeserializeOwned>(
+        &self,
+        path: S,
+        data: Option<T>,
+    ) -> Result<ApiResponse<R>, RvError> {
+        self.request("PUT", path, data).await
+    }
+
+    pub async fn request_delete<S: Into<String>, R: DeserializeOwned>(
+        &self,
+        path: S,
+    ) -> Result<ApiResponse<R>, RvError> {
+        self.request::<_, (), R>("DELETE", path, None).await
+    }
+}
+
+impl ClientBuilder {
     pub fn with_addr(mut self, addr: &str) -> Self {
         self.address = addr.into();
         self
@@ -152,119 +188,78 @@ impl Client {
         self
     }
 
-    pub fn with_tls_config(mut self, tls_config: TLSConfig) -> Self {
-        self.tls_config = Some(tls_config);
-        self
-    }
-
     pub fn add_header(mut self, key: &str, value: &str) -> Self {
         self.headers.insert(key.into(), value.into());
         self
     }
 
-    pub fn build(mut self) -> Self {
-        let mut agent = AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30));
-
-        if let Some(tls_config) = &self.tls_config {
-            agent = agent.tls_config(Arc::new(tls_config.clone_inner()));
-        }
-
-        self.http_client = agent.build();
+    pub fn with_tls_config(mut self, tls_config: TLSConfig) -> Self {
+        self.tls_config = Some(tls_config);
         self
     }
 
-    pub fn request<S: Into<String>>(
-        &self,
-        method: &str,
-        path: S,
-        data: Option<Map<String, Value>>,
-    ) -> Result<HttpResponse, RvError> {
-        let path = path.into();
-        let url = if path.starts_with('/') {
-            format!("{}{}", self.address, path)
-        } else {
-            format!("{}/{}", self.address, path)
-        };
-        log::debug!("request url: {url}, method: {method}");
+    pub fn with_tls_config_builder(mut self, builder: TLSConfigBuilder) -> Result<Self, RvError> {
+        self.tls_config = Some(builder.build()?);
+        Ok(self)
+    }
 
-        let mut req = self.http_client.request(&method.to_uppercase(), &url);
+    pub fn build(self) -> Result<Client, RvError> {
+        let mut builder = ReqwestClient::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30));
 
-        req = req.set("Accept", "application/json");
-        if !path.ends_with("/login") {
-            req = req.set("X-RustyVault-Token", &self.token);
+        if let Some(tls_config) = &self.tls_config {
+            if tls_config.insecure() {
+                builder = builder.danger_accept_invalid_certs(true);
+            }
+
+            if let Some(ca_pem) = tls_config.server_ca_pem() {
+                let cert = reqwest::tls::Certificate::from_pem(ca_pem)?;
+                builder = builder.add_root_certificate(cert);
+            }
+
+            if let (Some(cert_pem), Some(key_pem)) =
+                (tls_config.client_cert_pem(), tls_config.client_key_pem())
+            {
+                let mut identity_pem = Vec::new();
+                identity_pem.extend_from_slice(cert_pem);
+                if !identity_pem.ends_with(b"\n") {
+                    identity_pem.push(b'\n');
+                }
+                identity_pem.extend_from_slice(key_pem);
+                let identity = reqwest::Identity::from_pem(&identity_pem)?;
+                builder = builder.identity(identity);
+            }
         }
 
-        let mut ret = HttpResponse {
-            method: method.to_string(),
-            url,
-            ..Default::default()
+        let http_client = match builder.build() {
+            Ok(client) => client,
+            Err(err) => panic!("failed to build async HTTP client: {err:?}"),
         };
 
-        let response_result = if let Some(send_data) = data {
-            req.send_json(send_data)
-        } else {
-            req.call()
-        };
-
-        match response_result {
-            Ok(response) => {
-                ret.response_status = response.status();
-                if ret.response_status == 204 {
-                    return Ok(ret.clone());
-                }
-                let json: Value = response.into_json()?;
-                ret.response_data = Some(json);
-                Ok(ret.clone())
-            }
-            Err(ureq::Error::Status(status, response)) => {
-                ret.response_status = status;
-                if let Ok(response_data) = response.into_json() {
-                    ret.response_data = Some(response_data);
-                }
-                Ok(ret.clone())
-            }
-            Err(e) => {
-                log::error!("Request failed: {e}");
-                Err(RvError::UreqError { source: e })
-            }
-        }
+        Ok(Client {
+            address: self.address,
+            token: self.token,
+            headers: self.headers,
+            http_client,
+        })
     }
+}
 
-    pub fn request_list<S: Into<String>>(&self, path: S) -> Result<HttpResponse, RvError> {
-        self.request("LIST", path, None)
-    }
+#[cfg(test)]
+mod tests {
+    use super::Client;
 
-    pub fn request_read<S: Into<String>>(&self, path: S) -> Result<HttpResponse, RvError> {
-        self.request("GET", path, None)
-    }
-
-    pub fn request_get<S: Into<String>>(&self, path: S) -> Result<HttpResponse, RvError> {
-        self.request("GET", path, None)
-    }
-
-    pub fn request_write<S: Into<String>>(
-        &self,
-        path: S,
-        data: Option<Map<String, Value>>,
-    ) -> Result<HttpResponse, RvError> {
-        self.request("POST", path, data)
-    }
-
-    pub fn request_put<S: Into<String>>(
-        &self,
-        path: S,
-        data: Option<Map<String, Value>>,
-    ) -> Result<HttpResponse, RvError> {
-        self.request("PUT", path, data)
-    }
-
-    pub fn request_delete<S: Into<String>>(
-        &self,
-        path: S,
-        data: Option<Map<String, Value>>,
-    ) -> Result<HttpResponse, RvError> {
-        self.request("DELETE", path, data)
+    #[test]
+    fn builder_methods_do_not_panic() {
+        let client = Client::builder()
+            .with_addr("http://localhost:8200")
+            .with_token("root")
+            .add_header("X-Test", "1")
+            .build()
+            .unwrap();
+        assert_eq!(client.address, "http://localhost:8200");
+        assert_eq!(client.token, "root");
+        assert!(client.headers.contains_key("X-Test"));
     }
 }

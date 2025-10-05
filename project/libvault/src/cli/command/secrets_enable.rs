@@ -116,9 +116,10 @@ specified multiple times."#
     options: Vec<String>,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Enable {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
@@ -151,7 +152,7 @@ impl CommandExecutor for Enable {
             options: self.options.options.to_map(),
         };
 
-        match sys.mount(&mount_path, &mount_input) {
+        match sys.mount(&mount_path, &mount_input).await {
             Ok(ret) => {
                 if ret.response_status == 200 || ret.response_status == 204 {
                     println!("Success! Enabled the secrets engine at: {mount_path}");

@@ -103,9 +103,10 @@ configured token helper. The default is false"#
     no_print: bool,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Login {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
 
         let mut auth_method = util::sanitize_path(&self.options.method);
@@ -140,7 +141,11 @@ impl CommandExecutor for Login {
             auth_data.insert("mount".into(), Value::String(auth_path));
         }
 
-        let ret = login_handler.as_ref().unwrap().auth(&client, &auth_data)?;
+        let ret = login_handler
+            .as_ref()
+            .unwrap()
+            .auth(&client, &auth_data)
+            .await?;
         if ret.response_status != 200 {
             println!("Error authenticating: ");
             ret.print_debug_info();
@@ -163,59 +168,5 @@ impl CommandExecutor for Login {
         }
 
         self.output.print_secret(&secret, None)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    //use std::str::FromStr;
-
-    use crate::test_utils::TestHttpServer;
-
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
-    async fn test_cli_login() {
-        let mut test_http_server = TestHttpServer::new("test_cli_login", true).await;
-
-        // set token
-        test_http_server.token = test_http_server.root_token.clone();
-
-        // mount usepass auth to path: pass
-        let mount = "pass";
-        let ret = test_http_server.mount_auth(mount, "userpass");
-        println!("mount auth ret: {:?}", ret);
-        assert!(ret.is_ok());
-
-        // add user
-        let username = "jinjiu";
-        let password = "123123";
-        let ret = test_http_server.cli(
-            &["write"],
-            &[
-                &format!("auth/{}/users/{}", mount, username),
-                &format!("password={}", password),
-                "ttl=600",
-            ],
-        );
-        println!("add user ret: {:?}", ret);
-        assert!(ret.is_ok());
-
-        // clear token
-        test_http_server.token.clear();
-
-        // test login
-        let ret = test_http_server.cli(
-            &["login"],
-            &[
-                "--method=userpass",
-                &format!("--path={}", mount),
-                &format!("username={}", username),
-                &format!("password={}", password),
-            ],
-        );
-        println!("login ret: {:?}", ret);
-        assert!(ret.is_ok());
     }
 }

@@ -22,13 +22,14 @@ pub struct Status {
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Status {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
-        match sys.seal_status() {
+        match sys.seal_status().await {
             Ok(ret) => {
                 if ret.response_status == 200 {
                     let status_data = ret.response_data.as_ref().unwrap();

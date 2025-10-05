@@ -38,15 +38,16 @@ pub struct Disable {
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Disable {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
         let path = util::ensure_trailing_slash(&util::sanitize_path(&self.path));
 
-        match sys.unmount(&path) {
+        match sys.unmount(&path).await {
             Ok(ret) => {
                 if ret.response_status == 200 || ret.response_status == 204 {
                     println!(

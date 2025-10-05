@@ -1,14 +1,14 @@
 use std::io::{self, Write};
 
+use async_trait::async_trait;
 use better_default::Default;
 use rpassword::read_password;
 use serde_json::{Map, Value};
 
 use crate::{
     api::{
-        HttpResponse,
+        Client, HttpResponse,
         auth::LoginHandler,
-        client::Client,
         secret::{Secret, SecretAuth},
     },
     errors::RvError,
@@ -19,8 +19,13 @@ use crate::{
 #[derive(Default)]
 pub struct TokenCliHandler;
 
+#[async_trait]
 impl LoginHandler for TokenCliHandler {
-    fn auth(&self, client: &Client, data: &Map<String, Value>) -> Result<HttpResponse, RvError> {
+    async fn auth(
+        &self,
+        client: &Client,
+        data: &Map<String, Value>,
+    ) -> Result<HttpResponse, RvError> {
         let mut token = data["token"].as_str().unwrap_or("").to_string();
         if token.is_empty() {
             let mut writer = io::stdout();
@@ -64,10 +69,9 @@ impl LoginHandler for TokenCliHandler {
             return Ok(ret);
         }
 
-        let mut client = client.clone();
-        client.token = token;
+        let client = client.clone_with_token(&token);
 
-        let ret = client.token().lookup_self()?;
+        let ret = client.token().lookup_self().await?;
         let response_value = ret.response_data.ok_or(RvError::ErrResponseDataInvalid)?;
         let secret: Secret = serde_json::from_value(response_value)?;
 

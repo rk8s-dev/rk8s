@@ -21,13 +21,14 @@ pub struct List {
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for List {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
-        match sys.list_policy() {
+        match sys.list_policy().await {
             Ok(ret) => {
                 if ret.response_status == 200 {
                     let value = ret.response_data.as_ref().unwrap();
@@ -57,10 +58,7 @@ impl CommandExecutor for List {
 mod test {
     use crate::test_utils::TestHttpServer;
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_cli_policy_list() {
         let mut test_http_server = TestHttpServer::new("test_cli_policy_list", true).await;
         test_http_server.token = test_http_server.root_token.clone();
@@ -77,7 +75,7 @@ mod test {
         let test_policy = r#"path "secret/" {}"#;
         let client = test_http_server.client().unwrap();
         let sys = client.sys();
-        assert!(sys.write_policy("my-policy", test_policy).is_ok());
+        assert!(sys.write_policy("my-policy", test_policy).await.is_ok());
 
         // list policy again
         let ret = test_http_server.cli(&["policy", "list"], &[]);

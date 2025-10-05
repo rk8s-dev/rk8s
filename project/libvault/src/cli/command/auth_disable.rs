@@ -37,15 +37,16 @@ pub struct Disable {
     http_options: command::HttpOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Disable {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
         let path = util::ensure_trailing_slash(&util::sanitize_path(&self.path));
 
-        match sys.disable_auth(&path) {
+        match sys.disable_auth(&path).await {
             Ok(ret) => match ret.response_status {
                 200 | 204 | 404 => {
                     println!("Success! Disabled the auth method (if it existed) at: {path}");

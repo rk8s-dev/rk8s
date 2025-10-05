@@ -36,13 +36,14 @@ pub struct Read {
     output: command::LogicalOutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Read {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let logical = client.logical();
 
-        match logical.read(&self.path) {
+        match logical.read(&self.path).await {
             Ok(ret) => {
                 if ret.response_status == 200 {
                     self.output.print_data(

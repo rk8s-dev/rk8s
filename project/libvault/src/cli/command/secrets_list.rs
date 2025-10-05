@@ -33,13 +33,14 @@ pub struct List {
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for List {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
-        match sys.list_mounts() {
+        match sys.list_mounts().await {
             Ok(ret) => {
                 if ret.response_status == 200 && ret.response_data.is_some() {
                     let value = ret.response_data.as_ref().unwrap();

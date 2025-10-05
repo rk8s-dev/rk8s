@@ -91,11 +91,11 @@ impl PkiBackendInner {
             common_names.push(common_name.clone());
         }
 
-        if let Some(alt_names) = payload.alt_names {
-            if !alt_names.is_empty() {
-                for v in alt_names.split(',') {
-                    common_names.push(v.to_string());
-                }
+        if let Some(alt_names) = payload.alt_names
+            && !alt_names.is_empty()
+        {
+            for v in alt_names.split(',') {
+                common_names.push(v.to_string());
             }
         }
 
@@ -114,11 +114,11 @@ impl PkiBackendInner {
         let role_entry = role.unwrap();
 
         let mut ip_sans = Vec::new();
-        if let Some(ip_sans_str) = payload.ip_sans {
-            if !ip_sans_str.is_empty() {
-                for v in ip_sans_str.split(',') {
-                    ip_sans.push(v.to_string());
-                }
+        if let Some(ip_sans_str) = payload.ip_sans
+            && !ip_sans_str.is_empty()
+        {
+            for v in ip_sans_str.split(',') {
+                ip_sans.push(v.to_string());
             }
         }
 

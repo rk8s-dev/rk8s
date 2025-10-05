@@ -17,20 +17,27 @@ impl Client {
 }
 
 impl Logical<'_> {
-    pub fn read(&self, path: &str) -> Result<HttpResponse, RvError> {
-        self.request_read(format!("/v1/{path}"))
+    pub async fn read(&self, path: &str) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("GET", format!("/v1/{path}"), None::<Value>)
+            .await
     }
 
-    pub fn write(
+    pub async fn write(
         &self,
         path: &str,
         data: Option<Map<String, Value>>,
     ) -> Result<HttpResponse, RvError> {
-        self.request_write(format!("/v1/{path}"), data)
+        self.client
+            .request_raw("POST", format!("/v1/{path}"), data)
+            .await
     }
 
-    pub fn list(&self, path: &str) -> Result<HttpResponse, RvError> {
-        let mut ret = self.request_list(format!("/v1/{path}"))?;
+    pub async fn list(&self, path: &str) -> Result<HttpResponse, RvError> {
+        let mut ret = self
+            .client
+            .request_raw::<_, Value>("LIST", format!("/v1/{path}"), None::<Value>)
+            .await?;
         if ret.response_status != 200 || ret.response_data.is_none() {
             return Ok(ret);
         }
@@ -41,11 +48,13 @@ impl Logical<'_> {
         Ok(ret)
     }
 
-    pub fn delete(
+    pub async fn delete(
         &self,
         path: &str,
         data: Option<Map<String, Value>>,
     ) -> Result<HttpResponse, RvError> {
-        self.request_delete(format!("/v1/{path}"), data)
+        self.client
+            .request_raw("DELETE", format!("/v1/{path}"), data)
+            .await
     }
 }

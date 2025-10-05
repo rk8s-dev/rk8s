@@ -45,7 +45,7 @@ use ureq::AgentBuilder;
 
 use crate::{
     RustyVault,
-    api::{Client, client::TLSConfigBuilder},
+    api::{Client, TLSConfigBuilder},
     cli::config::Config,
     core::{Core, InitResult, SealConfig},
     errors::RvError,
@@ -525,6 +525,7 @@ impl TestHttpServer {
         req = req.set("Accept", "application/json");
         if !path.ends_with("/login") {
             req = req.set("X-RustyVault-Token", tk);
+            req = req.set("X-Vault-Token", tk);
         }
 
         let response_result = if let Some(send_data) = data {
@@ -712,7 +713,7 @@ impl TestHttpServer {
     }
 
     pub fn client(&self) -> Result<Client, RvError> {
-        let mut client = Client::new().with_token(&self.token);
+        let mut builder = Client::builder().with_token(&self.token);
 
         if self.tls_enable {
             let mut tls_config_builder = TLSConfigBuilder::new().with_insecure(true);
@@ -727,14 +728,14 @@ impl TestHttpServer {
 
             let tls_config = tls_config_builder.build()?;
 
-            client = client
+            builder = builder
                 .with_addr(&format!("https://{}", self.listen_addr))
                 .with_tls_config(tls_config);
         } else {
-            client = client.with_addr(&format!("http://{}", self.listen_addr));
+            builder = builder.with_addr(&format!("http://{}", self.listen_addr));
         }
 
-        Ok(client.build())
+        builder.build()
     }
 }
 
@@ -758,7 +759,11 @@ mod tests {
         let dir = env::temp_dir().join(*TEST_DIR);
         let _ = fs::remove_dir_all(&dir);
         let _ = rustls::crypto::ring::default_provider().install_default();
-        assert!(fs::create_dir(&dir).is_ok());
+        if let Err(e) = fs::create_dir(&dir) {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                panic!("failed to create test dir: {e}");
+            }
+        }
     }
 
     #[ctor::dtor]
@@ -1040,6 +1045,7 @@ pub fn cert_to_x509(
     Ok(builder.build())
 }
 
+#[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn new_test_crl(
     revoked_cert_pem: &str,
     ca_cert_pem: &str,

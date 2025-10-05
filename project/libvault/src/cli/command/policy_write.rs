@@ -48,9 +48,10 @@ pub struct Write {
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Write {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
@@ -65,7 +66,7 @@ impl CommandExecutor for Write {
 
         let policy_name = self.name.trim().to_lowercase();
 
-        match sys.write_policy(&policy_name, &buffer) {
+        match sys.write_policy(&policy_name, &buffer).await {
             Ok(ret) => {
                 if ret.response_status == 200 || ret.response_status == 204 {
                     println!("Success! Uploaded policy: {policy_name}");
@@ -87,10 +88,7 @@ mod test {
 
     use crate::test_utils::TestHttpServer;
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_cli_policy_write() {
         let mut test_http_server = TestHttpServer::new("test_cli_policy_write", true).await;
         test_http_server.token = test_http_server.root_token.clone();

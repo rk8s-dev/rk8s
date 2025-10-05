@@ -65,10 +65,7 @@ impl Policy {
 mod test {
     use crate::{errors::RvError, rv_error_string, test_utils::TestHttpServer};
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_cli_policy() {
         let mut test_http_server = TestHttpServer::new("test_cli_policy", true).await;
         test_http_server.token = test_http_server.root_token.clone();

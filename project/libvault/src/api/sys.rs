@@ -88,86 +88,133 @@ impl Client {
 }
 
 impl Sys<'_> {
-    pub fn init(&self, init_req: &InitRequest) -> Result<HttpResponse, RvError> {
+    pub async fn init(&self, init_req: &InitRequest) -> Result<HttpResponse, RvError> {
         let data = json!({
             "secret_shares": init_req.secret_shares,
             "secret_threshold": init_req.secret_threshold,
         });
 
-        self.request_put("/v1/sys/init", data.as_object().cloned())
+        self.client
+            .request_raw("PUT", "/v1/sys/init", data.as_object().cloned())
+            .await
     }
 
-    pub fn seal_status(&self) -> Result<HttpResponse, RvError> {
-        self.request_read("/v1/sys/seal-status")
+    pub async fn seal_status(&self) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("GET", "/v1/sys/seal-status", None::<Value>)
+            .await
     }
 
-    pub fn seal(&self) -> Result<HttpResponse, RvError> {
-        self.request_put("/v1/sys/seal", None)
+    pub async fn seal(&self) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("PUT", "/v1/sys/seal", None::<Value>)
+            .await
     }
 
-    pub fn unseal(&self, key: &str) -> Result<HttpResponse, RvError> {
+    pub async fn unseal(&self, key: &str) -> Result<HttpResponse, RvError> {
         let data = json!({
             "key": key,
         });
 
-        self.request_put("/v1/sys/unseal", data.as_object().cloned())
+        self.client
+            .request_raw("PUT", "/v1/sys/unseal", data.as_object().cloned())
+            .await
     }
 
-    pub fn list_auth(&self) -> Result<HttpResponse, RvError> {
-        self.request_read("/v1/sys/auth")
+    pub async fn list_auth(&self) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("GET", "/v1/sys/auth", None::<Value>)
+            .await
     }
 
-    pub fn enable_auth(&self, path: &str, input: &AuthInput) -> Result<HttpResponse, RvError> {
+    pub async fn enable_auth(
+        &self,
+        path: &str,
+        input: &AuthInput,
+    ) -> Result<HttpResponse, RvError> {
         let data = serde_json::to_value(input)?;
-        self.request_write(format!("/v1/sys/auth/{path}"), data.as_object().cloned())
+        self.client
+            .request_raw(
+                "POST",
+                format!("/v1/sys/auth/{path}"),
+                data.as_object().cloned(),
+            )
+            .await
     }
 
-    pub fn disable_auth(&self, path: &str) -> Result<HttpResponse, RvError> {
-        self.request_delete(format!("/v1/sys/auth/{path}"), None)
+    pub async fn disable_auth(&self, path: &str) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("DELETE", format!("/v1/sys/auth/{path}"), None::<Value>)
+            .await
     }
 
-    pub fn mount(&self, path: &str, input: &MountInput) -> Result<HttpResponse, RvError> {
+    pub async fn mount(&self, path: &str, input: &MountInput) -> Result<HttpResponse, RvError> {
         let data = serde_json::to_value(input)?;
-        self.request_write(format!("/v1/sys/mounts/{path}"), data.as_object().cloned())
+        self.client
+            .request_raw(
+                "POST",
+                format!("/v1/sys/mounts/{path}"),
+                data.as_object().cloned(),
+            )
+            .await
     }
 
-    pub fn unmount(&self, path: &str) -> Result<HttpResponse, RvError> {
-        self.request_delete(format!("/v1/sys/mounts/{path}"), None)
+    pub async fn unmount(&self, path: &str) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("DELETE", format!("/v1/sys/mounts/{path}"), None::<Value>)
+            .await
     }
 
-    pub fn remount(&self, from: &str, to: &str) -> Result<HttpResponse, RvError> {
+    pub async fn remount(&self, from: &str, to: &str) -> Result<HttpResponse, RvError> {
         let data = json!({
             "from": from,
             "to": to,
         });
 
-        self.request_write("/v1/sys/remount", data.as_object().cloned())
+        self.client
+            .request_raw("POST", "/v1/sys/remount", data.as_object().cloned())
+            .await
     }
 
-    pub fn list_mounts(&self) -> Result<HttpResponse, RvError> {
-        self.request_read("/v1/sys/mounts")
+    pub async fn list_mounts(&self) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("GET", "/v1/sys/mounts", None::<Value>)
+            .await
     }
 
-    pub fn list_policy(&self) -> Result<HttpResponse, RvError> {
-        self.request_read("/v1/sys/policies/acl")
+    pub async fn list_policy(&self) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("GET", "/v1/sys/policies/acl", None::<Value>)
+            .await
     }
 
-    pub fn read_policy(&self, name: &str) -> Result<HttpResponse, RvError> {
-        self.request_read(format!("/v1/sys/policies/acl/{name}"))
+    pub async fn read_policy(&self, name: &str) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>("GET", format!("/v1/sys/policies/acl/{name}"), None::<Value>)
+            .await
     }
 
-    pub fn write_policy(&self, name: &str, policy: &str) -> Result<HttpResponse, RvError> {
+    pub async fn write_policy(&self, name: &str, policy: &str) -> Result<HttpResponse, RvError> {
         let data = json!({
             "policy": policy,
         });
 
-        self.request_write(
-            format!("/v1/sys/policies/acl/{name}"),
-            data.as_object().cloned(),
-        )
+        self.client
+            .request_raw(
+                "POST",
+                format!("/v1/sys/policies/acl/{name}"),
+                data.as_object().cloned(),
+            )
+            .await
     }
 
-    pub fn delete_policy(&self, name: &str) -> Result<HttpResponse, RvError> {
-        self.request_delete(format!("/v1/sys/policies/acl/{name}"), None)
+    pub async fn delete_policy(&self, name: &str) -> Result<HttpResponse, RvError> {
+        self.client
+            .request_raw::<_, Value>(
+                "DELETE",
+                format!("/v1/sys/policies/acl/{name}"),
+                None::<Value>,
+            )
+            .await
     }
 }

@@ -33,15 +33,16 @@ pub struct Delete {
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Delete {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
         let policy_name = self.name.trim().to_lowercase();
 
-        match sys.delete_policy(&policy_name) {
+        match sys.delete_policy(&policy_name).await {
             Ok(ret) => {
                 if ret.response_status == 200 || ret.response_status == 204 {
                     println!("Success! Deleted policy: {policy_name}");
@@ -61,10 +62,7 @@ impl CommandExecutor for Delete {
 mod test {
     use crate::test_utils::TestHttpServer;
 
-    #[maybe_async::test(
-        feature = "sync_handler",
-        async(all(not(feature = "sync_handler")), tokio::test)
-    )]
+    #[tokio::test]
     async fn test_cli_policy_delete() {
         let mut test_http_server = TestHttpServer::new("test_cli_policy_delete", true).await;
         test_http_server.token = test_http_server.root_token.clone();
@@ -87,7 +85,7 @@ mod test {
         let test_policy = r#"path "secret/" {}"#;
         let client = test_http_server.client().unwrap();
         let sys = client.sys();
-        assert!(sys.write_policy("my-policy", test_policy).is_ok());
+        assert!(sys.write_policy("my-policy", test_policy).await.is_ok());
 
         // delete default should be ok
         let ret = test_http_server.cli(&["policy", "delete"], &["my-policy"]);

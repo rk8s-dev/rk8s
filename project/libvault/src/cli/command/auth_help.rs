@@ -46,16 +46,17 @@ pub struct Help {
     http_options: command::HttpOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Help {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
         let mut login_handler = LoginHandlers.get(&self.auth_type);
         if login_handler.is_none() {
             let path = util::ensure_trailing_slash(&util::sanitize_path(&self.auth_type));
-            let auth_list: crate::api::HttpResponse = sys.list_auth()?;
+            let auth_list: crate::api::HttpResponse = sys.list_auth().await?;
             if auth_list.response_status != 200 || auth_list.response_data.is_none() {
                 println!("Error listing auth methods at: {path}");
                 std::process::exit(2);

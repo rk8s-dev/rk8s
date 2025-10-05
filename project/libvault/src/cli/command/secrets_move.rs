@@ -57,16 +57,17 @@ pub struct Move {
     http_options: command::HttpOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Move {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
         let from = util::ensure_trailing_slash(&self.source);
         let to = util::ensure_trailing_slash(&self.destination);
 
-        match sys.remount(&from, &to) {
+        match sys.remount(&from, &to).await {
             Ok(ret) => match ret.response_status {
                 200 | 204 => {
                     println!("Success! Finished moving auth method {from} to {to}.");

@@ -75,9 +75,10 @@ specified multiple times."#
     options: Vec<String>,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Enable {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let sys = client.sys();
 
@@ -89,7 +90,7 @@ impl CommandExecutor for Enable {
             ..Default::default()
         };
 
-        match sys.enable_auth(&path, &auth_input) {
+        match sys.enable_auth(&path, &auth_input).await {
             Ok(ret) => match ret.response_status {
                 200 | 204 => {
                     println!("Success! Enabled {} auth method at: {}", self.method, path);

@@ -802,10 +802,9 @@ mod mod_expiration_tests {
 
     use super::*;
     use crate::{
-        context::Context,
         logical::{
             Backend, FieldBuilder, FieldType, Lease, LogicalBackend, Operation, PathBuilder,
-            PathOperation, Secret, SecretBuilder,
+            Secret, SecretBuilder,
         },
         mount::{MOUNT_TABLE_TYPE, MountEntry},
         test_utils::{NoopBackend, new_unseal_test_rusty_vault},

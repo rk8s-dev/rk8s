@@ -53,13 +53,14 @@ stdin."#
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Write {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let logical = client.logical();
 
-        match logical.write(&self.path, Some(self.data.to_map())) {
+        match logical.write(&self.path, Some(self.data.to_map())).await {
             Ok(ret) => {
                 if ret.response_status == 200 || ret.response_status == 204 {
                     println!("Success! Data written to: {}", self.path);

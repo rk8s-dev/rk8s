@@ -1,8 +1,9 @@
+use async_trait::async_trait;
 use better_default::Default;
 use serde_json::{Map, Value};
 
 use crate::{
-    api::{HttpResponse, auth::LoginHandler, client::Client},
+    api::{Client, HttpResponse, auth::LoginHandler},
     errors::RvError,
     rv_error_response,
 };
@@ -13,8 +14,13 @@ pub struct CertAuthCliHandler {
     pub default_mount: String,
 }
 
+#[async_trait]
 impl LoginHandler for CertAuthCliHandler {
-    fn auth(&self, client: &Client, data: &Map<String, Value>) -> Result<HttpResponse, RvError> {
+    async fn auth(
+        &self,
+        client: &Client,
+        data: &Map<String, Value>,
+    ) -> Result<HttpResponse, RvError> {
         if data["name"].as_str().is_none() {
             return Err(rv_error_response!("'name' must be specified"));
         }
@@ -37,7 +43,7 @@ impl LoginHandler for CertAuthCliHandler {
 
         let logical = client.logical();
 
-        logical.write(&path, payload.as_object().cloned())
+        logical.write(&path, payload.as_object().cloned()).await
     }
 
     fn help(&self) -> String {

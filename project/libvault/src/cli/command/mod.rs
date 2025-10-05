@@ -6,11 +6,13 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, ValueEnum, ValueHint};
 use sysexits::ExitCode;
+use tokio::runtime::Builder;
 
 use crate::{
     EXIT_CODE_OK,
-    api::{Client, client::TLSConfigBuilder},
+    api::{Client, TLSConfigBuilder},
     errors::RvError,
+    rv_error_string,
 };
 
 pub mod auth;
@@ -200,9 +202,25 @@ impl HttpOptions {
     }
 
     pub fn client(&self) -> Result<Client, RvError> {
-        let mut client = Client::new()
+        let mut builder = Client::builder()
             .with_addr(&self.address)
             .with_token(&self.token);
+
+        for header in &self.header {
+            let Some((key, value)) = header.split_once('=') else {
+                return Err(rv_error_string!(format!(
+                    "Invalid header format, expected key=value but got: {header}"
+                )));
+            };
+
+            if key.to_ascii_lowercase().starts_with("x-vault-") {
+                return Err(rv_error_string!(
+                    "Headers starting with 'X-Vault-' are not allowed"
+                ));
+            }
+
+            builder = builder.add_header(key.trim(), value.trim());
+        }
 
         if self.address.starts_with("https://") {
             let mut tls_config_builder =
@@ -219,17 +237,26 @@ impl HttpOptions {
 
             let tls_config = tls_config_builder.build()?;
 
-            client = client.with_tls_config(tls_config);
+            builder = builder.with_tls_config(tls_config);
         }
 
-        Ok(client.build())
+        builder.build()
     }
 }
 
+#[async_trait::async_trait]
 pub trait CommandExecutor {
     #[inline]
     fn execute(&mut self) -> ExitCode {
-        match self.main() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|e| {
+                eprintln!("Error: failed to create async runtime: {e}");
+                std::process::exit(1);
+            });
+
+        match runtime.block_on(self.main()) {
             Ok(_) => EXIT_CODE_OK,
             Err(RvError::ErrRequestNoData) => {
                 std::process::exit(2);
@@ -241,5 +268,5 @@ pub trait CommandExecutor {
         }
     }
 
-    fn main(&self) -> Result<(), RvError>;
+    async fn main(&self) -> Result<(), RvError>;
 }

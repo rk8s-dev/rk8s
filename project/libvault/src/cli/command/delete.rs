@@ -30,13 +30,14 @@ pub struct Delete {
     output: command::OutputOptions,
 }
 
+#[async_trait::async_trait]
 impl CommandExecutor for Delete {
     #[inline]
-    fn main(&self) -> Result<(), RvError> {
+    async fn main(&self) -> Result<(), RvError> {
         let client = self.client()?;
         let logical = client.logical();
 
-        match logical.delete(&self.path, None) {
+        match logical.delete(&self.path, None).await {
             Ok(ret) => {
                 if ret.response_status == 200 || ret.response_status == 204 {
                     println!("Success! Data deleted (if it existed) at: {}", self.path);
