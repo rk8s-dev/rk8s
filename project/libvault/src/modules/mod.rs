@@ -6,6 +6,7 @@
 //! get the `trait Module` implemented correctly.
 
 use crate::{core::Core, errors::RvError, logical::Request};
+use async_trait::async_trait;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
@@ -14,6 +15,7 @@ use std::{any::Any, sync::Arc};
 pub mod auth;
 pub mod credential;
 pub mod crypto;
+pub mod kv;
 pub mod pki;
 pub mod policy;
 pub mod system;
@@ -57,7 +59,7 @@ where
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait]
 pub trait Module: Any + Send + Sync {
     //! Description for a trait itself.
     fn name(&self) -> String;

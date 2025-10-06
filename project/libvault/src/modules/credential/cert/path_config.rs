@@ -76,7 +76,6 @@ then the next renew will cause the lease to expire.
     }
 }
 
-#[maybe_async::maybe_async]
 impl CertBackendInner {
     pub async fn get_config(&self, req: &Request) -> Result<Option<Config>, RvError> {
         let storage_entry = req.storage_get("config").await?;

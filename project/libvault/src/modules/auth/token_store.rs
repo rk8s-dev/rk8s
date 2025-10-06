@@ -13,6 +13,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
+use async_trait::async_trait;
 use better_default::Default;
 use humantime::parse_duration;
 use lazy_static::lazy_static;
@@ -127,7 +128,6 @@ pub struct TokenStore {
     pub auth_handlers: ArcSwap<Vec<Arc<dyn AuthHandler>>>,
 }
 
-#[maybe_async::maybe_async]
 impl TokenStore {
     /// Wraps the `TokenStore` instance in an `Arc` and sets its weak pointer reference.
     pub fn wrap(self) -> Arc<Self> {
@@ -862,7 +862,7 @@ impl TokenStore {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait]
 impl Handler for TokenStore {
     fn name(&self) -> String {
         "auth_token".to_string()
@@ -1064,7 +1064,7 @@ mod mod_token_store_tests {
 
     pub struct MockBackend(());
 
-    #[maybe_async::maybe_async]
+    #[async_trait]
     impl Backend for MockBackend {
         fn init(&mut self) -> Result<(), RvError> {
             Ok(())

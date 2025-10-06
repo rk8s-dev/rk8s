@@ -40,7 +40,6 @@ pub struct Config {
     pub hmac_type: MessageDigest,
 }
 
-#[maybe_async::maybe_async]
 impl Salt {
     pub async fn new(
         storage: Option<&dyn Storage>,

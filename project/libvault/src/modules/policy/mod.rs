@@ -1,6 +1,7 @@
 use std::{any::Any, str::FromStr, sync::Arc};
 
 use arc_swap::ArcSwap;
+use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use better_default::Default;
 use serde_json::{Map, Value};
@@ -31,7 +32,6 @@ pub struct PolicyModule {
     pub policy_store: ArcSwap<PolicyStore>,
 }
 
-#[maybe_async::maybe_async]
 impl PolicyModule {
     pub fn new(core: Arc<Core>) -> Self {
         Self {
@@ -147,7 +147,7 @@ impl PolicyModule {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait]
 impl Module for PolicyModule {
     fn name(&self) -> String {
         self.name.clone()
@@ -155,10 +155,6 @@ impl Module for PolicyModule {
 
     fn as_any_arc(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
         self
-    }
-
-    fn setup(&self, _core: &Core) -> Result<(), RvError> {
-        Ok(())
     }
 
     async fn init(&self, core: &Core) -> Result<(), RvError> {
@@ -169,6 +165,10 @@ impl Module for PolicyModule {
 
         core.add_auth_handler(policy_store as Arc<dyn AuthHandler>)?;
 
+        Ok(())
+    }
+
+    fn setup(&self, _core: &Core) -> Result<(), RvError> {
         Ok(())
     }
 
@@ -191,7 +191,6 @@ mod mod_policy_tests {
         test_write_api,
     };
 
-    #[maybe_async::maybe_async]
     async fn test_write_policy(core: &Core, token: &str, name: &str, policy: &str) {
         let data = json!({
             "policy": policy,
@@ -210,7 +209,6 @@ mod mod_policy_tests {
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::maybe_async]
     async fn test_read_policy(
         core: &Core,
         token: &str,
@@ -221,7 +219,6 @@ mod mod_policy_tests {
         resp
     }
 
-    #[maybe_async::maybe_async]
     async fn test_delete_policy(core: &Core, token: &str, name: &str) {
         let resp = test_delete_api(
             core,

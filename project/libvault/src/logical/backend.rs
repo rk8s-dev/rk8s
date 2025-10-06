@@ -33,7 +33,7 @@ pub struct LogicalBackend {
     pub ctx: Arc<Context>,
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl Backend for LogicalBackend {
     fn init(&mut self) -> Result<(), RvError> {
         if self.paths.len() == self.paths_re.len() {
@@ -123,7 +123,6 @@ impl Backend for LogicalBackend {
     }
 }
 
-#[maybe_async::maybe_async]
 impl LogicalBackend {
     pub fn new() -> Self {
         Self {
@@ -401,7 +400,6 @@ mod test {
 
     struct MyTest;
 
-    #[maybe_async::maybe_async]
     impl MyTest {
         pub fn new() -> Self {
             MyTest
@@ -434,7 +432,6 @@ mod test {
         assert_eq!(bb.unwrap(), "bb/cc");
     }
 
-    #[maybe_async::maybe_async]
     pub async fn renew_noop_handler(
         _backend: &dyn Backend,
         _req: &mut Request,
@@ -442,7 +439,6 @@ mod test {
         Ok(None)
     }
 
-    #[maybe_async::maybe_async]
     pub async fn revoke_noop_handler(
         _backend: &dyn Backend,
         _req: &mut Request,

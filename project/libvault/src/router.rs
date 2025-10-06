@@ -34,7 +34,6 @@ impl RouterEntry {
     }
 }
 
-#[maybe_async::maybe_async]
 impl Router {
     pub fn new() -> Self {
         Router::default()
@@ -250,7 +249,7 @@ impl Router {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl Handler for Router {
     fn name(&self) -> String {
         "core_router".to_string()

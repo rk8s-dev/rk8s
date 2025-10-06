@@ -16,6 +16,7 @@
 
 use std::{any::Any, collections::HashMap, sync::Arc};
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -28,7 +29,7 @@ pub mod physical;
 pub mod xline;
 
 /// A trait that abstracts core methods for all storage barrier types.
-#[maybe_async::maybe_async]
+#[async_trait]
 pub trait Storage: Send + Sync {
     async fn list(&self, prefix: &str) -> Result<Vec<String>, RvError>;
     async fn get(&self, key: &str) -> Result<Option<StorageEntry>, RvError>;
@@ -58,7 +59,7 @@ impl StorageEntry {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait]
 pub trait Backend: Send + Sync {
     //! This trait decsribes the generic methods that a storage backend needs to implement.
     async fn list(&self, prefix: &str) -> Result<Vec<String>, RvError>;
@@ -122,7 +123,6 @@ pub mod test {
         assert!(backend.is_err());
     }
 
-    #[maybe_async::maybe_async]
     pub async fn test_backend_curd(backend: &dyn Backend) {
         // Should be empty
         let keys = backend.list("").await;
@@ -184,7 +184,6 @@ pub mod test {
         assert_eq!(res.unwrap(), None);
     }
 
-    #[maybe_async::maybe_async]
     pub async fn test_backend_list_prefix(backend: &dyn Backend) {
         let entry1 = BackendEntry {
             key: "bar".to_string(),

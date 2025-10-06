@@ -189,7 +189,6 @@ impl ExpirationManager {
     }
 
     /// Restores the lease entries from the storage.
-    #[maybe_async::maybe_async]
     pub async fn restore(&self) -> Result<(), RvError> {
         let existing = self.id_view.get_keys().await?;
 
@@ -206,7 +205,6 @@ impl ExpirationManager {
     }
 
     /// Renews a lease entry by the given increment.
-    #[maybe_async::maybe_async]
     pub async fn renew(
         &self,
         lease_id: &str,
@@ -258,7 +256,6 @@ impl ExpirationManager {
     }
 
     /// Renews a token by the given increment.
-    #[maybe_async::maybe_async]
     pub async fn renew_token(
         &self,
         req: &mut Request,
@@ -320,7 +317,6 @@ impl ExpirationManager {
     }
 
     /// Registers a secret from a response for lease management.
-    #[maybe_async::maybe_async]
     pub async fn register_secret(
         &self,
         req: &mut Request,
@@ -368,7 +364,6 @@ impl ExpirationManager {
     }
 
     /// Registers an authentication entry for lease management.
-    #[maybe_async::maybe_async]
     pub async fn register_auth(&self, te: &TokenEntry, auth: &mut Auth) -> Result<(), RvError> {
         if te.ttl == 0
             && auth.expiration_time() == SystemTime::UNIX_EPOCH
@@ -418,7 +413,6 @@ impl ExpirationManager {
     }
 
     /// Revokes a lease entry by its lease ID.
-    #[maybe_async::maybe_async]
     pub async fn revoke_lease_id(
         &self,
         lease_id: &str,
@@ -450,7 +444,6 @@ impl ExpirationManager {
     }
 
     /// Revokes all lease entries with a given prefix.
-    #[maybe_async::maybe_async]
     pub async fn revoke_prefix(&self, prefix: &str) -> Result<(), RvError> {
         let mut prefix = prefix.to_string();
         if !prefix.ends_with('/') {
@@ -468,7 +461,6 @@ impl ExpirationManager {
     }
 
     /// Revokes all lease entries associated with a given token.
-    #[maybe_async::maybe_async]
     pub async fn revoke_by_token(&self, te: &TokenEntry) -> Result<(), RvError> {
         let existing = self.lookup_by_token(&te.id).await?;
         for lease_id in existing.iter() {
@@ -560,7 +552,6 @@ impl ExpirationManager {
     }
 
     /// Loads a lease entry from storage by lease ID, updating if necessary from old to new format.
-    #[maybe_async::maybe_async]
     async fn load_lease_entry(&self, lease_id: &str) -> Result<Option<LeaseEntry>, RvError> {
         let raw = self.id_view.get(lease_id).await?;
         if raw.is_none() {
@@ -598,7 +589,6 @@ impl ExpirationManager {
     }
 
     /// Persists a lease entry to storage.
-    #[maybe_async::maybe_async]
     async fn persist_lease_entry(&self, le: &LeaseEntry) -> Result<(), RvError> {
         let value = serde_json::to_string(&le)?;
 
@@ -611,13 +601,11 @@ impl ExpirationManager {
     }
 
     /// Deletes a lease entry from storage.
-    #[maybe_async::maybe_async]
     async fn delete_lease_entry(&self, lease_id: &str) -> Result<(), RvError> {
         self.id_view.delete(lease_id).await
     }
 
     /// Creates an index in the token view using the provided token and lease ID.
-    #[maybe_async::maybe_async]
     async fn create_index_by_token(&self, token: &str, lease_id: &str) -> Result<(), RvError> {
         let token_store = self
             .token_store
@@ -637,7 +625,6 @@ impl ExpirationManager {
     }
 
     /// Removes an index from the token view based on the provided token and lease ID.
-    #[maybe_async::maybe_async]
     async fn remove_index_by_token(&self, token: &str, lease_id: &str) -> Result<(), RvError> {
         let token_store = self
             .token_store
@@ -654,7 +641,6 @@ impl ExpirationManager {
 
     /// Retrieves an index from the token view based on the provided token and lease ID.
     #[allow(dead_code)]
-    #[maybe_async::maybe_async]
     async fn index_by_token(
         &self,
         token: &str,
@@ -674,7 +660,6 @@ impl ExpirationManager {
     }
 
     /// Looks up lease entries associated with a specific token.
-    #[maybe_async::maybe_async]
     async fn lookup_by_token(&self, token: &str) -> Result<Vec<String>, RvError> {
         let token_store = self
             .token_store
@@ -701,7 +686,6 @@ impl ExpirationManager {
     }
 
     /// Revokes a lease entry and handles secret or token revocation.
-    #[maybe_async::maybe_async]
     async fn revoke_lease_entry(&self, le: &LeaseEntry) -> Result<(), RvError> {
         let token_store = self
             .token_store
@@ -734,7 +718,6 @@ impl ExpirationManager {
     }
 
     /// Renews a secret lease entry with a specified increment duration.
-    #[maybe_async::maybe_async]
     async fn renew_secret_lease_entry(
         &self,
         le: &LeaseEntry,
@@ -764,7 +747,6 @@ impl ExpirationManager {
     }
 
     /// Renews an authentication lease entry with a specified increment duration.
-    #[maybe_async::maybe_async]
     async fn renew_auth_lease_entry(
         &self,
         _req: &mut Request,
@@ -832,7 +814,6 @@ mod mod_expiration_tests {
         }};
     }
 
-    #[maybe_async::maybe_async]
     pub async fn renew_noop_handler(
         _backend: &dyn Backend,
         _req: &mut Request,
@@ -840,7 +821,6 @@ mod mod_expiration_tests {
         Ok(None)
     }
 
-    #[maybe_async::maybe_async]
     pub async fn revoke_noop_handler(
         _backend: &dyn Backend,
         _req: &mut Request,

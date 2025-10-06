@@ -14,6 +14,7 @@
 
 use std::{any::Any, sync::Arc};
 
+use async_trait::async_trait;
 use dashmap::DashMap;
 use derive_more::Deref;
 
@@ -103,6 +104,7 @@ impl CertModule {
     }
 }
 
+#[async_trait]
 impl Module for CertModule {
     fn name(&self) -> String {
         self.name.clone()

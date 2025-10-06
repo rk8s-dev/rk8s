@@ -41,7 +41,7 @@ impl XlineBackend {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl Backend for XlineBackend {
     async fn list(&self, prefix: &str) -> Result<Vec<String>, RvError> {
         if prefix.starts_with("/") {

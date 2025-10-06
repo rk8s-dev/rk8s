@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use derive_more::Display;
 
 use crate::{
@@ -17,7 +18,7 @@ use crate::{
     logical::{Auth, request::Request, response::Response},
 };
 
-#[maybe_async::maybe_async]
+#[async_trait]
 pub trait Handler: Send + Sync {
     fn name(&self) -> String;
 
@@ -46,7 +47,7 @@ pub trait Handler: Send + Sync {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait]
 pub trait AuthHandler: Send + Sync {
     fn name(&self) -> String;
 

@@ -47,7 +47,6 @@ impl PkiBackend {
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn generate_root(
         &self,

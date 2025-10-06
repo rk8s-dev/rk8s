@@ -137,7 +137,6 @@ one of them expiring.
     }
 }
 
-#[maybe_async::maybe_async]
 impl CertBackendInner {
     pub async fn get_crl(&self, req: &mut Request) -> Result<Option<Config>, RvError> {
         let storage_entry = req.storage_get("crls").await?;

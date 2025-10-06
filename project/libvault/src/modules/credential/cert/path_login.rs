@@ -73,7 +73,6 @@ impl CertBackend {
     }
 }
 
-#[maybe_async::maybe_async]
 impl CertBackendInner {
     pub async fn login(
         &self,

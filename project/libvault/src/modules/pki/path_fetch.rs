@@ -9,7 +9,6 @@ use crate::{
     utils::cert::CertBundle,
 };
 
-#[maybe_async::maybe_async]
 impl PkiBackend {
     pub fn fetch_ca_path(&self) -> Path {
         let backend = self.inner.clone();
@@ -104,7 +103,6 @@ Using "ca" or "crl" as the value fetches the appropriate information in DER enco
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn handle_fetch_cert_bundle(
         &self,

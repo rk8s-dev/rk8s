@@ -8,7 +8,7 @@ pub struct BarrierView {
     prefix: String,
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl Storage for BarrierView {
     async fn list(&self, prefix: &str) -> Result<Vec<String>, RvError> {
         self.sanity_check(prefix)?;
@@ -47,7 +47,6 @@ impl Storage for BarrierView {
     }
 }
 
-#[maybe_async::maybe_async]
 impl BarrierView {
     pub fn new(barrier: Arc<dyn SecurityBarrier>, prefix: &str) -> Self {
         Self {

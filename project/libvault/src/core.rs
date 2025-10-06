@@ -133,7 +133,6 @@ impl Default for Core {
     }
 }
 
-#[maybe_async::maybe_async]
 impl Core {
     pub fn new(backend: Arc<dyn PhysicalBackend>) -> Self {
         let barrier = Arc::new(barrier_aes_gcm::AESGCMBarrier::new(backend.clone()));

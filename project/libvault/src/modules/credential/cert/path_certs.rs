@@ -304,7 +304,6 @@ impl CertBackend {
 }
 
 #[allow(clippy::assigning_clones)]
-#[maybe_async::maybe_async]
 impl CertBackendInner {
     pub async fn get_cert(&self, req: &Request, name: &str) -> Result<Option<CertEntry>, RvError> {
         let key = format!("cert/{}", name.to_lowercase());

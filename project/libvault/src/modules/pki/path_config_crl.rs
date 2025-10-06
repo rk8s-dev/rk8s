@@ -39,7 +39,6 @@ impl PkiBackend {
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn read_path_crl(
         &self,

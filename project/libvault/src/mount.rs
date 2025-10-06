@@ -236,7 +236,6 @@ impl MountEntry {
     }
 }
 
-#[maybe_async::maybe_async]
 impl MountTable {
     pub fn new(path: &str) -> Self {
         Self {
@@ -515,7 +514,6 @@ impl MountsMonitor {
     }
 }
 
-#[maybe_async::maybe_async]
 impl Core {
     pub async fn mount(&self, me: &MountEntry) -> Result<(), RvError> {
         {

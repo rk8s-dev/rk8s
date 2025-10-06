@@ -67,7 +67,6 @@ struct PolicyRequest {
     policy: String,
 }
 
-#[maybe_async::maybe_async]
 async fn response_seal_status(core: web::Data<Arc<Core>>) -> Result<HttpResponse, RvError> {
     let progress = core.unseal_progress();
     let sealed = core.sealed();

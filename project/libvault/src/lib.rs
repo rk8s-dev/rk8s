@@ -33,9 +33,7 @@ use crate::{
     errors::RvError,
     logical::{Request, Response},
     modules::{
-        auth::AuthModule,
-        credential::{cert::CertModule},
-        pki::PkiModule,
+        auth::AuthModule, credential::cert::CertModule, kv::KvModule, pki::PkiModule,
         policy::PolicyModule,
     },
     mount::MountsMonitor,
@@ -84,7 +82,6 @@ pub struct RustyVault {
     pub token: ArcSwap<String>,
 }
 
-#[maybe_async::maybe_async]
 impl RustyVault {
     pub fn new(backend: Arc<dyn Backend>, config: Option<&Config>) -> Result<Self, RvError> {
         let mut core = Core::new(backend);
@@ -119,6 +116,10 @@ impl RustyVault {
         // add credential module: cert
         let cert_module = CertModule::new(core.clone());
         core.module_manager.add_module(Arc::new(cert_module))?;
+
+        // add kv module
+        let kv_module = KvModule::new(core.clone());
+        core.module_manager.add_module(Arc::new(kv_module))?;
 
         let handlers = core.handlers.load().clone();
         for handler in handlers.iter() {

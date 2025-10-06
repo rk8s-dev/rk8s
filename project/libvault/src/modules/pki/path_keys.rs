@@ -253,7 +253,6 @@ used for sign,verify,encrypt,decrypt.
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn generate_key(
         &self,

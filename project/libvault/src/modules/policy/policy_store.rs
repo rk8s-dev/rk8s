@@ -208,7 +208,6 @@ pub struct PolicyStore {
     pub self_ptr: Weak<PolicyStore>,
 }
 
-#[maybe_async::maybe_async]
 impl PolicyStore {
     /// Creates a new `PolicyStore` with initial setup based on the given `Core`.
     ///
@@ -677,7 +676,7 @@ impl PolicyStore {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl AuthHandler for PolicyStore {
     fn name(&self) -> String {
         "policy_store".to_string()

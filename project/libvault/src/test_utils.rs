@@ -95,7 +95,6 @@ pub struct TestHttpServer {
     pub thread: Option<thread::JoinHandle<()>>,
 }
 
-#[maybe_async::maybe_async]
 impl TestHttpServer {
     pub async fn new(name: &str, tls_enable: bool) -> Self {
         let root_token;
@@ -1142,7 +1141,6 @@ pub fn new_test_rusty_vault(name: &str) -> RustyVault {
     RustyVault::new(new_test_backend(name), None).unwrap()
 }
 
-#[maybe_async::maybe_async]
 pub async fn init_test_rusty_vault(rvault: &RustyVault, seal_config: &SealConfig) -> InitResult {
     let result = rvault.init(seal_config).await;
     assert!(result.is_ok());
@@ -1150,12 +1148,10 @@ pub async fn init_test_rusty_vault(rvault: &RustyVault, seal_config: &SealConfig
     result.unwrap()
 }
 
-#[maybe_async::maybe_async]
 pub async fn unseal_test_rusty_vault(rvault: &RustyVault, keys: &[&[u8]]) -> bool {
     unseal_test_rusty_vault_core(rvault.core.load().as_ref(), keys).await
 }
 
-#[maybe_async::maybe_async]
 pub async fn unseal_test_rusty_vault_core(core: &Core, keys: &[&[u8]]) -> bool {
     let mut unsealed = false;
     for key in keys.iter() {
@@ -1167,7 +1163,6 @@ pub async fn unseal_test_rusty_vault_core(core: &Core, keys: &[&[u8]]) -> bool {
     unsealed
 }
 
-#[maybe_async::maybe_async]
 pub async fn new_unseal_test_rusty_vault(name: &str) -> (RustyVault, Arc<Core>, String) {
     let seal_config = SealConfig {
         secret_shares: 9,
@@ -1386,7 +1381,6 @@ pub fn start_test_http_server_with_prometheus(
     server_thread
 }
 
-#[maybe_async::maybe_async]
 pub async fn test_list_api(
     core: &Core,
     token: &str,
@@ -1402,7 +1396,6 @@ pub async fn test_list_api(
     resp
 }
 
-#[maybe_async::maybe_async]
 pub async fn test_read_api(
     core: &Core,
     token: &str,
@@ -1418,7 +1411,6 @@ pub async fn test_read_api(
     resp
 }
 
-#[maybe_async::maybe_async]
 pub async fn test_write_api(
     core: &Core,
     token: &str,
@@ -1437,7 +1429,6 @@ pub async fn test_write_api(
     resp
 }
 
-#[maybe_async::maybe_async]
 pub async fn test_delete_api(
     core: &Core,
     token: &str,
@@ -1455,7 +1446,6 @@ pub async fn test_delete_api(
     resp
 }
 
-#[maybe_async::maybe_async]
 pub async fn test_mount_api(core: &Core, token: &str, mtype: &str, path: &str) {
     let data = json!({
         "type": mtype,
@@ -1474,7 +1464,6 @@ pub async fn test_mount_api(core: &Core, token: &str, mtype: &str, path: &str) {
     assert!(resp.is_ok());
 }
 
-#[maybe_async::maybe_async]
 pub async fn test_mount_auth_api(core: &Core, token: &str, atype: &str, path: &str) {
     let auth_data = json!({
         "type": atype,
@@ -1545,7 +1534,7 @@ impl Clone for NoopBackend {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl logical::Backend for NoopBackend {
     async fn handle_request(&self, req: &mut Request) -> Result<Option<Response>, RvError> {
         if self.rollback_errs && req.operation == Operation::Rollback {

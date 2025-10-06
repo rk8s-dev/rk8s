@@ -22,7 +22,6 @@ pub struct ModuleManager {
     pub modules: ArcSwap<Vec<Arc<dyn Module>>>,
 }
 
-#[maybe_async::maybe_async]
 impl ModuleManager {
     pub fn new() -> Self {
         Self {
@@ -31,9 +30,7 @@ impl ModuleManager {
     }
 
     pub fn set_default_modules(&self, core: Arc<Core>) -> Result<(), RvError> {
-        let modules: Vec<Arc<dyn Module>> = vec![
-            Arc::new(SystemModule::new(core)),
-        ];
+        let modules: Vec<Arc<dyn Module>> = vec![Arc::new(SystemModule::new(core))];
         self.modules.store(Arc::new(modules));
         Ok(())
     }

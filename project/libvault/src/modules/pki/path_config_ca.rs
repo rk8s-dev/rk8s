@@ -45,7 +45,6 @@ For security reasons, you can only view the certificate when reading this endpoi
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn write_path_ca(
         &self,

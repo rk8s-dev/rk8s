@@ -54,7 +54,7 @@ pub struct AESGCMBarrier {
     backend: Arc<dyn Backend>,
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl Storage for AESGCMBarrier {
     async fn list(&self, prefix: &str) -> Result<Vec<String>, RvError> {
         if self.barrier_info.load().sealed {
@@ -117,7 +117,7 @@ impl Storage for AESGCMBarrier {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl SecurityBarrier for AESGCMBarrier {
     async fn inited(&self) -> Result<bool, RvError> {
         let res = self.backend.get(BARRIER_INIT_PATH).await?;

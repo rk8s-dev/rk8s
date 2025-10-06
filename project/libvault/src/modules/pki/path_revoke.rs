@@ -53,7 +53,6 @@ Force a rebuild of the CRL. This can be used to remove expired certificates from
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn revoke_cert(
         &self,

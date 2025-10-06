@@ -140,7 +140,6 @@ impl Path {
     }
 }
 
-#[maybe_async::maybe_async]
 impl PathOperation {
     pub fn new() -> Self {
         Self {
@@ -162,7 +161,6 @@ impl PathOperation {
 mod test {
     use super::{super::FieldType, *};
 
-    #[maybe_async::maybe_async]
     pub async fn my_test_read_handler(
         _backend: &dyn Backend,
         _req: &mut Request,

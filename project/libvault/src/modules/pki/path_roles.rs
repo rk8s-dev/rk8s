@@ -436,7 +436,6 @@ for "generate_lease"."#,
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn get_role(
         &self,

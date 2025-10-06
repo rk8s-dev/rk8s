@@ -6,6 +6,7 @@ use std::{
     sync::{Arc, Weak},
 };
 
+use async_trait::async_trait;
 use serde_json::{Map, Value, from_value, json};
 
 use crate::{
@@ -41,7 +42,6 @@ pub struct SystemBackend {
     pub self_ptr: Weak<SystemBackend>,
 }
 
-#[maybe_async::maybe_async]
 impl SystemBackend {
     pub fn new(core: Arc<Core>) -> Arc<Self> {
         let system_backend = SystemBackend {
@@ -1177,6 +1177,7 @@ impl SystemModule {
     }
 }
 
+#[async_trait]
 impl Module for SystemModule {
     fn name(&self) -> String {
         self.name.clone()

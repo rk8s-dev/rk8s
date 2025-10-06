@@ -9,7 +9,6 @@ use libvault::{
 };
 use serde_json::{Map, Value, json};
 
-#[maybe_async::maybe_async]
 async fn test_read_api(
     core: &Core,
     token: &str,
@@ -35,7 +34,6 @@ async fn test_read_api(
     }
 }
 
-#[maybe_async::maybe_async]
 async fn test_write_api(
     core: &Core,
     token: &str,
@@ -53,7 +51,6 @@ async fn test_write_api(
     assert_eq!(ret.is_ok(), is_ok);
 }
 
-#[maybe_async::maybe_async]
 async fn test_delete_api(core: &Core, token: &str, path: &str, is_ok: bool) {
     let mut req = Request::new(path);
     req.operation = Operation::Delete;
@@ -64,7 +61,6 @@ async fn test_delete_api(core: &Core, token: &str, path: &str, is_ok: bool) {
     assert_eq!(ret.is_ok(), is_ok);
 }
 
-#[maybe_async::maybe_async]
 async fn test_list_api(core: &Core, token: &str, path: &str, is_ok: bool, keys_len: usize) {
     let mut req = Request::new(path);
     req.operation = Operation::List;
@@ -80,7 +76,6 @@ async fn test_list_api(core: &Core, token: &str, path: &str, is_ok: bool, keys_l
     }
 }
 
-#[maybe_async::maybe_async]
 async fn test_default_secret(core: &Core, token: &str) {
     // create secret
     let kv_data = json!({
@@ -101,7 +96,6 @@ async fn test_default_secret(core: &Core, token: &str) {
     test_list_api(core, token, "secret/", true, 1).await;
 }
 
-#[maybe_async::maybe_async]
 async fn test_kv_logical_backend(core: &Core, token: &str) {
     // mount kv backend to path: kv/
     let mount_data = json!({
@@ -184,7 +178,6 @@ async fn test_kv_logical_backend(core: &Core, token: &str) {
     test_read_api(core, token, "vk/foo", false, None).await;
 }
 
-#[maybe_async::maybe_async]
 async fn test_sys_mount_feature(core: &Core, token: &str) {
     // test api: "mounts"
     let mut req = Request::new("sys/mounts");
@@ -277,7 +270,6 @@ async fn test_sys_mount_feature(core: &Core, token: &str) {
     test_write_api(core, token, "sys/remount", true, Some(remount_data)).await;
 }
 
-#[maybe_async::maybe_async]
 async fn test_sys_raw_api_feature(core: &Core, token: &str) {
     // test raw read
     let mut req = Request::new("sys/raw/core/mounts");
@@ -326,7 +318,6 @@ async fn test_sys_raw_api_feature(core: &Core, token: &str) {
     test_read_api(core, token, "sys/raw/test", true, None).await;
 }
 
-#[maybe_async::maybe_async]
 async fn test_rvualt_mount(rvault: &RustyVault, token: &str) {
     let ret = rvault.mount(Some(token), "kv9/test", "kv").await;
     assert!(ret.is_ok());
@@ -405,7 +396,6 @@ async fn test_rvualt_mount(rvault: &RustyVault, token: &str) {
     assert!(ret.is_err());
 }
 
-#[maybe_async::maybe_async]
 async fn test_sys_logical_backend(core: &Core, token: &str) {
     test_sys_mount_feature(core, token).await;
     test_sys_raw_api_feature(core, token).await;

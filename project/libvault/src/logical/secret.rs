@@ -54,7 +54,6 @@ impl Default for Secret {
     }
 }
 
-#[maybe_async::maybe_async]
 impl Secret {
     pub fn renewable(&self) -> bool {
         self.renew_handler.is_some()
@@ -186,7 +185,6 @@ mod test {
 
     struct MyTest;
 
-    #[maybe_async::maybe_async]
     impl MyTest {
         pub fn new() -> Self {
             MyTest
@@ -201,7 +199,6 @@ mod test {
         }
     }
 
-    #[maybe_async::maybe_async]
     pub async fn noop(
         _backend: &dyn Backend,
         _req: &mut Request,

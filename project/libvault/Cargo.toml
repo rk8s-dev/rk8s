@@ -71,7 +71,6 @@ async-trait = "0.1"
 stretto = "0.8"
 priority-queue = "2.1"
 crossbeam-channel = "0.5"
-maybe-async = { version = "0.2", optional = false }
 lockfile = "0.4.0"
 arc-swap = "1"
 blake3 = "1.8"

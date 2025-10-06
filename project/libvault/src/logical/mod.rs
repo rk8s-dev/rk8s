@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use enum_map::Enum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
@@ -61,7 +62,7 @@ pub enum Operation {
     Rollback,
 }
 
-#[maybe_async::maybe_async]
+#[async_trait]
 pub trait Backend: Send + Sync {
     fn init(&mut self) -> Result<(), RvError>;
     fn setup(&self, key: &str) -> Result<(), RvError>;

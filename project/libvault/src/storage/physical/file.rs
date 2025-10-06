@@ -21,7 +21,7 @@ pub struct FileBackend {
     path: PathBuf,
 }
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl Backend for FileBackend {
     async fn list(&self, prefix: &str) -> Result<Vec<String>, RvError> {
         if prefix.starts_with('/') {

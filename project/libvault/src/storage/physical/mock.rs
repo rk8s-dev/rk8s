@@ -8,7 +8,7 @@ use crate::{
 #[derive(Default)]
 pub struct MockBackend(());
 
-#[maybe_async::maybe_async]
+#[async_trait::async_trait]
 impl Backend for MockBackend {
     async fn list(&self, _prefix: &str) -> Result<Vec<String>, RvError> {
         Ok(Vec::new())

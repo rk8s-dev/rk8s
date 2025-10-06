@@ -5,6 +5,7 @@
 //! It usually means a different symmetric encryption algorithm is going to be supported,
 //! if a new barrier is under development.
 
+use async_trait::async_trait;
 use zeroize::Zeroizing;
 
 use super::Storage;
@@ -12,7 +13,7 @@ use crate::errors::RvError;
 
 pub const BARRIER_INIT_PATH: &str = "barrier/init";
 
-#[maybe_async::maybe_async]
+#[async_trait]
 pub trait SecurityBarrier: Storage + Send + Sync {
     async fn inited(&self) -> Result<bool, RvError>;
     async fn init(&self, key: &[u8]) -> Result<(), RvError>;

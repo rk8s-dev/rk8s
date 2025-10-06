@@ -8,6 +8,7 @@ use std::{
 };
 
 use arc_swap::ArcSwapOption;
+use async_trait::async_trait;
 use lazy_static::lazy_static;
 
 use crate::{
@@ -56,7 +57,6 @@ pub struct AuthModule {
     pub expiration: ArcSwapOption<ExpirationManager>,
 }
 
-#[maybe_async::maybe_async]
 impl AuthModule {
     pub fn new(core: Arc<Core>) -> Result<Self, RvError> {
         Ok(Self {
@@ -369,7 +369,7 @@ impl AuthModule {
     }
 }
 
-#[maybe_async::maybe_async]
+#[async_trait]
 impl Module for AuthModule {
     fn name(&self) -> String {
         self.name.clone()

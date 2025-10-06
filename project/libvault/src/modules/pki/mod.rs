@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use async_trait::async_trait;
 use derive_more::Deref;
 
 use crate::{
@@ -109,7 +110,6 @@ impl PkiBackend {
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn revoke_secret_creds(
         &self,
@@ -136,6 +136,7 @@ impl PkiModule {
     }
 }
 
+#[async_trait]
 impl Module for PkiModule {
     fn name(&self) -> String {
         self.name.clone()
@@ -176,7 +177,6 @@ mod test {
         },
     };
 
-    #[maybe_async::maybe_async]
     async fn config_ca(core: &Core, token: &str, path: &str) {
         let ca_pem_bundle = format!("{}{}", CA_CERT_PEM, CA_KEY_PEM);
 
@@ -198,7 +198,6 @@ mod test {
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::maybe_async]
     async fn config_role(
         core: &Core,
         token: &str,
@@ -233,7 +232,6 @@ mod test {
         assert!(resp.is_ok());
     }
 
-    #[maybe_async::maybe_async]
     async fn generate_root(
         core: &Core,
         token: &str,
@@ -326,7 +324,6 @@ mod test {
         }
     }
 
-    #[maybe_async::maybe_async]
     async fn delete_root(core: &Core, token: &str, path: &str, is_ok: bool) {
         let resp =
             test_delete_api(core, token, format!("{}root", path).as_str(), is_ok, None).await;
@@ -340,7 +337,6 @@ mod test {
         assert_eq!(resp_ca_pem.unwrap_err(), RvError::ErrPkiCaNotConfig);
     }
 
-    #[maybe_async::maybe_async]
     async fn issue_cert_by_generate_root(
         core: &Core,
         token: &str,
@@ -730,7 +726,6 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         delete_root(&core, token, path, true).await;
     }
 
-    #[maybe_async::maybe_async]
     async fn test_pki_generate_key_case(
         core: &Core,
         token: &str,
@@ -804,7 +799,6 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         }
     }
 
-    #[maybe_async::maybe_async]
     async fn test_pki_import_key_case(
         core: &Core,
         token: &str,
@@ -858,7 +852,6 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         assert_eq!(key_data["key_bits"].as_u64().unwrap(), key_bits as u64);
     }
 
-    #[maybe_async::maybe_async]
     async fn test_pki_sign_verify(
         core: &Core,
         token: &str,
@@ -982,7 +975,6 @@ x/+V28hUf8m8P2NxP5ALaDZagdaMfzjGZo3O3wDv33Cds0P5GMGQYnRXDxcZN/2L
         assert!(resp.is_err());
     }
 
-    #[maybe_async::maybe_async]
     async fn test_pki_encrypt_decrypt(
         core: &Core,
         token: &str,

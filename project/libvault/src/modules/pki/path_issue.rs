@@ -75,7 +75,6 @@ requested common name is allowed by the role policy.
     }
 }
 
-#[maybe_async::maybe_async]
 impl PkiBackendInner {
     pub async fn issue_cert(
         &self,

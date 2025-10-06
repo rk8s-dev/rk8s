@@ -35,7 +35,6 @@ pub struct Request {
     pub ctx: Arc<Context>,
 }
 
-#[maybe_async::maybe_async]
 impl Request {
     pub fn new<S: Into<String>>(path: S) -> Self {
         Self {
