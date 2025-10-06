@@ -1,9 +1,9 @@
 storage "xline" {
-    endpoints = ["http://127.0.0.1:2379"]
+    endpoints = ["http://etcd:2379"]
 }
 
 listener "tcp" {
-    address     = "127.0.0.1:8200"
+    address     = "0.0.0.0:8200"
     tls_disable = "true"
     tls_cert_file = "servercert.pem"
     tls_key_file = "serverkey.pem"
@@ -11,7 +11,7 @@ listener "tcp" {
     tls_require_and_verify_client_cert = false
 }
 
-daemon = true
+daemon = false
 daemon_user = "paul"
 daemon_group = "staff"
 
@@ -25,8 +25,8 @@ pid_file = "rusty_vault.pid"
 # Policy snippets to load with `vault policy write` (or equivalent CLI)
 # -----------------------------------------------------------------------------
 
-# control-plane.hcl
-# path "pki/issue/control-plane" {
+# policy-rks-node.hcl
+# path "pki/issue/rks-node" {
 #   capabilities = ["update"]
 # }
 #
@@ -46,8 +46,8 @@ pid_file = "rusty_vault.pid"
 #   capabilities = ["update"]
 # }
 
-# data-plane.hcl
-# path "pki/issue/data-plane" {
+# policy-rkl-node.hcl
+# path "pki/issue/rkl-node" {
 #   capabilities = ["update"]
 # }
 #

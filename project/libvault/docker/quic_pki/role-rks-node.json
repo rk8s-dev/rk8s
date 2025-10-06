@@ -2,12 +2,12 @@
   "key_type": "ec",
   "key_bits": 256,
   "allow_ip_sans": true,
-  "allowed_domains": "data.svc.cluster.local",
+  "allowed_domains": "rks.svc.cluster.local",
   "allow_subdomains": true,
   "server_flag": true,
   "client_flag": true,
-  "ttl": "12h",
-  "max_ttl": "72h",
+  "ttl": "24h",
+  "max_ttl": "168h",
   "no_store": false,
   "generate_lease": false
 }

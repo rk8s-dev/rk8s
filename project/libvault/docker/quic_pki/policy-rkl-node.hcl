@@ -1,4 +1,4 @@
-path "pki/issue/data-plane" {
+path "pki/issue/rkl-node" {
   capabilities = ["update"]
 }
 

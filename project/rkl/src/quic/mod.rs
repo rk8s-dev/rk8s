@@ -1,3 +1,5 @@
+use crate::commands::pod::TLSConnectionArgs;
+
 pub mod client;
 pub mod verifier;
 
@@ -6,4 +8,14 @@ pub struct TLSConnectionConfig {
     pub enable_tls: bool,
     pub vault_url: String,
     pub bootstrap_token: String,
+}
+
+impl From<TLSConnectionArgs> for TLSConnectionConfig {
+    fn from(value: TLSConnectionArgs) -> Self {
+        Self {
+            enable_tls: value.enable_tls,
+            vault_url: value.vault_url,
+            bootstrap_token: value.bootstrap_token,
+        }
+    }
 }

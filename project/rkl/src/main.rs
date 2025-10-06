@@ -7,6 +7,7 @@ mod commands;
 mod cri;
 mod daemon;
 mod network;
+mod quic;
 mod rootpath;
 mod task;
 

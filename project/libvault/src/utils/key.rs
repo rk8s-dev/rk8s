@@ -1,3 +1,4 @@
+use crate::{errors::RvError, utils::generate_uuid};
 use better_default::Default;
 use openssl::{
     ec::{EcGroup, EcKey},
@@ -10,8 +11,6 @@ use openssl::{
     symm::{Cipher, decrypt, decrypt_aead, encrypt, encrypt_aead},
 };
 use serde::{Deserialize, Serialize};
-
-use crate::{errors::RvError, utils::generate_uuid};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct KeyBundle {
@@ -88,7 +87,7 @@ impl KeyBundle {
             "ec" => {
                 let curve_name = match key_bits {
                     224 => Nid::SECP224R1,
-                    256 => Nid::SECP256K1,
+                    256 => Nid::X9_62_PRIME256V1,
                     384 => Nid::SECP384R1,
                     521 => Nid::SECP521R1,
                     _ => return Err(RvError::ErrPkiKeyBitsInvalid),

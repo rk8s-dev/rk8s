@@ -178,17 +178,17 @@ impl Client {
 }
 
 impl ClientBuilder {
-    pub fn with_addr(mut self, addr: &str) -> Self {
+    pub fn with_addr(mut self, addr: impl Into<String>) -> Self {
         self.address = addr.into();
         self
     }
 
-    pub fn with_token(mut self, token: &str) -> Self {
+    pub fn with_token(mut self, token: impl Into<String>) -> Self {
         self.token = token.into();
         self
     }
 
-    pub fn add_header(mut self, key: &str, value: &str) -> Self {
+    pub fn add_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(key.into(), value.into());
         self
     }

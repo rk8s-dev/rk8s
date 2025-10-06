@@ -3,22 +3,22 @@
 This walkthrough assumes you have already run `docker/bootstrap_quic_pki.sh` (or otherwise
 completed the setup described in this directory) so that the following artefacts exist:
 
-- Policies `control-plane` and `data-plane` have been written to Vault.
+- Policies `rks-node` and `rkl-node` have been written to Vault.
 - `pki/` mount is available with a configured root/intermediate CA.
-- Role `data-plane` (from `role-data-plane.json`) exists under `/v1/pki/roles/data-plane`.
+- Role `rkl-node` (from `role-rkl-node.json`) exists under `/v1/pki/roles/rkl-node`.
 
 Below is an end-to-end example showing how an administrator issues a short-lived token for a data
 plane node, and how that node exchanges it for a certificate.
 
 ## 1. Administrator creates a limited-use token
 
-Use the root (or management) token to mint a child token tied to the `data-plane` policy. The token
+Use the root (or management) token to mint a child token tied to the `rkl-node` policy. The token
 is limited to three uses and has a 30-minute TTL. Adjust according to your security requirements.
 
 ```bash
-cat <<'JSON' > /tmp/data-plane-token.json
+cat <<'JSON' > /tmp/rkl-node-token.json
 {
-  "policies": ["data-plane"],
+  "policies": ["rkl-node"],
   "display_name": "quic-data-bootstrap",
   "ttl": "30m",
   "explicit_max_ttl": "2h",
@@ -30,10 +30,10 @@ JSON
 curl -sS -X POST "$VAULT_ADDR/v1/auth/token/create" \
   -H "X-Auth-Token: $ROOT_TOKEN" \
   -H "Content-Type: application/json" \
-  --data @/tmp/data-plane-token.json | jq '.auth.client_token' -r > /tmp/data-plane.token
+  --data @/tmp/rkl-node-token.json | jq '.auth.client_token' -r > /tmp/rkl-node.token
 ```
 
-Deliver `/tmp/data-plane.token` to the node through a secure channel. Using `token_type=batch` keeps
+Deliver `/tmp/rkl-node.token` to the node through a secure channel. Using `token_type=batch` keeps
 the token out of persistent storage on the Vault side; wrapping tokens (`X-Vault-Wrap-TTL`) can add an
 extra layer of protection in transit.
 
@@ -42,7 +42,7 @@ extra layer of protection in transit.
 The node can query Vault to inspect its own token metadata.
 
 ```bash
-DATA_TOKEN=$(cat /tmp/data-plane.token)
+DATA_TOKEN=$(cat /tmp/rkl-node.token)
 
 curl -sS -X POST "$VAULT_ADDR/v1/auth/token/lookup" \
   -H "X-Auth-Token: $ROOT_TOKEN" \
@@ -55,12 +55,12 @@ curl -sS -X POST "$VAULT_ADDR/v1/auth/token/lookup" \
 
 ## 3. Node requests a certificate
 
-Use the token as the `X-Auth-Token` header when calling `/v1/pki/issue/data-plane`. Provide the
+Use the token as the `X-Auth-Token` header when calling `/v1/pki/issue/rkl-node`. Provide the
 subject information via JSON body (for example, the contents of
-`docker/quic_pki/role-data-plane.json` determine what SAN/CN values are permitted).
+`docker/quic_pki/role-rkl-node.json` determine what SAN/CN values are permitted).
 
 ```bash
-cat <<'JSON' > /tmp/data-plane-cert-request.json
+cat <<'JSON' > /tmp/rkl-node-cert-request.json
 {
   "common_name": "node-01.data.svc.cluster.local",
   "alt_names": "node-01.data.svc.cluster.local,node-01",
@@ -69,15 +69,15 @@ cat <<'JSON' > /tmp/data-plane-cert-request.json
 }
 JSON
 
-curl -sS -X POST "$VAULT_ADDR/v1/pki/issue/data-plane" \
+curl -sS -X POST "$VAULT_ADDR/v1/pki/issue/rkl-node" \
   -H "X-Auth-Token: $DATA_TOKEN" \
   -H "Content-Type: application/json" \
-  --data @/tmp/data-plane-cert-request.json | tee /tmp/data-plane-cert.json
+  --data @/tmp/rkl-node-cert-request.json | tee /tmp/rkl-node-cert.json
 
-jq -r '.data.certificate'    /tmp/data-plane-cert.json > node-01-cert.pem
-jq -r '.data.private_key'    /tmp/data-plane-cert.json > node-01-key.pem
-jq -r '.data.issuing_ca'     /tmp/data-plane-cert.json > node-01-issuing-ca.pem
-jq -r '.data.ca_chain'       /tmp/data-plane-cert.json > node-01-ca-chain.pem
+jq -r '.data.certificate'    /tmp/rkl-node-cert.json > node-01-cert.pem
+jq -r '.data.private_key'    /tmp/rkl-node-cert.json > node-01-key.pem
+jq -r '.data.issuing_ca'     /tmp/rkl-node-cert.json > node-01-issuing-ca.pem
+jq -r '.data.ca_chain'       /tmp/rkl-node-cert.json > node-01-ca-chain.pem
 ```
 
 Install `node-01-cert.pem` and `node-01-key.pem` on the data-plane node, along with the CA chain as
@@ -103,4 +103,4 @@ serial number (this endpoint currently returns `NotImplemented`, so additional w
 ---
 
 This workflow matches the policies and role definitions provided in this directory, keeping the data
-plane restricted to `pki/issue/data-plane` and read-only access to issued certificates.
+plane restricted to `pki/issue/rkl-node` and read-only access to issued certificates.

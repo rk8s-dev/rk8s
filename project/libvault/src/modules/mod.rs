@@ -14,7 +14,6 @@ use std::{any::Any, sync::Arc};
 pub mod auth;
 pub mod credential;
 pub mod crypto;
-pub mod kv;
 pub mod pki;
 pub mod policy;
 pub mod system;

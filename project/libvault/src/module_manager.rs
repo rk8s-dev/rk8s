@@ -15,7 +15,7 @@ use arc_swap::ArcSwap;
 use crate::{
     core::Core,
     errors::RvError,
-    modules::{Module, kv::KvModule, system::SystemModule},
+    modules::{Module, system::SystemModule},
 };
 
 pub struct ModuleManager {
@@ -32,7 +32,6 @@ impl ModuleManager {
 
     pub fn set_default_modules(&self, core: Arc<Core>) -> Result<(), RvError> {
         let modules: Vec<Arc<dyn Module>> = vec![
-            Arc::new(KvModule::new(core.clone())),
             Arc::new(SystemModule::new(core)),
         ];
         self.modules.store(Arc::new(modules));

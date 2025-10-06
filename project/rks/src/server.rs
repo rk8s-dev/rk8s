@@ -1,4 +1,6 @@
 use crate::api::xlinestore::XlineStore;
+use crate::cert::{TLSConnectionConfig, build_quic_config};
+use crate::cli::TLSConnectionArgs;
 use crate::commands::create::watch_create;
 use crate::commands::delete::watch_delete;
 use crate::commands::{create, delete};
@@ -15,8 +17,7 @@ use ipnetwork::{Ipv4Network, Ipv6Network};
 use libcni::ip::route::Route;
 use libnetwork::{config::NetworkConfig, route};
 use log::{error, info, warn};
-use quinn::{Connection, Endpoint, ServerConfig};
-use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+use quinn::{Connection, Endpoint};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -61,11 +62,12 @@ pub async fn serve(
     addr: String,
     xline_store: Arc<XlineStore>,
     local_manager: Arc<LocalManager>,
+    tls_cfg: TLSConnectionArgs,
 ) -> anyhow::Result<()> {
     info!("Starting server with address: {addr}");
 
     // Create QUIC endpoint and server certificate
-    let endpoint = make_server_endpoint(addr.parse()?).await?;
+    let endpoint = make_server_endpoint(addr.parse()?, tls_cfg).await?;
     info!("QUIC server listening on {addr}");
 
     let node_registry = Arc::new(NodeRegistry::default());
@@ -495,21 +497,14 @@ pub async fn dispatch_user(
 }
 
 /// Set up the QUIC server endpoint with TLS certificate.
-async fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<Endpoint> {
-    let server_config = configure_server()?;
+async fn make_server_endpoint(
+    bind_addr: SocketAddr,
+    tls_cfg: TLSConnectionArgs,
+) -> anyhow::Result<Endpoint> {
+    let tls_cfg: TLSConnectionConfig = tls_cfg.into();
+    let server_config = build_quic_config(&tls_cfg).await?;
     let endpoint = Endpoint::server(server_config, bind_addr)?;
     Ok(endpoint)
-}
-
-/// Generate a self-signed TLS certificate and configure QUIC server.
-fn configure_server() -> anyhow::Result<ServerConfig> {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
-    let cert_der = CertificateDer::from(cert.serialize_der()?);
-    let key = PrivatePkcs8KeyDer::from(cert.serialize_private_key_der());
-    let certs = vec![cert_der];
-    let server_config =
-        ServerConfig::with_single_cert(certs, rustls::pki_types::PrivateKeyDer::Pkcs8(key))?;
-    Ok(server_config)
 }
 
 /// Calculate routes for a node from all current leases.

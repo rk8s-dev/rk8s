@@ -1,4 +1,4 @@
-path "pki/issue/control-plane" {
+path "pki/issue/rks-node" {
   capabilities = ["update"]
 }
 

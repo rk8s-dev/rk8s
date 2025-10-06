@@ -34,7 +34,7 @@ use crate::{
     logical::{Request, Response},
     modules::{
         auth::AuthModule,
-        credential::{approle::AppRoleModule, cert::CertModule},
+        credential::{cert::CertModule},
         pki::PkiModule,
         policy::PolicyModule,
     },
@@ -115,10 +115,6 @@ impl RustyVault {
         // add pki_module
         let pki_module = PkiModule::new(core.clone());
         core.module_manager.add_module(Arc::new(pki_module))?;
-
-        // add credential module: approle
-        let approle_module = AppRoleModule::new(core.clone());
-        core.module_manager.add_module(Arc::new(approle_module))?;
 
         // add credential module: cert
         let cert_module = CertModule::new(core.clone());

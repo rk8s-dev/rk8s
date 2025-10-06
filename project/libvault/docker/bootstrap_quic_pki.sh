@@ -5,9 +5,9 @@ set -euo pipefail
 # It will:
 #   1. Initialise the vault (if not already initialised) using docker/quic_pki/01-init.json
 #   2. Unseal the vault with the generated keys
-#   3. Write control-plane & data-plane policies
+#   3. Write rks-node & rkl-node policies
 #   4. Mount the PKI backend and generate/import a root CA
-#   5. Create control-plane & data-plane issuance roles
+#   5. Create rks-node & rkl-node issuance roles
 #
 # Requirements: curl, jq
 # Environment variables:
@@ -135,9 +135,9 @@ vault_write_raw() {
 }
 
 echo "[INFO] Writing policies..."
-for policy in control-plane data-plane; do
+for policy in rks-node rkl-node; do
   hcl_path="$EXAMPLES_DIR/policy-$policy.hcl"
-  curl -sS -X PUT "$VAULT_ADDR/v1/sys/policies/acl/$policy" \
+  curl -sS -X POST "$VAULT_ADDR/v1/sys/policies/acl/$policy" \
     -H "$AUTH_HEADER: $ROOT_TOKEN_LOCAL" \
     -H 'Content-Type: application/json' \
     --data @<(jq -Rs '{policy:.}' "$hcl_path") >/dev/null
@@ -172,8 +172,8 @@ else
 fi
 
 echo "[INFO] Creating issuance roles..."
-vault_write_json "pki/roles/control-plane" "$EXAMPLES_DIR/role-control-plane.json" >/dev/null
-vault_write_json "pki/roles/data-plane" "$EXAMPLES_DIR/role-data-plane.json" >/dev/null
+vault_write_json "pki/roles/rks-node" "$EXAMPLES_DIR/role-rks-node.json" >/dev/null
+vault_write_json "pki/roles/rkl-node" "$EXAMPLES_DIR/role-rkl-node.json" >/dev/null
 
 # Legacy quic-endpoint role retained for compatibility with earlier examples
 vault_write_json "pki/roles/quic-endpoint" "$EXAMPLES_DIR/05-role-quic-endpoint.json" >/dev/null

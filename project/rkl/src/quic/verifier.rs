@@ -1,6 +1,6 @@
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::{DigitallySignedStruct, SignatureScheme};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{DigitallySignedStruct, SignatureScheme};
 
 /// Skip certificate verification
 #[derive(Debug)]

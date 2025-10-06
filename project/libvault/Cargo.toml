@@ -81,6 +81,7 @@ etcd-client = "0.17.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["fmt", "env-filter"] }
 tracing-log = "0.2.0"
+builder-pattern = "0.4.2"
 
 # optional dependencies
 openssl = { version = "*", optional = true }

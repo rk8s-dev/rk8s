@@ -1,4 +1,5 @@
 mod api;
+mod cert;
 mod cli;
 mod commands;
 mod dns;
@@ -28,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     info!("server started");
 
     match &cli.command {
-        Commands::Start { config } => {
+        Commands::Start { config, tls_cfg } => {
             let cfg = load_config(config.to_str().unwrap())?;
             let xline_config = cfg.xline_config;
             let endpoints: Vec<&str> = xline_config.endpoints.iter().map(|s| s.as_str()).collect();
@@ -55,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("Failed to create Scheduler")?;
             scheduler.run().await;
-            serve(cfg.addr, xline_store, local_manager).await?;
+            serve(cfg.addr, xline_store, local_manager, tls_cfg.clone()).await?;
         }
     }
 

@@ -351,7 +351,7 @@ impl Certificate {
             "ec" => {
                 let curve_name = match key_bits {
                     224 => Nid::SECP224R1,
-                    256 => Nid::SECP256K1,
+                    256 => Nid::X9_62_PRIME256V1,
                     384 => Nid::SECP384R1,
                     521 => Nid::SECP521R1,
                     _ => return Err(RvError::ErrPkiKeyBitsInvalid),

@@ -42,8 +42,11 @@ COPY docker/files/config.hcl /etc/rusty_vault/config.hcl
 COPY docker/bootstrap_quic_pki.sh /usr/local/bin/bootstrap_quic_pki.sh
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY docker/quic_pki /opt/rusty_vault/quic_pki
+COPY docker/scripts/create_rkl_bootstrap_token.sh /usr/local/bin/create_rkl_bootstrap_token.sh
+COPY docker/scripts/create_rks_bootstrap_token.sh /usr/local/bin/create_rks_bootstrap_token.sh
 
 RUN chmod +x /usr/local/bin/bootstrap_quic_pki.sh /usr/local/bin/docker-entrypoint.sh \
+    /usr/local/bin/create_rkl_bootstrap_token.sh /usr/local/bin/create_rks_bootstrap_token.sh \
     && mkdir -p /opt/rusty_vault/state
 
 ENV VAULT_ADDR=http://127.0.0.1:8200 \
