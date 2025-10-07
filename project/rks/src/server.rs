@@ -1,10 +1,10 @@
 use crate::api::xlinestore::XlineStore;
-use crate::cert::{TLSConnectionConfig, build_quic_config};
-use crate::cli::TLSConnectionArgs;
+use crate::cert::build_quic_config;
 use crate::commands::create::watch_create;
 use crate::commands::delete::watch_delete;
 use crate::commands::{create, delete};
 use crate::network::{lease::LeaseWatchResult, manager::LocalManager};
+use crate::protocol::config::TLSConfig;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use common::{
@@ -62,7 +62,7 @@ pub async fn serve(
     addr: String,
     xline_store: Arc<XlineStore>,
     local_manager: Arc<LocalManager>,
-    tls_cfg: TLSConnectionArgs,
+    tls_cfg: TLSConfig,
 ) -> anyhow::Result<()> {
     info!("Starting server with address: {addr}");
 
@@ -499,9 +499,8 @@ pub async fn dispatch_user(
 /// Set up the QUIC server endpoint with TLS certificate.
 async fn make_server_endpoint(
     bind_addr: SocketAddr,
-    tls_cfg: TLSConnectionArgs,
+    tls_cfg: TLSConfig,
 ) -> anyhow::Result<Endpoint> {
-    let tls_cfg: TLSConnectionConfig = tls_cfg.into();
     let server_config = build_quic_config(&tls_cfg).await?;
     let endpoint = Endpoint::server(server_config, bind_addr)?;
     Ok(endpoint)

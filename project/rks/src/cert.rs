@@ -1,4 +1,4 @@
-use crate::cli::TLSConnectionArgs;
+use crate::protocol::config::TLSConfig;
 use anyhow::Context;
 use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 use quinn::crypto::rustls::QuicServerConfig;
@@ -10,23 +10,6 @@ use std::sync::Arc;
 
 const DEFAULT_TTL: &str = "12h";
 
-#[derive(Debug, Clone)]
-pub struct TLSConnectionConfig {
-    pub enable_tls: bool,
-    pub vault_url: String,
-    pub bootstrap_token: String,
-}
-
-impl From<TLSConnectionArgs> for TLSConnectionConfig {
-    fn from(value: TLSConnectionArgs) -> Self {
-        Self {
-            enable_tls: value.enable_tls,
-            vault_url: value.vault_url,
-            bootstrap_token: value.bootstrap_token,
-        }
-    }
-}
-
 fn build_no_tls_config() -> anyhow::Result<quinn::ServerConfig> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
     let cert_der = CertificateDer::from(cert.serialize_der()?);
@@ -37,16 +20,14 @@ fn build_no_tls_config() -> anyhow::Result<quinn::ServerConfig> {
     Ok(server_config)
 }
 
-pub async fn build_quic_config(
-    config: &TLSConnectionConfig,
-) -> anyhow::Result<quinn::ServerConfig> {
-    if !config.enable_tls {
+pub async fn build_quic_config(config: &TLSConfig) -> anyhow::Result<quinn::ServerConfig> {
+    if !config.enable {
         return build_no_tls_config();
     }
 
     let req = IssueCertificateRequest {
         common_name: Some("rks-cluster".to_string()),
-        alt_names: Some("rks.svc.cluster.local".to_string()),
+        alt_names: Some("rks.svc.cluster.local,localhost".to_string()),
         ip_sans: Some("192.168.73.128,127.0.0.1".to_string()),
         ttl: Some(DEFAULT_TTL.to_string()),
     };
@@ -67,18 +48,18 @@ pub async fn build_quic_config(
 }
 
 async fn issue_certificate(
-    config: &TLSConnectionConfig,
+    config: &TLSConfig,
     path: &str,
     req: IssueCertificateRequest,
 ) -> anyhow::Result<IssueCertificateResponse> {
-    let mut vault_url = config.vault_url.clone();
+    let mut vault_url = config.vault_url.clone().unwrap();
     if !vault_url.starts_with("http") {
         vault_url = format!("http://{}", vault_url);
     }
 
     let client = libvault::api::Client::builder()
         .with_addr(&vault_url)
-        .with_token(&config.bootstrap_token)
+        .with_token(config.bootstrap_token.as_ref().unwrap())
         .build()?;
 
     client

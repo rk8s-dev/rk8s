@@ -2,15 +2,9 @@
 name = "libvault"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
-description = """
-RustyVault is a powerful identity-based secrets management software, providing features such as
-cryptographic key management, encryption as a service, public key cryptography, certificates management, identity credentials
-management and so forth.
-
-RustyVault's RESTful API is designed to be fully compatible with Hashicorp Vault.
-"""
-repository = "https://github.com/Tongsuo-Project/RustyVault"
+authors = ["rk8s-dev team"]
+description = "the libvault is modified from RustyVault"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libvault"
 documentation = "https://docs.rs/rusty_vault/latest/rusty_vault/"
 build = "build.rs"
 
@@ -83,13 +77,8 @@ tracing-log = "0.2.0"
 builder-pattern = "0.4.2"
 
 # optional dependencies
-openssl = { version = "*", optional = true }
-openssl-sys = { version = "*", optional = true }
-
-# rust-tongsuo is a superset of rust-openssl, so we can use it mandatorily anyway.
-[patch.crates-io]
-openssl = { git = "https://github.com/Tongsuo-Project/rust-tongsuo.git" }
-openssl-sys = { git = "https://github.com/Tongsuo-Project/rust-tongsuo.git" }
+openssl = { version = "0.10.73", optional = true }
+openssl-sys = { version = "0.9.109", optional = true }
 
 [build-dependencies]
 toml = "0.8.19"

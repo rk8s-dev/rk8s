@@ -35,17 +35,22 @@ xline_config:
     - "http://172.20.0.3:2379"
     - "http://172.20.0.4:2379"
     - "http://172.20.0.5:2379"
-    prefix: "/coreos.com/network"
-    subnet_lease_renew_margin: 60
+  prefix: "/coreos.com/network"
+  subnet_lease_renew_margin: 60
 network_config:
   Network: "10.1.0.0/16"
   SubnetMin: "10.1.1.0"
   SubnetMax: "10.1.254.0"
   SubnetLen: 24
+tls_config:
+  enable: false
+  vault_url: ""
+  bootstrap_token: ""
 ```
 -   `addr`: The address and port where the RKS service listens. `addr` is the only field that you need modify.
 -   `xline_config`: Defines the backend Xline cluster, including endpoints, a prefix key for storing data, and a lease renewal margin.
- -   `network_config`: Specifies the network settings managed by RKS, such as the overall network range (`10.1.0.0/16`), the minimum and maximum subnets to allocate, and the subnet length (`/24`).
+-   `network_config`: Specifies the network settings managed by RKS, such as the overall network range (`10.1.0.0/16`), the minimum and maximum subnets to allocate, and the subnet length (`/24`).
+-   `tls_config`: RKS uses QUIC to communicate with RKL, and libvault is used as certificates manager. Set `enable = false` to disable authentication, otherwise set `vault_url` and `bootstrap_token` to configurate it.
 
 Then,we can start RKS:
 ```bash
@@ -70,17 +75,17 @@ spec:
   node_name:
   containers:
     - name: container1
-    image: ./rk8s/project/test/bundles/busybox
-    args:
-      - "dd"
-      - "if=/dev/zero"
-      - "of=/dev/null"
-    ports:
-      - containerPort: 80
-    resources:
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
+      image: ./rk8s/project/test/bundles/busybox
+      args:
+        - "dd"
+        - "if=/dev/zero"
+        - "of=/dev/null"
+      ports:
+        - containerPort: 80
+      resources:
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
 status:
 ```
 In the `/project/test/bundles` directory, a test bundle is provided.  

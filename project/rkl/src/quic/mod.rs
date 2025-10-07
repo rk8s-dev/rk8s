@@ -14,8 +14,8 @@ impl From<TLSConnectionArgs> for TLSConnectionConfig {
     fn from(value: TLSConnectionArgs) -> Self {
         Self {
             enable_tls: value.enable_tls,
-            vault_url: value.vault_url,
-            bootstrap_token: value.bootstrap_token,
+            vault_url: value.vault_url.unwrap_or_default(),
+            bootstrap_token: value.bootstrap_token.unwrap_or_default(),
         }
     }
 }

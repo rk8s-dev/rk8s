@@ -16,11 +16,15 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use log::error;
+use rustls::crypto::CryptoProvider;
 use server::serve;
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    CryptoProvider::install_default(rustls::crypto::ring::default_provider())
+        .expect("failed to install default CryptoProvider");
+
     let cli = Cli::parse();
     use log::info;
 
@@ -29,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     info!("server started");
 
     match &cli.command {
-        Commands::Start { config, tls_cfg } => {
+        Commands::Start { config } => {
             let cfg = load_config(config.to_str().unwrap())?;
             let xline_config = cfg.xline_config;
             let endpoints: Vec<&str> = xline_config.endpoints.iter().map(|s| s.as_str()).collect();
@@ -56,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("Failed to create Scheduler")?;
             scheduler.run().await;
-            serve(cfg.addr, xline_store, local_manager, tls_cfg.clone()).await?;
+            serve(cfg.addr, xline_store, local_manager, cfg.tls_config).await?;
         }
     }
 

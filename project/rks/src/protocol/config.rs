@@ -10,6 +10,8 @@ pub struct Config {
     pub xline_config: XlineConfig,
     // network config
     pub network_config: NetworkConfig,
+    // tls connection config
+    pub tls_config: TLSConfig,
 }
 
 #[allow(dead_code)]
@@ -36,6 +38,13 @@ pub struct NetworkConfig {
 
     #[serde(rename = "SubnetLen")]
     pub subnet_len: u8,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TLSConfig {
+    pub enable: bool,
+    pub vault_url: Option<String>,
+    pub bootstrap_token: Option<String>,
 }
 
 pub fn load_config(path: &str) -> Result<Config> {

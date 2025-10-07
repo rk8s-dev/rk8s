@@ -21,10 +21,10 @@ pub mod standalone;
 pub struct TLSConnectionArgs {
     #[arg(long, env = "ENABLE_TLS", required = false)]
     pub enable_tls: bool,
-    #[arg(long, env = "VAULT_URL", required = true)]
-    pub vault_url: String,
-    #[arg(long, env = "BOOTSTRAP_TOKEN", required = true)]
-    pub bootstrap_token: String,
+    #[arg(long, env = "VAULT_URL")]
+    pub vault_url: Option<String>,
+    #[arg(long, env = "BOOTSTRAP_TOKEN")]
+    pub bootstrap_token: Option<String>,
 }
 
 #[derive(Subcommand)]

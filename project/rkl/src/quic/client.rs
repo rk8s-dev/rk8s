@@ -260,6 +260,7 @@ mod tests {
         CryptoProvider::install_default(rustls::crypto::ring::default_provider())
             .expect("failed to install default CryptoProvider");
 
+        // Use the root token or generated token of libvault as the bootstrap token
         let config = TLSConnectionConfig {
             enable_tls: true,
             vault_url: "127.0.0.1:8200".to_string(),
