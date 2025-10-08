@@ -64,10 +64,11 @@ jobs:
 
       - name: Run redundancy check
         run: |
-          if find third-party/rust/crates -mindepth 2 -maxdepth 2 -type d -exec bash -c '
+          x=$(find third-party/rust/crates -mindepth 2 -maxdepth 2 -type d -exec bash -c '
             n=$(find "$1" -maxdepth 1 -type f | wc -l)
             [ $n -gt 1 ]
-          ' _ {} \; -print -quit | head -1 >/dev/null; then
+          ' _ {} \; -print -quit | wc -l)
+          if [ $x -gt 0 ]; then
             echo "❌ Redundant directories found"
             exit 1
           else
