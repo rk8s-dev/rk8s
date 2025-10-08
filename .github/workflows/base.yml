@@ -52,6 +52,29 @@ jobs:
           cd project
           cargo clippy --workspace -- -D warnings
 
+  redundancy:
+    name: Redundancy Check
+    runs-on: [self-hosted]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run redundancy check
+        run: |
+          if find third-party/rust/crates -mindepth 2 -maxdepth 2 -type d -exec bash -c '
+            n=$(find "$1" -maxdepth 1 -type f | wc -l)
+            [ $n -gt 1 ]
+          ' _ {} \; -print -quit | head -1 >/dev/null; then
+            echo "❌ Redundant directories found"
+            exit 1
+          else
+            echo "✅ All good"
+            exit 0
+          fi
+
   build:
     name: Buck2 Build
 
