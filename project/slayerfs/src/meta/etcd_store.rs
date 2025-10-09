@@ -1,40 +1,40 @@
 //! Etcd-based metadata store implementation
 //!
-//! Uses Xline/etcd as the backend for metadata storage
+//! Uses Etcd/etcd as the backend for metadata storage
 
 use crate::meta::Permission;
 use crate::meta::config::{Config, DatabaseType};
-use crate::meta::entities::xline::*;
+use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
 use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
-use etcd_client::Client as XlineClient;
+use etcd_client::Client as EtcdClient;
 use log::{error, info};
 use serde_json;
 use std::collections::HashSet;
 use std::path::Path;
 
 /// Etcd-based metadata store
-pub struct XlineMetaStore {
-    client: XlineClient,
+pub struct EtcdMetaStore {
+    client: EtcdClient,
     _config: Config,
 }
 #[allow(dead_code)]
-impl XlineMetaStore {
-    /// Xline helper method: generate forward index key (parent_inode, name)
-    fn xline_forward_key(parent_inode: i64, name: &str) -> String {
+impl EtcdMetaStore {
+    /// Etcd helper method: generate forward index key (parent_inode, name)
+    fn etcd_forward_key(parent_inode: i64, name: &str) -> String {
         format!("f:{}:{}", parent_inode, name)
     }
 
-    /// Xline helper method: generate reverse index key for inode
-    fn xline_reverse_key(ino: i64) -> String {
+    /// Etcd helper method: generate reverse index key for inode
+    fn etcd_reverse_key(ino: i64) -> String {
         format!("r:{}", ino)
     }
 
-    /// Xline helper method: generate directory children key
-    fn xline_children_key(inode: i64) -> String {
+    /// Etcd helper method: generate directory children key
+    fn etcd_children_key(inode: i64) -> String {
         format!("c:{}", inode)
     }
 
@@ -43,37 +43,37 @@ impl XlineMetaStore {
         let _config =
             Config::from_path(backend_path).map_err(|e| MetaError::Config(e.to_string()))?;
 
-        info!("Initializing XlineMetaStore");
+        info!("Initializing EtcdMetaStore");
         info!("Backend path: {}", backend_path.display());
 
         let client = Self::create_client(&_config).await?;
         let store = Self { client, _config };
         store.init_root_directory().await?;
 
-        info!("XlineMetaStore initialized successfully");
+        info!("EtcdMetaStore initialized successfully");
         Ok(store)
     }
 
     /// Create from existing config
     pub async fn from_config(_config: Config) -> Result<Self, MetaError> {
-        info!("Initializing XlineMetaStore from config");
+        info!("Initializing EtcdMetaStore from config");
 
         let client = Self::create_client(&_config).await?;
         let store = Self { client, _config };
         store.init_root_directory().await?;
 
-        info!("XlineMetaStore initialized successfully");
+        info!("EtcdMetaStore initialized successfully");
         Ok(store)
     }
 
     /// Create etcd client
-    async fn create_client(config: &Config) -> Result<XlineClient, MetaError> {
+    async fn create_client(config: &Config) -> Result<EtcdClient, MetaError> {
         match &config.database.db_config {
-            DatabaseType::Xline { urls } => {
-                info!("Connecting to Xline cluster: {:?}", urls);
-                let client = XlineClient::connect(urls, None)
+            DatabaseType::Etcd { urls } => {
+                info!("Connecting to Etcd cluster: {:?}", urls);
+                let client = EtcdClient::connect(urls, None)
                     .await
-                    .map_err(|e| MetaError::Config(format!("Failed to connect to Xline: {}", e)))?;
+                    .map_err(|e| MetaError::Config(format!("Failed to connect to Etcd: {}", e)))?;
                 Ok(client)
             }
             DatabaseType::Sqlite { .. } | DatabaseType::Postgres { .. } => {
@@ -87,7 +87,7 @@ impl XlineMetaStore {
 
     /// Initialize root directory
     async fn init_root_directory(&self) -> Result<(), MetaError> {
-        let children_key = Self::xline_children_key(1);
+        let children_key = Self::etcd_children_key(1);
         let mut client = self.client.clone();
 
         if let Ok(resp) = client.get(children_key.clone(), None).await
@@ -97,7 +97,7 @@ impl XlineMetaStore {
             return Ok(());
         }
 
-        let root_children = XlineDirChildren {
+        let root_children = EtcdDirChildren {
             inode: 1,
             children: HashSet::new(),
         };
@@ -131,13 +131,13 @@ impl XlineMetaStore {
             }));
         }
 
-        let reverse_key = Self::xline_reverse_key(inode);
+        let reverse_key = Self::etcd_reverse_key(inode);
         let mut client = self.client.clone();
 
         match client.get(reverse_key, None).await {
             Ok(resp) => {
                 if let Some(kv) = resp.kvs().first() {
-                    let entry_info: XlineEntryInfo = serde_json::from_slice(kv.value())?;
+                    let entry_info: EtcdEntryInfo = serde_json::from_slice(kv.value())?;
                     if !entry_info.is_file {
                         let permission = entry_info.permission().clone();
                         let access_meta = AccessMetaModel::from_permission(
@@ -162,13 +162,13 @@ impl XlineMetaStore {
         &self,
         parent_inode: i64,
     ) -> Result<Option<Vec<ContentMetaModel>>, MetaError> {
-        let children_key = Self::xline_children_key(parent_inode);
+        let children_key = Self::etcd_children_key(parent_inode);
         let mut client = self.client.clone();
 
         match client.get(children_key, None).await {
             Ok(resp) => {
                 if let Some(kv) = resp.kvs().first() {
-                    let dir_children: XlineDirChildren = serde_json::from_slice(kv.value())?;
+                    let dir_children: EtcdDirChildren = serde_json::from_slice(kv.value())?;
 
                     if dir_children.children.is_empty() {
                         return Ok(None);
@@ -177,11 +177,11 @@ impl XlineMetaStore {
                     let mut content_list = Vec::new();
 
                     for child_name in &dir_children.children {
-                        let forward_key = Self::xline_forward_key(parent_inode, child_name);
+                        let forward_key = Self::etcd_forward_key(parent_inode, child_name);
                         if let Ok(forward_resp) = client.get(forward_key, None).await
                             && let Some(forward_kv) = forward_resp.kvs().first()
                         {
-                            let forward_entry: XlineForwardEntry =
+                            let forward_entry: EtcdForwardEntry =
                                 serde_json::from_slice(forward_kv.value())?;
 
                             let entry_type = if forward_entry.is_file {
@@ -214,13 +214,13 @@ impl XlineMetaStore {
 
     /// Get file metadata
     async fn get_file_meta(&self, inode: i64) -> Result<Option<FileMetaModel>, MetaError> {
-        let reverse_key = Self::xline_reverse_key(inode);
+        let reverse_key = Self::etcd_reverse_key(inode);
         let mut client = self.client.clone();
 
         match client.get(reverse_key.clone(), None).await {
             Ok(resp) => {
                 if let Some(kv) = resp.kvs().first() {
-                    let entry_info: XlineEntryInfo = serde_json::from_slice(kv.value())?;
+                    let entry_info: EtcdEntryInfo = serde_json::from_slice(kv.value())?;
 
                     if entry_info.is_file {
                         let permission = entry_info.permission().clone();
@@ -270,7 +270,7 @@ impl XlineMetaStore {
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let dir_permission = Permission::new(0o40755, 0, 0);
-        let entry_info = XlineEntryInfo {
+        let entry_info = EtcdEntryInfo {
             is_file: false,
             size: None,
             version: None,
@@ -281,8 +281,8 @@ impl XlineMetaStore {
             nlink: 2,
         };
 
-        let forward_key = Self::xline_forward_key(parent_inode, &name);
-        let forward_entry = XlineForwardEntry {
+        let forward_key = Self::etcd_forward_key(parent_inode, &name);
+        let forward_entry = EtcdForwardEntry {
             parent_inode,
             name: name.clone(),
             inode,
@@ -290,25 +290,25 @@ impl XlineMetaStore {
         };
         let forward_json = serde_json::to_string(&forward_entry)?;
 
-        let reverse_key = Self::xline_reverse_key(inode);
+        let reverse_key = Self::etcd_reverse_key(inode);
         let reverse_json = serde_json::to_string(&entry_info)?;
 
-        let children_key = Self::xline_children_key(inode);
-        let children = XlineDirChildren {
+        let children_key = Self::etcd_children_key(inode);
+        let children = EtcdDirChildren {
             inode,
             children: HashSet::new(),
         };
         let children_json = serde_json::to_string(&children)?;
 
-        let parent_children_key = Self::xline_children_key(parent_inode);
+        let parent_children_key = Self::etcd_children_key(parent_inode);
         let parent_children = match client.get(parent_children_key.clone(), None).await {
             Ok(resp) => {
                 if let Some(kv) = resp.kvs().first() {
-                    let mut children: XlineDirChildren = serde_json::from_slice(kv.value())?;
+                    let mut children: EtcdDirChildren = serde_json::from_slice(kv.value())?;
                     children.children.insert(name.clone());
                     children
                 } else {
-                    let mut children = XlineDirChildren {
+                    let mut children = EtcdDirChildren {
                         inode: parent_inode,
                         children: HashSet::new(),
                     };
@@ -372,7 +372,7 @@ impl XlineMetaStore {
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let file_permission = Permission::new(0o644, 0, 0);
-        let entry_info = XlineEntryInfo {
+        let entry_info = EtcdEntryInfo {
             is_file: true,
             size: Some(0),
             version: Some(0),
@@ -383,8 +383,8 @@ impl XlineMetaStore {
             nlink: 1,
         };
 
-        let forward_key = Self::xline_forward_key(parent_inode, &name);
-        let forward_entry = XlineForwardEntry {
+        let forward_key = Self::etcd_forward_key(parent_inode, &name);
+        let forward_entry = EtcdForwardEntry {
             parent_inode,
             name: name.clone(),
             inode,
@@ -392,18 +392,18 @@ impl XlineMetaStore {
         };
         let forward_json = serde_json::to_string(&forward_entry)?;
 
-        let reverse_key = Self::xline_reverse_key(inode);
+        let reverse_key = Self::etcd_reverse_key(inode);
         let reverse_json = serde_json::to_string(&entry_info)?;
 
-        let parent_children_key = Self::xline_children_key(parent_inode);
+        let parent_children_key = Self::etcd_children_key(parent_inode);
         let parent_children = match client.get(parent_children_key.clone(), None).await {
             Ok(resp) => {
                 if let Some(kv) = resp.kvs().first() {
-                    let mut children: XlineDirChildren = serde_json::from_slice(kv.value())?;
+                    let mut children: EtcdDirChildren = serde_json::from_slice(kv.value())?;
                     children.children.insert(name.clone());
                     children
                 } else {
-                    let mut children = XlineDirChildren {
+                    let mut children = EtcdDirChildren {
                         inode: parent_inode,
                         children: HashSet::new(),
                     };
@@ -437,42 +437,86 @@ impl XlineMetaStore {
         Ok(inode)
     }
 
-    /// Generate unique ID
+    /// Generate unique ID using Etcd atomic counter
+    /// Uses compare-and-swap to ensure atomicity in distributed environment
     async fn generate_id(&self) -> Result<i64, MetaError> {
         let mut client = self.client.clone();
         let counter_key = "slayerfs:next_inode_id";
 
-        match client.get(counter_key, None).await {
-            Ok(resp) => {
-                let current_id = if let Some(kv) = resp.kvs().first() {
-                    String::from_utf8_lossy(kv.value())
-                        .parse::<i64>()
-                        .unwrap_or(1)
-                } else {
-                    1
-                };
+        // Retry loop for CAS operation
+        // TODO: think about how to keep in sync with remote
+        for retry in 0..10 {
+            match client.get(counter_key, None).await {
+                Ok(resp) => {
+                    let (current_id, mod_revision) = if let Some(kv) = resp.kvs().first() {
+                        let id = String::from_utf8_lossy(kv.value())
+                            .parse::<i64>()
+                            .unwrap_or(1);
+                        (id, kv.mod_revision())
+                    } else {
+                        // First time initialization
+                        if let Err(e) = client.put(counter_key, "2", None).await {
+                            error!("Failed to initialize ID counter: {}", e);
+                            return Err(MetaError::Config(format!(
+                                "Failed to initialize ID counter: {}",
+                                e
+                            )));
+                        }
+                        return Ok(2);
+                    };
 
-                let next_id = current_id + 1;
+                    let next_id = current_id + 1;
 
-                if let Err(e) = client.put(counter_key, next_id.to_string(), None).await {
+                    // Use transaction for atomic compare-and-swap
+                    use etcd_client::{Compare, CompareOp, Txn, TxnOp};
+
+                    let cmp = Compare::mod_revision(counter_key, CompareOp::Equal, mod_revision);
+                    let put_op = TxnOp::put(counter_key, next_id.to_string(), None);
+                    let txn = Txn::new().when([cmp]).and_then([put_op]);
+
+                    match client.txn(txn).await {
+                        Ok(txn_resp) => {
+                            if txn_resp.succeeded() {
+                                // CAS succeeded, return the new ID
+                                return Ok(next_id);
+                            } else {
+                                // CAS failed, retry
+                                if retry < 9 {
+                                    continue;
+                                } else {
+                                    return Err(MetaError::Config(
+                                        "Failed to generate ID after max retries".to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to execute transaction: {}", e);
+                            return Err(MetaError::Config(format!(
+                                "Failed to execute ID generation transaction: {}",
+                                e
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get ID counter: {}", e);
                     return Err(MetaError::Config(format!(
-                        "Failed to update ID counter: {}",
+                        "Failed to get ID counter: {}",
                         e
                     )));
                 }
-
-                Ok(next_id)
             }
-            Err(e) => Err(MetaError::Config(format!(
-                "Failed to get ID counter: {}",
-                e
-            ))),
         }
+
+        Err(MetaError::Config(
+            "Failed to generate ID: max retries exceeded".to_string(),
+        ))
     }
 }
 
 #[async_trait]
-impl MetaStore for XlineMetaStore {
+impl MetaStore for EtcdMetaStore {
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         if let Ok(Some(file_meta)) = self.get_file_meta(ino).await {
             let permission = file_meta.permission();
@@ -630,12 +674,12 @@ impl MetaStore for XlineMetaStore {
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         let mut client = self.client.clone();
-        let reverse_key = Self::xline_reverse_key(ino);
+        let reverse_key = Self::etcd_reverse_key(ino);
 
         match client.get(reverse_key.clone(), None).await {
             Ok(resp) => {
                 if let Some(kv) = resp.kvs().first() {
-                    let mut entry_info: XlineEntryInfo = serde_json::from_slice(kv.value())
+                    let mut entry_info: EtcdEntryInfo = serde_json::from_slice(kv.value())
                         .map_err(|e| {
                             MetaError::Internal(format!("Failed to parse entry info: {}", e))
                         })?;

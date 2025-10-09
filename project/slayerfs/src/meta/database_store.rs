@@ -2,9 +2,6 @@
 //!
 //! Supports SQLite and PostgreSQL backends via SeaORM
 
-use sea_orm::*;
-use std::path::Path;
-
 use crate::meta::Permission;
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::*;
@@ -13,11 +10,15 @@ use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
 use log::info;
+use sea_orm::*;
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Database-based metadata store
 pub struct DatabaseMetaStore {
     db: DatabaseConnection,
     _config: Config,
+    next_inode: AtomicU64,
 }
 
 impl DatabaseMetaStore {
@@ -34,7 +35,12 @@ impl DatabaseMetaStore {
         let db = Self::create_connection(&_config).await?;
         Self::init_schema(&db).await?;
 
-        let store = Self { db, _config };
+        let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
+        let store = Self {
+            db,
+            _config,
+            next_inode,
+        };
         store.init_root_directory().await?;
 
         info!("DatabaseMetaStore initialized successfully");
@@ -49,11 +55,39 @@ impl DatabaseMetaStore {
         let db = Self::create_connection(&_config).await?;
         Self::init_schema(&db).await?;
 
-        let store = Self { db, _config };
+        let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
+        let store = Self {
+            db,
+            _config,
+            next_inode,
+        };
         store.init_root_directory().await?;
 
         info!("DatabaseMetaStore initialized successfully");
         Ok(store)
+    }
+
+    /// Initialize next inode counter from database
+    async fn init_next_inode(db: &DatabaseConnection) -> Result<u64, MetaError> {
+        let max_access = AccessMeta::find()
+            .order_by_desc(access_meta::Column::Inode)
+            .one(db)
+            .await
+            .map_err(MetaError::Database)?
+            .map(|r| r.inode as u64)
+            .unwrap_or(1);
+
+        let max_file = FileMeta::find()
+            .order_by_desc(file_meta::Column::Inode)
+            .one(db)
+            .await
+            .map_err(MetaError::Database)?
+            .map(|r| r.inode as u64)
+            .unwrap_or(1);
+
+        let next = max_access.max(max_file) + 1;
+        info!("Initialized next inode counter to: {}", next);
+        Ok(next)
     }
 
     /// Create database connection
@@ -71,8 +105,8 @@ impl DatabaseMetaStore {
                 let db = Database::connect(opts).await?;
                 Ok(db)
             }
-            DatabaseType::Xline { .. } => Err(MetaError::Config(
-                "Xline backend not supported by DatabaseMetaStore. Use EtcdMetaStore instead."
+            DatabaseType::Etcd { .. } => Err(MetaError::Config(
+                "Etcd backend not supported by DatabaseMetaStore. Use EtcdMetaStore instead."
                     .to_string(),
             )),
         }
@@ -188,7 +222,7 @@ impl DatabaseMetaStore {
             }
         }
 
-        let inode = self.generate_id().await?;
+        let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let dir_permission = Permission::new(0o40755, 0, 0); // 目录权限：0o40000 (目录标志) + 0o755 (权限)
@@ -242,7 +276,7 @@ impl DatabaseMetaStore {
             }
         }
 
-        let inode = self.generate_id().await?;
+        let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let file_permission = Permission::new(0o644, 0, 0);
@@ -276,29 +310,10 @@ impl DatabaseMetaStore {
         Ok(inode)
     }
 
-    /// Generate unique ID
-    async fn generate_id(&self) -> Result<i64, MetaError> {
-        use sea_orm::QueryOrder;
-
-        let max_access = AccessMeta::find()
-            .order_by_desc(access_meta::Column::Inode)
-            .one(&self.db)
-            .await
-            .map_err(MetaError::Database)?
-            .map(|r| r.inode)
-            .unwrap_or(1);
-
-        let max_file = FileMeta::find()
-            .order_by_desc(file_meta::Column::Inode)
-            .one(&self.db)
-            .await
-            .map_err(MetaError::Database)?
-            .map(|r| r.inode)
-            .unwrap_or(1);
-
-        let next_id = std::cmp::max(max_access, max_file) + 1;
-
-        Ok(next_id)
+    /// Generate unique ID using atomic counter
+    fn generate_id(&self) -> i64 {
+        let id = self.next_inode.fetch_add(1, Ordering::SeqCst);
+        id as i64
     }
 }
 

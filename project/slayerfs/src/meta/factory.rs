@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::database_store::DatabaseMetaStore;
+use crate::meta::etcd_store::EtcdMetaStore;
 use crate::meta::store::{MetaError, MetaStore};
-use crate::meta::xline_store::XlineMetaStore;
 
 /// Factory for creating MetaStore instances
 pub struct MetaStoreFactory;
@@ -29,8 +29,8 @@ impl MetaStoreFactory {
                 let store = DatabaseMetaStore::from_config(config).await?;
                 Ok(Arc::new(store))
             }
-            DatabaseType::Xline { .. } => {
-                let store = XlineMetaStore::from_config(config).await?;
+            DatabaseType::Etcd { .. } => {
+                let store = EtcdMetaStore::from_config(config).await?;
                 Ok(Arc::new(store))
             }
         }
@@ -64,7 +64,7 @@ impl MetaStoreFactory {
             } else {
                 vec![url.to_string()]
             };
-            DatabaseType::Xline { urls }
+            DatabaseType::Etcd { urls }
         } else {
             return Err(MetaError::Config(format!(
                 "Unsupported URL scheme: {}",

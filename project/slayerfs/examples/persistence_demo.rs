@@ -54,8 +54,8 @@ fn process_config_for_backend(
                     println!("Using PostgreSQL database backend");
                     Ok(config_content.to_string())
                 }
-                "xline" => {
-                    println!("Using xline distributed backend");
+                "etcd" => {
+                    println!("Using etcd distributed backend");
                     Ok(config_content.to_string())
                 }
                 _ => Err(format!("Unsupported database type: {}", db_type).into()),
@@ -104,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!();
             eprintln!("Please create a config file or use existing ones:");
             eprintln!("  slayerfs-sqlite.yml   # SQLite database backend");
-            eprintln!("  slayerfs-xline.yml    # xline distributed backend");
+            eprintln!("  slayerfs-etcd.yml    # etcd distributed backend");
             std::process::exit(1);
         }
 

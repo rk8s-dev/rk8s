@@ -16,17 +16,17 @@
 //! - `client`: transactional metadata client (SQLx wrappers)
 //! - `migrations`: DB migration helpers
 //! - `database_store`: Database-based metadata store (SQLite/PostgreSQL)
-//! - `etcd_store`: Etcd-based metadata store (Xline/etcd)
+//! - `etcd_store`: Etcd-based metadata store (Etcd/etcd)
 //! - `factory`: Factory for creating appropriate MetaStore implementations
 pub mod client;
 pub mod config;
 pub mod database_store;
 pub mod entities;
+pub mod etcd_store;
 pub mod factory;
 pub mod migrations;
 pub mod permission;
 pub mod store;
-pub mod xline_store;
 
 // Primary exports
 pub use factory::create_meta_store_from_url;

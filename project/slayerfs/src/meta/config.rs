@@ -1,6 +1,6 @@
 //! SlayerFS configuration management
 //!
-//! Database connection configuration supporting SQLite, PostgreSQL and Xline
+//! Database connection configuration supporting SQLite, PostgreSQL and Etcd
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -30,8 +30,8 @@ pub enum DatabaseType {
     },
     #[serde(rename = "postgres")]
     Postgres { url: String },
-    #[serde(rename = "xline")]
-    Xline { urls: Vec<String> },
+    #[serde(rename = "etcd")]
+    Etcd { urls: Vec<String> },
 }
 
 fn default_sqlite_url() -> String {
@@ -85,7 +85,7 @@ impl DatabaseConfig {
         match &self.db_config {
             DatabaseType::Sqlite { .. } => "sqlite",
             DatabaseType::Postgres { .. } => "postgres",
-            DatabaseType::Xline { .. } => "xline",
+            DatabaseType::Etcd { .. } => "etcd",
         }
     }
 }

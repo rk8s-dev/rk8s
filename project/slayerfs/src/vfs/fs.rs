@@ -136,12 +136,16 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
     /// 由 inode 还原绝对路径（用于 FUSE open/read 等）
     pub fn path_of(&self, ino: i64) -> Option<String> {
         let ns = self.ns.lock().unwrap();
+        self.build_path(&ns, ino)
+    }
+
+    /// Build absolute path from inode while namespace is locked
+    fn build_path(&self, ns: &Namespace, ino: i64) -> Option<String> {
         let mut cur = ino;
         let mut parts: Vec<String> = Vec::new();
         loop {
             let vnode = ns.nodes.get(&cur)?;
             if vnode.parent.is_none() {
-                // 根
                 break;
             }
             parts.push(vnode.name.clone());
@@ -223,6 +227,7 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
                 }
             }
 
+            // Insert child nodes and update path mapping
             for entry in &meta_entries {
                 ns.nodes.insert(
                     entry.ino,
@@ -231,6 +236,16 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
                         FileType::File => VNode::file(entry.name.clone(), Some(ino)),
                     },
                 );
+
+                // Update path lookup to enable path-based operations like write
+                if let Some(parent_path) = self.build_path(&ns, ino) {
+                    let child_path = if parent_path == "/" {
+                        format!("/{}", entry.name)
+                    } else {
+                        format!("{}/{}", parent_path, entry.name)
+                    };
+                    ns.lookup.insert(child_path, entry.ino);
+                }
             }
         }
 
@@ -272,9 +287,65 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
             root: root_ino,
         };
 
-        let _ = vfs.readdir("/").await;
+        vfs.load_tree_from_meta().await?;
 
         Ok(vfs)
+    }
+
+    /// Load entire directory tree from MetaStore to rebuild namespace.
+    /// Critical for remount scenarios to restore all path mappings.
+    /// TODO: Optimize loading for deep directory trees.
+    async fn load_tree_from_meta(&self) -> Result<(), String> {
+        let mut queue: Vec<(String, i64)> = vec![("/".to_string(), self.root)];
+
+        while let Some((path, ino)) = queue.pop() {
+            let entries = match self.meta.readdir(ino).await {
+                Ok(entries) => entries,
+                Err(e) => {
+                    log::warn!("Failed to readdir {} (ino={}): {:?}", path, ino, e);
+                    continue;
+                }
+            };
+
+            {
+                let mut ns = self.ns.lock().unwrap();
+
+                ns.nodes
+                    .entry(ino)
+                    .or_insert_with(|| VNode::dir(path.clone(), None));
+
+                if let Some(vnode) = ns.nodes.get_mut(&ino) {
+                    vnode.children.clear();
+                    for entry in &entries {
+                        vnode.children.insert(entry.name.clone(), entry.ino);
+                    }
+                }
+
+                for entry in &entries {
+                    let child_path = if path == "/" {
+                        format!("/{}", entry.name)
+                    } else {
+                        format!("{}/{}", path, entry.name)
+                    };
+
+                    ns.nodes.insert(
+                        entry.ino,
+                        match entry.kind {
+                            FileType::Dir => VNode::dir(entry.name.clone(), Some(ino)),
+                            FileType::File => VNode::file(entry.name.clone(), Some(ino)),
+                        },
+                    );
+
+                    ns.lookup.insert(child_path.clone(), entry.ino);
+
+                    if entry.kind == FileType::Dir {
+                        queue.push((child_path, entry.ino));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// 规范化路径（内部）：
@@ -647,6 +718,7 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         let path = Self::norm_path(path);
         let ino = { self.ns.lock().unwrap().lookup.get(&path).cloned() }
             .ok_or_else(|| "not found".to_string())?;
+
         let spans: Vec<ChunkSpan> = split_file_range_into_chunks(self.layout, offset, data.len());
         let mut cursor = 0usize;
         for sp in spans {

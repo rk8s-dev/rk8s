@@ -1,12 +1,12 @@
-//! Xline backend-specific data structures
+//! Etcd backend-specific data structures
 
 use crate::meta::Permission;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// Xline entry information (reverse index: inode -> file/directory attributes)
+/// Etcd entry information (reverse index: inode -> file/directory attributes)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct XlineEntryInfo {
+pub struct EtcdEntryInfo {
     pub is_file: bool,
     pub size: Option<i64>,
     pub version: Option<i32>,
@@ -17,23 +17,23 @@ pub struct XlineEntryInfo {
     pub nlink: u32,
 }
 
-/// Xline forward index entry ((parent_id, name) -> inode)
+/// Etcd forward index entry ((parent_id, name) -> inode)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct XlineForwardEntry {
+pub struct EtcdForwardEntry {
     pub parent_inode: i64,
     pub name: String,
     pub inode: i64,
     pub is_file: bool,
 }
 
-/// Xline directory children collection (dir_id -> children names)
+/// Etcd directory children collection (dir_id -> children names)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct XlineDirChildren {
+pub struct EtcdDirChildren {
     pub inode: i64,
     pub children: HashSet<String>,
 }
 #[allow(dead_code)]
-impl XlineEntryInfo {
+impl EtcdEntryInfo {
     pub fn permission(&self) -> &Permission {
         &self.permission
     }
