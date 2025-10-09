@@ -63,7 +63,7 @@ cargo.rust_binary(
         "//third-party/rust/crates/tokio/1.47.1:tokio",
         "//third-party/rust/crates/tracing-subscriber/0.3.20:tracing-subscriber",
         "//third-party/rust/crates/tracing/0.1.41:tracing",
-        "//third-party/rust/crates/users/0.11.0:users",
+        "//third-party/rust/crates/uzers/0.12.1:uzers",
         "//third-party/rust/crates/walkdir/2.5.0:walkdir",
     ],
 )
@@ -122,7 +122,7 @@ cargo.rust_library(
         "//third-party/rust/crates/tokio/1.47.1:tokio",
         "//third-party/rust/crates/tracing-subscriber/0.3.20:tracing-subscriber",
         "//third-party/rust/crates/tracing/0.1.41:tracing",
-        "//third-party/rust/crates/users/0.11.0:users",
+        "//third-party/rust/crates/uzers/0.12.1:uzers",
         "//third-party/rust/crates/walkdir/2.5.0:walkdir",
     ],
 )

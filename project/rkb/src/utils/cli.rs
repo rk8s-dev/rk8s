@@ -1,9 +1,9 @@
+use uzers::os::unix::UserExt;
 use anyhow::Context;
 use reqwest::RequestBuilder;
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 use std::process::Command;
-use users::os::unix::UserExt;
 
 #[async_trait::async_trait]
 pub trait RequestBuilderExt {
@@ -63,7 +63,7 @@ pub fn original_user_config_path<'a>(
             let app_name = app_name.as_ref();
             let config_name = config_name.into().unwrap_or("default-config");
 
-            let user = users::get_user_by_name(&name)
+            let user = uzers::get_user_by_name(&name)
                 .with_context(|| format!("Failed to find user with name: {name}"))?;
             let home_dir = user.home_dir();
 
