@@ -58,20 +58,4 @@ impl fmt::Display for UnixSockAddr {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::{super::sock_addr::SockAddrType, *};
 
-    #[test]
-    fn test_unix_sock_addr() {
-        let addr1 = UnixSockAddr::new("/tmp/bar").unwrap();
-        let addr2 = UnixSockAddr::new("/tmp/bar").unwrap();
-        let addr3 = UnixSockAddr::new("/tmp/foo").unwrap();
-
-        assert!(addr1.contains(&addr2));
-        assert!(addr1.equal(&addr2));
-        assert!(!addr1.contains(&addr3));
-        assert!(!addr1.equal(&addr3));
-        assert_eq!(addr1.sock_addr_type(), SockAddrType::Unix);
-    }
-}

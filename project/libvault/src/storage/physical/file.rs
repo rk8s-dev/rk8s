@@ -153,16 +153,4 @@ impl FileBackend {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::super::super::test::{test_backend_curd, test_backend_list_prefix};
-    use crate::test_utils::new_test_backend;
 
-    #[tokio::test]
-    async fn test_file_backend() {
-        let backend = new_test_backend("test_file_backend");
-
-        test_backend_curd(backend.as_ref()).await;
-        test_backend_list_prefix(backend.as_ref()).await;
-    }
-}

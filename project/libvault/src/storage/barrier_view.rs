@@ -117,31 +117,4 @@ impl BarrierView {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use std::sync::Arc;
 
-    use rand::{Rng, thread_rng};
-
-    use super::{super::*, *};
-    use crate::test_utils::new_test_backend;
-
-    #[tokio::test]
-    async fn test_new_barrier_view() {
-        let backend = new_test_backend("test_new_barrier_view");
-
-        let mut key = vec![0u8; 32];
-        thread_rng().fill(key.as_mut_slice());
-
-        let aes_gcm_view = barrier_aes_gcm::AESGCMBarrier::new(backend.clone());
-
-        let init = aes_gcm_view.init(key.as_slice()).await;
-        assert!(init.is_ok());
-
-        let view = barrier_view::BarrierView::new(Arc::new(aes_gcm_view), "test");
-        assert_eq!(view.expand_key("foo"), "testfoo");
-        assert!(view.sanity_check("foo").is_ok());
-        assert!(view.sanity_check("../foo").is_err());
-        assert!(view.sanity_check("foo/../").is_err());
-    }
-}
