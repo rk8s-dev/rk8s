@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use lazy_static::lazy_static;
 
 use crate::{
-    cli::config::MountEntryHMACLevel,
+    config::MountEntryHMACLevel,
     core::{Core, LogicalBackendNewFunc},
     errors::RvError,
     handler::{AuthHandler, Handler},

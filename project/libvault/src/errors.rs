@@ -8,7 +8,6 @@ use std::{
     sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard},
 };
 
-use actix_web::http::StatusCode;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -276,12 +275,6 @@ pub enum RvError {
         source: ipnetwork::IpNetworkError,
     },
 
-    #[error("Some actix_web http header error happened, {:?}", .source)]
-    ActixWebHttpHeaderError {
-        #[from]
-        source: actix_web::http::header::ToStrError,
-    },
-
     #[error("Some url error happened, {:?}", .source)]
     UrlError {
         #[from]
@@ -327,12 +320,6 @@ pub enum RvError {
         source: etcd_client::Error,
     },
 
-    #[error("Failed to set logger")]
-    SetLoggerError {
-        #[from]
-        source: log::SetLoggerError,
-    },
-
     #[error(transparent)]
     ErrOther(#[from] anyhow::Error),
     #[error("Some error happend, response text: {0}")]
@@ -346,7 +333,7 @@ pub enum RvError {
 }
 
 impl RvError {
-    pub fn response_status(&self) -> StatusCode {
+    pub fn response_status(&self) -> u16 {
         match self {
             RvError::ErrRequestNoData
             | RvError::ErrBarrierAlreadyInit
@@ -358,11 +345,11 @@ impl RvError {
             | RvError::ErrRequestInvalid
             | RvError::ErrRequestClientTokenMissing
             | RvError::ErrRequestFieldNotFound
-            | RvError::ErrRequestFieldInvalid => StatusCode::BAD_REQUEST,
-            RvError::ErrBarrierSealed => StatusCode::SERVICE_UNAVAILABLE,
-            RvError::ErrPermissionDenied => StatusCode::FORBIDDEN,
-            RvError::ErrRouterMountNotFound => StatusCode::NOT_FOUND,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
+            | RvError::ErrRequestFieldInvalid => 400,
+            RvError::ErrBarrierSealed => 503,
+            RvError::ErrPermissionDenied => 403,
+            RvError::ErrRouterMountNotFound => 404,
+            _ => 500,
         }
     }
 }

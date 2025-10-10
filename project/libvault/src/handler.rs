@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use derive_more::Display;
 
 use crate::{
-    cli::config::Config,
+    config::Config,
     core::Core,
     errors::RvError,
     logical::{Auth, request::Request, response::Response},

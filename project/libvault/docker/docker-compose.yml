@@ -37,20 +37,20 @@ services:
     volumes:
       - etcd-data:/etcd-data
 
-  vault:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    depends_on:
-      etcd:
-        condition: service_healthy
-    environment:
-      - VAULT_ADDR=http://127.0.0.1:8200
-    ports:
-      - "8200:8200"
-    volumes:
-      - vault-state:/opt/rusty_vault/state
+#  vault:
+#    build:
+#      context: ..
+#      dockerfile: docker/Dockerfile
+#    depends_on:
+#      etcd:
+#        condition: service_healthy
+#    environment:
+#      - VAULT_ADDR=http://127.0.0.1:8200
+#    ports:
+#      - "8200:8200"
+#    volumes:
+#      - vault-state:/opt/rusty_vault/state
 
 volumes:
   etcd-data:
-  vault-state:
+#  vault-state:

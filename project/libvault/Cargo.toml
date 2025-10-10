@@ -27,13 +27,8 @@ strum_macros = "0.25"
 radix_trie = "0.2.1"
 lazy_static = "1.4.0"
 regex = "1.11"
-clap = { version = "4.5", features = ["wrap_help", "derive", "env", "suggestions"] }
-sysexits = { version = "0.7", features = ["std"] }
 build-time = "0.1"
 hcl-rs = "0.18"
-actix-web = { version = "4.9", features = ["openssl"] }
-actix-tls = "3.1"
-actix-rt = "2.9"
 log = "0.4"
 hex = "0.4"
 humantime = "2.1"
@@ -54,13 +49,8 @@ ipnetwork = "0.20"
 blake2b_simd = "1.0"
 derive_more = "0.99.17"
 dashmap = "6.1"
-tokio = { version = "1.40", features = ["rt-multi-thread", "macros"] }
-ctor = "0.2.8"
 better_default = "1.0.5"
-prometheus-client = "0.22.3"
-sysinfo = "0.31.4"
-prettytable = "0.10"
-rpassword = "7.3"
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros"] }
 async-trait = "0.1"
 stretto = "0.8"
 priority-queue = "2.1"
@@ -72,19 +62,14 @@ blake3 = "1.8"
 itertools = "0.14.0"
 etcd-client = "0.17.0"
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["fmt", "env-filter"] }
-tracing-log = "0.2.0"
 builder-pattern = "0.4.2"
 
-# optional dependencies
+# optional dependencies removed; keep openssl as required dependency for crypto modules.
 openssl = { version = "0.10.73", optional = true }
 openssl-sys = { version = "0.9.109", optional = true }
 
 [build-dependencies]
 toml = "0.8.19"
-
-[dev-dependencies]
-serial_test = "3.2"
 
 [features]
 default = ["crypto_adaptor_openssl"]
@@ -113,11 +98,3 @@ unnecessary_unwrap = "allow"
 collapsible_match = "allow"
 large_enum_variant = "allow"
 unnecessary_map_or = "allow"
-
-[[bin]]
-name = "rvault"
-path = "bin/rusty_vault.rs"
-
-[[test]]
-name = "test_default_logical"
-path = "tests/test_default_logical.rs"

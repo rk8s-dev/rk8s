@@ -25,7 +25,6 @@ use crate::{
     modules::{Module, auth::AuthModule},
 };
 
-pub mod cli;
 pub mod path_certs;
 pub mod path_config;
 pub mod path_crls;

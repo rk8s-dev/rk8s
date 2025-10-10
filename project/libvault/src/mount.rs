@@ -24,9 +24,10 @@ use openssl::{
     sign::{Signer, Verifier},
 };
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
 
 use crate::{
-    cli::config::MountEntryHMACLevel,
+    config::MountEntryHMACLevel,
     core::{Core, LogicalBackendNewFunc},
     errors::RvError,
     router::Router,
@@ -453,7 +454,7 @@ impl MountsMonitor {
 
         let ticker = tick(Duration::from_secs(self.interval));
         let handle = thread::spawn(move || {
-            let rt = actix_rt::Runtime::new().unwrap();
+            let rt = Runtime::new().unwrap();
             rt.block_on(async move {
                 while running_flag.load(Ordering::Relaxed) {
                     select! {

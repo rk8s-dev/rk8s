@@ -446,7 +446,7 @@ mod test {
         Ok(None)
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_logical_backend_api() {
         let backend = new_test_backend("test_logical_backend_api");
 
@@ -675,7 +675,7 @@ mod test {
         );
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_logical_path_field() {
         let backend = new_test_backend("test_logical_path_field");
 

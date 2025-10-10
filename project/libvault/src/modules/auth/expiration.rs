@@ -16,6 +16,7 @@ use crossbeam_channel::{select, tick};
 use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tokio::runtime::Runtime;
 
 use super::{TokenStore, token_store::TokenEntry};
 use crate::{
@@ -482,7 +483,7 @@ impl ExpirationManager {
 
         let ticker = tick(Duration::from_millis(200));
         thread::spawn(move || {
-            let rt = actix_rt::Runtime::new().unwrap();
+            let rt = Runtime::new().unwrap();
             let queue_cloned = queue;
             let expiration_cloned = expiration;
             rt.block_on(async move {
@@ -828,7 +829,7 @@ mod mod_expiration_tests {
         Ok(None)
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_secret_expiration() {
         let (core, expiration, _token_store) = mock_expiration_manager!();
         let new_now: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
