@@ -29,6 +29,13 @@ impl XlineBackend {
         })
     }
 
+    pub fn with_endpoints(endpoints: &[String]) -> Self {
+        Self {
+            client: OnceCell::new(),
+            endpoints: endpoints.to_owned(),
+        }
+    }
+
     pub async fn get_kv_client_or_try_init(&self) -> Result<KvClient, RvError> {
         let client = self
             .client

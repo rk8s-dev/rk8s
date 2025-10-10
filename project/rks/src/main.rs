@@ -1,23 +1,23 @@
 mod api;
-mod cert;
 mod cli;
 mod commands;
 mod dns;
 mod network;
+mod node;
 mod protocol;
 mod scheduler;
-mod server;
+mod vault;
 
 use crate::network::init;
+use crate::node::{NodeRegistry, RksNode, Shared};
 use crate::protocol::config::load_config;
-use crate::{api::xlinestore::XlineStore, scheduler::Scheduler};
+use crate::{api::xlinestore::XlineStore, scheduler::Scheduler, vault::Vault};
 use anyhow::Context;
 use clap::Parser;
 use cli::{Cli, Commands};
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use log::error;
 use rustls::crypto::CryptoProvider;
-use server::serve;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -35,13 +35,15 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Start { config } => {
             let cfg = load_config(config.to_str().unwrap())?;
-            let xline_config = cfg.xline_config;
+            let xline_config = cfg.xline_config.clone();
             let endpoints: Vec<&str> = xline_config.endpoints.iter().map(|s| s.as_str()).collect();
             let xline_store = Arc::new(XlineStore::new(&endpoints).await?);
             xline_store
                 .insert_network_config(&xline_config.prefix, &cfg.network_config)
                 .await?;
+
             println!("[rks] listening on {}", cfg.addr);
+
             let sm = match init::new_subnet_manager(xline_config.clone()).await {
                 Ok(m) => m,
                 Err(e) => {
@@ -59,8 +61,20 @@ async fn main() -> anyhow::Result<()> {
             )
             .await
             .context("Failed to create Scheduler")?;
+
             scheduler.run().await;
-            serve(cfg.addr, xline_store, local_manager, cfg.tls_config).await?;
+
+            let mut vault = Vault::new()?;
+            vault.init().await?;
+
+            let shared = Arc::new(Shared::new(
+                xline_store.clone(),
+                local_manager.clone(),
+                Arc::new(vault),
+                Arc::new(NodeRegistry::default()),
+            ));
+
+            RksNode::new(cfg.addr.clone(), shared).run().await?;
         }
     }
 

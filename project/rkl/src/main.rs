@@ -1,6 +1,7 @@
 // src/main.rs
 
 use clap::{Parser, Subcommand};
+use rustls::crypto::CryptoProvider;
 
 mod bundle;
 mod commands;
@@ -53,6 +54,9 @@ enum Workload {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    CryptoProvider::install_default(rustls::crypto::ring::default_provider())
+        .expect("failed to install default CryptoProvider");
+
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env().add_directive(

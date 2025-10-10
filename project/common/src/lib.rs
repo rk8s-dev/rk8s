@@ -1,10 +1,13 @@
+use chrono::{DateTime, Utc};
 use libcni::ip::route::{Interface, Route};
 use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 use serde::{Deserialize, Serialize};
+use std::convert::{TryFrom, TryInto};
 use std::fmt::{Display, Formatter};
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, Ipv6Addr},
+    time::Duration,
 };
 
 pub mod _private {
@@ -281,6 +284,63 @@ impl Taint {
         }
     }
 }
+
+impl TryFrom<&NodeCondition> for Taint {
+    type Error = ();
+
+    fn try_from(condition: &NodeCondition) -> Result<Self, Self::Error> {
+        match condition.condition_type {
+            NodeConditionType::Ready
+                if matches!(
+                    condition.status,
+                    ConditionStatus::False | ConditionStatus::Unknown
+                ) =>
+            {
+                Ok(Taint::new(TaintKey::NodeNotReady, TaintEffect::NoExecute))
+            }
+            NodeConditionType::MemoryPressure
+                if matches!(condition.status, ConditionStatus::True) =>
+            {
+                Ok(Taint::new(
+                    TaintKey::NodeMemoryPressure,
+                    TaintEffect::NoSchedule,
+                ))
+            }
+            NodeConditionType::DiskPressure
+                if matches!(condition.status, ConditionStatus::True) =>
+            {
+                Ok(Taint::new(
+                    TaintKey::NodeDiskPressure,
+                    TaintEffect::NoSchedule,
+                ))
+            }
+            NodeConditionType::PIDPressure if matches!(condition.status, ConditionStatus::True) => {
+                Ok(Taint::new(
+                    TaintKey::NodeUnschedulable,
+                    TaintEffect::NoSchedule,
+                ))
+            }
+            NodeConditionType::NetworkUnavailable
+                if matches!(condition.status, ConditionStatus::True) =>
+            {
+                Ok(Taint::new(
+                    TaintKey::NodeNetworkUnavailable,
+                    TaintEffect::NoSchedule,
+                ))
+            }
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<NodeCondition> for Taint {
+    type Error = ();
+
+    fn try_from(value: NodeCondition) -> Result<Self, Self::Error> {
+        (&value).try_into()
+    }
+}
+
 /// Node status
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeStatus {
@@ -328,6 +388,30 @@ pub enum ConditionStatus {
     Unknown,
 }
 
+impl NodeCondition {
+    pub fn is_ready(&self) -> bool {
+        matches!(self.condition_type, NodeConditionType::Ready)
+    }
+
+    pub fn heartbeat_age(&self, now: DateTime<Utc>) -> Option<Duration> {
+        let timestamp = self.last_heartbeat_time.as_ref()?;
+        let heartbeat = chrono::DateTime::parse_from_rfc3339(timestamp)
+            .ok()?
+            .with_timezone(&Utc);
+        now.signed_duration_since(heartbeat).to_std().ok()
+    }
+
+    pub fn is_expired_at(&self, grace: Duration, now: DateTime<Utc>) -> bool {
+        self.heartbeat_age(now)
+            .map(|elapsed| elapsed > grace)
+            .unwrap_or(true)
+    }
+
+    pub fn is_expired(&self, grace: Duration) -> bool {
+        self.is_expired_at(grace, Utc::now())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Node {
     #[serde(rename = "apiVersion")]
@@ -337,6 +421,38 @@ pub struct Node {
     pub metadata: ObjectMeta,
     pub spec: NodeSpec,
     pub status: NodeStatus,
+}
+
+impl Node {
+    pub fn ready_condition(&self) -> Option<&NodeCondition> {
+        self.status.conditions.iter().find(|cond| cond.is_ready())
+    }
+
+    pub fn ready_condition_mut(&mut self) -> Option<&mut NodeCondition> {
+        self.status
+            .conditions
+            .iter_mut()
+            .find(|cond| cond.is_ready())
+    }
+
+    pub fn update_ready_status_on_timeout(&mut self, grace: Duration) -> bool {
+        if let Some(cond) = self.ready_condition_mut()
+            && cond.is_expired(grace)
+            && !matches!(cond.status, ConditionStatus::Unknown)
+        {
+            cond.status = ConditionStatus::Unknown;
+            cond.last_heartbeat_time = Some(Utc::now().to_rfc3339());
+            return true;
+        }
+        false
+    }
+
+    pub fn derive_taints_from_conditions(conditions: &[NodeCondition]) -> Vec<Taint> {
+        conditions
+            .iter()
+            .filter_map(|condition| condition.try_into().ok())
+            .collect()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

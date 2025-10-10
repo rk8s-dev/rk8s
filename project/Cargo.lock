@@ -1191,6 +1191,12 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
+
+[[package]]
+name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
@@ -1715,9 +1721,16 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "bincode",
+ "bytes",
  "chrono",
  "ipnetwork 0.17.0",
  "libcni",
+ "libvault",
+ "log",
+ "quinn",
  "serde",
  "serde_json",
 ]
@@ -6242,6 +6255,7 @@ dependencies = [
  "clap",
  "common",
  "daemonize",
+ "derive_more 2.0.1",
  "dotenvy",
  "flate2",
  "futures",
@@ -6270,7 +6284,6 @@ dependencies = [
  "regex",
  "rkb",
  "rustls 0.23.32",
- "rustls-pemfile 2.2.0",
  "scopeguard",
  "serde",
  "serde_json",
@@ -6289,7 +6302,6 @@ dependencies = [
  "tracing-journald",
  "tracing-subscriber",
  "uuid",
- "webpki",
 ]
 
 [[package]]
@@ -6298,11 +6310,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.20.0",
  "bincode",
  "chrono",
  "clap",
  "common",
  "context",
+ "derive_more 2.0.1",
  "dotenvy",
  "env_logger 0.11.8",
  "etcd-client 0.16.1",
@@ -8895,16 +8909,6 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webpki"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
-dependencies = [
- "ring",
- "untrusted",
 ]
 
 [[package]]

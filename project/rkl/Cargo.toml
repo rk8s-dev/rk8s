@@ -64,8 +64,7 @@ netlink-packet-route = "0.22.0"
 json= "0.12.4"
 thiserror = "2.0.16"
 libvault = { path = "../libvault" }
-rustls-pemfile = "2.2.0"
-webpki = "0.22.4"
+derive_more = { version = "2.0.1", features = ["deref"] }
 
 [dev-dependencies]
 tempfile = "3"

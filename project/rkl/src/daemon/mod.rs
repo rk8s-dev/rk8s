@@ -4,14 +4,12 @@ pub mod client;
 pub mod static_pods;
 
 use crate::commands::pod::TLSConnectionArgs;
-use client::init_crypto;
 
 pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
         .block_on(async move {
-            init_crypto();
             //tokio::spawn(status_access::init());
 
             tokio::spawn(async move {

@@ -1,7 +1,9 @@
 pub mod api;
-pub mod cert;
 pub mod cli;
+pub mod commands;
 pub mod dns;
 pub mod network;
+pub mod node;
 pub mod protocol;
 pub mod scheduler;
+pub mod vault;

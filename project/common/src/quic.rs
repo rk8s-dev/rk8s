@@ -1,6 +1,5 @@
 use crate::RksMessage;
 use anyhow::Context;
-use bytes::BytesMut;
 use quinn::{Connection, RecvStream, SendStream};
 use std::ops::{Deref, DerefMut};
 
@@ -142,25 +141,22 @@ pub trait RecvStreamExt {
 #[async_trait::async_trait]
 impl SendStreamExt for SendStream {
     async fn send_msg(&mut self, msg: &RksMessage) -> anyhow::Result<usize> {
-        let msg = bincode::serialize(&msg)?;
-        self.write(&msg)
+        let msg = bincode::serialize(msg)?;
+        self.write_all(&msg)
             .await
-            .with_context(|| "Failed to send a rks message")
+            .with_context(|| "Failed to send a rks message")?;
+        Ok(msg.len())
     }
 }
 
 #[async_trait::async_trait]
 impl RecvStreamExt for RecvStream {
     async fn fetch_msg(&mut self) -> anyhow::Result<RksMessage> {
-        let mut buf = BytesMut::new();
+        let mut buf = Vec::new();
+        let mut chunk = vec![0u8; 4096];
 
-        loop {
-            buf.reserve(4096);
-
-            match self.read(&mut buf).await? {
-                Some(_) => {}
-                None => break,
-            }
+        while let Some(n) = self.read(&mut chunk).await? {
+            buf.extend_from_slice(&chunk[..n]);
         }
 
         bincode::deserialize::<RksMessage>(&buf)

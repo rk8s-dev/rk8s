@@ -1,6 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::sync::OnceLock;
+
+static CONFIG: OnceLock<Config> = OnceLock::new();
+
+pub fn config() -> &'static Config {
+    CONFIG.get().unwrap()
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -43,13 +50,12 @@ pub struct NetworkConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TLSConfig {
     pub enable: bool,
-    pub vault_url: Option<String>,
-    pub bootstrap_token: Option<String>,
 }
 
-pub fn load_config(path: &str) -> Result<Config> {
+pub fn load_config(path: &str) -> anyhow::Result<&'static Config> {
     let content =
         fs::read_to_string(path).with_context(|| format!("Failed to read config from {path}"))?;
     let cfg: Config = serde_yaml::from_str(&content).context("Failed to parse YAML config")?;
+    let cfg = CONFIG.get_or_init(|| cfg);
     Ok(cfg)
 }

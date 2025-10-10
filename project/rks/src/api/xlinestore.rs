@@ -109,6 +109,16 @@ impl XlineStore {
         Ok(())
     }
 
+    pub async fn insert_node(&self, node: &Node) -> Result<()> {
+        let node_name = node.metadata.name.clone();
+        if node_name.is_empty() {
+            anyhow::bail!("node.metadata.name is empty");
+        }
+
+        let node_yaml = serde_yaml::to_string(node)?;
+        self.insert_node_yaml(&node_name, &node_yaml).await
+    }
+
     // Example (currently unused):
     pub async fn get_node_yaml(&self, node_name: &str) -> Result<Option<String>> {
         let key = format!("/registry/nodes/{node_name}");
@@ -146,6 +156,13 @@ impl XlineStore {
             Ok(Some(String::from_utf8_lossy(kv.value()).to_string()))
         } else {
             Ok(None)
+        }
+    }
+
+    pub async fn get_pod(&self, pod_name: &str) -> Result<Option<PodTask>> {
+        match self.get_pod_yaml(pod_name).await? {
+            Some(yaml) => Ok(Some(serde_yaml::from_str::<PodTask>(&yaml)?)),
+            None => Ok(None),
         }
     }
 
