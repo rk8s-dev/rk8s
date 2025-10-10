@@ -1,9 +1,9 @@
-use uzers::os::unix::UserExt;
 use anyhow::Context;
 use reqwest::RequestBuilder;
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 use std::process::Command;
+use uzers::os::unix::UserExt;
 
 #[async_trait::async_trait]
 pub trait RequestBuilderExt {
