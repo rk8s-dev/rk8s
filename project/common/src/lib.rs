@@ -1,11 +1,19 @@
 use libcni::ip::route::{Interface, Route};
+use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, Ipv6Addr},
 };
 
+pub mod _private {
+    pub use log::error;
+}
+
 pub mod lease;
+pub mod quic;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TypeMeta {
     #[serde(rename = "apiVersion")]
@@ -157,6 +165,17 @@ pub enum TaintKey {
     NodeOutOfService,
 }
 
+#[macro_export]
+macro_rules! invalid_rks_variant_error {
+    ($message:expr, $expected:pat) => {
+        RksMessage::Error(format!(
+            "invalid message, expected: {}, but got: {}",
+            stringify!($expected),
+            $message
+        ))
+    };
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum RksMessage {
     //request
@@ -174,6 +193,11 @@ pub enum RksMessage {
     SetNetwork(Box<NodeNetworkConfig>),
     UpdateRoutes(String, Vec<Route>),
 
+    CertificateSign {
+        token: String,
+        req: IssueCertificateRequest,
+    },
+
     //response
     Ack,
     Error(String),
@@ -181,6 +205,56 @@ pub enum RksMessage {
     ListPodRes(Vec<String>),
     // (Podname, Podip)
     SetPodip((String, String)),
+    Certificate(IssueCertificateResponse),
+}
+
+impl Display for RksMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // request
+            Self::CreatePod(_) => f.write_str("RksMessage::CreatePod { .. }"),
+            Self::DeletePod(pod_name) => {
+                write!(f, "RksMessage::DeletePod {{ pod_name: {} }}", pod_name)
+            }
+            Self::ListPod => f.write_str("RksMessage::ListPod"),
+            Self::GetNodeCount => f.write_str("RksMessage::GetNodeCount"),
+            Self::RegisterNode(_) => f.write_str("RksMessage::RegisterNode { .. }"),
+            Self::UserRequest(_) => f.write_str("RksMessage::UserRequest { .. }"),
+            Self::Heartbeat { node_name, status } => {
+                write!(
+                    f,
+                    "RksMessage::Heartbeat {{ node_name: {}, status: {:?} }}",
+                    node_name, status
+                )
+            }
+            Self::SetNetwork(_) => f.write_str("RksMessage::SetNetwork { .. }"),
+            Self::UpdateRoutes(node_name, routes) => {
+                write!(
+                    f,
+                    "RksMessage::UpdateRoutes {{ node_name: {}, routes_count: {} }}",
+                    node_name,
+                    routes.len()
+                )
+            }
+            Self::CertificateSign { .. } => f.write_str("RksMessage::CertificateSign { .. }"),
+
+            // response
+            Self::Ack => f.write_str("RksMessage::Ack"),
+            Self::Error(err_msg) => write!(f, "RksMessage::Error({})", err_msg),
+            Self::NodeCount(count) => write!(f, "RksMessage::NodeCount({})", count),
+            Self::ListPodRes(pods) => {
+                write!(f, "RksMessage::ListPodRes {{ count: {} }}", pods.len())
+            }
+            Self::SetPodip((pod_name, pod_ip)) => {
+                write!(
+                    f,
+                    "RksMessage::SetPodip {{ pod_name: {}, pod_ip: {} }}",
+                    pod_name, pod_ip
+                )
+            }
+            Self::Certificate(_) => f.write_str("RksMessage::Certificate"),
+        }
+    }
 }
 
 /// Node spec
