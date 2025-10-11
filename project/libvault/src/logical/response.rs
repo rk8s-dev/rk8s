@@ -63,7 +63,7 @@ impl Response {
         if value.is_ok() {
             resp.data = json!({
                 "help": text.to_string(),
-                "sea_also": value.unwrap(),
+                "see_also": value.unwrap(),
             })
             .as_object()
             .cloned();

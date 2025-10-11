@@ -383,7 +383,7 @@ impl ExpirationManager {
 
         if te.path.contains("..") {
             return Err(rv_error_string!(
-                "cannot register an auth lease with n token entry whose path contains parent references"
+                "cannot register an auth lease with a token entry whose path contains parent references"
             ));
         }
 
