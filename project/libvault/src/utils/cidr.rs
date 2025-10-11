@@ -187,5 +187,3 @@ fn is_ip_addr_zero(ip_addr: &IpAddr) -> bool {
         IpAddr::V6(addr) => addr == Ipv6Addr::UNSPECIFIED,
     }
 }
-
-

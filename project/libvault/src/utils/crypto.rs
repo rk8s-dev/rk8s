@@ -335,5 +335,3 @@ pub fn blake2b256_hash(key: &str) -> Vec<u8> {
         .finalize();
     hash.as_bytes().to_vec()
 }
-
-

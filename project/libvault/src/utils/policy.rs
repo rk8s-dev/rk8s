@@ -76,5 +76,3 @@ pub fn equivalent_policies(a: &Vec<String>, b: &Vec<String>) -> bool {
 
     filtered_sorted_a == filtered_sorted_b
 }
-
-

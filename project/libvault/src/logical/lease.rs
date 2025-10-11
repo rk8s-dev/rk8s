@@ -137,5 +137,3 @@ pub fn calculate_ttl(
 
     Ok(ttl)
 }
-
-

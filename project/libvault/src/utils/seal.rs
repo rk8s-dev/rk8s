@@ -523,5 +523,3 @@ where
         self.value.as_mut().ok_or(SealBoxError::Sealed)
     }
 }
-
-

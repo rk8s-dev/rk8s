@@ -119,5 +119,3 @@ impl Salt {
         self.generated
     }
 }
-
-

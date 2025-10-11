@@ -93,5 +93,3 @@ pub fn new_backend(t: &str, conf: &HashMap<String, Value>) -> Result<Arc<dyn Bac
         _ => Err(RvError::ErrPhysicalTypeInvalid),
     }
 }
-
-

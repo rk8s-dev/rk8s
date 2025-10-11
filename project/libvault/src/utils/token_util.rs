@@ -279,5 +279,3 @@ impl TokenParams {
         auth.renewable = true;
     }
 }
-
-

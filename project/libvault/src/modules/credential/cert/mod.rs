@@ -140,5 +140,3 @@ impl Module for CertModule {
         Ok(())
     }
 }
-
-

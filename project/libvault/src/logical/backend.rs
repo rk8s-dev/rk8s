@@ -384,5 +384,3 @@ impl LogicalBackendBuilder {
         Arc::new(self.backend)
     }
 }
-
-

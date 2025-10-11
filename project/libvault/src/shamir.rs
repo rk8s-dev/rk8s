@@ -314,5 +314,3 @@ impl ShamirSecret {
         results
     }
 }
-
-

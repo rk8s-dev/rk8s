@@ -160,5 +160,3 @@ impl Module for PkiModule {
         core.delete_logical_backend("pki")
     }
 }
-
-

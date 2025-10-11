@@ -671,5 +671,3 @@ pub fn to_granting_capabilities(value: u32) -> Vec<String> {
 
     ret
 }
-
-

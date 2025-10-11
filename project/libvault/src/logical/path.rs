@@ -156,5 +156,3 @@ impl PathOperation {
         (self.handler)(backend, req).await
     }
 }
-
-

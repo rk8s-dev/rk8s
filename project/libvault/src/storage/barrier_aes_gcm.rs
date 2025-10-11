@@ -368,5 +368,3 @@ impl AESGCMBarrier {
         Ok(out)
     }
 }
-
-

@@ -124,6 +124,7 @@ pub struct Toleration {
     #[serde(default)]
     pub value: String,
 }
+
 impl Toleration {
     pub fn tolerate(&self, taint: &Taint) -> bool {
         if self.effect.is_some() && self.effect.as_ref().unwrap() != &taint.effect {

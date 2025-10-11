@@ -407,5 +407,3 @@ pub trait Encryption: PublicKey {
     /// The plaintext is returned on success.
     fn decrypt(&mut self, ciphertext: &Vec<u8>) -> Result<Vec<u8>, RvError>;
 }
-
-

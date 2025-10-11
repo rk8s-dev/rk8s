@@ -441,5 +441,3 @@ impl ServerCertVerifier for DisabledVerifier {
             .supported_schemes()
     }
 }
-
-

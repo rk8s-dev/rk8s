@@ -731,5 +731,3 @@ impl AuthHandler for PolicyStore {
         Ok(())
     }
 }
-
-

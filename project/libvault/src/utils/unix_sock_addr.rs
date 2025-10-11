@@ -57,5 +57,3 @@ impl fmt::Display for UnixSockAddr {
         write!(f, "{}", self.path)
     }
 }
-
-

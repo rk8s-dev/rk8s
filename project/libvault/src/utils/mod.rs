@@ -436,5 +436,3 @@ pub fn is_protect_path(protected: &[&str], paths: &[&str]) -> bool {
 pub fn default_system_time() -> SystemTime {
     SystemTime::UNIX_EPOCH
 }
-
-

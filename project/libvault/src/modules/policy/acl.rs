@@ -480,5 +480,3 @@ fn check_path_capability(rules: &Trie<String, Permissions>, path: &str) -> bool 
                     > 0
             })
 }
-
-

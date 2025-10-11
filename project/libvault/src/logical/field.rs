@@ -473,5 +473,3 @@ impl fmt::Debug for Field {
             .finish()
     }
 }
-
-

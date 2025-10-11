@@ -134,5 +134,3 @@ pub fn new_sock_addr(s: &str) -> Result<Box<dyn SockAddr>, RvError> {
         "Unable to convert {s} to an IPv4 or IPv6 address, or a UNIX Socket"
     )))
 }
-
-

@@ -33,6 +33,7 @@ cargo.rust_library(
     },
     features = [
         "alloc",
+        "default",
         "getrandom",
         "libc",
         "rand_chacha",

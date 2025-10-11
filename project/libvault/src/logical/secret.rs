@@ -178,5 +178,3 @@ impl SecretBuilder {
         Arc::new(self.secret)
     }
 }
-
-

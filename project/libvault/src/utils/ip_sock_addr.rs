@@ -73,5 +73,3 @@ impl fmt::Display for IpSockAddr {
         write!(f, "{}/{}", self.addr.ip(), self.addr.prefix())
     }
 }
-
-

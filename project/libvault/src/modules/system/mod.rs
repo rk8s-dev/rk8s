@@ -1212,5 +1212,3 @@ fn sanitize_path(path: &str) -> String {
     }
     new_path
 }
-
-

@@ -202,5 +202,3 @@ impl GlobContains for Vec<Value> {
         (&self).glob_contains(val)
     }
 }
-
-
