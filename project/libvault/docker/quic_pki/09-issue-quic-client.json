@@ -1,5 +1,0 @@
-{
-  "common_name": "client.svc.cluster.local",
-  "alt_names": "client.svc.cluster.local,client",
-  "ttl": "8h"
-}
