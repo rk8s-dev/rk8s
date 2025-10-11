@@ -3,6 +3,7 @@ use crate::node::dispatch::{dispatch_user, dispatch_worker};
 use crate::node::register::NodeRegister;
 use crate::node::server::private::Sealed;
 use crate::node::watcher::PodsWatcher;
+use crate::protocol::config::config;
 use async_trait::async_trait;
 use common::quic::RksConnection;
 use common::{RksMessage, log_error, reply_and_bail};
@@ -34,7 +35,9 @@ impl QUICServer {
             tokio::spawn(async move {
                 match incoming.await {
                     Ok(connection) => {
-                        let result = if connection.peer_identity().is_some() {
+                        let result = if !config().tls_config.enable
+                            || connection.peer_identity().is_some()
+                        {
                             let conn = AuthConnection::<Verified>::new(connection, shared.clone());
                             conn.serve().await
                         } else {
@@ -137,11 +140,18 @@ impl ConnectionState for Unauthenticated {
         debug!("[server] received request from client");
 
         match &msg {
-            RksMessage::CertificateSign { req, .. } => {
-                let res = conn.shared.vault.issue_cert("rkl", req).await?;
-
+            RksMessage::CertificateSign { req, token } => {
                 debug!("[server] return issued certificate to client");
-                conn.conn.send_msg(&RksMessage::Certificate(res)).await?;
+
+                let message = if token == conn.shared.vault.join_token() {
+                    let res = conn.shared.vault.issue_cert("rkl", req).await?;
+                    RksMessage::Certificate(res)
+                } else {
+                    RksMessage::Error("Invalid join token".to_string())
+                };
+
+                conn.conn.send_msg(&message).await?;
+
                 debug!("[server] waiting for client to close auth connection");
                 let _ = conn.conn.closed().await;
                 debug!("[server] auth connection closed by client");

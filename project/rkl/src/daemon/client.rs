@@ -115,7 +115,7 @@ pub async fn run_once(
     server_addr: SocketAddr,
     node: Node,
     ext_iface: Arc<ExternalInterface>,
-    _tls_cfg: TLSConnectionArgs,
+    tls_cfg: TLSConnectionArgs,
 ) -> Result<()> {
     let subnet_file_path = get_subnet_file_path();
     let link_index = env::var("LINK_INDEX")
@@ -133,7 +133,7 @@ pub async fn run_once(
 
     info!("Network receiver created for node: {}", node.metadata.name);
 
-    let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string()).await?;
+    let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string(), &tls_cfg).await?;
     info!("[worker] connected to RKS at {server_addr}");
 
     // register to rks by sending RegisterNode(Box<Node>)

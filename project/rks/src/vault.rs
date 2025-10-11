@@ -7,6 +7,7 @@ use libvault::modules::ResponseExt;
 use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 use libvault::storage::xline::XlineBackend;
 use log::{debug, info};
+use rand::RngCore;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ pub struct Vault {
     #[deref]
     vault: RustyVault,
     root_token: String,
+    join_token: String,
 }
 
 #[allow(dead_code)]
@@ -37,7 +39,12 @@ impl Vault {
         Ok(Self {
             vault: RustyVault::new(Arc::new(backend), None)?,
             root_token: String::new(),
+            join_token: String::new(),
         })
+    }
+
+    pub fn join_token(&self) -> &str {
+        self.join_token.as_str()
     }
 
     async fn write_policies(&self) -> anyhow::Result<()> {
@@ -122,6 +129,17 @@ impl Vault {
         Ok(())
     }
 
+    fn generate_join_token(&mut self) -> anyhow::Result<()> {
+        let mut bytes = [0_u8; 24];
+        rand::rng().fill_bytes(&mut bytes);
+
+        let join_token = base64::encode(bytes);
+        info!("[vault] generated join token: {join_token}");
+
+        self.join_token = join_token;
+        Ok(())
+    }
+
     pub async fn init(&mut self) -> anyhow::Result<()> {
         info!("[vault] initializing seal configuration");
         let keys = self
@@ -157,6 +175,8 @@ impl Vault {
 
         self.write_policies().await?;
         self.generate_root_ca().await?;
+        self.generate_join_token()?;
+
         info!("[vault] bootstrap sequence completed");
 
         Ok(())

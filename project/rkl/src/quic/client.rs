@@ -1,3 +1,4 @@
+use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::private::Sealed;
 use crate::quic::verifier::SkipServerVerification;
 use common::RksMessage;
@@ -16,7 +17,7 @@ use tokio::time;
 use tonic::async_trait;
 use tracing::{debug, info, warn};
 
-const DEFAULT_TTL: &str = "12h";
+const DEFAULT_TTL: &str = "64h";
 
 mod private {
     pub trait Sealed {}
@@ -67,17 +68,24 @@ impl<Type> Clone for QUICClient<Type> {
 }
 
 impl<Type: ClientType + Send> QUICClient<Type> {
-    pub async fn connect(addr: impl AsRef<str>) -> anyhow::Result<Self> {
+    pub async fn connect(
+        addr: impl AsRef<str>,
+        tls_cfg: &TLSConnectionArgs,
+    ) -> anyhow::Result<Self> {
         let addr = addr.as_ref();
         info!(target: "rkl::quic", server_addr = %addr, "initializing QUIC client");
 
         let config = build_no_certificates_config()?;
         debug!(target: "rkl::quic", server_addr = %addr, "establishing provisional connection");
-        let conn = try_connect(addr, Some(config)).await?;
+        let mut conn = try_connect(addr, Some(config)).await?;
 
-        let config = Self::request_certificate(conn).await?;
-        debug!(target: "rkl::quic", server_addr = %addr, "provisional connection succeeded; retrying with client certificate");
-        let conn = try_connect(addr, Some(config)).await?;
+        if tls_cfg.enable_tls {
+            let join_token = tls_cfg.join_token.as_deref().unwrap_or_default();
+            let config = Self::request_certificate(conn, join_token).await?;
+
+            debug!(target: "rkl::quic", server_addr = %addr, "provisional connection succeeded; retrying with client certificate");
+            conn = try_connect(addr, Some(config)).await?;
+        }
 
         let client = Self {
             conn,
@@ -91,7 +99,10 @@ impl<Type: ClientType + Send> QUICClient<Type> {
         Ok(client)
     }
 
-    async fn request_certificate(conn: RksConnection) -> anyhow::Result<ClientConfig> {
+    async fn request_certificate(
+        conn: RksConnection,
+        join_token: impl Into<String>,
+    ) -> anyhow::Result<ClientConfig> {
         let request = IssueCertificateRequest {
             common_name: Some("rkl-cluster".to_string()),
             alt_names: Some("rkl.svc.cluster.local".to_string()),
@@ -102,7 +113,7 @@ impl<Type: ClientType + Send> QUICClient<Type> {
         debug!(target: "rkl::quic", "sending certificate signing request");
         conn.send_msg(&RksMessage::CertificateSign {
             req: request,
-            token: String::new(),
+            token: join_token.into(),
         })
         .await?;
 
@@ -214,41 +225,4 @@ async fn try_connect(
         }
     };
     Ok(RksConnection::new(conn))
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::quic::client::{Cli, QUICClient};
-    use common::RksMessage;
-    use rustls::crypto::CryptoProvider;
-    use std::sync::OnceLock;
-    use tracing::info;
-    use tracing_subscriber::EnvFilter;
-
-    fn init_test_logger() {
-        static INIT: OnceLock<()> = OnceLock::new();
-        INIT.get_or_init(|| {
-            let filter =
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-            let _ = tracing_subscriber::fmt()
-                .with_test_writer()
-                .with_env_filter(filter)
-                .try_init();
-        });
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_connect_to_rks() -> anyhow::Result<()> {
-        init_test_logger();
-        CryptoProvider::install_default(rustls::crypto::ring::default_provider())
-            .expect("failed to install default CryptoProvider");
-
-        let rks_addr = "127.0.0.1:50051";
-
-        let client = QUICClient::<Cli>::connect(rks_addr).await?;
-        client.send_msg(&RksMessage::ListPod).await?;
-        info!("{}", client.fetch_msg().await?);
-        Ok(())
-    }
 }

@@ -12,8 +12,8 @@ use tracing::info;
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Cli, QUICClient};
 
-pub async fn delete_pod(pod_name: &str, addr: &str, _tls_cfg: TLSConnectionArgs) -> Result<()> {
-    let cli = QUICClient::<Cli>::connect(addr).await?;
+pub async fn delete_pod(pod_name: &str, addr: &str, tls_cfg: TLSConnectionArgs) -> Result<()> {
+    let cli = QUICClient::<Cli>::connect(addr, &tls_cfg).await?;
     info!("RKL connected to RKS at {addr}");
 
     cli.send_msg(&RksMessage::DeletePod(pod_name.to_string()))
@@ -23,8 +23,8 @@ pub async fn delete_pod(pod_name: &str, addr: &str, _tls_cfg: TLSConnectionArgs)
     Ok(())
 }
 
-pub async fn create_pod(pod_yaml: &str, addr: &str, _tls_cfg: TLSConnectionArgs) -> Result<()> {
-    let cli = QUICClient::<Cli>::connect(addr).await.unwrap();
+pub async fn create_pod(pod_yaml: &str, addr: &str, tls_cfg: TLSConnectionArgs) -> Result<()> {
+    let cli = QUICClient::<Cli>::connect(addr, &tls_cfg).await.unwrap();
     info!("RKL connected to RKS at {addr}");
 
     let task = pod_task_from_path(pod_yaml).map_err(|e| anyhow!("invalid pod yaml: {}", e))?;
@@ -35,8 +35,8 @@ pub async fn create_pod(pod_yaml: &str, addr: &str, _tls_cfg: TLSConnectionArgs)
     Ok(())
 }
 
-pub async fn list_pod(addr: &str, _tls_cfg: TLSConnectionArgs) -> Result<()> {
-    let cli = QUICClient::<Cli>::connect(addr).await?;
+pub async fn list_pod(addr: &str, tls_cfg: TLSConnectionArgs) -> Result<()> {
+    let cli = QUICClient::<Cli>::connect(addr, &tls_cfg).await?;
     info!("RKL connected to RKS at {addr}");
 
     cli.send_msg(&RksMessage::ListPod).await?;
