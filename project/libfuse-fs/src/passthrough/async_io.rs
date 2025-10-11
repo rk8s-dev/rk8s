@@ -1,7 +1,6 @@
 use crate::util::open_options::OpenOptions;
 use bytes::Bytes;
 use futures::stream;
-use futures_util::stream::Iter;
 use libc::{off_t, pread, size_t};
 use rfuse3::{Errno, Inode, Result, raw::prelude::*};
 use std::{
@@ -30,7 +29,6 @@ use crate::{
 use super::{
     Handle, HandleData, PassthroughFs, config::CachePolicy, os_compat::LinuxDirent64, util::*,
 };
-use std::vec::IntoIter;
 
 impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
     async fn open_inode(&self, inode: Inode, flags: i32) -> io::Result<File> {
@@ -388,17 +386,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 }
 
 impl Filesystem for PassthroughFs {
-    /// dir entry stream given by [`readdir`][Filesystem::readdir].
-    type DirEntryStream<'a>
-        = Iter<IntoIter<Result<DirectoryEntry>>>
-    where
-        Self: 'a;
-    /// dir entry stream given by [`readdir`][Filesystem::readdir].
-    type DirEntryPlusStream<'a>
-        = Iter<IntoIter<Result<DirectoryEntryPlus>>>
-    where
-        Self: 'a;
-
     /// initialize filesystem. Called before any other filesystem method.
     async fn init(&self, _req: Request) -> Result<ReplyInit> {
         if self.cfg.do_import {
@@ -1241,13 +1228,17 @@ impl Filesystem for PassthroughFs {
     /// read directory. `offset` is used to track the offset of the directory entries. `fh` will
     /// contain the value set by the [`opendir`][Filesystem::opendir] method, or will be
     /// undefined if the [`opendir`][Filesystem::opendir] method didn't set any value.
-    async fn readdir(
-        &self,
+    async fn readdir<'a>(
+        &'a self,
         _req: Request,
         parent: Inode,
         fh: u64,
         offset: i64,
-    ) -> Result<ReplyDirectory<Self::DirEntryStream<'_>>> {
+    ) -> Result<
+        ReplyDirectory<
+            impl futures_util::stream::Stream<Item = Result<DirectoryEntry>> + Send + 'a,
+        >,
+    > {
         if self.no_readdir.load(Ordering::Relaxed) {
             return Err(enosys().into());
         }
@@ -1261,14 +1252,18 @@ impl Filesystem for PassthroughFs {
 
     /// read directory entries, but with their attribute, like [`readdir`][Filesystem::readdir]
     /// + [`lookup`][Filesystem::lookup] at the same time.
-    async fn readdirplus(
-        &self,
+    async fn readdirplus<'a>(
+        &'a self,
         _req: Request,
         parent: Inode,
         fh: u64,
         offset: u64,
         _lock_owner: u64,
-    ) -> Result<ReplyDirectoryPlus<Self::DirEntryPlusStream<'_>>> {
+    ) -> Result<
+        ReplyDirectoryPlus<
+            impl futures_util::stream::Stream<Item = Result<DirectoryEntryPlus>> + Send + 'a,
+        >,
+    > {
         if self.no_readdir.load(Ordering::Relaxed) {
             return Err(enosys().into());
         }

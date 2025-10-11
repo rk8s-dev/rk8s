@@ -25,26 +25,16 @@ impl<FS: Filesystem> LoggingFileSystem<FS> {
 }
 
 impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileSystem<FS> {
-    type DirEntryStream<'a>
-        = FS::DirEntryStream<'a>
-    where
-        Self: 'a;
-
-    type DirEntryPlusStream<'a>
-        = FS::DirEntryPlusStream<'a>
-    where
-        Self: 'a;
-
     /// read directory entries, but with their attribute, like [`readdir`][Filesystem::readdir]
     /// + [`lookup`][Filesystem::lookup] at the same time.
-    async fn readdirplus(
-        &self,
+    async fn readdirplus<'a>(
+        &'a self,
         req: Request,
         parent: Inode,
         fh: u64,
         offset: u64,
         lock_owner: u64,
-    ) -> Result<ReplyDirectoryPlus<Self::DirEntryPlusStream<'_>>> {
+    ) -> Result<ReplyDirectoryPlus<impl futures_util::stream::Stream<Item = Result<DirectoryEntryPlus>> + Send + 'a>> {
         debug!(
             "fs:{}, [readdirplus]: parent: {:?}, fh: {}, offset: {}",
             self.fsname, parent, fh, offset
@@ -511,13 +501,13 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     }
 
     /// read directory.
-    async fn readdir(
-        &self,
+    async fn readdir<'a>(
+        &'a self,
         req: Request,
         parent: Inode,
         fh: u64,
         offset: i64,
-    ) -> Result<ReplyDirectory<Self::DirEntryStream<'_>>> {
+    ) -> Result<ReplyDirectory<impl futures_util::stream::Stream<Item = Result<DirectoryEntry>> + Send + 'a>> {
         debug!(
             "fs:{}, readdir: parent: {:?}, fh: {}, offset: {}",
             self.fsname, parent, fh, offset

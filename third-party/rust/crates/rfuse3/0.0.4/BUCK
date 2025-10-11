@@ -3,9 +3,12 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 
-filegroup(
+http_archive(
     name = "rfuse3-vendor",
-    srcs = glob(["**/**"]),
+    urls = ["https://static.crates.io/crates/rfuse3/rfuse3-0.0.4.crate"],
+    sha256 = "5e65743fb89df9efbac998a144a9222434754fdc18438270f6e3dcde90a41617",
+    type = "tar.gz",
+    strip_prefix = "rfuse3-0.0.4",
     out = "vendor",
 )
 

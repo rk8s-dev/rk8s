@@ -1,6 +1,6 @@
 [package]
 name = "rfuse3"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 readme = "README.md"
 keywords = ["fuse", "filesystem", "system", "bindings"]

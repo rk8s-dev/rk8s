@@ -44,15 +44,6 @@ impl<FS: Filesystem> LoggingFileSystem<FS> {
 }
 
 impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileSystem<FS> {
-    type DirEntryStream<'a>
-        = FS::DirEntryStream<'a>
-    where
-        Self: 'a;
-    type DirEntryPlusStream<'a>
-        = FS::DirEntryPlusStream<'a>
-    where
-        Self: 'a;
-
     async fn init(&self, req: Request) -> Result<ReplyInit> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "init";
@@ -135,14 +126,18 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn readdirplus(
-        &self,
+    async fn readdirplus<'a>(
+        &'a self,
         req: Request,
         parent: Inode,
         fh: u64,
         offset: u64,
         lock_owner: u64,
-    ) -> Result<ReplyDirectoryPlus<Self::DirEntryPlusStream<'_>>> {
+    ) -> Result<
+        ReplyDirectoryPlus<
+            impl futures_util::stream::Stream<Item = Result<DirectoryEntryPlus>> + Send + 'a,
+        >,
+    > {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "readdirplus";
         let args = vec![
@@ -176,13 +171,17 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn readdir(
-        &self,
+    async fn readdir<'a>(
+        &'a self,
         req: Request,
         parent: Inode,
         fh: u64,
         offset: i64,
-    ) -> Result<ReplyDirectory<Self::DirEntryStream<'_>>> {
+    ) -> Result<
+        ReplyDirectory<
+            impl futures_util::stream::Stream<Item = Result<DirectoryEntry>> + Send + 'a,
+        >,
+    > {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "readdir";
         let args = vec![

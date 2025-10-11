@@ -1251,7 +1251,9 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-    ) -> Result<<OverlayFs as rfuse3::raw::Filesystem>::DirEntryStream<'a>> {
+    ) -> Result<
+        impl futures_util::stream::Stream<Item = std::result::Result<DirectoryEntry, Errno>> + Send + 'a,
+    > {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
             Some(dir) => dir.node.clone(),
@@ -1314,7 +1316,11 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-    ) -> Result<<OverlayFs as rfuse3::raw::Filesystem>::DirEntryPlusStream<'a>> {
+    ) -> Result<
+        impl futures_util::stream::Stream<Item = std::result::Result<DirectoryEntryPlus, Errno>>
+        + Send
+        + 'a,
+    > {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
             Some(dir) => {
