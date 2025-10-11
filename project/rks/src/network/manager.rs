@@ -555,20 +555,20 @@ mod tests {
             .get_network_config()
             .await
             .expect("get config failed");
-        println!("Parsed config: {config:?}");
+        info!("Parsed config: {config:?}");
 
         let lease = manager
             .acquire_lease(&lease_attrs)
             .await
             .expect("acquire lease failed");
-        println!("Lease acquired: {lease:?}");
+        info!("Lease acquired: {lease:?}");
 
         let mut lease2 = lease.clone();
         manager
             .renew_lease(&mut lease2)
             .await
             .expect("renew failed");
-        println!("Lease renewed to: {:?}", lease2.expiration);
+        info!("Lease renewed to: {:?}", lease2.expiration);
 
         assert!(lease2.expiration > lease.expiration);
     }

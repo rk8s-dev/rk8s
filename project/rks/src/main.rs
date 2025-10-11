@@ -16,7 +16,7 @@ use anyhow::Context;
 use clap::Parser;
 use cli::{Cli, Commands};
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
-use log::error;
+use log::{error, info};
 use rustls::crypto::CryptoProvider;
 use std::sync::Arc;
 
@@ -26,7 +26,6 @@ async fn main() -> anyhow::Result<()> {
         .expect("failed to install default CryptoProvider");
 
     let cli = Cli::parse();
-    use log::info;
 
     env_logger::init();
 
@@ -42,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
                 .insert_network_config(&xline_config.prefix, &cfg.network_config)
                 .await?;
 
-            println!("[rks] listening on {}", cfg.addr);
+            info!("[rks] listening on {}", cfg.addr);
 
             let sm = match init::new_subnet_manager(xline_config.clone()).await {
                 Ok(m) => m,

@@ -18,10 +18,11 @@ use std::collections::HashMap;
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
 use sysinfo::{Disks, System};
+use tracing::{error, info, warn};
 
 fn get_subnet_file_path() -> String {
     if let Ok(path) = env::var("SUBNET_FILE_PATH") {
-        println!("Using custom subnet file path: {path}");
+        info!("Using custom subnet file path: {path}");
         return path;
     }
 
@@ -34,7 +35,7 @@ fn get_subnet_file_path() -> String {
             .open(cni_path)
             .is_ok()
     {
-        println!("Using CNI standard path: {cni_path}");
+        info!("Using CNI standard path: {cni_path}");
         return cni_path.to_string();
     }
 
@@ -43,13 +44,13 @@ fn get_subnet_file_path() -> String {
         let user_path = format!("{user_dir}/subnet.env");
 
         if fs::create_dir_all(&user_dir).is_ok() {
-            println!("Using user directory: {user_path}");
+            info!("Using user directory: {user_path}");
             return user_path;
         }
     }
 
     let default_path = "/tmp/subnet.env";
-    println!("Using default temporary path: {default_path}");
+    info!("Using default temporary path: {default_path}");
     default_path.to_string()
 }
 
@@ -89,7 +90,7 @@ pub async fn run_forever(tls_cfg: TLSConnectionArgs) -> Result<()> {
         )
         .await
         {
-            eprintln!("[rkl_worker] error: {e:?}, retrying in 3s");
+            error!("[rkl_worker] error: {e:?}, retrying in 3s");
             time::sleep(Duration::from_secs(3)).await;
         } else {
             time::sleep(Duration::from_secs(1)).await;
@@ -130,15 +131,15 @@ pub async fn run_once(
         node.metadata.name.clone(),
     );
 
-    println!("Network receiver created for node: {}", node.metadata.name);
+    info!("Network receiver created for node: {}", node.metadata.name);
 
     let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string()).await?;
-    println!("[worker] connected to RKS at {server_addr}");
+    info!("[worker] connected to RKS at {server_addr}");
 
     // register to rks by sending RegisterNode(Box<Node>)
     let register_msg = RksMessage::RegisterNode(Box::new(node.clone()));
     client.send_msg(&register_msg).await?;
-    println!("[worker] sent RegisterNode({})", node.metadata.name);
+    info!("[worker] sent RegisterNode({})", node.metadata.name);
 
     // heartbeat
     let hb_conn = client.clone();
@@ -164,13 +165,13 @@ pub async fn run_once(
                     };
 
                     if let Err(e) = hb_conn.send_msg(&hb).await {
-                        eprintln!("[worker heartbeat] send failed: {e}");
+                        error!("[worker heartbeat] send failed: {e}");
                     } else {
-                        println!("[worker] heartbeat sent");
+                        info!("[worker] heartbeat sent");
                     }
                 }
                 Err(e) => {
-                    eprintln!("[worker heartbeat] generate_node failed: {e}");
+                    error!("[worker heartbeat] generate_node failed: {e}");
                 }
             }
         }
@@ -184,39 +185,39 @@ pub async fn run_once(
                 match recv.read(&mut buf).await {
                     Ok(Some(n)) => match bincode::deserialize::<RksMessage>(&buf[..n]) {
                         Ok(RksMessage::Ack) => {
-                            println!("[worker] got register Ack");
+                            info!("[worker] got register Ack");
                         }
                         Ok(RksMessage::Error(e)) => {
-                            eprintln!("[worker] register error: {e}");
+                            error!("[worker] register error: {e}");
                         }
                         Ok(RksMessage::SetNetwork(cfg)) => {
-                            println!("[worker] received network config: {cfg:?}");
+                            info!("[worker] received network config: {cfg:?}");
 
                             if let Err(e) = handle_network_config(&network_receiver, &cfg).await {
-                                eprintln!("[worker] failed to apply network config: {e}");
+                                error!("[worker] failed to apply network config: {e}");
                                 let _ = client
                                     .send_msg(&RksMessage::Error(format!(
                                         "network config failed: {e}"
                                     )))
                                     .await;
                             } else {
-                                println!("[worker] network config applied successfully");
+                                info!("[worker] network config applied successfully");
                                 let _ = client.send_msg(&RksMessage::Ack).await;
                             }
                         }
                         Ok(RksMessage::UpdateRoutes(_id, routes)) => {
-                            println!("[worker] received routes update: {routes:?}");
+                            info!("[worker] received routes update: {routes:?}");
                             let route_msg = NetworkConfigMessage::Route { routes };
                             if let Err(e) = network_receiver.handle_network_config(route_msg).await
                             {
-                                eprintln!("[worker] failed to apply routes: {e}");
+                                error!("[worker] failed to apply routes: {e}");
                                 let _ = client
                                     .send_msg(&RksMessage::Error(format!(
                                         "routes update failed: {e}"
                                     )))
                                     .await;
                             } else {
-                                println!("[worker] routes applied successfully");
+                                info!("[worker] routes applied successfully");
                                 let _ = client.send_msg(&RksMessage::Ack).await;
                             }
                         }
@@ -228,7 +229,7 @@ pub async fn run_once(
                             if let Some(target) = target_opt
                                 && target != node.metadata.name
                             {
-                                eprintln!(
+                                warn!(
                                     "[worker] CreatePod skipped: target={} self={}",
                                     target, node.metadata.name
                                 );
@@ -241,7 +242,7 @@ pub async fn run_once(
                                 continue;
                             }
 
-                            println!(
+                            info!(
                                 "[worker] CreatePod name={} assigned_to={}",
                                 pod.metadata.name,
                                 target_opt.unwrap_or("<unspecified>")
@@ -251,7 +252,7 @@ pub async fn run_once(
                             let runner = match TaskRunner::from_task(pod.clone()) {
                                 Ok(r) => r,
                                 Err(e) => {
-                                    eprintln!("[worker] TaskRunner::from_task failed: {e:?}");
+                                    error!("[worker] TaskRunner::from_task failed: {e:?}");
                                     let _ = client
                                         .send_msg(&RksMessage::Error(format!(
                                             "create {} failed: {e}",
@@ -272,7 +273,7 @@ pub async fn run_once(
                                         .await;
                                 }
                                 Err(e) => {
-                                    eprintln!("[worker] run_pod_from_taskrunner failed: {e:?}");
+                                    error!("[worker] run_pod_from_taskrunner failed: {e:?}");
                                     let _ = client
                                         .send_msg(&RksMessage::Error(format!(
                                             "create {} failed: {e}",
@@ -283,13 +284,13 @@ pub async fn run_once(
                             }
                         }
                         Ok(RksMessage::DeletePod(name)) => {
-                            println!("[worker] DeletePod {name}");
+                            info!("[worker] DeletePod {name}");
                             match pod::standalone::delete_pod(&name) {
                                 Ok(_) => {
                                     let _ = client.send_msg(&RksMessage::Ack).await;
                                 }
                                 Err(e) => {
-                                    eprintln!("[worker] delete_pod failed: {e:?}");
+                                    error!("[worker] delete_pod failed: {e:?}");
                                     let _ = client
                                         .send_msg(&RksMessage::Error(format!(
                                             "delete {name} failed: {e}"
@@ -299,23 +300,23 @@ pub async fn run_once(
                             }
                         }
                         Ok(other) => {
-                            println!("[worker] unexpected message: {other:?}");
+                            warn!("[worker] unexpected message: {other:?}");
                         }
                         Err(err) => {
-                            eprintln!("[worker] deserialize failed: {err}");
-                            eprintln!("[worker] raw: {:?}", &buf[..n]);
+                            error!("[worker] deserialize failed: {err}");
+                            error!("[worker] raw: {:?}", &buf[..n]);
                         }
                     },
                     Ok(None) => {
-                        eprintln!("[worker] uni stream closed early");
+                        warn!("[worker] uni stream closed early");
                     }
                     Err(e) => {
-                        eprintln!("[worker] read error: {e}");
+                        error!("[worker] read error: {e}");
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[worker] accept_uni error: {e}, breaking to reconnect");
+                error!("[worker] accept_uni error: {e}, breaking to reconnect");
                 break Ok(());
             }
         }
@@ -326,7 +327,7 @@ async fn handle_network_config(
     network_receiver: &NetworkReceiver,
     node_cfg: &NodeNetworkConfig,
 ) -> Result<()> {
-    println!(
+    info!(
         "[worker] Processing network configuration for node: {}",
         node_cfg.node_id
     );
@@ -376,7 +377,7 @@ async fn handle_network_config(
 
     network_receiver.handle_network_config(config_msg).await?;
 
-    println!("[worker] Network configuration processed successfully");
+    info!("[worker] Network configuration processed successfully");
     Ok(())
 }
 

@@ -34,7 +34,7 @@ pub async fn user_delete(
     conn: &Connection,
 ) -> Result<()> {
     xline_store.delete_pod(&pod_name).await?;
-    println!("[user_delete] deleted pod {pod_name} (written to xline)");
+    info!("[user_delete] deleted pod {pod_name} (written to xline)");
 
     let response = RksMessage::Ack;
     let data = bincode::serialize(&response)?;

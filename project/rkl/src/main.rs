@@ -14,6 +14,7 @@ mod task;
 
 use commands::{compose::ComposeCommand, container::ContainerCommand, pod::PodCommand};
 use commands::{compose::compose_execute, container::container_execute, pod::pod_execute};
+use tracing::error;
 
 #[derive(Parser)]
 #[command(name = "rkl")]
@@ -70,6 +71,5 @@ fn main() -> Result<(), anyhow::Error> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let cli = Cli::parse();
-    cli.run()
-        .inspect_err(|err| eprintln!("Failed to run: {err}"))
+    cli.run().inspect_err(|err| error!("Failed to run: {err}"))
 }

@@ -9,7 +9,7 @@ use clap::Subcommand;
 use libcontainer::container::State;
 use liboci_cli::{Delete, List};
 use serde_json::json;
-use tracing::debug;
+use tracing::{debug, error, info};
 
 use crate::{
     commands::{
@@ -153,7 +153,7 @@ impl ComposeManager {
         // store the spec info into a .json file
         self.persist_compose_state()?;
 
-        println!("Project {} starts successfully", self.project_name);
+        info!("Project {} starts successfully", self.project_name);
         Ok(())
     }
 
@@ -191,7 +191,7 @@ impl ComposeManager {
         let network_mapping = self.network_manager.network_service_mapping();
 
         for (network_name, services) in network_mapping {
-            println!("Creating network: {network_name}");
+            info!("Creating network: {network_name}");
 
             for (srv_name, srv) in services.into_iter() {
                 let container_ports = map_port_style(srv.ports.clone())?;
@@ -237,7 +237,7 @@ impl ComposeManager {
                     }
                     Err(err) => {
                         // create one container failed delete others
-                        println!(
+                        error!(
                             "container {} created failed: {}",
                             runner.get_container_id()?,
                             err
@@ -250,9 +250,9 @@ impl ComposeManager {
                                 },
                                 self.root_path.clone(),
                             ) {
-                                println!("container {} deleted failed: {}", state.id, err)
+                                error!("container {} deleted failed: {}", state.id, err)
                             } else {
-                                println!("container {} deleted during the rollback", state.id)
+                                info!("container {} deleted during the rollback", state.id)
                             }
                         }
                         return Err(err);

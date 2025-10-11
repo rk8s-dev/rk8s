@@ -4,6 +4,7 @@ pub mod client;
 pub mod static_pods;
 
 use crate::commands::pod::TLSConnectionArgs;
+use tracing::error;
 
 pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
     tokio::runtime::Builder::new_multi_thread()
@@ -14,13 +15,13 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
 
             tokio::spawn(async move {
                 if let Err(e) = client::run_forever(tls_cfg).await {
-                    eprintln!("[daemon] rks client exited with error: {e:?}");
+                    error!("[daemon] rks client exited with error: {e:?}");
                 }
             });
             tokio::spawn(async {
                 let sync_loop = SyncLoop::default().register_event(static_pods::handler);
                 sync_loop.run().await;
-                eprintln!("[daemon] sync_loop exited unexpectedly");
+                error!("[daemon] sync_loop exited unexpectedly");
             });
             tokio::signal::ctrl_c().await?;
             Ok(())

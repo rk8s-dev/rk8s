@@ -663,7 +663,7 @@ mod tests {
             .await
             .expect("failed to create subnet");
 
-        println!("Lease expiration: {exp}");
+        info!("Lease expiration: {exp}");
 
         let (lease_opt, _) = registry
             .get_subnet(sn4, Some(sn6))
@@ -724,7 +724,7 @@ mod tests {
 
         tokio::select! {
             Some(watch_result) = rx.recv() => {
-                println!("Received watch event: {watch_result:?}");
+                info!("Received watch event: {watch_result:?}");
                 assert!(!watch_result.is_empty());
             }
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {

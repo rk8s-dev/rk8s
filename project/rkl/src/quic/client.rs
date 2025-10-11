@@ -222,6 +222,7 @@ mod tests {
     use common::RksMessage;
     use rustls::crypto::CryptoProvider;
     use std::sync::OnceLock;
+    use tracing::info;
     use tracing_subscriber::EnvFilter;
 
     fn init_test_logger() {
@@ -247,7 +248,7 @@ mod tests {
 
         let client = QUICClient::<Cli>::connect(rks_addr).await?;
         client.send_msg(&RksMessage::ListPod).await?;
-        println!("{}", client.fetch_msg().await?);
+        info!("{}", client.fetch_msg().await?);
         Ok(())
     }
 }
