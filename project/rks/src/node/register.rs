@@ -3,7 +3,6 @@ use anyhow::Context;
 use common::lease::{Lease, LeaseAttrs};
 use common::quic::RksConnection;
 use common::{Node, NodeNetworkConfig, RksMessage, log_error, reply_error_msg_and_bail};
-use derive_more::Deref;
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use libnetwork::config::NetworkConfig;
 use log::info;
@@ -11,15 +10,13 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-#[derive(Deref)]
 pub struct NodeRegister<'a> {
-    #[deref]
-    shared: Arc<Shared>,
+    shared: &'a Shared,
     conn: &'a RksConnection,
 }
 
 impl<'a> NodeRegister<'a> {
-    pub fn new(conn: &'a RksConnection, shared: Arc<Shared>) -> Self {
+    pub fn new(conn: &'a RksConnection, shared: &'a Shared) -> Self {
         Self { shared, conn }
     }
 
