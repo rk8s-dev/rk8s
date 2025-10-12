@@ -10,6 +10,8 @@ pub struct Config {
     pub xline_config: XlineConfig,
     // network config
     pub network_config: NetworkConfig,
+    // DNS config
+    pub dns_config: DnsConfig,
 }
 
 #[allow(dead_code)]
@@ -36,6 +38,13 @@ pub struct NetworkConfig {
 
     #[serde(rename = "SubnetLen")]
     pub subnet_len: u8,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DnsConfig {
+    #[serde(rename = "Port")]
+    pub port: u16,
 }
 
 pub fn load_config(path: &str) -> Result<Config> {

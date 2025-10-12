@@ -58,7 +58,7 @@ async fn test_run_dns_server_startup() {
 
     info!("test get pods: {pods:?}");
     let handle = tokio::spawn(async move {
-        let _ = run_dns_server(store).await;
+        let _ = run_dns_server(store, 5300).await;
     });
 
     tokio::signal::ctrl_c()

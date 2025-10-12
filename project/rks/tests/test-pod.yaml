@@ -4,11 +4,12 @@ metadata:
   name: test-pod1
   labels:
     app: my-app 
-    bundle: ./rk8s/project/test/bundles/pause
+    bundle: ./project/rk8s/project/test/bundles/pause
 spec:
+  node_name: tcy-VMware-Virtual-Platform
   containers:
     - name: container1    
-      image: ./rk8s/project/test/bundles/busybox
+      image: ./project/rk8s/project/test/bundles/busybox
       args:             
         - "dd"                   
         - "if=/dev/zero"  
@@ -20,4 +21,4 @@ spec:
           cpu: "500m"
           memory: "512Mi"
 status:
-  podIP: 10.10.0.122
+  podIP:

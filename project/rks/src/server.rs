@@ -61,11 +61,12 @@ pub async fn serve(
     addr: String,
     xline_store: Arc<XlineStore>,
     local_manager: Arc<LocalManager>,
+    dns_port: u16,
 ) -> anyhow::Result<()> {
     info!("Starting server with address: {addr}");
 
     // Create QUIC endpoint and server certificate
-    let endpoint = make_server_endpoint(addr.parse()?).await?;
+    let endpoint = make_server_endpoint(addr.clone().parse()?).await?;
     info!("QUIC server listening on {addr}");
 
     let node_registry = Arc::new(NodeRegistry::default());
@@ -115,7 +116,7 @@ pub async fn serve(
         let xline_store = xline_store.clone();
         let local_manager = local_manager.clone();
         let node_registry = node_registry.clone();
-
+        let addr = addr.clone();
         match connecting {
             Some(connecting) => match connecting.await {
                 Ok(conn) => {
@@ -123,8 +124,15 @@ pub async fn serve(
                     info!("[server] connection accepted: addr={remote_addr}");
 
                     tokio::spawn(async move {
-                        if let Err(e) =
-                            handle_connection(conn, xline_store, local_manager, node_registry).await
+                        if let Err(e) = handle_connection(
+                            conn,
+                            xline_store,
+                            local_manager,
+                            node_registry,
+                            dns_port,
+                            addr,
+                        )
+                        .await
                         {
                             error!("[server] handle_connection error: {e:?}");
                         }
@@ -254,6 +262,8 @@ async fn handle_connection(
     xline_store: Arc<XlineStore>,
     local_manager: Arc<LocalManager>,
     node_registry: Arc<NodeRegistry>,
+    dns_port: u16,
+    server_addr: String,
 ) -> Result<()> {
     let mut buf = vec![0u8; 4096];
     let mut is_worker = false;
@@ -339,6 +349,20 @@ async fn handle_connection(
                             let msg = RksMessage::SetNetwork(Box::new(node_net_config));
                             if let Some(worker) = node_registry_clone.get(&id).await {
                                 if let Err(e) = worker.tx.try_send(msg) {
+                                    error!("Failed to enqueue message for {id}: {e:?}");
+                                }
+                            } else {
+                                error!("No active worker for {id}");
+                            }
+
+                            let server_ip = server_addr
+                                .split(':')
+                                .next()
+                                .unwrap_or("127.0.0.1")
+                                .to_string();
+                            let dns_msg = RksMessage::SetDns(server_ip, dns_port);
+                            if let Some(worker) = node_registry_clone.get(&id).await {
+                                if let Err(e) = worker.tx.try_send(dns_msg) {
                                     error!("Failed to enqueue message for {id}: {e:?}");
                                 }
                             } else {

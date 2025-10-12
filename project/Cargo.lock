@@ -5539,6 +5539,7 @@ dependencies = [
  "hickory-resolver",
  "hickory-server",
  "ipnetwork",
+ "iptables",
  "lazy_static",
  "libcni",
  "libnetwork",

@@ -20,5 +20,6 @@ pub async fn main() -> Result<(), anyhow::Error> {
         eprintln!("[daemon] sync_loop exited unexpectedly");
     });
     tokio::signal::ctrl_c().await?;
+    println!("[daemon] received Ctrl-C, shutting down");
     Ok(())
 }

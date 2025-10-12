@@ -2,7 +2,7 @@ use common::{
     ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec, NodeStatus,
     ObjectMeta, PodSpec, PodStatus, PodTask, Resource,
 };
-use libnetwork::config::validate_network_config;
+//use libnetwork::config::validate_network_config;
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use serial_test::serial;
 use std::{collections::HashMap, sync::Arc};

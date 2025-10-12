@@ -7,6 +7,7 @@ mod protocol;
 mod scheduler;
 mod server;
 
+use crate::dns::authority::run_dns_server;
 use crate::network::init;
 use crate::protocol::config::load_config;
 use crate::{api::xlinestore::XlineStore, scheduler::Scheduler};
@@ -36,6 +37,19 @@ async fn main() -> anyhow::Result<()> {
             xline_store
                 .insert_network_config(&xline_config.prefix, &cfg.network_config)
                 .await?;
+            let store = xline_store.clone();
+            println!("[rks] init dns server");
+            tokio::spawn(async move {
+                let _ = run_dns_server(store, cfg.dns_config.port).await;
+            });
+            let server_ip = cfg
+                .addr
+                .clone()
+                .split(':')
+                .next()
+                .unwrap_or("127.0.0.1")
+                .to_string();
+            crate::dns::authority::setup_iptable(server_ip, cfg.dns_config.port).await?;
             println!("[rks] listening on {}", cfg.addr);
             let sm = match init::new_subnet_manager(xline_config.clone()).await {
                 Ok(m) => m,
@@ -55,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("Failed to create Scheduler")?;
             scheduler.run().await;
-            serve(cfg.addr, xline_store, local_manager).await?;
+            serve(cfg.addr, xline_store, local_manager, cfg.dns_config.port).await?;
         }
     }
 

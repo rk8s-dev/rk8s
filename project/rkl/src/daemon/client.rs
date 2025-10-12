@@ -369,6 +369,21 @@ pub async fn run_once(
                                 }
                             }
                         }
+                        Ok(RksMessage::SetDns(ip, dns_port)) => {
+                            println!("[worker] received dns config: {ip}:{dns_port}");
+
+                            if let Err(e) = handle_dns_config(ip, dns_port).await {
+                                eprintln!("[worker] failed to apply dns config: {e}");
+                                let _ = send_uni(
+                                    &connection,
+                                    &RksMessage::Error(format!("dns config failed: {e}")),
+                                )
+                                .await;
+                            } else {
+                                println!("[worker] dns config applied successfully");
+                                let _ = send_uni(&connection, &RksMessage::Ack).await;
+                            }
+                        }
                         Ok(other) => {
                             println!("[worker] unexpected message: {other:?}");
                         }
@@ -624,4 +639,8 @@ pub fn network_condition() -> NodeCondition {
         status,
         last_heartbeat_time: Some(Utc::now().to_rfc3339()),
     }
+}
+
+async fn handle_dns_config(_dns_ip: String, _dns_port: u16) -> Result<()> {
+    Ok(())
 }

@@ -173,6 +173,7 @@ pub enum RksMessage {
     },
     SetNetwork(Box<NodeNetworkConfig>),
     UpdateRoutes(String, Vec<Route>),
+    SetDns(String, u16),
 
     //response
     Ack,
