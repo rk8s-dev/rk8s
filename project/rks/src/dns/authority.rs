@@ -444,7 +444,7 @@ pub async fn setup_iptable(dns_ip: String, dns_port: u16) -> anyhow::Result<()> 
 #[allow(dead_code)]
 pub async fn cleanup_iptable(dns_ip: String, dns_port: u16) -> anyhow::Result<()> {
     let br_name = env::var("BR_NAME").unwrap_or_else(|_| "cni0".to_string());
-    let ipt = iptables::new(false).unwrap();
+    let ipt = iptables::new(false).map_err(|e| anyhow::anyhow!("failed to init iptables: {e}"))?;
 
     let rule1 = format!("-i {br_name} -p udp --dport 53 -j REDIRECT --to-ports {dns_port}");
     let rule2 = format!("-i {br_name} -p tcp --dport 53 -j REDIRECT --to-ports {dns_port}");
@@ -453,15 +453,24 @@ pub async fn cleanup_iptable(dns_ip: String, dns_port: u16) -> anyhow::Result<()
     let rule4 =
         format!("-p tcp -d {dns_ip} --dport 53 -j DNAT --to-destination {dns_ip}:{dns_port}");
 
-    ipt.delete("nat", "PREROUTING", &rule1)
-        .map_err(|e| anyhow::anyhow!("failed to delete rule1: {e}"))?;
-    ipt.delete("nat", "PREROUTING", &rule2)
-        .map_err(|e| anyhow::anyhow!("failed to delete rule2: {e}"))?;
-    ipt.delete("nat", "PREROUTING", &rule3)
-        .map_err(|e| anyhow::anyhow!("failed to delete rule3: {e}"))?;
-    ipt.delete("nat", "PREROUTING", &rule4)
-        .map_err(|e| anyhow::anyhow!("failed to delete rule4: {e}"))?;
-
+    let rules = [
+        ("rule1", &rule1),
+        ("rule2", &rule2),
+        ("rule3", &rule3),
+        ("rule4", &rule4),
+    ];
+    for (name, rule) in rules {
+        if ipt
+            .exists("nat", "PREROUTING", rule)
+            .map_err(|e| anyhow::anyhow!("failed to check {name}: {e}"))?
+        {
+            ipt.delete("nat", "PREROUTING", rule)
+                .map_err(|e| anyhow::anyhow!("failed to delete {name}: {e}"))?;
+            info!("Deleted iptables rule: {rule}");
+        } else {
+            info!("Rule does not exist, skipping delete: {rule}");
+        }
+    }
     Ok(())
 }
 
