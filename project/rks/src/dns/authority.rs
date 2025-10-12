@@ -458,9 +458,9 @@ pub async fn cleanup_iptable(dns_ip: String, dns_port: u16) -> anyhow::Result<()
     ipt.delete("nat", "PREROUTING", &rule2)
         .map_err(|e| anyhow::anyhow!("failed to delete rule2: {e}"))?;
     ipt.delete("nat", "PREROUTING", &rule3)
-        .map_err(|e| anyhow::anyhow!("failed to delete rule1: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("failed to delete rule3: {e}"))?;
     ipt.delete("nat", "PREROUTING", &rule4)
-        .map_err(|e| anyhow::anyhow!("failed to delete rule2: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("failed to delete rule4: {e}"))?;
 
     Ok(())
 }
