@@ -42,9 +42,9 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/itoa/1.0.15:itoa",
-        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/memchr/2.7.6:memchr",
         "//third-party/rust/crates/ryu/1.0.20:ryu",
-        "//third-party/rust/crates/serde_core/1.0.226:serde_core",
+        "//third-party/rust/crates/serde_core/1.0.228:serde_core",
     ],
 )
 

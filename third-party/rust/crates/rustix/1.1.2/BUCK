@@ -52,7 +52,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
-        "//third-party/rust/crates/libc/0.2.176:libc",
+        "//third-party/rust/crates/libc/0.2.177:libc",
         "//third-party/rust/crates/linux-raw-sys/0.11.0:linux-raw-sys",
     ],
 )

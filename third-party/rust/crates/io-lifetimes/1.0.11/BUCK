@@ -40,7 +40,7 @@ cargo.rust_library(
     ],
     rustc_flags = ["@$(location :io-lifetimes-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.176:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.177:libc"],
 )
 
 cargo.rust_binary(

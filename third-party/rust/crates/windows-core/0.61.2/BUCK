@@ -34,8 +34,8 @@ cargo.rust_library(
     features = ["std"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/windows-implement/0.60.0:windows-implement",
-        "//third-party/rust/crates/windows-interface/0.59.1:windows-interface",
+        "//third-party/rust/crates/windows-implement/0.60.2:windows-implement",
+        "//third-party/rust/crates/windows-interface/0.59.3:windows-interface",
         "//third-party/rust/crates/windows-link/0.1.3:windows-link",
         "//third-party/rust/crates/windows-result/0.3.4:windows-result",
         "//third-party/rust/crates/windows-strings/0.4.2:windows-strings",

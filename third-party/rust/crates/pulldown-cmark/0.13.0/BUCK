@@ -36,7 +36,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
-        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/memchr/2.7.6:memchr",
         "//third-party/rust/crates/unicase/2.8.1:unicase",
     ],
 )

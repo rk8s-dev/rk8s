@@ -43,8 +43,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anstream/0.6.20:anstream",
-        "//third-party/rust/crates/anstyle/1.0.11:anstyle",
+        "//third-party/rust/crates/anstream/0.6.21:anstream",
+        "//third-party/rust/crates/anstyle/1.0.13:anstyle",
         "//third-party/rust/crates/clap_lex/0.7.5:clap_lex",
         "//third-party/rust/crates/strsim/0.11.1:strsim",
     ],

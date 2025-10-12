@@ -4,13 +4,16 @@ use etcd_client::EventType;
 use futures::StreamExt;
 use hickory_proto::op::ResponseCode;
 use hickory_proto::rr::LowerName;
+use hickory_proto::rr::Name;
 use hickory_proto::rr::{RData, Record, RecordSet, RecordType};
+use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_server::ServerFuture;
 use hickory_server::authority::{
     Authority, AuthorityObject, Catalog, LookupControlFlow, LookupOptions, LookupRecords,
     MessageRequest, ZoneType,
 };
 use hickory_server::server::RequestInfo;
+use hickory_server::store::forwarder::ForwardAuthority;
 use log::{debug, error, info};
 use std::env;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -338,6 +341,12 @@ pub async fn run_dns_server(xline_store: Arc<XlineStore>, port: u16) -> anyhow::
 
     let xline_authority: Arc<dyn AuthorityObject> = xline_authority;
     catalog.upsert(origin, vec![xline_authority]);
+
+    let forwarder = ForwardAuthority::builder(TokioConnectionProvider::default())
+        .map_err(|e| anyhow::anyhow!(e))?
+        .build()
+        .map_err(|e| anyhow::anyhow!(e))?;
+    catalog.upsert(LowerName::from(Name::root()), vec![Arc::new(forwarder)]);
 
     let mut server = ServerFuture::new(catalog);
     let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;

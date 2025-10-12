@@ -41,7 +41,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/hashbrown/0.12.3:hashbrown",
-        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde/1.0.228:serde",
     ],
 )
 

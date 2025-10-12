@@ -33,9 +33,9 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytemuck/1.23.2:bytemuck",
+        "//third-party/rust/crates/bytemuck/1.24.0:bytemuck",
         "//third-party/rust/crates/byteorder-lite/0.1.0:byteorder-lite",
-        "//third-party/rust/crates/moxcms/0.7.5:moxcms",
+        "//third-party/rust/crates/moxcms/0.7.7:moxcms",
         "//third-party/rust/crates/num-traits/0.2.19:num-traits",
     ],
 )

@@ -43,7 +43,7 @@ cargo.rust_library(
         "//third-party/rust/crates/humantime/2.3.0:humantime",
         "//third-party/rust/crates/is-terminal/0.4.16:is-terminal",
         "//third-party/rust/crates/log/0.4.28:log",
-        "//third-party/rust/crates/regex/1.11.2:regex",
+        "//third-party/rust/crates/regex/1.12.1:regex",
         "//third-party/rust/crates/termcolor/1.1.3:termcolor",
     ],
 )

@@ -38,11 +38,11 @@ cargo.rust_library(
         "std",
     ],
     named_deps = {
-        "syscall": "//third-party/rust/crates/redox_syscall/0.5.17:redox_syscall",
+        "syscall": "//third-party/rust/crates/redox_syscall/0.5.18:redox_syscall",
     },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
-        "//third-party/rust/crates/libc/0.2.176:libc",
+        "//third-party/rust/crates/libc/0.2.177:libc",
     ],
 )

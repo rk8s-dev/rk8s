@@ -80,7 +80,7 @@ cargo.rust_binary(
     ],
     visibility = [],
     deps = [
-        "//third-party/rust/crates/cc/1.2.38:cc",
+        "//third-party/rust/crates/cc/1.2.41:cc",
         "//third-party/rust/crates/pkg-config/0.3.32:pkg-config",
         "//third-party/rust/crates/vcpkg/0.2.15:vcpkg",
     ],

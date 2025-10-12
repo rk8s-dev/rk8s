@@ -44,7 +44,7 @@ cargo.rust_library(
         "//third-party/rust/crates/num-bigint/0.4.6:num-bigint",
         "//third-party/rust/crates/num-integer/0.1.46:num-integer",
         "//third-party/rust/crates/num-traits/0.2.19:num-traits",
-        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde/1.0.228:serde",
     ],
 )
 

@@ -32,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/pest/2.8.2:pest"],
+    deps = ["//third-party/rust/crates/pest/2.8.3:pest"],
 )

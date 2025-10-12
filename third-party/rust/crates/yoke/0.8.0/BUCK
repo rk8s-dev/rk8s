@@ -38,8 +38,8 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/serde/1.0.226:serde",
-        "//third-party/rust/crates/stable_deref_trait/1.2.0:stable_deref_trait",
+        "//third-party/rust/crates/serde/1.0.228:serde",
+        "//third-party/rust/crates/stable_deref_trait/1.2.1:stable_deref_trait",
         "//third-party/rust/crates/yoke-derive/0.8.0:yoke-derive",
         "//third-party/rust/crates/zerofrom/0.1.6:zerofrom",
     ],

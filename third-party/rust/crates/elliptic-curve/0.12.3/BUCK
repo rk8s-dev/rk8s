@@ -55,6 +55,6 @@ cargo.rust_library(
         "//third-party/rust/crates/rand_core/0.6.4:rand_core",
         "//third-party/rust/crates/sec1/0.3.0:sec1",
         "//third-party/rust/crates/subtle/2.6.1:subtle",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
+        "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],
 )

@@ -40,7 +40,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",
-        "//third-party/rust/crates/lock_api/0.4.13:lock_api",
-        "//third-party/rust/crates/parking_lot/0.12.4:parking_lot",
+        "//third-party/rust/crates/lock_api/0.4.14:lock_api",
+        "//third-party/rust/crates/parking_lot/0.12.5:parking_lot",
     ],
 )

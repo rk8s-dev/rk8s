@@ -32,7 +32,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
-        "parent": "//third-party/rust/crates/webpki-roots/1.0.2:webpki-roots",
+        "parent": "//third-party/rust/crates/webpki-roots/1.0.3:webpki-roots",
     },
     visibility = ["PUBLIC"],
 )

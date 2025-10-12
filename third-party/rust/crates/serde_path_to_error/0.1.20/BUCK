@@ -34,6 +34,6 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/itoa/1.0.15:itoa",
-        "//third-party/rust/crates/serde_core/1.0.226:serde_core",
+        "//third-party/rust/crates/serde_core/1.0.228:serde_core",
     ],
 )

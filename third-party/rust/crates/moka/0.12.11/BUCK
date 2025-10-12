@@ -50,7 +50,7 @@ cargo.rust_library(
         "//third-party/rust/crates/equivalent/1.0.2:equivalent",
         "//third-party/rust/crates/event-listener/5.4.1:event-listener",
         "//third-party/rust/crates/futures-util/0.3.31:futures-util",
-        "//third-party/rust/crates/parking_lot/0.12.4:parking_lot",
+        "//third-party/rust/crates/parking_lot/0.12.5:parking_lot",
         "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic",
         "//third-party/rust/crates/smallvec/1.15.1:smallvec",
         "//third-party/rust/crates/tagptr/0.2.0:tagptr",

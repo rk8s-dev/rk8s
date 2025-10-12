@@ -35,6 +35,6 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/generic-array/0.14.7:generic-array",
-        "//third-party/rust/crates/typenum/1.18.0:typenum",
+        "//third-party/rust/crates/typenum/1.19.0:typenum",
     ],
 )

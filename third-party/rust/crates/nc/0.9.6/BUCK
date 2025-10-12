@@ -64,7 +64,7 @@ cargo.rust_binary(
         "std",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.38:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.41:cc"],
 )
 
 buildscript_run(

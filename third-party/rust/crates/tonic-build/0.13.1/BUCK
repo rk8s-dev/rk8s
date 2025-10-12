@@ -43,7 +43,7 @@ cargo.rust_library(
         "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
         "//third-party/rust/crates/prost-build/0.13.5:prost-build",
         "//third-party/rust/crates/prost-types/0.13.5:prost-types",
-        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/quote/1.0.41:quote",
         "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

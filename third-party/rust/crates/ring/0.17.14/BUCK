@@ -82,7 +82,7 @@ cargo.rust_binary(
         "wasm32_unknown_unknown_js",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.38:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.41:cc"],
 )
 
 buildscript_run(

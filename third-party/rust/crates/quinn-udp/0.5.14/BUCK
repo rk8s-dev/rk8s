@@ -39,7 +39,7 @@ cargo.rust_library(
     rustc_flags = ["@$(location :quinn-udp-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.176:libc",
+        "//third-party/rust/crates/libc/0.2.177:libc",
         "//third-party/rust/crates/socket2/0.6.0:socket2",
         "//third-party/rust/crates/tracing/0.1.41:tracing",
     ],

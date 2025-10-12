@@ -32,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.176:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.177:libc"],
 )

@@ -55,7 +55,7 @@ cargo.rust_library(
         "//third-party/rust/crates/futures-macro/0.3.31:futures-macro",
         "//third-party/rust/crates/futures-sink/0.3.31:futures-sink",
         "//third-party/rust/crates/futures-task/0.3.31:futures-task",
-        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/memchr/2.7.6:memchr",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/pin-utils/0.1.0:pin-utils",
         "//third-party/rust/crates/slab/0.4.11:slab",

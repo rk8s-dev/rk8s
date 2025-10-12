@@ -54,8 +54,8 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/glob/0.3.3:glob",
-        "//third-party/rust/crates/libc/0.2.176:libc",
-        "//third-party/rust/crates/libloading/0.8.9:libloading",
+        "//third-party/rust/crates/libc/0.2.177:libc",
+        "//third-party/rust/crates/libloading/0.8.8:libloading",
     ],
 )
 

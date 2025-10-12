@@ -43,11 +43,11 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/deranged/0.5.3:deranged",
+        "//third-party/rust/crates/deranged/0.5.4:deranged",
         "//third-party/rust/crates/itoa/1.0.15:itoa",
         "//third-party/rust/crates/num-conv/0.1.0:num-conv",
         "//third-party/rust/crates/powerfmt/0.2.0:powerfmt",
-        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/time-core/0.1.6:time-core",
         "//third-party/rust/crates/time-macros/0.2.24:time-macros",
     ],

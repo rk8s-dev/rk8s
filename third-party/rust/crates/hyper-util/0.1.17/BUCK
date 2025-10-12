@@ -55,7 +55,7 @@ cargo.rust_library(
         "//third-party/rust/crates/http/1.3.1:http",
         "//third-party/rust/crates/hyper/1.7.0:hyper",
         "//third-party/rust/crates/ipnet/2.11.0:ipnet",
-        "//third-party/rust/crates/libc/0.2.176:libc",
+        "//third-party/rust/crates/libc/0.2.177:libc",
         "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/socket2/0.6.0:socket2",

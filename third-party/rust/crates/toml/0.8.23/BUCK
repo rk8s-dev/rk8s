@@ -38,7 +38,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_spanned/0.6.9:serde_spanned",
         "//third-party/rust/crates/toml_datetime/0.6.11:toml_datetime",
         "//third-party/rust/crates/toml_edit/0.22.27:toml_edit",

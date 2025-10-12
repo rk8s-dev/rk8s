@@ -98,34 +98,34 @@
     "cwd": "/",
     "capabilities": {
       "bounding": [
-        "CAP_NET_BIND_SERVICE",
         "CAP_NET_RAW",
         "CAP_KILL",
-        "CAP_AUDIT_WRITE"
+        "CAP_AUDIT_WRITE",
+        "CAP_NET_BIND_SERVICE"
       ],
       "effective": [
-        "CAP_NET_BIND_SERVICE",
         "CAP_NET_RAW",
         "CAP_KILL",
-        "CAP_AUDIT_WRITE"
+        "CAP_AUDIT_WRITE",
+        "CAP_NET_BIND_SERVICE"
       ],
       "inheritable": [
-        "CAP_NET_BIND_SERVICE",
         "CAP_NET_RAW",
         "CAP_KILL",
-        "CAP_AUDIT_WRITE"
+        "CAP_AUDIT_WRITE",
+        "CAP_NET_BIND_SERVICE"
       ],
       "permitted": [
-        "CAP_NET_BIND_SERVICE",
         "CAP_NET_RAW",
         "CAP_KILL",
-        "CAP_AUDIT_WRITE"
+        "CAP_AUDIT_WRITE",
+        "CAP_NET_BIND_SERVICE"
       ],
       "ambient": [
-        "CAP_NET_BIND_SERVICE",
         "CAP_NET_RAW",
         "CAP_KILL",
-        "CAP_AUDIT_WRITE"
+        "CAP_AUDIT_WRITE",
+        "CAP_NET_BIND_SERVICE"
       ]
     },
     "rlimits": [
@@ -152,19 +152,19 @@
     "namespaces": [
       {
         "type": "pid",
-        "path": "/proc/30484/ns/pid"
+        "path": "/proc/103948/ns/pid"
       },
       {
         "type": "network",
-        "path": "/proc/30484/ns/net"
+        "path": "/proc/103948/ns/net"
       },
       {
         "type": "ipc",
-        "path": "/proc/30484/ns/ipc"
+        "path": "/proc/103948/ns/ipc"
       },
       {
         "type": "uts",
-        "path": "/proc/30484/ns/uts"
+        "path": "/proc/103948/ns/uts"
       },
       {
         "type": "mount"

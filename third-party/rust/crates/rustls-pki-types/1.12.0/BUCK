@@ -39,5 +39,5 @@ cargo.rust_library(
         "web-time",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/zeroize/1.8.1:zeroize"],
+    deps = ["//third-party/rust/crates/zeroize/1.8.2:zeroize"],
 )

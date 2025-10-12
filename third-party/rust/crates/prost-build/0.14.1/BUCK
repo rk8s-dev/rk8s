@@ -49,7 +49,7 @@ cargo.rust_library(
         "//third-party/rust/crates/prost/0.14.1:prost",
         "//third-party/rust/crates/pulldown-cmark-to-cmark/21.0.0:pulldown-cmark-to-cmark",
         "//third-party/rust/crates/pulldown-cmark/0.13.0:pulldown-cmark",
-        "//third-party/rust/crates/regex/1.11.2:regex",
+        "//third-party/rust/crates/regex/1.12.1:regex",
         "//third-party/rust/crates/syn/2.0.106:syn",
         "//third-party/rust/crates/tempfile/3.23.0:tempfile",
     ],

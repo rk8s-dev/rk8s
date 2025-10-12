@@ -46,7 +46,7 @@ cargo.rust_library(
         "//third-party/rust/crates/fastrand/1.9.0:fastrand",
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",
         "//third-party/rust/crates/futures-io/0.3.31:futures-io",
-        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/memchr/2.7.6:memchr",
         "//third-party/rust/crates/parking/2.2.1:parking",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/waker-fn/1.2.0:waker-fn",

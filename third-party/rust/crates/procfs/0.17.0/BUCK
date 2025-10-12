@@ -42,7 +42,7 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
         "//third-party/rust/crates/chrono/0.4.42:chrono",
-        "//third-party/rust/crates/flate2/1.1.2:flate2",
+        "//third-party/rust/crates/flate2/1.1.4:flate2",
         "//third-party/rust/crates/hex/0.4.3:hex",
         "//third-party/rust/crates/procfs-core/0.17.0:procfs-core",
         "//third-party/rust/crates/rustix/0.38.44:rustix",

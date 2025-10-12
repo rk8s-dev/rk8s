@@ -33,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.176:libc",
+        "//third-party/rust/crates/libc/0.2.177:libc",
         "//third-party/rust/crates/tracing-core/0.1.34:tracing-core",
         "//third-party/rust/crates/tracing-subscriber/0.3.20:tracing-subscriber",
     ],

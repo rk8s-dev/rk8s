@@ -35,7 +35,7 @@ cargo.rust_library(
     features = ["more_lengths"],
     rustc_flags = ["@$(location :generic-array-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/typenum/1.18.0:typenum"],
+    deps = ["//third-party/rust/crates/typenum/1.19.0:typenum"],
 )
 
 cargo.rust_binary(
