@@ -23,6 +23,8 @@ pub struct TLSConnectionArgs {
     pub enable_tls: bool,
     #[arg(long, env = "JOIN_TOKEN")]
     pub join_token: Option<String>,
+    #[arg(long, env = "ROOT_CERT_PATH")]
+    pub root_cert_path: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]

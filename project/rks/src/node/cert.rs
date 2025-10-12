@@ -19,16 +19,18 @@ fn build_no_tls_config() -> anyhow::Result<quinn::ServerConfig> {
     Ok(server_config)
 }
 
-pub async fn build_quic_config(vault: &Vault) -> anyhow::Result<quinn::ServerConfig> {
+pub async fn build_quic_config(
+    vault: &Vault,
+) -> anyhow::Result<(quinn::ServerConfig, Option<Vec<CertificateDer<'static>>>)> {
     if !config().tls_config.enable {
-        return build_no_tls_config();
+        return Ok((build_no_tls_config()?, None));
     }
 
     let req = IssueCertificateRequest {
         common_name: Some("rks-cluster".to_string()),
         alt_names: Some("rks.svc.cluster.local,localhost".to_string()),
         ip_sans: Some("192.168.73.128,127.0.0.1".to_string()),
-        ttl: Some(DEFAULT_TTL.to_string()),
+        ttl: Some("15s".to_string()),
     };
 
     let IssuedCertMaterial {
@@ -42,10 +44,13 @@ pub async fn build_quic_config(vault: &Vault) -> anyhow::Result<quinn::ServerCon
         .build()?;
     let rustls_config = rustls::ServerConfig::builder()
         .with_client_cert_verifier(verifier)
-        .with_single_cert(certs, private_key)?;
+        .with_single_cert(certs.clone(), private_key)?;
 
     let quic_crypto = QuicServerConfig::try_from(rustls_config)?;
-    Ok(quinn::ServerConfig::with_crypto(Arc::new(quic_crypto)))
+    Ok((
+        quinn::ServerConfig::with_crypto(Arc::new(quic_crypto)),
+        Some(certs),
+    ))
 }
 
 fn trust_roots_from_certs(certs: &[CertificateDer<'static>]) -> anyhow::Result<Arc<RootCertStore>> {
@@ -57,9 +62,9 @@ fn trust_roots_from_certs(certs: &[CertificateDer<'static>]) -> anyhow::Result<A
 }
 
 struct IssuedCertMaterial {
-    certs: Vec<CertificateDer<'static>>,
-    trust_roots: Arc<RootCertStore>,
-    private_key: PrivateKeyDer<'static>,
+    pub certs: Vec<CertificateDer<'static>>,
+    pub trust_roots: Arc<RootCertStore>,
+    pub private_key: PrivateKeyDer<'static>,
 }
 
 fn into_cert_material(resp: IssueCertificateResponse) -> anyhow::Result<IssuedCertMaterial> {

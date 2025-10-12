@@ -1,8 +1,7 @@
-use anyhow::Context;
+use crate::modules::pki::CertExt;
 use builder_pattern::Builder;
 use rustls::pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
 
 /// Request body for `POST /v1/pki/config/ca`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,10 +56,7 @@ impl IssueCertificateResponse {
             all_cert.push_str(&self.ca_chain);
         }
 
-        let mut reader = Cursor::new(all_cert.as_bytes());
-        rustls_pemfile::certs(&mut reader)
-            .map(|e| e.with_context(|| "Failed to extract certificate from PEM certificate chain"))
-            .collect::<anyhow::Result<Vec<_>>>()
+        all_cert.to_certs()
     }
 }
 

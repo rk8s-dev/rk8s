@@ -1,6 +1,5 @@
 use crate::api::xlinestore::XlineStore;
 use crate::network::manager::LocalManager;
-use crate::node::cert::build_quic_config;
 use crate::node::lease_sync::LeaseSynchronizer;
 use crate::node::server::QUICServer;
 use crate::vault::Vault;
@@ -62,8 +61,6 @@ impl NodeRegistry {
     }
 }
 
-/// Launch the RKS server to listen for incoming QUIC connections.
-/// Each connection will be handled in a dedicated task.
 pub struct RksNode {
     addr: String,
     shared: Arc<Shared>,
@@ -79,8 +76,8 @@ impl RksNode {
 
         self.start_background_tasks();
 
-        let server = self.init_quic_server().await?;
-        server.serve(self.shared).await
+        let server = QUICServer::new(self.addr.parse()?, self.shared.vault.clone()).await?;
+        server.serve(self.shared.clone()).await
     }
 
     fn start_background_tasks(&self) {
@@ -96,11 +93,6 @@ impl RksNode {
             self.shared.node_registry.clone(),
         );
         info!("Lease synchronizer started");
-    }
-
-    async fn init_quic_server(&self) -> anyhow::Result<QUICServer> {
-        let config = build_quic_config(&self.shared.vault).await?;
-        QUICServer::new(self.addr.parse()?, config)
     }
 }
 

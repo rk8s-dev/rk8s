@@ -1,21 +1,27 @@
 //! The `libvault::pki` module implements public key cryptography features, including
 //! manipulating certificates as a CA or encrypting a piece of data by using a public key.
 
-use std::{
-    any::Any,
-    sync::{Arc, atomic::AtomicU64},
-    time::Duration,
-};
-
-use async_trait::async_trait;
-use derive_more::Deref;
-
 use crate::{
     core::Core,
     errors::RvError,
     logical::{Backend, LogicalBackend, Request, Response, SecretBuilder},
     modules::Module,
 };
+use anyhow::Context;
+use async_trait::async_trait;
+use derive_more::Deref;
+use rustls::pki_types::CertificateDer;
+use std::io::Cursor;
+use std::time::SystemTime;
+use std::{
+    any::Any,
+    convert::TryFrom,
+    sync::{Arc, atomic::AtomicU64},
+    time::Duration,
+};
+use x509_parser::nom::AsBytes;
+use x509_parser::prelude::{FromDer, X509Certificate};
+use x509_parser::time::ASN1Time;
 
 pub mod field;
 pub mod path_config_ca;
@@ -158,5 +164,83 @@ impl Module for PkiModule {
 
     fn cleanup(&self, core: &Core) -> Result<(), RvError> {
         core.delete_logical_backend("pki")
+    }
+}
+
+pub trait CertExt {
+    fn to_certs(&self) -> anyhow::Result<Vec<CertificateDer<'static>>> {
+        Ok(vec![])
+    }
+
+    fn validity_range(&self) -> anyhow::Result<(ASN1Time, ASN1Time)> {
+        anyhow::bail!("Not implemented")
+    }
+
+    fn rotate_deadline(&self, ratio: f64) -> anyhow::Result<SystemTime> {
+        anyhow::ensure!(ratio.is_finite(), "Rotation ratio must be finite");
+        anyhow::ensure!(
+            (0.0..=1.0).contains(&ratio),
+            "Rotation ratio must lie in the inclusive range [0.0, 1.0]",
+        );
+
+        let (not_before, not_after) = self.validity_range()?;
+        let not_before = not_before.to_datetime();
+        let not_after = not_after.to_datetime();
+
+        let lifetime = not_after - not_before;
+        anyhow::ensure!(
+            !lifetime.is_negative(),
+            "Certificate validity window is inverted",
+        );
+
+        let rotate_at = not_before + lifetime * ratio;
+        let nanos = rotate_at.unix_timestamp_nanos();
+
+        if nanos >= 0 {
+            let secs = u64::try_from(nanos / 1_000_000_000)
+                .context("Rotation deadline is too far in the future")?;
+            let sub_nanos = u32::try_from(nanos % 1_000_000_000)
+                .context("Nanosecond remainder out of range")?;
+            return Ok(SystemTime::UNIX_EPOCH + Duration::new(secs, sub_nanos));
+        }
+
+        let nanos_abs = nanos
+            .checked_abs()
+            .ok_or_else(|| anyhow::anyhow!("Rotation deadline overflow"))?;
+        let secs = u64::try_from(nanos_abs / 1_000_000_000)
+            .context("Rotation deadline is too far in the past")?;
+        let sub_nanos = u32::try_from(nanos_abs % 1_000_000_000)
+            .context("Nanosecond remainder out of range")?;
+        let duration = Duration::new(secs, sub_nanos);
+        SystemTime::UNIX_EPOCH
+            .checked_sub(duration)
+            .context("Rotation deadline before supported SystemTime range")
+    }
+}
+
+impl CertExt for String {
+    fn to_certs(&self) -> anyhow::Result<Vec<CertificateDer<'static>>> {
+        let mut reader = Cursor::new(self.as_bytes());
+        rustls_pemfile::certs(&mut reader)
+            .map(|e| e.with_context(|| "Failed to extract certificate from PEM certificate chain"))
+            .collect::<anyhow::Result<Vec<_>>>()
+    }
+
+    fn validity_range(&self) -> anyhow::Result<(ASN1Time, ASN1Time)> {
+        let certs = self.to_certs()?;
+        anyhow::ensure!(!certs.is_empty(), "No valid certs found");
+        certs[0].validity_range()
+    }
+}
+
+impl CertExt for CertificateDer<'static> {
+    fn to_certs(&self) -> anyhow::Result<Vec<CertificateDer<'static>>> {
+        Ok(vec![self.clone()])
+    }
+
+    fn validity_range(&self) -> anyhow::Result<(ASN1Time, ASN1Time)> {
+        let (_, parsed) = X509Certificate::from_der(self.as_bytes())?;
+        let validity = parsed.validity();
+        Ok((validity.not_before, validity.not_after))
     }
 }

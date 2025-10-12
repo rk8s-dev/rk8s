@@ -1,18 +1,23 @@
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::private::Sealed;
 use crate::quic::verifier::SkipServerVerification;
+use anyhow::Context;
 use common::RksMessage;
 use common::quic::RksConnection;
 use derive_more::Deref;
+use libvault::modules::pki::CertExt;
 use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig, Endpoint};
 use rustls::RootCertStore;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use std::io::Cursor;
 use std::marker::PhantomData;
-use std::sync::Arc;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Weak};
+use std::time::{Duration, SystemTime};
+use tokio::sync::Mutex;
 use tokio::time;
 use tonic::async_trait;
 use tracing::{debug, info, warn};
@@ -68,6 +73,7 @@ impl<Type> Clone for QUICClient<Type> {
 }
 
 impl<Type: ClientType + Send> QUICClient<Type> {
+    // todo: implement certificate rotation for client.
     pub async fn connect(
         addr: impl AsRef<str>,
         tls_cfg: &TLSConnectionArgs,
@@ -75,7 +81,7 @@ impl<Type: ClientType + Send> QUICClient<Type> {
         let addr = addr.as_ref();
         info!(target: "rkl::quic", server_addr = %addr, "initializing QUIC client");
 
-        let config = build_no_certificates_config()?;
+        let config = build_handshake_config(tls_cfg.root_cert_path.as_deref()).await?;
         debug!(target: "rkl::quic", server_addr = %addr, "establishing provisional connection");
         let mut conn = try_connect(addr, Some(config)).await?;
 
@@ -139,12 +145,25 @@ impl<Type: ClientType + Send> QUICClient<Type> {
     }
 }
 
-fn build_no_certificates_config() -> anyhow::Result<quinn::ClientConfig> {
-    let mut tls = rustls::ClientConfig::builder()
-        .with_root_certificates(RootCertStore::empty())
+async fn build_handshake_config(
+    root_cert_path: Option<impl AsRef<Path>>,
+) -> anyhow::Result<quinn::ClientConfig> {
+    let mut roots = RootCertStore::empty();
+    if let Some(root_cert_path) = root_cert_path {
+        let mut cert = tokio::fs::read_to_string(root_cert_path)
+            .await?
+            .to_certs()?;
+
+        anyhow::ensure!(
+            !cert.is_empty(),
+            "There are no certificates in offered root cert pem"
+        );
+        roots.add(cert[0].clone())?;
+    }
+
+    let tls = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
         .with_no_client_auth();
-    tls.dangerous()
-        .set_certificate_verifier(Arc::new(SkipServerVerification));
 
     let quic_crypto = QuicClientConfig::try_from(tls)?;
     Ok(quinn::ClientConfig::new(Arc::new(quic_crypto)))

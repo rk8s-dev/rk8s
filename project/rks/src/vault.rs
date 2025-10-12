@@ -117,15 +117,27 @@ impl Vault {
             "max_path_length": 1,
         });
 
-        self.vault
+        let resp = self
+            .vault
             .write(
                 Some(self.root_token.as_str()),
                 "pki/root/generate/exported",
                 payload.to_map()?,
             )
             .await
-            .with_context(|| "Failed to generate root CA")?;
+            .with_context(|| "Failed to generate root CA")?
+            .unwrap();
+
+        let cert_pem = resp
+            .data
+            .with_context(|| "Failed to get data from vault request")?
+            .get("certificate")
+            .and_then(|v| v.as_str())
+            .map(|e| e.chars().filter(|c| *c != '\n').collect::<String>())
+            .with_context(|| "Failed to get cert pem from vault response")?;
+
         info!("[vault] generated/exported cluster root CA");
+        info!("[vault] cert pem: {cert_pem}");
         Ok(())
     }
 

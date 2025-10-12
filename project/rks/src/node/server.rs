@@ -1,31 +1,89 @@
 use crate::node::Shared;
+use crate::node::cert::build_quic_config;
 use crate::node::dispatch::{dispatch_user, dispatch_worker};
 use crate::node::register::NodeRegister;
 use crate::node::server::private::Sealed;
 use crate::node::watcher::PodsWatcher;
 use crate::protocol::config::config;
+use crate::vault::Vault;
 use async_trait::async_trait;
 use common::quic::RksConnection;
 use common::{RksMessage, log_error, reply_and_bail};
+use humantime::format_rfc3339;
+use libvault::modules::pki::CertExt;
 use log::{debug, error, info};
-use quinn::{Connection, Endpoint, ServerConfig};
+use quinn::{Connection, Endpoint};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc};
+use std::time::SystemTime;
+use tokio::sync::Mutex;
 
 pub struct QUICServer {
-    endpoint: Endpoint,
+    endpoint: Arc<Endpoint>,
+    context: Arc<RotateContext>,
+}
+
+struct RotateContext {
+    vault: Arc<Vault>,
+    deadline: Option<SystemTime>,
 }
 
 impl QUICServer {
-    pub fn new(addr: SocketAddr, config: ServerConfig) -> anyhow::Result<Self> {
+    pub async fn new(addr: SocketAddr, vault: Arc<Vault>) -> anyhow::Result<Self> {
+        let (config, certs) = build_quic_config(&vault).await?;
+
+        let deadline = match certs {
+            Some(certs) => Some(certs[0].rotate_deadline(2.0 / 3.0)?),
+            None => None,
+        };
+
         Ok(Self {
-            endpoint: Endpoint::server(config, addr)?,
+            endpoint: Arc::new(Endpoint::server(config, addr)?),
+            context: Arc::new(RotateContext { vault, deadline }),
         })
+    }
+
+    fn rotate_background(&self) {
+        if let Some(deadline) = self.context.deadline {
+            info!("next rotation deadline: {}", format_rfc3339(deadline));
+
+            let vault = self.context.vault.clone();
+            let endpoint = self.endpoint.clone();
+
+            tokio::spawn(async move {
+                let result = || -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>> {
+                    let mut deadline = deadline;
+
+                    Box::pin(async move {
+                        loop {
+                            let until = tokio::time::Instant::now()
+                                + deadline.duration_since(SystemTime::now()).unwrap();
+                            tokio::time::sleep_until(until).await;
+
+                            info!("deadline reached, preparing rotate certificate");
+
+                            let (config, certs) = build_quic_config(&vault).await?;
+
+                            let certs = certs.unwrap();
+                            deadline = certs[0].rotate_deadline(2.0 / 3.0)?;
+                            info!("next rotation deadline: {}", format_rfc3339(deadline));
+
+                            endpoint.set_server_config(Some(config))
+                        }
+                    })
+                };
+
+                log_error!(result().await)
+            });
+        }
     }
 
     pub async fn serve(&self, shared: Arc<Shared>) -> anyhow::Result<()> {
         loop {
+            self.rotate_background();
+
             let incoming = match self.endpoint.accept().await {
                 Some(incoming) => incoming,
                 None => anyhow::bail!("The endpoint is closed unexpectedly"),
