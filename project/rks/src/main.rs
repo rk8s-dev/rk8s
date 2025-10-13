@@ -63,8 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
             scheduler.run().await;
 
-            let mut vault = Vault::new()?;
-            vault.init().await?;
+            let vault = Vault::migrate().await?;
 
             let shared = Arc::new(Shared::new(
                 xline_store.clone(),
@@ -75,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
 
             RksNode::new(cfg.addr.clone(), shared).run().await?;
         }
+        Commands::Gen { sub } => sub.handle().await?,
     }
 
     Ok(())

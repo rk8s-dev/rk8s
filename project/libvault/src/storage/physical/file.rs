@@ -7,7 +7,7 @@ use std::{
     thread::sleep,
     time::Duration,
 };
-
+use std::path::Path;
 use lockfile::Lockfile;
 use serde_json::Value;
 
@@ -143,6 +143,14 @@ impl FileBackend {
             }
             None => Err(RvError::ErrPhysicalConfigItemMissing),
         }
+    }
+
+    pub fn with_folder(folder: impl AsRef<Path>) -> Result<Self, RvError> {
+        let path = folder.as_ref();
+
+        Ok(Self {
+            path: PathBuf::from(path),
+        })
     }
 
     fn path_key(&self, k: &str) -> (PathBuf, String) {

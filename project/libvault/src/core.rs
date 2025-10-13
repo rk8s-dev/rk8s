@@ -7,14 +7,16 @@
 //! This module is very low-level and usually it should not disturb end users and module developers
 //! of RustyVault.
 
+use anyhow::anyhow;
+use arc_swap::{ArcSwap, ArcSwapOption};
+use go_defer::defer;
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, Weak},
 };
-
-use arc_swap::{ArcSwap, ArcSwapOption};
-use go_defer::defer;
-use serde::{Deserialize, Serialize};
+use tracing::{info, trace};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
@@ -152,6 +154,30 @@ impl Core {
             )),
             ..Default::default()
         }
+    }
+
+    pub async fn migrate(&self, source: Arc<dyn PhysicalBackend>) -> anyhow::Result<()> {
+        let mut queue = VecDeque::from([String::new()]);
+
+        while let Some(prefix) = queue.pop_front() {
+            let keys = source.list(&prefix).await?;
+
+            for key in keys {
+                let full = format!("{prefix}{key}");
+
+                if key.ends_with("/") {
+                    queue.push_back(full);
+                    continue;
+                }
+
+                let entry = source
+                    .get(&full)
+                    .await?
+                    .ok_or_else(|| anyhow!("failed to get an expectedly existed key"))?;
+                self.physical.put(&entry).await?;
+            }
+        }
+        Ok(())
     }
 
     pub fn wrap(self) -> Arc<Self> {

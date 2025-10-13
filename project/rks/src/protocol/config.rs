@@ -1,6 +1,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -50,6 +51,7 @@ pub struct NetworkConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TLSConfig {
     pub enable: bool,
+    pub vault_folder: PathBuf,
 }
 
 pub fn load_config(path: &str) -> anyhow::Result<&'static Config> {

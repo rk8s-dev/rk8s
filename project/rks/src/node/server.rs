@@ -16,7 +16,7 @@ use quinn::{Connection, Endpoint};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::Mutex;
 
@@ -53,27 +53,28 @@ impl QUICServer {
             let endpoint = self.endpoint.clone();
 
             tokio::spawn(async move {
-                let result = || -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>> {
-                    let mut deadline = deadline;
+                let result =
+                    || -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>> {
+                        let mut deadline = deadline;
 
-                    Box::pin(async move {
-                        loop {
-                            let until = tokio::time::Instant::now()
-                                + deadline.duration_since(SystemTime::now()).unwrap();
-                            tokio::time::sleep_until(until).await;
+                        Box::pin(async move {
+                            loop {
+                                let until = tokio::time::Instant::now()
+                                    + deadline.duration_since(SystemTime::now()).unwrap();
+                                tokio::time::sleep_until(until).await;
 
-                            info!("deadline reached, preparing rotate certificate");
+                                info!("deadline reached, preparing rotate certificate");
 
-                            let (config, certs) = build_quic_config(&vault).await?;
+                                let (config, certs) = build_quic_config(&vault).await?;
 
-                            let certs = certs.unwrap();
-                            deadline = certs[0].rotate_deadline(2.0 / 3.0)?;
-                            info!("next rotation deadline: {}", format_rfc3339(deadline));
+                                let certs = certs.unwrap();
+                                deadline = certs[0].rotate_deadline(2.0 / 3.0)?;
+                                info!("next rotation deadline: {}", format_rfc3339(deadline));
 
-                            endpoint.set_server_config(Some(config))
-                        }
-                    })
-                };
+                                endpoint.set_server_config(Some(config))
+                            }
+                        })
+                    };
 
                 log_error!(result().await)
             });
