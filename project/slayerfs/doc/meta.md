@@ -102,3 +102,39 @@ database:
 1. 优化性能与大目录可扩展性
 2. 实现权限系统（包括 FUSE 映射）
 3. 增强错误处理（消除字符串化错误）
+
+### persistence_demo
+
+本机运行示例：
+
+```sh
+# 使用sqlite持久化存储元数据，将文件内容块儿保存在/tmp/sqlite文件夹。
+# 挂载的视图展示在/tmp/mount，也就是直接在/tmp/mount进行操作
+cargo run --example persistence_demo -- -c sqlite.yml -s /tmp/sqlite -m /tmp/mount
+```
+
+sqlite.yml
+
+```yml
+database:
+  type: sqlite
+
+```
+
+本机运行示例：
+
+```sh
+# 使用PostgreSQL持久化存储元数据，将文件内容块儿保存在/tmp/pg文件夹。
+# 挂载的视图展示在/tmp/mount，也就是直接在/tmp/mount进行操作
+cargo run --example persistence_demo -- -c pg.yml -s /tmp/pg -m /tmp/mount
+```
+
+pg.yml
+
+```yml
+database:
+  type: postgres
+  url: "postgresql://postgres:postgres@127.0.0.1:5432/meta"
+```
+
+​	目前，本地数据库模式下，在挂载后的文件夹中，可以正常操作文件夹，包括重命名，删除，读写文件之类的操作。

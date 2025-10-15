@@ -4,7 +4,6 @@ use slayerfs::cadapter::localfs::LocalFsBackend;
 use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::ObjectBlockStore;
 use slayerfs::fuse::mount::mount_vfs_unprivileged;
-use slayerfs::meta::MetaStore;
 use slayerfs::vfs::fs::VFS;
 use std::path::PathBuf;
 use tokio::signal;
@@ -82,10 +81,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     {
         let args = Args::parse();
-        let program_name = std::env::args()
-            .next()
-            .unwrap_or_else(|| "persistence_demo".to_string());
-
         let config_file = args.config;
         let mount_point = args.mount;
         let backend_storage = args.storage;
@@ -129,13 +124,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::fs::set_permissions(&mount_point, permissions)?;
         }
 
-        println!("Starting SlayerFS...");
-        println!("Backend storage location: {}", backend_storage.display());
         let layout = ChunkLayout::default();
         let client = ObjectClient::new(LocalFsBackend::new(&backend_storage));
         let store = ObjectBlockStore::new(client);
 
-        println!("Reading config file: {}", config_file.display());
         let config_content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Cannot read config file: {}", e))?;
 
@@ -146,35 +138,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let processed_config = process_config_for_backend(&config_content, &meta_config_dir)?;
         std::fs::write(&target_config_path, processed_config)?;
 
-        println!("Initializing metadata storage...");
         let config = slayerfs::meta::config::Config::from_file(&target_config_path)
             .map_err(|e| format!("Failed to load config file: {}", e))?;
         let meta = slayerfs::meta::factory::MetaStoreFactory::create_from_config(config)
             .await
             .map_err(|e| format!("Failed to initialize metadata storage: {}", e))?;
 
-        println!("Verifying metadata storage status...");
-        let root_entries = meta
-            .readdir(1)
-            .await
-            .map_err(|e| format!("readdir failed: {}", e))?;
-        println!("Root directory contains {} entries", root_entries.len());
-        if !root_entries.is_empty() {
-            println!("Existing entries:");
-            for entry in &root_entries {
-                println!(
-                    "  - {} (inode: {}, type: {:?})",
-                    entry.name, entry.ino, entry.kind
-                );
-            }
-            println!("Detected existing data, persistence working!");
-        } else {
-            println!("This is a new filesystem");
-        }
-
-        println!("Creating VFS instance...");
         let fs = VFS::new(layout, store, meta).await.expect("create VFS");
-        println!("VFS instance created successfully");
 
         println!("Mounting filesystem...");
 
@@ -206,47 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "SlayerFS successfully mounted at: {}",
             mount_point.display()
         );
-        println!(
-            "Mount point permissions: {:?}",
-            std::fs::metadata(&mount_point)?.permissions()
-        );
 
-        println!();
-        println!("You can now test file operations in another terminal:");
-        println!("  ls {}", mount_point.display());
-        println!("  echo 'hello world' > {}/test.txt", mount_point.display());
-        println!("  cat {}/test.txt", mount_point.display());
-        println!("  mkdir {}/testdir", mount_point.display());
-        println!();
-        println!("Persistence testing:");
-        println!("  1. Create some files and directories");
-        println!("  2. Press Ctrl+C to stop the program");
-        println!("  3. Start the program again with same parameters:");
-        println!(
-            "     {} --config {} --mount {} --storage {}",
-            program_name,
-            config_file.display(),
-            mount_point.display(),
-            backend_storage.display()
-        );
-        println!("  4. Check if your data is still there!");
-        println!();
-        println!("Backend switching test:");
-        println!("  1. Stop the program");
-        println!("  2. Start with different config files:");
-        println!(
-            "     {} --config slayerfs-sqlite.yml --mount {} --storage {}",
-            program_name,
-            mount_point.display(),
-            backend_storage.display()
-        );
-        println!(
-            "     {} --config slayerfs-etcd.yml --mount {} --storage {}",
-            program_name,
-            mount_point.display(),
-            backend_storage.display()
-        );
-        println!();
         println!("Press Ctrl+C to exit and unmount filesystem...");
 
         signal::ctrl_c().await?;
@@ -254,18 +184,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         handle.unmount().await?;
         println!("Filesystem unmounted");
-        println!();
-        println!("Tips:");
-        println!("  - Re-run the same command to verify data persistence");
-        println!("  - Try different config files to test multi-backend support");
-        println!(
-            "  - Restart command: {} --config {} --mount {} --storage {}",
-            program_name,
-            config_file.display(),
-            mount_point.display(),
-            backend_storage.display()
-        );
-
         Ok(())
     }
 }

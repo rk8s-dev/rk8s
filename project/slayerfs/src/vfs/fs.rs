@@ -585,27 +585,40 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
     /// - 调整命名空间并移除路径映射；底层数据清理由后续 GC 处理。
     pub async fn unlink(&self, path: &str) -> Result<(), String> {
         let path = Self::norm_path(path);
-        let mut ns = self.ns.lock().unwrap();
-        let ino = ns
-            .lookup
-            .get(&path)
-            .cloned()
-            .ok_or_else(|| "not found".to_string())?;
-        let (parent, kind) = {
+
+        // Extract metadata from namespace while holding lock
+        let (parent, name, ino) = {
+            let ns = self.ns.lock().unwrap();
+            let ino = ns
+                .lookup
+                .get(&path)
+                .cloned()
+                .ok_or_else(|| "not found".to_string())?;
             let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
-            (
-                vnode.parent.ok_or_else(|| "orphan".to_string())?,
-                vnode.kind,
-            )
+
+            if vnode.kind != FileType::File {
+                return Err("is a directory".into());
+            }
+
+            let parent = vnode.parent.ok_or_else(|| "orphan".to_string())?;
+            let name = vnode.name.clone();
+            (parent, name, ino)
         };
-        if kind != FileType::File {
-            return Err("is a directory".into());
-        }
+
+        // Persist deletion to metadata store
+        self.meta
+            .unlink(parent, &name)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Update in-memory namespace
+        let mut ns = self.ns.lock().unwrap();
         if let Some(p) = ns.nodes.get_mut(&parent) {
             p.children.retain(|_, v| *v != ino);
         }
         ns.lookup.remove(&path);
         ns.nodes.remove(&ino);
+
         Ok(())
     }
 
@@ -617,82 +630,147 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         if path == "/" {
             return Err("cannot remove root".into());
         }
+
+        // Validate and extract metadata from namespace
+        let (parent, name, ino) = {
+            let ns = self.ns.lock().unwrap();
+            let ino = ns
+                .lookup
+                .get(&path)
+                .cloned()
+                .ok_or_else(|| "not found".to_string())?;
+            let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
+
+            if vnode.kind != FileType::Dir {
+                return Err("not a directory".into());
+            }
+            if !vnode.children.is_empty() {
+                return Err("directory not empty".into());
+            }
+
+            let parent = vnode.parent.ok_or_else(|| "orphan".to_string())?;
+            let name = vnode.name.clone();
+            (parent, name, ino)
+        };
+
+        // Persist deletion to metadata store
+        self.meta
+            .rmdir(parent, &name)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Update in-memory namespace
         let mut ns = self.ns.lock().unwrap();
-        let ino = ns
-            .lookup
-            .get(&path)
-            .cloned()
-            .ok_or_else(|| "not found".to_string())?;
-        let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
-        if vnode.kind != FileType::Dir {
-            return Err("not a directory".into());
-        }
-        if !vnode.children.is_empty() {
-            return Err("directory not empty".into());
-        }
-        let parent = vnode.parent.ok_or_else(|| "orphan".to_string())?;
         if let Some(p) = ns.nodes.get_mut(&parent) {
             p.children.retain(|_, v| *v != ino);
         }
         ns.lookup.remove(&path);
         ns.nodes.remove(&ino);
+
         Ok(())
     }
 
-    /// 文件重命名（仅支持文件，目标不得已存在）。
-    /// 重命名文件：
-    /// - 仅支持文件；目标不得存在；目标父目录若不存在会自动创建。
+    /// 通用重命名（支持文件和目录）
+    /// - 支持文件和目录；目标不得存在；目标父目录若不存在会自动创建。
     /// - 在命名空间锁内进行迁移与路径更新；当前实现不支持覆盖。
-    pub async fn rename_file(&self, old: &str, new: &str) -> Result<(), String> {
+    pub async fn rename(&self, old: &str, new: &str) -> Result<(), String> {
         let old = Self::norm_path(old);
         let new = Self::norm_path(new);
         let (new_dir, new_name) = Self::split_dir_file(&new);
-        if self.ns.lock().unwrap().lookup.contains_key(&new) {
-            return Err("target exists".into());
-        }
-        let ino = { self.ns.lock().unwrap().lookup.get(&old).cloned() }
-            .ok_or_else(|| "not found".to_string())?;
-        // 创建缺失的父目录并获取其 inode
-        self.mkdir_p(&new_dir).await?;
-        let new_dir_ino = self
-            .ns
-            .lock()
-            .unwrap()
-            .lookup
-            .get(&new_dir)
-            .cloned()
-            .ok_or_else(|| "parent not found".to_string())?;
 
-        // 操作命名空间时小心借用范围，避免同时持有多个可变借用
-        let mut ns = self.ns.lock().unwrap();
-        let old_parent = {
-            let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
-            if vnode.kind != FileType::File {
-                return Err("only file supported".into());
+        {
+            let ns = self.ns.lock().unwrap();
+            if ns.lookup.contains_key(&new) {
+                return Err("target exists".into());
             }
-            vnode.parent
+        }
+
+        // 获取源 inode
+        let ino = {
+            let ns = self.ns.lock().unwrap();
+            ns.lookup.get(&old).cloned()
+        }
+        .ok_or_else(|| "not found".to_string())?;
+
+        // Ensure target parent directory exists
+        self.mkdir_p(&new_dir).await?;
+
+        let new_dir_ino = {
+            let ns = self.ns.lock().unwrap();
+            ns.lookup.get(&new_dir).cloned()
+        }
+        .ok_or_else(|| "parent not found".to_string())?;
+
+        // Update namespace: move node and update parent-child relationships
+        let (old_parent_ino, old_name) = {
+            let mut ns = self.ns.lock().unwrap();
+            let (old_parent, old_name, is_dir) = {
+                let vnode = ns.nodes.get(&ino).ok_or_else(|| "not found".to_string())?;
+                (
+                    vnode.parent,
+                    vnode.name.clone(),
+                    vnode.kind == FileType::Dir,
+                )
+            };
+
+            let old_parent_ino = old_parent.ok_or_else(|| "parent not found".to_string())?;
+
+            // Remove from old parent
+            if let Some(parent) = old_parent
+                && let Some(p) = ns.nodes.get_mut(&parent)
+            {
+                p.children.retain(|_, v| *v != ino);
+            }
+
+            // Update node's parent and name
+            {
+                let vnode = ns
+                    .nodes
+                    .get_mut(&ino)
+                    .ok_or_else(|| "not found".to_string())?;
+                vnode.parent = Some(new_dir_ino);
+                vnode.name = new_name.clone();
+            }
+
+            // Add to new parent
+            if let Some(p) = ns.nodes.get_mut(&new_dir_ino) {
+                p.children.insert(new_name.clone(), ino);
+            }
+
+            // For directories: recursively update all descendant paths in lookup table
+            if is_dir {
+                let mut to_update = Vec::new();
+                for (path, path_ino) in ns.lookup.iter() {
+                    if path.starts_with(&old)
+                        && (*path == old || path.as_bytes().get(old.len()) == Some(&b'/'))
+                    {
+                        to_update.push((path.clone(), *path_ino));
+                    }
+                }
+
+                for (old_path, path_ino) in to_update {
+                    ns.lookup.remove(&old_path);
+                    let new_path = if old_path == old {
+                        new.clone()
+                    } else {
+                        format!("{}{}", new, &old_path[old.len()..])
+                    };
+                    ns.lookup.insert(new_path, path_ino);
+                }
+            } else {
+                ns.lookup.remove(&old);
+                ns.lookup.insert(new.clone(), ino);
+            }
+
+            (old_parent_ino, old_name)
         };
-        // 从旧父目录移除
-        if let Some(parent) = old_parent
-            && let Some(p) = ns.nodes.get_mut(&parent)
-        {
-            p.children.retain(|_, v| *v != ino);
-        }
-        // 设置新父与名字
-        {
-            let vnode = ns
-                .nodes
-                .get_mut(&ino)
-                .ok_or_else(|| "not found".to_string())?;
-            vnode.parent = Some(new_dir_ino);
-            vnode.name = new_name.clone();
-        }
-        if let Some(p) = ns.nodes.get_mut(&new_dir_ino) {
-            p.children.insert(new_name.clone(), ino);
-        }
-        // 更新查找表
-        ns.lookup.remove(&old);
-        ns.lookup.insert(new, ino);
+
+        // Persist rename operation to metadata store
+        self.meta
+            .rename(old_parent_ino, &old_name, new_dir_ino, new_name)
+            .await
+            .map_err(|e| e.to_string())?;
+
         Ok(())
     }
 
@@ -828,7 +906,7 @@ mod tests {
         assert!(fs.exists("/a/b/t.txt"));
 
         // rename file
-        fs.rename_file("/a/b/t.txt", "/a/b/u.txt").await.unwrap();
+        fs.rename("/a/b/t.txt", "/a/b/u.txt").await.unwrap();
         assert!(!fs.exists("/a/b/t.txt") && fs.exists("/a/b/u.txt"));
 
         // truncate
