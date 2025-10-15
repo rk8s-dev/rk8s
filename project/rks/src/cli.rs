@@ -28,6 +28,10 @@ pub enum Commands {
 pub enum GenCommand {
     /// Generate certificates
     Certs { config: PathBuf },
+    JoinToken {
+        #[arg(long, default_value = "6789", required = false)]
+        port: String,
+    },
 }
 
 impl GenCommand {
@@ -38,6 +42,12 @@ impl GenCommand {
 
                 let mut vault = Vault::with_file_backend()?;
                 vault.generate_certs().await
+            }
+            Self::JoinToken { port } => {
+                let resp = reqwest::get(format!("http://127.0.0.1:{port}/join_token")).await?;
+                let body = resp.text().await?;
+                println!("{body}");
+                Ok(())
             }
         }
     }

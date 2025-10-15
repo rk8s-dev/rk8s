@@ -31,6 +31,12 @@ macro_rules! log_error {
             $crate::_private::error!("{e}");
         }
     };
+    ($maybe_error:expr, $error_msg:expr) => {
+        if let Err(e) = $maybe_error {
+            $crate::_private::error!("{e}");
+            anyhow::bail!($error_msg);
+        }
+    };
 }
 
 #[macro_export]

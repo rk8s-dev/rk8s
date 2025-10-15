@@ -2,6 +2,7 @@ use crate::protocol::config::NetworkConfig;
 use anyhow::Result;
 use common::*;
 use etcd_client::{Client, GetOptions, PutOptions, WatchOptions, WatchStream, Watcher};
+use libvault::storage::xline::XlineOptions;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -16,8 +17,8 @@ pub struct XlineStore {
 #[allow(unused)]
 impl XlineStore {
     /// Create a new XlineStore instance by connecting to the given endpoints.
-    pub async fn new(endpoints: &[&str]) -> Result<Self> {
-        let client = Client::connect(endpoints, None).await?;
+    pub async fn new(option: XlineOptions) -> Result<Self> {
+        let client = Client::connect(option.endpoints, option.config).await?;
         Ok(Self {
             client: Arc::new(RwLock::new(client)),
         })

@@ -1,7 +1,6 @@
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::private::Sealed;
 use crate::quic::verifier::SkipServerVerification;
-use anyhow::Context;
 use common::RksMessage;
 use common::quic::RksConnection;
 use derive_more::Deref;
@@ -12,17 +11,15 @@ use quinn::{ClientConfig, Endpoint};
 use rustls::RootCertStore;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use std::io::Cursor;
 use std::marker::PhantomData;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Weak};
-use std::time::{Duration, SystemTime};
-use tokio::sync::Mutex;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::time;
 use tonic::async_trait;
 use tracing::{debug, info, warn};
 
-const DEFAULT_TTL: &str = "64h";
+const DEFAULT_TTL: &str = "180d";
 
 mod private {
     pub trait Sealed {}
@@ -146,11 +143,11 @@ impl<Type: ClientType + Send> QUICClient<Type> {
 }
 
 async fn build_handshake_config(
-    root_cert_path: Option<impl AsRef<Path>>,
+    root_cert_path: Option<&Path>,
 ) -> anyhow::Result<quinn::ClientConfig> {
     let mut roots = RootCertStore::empty();
-    if let Some(root_cert_path) = root_cert_path {
-        let mut cert = tokio::fs::read_to_string(root_cert_path)
+    if let Some(root_cert_path) = &root_cert_path {
+        let cert = tokio::fs::read_to_string(root_cert_path)
             .await?
             .to_certs()?;
 
@@ -161,9 +158,13 @@ async fn build_handshake_config(
         roots.add(cert[0].clone())?;
     }
 
-    let tls = rustls::ClientConfig::builder()
+    let mut tls = rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth();
+    if root_cert_path.is_none() {
+        tls.dangerous()
+            .set_certificate_verifier(Arc::new(SkipServerVerification));
+    }
 
     let quic_crypto = QuicClientConfig::try_from(tls)?;
     Ok(quinn::ClientConfig::new(Arc::new(quic_crypto)))
@@ -209,7 +210,7 @@ async fn try_connect(
     let mut attempts = 0u32;
     let conn = loop {
         attempts += 1;
-        match endpoint.connect(addr.parse()?, "rks.svc.cluster.local") {
+        match endpoint.connect(addr.parse()?, "rks-cluster") {
             Ok(connecting) => match connecting.await {
                 Ok(conn) => {
                     info!(

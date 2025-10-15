@@ -7,3 +7,6 @@ pub mod node;
 pub mod protocol;
 pub mod scheduler;
 pub mod vault;
+
+#[allow(dead_code)]
+mod internal;

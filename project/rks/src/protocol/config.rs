@@ -1,12 +1,14 @@
 use anyhow::Context;
+use either::Either;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-pub fn config() -> &'static Config {
+pub fn config_ref() -> &'static Config {
     CONFIG.get().unwrap()
 }
 
@@ -60,4 +62,29 @@ pub fn load_config(path: &str) -> anyhow::Result<&'static Config> {
     let cfg: Config = serde_yaml::from_str(&content).context("Failed to parse YAML config")?;
     let cfg = CONFIG.get_or_init(|| cfg);
     Ok(cfg)
+}
+
+pub fn ip_or_dns(addr: impl AsRef<str>) -> Either<String, String> {
+    let addr = addr.as_ref();
+    match addr
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .parse::<SocketAddr>()
+    {
+        Ok(addr) => Either::Left(addr.ip().to_string()),
+        Err(_) => {
+            let (host, _) = addr.rsplit_once(':').unwrap_or((addr, ""));
+            Either::Right(host.to_string())
+        }
+    }
+}
+
+pub fn to_alt_names_and_ip_sans(
+    ip_or_dns: Either<String, String>,
+) -> (Option<String>, Option<String>) {
+    (ip_or_dns.clone().right(), ip_or_dns.left())
+}
+
+pub fn local_alt_names_and_ip_sans() -> (Option<String>, Option<String>) {
+    to_alt_names_and_ip_sans(ip_or_dns(&config_ref().addr))
 }

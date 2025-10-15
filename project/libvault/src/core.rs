@@ -16,7 +16,6 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, Weak},
 };
-use tracing::{info, trace};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{

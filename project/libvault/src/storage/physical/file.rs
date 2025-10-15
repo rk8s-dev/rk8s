@@ -1,3 +1,6 @@
+use lockfile::Lockfile;
+use serde_json::Value;
+use std::path::Path;
 use std::{
     any::Any,
     collections::HashMap,
@@ -7,9 +10,6 @@ use std::{
     thread::sleep,
     time::Duration,
 };
-use std::path::Path;
-use lockfile::Lockfile;
-use serde_json::Value;
 
 use crate::{
     errors::RvError,

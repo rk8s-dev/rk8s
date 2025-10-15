@@ -1,5 +1,5 @@
-use crate::protocol::config::config;
-use crate::vault::Vault;
+use crate::protocol::config::{config_ref, ip_or_dns, to_alt_names_and_ip_sans};
+use crate::vault::{CertRole, Vault};
 use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 use quinn::crypto::rustls::QuicServerConfig;
 use rustls::RootCertStore;
@@ -7,8 +7,6 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::server::WebPkiClientVerifier;
 use std::sync::Arc;
-
-const DEFAULT_TTL: &str = "12h";
 
 fn build_no_tls_config() -> anyhow::Result<quinn::ServerConfig> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
@@ -22,22 +20,24 @@ fn build_no_tls_config() -> anyhow::Result<quinn::ServerConfig> {
 pub async fn build_quic_config(
     vault: &Vault,
 ) -> anyhow::Result<(quinn::ServerConfig, Option<Vec<CertificateDer<'static>>>)> {
-    if !config().tls_config.enable {
+    let cfg = config_ref();
+    if !cfg.tls_config.enable {
         return Ok((build_no_tls_config()?, None));
     }
 
+    let (alt_names, ip_sans) = to_alt_names_and_ip_sans(ip_or_dns(&cfg.addr));
     let req = IssueCertificateRequest {
         common_name: Some("rks-cluster".to_string()),
-        alt_names: Some("rks.svc.cluster.local,localhost".to_string()),
-        ip_sans: Some("192.168.73.128,127.0.0.1".to_string()),
-        ttl: Some("15s".to_string()),
+        alt_names,
+        ip_sans,
+        ttl: Some("360s".to_string()),
     };
 
     let IssuedCertMaterial {
         certs,
         trust_roots,
         private_key,
-    } = into_cert_material(vault.issue_cert("rks", &req).await?)?;
+    } = into_cert_material(vault.issue_cert(CertRole::Rks, &req).await?)?;
 
     let verifier = WebPkiClientVerifier::builder(trust_roots)
         .allow_unauthenticated()

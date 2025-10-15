@@ -1,14 +1,44 @@
 use crate::errors::RvError;
 use crate::storage::{Backend, BackendEntry};
-use etcd_client::{Client, GetOptions, KvClient};
+use etcd_client::{Client, ConnectOptions, GetOptions, KvClient, TlsOptions};
 use itertools::Itertools;
 use serde_json::Value;
 use std::collections::HashMap;
 use tokio::sync::OnceCell;
+use tonic::transport::{Certificate, Identity};
 
 pub struct XlineBackend {
     client: OnceCell<Client>,
-    endpoints: Vec<String>,
+    option: XlineOptions,
+}
+
+#[derive(Clone)]
+pub struct XlineOptions {
+    pub endpoints: Vec<String>,
+    pub config: Option<ConnectOptions>,
+}
+
+impl XlineOptions {
+    pub fn new(endpoints: Vec<String>) -> Self {
+        Self {
+            endpoints,
+            config: None,
+        }
+    }
+
+    pub fn with_tls(
+        mut self,
+        root_cert: impl AsRef<str>,
+        cert: impl AsRef<str>,
+        private_key: impl AsRef<str>,
+    ) -> anyhow::Result<Self> {
+        let tls_cfg = TlsOptions::default()
+            .ca_certificate(Certificate::from_pem(root_cert.as_ref()))
+            .identity(Identity::from_pem(cert.as_ref(), private_key.as_ref()));
+
+        self.config = Some(ConnectOptions::default().with_tls(tls_cfg));
+        Ok(self)
+    }
 }
 
 impl XlineBackend {
@@ -25,14 +55,14 @@ impl XlineBackend {
 
         Ok(Self {
             client: OnceCell::new(),
-            endpoints,
+            option: XlineOptions::new(endpoints),
         })
     }
 
-    pub fn with_endpoints(endpoints: &[String]) -> Self {
+    pub fn with_options(option: XlineOptions) -> Self {
         Self {
             client: OnceCell::new(),
-            endpoints: endpoints.to_owned(),
+            option,
         }
     }
 
@@ -40,7 +70,8 @@ impl XlineBackend {
         let client = self
             .client
             .get_or_try_init(|| async {
-                let client = Client::connect(&self.endpoints, None).await?;
+                let client =
+                    Client::connect(&self.option.endpoints, self.option.config.clone()).await?;
                 Ok::<_, RvError>(client)
             })
             .await?;

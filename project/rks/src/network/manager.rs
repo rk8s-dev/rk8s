@@ -518,9 +518,10 @@ mod tests {
     use super::*;
     use crate::api::xlinestore::XlineStore;
     use crate::{network::registry::XlineSubnetRegistry, protocol::config::XlineConfig};
+    use libvault::storage::xline::XlineOptions;
     #[tokio::test]
     async fn test_local_manager_with_xline_registry() {
-        let store = XlineStore::new(&["http://127.0.0.1:2379"])
+        let store = XlineStore::new(XlineOptions::new(vec!["http://127.0.0.1:2379".to_string()]))
             .await
             .expect("failed to connect etcd");
         store

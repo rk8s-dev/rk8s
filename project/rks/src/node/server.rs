@@ -4,8 +4,8 @@ use crate::node::dispatch::{dispatch_user, dispatch_worker};
 use crate::node::register::NodeRegister;
 use crate::node::server::private::Sealed;
 use crate::node::watcher::PodsWatcher;
-use crate::protocol::config::config;
-use crate::vault::Vault;
+use crate::protocol::config::config_ref;
+use crate::vault::{CertRole, Vault};
 use async_trait::async_trait;
 use common::quic::RksConnection;
 use common::{RksMessage, log_error, reply_and_bail};
@@ -18,7 +18,6 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::sync::Mutex;
 
 pub struct QUICServer {
     endpoint: Arc<Endpoint>,
@@ -94,7 +93,8 @@ impl QUICServer {
             tokio::spawn(async move {
                 match incoming.await {
                     Ok(connection) => {
-                        let result = if !config().tls_config.enable
+                        let cfg = config_ref();
+                        let result = if !cfg.tls_config.enable
                             || connection.peer_identity().is_some()
                         {
                             let conn = AuthConnection::<Verified>::new(connection, shared.clone());
@@ -202,14 +202,15 @@ impl ConnectionState for Unauthenticated {
             RksMessage::CertificateSign { req, token } => {
                 debug!("[server] return issued certificate to client");
 
-                let message = if token == conn.shared.vault.join_token() {
-                    let res = conn.shared.vault.issue_cert("rkl", req).await?;
-                    RksMessage::Certificate(res)
-                } else {
-                    RksMessage::Error("Invalid join token".to_string())
+                let reply = match conn.shared.vault.validate_token(token).await {
+                    Ok(_) => {
+                        let res = conn.shared.vault.issue_cert(CertRole::Rkl, req).await?;
+                        RksMessage::Certificate(res)
+                    }
+                    Err(e) => RksMessage::Error(format!("Invalid join token: {e}")),
                 };
 
-                conn.conn.send_msg(&message).await?;
+                conn.conn.send_msg(&reply).await?;
 
                 debug!("[server] waiting for client to close auth connection");
                 let _ = conn.conn.closed().await;
