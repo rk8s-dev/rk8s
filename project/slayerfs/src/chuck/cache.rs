@@ -10,7 +10,6 @@ use std::{
 use anyhow::anyhow;
 use dirs::cache_dir;
 use sea_orm::sea_query::WindowSelectType;
-use serde_yaml::Value;
 use sha2::{Digest, Sha256, digest::KeyInit};
 use tokio::fs;
 use tokio::sync::RwLock;
@@ -529,11 +528,8 @@ impl AccessStats {
         let current_bucket_idx = self.short_current_bucket.load(Ordering::Relaxed);
 
         for (i, bucket) in self.short_buckets.iter().enumerate() {
-            let bucket_age = if i >= current_bucket_idx {
-                i - current_bucket_idx
-            } else {
-                self.short_bucket_count - current_bucket_idx + i
-            };
+            let bucket_age =
+                (current_bucket_idx + self.short_bucket_count - i) % self.short_bucket_count;
 
             if bucket_age >= window_buckets {
                 bucket.store(0, Ordering::Relaxed);
@@ -548,11 +544,8 @@ impl AccessStats {
         let current_bucket_idx = self.medium_current_bucket.load(Ordering::Relaxed);
 
         for (i, bucket) in self.medium_buckets.iter().enumerate() {
-            let bucket_age = if i >= current_bucket_idx {
-                i - current_bucket_idx
-            } else {
-                self.medium_bucket_count - current_bucket_idx + i
-            };
+            let bucket_age =
+                (current_bucket_idx + self.medium_bucket_count - i) % self.medium_bucket_count;
 
             if bucket_age >= window_buckets {
                 bucket.store(0, Ordering::Relaxed);
