@@ -146,6 +146,7 @@ pub struct ChunksCacheConfig {
     /// **When true**: Dynamically adjusts promotion threshold based on:
     ///   - System load (cache utilization + request rate)
     ///   - Cache hit rate
+    ///
     /// **When false**: Uses fixed base_promotion_threshold
     pub enable_adaptive_threshold: bool,
 
@@ -343,16 +344,13 @@ impl AccessStats {
     fn new(short_window_size: Duration, medium_window_size: Duration, _max_entries: usize) -> Self {
         // Short window: 1 second per bucket, up to 60 buckets (1 minute)
         let short_bucket_duration_secs = 1u64;
-        let short_bucket_count = (short_window_size.as_secs() / short_bucket_duration_secs)
-            .max(10) // At least 10 buckets
-            .min(300) as usize; // Maximum 5 minutes of buckets
+        let short_bucket_count =
+            (short_window_size.as_secs() / short_bucket_duration_secs).clamp(10, 300) as usize;
 
         // Medium window: 5 seconds per bucket, up to 72 buckets (6 minutes)
         let medium_bucket_duration_secs = 5u64;
-        let medium_bucket_count = (medium_window_size.as_secs() / medium_bucket_duration_secs)
-            .max(12) // At least 12 buckets
-            .min(180) as usize; // Maximum 15 minutes of buckets
-
+        let medium_bucket_count =
+            (medium_window_size.as_secs() / medium_bucket_duration_secs).clamp(12, 180) as usize;
         let short_buckets = (0..short_bucket_count)
             .map(|_| AtomicU64::new(0))
             .collect::<Vec<_>>()
@@ -448,7 +446,8 @@ impl AccessStats {
         bucket_count: usize,
         window_size: Duration,
     ) -> f64 {
-        let window_bucket_count = (window_size.as_secs() / bucket_duration_secs).min(bucket_count as u64) as usize;
+        let window_bucket_count =
+            (window_size.as_secs() / bucket_duration_secs).min(bucket_count as u64) as usize;
 
         if window_bucket_count == 0 {
             return 0.0;
@@ -486,8 +485,8 @@ impl AccessStats {
         let expected_bucket = self.calculate_short_bucket_index(now);
         let current = self.short_current_bucket.load(Ordering::Relaxed);
 
-        if current != expected_bucket {
-            if self
+        if current != expected_bucket
+            && self
                 .short_current_bucket
                 .compare_exchange_weak(
                     current,
@@ -496,10 +495,9 @@ impl AccessStats {
                     Ordering::Relaxed,
                 )
                 .is_ok()
-            {
-                self.short_buckets[expected_bucket].store(1, Ordering::Relaxed);
-                self.cleanup_old_short_buckets(now);
-            }
+        {
+            self.short_buckets[expected_bucket].store(1, Ordering::Relaxed);
+            self.cleanup_old_short_buckets(now);
         }
     }
 
@@ -508,8 +506,8 @@ impl AccessStats {
         let expected_bucket = self.calculate_medium_bucket_index(now);
         let current = self.medium_current_bucket.load(Ordering::Relaxed);
 
-        if current != expected_bucket {
-            if self
+        if current != expected_bucket
+            && self
                 .medium_current_bucket
                 .compare_exchange_weak(
                     current,
@@ -518,16 +516,16 @@ impl AccessStats {
                     Ordering::Relaxed,
                 )
                 .is_ok()
-            {
-                self.medium_buckets[expected_bucket].store(1, Ordering::Relaxed);
-                self.cleanup_old_medium_buckets(now);
-            }
+        {
+            self.medium_buckets[expected_bucket].store(1, Ordering::Relaxed);
+            self.cleanup_old_medium_buckets(now);
         }
     }
 
     /// Clean up expired short window buckets
     fn cleanup_old_short_buckets(&self, _now: u64) {
-        let window_buckets = (self.short_window_size.as_secs() / self.short_bucket_duration_secs) as usize;
+        let window_buckets =
+            (self.short_window_size.as_secs() / self.short_bucket_duration_secs) as usize;
         let current_bucket_idx = self.short_current_bucket.load(Ordering::Relaxed);
 
         for (i, bucket) in self.short_buckets.iter().enumerate() {
@@ -545,7 +543,8 @@ impl AccessStats {
 
     /// Clean up expired medium window buckets
     fn cleanup_old_medium_buckets(&self, _now: u64) {
-        let window_buckets = (self.medium_window_size.as_secs() / self.medium_bucket_duration_secs) as usize;
+        let window_buckets =
+            (self.medium_window_size.as_secs() / self.medium_bucket_duration_secs) as usize;
         let current_bucket_idx = self.medium_current_bucket.load(Ordering::Relaxed);
 
         for (i, bucket) in self.medium_buckets.iter().enumerate() {
@@ -666,7 +665,8 @@ impl SystemMetrics {
     fn update_cache_utilization(&self, current_size: u64, max_size: u64) {
         if max_size > 0 {
             let utilization = (current_size * 10000) / max_size;
-            self.hot_cache_utilization.store(utilization, Ordering::Relaxed);
+            self.hot_cache_utilization
+                .store(utilization, Ordering::Relaxed);
         }
     }
 }
@@ -749,6 +749,7 @@ struct Policy {
 }
 
 impl Policy {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         short_window_size: Duration,
         medium_window_size: Duration,
@@ -802,7 +803,7 @@ impl Policy {
         }
 
         // Ensure threshold stays within reasonable bounds
-        threshold.max(1.0).min(50.0)
+        threshold.clamp(1.0, 50.0)
     }
 
     async fn record_access(&self, key: String) {
@@ -822,7 +823,11 @@ impl Policy {
         if let Some(entry) = stats.get(&key) {
             entry.record_access();
         } else {
-            let entry = AccessStats::new(self.short_window_size, self.medium_window_size, self.max_entries);
+            let entry = AccessStats::new(
+                self.short_window_size,
+                self.medium_window_size,
+                self.max_entries,
+            );
             entry.record_access();
             stats.insert(key, entry);
         }
@@ -836,10 +841,8 @@ impl Policy {
         let stats = self.access_stats.read().await;
         if let Some(entry) = stats.get(&key) {
             // Use weighted frequency from both time windows
-            let weighted_frequency = entry.get_weighted_access_frequency(
-                self.short_window_weight,
-                self.medium_window_weight,
-            );
+            let weighted_frequency = entry
+                .get_weighted_access_frequency(self.short_window_weight, self.medium_window_weight);
 
             weighted_frequency >= threshold
         } else {
@@ -854,7 +857,8 @@ impl Policy {
 
     /// Update cache utilization metrics
     fn update_cache_utilization(&self, current_size: u64, max_size: u64) {
-        self.system_metrics.update_cache_utilization(current_size, max_size);
+        self.system_metrics
+            .update_cache_utilization(current_size, max_size);
     }
 
     /// Clean up old entries
@@ -1066,7 +1070,7 @@ impl ChunksCache {
 
     /// Update cache utilization metrics
     fn update_utilization_metrics(&self) {
-        let current_size = self.hot_cache.entry_count() as u64;
+        let current_size = self.hot_cache.entry_count();
         let max_size = self.config.hot_cache_size as u64;
         self.policy.update_cache_utilization(current_size, max_size);
     }
@@ -1379,7 +1383,11 @@ mod tests {
         let short_window_size = Duration::from_secs(10);
         let medium_window_size = Duration::from_secs(60);
         let max_entries = 100;
-        let stats = Arc::new(AccessStats::new(short_window_size, medium_window_size, max_entries));
+        let stats = Arc::new(AccessStats::new(
+            short_window_size,
+            medium_window_size,
+            max_entries,
+        ));
 
         let mut handles = vec![];
 
