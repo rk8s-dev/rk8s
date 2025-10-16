@@ -1,10 +1,8 @@
-use anyhow::{Context, Result};
+use crate::image::config::DEFAULT_ENV;
+use anyhow::Result;
 use oci_spec::image::{
     Arch, Config, ConfigBuilder, ImageConfiguration, ImageConfigurationBuilder, Os, RootFsBuilder,
 };
-
-#[allow(dead_code)]
-static DEFAULT_ENV: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 #[derive(Default)]
 pub struct OciImageConfig {
@@ -12,13 +10,11 @@ pub struct OciImageConfig {
 }
 
 impl OciImageConfig {
-    #[allow(dead_code)]
     pub fn default_config(mut self) -> Result<Self> {
         let config = ConfigBuilder::default()
             .cmd(vec!["sh".to_string()])
-            .env(vec![DEFAULT_ENV.to_string()])
-            .build()
-            .context("Failed to build default config")?;
+            .env(vec![format!("PATH={DEFAULT_ENV}")])
+            .build()?;
 
         self.image_config_builder = self
             .image_config_builder
@@ -50,8 +46,7 @@ impl OciImageConfig {
                     .map(|s| format!("sha256:{s}"))
                     .collect::<Vec<String>>(),
             )
-            .build()
-            .context("Failed to build rootfs")?;
+            .build()?;
 
         self.image_config_builder = self.image_config_builder.rootfs(rootfs);
 
@@ -59,8 +54,6 @@ impl OciImageConfig {
     }
 
     pub fn build(self) -> Result<ImageConfiguration> {
-        self.image_config_builder
-            .build()
-            .context("Failed to build image configuration")
+        Ok(self.image_config_builder.build()?)
     }
 }

@@ -39,5 +39,8 @@ impl LayerCompressionConfig {
 }
 
 pub trait LayerCompressor {
+    /// Compress layer to tar.gz
+    ///
+    /// Returns the size and sha256sum of the result
     fn compress_layer(&self, config: &LayerCompressionConfig) -> Result<LayerCompressionResult>;
 }

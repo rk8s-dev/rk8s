@@ -1,15 +1,22 @@
-pub mod builder;
 pub mod config;
+pub mod context;
+pub mod execute;
 pub mod executor;
 pub mod stage_executor;
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::compressor::tar_gz_compressor::TarGzCompressor;
+use crate::image::executor::Executor;
 use anyhow::{Context, Result};
 use clap::Parser;
 use dockerfile_parser::Dockerfile;
 use rand::{Rng, distr::Alphanumeric};
+
+pub static BLOBS: &str = "blobs/sha256";
 
 #[derive(Parser, Debug)]
 pub struct BuildArgs {
@@ -32,10 +39,11 @@ pub struct BuildArgs {
     /// Output directory for the image
     #[arg(short, long, value_name = "DIR")]
     pub output_dir: Option<String>,
-    // TODO: Add registry info
-}
 
-use builder::Builder;
+    /// Build context. Defaults to the directory of the Dockerfile.
+    #[arg(default_value = ".")]
+    pub context: PathBuf,
+}
 
 fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
     let dockerfile_path = dockerfile_path.as_ref().to_path_buf();
@@ -44,6 +52,18 @@ fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
     let dockerfile = Dockerfile::parse(&dockerfile_content)
         .with_context(|| format!("Failed to parse Dockerfile: {}", dockerfile_path.display()))?;
     Ok(dockerfile)
+}
+
+fn parse_global_args(dockerfile: &Dockerfile) -> HashMap<String, Option<String>> {
+    dockerfile
+        .global_args
+        .iter()
+        .map(|arg| {
+            let key = arg.name.content.clone();
+            let value = arg.value.as_ref().map(|v| v.content.clone());
+            (key, value)
+        })
+        .collect()
 }
 
 pub fn build_image(build_args: &BuildArgs) -> Result<()> {
@@ -56,6 +76,8 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
             .map(|dir| dir.trim_end_matches('/').to_string())
             .unwrap_or_else(|| ".".to_string());
 
+        let context = build_args.context.clone();
+
         let tag = build_args.tag.clone().unwrap_or_else(|| {
             let rng = rand::rng();
             rng.sample_iter(&Alphanumeric)
@@ -67,23 +89,22 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
         let image_output_dir = PathBuf::from(format!("{output_dir}/{tag}"));
 
         if image_output_dir.exists() {
-            fs::remove_dir_all(&image_output_dir).with_context(|| {
-                format!(
-                    "Failed to remove existing directory: {}",
-                    image_output_dir.display()
-                )
-            })?;
+            fs::remove_dir_all(&image_output_dir)?;
         }
-        fs::create_dir_all(&image_output_dir).with_context(|| {
-            format!(
-                "Failed to create output directory: {}",
-                image_output_dir.display()
-            )
-        })?;
+        fs::create_dir_all(&image_output_dir)?;
 
-        let image_builder = Builder::new(dockerfile).image_output_dir(image_output_dir);
+        let global_args = parse_global_args(&dockerfile);
 
-        image_builder.build_image()?;
+        let mut executor = Executor::new(
+            dockerfile,
+            context,
+            image_output_dir,
+            global_args,
+            Arc::new(TarGzCompressor),
+        );
+        executor.libfuse(build_args.libfuse);
+
+        executor.build_image()?;
     }
 
     Ok(())

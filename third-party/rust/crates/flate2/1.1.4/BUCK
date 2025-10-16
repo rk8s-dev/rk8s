@@ -33,13 +33,17 @@ cargo.rust_library(
     },
     features = [
         "any_impl",
+        "any_zlib",
         "default",
+        "libz-rs-sys",
         "miniz_oxide",
         "rust_backend",
+        "zlib-rs",
     ],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/crc32fast/1.5.0:crc32fast",
+        "//third-party/rust/crates/libz-rs-sys/0.5.1:libz-rs-sys",
         "//third-party/rust/crates/miniz_oxide/0.8.9:miniz_oxide",
     ],
 )

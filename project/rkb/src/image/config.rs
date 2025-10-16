@@ -2,12 +2,14 @@ use anyhow::{Context, Result};
 use oci_spec::image::{Config, ConfigBuilder};
 use std::collections::HashMap;
 
-/// Image config is used in config.json.
+pub static DEFAULT_ENV: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/// Image config is used in OCI image's `config.json`.
 ///
 /// Currently not exhaustive, only some simple fields.
 ///
-/// Struct fields should be used to construct OciImageConfig.
-#[derive(Debug, Clone, Default)]
+/// Struct fields should be used to construct `OciImageConfig`.
+#[derive(Debug, Clone)]
 pub struct ImageConfig {
     pub labels: HashMap<String, String>,
     pub envp: HashMap<String, String>,
@@ -39,14 +41,13 @@ impl ImageConfig {
             config = config.labels(self.labels.clone());
         }
 
-        if !self.envp.is_empty() {
-            config = config.env(
-                self.envp
-                    .iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect::<Vec<String>>(),
-            );
-        }
+        let env_vars = self
+            .envp
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<String>>();
+
+        config = config.env(env_vars);
 
         if let Some(entrypoint) = &self.entrypoint {
             config = config.entrypoint(entrypoint.clone());
@@ -60,14 +61,16 @@ impl ImageConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct StageExecutorConfig {
-    pub global_args: HashMap<String, Option<String>>,
-}
-
-impl StageExecutorConfig {
-    pub fn global_args(mut self, global_args: &HashMap<String, Option<String>>) -> Self {
-        self.global_args = global_args.clone();
-        self
+impl Default for ImageConfig {
+    fn default() -> Self {
+        Self {
+            labels: HashMap::new(),
+            envp: HashMap::from([
+                ("PATH".to_string(), DEFAULT_ENV.to_string()),
+                ("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string()),
+            ]),
+            entrypoint: None,
+            cmd: None,
+        }
     }
 }

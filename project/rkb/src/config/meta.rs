@@ -1,4 +1,4 @@
-use crate::config::registry::CONFIG;
+use crate::config::image::CONFIG;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

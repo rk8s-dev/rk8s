@@ -1,20 +1,24 @@
-pub mod args;
-pub mod build;
-pub mod compressor;
-pub mod config;
-pub mod exec;
-pub mod login;
-pub mod logout;
-pub mod mount;
-pub mod oci_spec;
-pub mod overlayfs;
-pub mod pull;
-pub mod push;
-pub mod repo;
-pub mod rt;
-pub mod run;
-pub mod storage;
-pub mod utils;
+#![allow(dead_code)]
+
+// For Buck2 build compatibility,
+// all modules need to be declared in `main.rs` as well (refer to `lib.rs`).
+mod args;
+mod compressor;
+mod config;
+mod copy;
+mod image;
+mod login;
+mod logout;
+mod oci_spec;
+mod overlayfs;
+mod pull;
+mod push;
+mod repo;
+mod rt;
+mod run;
+mod storage;
+mod task;
+mod utils;
 
 use crate::args::{Cli, Commands};
 use anyhow::Result;
@@ -29,14 +33,15 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Build(args) => build::build_image(&args),
-        Commands::Exec(args) => exec::exec(args),
-        Commands::Cleanup(args) => exec::cleanup(args),
-        Commands::Mount(args) => mount::main(args),
+        Commands::Build(args) => image::build_image(&args),
+        Commands::Cleanup(args) => overlayfs::cleanup(args),
+        Commands::Copy(args) => copy::copy(args),
         Commands::Login(args) => login::login(args),
         Commands::Logout(args) => logout::logout(args),
-        Commands::Repo(args) => repo::repo(args),
+        Commands::Mount(args) => overlayfs::do_mount(args),
         Commands::Pull(args) => pull::pull(args),
         Commands::Push(args) => push::push(args),
+        Commands::Repo(args) => repo::repo(args),
+        Commands::Run(args) => run::run(args),
     }
 }

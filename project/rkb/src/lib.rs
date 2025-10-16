@@ -1,16 +1,15 @@
-pub mod build;
-pub mod config;
-pub mod login;
-pub mod logout;
-pub mod pull;
-pub mod push;
-pub mod repo;
-pub mod storage;
-pub mod utils;
-
+#![allow(dead_code)]
 mod compressor;
-mod exec;
+mod config;
+mod image;
+mod login;
+mod logout;
 mod oci_spec;
 mod overlayfs;
+pub mod pull;
+mod push;
+mod repo;
 mod rt;
-mod run;
+mod storage;
+mod task;
+mod utils;

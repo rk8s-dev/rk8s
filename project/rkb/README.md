@@ -7,61 +7,63 @@ A container image builder and registry management tool implemented in Rust, simi
 ```mermaid
 flowchart TD
   subgraph CLI
-    A[CLI: rkb]
-    A --> B[main]
+    cli[CLI: rkb] --> main[main.rs::main]
   end
 
-  subgraph Parse & dispatch
-    B -->|build| CmdBuild[Commands::Build]
-    B -->|push| CmdPush[Commands::Push]
-    B -->|pull| CmdPull[Commands::Pull]
-    B -->|mount| CmdMount[Commands::Mount]
-    B -->|exec| CmdExec[Commands::Exec]
-    B -->|cleanup| CmdCleanup[Commands::Cleanup]
-    B -->|login| CmdLogin[Commands::Login]
-    B -->|logout| CmdLogout[Commands::Logout]
-    B -->|repo| CmdRepo[Commands::Repo]
+  subgraph "Command Dispatch"
+    main --> args[args.rs::Commands]
+    args -->|build| CmdBuild[image::build_image]
+    args -->|pull| CmdPull[pull::pull]
+    args -->|push| CmdPush[push::push]
+    args -->|repo| CmdRepo[repo::repo]
+    args -->|login| CmdLogin[login::login]
+    args -->|logout| CmdLogout[logout::logout]
+    args -->|run| CmdRun[run::run]
+    args -->|copy| CmdCopy[copy::copy]
+    args -->|mount| CmdMount[overlayfs::do_mount]
+    args -->|cleanup| CmdCleanup[overlayfs::cleanup]
   end
 
-  subgraph Build
-    CmdBuild --> Builder[builder::Builder]
-    Builder --> Executor[executor::Executor]
-    Executor --> StageExec[stage_executor::StageExecutor]
-    StageExec --> Registry[registry::pull_or_get_image]
-    StageExec --> MountCfg[overlayfs::MountConfig]
-    Executor --> Compressor[compressor::LayerCompressor]
-    Executor --> OCIBuilder[oci_spec::OCIBuilder]
+  subgraph "Image Build Pipeline"
+    CmdBuild --> Exec[image::executor::Executor]
+    Exec --> StageExec[image::stage_executor::StageExecutor]
+    StageExec --> Instr[image::execute::InstructionExt]
+    Instr -->|RUN| RunTask[task::RunTask]
+    Instr -->|COPY| CopyTask[task::CopyTask]
+    RunTask --> MountSession[task::MountSession]
+    CopyTask --> MountSession
+    MountSession --> CmdMount
+    MountSession --> CmdRun
+    MountSession --> CmdCopy
+    MountSession --> CmdCleanup
+    Exec --> Compress[compressor::tar_gz_compressor::TarGzCompressor]
+    Compress --> LayerMeta[LayerCompressionResult]
+    LayerMeta --> OciBuild[oci_spec::builder::OciBuilder]
+    OciBuild --> ImageOutput[Built OCI layout]
   end
 
-  subgraph Mount & run
-    CmdMount --> MountMain[mount_main::main]
-    MountMain --> OverlayFS[libfuse_fs::overlayfs::mount_fs]
-    CmdExec --> ExecTask[run::exec_task]
-    ExecTask -->|spawn mount| MountMain
-    ExecTask -->|spawn exec| ExecProcess[exec_main::chroot & exec]
-    ExecTask -->|spawn cleanup| ExecProcess
-    CmdCleanup -->|ns switch & unmount| ExecProcess
+  subgraph "OverlayFS Runtime"
+    CmdMount --> Libfuse[overlayfs::libfuse]
+    CmdMount --> LinuxMount[overlayfs::linux]
   end
 
-  subgraph Registry Management
-    CmdLogin --> LoginMain[login_main::login]
-    LoginMain --> OAuth[GitHub OAuth Flow]
-    LoginMain --> Config[LoginConfig::store]
-    CmdLogout --> LogoutMain[logout_main::logout]
-    LogoutMain --> Config
-    CmdPush --> PushMain[push_main::push]
-    CmdPull --> PullMain[pull_main::pull]
-    CmdRepo --> RepoMain[repo_main::main]
-    PushMain --> AuthClient[client_with_authentication]
-    PullMain --> AuthClient
-    RepoMain --> AuthClient
-    AuthClient --> RepoAPI[Distribution Server API]
+  subgraph "Registry & Auth"
+    CmdLogin --> OAuth[login::oauth::OAuthFlow]
+    OAuth --> GitHub[GitHub OAuth]
+    OAuth --> AuthCfg[config::auth::AuthConfig]
+    CmdLogout --> AuthCfg
+    CmdPush --> AuthCfg
+    CmdPull --> AuthCfg
+    CmdRepo --> AuthCfg
+    AuthCfg --> RegistryAPI["Distribution Server API"]
+    CmdPull --> PullGet
+    LayerFetch --> RegistryAPI
+    PushImage --> Pusher[push::Pusher]
+    Pusher --> RegistryAPI
+    RegistryAPI --> ManifestStore
+    CmdRepo --> RepoOps[repo::handlers]
+    RepoOps --> RegistryAPI
   end
-
-  StageExec --> ExecTask
-  MountCfg --> OverlayFS
-  Registry -->| lower_dir| MountCfg
-  Config --> AuthClient
 ```
 
 ## Quick Start
@@ -107,8 +109,15 @@ mkdir -p output
 Start rkb (root privilege is required).
 
 ```sh
-sudo ../target/debug/rkb build -f example-Dockerfile -t image1 -o output
+sudo ../target/debug/rkb build -f example-Dockerfile -t image1 -o output .
 ```
+
+Or use `--libfuse` option.
+```sh
+sudo ../target/debug/rkb build -f example-Dockerfile -t image1 -o output --libfuse .
+```
+
+Here the last optional `.` specifies the build context, which by default is `.`.
 
 ### Example result
 
@@ -218,6 +227,19 @@ Then, convert `image1` into an OCI bundle.
 
 ```sh
 sudo umoci unpack --image image1:latest bundle
+```
+
+### Convert image to Docker image
+Use skopeo to convert the image into a Docker image
+
+```sh
+cd output && skopeo copy oci:image1:latest docker-daemon:image1:latest
+```
+
+Then, verify that the image works correctly by running:
+
+```sh
+docker run --rm image1:latest
 ```
 
 ## Registry Management
@@ -429,12 +451,25 @@ Options:
 |----------------------------|--------|
 | Image building             | ✅     |
 | Image push/pull            | ✅     |
-| lib-fuse integration       | ✅     |
+| libfuse integration        | ✅     |
 | Registry authentication    | ✅     |
 | Repository management      | ✅     |
 | GitHub OAuth login         | ✅     |
 | Multi-server support       | ✅     |
 | Cross-platform             | ❌     |
+
+### Supported Dockerfile instructions
+
+| Instruction | Status |
+|-------------|--------|
+| FROM        | ✅     |
+| RUN         | ✅     |
+| CMD         | ✅     |
+| ENV         | ✅     |
+| LABEL       | ✅     |
+| COPY        | ✅     |
+| ENTRYPOINT  | ✅     |
+| ARG         | ❌     |
 
 ## Testing
 
@@ -463,16 +498,3 @@ The test suite covers:
 - Distribution server running (e.g., on 127.0.0.1:8968)
 - `jq` command-line JSON processor
 - Built rkb binary in `../target/debug/rkb`
-
-### Supported Dockerfile instructions
-
-| Instruction | Status |
-|-------------|--------|
-| FROM        | ✅     |
-| RUN         | ✅     |
-| CMD         | ✅     |
-| ENV         | ✅     |
-| LABEL       | ✅     |
-| COPY        | ✅     |
-| ENTRYPOINT  | ✅     |
-| ARG         | ❌     |
