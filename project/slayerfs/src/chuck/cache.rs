@@ -392,14 +392,14 @@ impl AccessStats {
         self.last_update.store(now, Ordering::Relaxed);
 
         // Record in short window
+        self.maybe_reset_short_bucket(now);
         let short_bucket_idx = self.calculate_short_bucket_index(now);
         self.short_buckets[short_bucket_idx].fetch_add(1, Ordering::Relaxed);
-        self.maybe_reset_short_bucket(now);
 
         // Record in medium window
+        self.maybe_reset_medium_bucket(now);
         let medium_bucket_idx = self.calculate_medium_bucket_index(now);
         self.medium_buckets[medium_bucket_idx].fetch_add(1, Ordering::Relaxed);
-        self.maybe_reset_medium_bucket(now);
     }
 
     /// Get weighted access frequency using both short and medium windows
