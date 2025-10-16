@@ -612,6 +612,15 @@ struct SystemMetrics {
     /// **Purpose**: Memory pressure indicator for adaptive thresholding
     /// **Impact**: High utilization may trigger aggressive promotion to improve hit rate
     hot_cache_utilization: AtomicU64,
+
+    /// Sliding window request tracking for accurate rate calculation
+    ///
+    /// **Purpose**: Track requests in recent time window to compute true request rate
+    /// **Implementation**: Fixed-size circular buffer with time buckets
+    /// **Benefit**: Prevents permanent drift in load calculation
+    request_buckets: [AtomicU64; 60], // 60 buckets for 1-minute sliding window
+    current_request_bucket: AtomicU64,
+    last_request_advance: AtomicU64,
 }
 
 impl SystemMetrics {
@@ -621,6 +630,9 @@ impl SystemMetrics {
             total_requests: AtomicU64::new(0),
             cache_hits: AtomicU64::new(0),
             hot_cache_utilization: AtomicU64::new(0),
+            request_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            current_request_bucket: AtomicU64::new(0),
+            last_request_advance: AtomicU64::new(0),
         }
     }
 
@@ -629,7 +641,70 @@ impl SystemMetrics {
         if hit {
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
         }
+
+        // Update sliding window request tracking
+        self.advance_request_buckets();
+        let current_bucket = self.current_request_bucket.load(Ordering::Relaxed) as usize;
+        self.request_buckets[current_bucket].fetch_add(1, Ordering::Relaxed);
+
         self.update_hit_rate();
+    }
+
+    /// Advance request buckets based on current time
+    fn advance_request_buckets(&self) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let last_advance = self.last_request_advance.load(Ordering::Relaxed);
+
+        if now <= last_advance {
+            return;
+        }
+
+        // Calculate how many buckets to advance
+        let buckets_to_advance = (now - last_advance).min(60) as usize; // Cap at 60 to avoid wrapping multiple times
+
+        if buckets_to_advance == 0 {
+            return;
+        }
+
+        // Try to update last_advance time, bail out if another thread beat us to it
+        match self.last_request_advance.compare_exchange(
+            last_advance,
+            now,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => {
+                // We successfully updated the time, now advance the buckets
+                let current_bucket = self.current_request_bucket.load(Ordering::Relaxed) as usize;
+                for _ in 0..buckets_to_advance {
+                    let next_bucket = (current_bucket + 1) % 60;
+                    self.current_request_bucket
+                        .store(next_bucket as u64, Ordering::Relaxed);
+                    // Clear the new bucket
+                    self.request_buckets[next_bucket].store(0, Ordering::Relaxed);
+                }
+            }
+            Err(_) => {
+                // Another thread updated the time, just return
+                // The next call will advance if needed
+            }
+        }
+    }
+
+    /// Get request rate from sliding window (requests per second)
+    fn get_request_rate(&self) -> f64 {
+        self.advance_request_buckets(); // Ensure buckets are up to date
+
+        let mut total_requests = 0u64;
+        for bucket in &self.request_buckets {
+            total_requests += bucket.load(Ordering::Relaxed);
+        }
+
+        total_requests as f64 / 60.0 // requests per second over 1-minute window
     }
 
     fn update_hit_rate(&self) {
@@ -648,11 +723,11 @@ impl SystemMetrics {
     fn get_system_load(&self) -> f64 {
         // Simple heuristic: high cache utilization = high system load
         let utilization = self.hot_cache_utilization.load(Ordering::Relaxed) as f64 / 10000.0;
-        let request_rate = self.total_requests.load(Ordering::Relaxed) as f64;
+        let request_rate = self.get_request_rate(); // Use sliding window rate instead of total count
 
         // Combine utilization and request rate for load estimate
         // This is a simplified calculation - in practice you might use CPU/memory metrics
-        utilization * 0.7 + (request_rate / 1000.0).min(1.0) * 0.3
+        utilization * 0.7 + (request_rate / 100.0).min(1.0) * 0.3 // Adjusted scaling for RPS
     }
 
     fn update_cache_utilization(&self, current_size: u64, max_size: u64) {
