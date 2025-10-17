@@ -13,7 +13,6 @@ use sea_orm::sea_query::WindowSelectType;
 use sha2::{Digest, Sha256, digest::KeyInit};
 use tokio::fs;
 use tokio::sync::RwLock;
-use tokio::time::Instant;
 
 /// Configuration for the intelligent dual-layer cache system.
 ///
@@ -408,6 +407,9 @@ impl AccessStats {
 
         // Normalize weights
         let total_weight = short_weight + medium_weight;
+        if total_weight == 0.0 {
+            return 0.0;
+        }
         let short_norm = short_weight / total_weight;
         let medium_norm = medium_weight / total_weight;
 
@@ -495,7 +497,7 @@ impl AccessStats {
                 )
                 .is_ok()
         {
-            self.short_buckets[expected_bucket].store(1, Ordering::Relaxed);
+            self.short_buckets[expected_bucket].store(0, Ordering::Relaxed);
             self.cleanup_old_short_buckets(now);
         }
     }
@@ -516,7 +518,7 @@ impl AccessStats {
                 )
                 .is_ok()
         {
-            self.medium_buckets[expected_bucket].store(1, Ordering::Relaxed);
+            self.medium_buckets[expected_bucket].store(0, Ordering::Relaxed);
             self.cleanup_old_medium_buckets(now);
         }
     }
@@ -679,13 +681,13 @@ impl SystemMetrics {
         ) {
             Ok(_) => {
                 // We successfully updated the time, now advance the buckets
-                let current_bucket = self.current_request_bucket.load(Ordering::Relaxed) as usize;
+                let mut bucket = self.current_request_bucket.load(Ordering::Relaxed) as usize;
                 for _ in 0..buckets_to_advance {
-                    let next_bucket = (current_bucket + 1) % 60;
+                    bucket = (bucket + 1) % 60;
                     self.current_request_bucket
-                        .store(next_bucket as u64, Ordering::Relaxed);
+                        .store(bucket as u64, Ordering::Relaxed);
                     // Clear the new bucket
-                    self.request_buckets[next_bucket].store(0, Ordering::Relaxed);
+                    self.request_buckets[bucket].store(0, Ordering::Relaxed);
                 }
             }
             Err(_) => {
