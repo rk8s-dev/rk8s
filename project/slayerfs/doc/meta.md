@@ -40,7 +40,7 @@
   - 针对关系查询的索引优化
   - 事务保证 ACID 特性
 
-#### XlineMetaStore（分布式 KV 存储后端）
+#### EtcdMetaStore（分布式 KV 存储后端）
 
 - **技术栈**：基于 etcd-client，通过 Xline/etcd 集群提供分布式协调
 - **关键特性**：
@@ -118,6 +118,24 @@ sqlite.yml
 ```yml
 database:
   type: sqlite
+cache:
+  enabled: true
+  
+  # Cache capacity (number of entries)
+  capacity:
+    attr: 10000           # File attributes cache
+    dentry: 10000         # Directory entry cache
+    path: 5000            # Path resolution cache
+    inode_to_path: 5000   # Reverse path cache
+    readdir: 1000         # Directory content cache
+  
+  # Cache TTL (in seconds, supports decimal values)
+  ttl:
+    attr_ttl: 10.0        # 10 seconds
+    dentry_ttl: 8.0       # 8 seconds
+    path_ttl: 10.0        # 10 seconds
+    inode_to_path_ttl: 10.0
+    readdir_ttl: 5.0      # 5 seconds (directory content cache)
 
 ```
 
@@ -135,6 +153,24 @@ pg.yml
 database:
   type: postgres
   url: "postgresql://postgres:postgres@127.0.0.1:5432/meta"
+cache:
+  enabled: true
+  
+  # Cache capacity (number of entries)
+  capacity:
+    attr: 10000           # File attributes cache
+    dentry: 10000         # Directory entry cache
+    path: 5000            # Path resolution cache
+    inode_to_path: 5000   # Reverse path cache
+    readdir: 1000         # Directory content cache
+  
+  # Cache TTL (in seconds, supports decimal values)
+  ttl:
+    attr_ttl: 10.0        # 10 seconds
+    dentry_ttl: 8.0       # 8 seconds
+    path_ttl: 10.0        # 10 seconds
+    inode_to_path_ttl: 10.0
+    readdir_ttl: 5.0      # 5 seconds (directory content cache)
 ```
 
 ​	目前，本地数据库模式下，在挂载后的文件夹中，可以正常操作文件夹，包括重命名，删除，读写文件之类的操作。

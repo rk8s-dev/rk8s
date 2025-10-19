@@ -1,10 +1,10 @@
 use clap::Parser;
-use dotenv;
 use slayerfs::cadapter::client::ObjectClient;
 use slayerfs::cadapter::s3::{S3Backend, S3Config};
 use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::ObjectBlockStore;
 use slayerfs::fuse::mount::mount_vfs_unprivileged;
+use slayerfs::meta::factory::MetaStoreFactory;
 use slayerfs::vfs::fs::VFS;
 use std::path::PathBuf;
 use tokio::signal;
@@ -198,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let config = slayerfs::meta::config::Config::from_file(&target_config_path)
             .map_err(|e| format!("Failed to load config file: {}", e))?;
-        let meta = slayerfs::meta::factory::MetaStoreFactory::create_from_config(config)
+        let meta = MetaStoreFactory::create_from_config(config)
             .await
             .map_err(|e| format!("Failed to initialize metadata storage: {}", e))?;
 

@@ -1,8 +1,24 @@
 //! Metadata store abstract interface
 //!
 //! Defines unified interface for filesystem metadata operations
-use crate::vfs::fs::FileType;
+use crate::meta::entities::content_meta::EntryType;
 use async_trait::async_trait;
+
+/// File type enumeration
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileType {
+    File,
+    Dir,
+}
+
+impl From<EntryType> for FileType {
+    fn from(entry_type: EntryType) -> Self {
+        match entry_type {
+            EntryType::File => FileType::File,
+            EntryType::Directory => FileType::Dir,
+        }
+    }
+}
 
 /// File attributes
 #[derive(Debug, Clone)]
@@ -102,6 +118,15 @@ pub trait MetaStore: Send + Sync {
     ) -> Result<(), MetaError>;
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
+
+    /// get the node's parent inode
+    async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError>;
+
+    /// get the node's name in its parent directory
+    async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError>;
+
+    /// get the inode's full path (from the root directory)
+    async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError>;
 
     fn root_ino(&self) -> i64;
 
