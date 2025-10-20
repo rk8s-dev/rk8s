@@ -451,8 +451,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             // Here we need to adjust the code order because guard doesn't allowed to cross await point
             let flags = self.get_writeback_open_flags(flags as i32).await;
             let _guard = set_creds(
-                self.cfg.mapping.get_uid(uid.unwrap_or(req.uid)),
-                self.cfg.mapping.get_gid(gid.unwrap_or(req.gid)),
+                uid.unwrap_or(self.cfg.mapping.get_uid(req.uid)),
+                gid.unwrap_or(self.cfg.mapping.get_gid(req.gid)),
             )?;
             Self::create_file_excl(&dir_file, name, flags, mode)?
         };
@@ -488,8 +488,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
                 {
                     let _guard = set_creds(
-                        self.cfg.mapping.get_uid(uid.unwrap_or(req.uid)),
-                        self.cfg.mapping.get_gid(gid.unwrap_or(req.gid)),
+                        uid.unwrap_or(self.cfg.mapping.get_uid(req.uid)),
+                        gid.unwrap_or(self.cfg.mapping.get_gid(req.gid)),
                     )?;
                     data.open_file(final_flags, &self.proc_self_fd)?
                 }
@@ -563,8 +563,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let res = {
             let _guard = set_creds(
-                self.cfg.mapping.get_uid(uid.unwrap_or(req.uid)),
-                self.cfg.mapping.get_gid(gid.unwrap_or(req.gid)),
+                uid.unwrap_or(self.cfg.mapping.get_uid(req.uid)),
+                gid.unwrap_or(self.cfg.mapping.get_gid(req.gid)),
             )?;
 
             let file = data.get_file()?;
@@ -620,8 +620,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let res = {
             let _guard = set_creds(
-                self.cfg.mapping.get_uid(uid.unwrap_or(req.uid)),
-                self.cfg.mapping.get_gid(gid.unwrap_or(req.gid)),
+                uid.unwrap_or(self.cfg.mapping.get_uid(req.uid)),
+                gid.unwrap_or(self.cfg.mapping.get_gid(req.gid)),
             )?;
 
             let file = data.get_file()?;
