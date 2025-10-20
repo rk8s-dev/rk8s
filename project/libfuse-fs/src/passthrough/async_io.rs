@@ -300,10 +300,19 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         Ok((Some(handle), opts))
     }
 
-    async fn do_getattr(
+    /// Core implementation for `getattr`.
+    ///
+    /// This is the internal function that performs the actual `stat` system call.
+    /// It contains a crucial `mapping` parameter that controls its behavior:
+    /// - `mapping: true`: Applies reverse ID mapping (host -> container) to the `uid` and `gid`.
+    ///   This is for external FUSE clients.
+    /// - `mapping: false`: Returns the raw, unmapped host attributes. This is for internal
+    ///   callers like `overlayfs`'s copy-up logic.
+    async fn do_getattr_inner(
         &self,
         inode: Inode,
         handle: Option<Handle>,
+        mapping: bool,
     ) -> io::Result<(libc::stat64, Duration)> {
         // trace!("FS {} passthrough: do_getattr: before get: inode={}, handle={:?}", self.uuid, inode, handle);
         let data = self.inode_map.get(inode).await.map_err(|e| {
@@ -329,8 +338,39 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             error!("fuse: do_getattr stat failed ino {inode} err {e:?}");
             e
         })?;
-        st.st_ino = inode; //FIX BUG!
+        st.st_ino = inode;
+        if mapping {
+            st.st_uid = self.cfg.mapping.find_mapping(st.st_uid, true, true);
+            st.st_gid = self.cfg.mapping.find_mapping(st.st_gid, true, false);
+        }
         Ok((st, self.cfg.attr_timeout))
+    }
+
+    /// Public `getattr` wrapper for FUSE clients.
+    ///
+    /// This function serves as the standard entry point for `getattr` requests from the FUSE
+    /// kernel module. It always performs ID mapping by calling [`do_getattr_inner`][Self::do_getattr_inner] with
+    /// `mapping: true` to ensure clients see attributes from the container's perspective.
+    async fn do_getattr(
+        &self,
+        inode: Inode,
+        handle: Option<Handle>,
+    ) -> io::Result<(libc::stat64, Duration)> {
+        self.do_getattr_inner(inode, handle, true).await
+    }
+
+    /// Internal `getattr` helper that skips ID mapping.
+    ///
+    /// This helper is specifically designed for internal use by `overlayfs`. It calls
+    /// [`do_getattr_inner`][Self::do_getattr_inner] with `mapping: false` to retrieve the raw, unmodified host
+    /// attributes of a file. This is essential for the `copy_up` process to correctly
+    /// preserve the original file ownership.
+    pub async fn do_getattr_helper(
+        &self,
+        inode: Inode,
+        handle: Option<Handle>,
+    ) -> io::Result<(libc::stat64, Duration)> {
+        self.do_getattr_inner(inode, handle, false).await
     }
 
     async fn do_unlink(&self, parent: Inode, name: &CStr, flags: libc::c_int) -> io::Result<()> {
@@ -382,6 +422,234 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             let file = self.open_inode(inode, flags).await?;
             Ok(Arc::new(HandleData::new(inode, file, flags as u32)))
         }
+    }
+
+    /// Core implementation for `create`.
+    ///
+    /// It uses the provided `uid` and `gid` for credential switching if they are `Some`;
+    /// otherwise, it falls back to the credentials from the `Request`. This allows internal
+    /// callers like `overlayfs` to specify an exact host UID/GID.
+    #[allow(clippy::too_many_arguments)]
+    async fn do_create_inner(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        mode: u32,
+        flags: u32,
+        uid: Option<u32>,
+        gid: Option<u32>,
+    ) -> Result<ReplyCreated> {
+        let name = osstr_to_cstr(name).unwrap();
+        let name = name.as_ref();
+        self.validate_path_component(name)?;
+
+        let dir = self.inode_map.get(parent).await?;
+        let dir_file = dir.get_file()?;
+
+        let new_file = {
+            // Here we need to adjust the code order because guard doesn't allowed to cross await point
+            let flags = self.get_writeback_open_flags(flags as i32).await;
+            let _guard = set_creds(
+                self.cfg.mapping.get_uid(uid.unwrap_or(req.uid)),
+                self.cfg.mapping.get_gid(gid.unwrap_or(req.gid)),
+            )?;
+            Self::create_file_excl(&dir_file, name, flags, mode)?
+        };
+
+        let entry = self.do_lookup(parent, name).await?;
+        let file = match new_file {
+            // File didn't exist, now created by create_file_excl()
+            Some(f) => f,
+            // File exists, and args.flags doesn't contain O_EXCL. Now let's open it with
+            // open_inode().
+            None => {
+                // Cap restored when _killpriv is dropped
+                // let _killpriv = if self.killpriv_v2.load().await
+                //     && (args.fuse_flags & FOPEN_IN_KILL_SUIDGID != 0)
+                // {
+                //     self::drop_cap_fsetid()?
+                // } else {
+                //     None
+                // };
+
+                // Here we can not call self.open_inode() directly because guard doesn't allowed to cross await point
+                let data = self.inode_map.get(entry.attr.ino).await?;
+                if !is_safe_inode(data.mode) {
+                    return Err(ebadf().into());
+                }
+
+                // Calculate the final flags. This involves an async call.
+                let mut final_flags = self.get_writeback_open_flags(flags as i32).await;
+                if !self.cfg.allow_direct_io && (flags as i32) & libc::O_DIRECT != 0 {
+                    final_flags &= !libc::O_DIRECT;
+                }
+                final_flags |= libc::O_CLOEXEC;
+
+                {
+                    let _guard = set_creds(
+                        self.cfg.mapping.get_uid(uid.unwrap_or(req.uid)),
+                        self.cfg.mapping.get_gid(gid.unwrap_or(req.gid)),
+                    )?;
+                    data.open_file(final_flags, &self.proc_self_fd)?
+                }
+            }
+        };
+
+        let ret_handle = if !self.no_open.load(Ordering::Relaxed) {
+            let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
+            let data = HandleData::new(entry.attr.ino, file, flags);
+            self.handle_map.insert(handle, data).await;
+            handle
+        } else {
+            return Err(io::Error::from_raw_os_error(libc::EACCES).into());
+        };
+
+        let mut opts = OpenOptions::empty();
+        match self.cfg.cache_policy {
+            CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
+            CachePolicy::Metadata => opts |= OpenOptions::DIRECT_IO,
+            CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
+            _ => {}
+        };
+        Ok(ReplyCreated {
+            ttl: entry.ttl,
+            attr: entry.attr,
+            generation: entry.generation,
+            fh: ret_handle,
+            flags: opts.bits(),
+        })
+    }
+
+    /// A wrapper for `create`, used by [`copy_regfile_up`][crate::overlayfs::OverlayFs::copy_regfile_up].
+    ///
+    /// This helper is called during a copy-up operation to create a file in the upper
+    /// layer while preserving the original host UID/GID from the lower layer file.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn do_create_helper(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        mode: u32,
+        flags: u32,
+        uid: u32,
+        gid: u32,
+    ) -> Result<ReplyCreated> {
+        self.do_create_inner(req, parent, name, mode, flags, Some(uid), Some(gid))
+            .await
+    }
+
+    /// Core implementation for `mkdir`.
+    ///
+    /// It uses the provided `uid` and `gid` for credential switching if they are `Some`;
+    /// otherwise, it falls back to the credentials from the `Request`.
+    #[allow(clippy::too_many_arguments)]
+    async fn do_mkdir_inner(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        mode: u32,
+        umask: u32,
+        uid: Option<u32>,
+        gid: Option<u32>,
+    ) -> Result<ReplyEntry> {
+        let name = osstr_to_cstr(name).unwrap();
+        let name = name.as_ref();
+        self.validate_path_component(name)?;
+
+        let data = self.inode_map.get(parent).await?;
+
+        let res = {
+            let _guard = set_creds(
+                self.cfg.mapping.get_uid(uid.unwrap_or(req.uid)),
+                self.cfg.mapping.get_gid(gid.unwrap_or(req.gid)),
+            )?;
+
+            let file = data.get_file()?;
+            // Safe because this doesn't modify any memory and we check the return value.
+            unsafe { libc::mkdirat(file.as_raw_fd(), name.as_ptr(), mode & !umask) }
+        };
+        if res < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+
+        self.do_lookup(parent, name).await
+    }
+
+    /// A wrapper for `mkdir`, used by [`create_upper_dir`][crate::overlayfs::OverlayInode::create_upper_dir] function.
+    ///
+    /// This helper is called during a copy-up operation when a parent directory needs to be
+    /// created in the upper layer, preserving the original host UID/GID.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn do_mkdir_helper(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        mode: u32,
+        umask: u32,
+        uid: u32,
+        gid: u32,
+    ) -> Result<ReplyEntry> {
+        self.do_mkdir_inner(req, parent, name, mode, umask, Some(uid), Some(gid))
+            .await
+    }
+
+    /// Core implementation for `symlink`.
+    ///
+    /// It uses the provided `uid` and `gid` for credential switching if they are `Some`;
+    /// otherwise, it falls back to the credentials from the `Request`.
+    async fn do_symlink_inner(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        link: &OsStr,
+        uid: Option<u32>,
+        gid: Option<u32>,
+    ) -> Result<ReplyEntry> {
+        let name = osstr_to_cstr(name).unwrap();
+        let name = name.as_ref();
+        let link = osstr_to_cstr(link).unwrap();
+        let link = link.as_ref();
+        self.validate_path_component(name)?;
+
+        let data = self.inode_map.get(parent).await?;
+
+        let res = {
+            let _guard = set_creds(
+                self.cfg.mapping.get_uid(uid.unwrap_or(req.uid)),
+                self.cfg.mapping.get_gid(gid.unwrap_or(req.gid)),
+            )?;
+
+            let file = data.get_file()?;
+            // Safe because this doesn't modify any memory and we check the return value.
+            unsafe { libc::symlinkat(link.as_ptr(), file.as_raw_fd(), name.as_ptr()) }
+        };
+        if res == 0 {
+            self.do_lookup(parent, name).await
+        } else {
+            Err(io::Error::last_os_error().into())
+        }
+    }
+
+    /// A wrapper for `symlink`, used by [`copy_symlink_up`][crate::overlayfs::OverlayFs::copy_symlink_up] function.
+    ///
+    /// This helper is called during a copy-up operation to create a symbolic link in the
+    /// upper layer while preserving the original host UID/GID from the lower layer link.
+    pub async fn do_symlink_helper(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        link: &OsStr,
+        uid: u32,
+        gid: u32,
+    ) -> Result<ReplyEntry> {
+        self.do_symlink_inner(req, parent, name, link, Some(uid), Some(gid))
+            .await
     }
 }
 
@@ -509,8 +777,8 @@ impl Filesystem for PassthroughFs {
 
         if set_attr.uid.is_some() && set_attr.gid.is_some() {
             //valid.intersects(SetattrValid::UID | SetattrValid::GID)
-            let uid = set_attr.uid.unwrap();
-            let gid = set_attr.gid.unwrap();
+            let uid = self.cfg.mapping.get_uid(set_attr.uid.unwrap());
+            let gid = self.cfg.mapping.get_gid(set_attr.gid.unwrap());
 
             // Safe because this is a constant value and a valid C string.
             let empty = unsafe { CStr::from_bytes_with_nul_unchecked(EMPTY_CSTR) };
@@ -614,31 +882,13 @@ impl Filesystem for PassthroughFs {
     /// create a symbolic link.
     async fn symlink(
         &self,
-        _req: Request,
+        req: Request,
         parent: Inode,
         name: &OsStr,
         link: &OsStr,
     ) -> Result<ReplyEntry> {
-        let name = osstr_to_cstr(name).unwrap();
-        let name = name.as_ref();
-        let link = osstr_to_cstr(link).unwrap();
-        let link = link.as_ref();
-        self.validate_path_component(name)?;
-
-        let data = self.inode_map.get(parent).await?;
-
-        let res = {
-            //let (_uid, _gid) = set_creds(req.uid, req.gid)?;
-
-            let file = data.get_file()?;
-            // Safe because this doesn't modify any memory and we check the return value.
-            unsafe { libc::symlinkat(link.as_ptr(), file.as_raw_fd(), name.as_ptr()) }
-        };
-        if res == 0 {
-            self.do_lookup(parent, name).await
-        } else {
-            Err(io::Error::last_os_error().into())
-        }
+        self.do_symlink_inner(req, parent, name, link, None, None)
+            .await
     }
 
     /// create file node. Create a regular file, character device, block device, fifo or socket
@@ -646,7 +896,7 @@ impl Filesystem for PassthroughFs {
     /// [`create`][Filesystem::create].
     async fn mknod(
         &self,
-        _req: Request,
+        req: Request,
         parent: Inode,
         name: &OsStr,
         mode: u32,
@@ -660,7 +910,10 @@ impl Filesystem for PassthroughFs {
         let file = data.get_file()?;
 
         let res = {
-            //let (_uid, _gid) = set_creds(req.uid, req.gid)?;
+            let (_uid, _gid) = set_creds(
+                self.cfg.mapping.get_uid(req.uid),
+                self.cfg.mapping.get_gid(req.gid),
+            )?;
 
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe {
@@ -682,30 +935,14 @@ impl Filesystem for PassthroughFs {
     /// create a directory.
     async fn mkdir(
         &self,
-        _req: Request,
+        req: Request,
         parent: Inode,
         name: &OsStr,
         mode: u32,
         umask: u32,
     ) -> Result<ReplyEntry> {
-        let name = osstr_to_cstr(name).unwrap();
-        let name = name.as_ref();
-        self.validate_path_component(name)?;
-
-        let data = self.inode_map.get(parent).await?;
-
-        let res = {
-            //let (_uid, _gid) = set_creds(req.uid, req.gid)?;
-
-            let file = data.get_file()?;
-            // Safe because this doesn't modify any memory and we check the return value.
-            unsafe { libc::mkdirat(file.as_raw_fd(), name.as_ptr(), mode & !umask) }
-        };
-        if res < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
-
-        self.do_lookup(parent, name).await
+        self.do_mkdir_inner(req, parent, name, mode, umask, None, None)
+            .await
     }
 
     /// remove a file.
@@ -790,7 +1027,7 @@ impl Filesystem for PassthroughFs {
     /// Filesystem may also implement stateless file I/O and not store anything in fh. There are
     /// also some flags (`direct_io`, `keep_cache`) which the filesystem may set, to change the way
     /// the file is opened. A filesystem need not implement this method if it
-    /// sets [`MountOptions::no_open_support`][crate::MountOptions::no_open_support] and if the
+    /// sets [`MountOptions::no_open_support`][rfuse3::MountOptions::no_open_support] and if the
     /// kernel supports `FUSE_NO_OPEN_SUPPORT`.
     ///
     /// # Notes:
@@ -876,7 +1113,7 @@ impl Filesystem for PassthroughFs {
     /// return value of the write system call will reflect the return value of this operation. `fh`
     /// will contain the value set by the open method, or will be undefined if the open method
     /// didn't set any value. When `write_flags` contains
-    /// [`FUSE_WRITE_CACHE`](crate::raw::flags::FUSE_WRITE_CACHE), means the write operation is a
+    /// [`FUSE_WRITE_CACHE`][rfuse3::raw::flags::FUSE_WRITE_CACHE], means the write operation is a
     /// delay write.
     #[allow(clippy::too_many_arguments)]
     async fn write(
@@ -1207,7 +1444,7 @@ impl Filesystem for PassthroughFs {
     /// ([`readdir`][Filesystem::readdir], [`releasedir`][Filesystem::releasedir],
     /// [`fsyncdir`][Filesystem::fsyncdir]). Filesystem may also implement stateless directory
     /// I/O and not store anything in `fh`.  A file system need not implement this method if it
-    /// sets [`MountOptions::no_open_dir_support`][crate::MountOptions::no_open_dir_support] and
+    /// sets [`MountOptions::no_open_dir_support`][rfuse3::MountOptions::no_open_dir_support] and
     /// if the kernel supports `FUSE_NO_OPENDIR_SUPPORT`.
     async fn opendir(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
         if self.no_opendir.load(Ordering::Relaxed) {
@@ -1304,24 +1541,27 @@ impl Filesystem for PassthroughFs {
         let st = stat_fd(&data.get_file()?, None)?;
         let mode = mask as i32 & (libc::R_OK | libc::W_OK | libc::X_OK);
 
+        let uid = self.cfg.mapping.get_uid(req.uid);
+        let gid = self.cfg.mapping.get_gid(req.gid);
+
         if mode == libc::F_OK {
             // The file exists since we were able to call `stat(2)` on it.
             return Ok(());
         }
 
         if (mode & libc::R_OK) != 0
-            && req.uid != 0
-            && (st.st_uid != req.uid || st.st_mode & 0o400 == 0)
-            && (st.st_gid != req.gid || st.st_mode & 0o040 == 0)
+            && uid != 0
+            && (st.st_uid != uid || st.st_mode & 0o400 == 0)
+            && (st.st_gid != gid || st.st_mode & 0o040 == 0)
             && st.st_mode & 0o004 == 0
         {
             return Err(io::Error::from_raw_os_error(libc::EACCES).into());
         }
 
         if (mode & libc::W_OK) != 0
-            && req.uid != 0
-            && (st.st_uid != req.uid || st.st_mode & 0o200 == 0)
-            && (st.st_gid != req.gid || st.st_mode & 0o020 == 0)
+            && uid != 0
+            && (st.st_uid != uid || st.st_mode & 0o200 == 0)
+            && (st.st_gid != gid || st.st_mode & 0o020 == 0)
             && st.st_mode & 0o002 == 0
         {
             return Err(io::Error::from_raw_os_error(libc::EACCES).into());
@@ -1330,9 +1570,9 @@ impl Filesystem for PassthroughFs {
         // root can only execute something if it is executable by one of the owner, the group, or
         // everyone.
         if (mode & libc::X_OK) != 0
-            && (req.uid != 0 || st.st_mode & 0o111 == 0)
-            && (st.st_uid != req.uid || st.st_mode & 0o100 == 0)
-            && (st.st_gid != req.gid || st.st_mode & 0o010 == 0)
+            && (uid != 0 || st.st_mode & 0o111 == 0)
+            && (st.st_uid != uid || st.st_mode & 0o100 == 0)
+            && (st.st_gid != gid || st.st_mode & 0o010 == 0)
             && st.st_mode & 0o001 == 0
         {
             return Err(io::Error::from_raw_os_error(libc::EACCES).into());
@@ -1359,70 +1599,14 @@ impl Filesystem for PassthroughFs {
     /// more details.
     async fn create(
         &self,
-        _req: Request,
+        req: Request,
         parent: Inode,
         name: &OsStr,
         mode: u32,
         flags: u32,
     ) -> Result<ReplyCreated> {
-        let name = osstr_to_cstr(name).unwrap();
-        let name = name.as_ref();
-        self.validate_path_component(name)?;
-
-        let dir = self.inode_map.get(parent).await?;
-        let dir_file = dir.get_file()?;
-
-        let new_file = {
-            //let (_uid, _gid) = set_creds(req.uid, req.gid)?;
-
-            let flags = self.get_writeback_open_flags(flags as i32).await;
-            Self::create_file_excl(&dir_file, name, flags, mode)?
-        };
-
-        let entry = self.do_lookup(parent, name).await?;
-        let file = match new_file {
-            // File didn't exist, now created by create_file_excl()
-            Some(f) => f,
-            // File exists, and args.flags doesn't contain O_EXCL. Now let's open it with
-            // open_inode().
-            None => {
-                // Cap restored when _killpriv is dropped
-                // let _killpriv = if self.killpriv_v2.load().await
-                //     && (args.fuse_flags & FOPEN_IN_KILL_SUIDGID != 0)
-                // {
-                //     self::drop_cap_fsetid()?
-                // } else {
-                //     None
-                // };
-
-                //let (_uid, _gid) = set_creds(req.uid, req.gid)?;
-                self.open_inode(entry.attr.ino, flags as i32).await?
-            }
-        };
-
-        let ret_handle = if !self.no_open.load(Ordering::Relaxed) {
-            let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
-            let data = HandleData::new(entry.attr.ino, file, flags);
-            self.handle_map.insert(handle, data).await;
-            handle
-        } else {
-            return Err(io::Error::from_raw_os_error(libc::EACCES).into());
-        };
-
-        let mut opts = OpenOptions::empty();
-        match self.cfg.cache_policy {
-            CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
-            CachePolicy::Metadata => opts |= OpenOptions::DIRECT_IO,
-            CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
-            _ => {}
-        };
-        Ok(ReplyCreated {
-            ttl: entry.ttl,
-            attr: entry.attr,
-            generation: entry.generation,
-            fh: ret_handle,
-            flags: opts.bits(),
-        })
+        self.do_create_inner(req, parent, name, mode, flags, None, None)
+            .await
     }
 
     /// handle interrupt. When a operation is interrupted, an interrupt request will send to fuse

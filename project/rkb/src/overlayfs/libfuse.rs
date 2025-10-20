@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use libfuse_fs::overlayfs::OverlayArgs;
 
 use crate::{
     config::image::CONFIG,
@@ -15,18 +16,16 @@ pub(super) fn do_mount(
     detach()?;
 
     block_on(async {
-        // TODO: avoid to_string_lossy and to_string
-        // TODO: change the signature of mount_fs to accept AsRef<Path>
-        let mountpoint = cfg.mountpoint.to_string_lossy().to_string();
-        let upperdir = cfg.upper_dir.to_string_lossy().to_string();
-        let lowerdir = cfg
-            .lower_dir
-            .iter()
-            .map(|d| d.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-
-        let mut mount_handle =
-            libfuse_fs::overlayfs::mount_fs(mountpoint, upperdir, lowerdir, CONFIG.is_root).await;
+        let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
+            lowerdir: &cfg.lower_dir,
+            upperdir: &cfg.upper_dir,
+            mountpoint: &cfg.mountpoint,
+            privileged: CONFIG.is_root,
+            mapping: None::<&str>,
+            name: None::<String>,
+            allow_other: true,
+        })
+        .await;
 
         // send ready message to parent process
         tx.send("ready".to_string())

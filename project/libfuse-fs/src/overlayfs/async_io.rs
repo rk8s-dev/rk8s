@@ -935,7 +935,7 @@ impl Filesystem for OverlayFs {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsString, sync::Arc};
+    use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
     use rfuse3::{MountOptions, raw::Session};
     use tokio::signal;
@@ -943,7 +943,7 @@ mod tests {
 
     use crate::{
         overlayfs::{OverlayFs, config::Config},
-        passthrough::{new_passthroughfs_layer, newlogfs::LoggingFileSystem},
+        passthrough::{PassthroughArgs, new_passthroughfs_layer, newlogfs::LoggingFileSystem},
     };
 
     #[tokio::test]
@@ -954,18 +954,30 @@ mod tests {
             .try_init();
 
         // Set up test environment
-        let mountpoint = "/home/luxian/megatest/true_temp".to_string();
-        let lowerdir = vec!["/home/luxian/github/buck2-rust-third-party".to_string()];
-        let upperdir = "/home/luxian/upper".to_string();
+        let mountpoint = PathBuf::from("/home/luxian/megatest/true_temp");
+        let lowerdir = vec![PathBuf::from("/home/luxian/github/buck2-rust-third-party")];
+        let upperdir = PathBuf::from("/home/luxian/upper");
 
         // Create lower layers
         let mut lower_layers = Vec::new();
         for lower in &lowerdir {
-            let layer = new_passthroughfs_layer(lower).await.unwrap();
+            let layer = new_passthroughfs_layer(PassthroughArgs {
+                root_dir: lower.clone(),
+                mapping: None::<&str>,
+            })
+            .await
+            .unwrap();
             lower_layers.push(Arc::new(layer));
         }
         // Create upper layer
-        let upper_layer = Arc::new(new_passthroughfs_layer(&upperdir).await.unwrap());
+        let upper_layer = Arc::new(
+            new_passthroughfs_layer(PassthroughArgs {
+                root_dir: upperdir,
+                mapping: None::<&str>,
+            })
+            .await
+            .unwrap(),
+        );
         // Create overlayfs
         let config = Config {
             mountpoint: mountpoint.clone(),

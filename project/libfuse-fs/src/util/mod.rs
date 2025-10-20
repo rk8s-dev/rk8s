@@ -1,3 +1,4 @@
+pub mod mapping;
 pub mod open_options;
 
 use tracing::error;
