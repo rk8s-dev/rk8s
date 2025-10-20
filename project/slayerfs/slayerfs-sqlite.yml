@@ -1,0 +1,3 @@
+database:
+  type: sqlite
+  url: "sqlite://metadata.db?mode=rwc"

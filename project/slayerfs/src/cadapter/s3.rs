@@ -28,6 +28,10 @@ pub struct S3Config {
     pub retry_base_delay: u64,
     /// Enable MD5 checksums for uploads (default: true)
     pub enable_md5: bool,
+    /// Custom endpoint URL (e.g. for MinIO or localstack)
+    pub endpoint: Option<String>,
+    /// Force path-style access (required for some S3-compatible services)
+    pub force_path_style: bool,
 }
 
 impl Default for S3Config {
@@ -40,6 +44,8 @@ impl Default for S3Config {
             max_retries: 3,
             retry_base_delay: 100,
             enable_md5: true,
+            endpoint: None,
+            force_path_style: false,
         }
     }
 }
@@ -79,7 +85,18 @@ impl S3Backend {
         }
 
         let aws_config = aws_config_loader.load().await;
-        let client = Client::new(&aws_config);
+
+        let mut s3_config_builder = aws_sdk_s3::config::Builder::from(&aws_config);
+
+        if let Some(endpoint) = &config.endpoint {
+            s3_config_builder = s3_config_builder.endpoint_url(endpoint);
+        }
+
+        if config.force_path_style {
+            s3_config_builder = s3_config_builder.force_path_style(true);
+        }
+
+        let client = Client::from_conf(s3_config_builder.build());
 
         Ok(Self { client, config })
     }

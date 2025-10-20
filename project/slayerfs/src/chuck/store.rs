@@ -189,12 +189,19 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         // 读取已有对象（若存在），在内存拼接后整体写回；MVP 简化。
         let key = Self::key_for(chunk_id, block_index);
         let bs = layout.block_size as usize;
-        // 失败直接 panic，与原同步实现行为一致；后续可改为返回 Result。
-        let existing = self
-            .client
-            .get_object(&key)
-            .await
-            .expect("object store get failed");
+        // 处理对象可能不存在的情况
+        let existing = match self.client.get_object(&key).await {
+            Ok(data) => data,
+            Err(e) => {
+                // 检查是否是 "对象不存在" 错误
+                let error_str = format!("{:?}", e);
+                if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
+                    None // 对象不存在是正常情况
+                } else {
+                    panic!("object store get failed: {:?}", e); // 其他错误仍然 panic
+                }
+            }
+        };
         let mut buf = existing.unwrap_or_else(|| vec![0u8; bs]);
         if buf.len() < bs {
             buf.resize(bs, 0);
@@ -242,12 +249,18 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
                 info!("Read block range from cache");
             }
             None => {
-                let block = self
-                    .client
-                    .get_object(&key)
-                    .await
-                    .unwrap()
-                    .unwrap_or_else(|| vec![0u8; len]);
+                let block = match self.client.get_object(&key).await {
+                    Ok(data) => data.unwrap_or_else(|| vec![0u8; len]),
+                    Err(e) => {
+                        // 检查是否是 "对象不存在" 错误
+                        let error_str = format!("{:?}", e);
+                        if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
+                            vec![0u8; len] // 对象不存在时返回零填充的块
+                        } else {
+                            panic!("object store get failed: {:?}", e);
+                        }
+                    }
+                };
                 buf.copy_from_slice(&block[start..end]);
                 self.block_cache.insert(&cache_key, &block).await.unwrap();
             }
