@@ -38,7 +38,17 @@ impl IdMappings {
         }
     }
 
-    /// Reads mappings from a string in the format `host:to:len[:host2:to2:len2...]`
+    /// Parses a colon-separated string in the format `host:to:len[:host2:to2:len2...]`
+    /// into a vector of `IdMapEntry` structs.
+    ///
+    /// # Arguments
+    ///
+    /// * `mapping` - A string slice containing the mapping(s) in the format `host:to:len[:host2:to2:len2...]`.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<IdMapEntry>)` if the input string is valid and successfully parsed.
+    /// * `Err(String)` if the format is invalid (e.g., the number of fields is not a multiple of 3, or parsing fails).
     fn read_mappings(mapping: &str) -> Result<Vec<IdMapEntry>, String> {
         let parts: Vec<&str> = mapping.split(':').collect();
         if !parts.len().is_multiple_of(3) {

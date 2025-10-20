@@ -114,9 +114,9 @@ async fn main() -> Result<(), std::io::Error> {
 
     let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
         name: Some(args.name),
-        mountpoint: args.mountpoint.as_str(),
+        mountpoint: args.mountpoint,
         lowerdir: args.lowerdir,
-        upperdir: args.upperdir.as_str(),
+        upperdir: args.upperdir,
         mapping: None::<&str>,
         privileged: true,
         allow_other: false,

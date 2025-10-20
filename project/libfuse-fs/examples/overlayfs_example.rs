@@ -35,9 +35,9 @@ async fn main() {
 
     let mut mount_handle = mount_fs(OverlayArgs {
         name: None::<String>,
-        mountpoint: args.mountpoint.as_str(),
+        mountpoint: args.mountpoint,
         lowerdir: args.lowerdir,
-        upperdir: args.upperdir.as_str(),
+        upperdir: args.upperdir,
         mapping: args.mapping,
         privileged: args.privileged,
         allow_other: args.allow_other,

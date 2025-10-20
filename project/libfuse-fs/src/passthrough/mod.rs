@@ -1328,7 +1328,7 @@ mod tests {
     /// Then, it creates a file owned by the host user and verifies that when FUSE looks up
     /// or gets attributes for this file, the returned UID/GID are correctly mapped to 1000.
     ///
-    /// Unfortunately, this can not work because `do_lookup` calls 'to_openalbe_handle' which
+    /// Unfortunately, this can not work because `do_lookup` calls `to_openable_handle` which
     /// requires CAP_DAC_READ_SEARCH capability, which is not available in unprivileged test environments.
     /// So this test is commented out for now.
     #[tokio::test]
