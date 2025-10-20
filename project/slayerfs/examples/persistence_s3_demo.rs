@@ -1,4 +1,5 @@
 use clap::Parser;
+use dotenv;
 use slayerfs::cadapter::client::ObjectClient;
 use slayerfs::cadapter::s3::{S3Backend, S3Config};
 use slayerfs::chuck::chunk::ChunkLayout;
@@ -7,7 +8,6 @@ use slayerfs::fuse::mount::mount_vfs_unprivileged;
 use slayerfs::vfs::fs::VFS;
 use std::path::PathBuf;
 use tokio::signal;
-use dotenv;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -80,7 +80,7 @@ fn process_config_for_backend(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 加载 .env 文件
     dotenv::dotenv().ok();
-    
+
     let format = tracing_subscriber::fmt::format().with_ansi(false);
     tracing_subscriber::fmt().event_format(format).init();
 
@@ -94,18 +94,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     {
         let args = Args::parse();
-        
+
         // 从环境变量获取配置，命令行参数优先
-        let bucket = args.bucket
+        let bucket = args
+            .bucket
             .or_else(|| std::env::var("S3_BUCKET").ok())
             .ok_or("S3 bucket must be specified via --bucket or S3_BUCKET env var")?;
-            
-        let endpoint = args.endpoint
+
+        let endpoint = args
+            .endpoint
             .or_else(|| std::env::var("S3_ENDPOINT").ok())
             .unwrap_or_else(|| "http://127.0.0.1:9000".to_string());
-            
-        let region = args.region
-            .or_else(|| std::env::var("AWS_REGION").ok());
+
+        let region = args.region.or_else(|| std::env::var("AWS_REGION").ok());
 
         println!("=== SlayerFS Persistence + S3 Demo ===");
         println!("Environment variables loaded from .env file");
