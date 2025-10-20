@@ -39,7 +39,7 @@ echo ""
 
 echo "--- Testing forward mapping (creating new files) ---"
 sudo -u "#${MY_UID}" touch "$TEST_ROOT/mount/created_by_container_node.txt"
-sudo touch /tmp/passthrough_test/mount/created_by_container_root.txt
+sudo touch "$TEST_ROOT/mount/created_by_container_root.txt"
 echo "ls -ln $TEST_ROOT/mount"
 ls -ln "$TEST_ROOT/mount"
 echo "Expected in source directory:"

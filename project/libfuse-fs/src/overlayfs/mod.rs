@@ -763,6 +763,8 @@ impl OverlayInode {
                 match parent_upper_inode {
                     Some(parent_ri) => {
                         let ri = match mode_umask {
+                            // We manually unfold the `mkdir` logic here instead of calling the `mkdir` method directly.
+                            // This is necessary to preserve the original directory's UID and GID during the copy-up process.
                             Some((mode, umask)) => {
                                 if !parent_ri.in_upper_layer {
                                     return Err(Error::from_raw_os_error(libc::EROFS));
@@ -2092,6 +2094,8 @@ impl OverlayFs {
                 // We already create upper dir for parent_node above.
                 let parent_real_inode =
                     parent_upper_inode.ok_or_else(|| Error::from_raw_os_error(libc::EROFS))?;
+                // We manually unfold the `symlink` logic here instead of calling the `symlink` method directly.
+                // This is necessary to preserve the original file's UID and GID during the copy-up process.
                 if !parent_real_inode.in_upper_layer {
                     return Err(Error::from_raw_os_error(libc::EROFS));
                 }
@@ -2189,6 +2193,8 @@ impl OverlayFs {
                     error!("parent {} has no upper inode", parent_node.inode);
                     Error::from_raw_os_error(libc::EINVAL)
                 })?;
+                // We manually unfold the `create` logic here instead of calling the `create` method directly.
+                // This is necessary to preserve the original file's UID and GID during the copy-up process.
                 if !parent_real_inode.in_upper_layer {
                     return Err(Error::from_raw_os_error(libc::EROFS));
                 }

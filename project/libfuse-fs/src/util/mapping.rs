@@ -16,7 +16,11 @@ pub struct IdMappings {
     pub uid_map: Vec<IdMapEntry>,
     pub gid_map: Vec<IdMapEntry>,
 
+    /// Fallback UID used when no mapping is found.
+    /// Typically read from `/proc/sys/kernel/overflowuid`.
     overflow_uid: u32,
+    /// Fallback GID used when no mapping is found.
+    /// Typically read from `/proc/sys/kernel/overflowgid`.
     overflow_gid: u32,
 }
 
