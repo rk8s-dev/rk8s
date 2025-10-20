@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "safe-path",
     srcs = [":safe-path-vendor"],
-    crate = "safe-path",
+    crate = "safe_path",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

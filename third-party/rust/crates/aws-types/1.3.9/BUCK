@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aws-types",
     srcs = [":aws-types-vendor"],
-    crate = "aws-types",
+    crate = "aws_types",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -46,7 +46,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "aws-types-build-script-build",
     srcs = [":aws-types-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

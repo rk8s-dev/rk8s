@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "proc-macro-crate",
     srcs = [":proc-macro-crate-vendor"],
-    crate = "proc-macro-crate",
+    crate = "proc_macro_crate",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

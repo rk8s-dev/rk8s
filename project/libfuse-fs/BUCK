@@ -12,7 +12,7 @@ filegroup(
 cargo.rust_library(
     name = "libfuse_fs",
     srcs = [":libfuse-fs-vendor"],
-    crate = "libfuse-fs",
+    crate = "libfuse_fs",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {

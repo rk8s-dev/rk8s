@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "winapi-util",
     srcs = [":winapi-util-vendor"],
-    crate = "winapi-util",
+    crate = "winapi_util",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

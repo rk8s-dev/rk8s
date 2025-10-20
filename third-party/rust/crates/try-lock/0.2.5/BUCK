@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "try-lock",
     srcs = [":try-lock-vendor"],
-    crate = "try-lock",
+    crate = "try_lock",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

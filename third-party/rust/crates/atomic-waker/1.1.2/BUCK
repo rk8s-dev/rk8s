@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "atomic-waker",
     srcs = [":atomic-waker-vendor"],
-    crate = "atomic-waker",
+    crate = "atomic_waker",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

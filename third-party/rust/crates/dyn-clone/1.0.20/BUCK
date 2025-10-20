@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "dyn-clone",
     srcs = [":dyn-clone-vendor"],
-    crate = "dyn-clone",
+    crate = "dyn_clone",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

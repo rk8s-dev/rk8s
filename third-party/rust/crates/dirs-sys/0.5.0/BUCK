@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "dirs-sys",
     srcs = [":dirs-sys-vendor"],
-    crate = "dirs-sys",
+    crate = "dirs_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

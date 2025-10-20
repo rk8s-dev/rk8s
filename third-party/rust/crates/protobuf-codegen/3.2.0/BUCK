@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "protobuf-codegen",
     srcs = [":protobuf-codegen-vendor"],
-    crate = "protobuf-codegen",
+    crate = "protobuf_codegen",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

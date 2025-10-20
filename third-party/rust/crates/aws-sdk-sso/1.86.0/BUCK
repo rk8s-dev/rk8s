@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aws-sdk-sso",
     srcs = [":aws-sdk-sso-vendor"],
-    crate = "aws-sdk-sso",
+    crate = "aws_sdk_sso",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

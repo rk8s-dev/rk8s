@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "netlink-packet-route",
     srcs = [":netlink-packet-route-vendor"],
-    crate = "netlink-packet-route",
+    crate = "netlink_packet_route",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

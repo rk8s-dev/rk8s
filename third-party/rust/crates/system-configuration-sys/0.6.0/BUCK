@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "system-configuration-sys",
     srcs = [":system-configuration-sys-vendor"],
-    crate = "system-configuration-sys",
+    crate = "system_configuration_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -43,7 +43,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "system-configuration-sys-build-script-build",
     srcs = [":system-configuration-sys-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

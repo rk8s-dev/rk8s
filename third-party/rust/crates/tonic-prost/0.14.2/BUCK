@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "tonic-prost",
     srcs = [":tonic-prost-vendor"],
-    crate = "tonic-prost",
+    crate = "tonic_prost",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

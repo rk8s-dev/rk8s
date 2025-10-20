@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "hyper-timeout",
     srcs = [":hyper-timeout-vendor"],
-    crate = "hyper-timeout",
+    crate = "hyper_timeout",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

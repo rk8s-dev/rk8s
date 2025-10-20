@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "redox_syscall",
     srcs = [":redox_syscall-vendor"],
-    crate = "redox_syscall",
+    crate = "syscall",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

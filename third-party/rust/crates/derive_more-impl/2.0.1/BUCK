@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "derive_more-impl",
     srcs = [":derive_more-impl-vendor"],
-    crate = "derive_more-impl",
+    crate = "derive_more_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

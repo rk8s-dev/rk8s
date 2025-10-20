@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "prost-build",
     srcs = [":prost-build-vendor"],
-    crate = "prost-build",
+    crate = "prost_build",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

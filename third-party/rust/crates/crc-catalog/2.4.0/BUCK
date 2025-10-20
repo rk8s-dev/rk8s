@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "crc-catalog",
     srcs = [":crc-catalog-vendor"],
-    crate = "crc-catalog",
+    crate = "crc_catalog",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

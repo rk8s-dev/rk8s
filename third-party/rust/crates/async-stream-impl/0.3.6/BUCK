@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "async-stream-impl",
     srcs = [":async-stream-impl-vendor"],
-    crate = "async-stream-impl",
+    crate = "async_stream_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

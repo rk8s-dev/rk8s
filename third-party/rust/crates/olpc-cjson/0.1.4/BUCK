@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "olpc-cjson",
     srcs = [":olpc-cjson-vendor"],
-    crate = "olpc-cjson",
+    crate = "olpc_cjson",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

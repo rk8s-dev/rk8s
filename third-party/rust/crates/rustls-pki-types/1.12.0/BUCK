@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rustls-pki-types",
     srcs = [":rustls-pki-types-vendor"],
-    crate = "rustls-pki-types",
+    crate = "rustls_pki_types",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

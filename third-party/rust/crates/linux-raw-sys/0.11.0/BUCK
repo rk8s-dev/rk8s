@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "linux-raw-sys",
     srcs = [":linux-raw-sys-vendor"],
-    crate = "linux-raw-sys",
+    crate = "linux_raw_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

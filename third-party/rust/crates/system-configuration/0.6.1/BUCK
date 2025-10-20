@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "system-configuration",
     srcs = [":system-configuration-vendor"],
-    crate = "system-configuration",
+    crate = "system_configuration",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "unsafe-libyaml",
     srcs = [":unsafe-libyaml-vendor"],
-    crate = "unsafe-libyaml",
+    crate = "unsafe_libyaml",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

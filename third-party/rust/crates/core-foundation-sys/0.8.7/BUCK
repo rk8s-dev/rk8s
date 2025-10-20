@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "core-foundation-sys",
     srcs = [":core-foundation-sys-vendor"],
-    crate = "core-foundation-sys",
+    crate = "core_foundation_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

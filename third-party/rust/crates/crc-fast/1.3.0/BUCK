@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "crc-fast",
     srcs = [":crc-fast-vendor"],
-    crate = "crc-fast",
+    crate = "crc_fast",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

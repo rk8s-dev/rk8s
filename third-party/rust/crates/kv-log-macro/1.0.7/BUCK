@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "kv-log-macro",
     srcs = [":kv-log-macro-vendor"],
-    crate = "kv-log-macro",
+    crate = "kv_log_macro",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

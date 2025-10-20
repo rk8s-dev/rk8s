@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "windows-result",
     srcs = [":windows-result-vendor"],
-    crate = "windows-result",
+    crate = "windows_result",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

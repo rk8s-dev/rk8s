@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rust-criu",
     srcs = [":rust-criu-vendor"],
-    crate = "rust-criu",
+    crate = "rust_criu",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -44,7 +44,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "rust-criu-build-script-build",
     srcs = [":rust-criu-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "crypto-bigint",
     srcs = [":crypto-bigint-vendor"],
-    crate = "crypto-bigint",
+    crate = "crypto_bigint",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

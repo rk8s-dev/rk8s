@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "foreign-types-shared",
     srcs = [":foreign-types-shared-vendor"],
-    crate = "foreign-types-shared",
+    crate = "foreign_types_shared",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

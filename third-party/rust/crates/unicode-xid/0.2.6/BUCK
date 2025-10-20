@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "unicode-xid",
     srcs = [":unicode-xid-vendor"],
-    crate = "unicode-xid",
+    crate = "unicode_xid",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

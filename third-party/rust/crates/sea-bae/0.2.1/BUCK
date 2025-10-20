@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "sea-bae",
     srcs = [":sea-bae-vendor"],
-    crate = "sea-bae",
+    crate = "sea_bae",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

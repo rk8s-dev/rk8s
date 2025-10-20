@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "vm-memory",
     srcs = [":vm-memory-vendor"],
-    crate = "vm-memory",
+    crate = "vm_memory",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

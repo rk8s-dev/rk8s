@@ -46,7 +46,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "typetag-build-script-build",
     srcs = [":typetag-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

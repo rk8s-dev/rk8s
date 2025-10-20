@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "typetag-impl",
     srcs = [":typetag-impl-vendor"],
-    crate = "typetag-impl",
+    crate = "typetag_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

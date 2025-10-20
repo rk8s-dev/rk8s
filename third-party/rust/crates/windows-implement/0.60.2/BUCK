@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "windows-implement",
     srcs = [":windows-implement-vendor"],
-    crate = "windows-implement",
+    crate = "windows_implement",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rustls-platform-verifier",
     srcs = [":rustls-platform-verifier-vendor"],
-    crate = "rustls-platform-verifier",
+    crate = "rustls_platform_verifier",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

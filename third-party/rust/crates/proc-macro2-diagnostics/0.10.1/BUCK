@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "proc-macro2-diagnostics",
     srcs = [":proc-macro2-diagnostics-vendor"],
-    crate = "proc-macro2-diagnostics",
+    crate = "proc_macro2_diagnostics",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
@@ -50,7 +50,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "proc-macro2-diagnostics-build-script-build",
     srcs = [":proc-macro2-diagnostics-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
     env = {

@@ -41,7 +41,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "context-build-script-build",
     srcs = [":context-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
     env = {

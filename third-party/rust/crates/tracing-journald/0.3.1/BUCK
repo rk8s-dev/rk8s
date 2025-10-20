@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "tracing-journald",
     srcs = [":tracing-journald-vendor"],
-    crate = "tracing-journald",
+    crate = "tracing_journald",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

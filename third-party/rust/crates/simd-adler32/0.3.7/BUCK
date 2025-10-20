@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "simd-adler32",
     srcs = [":simd-adler32-vendor"],
-    crate = "simd-adler32",
+    crate = "simd_adler32",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

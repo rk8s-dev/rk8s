@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "endian-type",
     srcs = [":endian-type-vendor"],
-    crate = "endian-type",
+    crate = "endian_type",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

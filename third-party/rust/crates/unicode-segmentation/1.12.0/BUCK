@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "unicode-segmentation",
     srcs = [":unicode-segmentation-vendor"],
-    crate = "unicode-segmentation",
+    crate = "unicode_segmentation",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

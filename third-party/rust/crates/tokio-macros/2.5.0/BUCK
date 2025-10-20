@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "tokio-macros",
     srcs = [":tokio-macros-vendor"],
-    crate = "tokio-macros",
+    crate = "tokio_macros",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

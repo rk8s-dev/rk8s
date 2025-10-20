@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "predicates-tree",
     srcs = [":predicates-tree-vendor"],
-    crate = "predicates-tree",
+    crate = "predicates_tree",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

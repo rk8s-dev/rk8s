@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "hickory-resolver",
     srcs = [":hickory-resolver-vendor"],
-    crate = "hickory-resolver",
+    crate = "hickory_resolver",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

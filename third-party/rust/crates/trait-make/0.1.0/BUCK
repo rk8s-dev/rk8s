@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "trait-make",
     srcs = [":trait-make-vendor"],
-    crate = "trait-make",
+    crate = "trait_make",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

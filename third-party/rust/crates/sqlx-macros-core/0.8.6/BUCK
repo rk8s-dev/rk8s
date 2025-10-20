@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "sqlx-macros-core",
     srcs = [":sqlx-macros-core-vendor"],
-    crate = "sqlx-macros-core",
+    crate = "sqlx_macros_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

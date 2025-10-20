@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "openssl-sys",
     srcs = [":openssl-sys-vendor"],
-    crate = "openssl-sys",
+    crate = "openssl_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -54,7 +54,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "openssl-sys-build-script-main",
     srcs = [":openssl-sys-vendor"],
-    crate = "build-script-main",
+    crate = "build_script_main",
     crate_root = "vendor/build/main.rs",
     edition = "2021",
     env = {

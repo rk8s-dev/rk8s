@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "tokio-native-tls",
     srcs = [":tokio-native-tls-vendor"],
-    crate = "tokio-native-tls",
+    crate = "tokio_native_tls",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

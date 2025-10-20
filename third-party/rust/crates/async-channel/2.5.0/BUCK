@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "async-channel",
     srcs = [":async-channel-vendor"],
-    crate = "async-channel",
+    crate = "async_channel",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

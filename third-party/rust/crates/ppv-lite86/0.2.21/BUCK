@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "ppv-lite86",
     srcs = [":ppv-lite86-vendor"],
-    crate = "ppv-lite86",
+    crate = "ppv_lite86",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

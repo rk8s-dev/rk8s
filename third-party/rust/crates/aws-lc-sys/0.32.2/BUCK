@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aws-lc-sys",
     srcs = [":aws-lc-sys-vendor"],
-    crate = "aws-lc-sys",
+    crate = "aws_lc_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -41,7 +41,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "aws-lc-sys-build-script-main",
     srcs = [":aws-lc-sys-vendor"],
-    crate = "build-script-main",
+    crate = "build_script_main",
     crate_root = "vendor/builder/main.rs",
     edition = "2021",
     env = {

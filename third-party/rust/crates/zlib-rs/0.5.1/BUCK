@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "zlib-rs",
     srcs = [":zlib-rs-vendor"],
-    crate = "zlib-rs",
+    crate = "zlib_rs",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "futures-io",
     srcs = [":futures-io-vendor"],
-    crate = "futures-io",
+    crate = "futures_io",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

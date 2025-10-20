@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "sea-orm-macros",
     srcs = [":sea-orm-macros-vendor"],
-    crate = "sea-orm-macros",
+    crate = "sea_orm_macros",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

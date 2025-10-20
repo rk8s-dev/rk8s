@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "resolv-conf",
     srcs = [":resolv-conf-vendor"],
-    crate = "resolv-conf",
+    crate = "resolv_conf",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

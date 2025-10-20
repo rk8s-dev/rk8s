@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aws-config",
     srcs = [":aws-config-vendor"],
-    crate = "aws-config",
+    crate = "aws_config",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

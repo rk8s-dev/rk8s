@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "zerocopy-derive",
     srcs = [":zerocopy-derive-vendor"],
-    crate = "zerocopy-derive",
+    crate = "zerocopy_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

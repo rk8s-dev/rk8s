@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "ipc-channel",
     srcs = [":ipc-channel-vendor"],
-    crate = "ipc-channel",
+    crate = "ipc_channel",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

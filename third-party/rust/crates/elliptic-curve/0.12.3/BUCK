@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "elliptic-curve",
     srcs = [":elliptic-curve-vendor"],
-    crate = "elliptic-curve",
+    crate = "elliptic_curve",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aws-smithy-eventstream",
     srcs = [":aws-smithy-eventstream-vendor"],
-    crate = "aws-smithy-eventstream",
+    crate = "aws_smithy_eventstream",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aws-credential-types",
     srcs = [":aws-credential-types-vendor"],
-    crate = "aws-credential-types",
+    crate = "aws_credential_types",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

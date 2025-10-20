@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "netlink-proto",
     srcs = [":netlink-proto-vendor"],
-    crate = "netlink-proto",
+    crate = "netlink_proto",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "thiserror-impl",
     srcs = [":thiserror-impl-vendor"],
-    crate = "thiserror-impl",
+    crate = "thiserror_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

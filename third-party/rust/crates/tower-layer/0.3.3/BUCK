@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "tower-layer",
     srcs = [":tower-layer-vendor"],
-    crate = "tower-layer",
+    crate = "tower_layer",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

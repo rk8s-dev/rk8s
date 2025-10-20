@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "base64-simd",
     srcs = [":base64-simd-vendor"],
-    crate = "base64-simd",
+    crate = "base64_simd",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

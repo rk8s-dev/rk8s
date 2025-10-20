@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "prost-derive",
     srcs = [":prost-derive-vendor"],
-    crate = "prost-derive",
+    crate = "prost_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

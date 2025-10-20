@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "windows-core",
     srcs = [":windows-core-vendor"],
-    crate = "windows-core",
+    crate = "windows_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

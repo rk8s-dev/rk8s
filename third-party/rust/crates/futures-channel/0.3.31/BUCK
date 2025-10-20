@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "futures-channel",
     srcs = [":futures-channel-vendor"],
-    crate = "futures-channel",
+    crate = "futures_channel",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

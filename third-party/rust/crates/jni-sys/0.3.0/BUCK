@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "jni-sys",
     srcs = [":jni-sys-vendor"],
-    crate = "jni-sys",
+    crate = "jni_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

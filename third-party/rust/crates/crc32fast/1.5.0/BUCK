@@ -44,7 +44,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "crc32fast-build-script-build",
     srcs = [":crc32fast-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

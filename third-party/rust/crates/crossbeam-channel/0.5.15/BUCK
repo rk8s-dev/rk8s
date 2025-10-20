@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "crossbeam-channel",
     srcs = [":crossbeam-channel-vendor"],
-    crate = "crossbeam-channel",
+    crate = "crossbeam_channel",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

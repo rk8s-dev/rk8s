@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aws-smithy-checksums",
     srcs = [":aws-smithy-checksums-vendor"],
-    crate = "aws-smithy-checksums",
+    crate = "aws_smithy_checksums",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "same-file",
     srcs = [":same-file-vendor"],
-    crate = "same-file",
+    crate = "same_file",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

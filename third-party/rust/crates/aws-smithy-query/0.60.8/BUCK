@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aws-smithy-query",
     srcs = [":aws-smithy-query-vendor"],
-    crate = "aws-smithy-query",
+    crate = "aws_smithy_query",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

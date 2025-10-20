@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "windows-registry",
     srcs = [":windows-registry-vendor"],
-    crate = "windows-registry",
+    crate = "windows_registry",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

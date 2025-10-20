@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "clang-sys",
     srcs = [":clang-sys-vendor"],
-    crate = "clang-sys",
+    crate = "clang_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -62,7 +62,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "clang-sys-build-script-build",
     srcs = [":clang-sys-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

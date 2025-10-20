@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "minimal-lexical",
     srcs = [":minimal-lexical-vendor"],
-    crate = "minimal-lexical",
+    crate = "minimal_lexical",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

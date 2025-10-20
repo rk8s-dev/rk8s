@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "enum-as-inner",
     srcs = [":enum-as-inner-vendor"],
-    crate = "enum-as-inner",
+    crate = "enum_as_inner",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "oci-spec",
     srcs = [":oci-spec-vendor"],
-    crate = "oci-spec",
+    crate = "oci_spec",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

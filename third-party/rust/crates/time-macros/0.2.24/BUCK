@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "time-macros",
     srcs = [":time-macros-vendor"],
-    crate = "time-macros",
+    crate = "time_macros",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

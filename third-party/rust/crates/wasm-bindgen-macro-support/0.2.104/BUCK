@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "wasm-bindgen-macro-support",
     srcs = [":wasm-bindgen-macro-support-vendor"],
-    crate = "wasm-bindgen-macro-support",
+    crate = "wasm_bindgen_macro_support",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "wasm-bindgen-backend",
     srcs = [":wasm-bindgen-backend-vendor"],
-    crate = "wasm-bindgen-backend",
+    crate = "wasm_bindgen_backend",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

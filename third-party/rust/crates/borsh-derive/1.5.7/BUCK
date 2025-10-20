@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "borsh-derive",
     srcs = [":borsh-derive-vendor"],
-    crate = "borsh-derive",
+    crate = "borsh_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

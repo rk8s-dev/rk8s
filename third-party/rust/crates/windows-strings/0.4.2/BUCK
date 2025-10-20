@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "windows-strings",
     srcs = [":windows-strings-vendor"],
-    crate = "windows-strings",
+    crate = "windows_strings",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

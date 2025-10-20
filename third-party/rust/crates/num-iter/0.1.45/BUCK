@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "num-iter",
     srcs = [":num-iter-vendor"],
-    crate = "num-iter",
+    crate = "num_iter",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

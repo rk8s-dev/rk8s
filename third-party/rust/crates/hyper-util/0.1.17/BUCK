@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "hyper-util",
     srcs = [":hyper-util-vendor"],
-    crate = "hyper-util",
+    crate = "hyper_util",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

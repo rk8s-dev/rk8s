@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "regex-automata",
     srcs = [":regex-automata-vendor"],
-    crate = "regex-automata",
+    crate = "regex_automata",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

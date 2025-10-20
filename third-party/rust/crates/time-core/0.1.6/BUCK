@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "time-core",
     srcs = [":time-core-vendor"],
-    crate = "time-core",
+    crate = "time_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

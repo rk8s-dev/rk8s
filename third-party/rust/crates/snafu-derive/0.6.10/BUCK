@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "snafu-derive",
     srcs = [":snafu-derive-vendor"],
-    crate = "snafu-derive",
+    crate = "snafu_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

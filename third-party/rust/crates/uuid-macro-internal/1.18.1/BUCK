@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "uuid-macro-internal",
     srcs = [":uuid-macro-internal-vendor"],
-    crate = "uuid-macro-internal",
+    crate = "uuid_macro_internal",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

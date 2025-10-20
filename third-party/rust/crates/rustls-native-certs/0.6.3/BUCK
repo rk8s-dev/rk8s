@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rustls-native-certs",
     srcs = [":rustls-native-certs-vendor"],
-    crate = "rustls-native-certs",
+    crate = "rustls_native_certs",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

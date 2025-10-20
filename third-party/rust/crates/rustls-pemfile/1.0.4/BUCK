@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rustls-pemfile",
     srcs = [":rustls-pemfile-vendor"],
-    crate = "rustls-pemfile",
+    crate = "rustls_pemfile",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "aho-corasick",
     srcs = [":aho-corasick-vendor"],
-    crate = "aho-corasick",
+    crate = "aho_corasick",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

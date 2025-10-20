@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "pulldown-cmark",
     srcs = [":pulldown-cmark-vendor"],
-    crate = "pulldown-cmark",
+    crate = "pulldown_cmark",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -44,7 +44,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "pulldown-cmark-build-script-build",
     srcs = [":pulldown-cmark-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

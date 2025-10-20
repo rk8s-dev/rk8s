@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "openssl-macros",
     srcs = [":openssl-macros-vendor"],
-    crate = "openssl-macros",
+    crate = "openssl_macros",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
