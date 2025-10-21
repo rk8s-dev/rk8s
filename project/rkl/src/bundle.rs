@@ -271,7 +271,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
         privileged: true,
         mapping: None::<&str>,
         name: None::<String>,
-        allow_other: true,
+        allow_other: false,
     })
     .await;
 
