@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "lru-slab",
     srcs = [":lru-slab-vendor"],
-    crate = "lru-slab",
+    crate = "lru_slab",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

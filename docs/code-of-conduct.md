@@ -6,7 +6,7 @@ All members of the rk8s community, including employees, contractors, interns, vo
 
 The rk8s community is committed to providing an environment free of harassment and discrimination for everyone, regardless of gender, gender identity and expression, sexual orientation, disability, physical appearance, body size, race, age, or religion. We do not tolerate harassment of participants in any form. Harassment includes offensive comments related to these characteristics, as well as deliberate intimidation, stalking, following, harassing photography or recording, sustained disruption of talks or other events, inappropriate physical contact, and unwelcome sexual attention.
 
-If you experience or witness unacceptable behavior, see something that makes you feel unsafe, or have concerns about the well-being of a participant, please report it to Eli Ma or Charles Feng immediately. All reports will be handled confidentially.
+If you experience or witness unacceptable behavior, see something that makes you feel unsafe, or have concerns about the well-being of a participant, please report it to Eli Ma <eli@patch.sh> or Charles Feng <fengyang@nju.edu.cn> immediately. All reports will be handled confidentially.
 
 We value diverse opinions, skills, and experiences. We strive to build an inclusive environment where everyone feels safe and respected. Together, we can achieve great things.
 
@@ -19,7 +19,7 @@ All members of the rk8s community are expected to:
 - Treat all people with respect and consideration, valuing a diversity of views and opinions.
   • Communicate openly and thoughtfully.
   • Avoid personal attacks directed at other participants.
-  • Be mindful of your surroundings and your fellow participants. Alert Eli Ma if you notice a dangerous situation or someone in distress.
+  • Be mindful of your surroundings and your fellow participants. Alert Eli Ma <eli@patch.sh> if you notice a dangerous situation or someone in distress.
   • Respect personal space and property.
   • Refrain from demeaning, discriminatory, or harassing behavior, speech, and imagery.
   • Be considerate in your use of space and resources. For example, avoid excessive noise from conversations, laptops, and other electronic devices. Be courteous when taking up shared space such as tables and walkways.
@@ -32,7 +32,7 @@ Failure to comply with this Code of Conduct may result in disciplinary action, i
 
 ### Contact Information
 
-If you have questions or concerns about this Code of Conduct, contact Eli Ma or Charles Feng.
+If you have questions or concerns about this Code of Conduct, contact Eli Ma <eli@patch.sh> or Charles Feng <fengyang@nju.edu.cn>.
 
 # Enforcement
 

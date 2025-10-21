@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "core-foundation",
     srcs = [":core-foundation-vendor"],
-    crate = "core-foundation",
+    crate = "core_foundation",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -38,6 +38,6 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys",
-        "//third-party/rust/crates/libc/0.2.176:libc",
+        "//third-party/rust/crates/libc/0.2.177:libc",
     ],
 )

@@ -1,19 +1,23 @@
 # rk8s - A Lite Version of Kubernetes in Rust
 
 rk8s is a lightweight, Kubernetes-compatible container orchestration system built on top of [Youki](https://github.com/youki-dev/youki), implementing the Container Runtime Interface (CRI) with support for three primary workload types: single containers, Kubernetes-style pods, and Docker Compose-style multi-container applications.
+
+The rk8s project is initiated by the Web3 Infrastructure Foundation and developed with support from Associate Professor Feng Yang’s lab at Nanjing University and the Institute of Software Chinese Academy of Sciences, through the [R2CN](https://r2cn.dev).
+
+The project is currently in **WIP** stage and **should not be used in production environments**.
+
 ## Architecture Overview
-
 rk8s follows a distributed architecture with both standalone and cluster deployment modes: 
-### Core Components
 
+### Core Components
 - **RKL (Container Runtime Interface)** - The primary runtime component supporting CLI operations and daemon mode
 - **RKS (Control Plane)** - Kubernetes-like control plane combining API server, scheduler, and controller functionality  
 - **Xline** - etcd-compatible distributed storage for cluster state
 - **Networking** - CNI-compliant networking with libbridge plugin
+
 ## Supported Workload Types
 
 ### 1. Single Container Workloads
-
 Manage standalone containers with resource limits and port mappings: 
 
 **Example single container specification:**
@@ -35,7 +39,6 @@ resources:
 ```
 
 ### 2. Kubernetes-Style Pods
-
 Group multiple containers sharing the same network namespace and lifecycle, implementing the Kubernetes pod model with pause containers for namespace sharing:
 
 **Pod Architecture:**
@@ -113,14 +116,12 @@ configs:
 ## Deployment Modes
 
 ### Local Mode (Standalone) 
-
 Direct CLI interaction with local container runtime:
 - No central control plane required
 - Immediate container creation and management
 - Ideal for development and testing
 
 ### Cluster Mode (Distributed) 
-
 Full Kubernetes-like cluster with distributed components:
 - RKS control plane for scheduling and state management
 - RKL daemons on worker nodes
@@ -153,13 +154,11 @@ rk8s/
 ## Quick Start
 
 ### Prerequisites
-
 - Rust toolchain (1.70+)
 - Root privileges for container operations
 - Docker (for creating OCI bundles)
 
 ### Build and Setup
-
 1. **Build the project:**
 ```bash
 cd rk8s/project/
@@ -179,15 +178,17 @@ sudo mv target/debug/libbridge /opt/cni/bin/
 mkdir -p rootfs
 docker export $(docker create busybox) | tar -C rootfs -xvf -
 ```
+
 ### Usage Examples
+
 **Single Container:**
 ```bash
 sudo project/target/debug/rkl container run single.yaml
 sudo project/target/debug/rkl container list
 sudo project/target/debug/rkl container exec single-container-test /bin/sh
 ```
-**Pod Management(Standalone):**
 
+**Pod Management(Standalone):**
 ```bash
 sudo project/target/debug/rkl pod run pod.yaml
 sudo project/target/debug/rkl pod state simple-container-task
@@ -215,10 +216,11 @@ sudo project/target/debug/rkl compose down
 ```bash
 sudo RKL_ADDRESS=127.0.0.1:50051 project/target/debug/rkl pod daemon # Monitors /etc/rk8s/manifests/ and acts as work node of rks
 ```
+
 **RKS:**
 For detail about building a cluster with RKS and RKL, please refer to [RKS–RKL usage](./project/rks/readme.md).
-## Key Features
 
+## Key Features
 - **CRI Compliance** - Full Container Runtime Interface implementation
 - **Kubernetes Compatibility** - Pod specifications and resource management
 - **Docker Compose Support** - Familiar multi-container application definitions

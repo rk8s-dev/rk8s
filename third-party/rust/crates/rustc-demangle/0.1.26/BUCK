@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rustc-demangle",
     srcs = [":rustc-demangle-vendor"],
-    crate = "rustc-demangle",
+    crate = "rustc_demangle",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

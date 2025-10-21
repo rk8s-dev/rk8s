@@ -580,7 +580,7 @@ where
         })
     }
 
-    // 重命名（当前仅支持文件）
+    // 重命名（支持文件和目录）
     async fn rename(
         &self,
         _req: Request,
@@ -595,12 +595,9 @@ where
         let Some(src_ino) = self.child_of(parent as i64, name.as_ref()) else {
             return Err(libc::ENOENT.into());
         };
-        let Some(src_attr) = self.stat_ino(src_ino).await else {
+        let Some(_src_attr) = self.stat_ino(src_ino).await else {
             return Err(libc::ENOENT.into());
         };
-        if matches!(src_attr.kind, VfsFileType::Dir) {
-            return Err(libc::EOPNOTSUPP.into());
-        }
 
         // 检查目标父
         let Some(pattr) = self.stat_ino(new_parent as i64).await else {
@@ -633,7 +630,7 @@ where
             newp.push('/');
         }
         newp.push_str(&new_name);
-        self.rename_file(&oldp, &newp).await.map_err(|e| {
+        VFS::rename(self, &oldp, &newp).await.map_err(|e| {
             let code = match e.as_str() {
                 "target exists" => libc::EEXIST,
                 _ => libc::EIO,

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "allocator-api2",
     srcs = [":allocator-api2-vendor"],
-    crate = "allocator-api2",
+    crate = "allocator_api2",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

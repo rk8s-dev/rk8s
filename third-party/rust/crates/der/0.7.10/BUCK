@@ -42,6 +42,6 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/const-oid/0.9.6:const-oid",
         "//third-party/rust/crates/pem-rfc7468/0.7.0:pem-rfc7468",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
+        "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],
 )

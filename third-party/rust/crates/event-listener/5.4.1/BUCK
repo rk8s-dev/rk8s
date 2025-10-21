@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "event-listener",
     srcs = [":event-listener-vendor"],
-    crate = "event-listener",
+    crate = "event_listener",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

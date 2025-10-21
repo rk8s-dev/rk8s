@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rustls-platform-verifier",
     srcs = [":rustls-platform-verifier-vendor"],
-    crate = "rustls-platform-verifier",
+    crate = "rustls_platform_verifier",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -32,7 +32,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
-        "webpki": "//third-party/rust/crates/rustls-webpki/0.103.6:rustls-webpki",
+        "webpki": "//third-party/rust/crates/rustls-webpki/0.103.7:rustls-webpki",
     },
     visibility = ["PUBLIC"],
     deps = [

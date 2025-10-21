@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "http-body-util",
     srcs = [":http-body-util-vendor"],
-    crate = "http-body-util",
+    crate = "http_body_util",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "prefix-trie",
     srcs = [":prefix-trie-vendor"],
-    crate = "prefix-trie",
+    crate = "prefix_trie",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

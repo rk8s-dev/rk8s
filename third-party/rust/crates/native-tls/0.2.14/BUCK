@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "native-tls",
     srcs = [":native-tls-vendor"],
-    crate = "native-tls",
+    crate = "native_tls",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
@@ -45,7 +45,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "native-tls-build-script-build",
     srcs = [":native-tls-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
     env = {

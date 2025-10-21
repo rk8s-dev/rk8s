@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "hyper-rustls",
     srcs = [":hyper-rustls-vendor"],
-    crate = "hyper-rustls",
+    crate = "hyper_rustls",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -51,7 +51,7 @@ cargo.rust_library(
         "//third-party/rust/crates/hyper/1.7.0:hyper",
         "//third-party/rust/crates/rustls-native-certs/0.8.1:rustls-native-certs",
         "//third-party/rust/crates/rustls/0.23.32:rustls",
-        "//third-party/rust/crates/tokio-rustls/0.26.3:tokio-rustls",
+        "//third-party/rust/crates/tokio-rustls/0.26.4:tokio-rustls",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
         "//third-party/rust/crates/webpki-roots/1.0.2:webpki-roots",

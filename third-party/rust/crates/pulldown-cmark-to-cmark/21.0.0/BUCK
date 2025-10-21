@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "pulldown-cmark-to-cmark",
     srcs = [":pulldown-cmark-to-cmark-vendor"],
-    crate = "pulldown-cmark-to-cmark",
+    crate = "pulldown_cmark_to_cmark",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

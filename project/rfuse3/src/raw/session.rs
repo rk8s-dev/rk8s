@@ -4,7 +4,6 @@ use std::ffi::OsString;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::io::Error as IoError;
-use std::io::ErrorKind;
 use std::io::Result as IoResult;
 use std::num::NonZeroU32;
 #[allow(unused_imports)]
@@ -151,6 +150,7 @@ impl MountHandleInner {
             {
                 #[cfg(all(target_os = "linux", feature = "unprivileged"))]
                 if self.unprivileged {
+                    use std::io::ErrorKind;
                     let binary_path = find_fusermount3()?;
                     let mut child = Command::new(binary_path)
                         .args([OsStr::new("-u"), self.mount_path.as_os_str()])
@@ -3009,6 +3009,8 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
 #[cfg(any(feature = "async-io-runtime", feature = "tokio-runtime"))]
 impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
     async fn mount_empty_check(&self, mount_path: &Path) -> IoResult<()> {
+        use std::io::ErrorKind;
+
         #[cfg(all(not(feature = "async-io-runtime"), feature = "tokio-runtime"))]
         if !self.mount_options.nonempty
             && matches!(read_dir(mount_path).await?.next_entry().await, Ok(Some(_)))
@@ -3252,6 +3254,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 Either::Right((data, extend_data)) => (data, Some(extend_data)),
             };
             if let Err(err) = fuse_connection.write_vectored(data, extend_data).await.1 {
+                use std::io::ErrorKind;
                 if err.kind() == ErrorKind::NotFound {
                     warn!(
                         "may reply interrupted fuse request, ignore this error {}",
@@ -3276,6 +3279,8 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
         fs: &FS,
         fuse_connection: &FuseConnection,
     ) -> IoResult<NonZeroU32> {
+        use std::io::ErrorKind;
+
         let header_buffer = vec![0; FUSE_IN_HEADER_SIZE];
         let data_buffer = vec![0; FUSE_MIN_READ_BUFFER_SIZE];
 

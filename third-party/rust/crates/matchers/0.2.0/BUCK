@@ -32,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/regex-automata/0.4.10:regex-automata"],
+    deps = ["//third-party/rust/crates/regex-automata/0.4.12:regex-automata"],
 )

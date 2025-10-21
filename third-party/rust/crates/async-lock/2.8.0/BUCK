@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "async-lock",
     srcs = [":async-lock-vendor"],
-    crate = "async-lock",
+    crate = "async_lock",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

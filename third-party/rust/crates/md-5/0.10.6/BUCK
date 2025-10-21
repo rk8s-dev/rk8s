@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "md-5",
     srcs = [":md-5-vendor"],
-    crate = "md-5",
+    crate = "md5",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

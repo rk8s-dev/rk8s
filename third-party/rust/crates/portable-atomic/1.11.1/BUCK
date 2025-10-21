@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "portable-atomic",
     srcs = [":portable-atomic-vendor"],
-    crate = "portable-atomic",
+    crate = "portable_atomic",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
@@ -44,7 +44,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "portable-atomic-build-script-build",
     srcs = [":portable-atomic-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
     env = {

@@ -1,76 +1,49 @@
-use crate::exec::Task;
-use crate::overlayfs::MountConfig;
-use anyhow::{Context, Result};
+use crate::overlayfs::{bind_mount, do_exec, prepare_network, switch_namespace};
+use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
-use ipc_channel::ipc::{IpcOneShotServer, IpcSender};
-use std::process::Command;
+use clap::Parser;
+use std::{ffi::CString, path::Path};
 
-pub fn exec_task(mount_config: MountConfig, task: Task) -> Result<()> {
-    let need_cleanup = matches!(&task, Task::Run { .. });
+#[derive(Debug, Parser, Clone)]
+pub struct RunArgs {
+    #[arg(long)]
+    pub mountpoint: String,
+    #[arg(long)]
+    pub envp_base64: String,
+    /// In order to support commands with arguments(e.g. `-c`),
+    /// we use base64 to encode the entire command list as a single argument.
+    #[arg(long)]
+    pub commands_base64: String,
+}
 
-    let config_json =
-        serde_json::to_string(&mount_config).context("Failed to serialize mount config to json")?;
-    let config_base64 = general_purpose::STANDARD.encode(config_json);
+pub fn run(args: RunArgs) -> Result<()> {
+    let mount_pid = std::env::var("MOUNT_PID")?.parse::<u32>()?;
+    switch_namespace(mount_pid)?;
 
-    let (parent_server, parent_server_name) = IpcOneShotServer::new()?;
-    let (child_server, child_server_name) = IpcOneShotServer::<String>::new()?;
-    let mut mount_command = Command::new(std::env::current_exe()?);
-    mount_command
-        .arg("mount")
-        .arg("--config-base64")
-        .arg(&config_base64)
-        .env("PARENT_SERVER_NAME", &parent_server_name)
-        .env("CHILD_SERVER_NAME", &child_server_name);
-    let mut mount_process = mount_command
-        .spawn()
-        .context("Failed to spawn mount process")?;
+    let mountpoint = Path::new(&args.mountpoint);
+    prepare_network(mountpoint)?;
+    bind_mount(mountpoint)?;
 
-    let (_, tx1): (_, IpcSender<String>) = parent_server
-        .accept()
-        .context("Failed to accept connection on parent server")?;
-    let (_, msg) = child_server
-        .accept()
-        .context("Failed to accept connection on child server")?;
-    assert_eq!(msg, "ready");
-
-    let mount_pid = mount_process.id();
-    let task_json = serde_json::to_string(&task).context("Failed to serialize task to json")?;
-    let task_base64 = general_purpose::STANDARD.encode(task_json);
-    let mut exec_command = Command::new(std::env::current_exe()?);
-    exec_command
-        .arg("exec")
-        .arg("--mountpoint")
-        .arg(mount_config.mountpoint.to_string_lossy().into_owned())
-        .arg("--task-base64")
-        .arg(&task_base64)
-        .env("MOUNT_PID", mount_pid.to_string());
-    let exec_status = exec_command
-        .status()
-        .context("Failed to run exec process")?;
-
-    if need_cleanup {
-        let mut cleanup_command = Command::new(std::env::current_exe()?);
-        cleanup_command
-            .arg("cleanup")
-            .arg("--mountpoint")
-            .arg(mount_config.mountpoint.to_string_lossy().into_owned())
-            .env("MOUNT_PID", mount_pid.to_string());
-        let cleanup_status = cleanup_command
-            .status()
-            .context("Failed to run cleanup command")?;
-        if !cleanup_status.success() {
-            tracing::error!("Cleanup command exited with status: {cleanup_status}");
-        }
+    let commands_json = general_purpose::STANDARD
+        .decode(&args.commands_base64)
+        .context("Failed to decode commands from base64")?;
+    let commands: Vec<String> = serde_json::from_slice(&commands_json)
+        .context("Failed to deserialize commands from json")?;
+    let commands = commands.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+    if commands.is_empty() {
+        bail!("At least one command is required to run");
     }
 
-    tx1.send("exit".to_string())
-        .context("Failed to send exit message to mount process")?;
-    mount_process
-        .wait()
-        .context("Failed to wait for mount process")?;
+    let envp_json = general_purpose::STANDARD
+        .decode(&args.envp_base64)
+        .context("Failed to decode envp from base64")?;
+    let envp: Vec<String> =
+        serde_json::from_slice(&envp_json).context("Failed to deserialize envp from json")?;
+    let envp = envp
+        .iter()
+        .map(|s| CString::new(s.as_bytes()).context("Environment variable contains null byte"))
+        .collect::<Result<Vec<_>>>()?;
 
-    if !exec_status.success() {
-        tracing::error!("Exec process exited with status: {exec_status}");
-    }
-    Ok(())
+    do_exec(mountpoint, &commands, &envp)?;
+    unreachable!();
 }

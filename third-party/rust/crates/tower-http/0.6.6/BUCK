@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "tower-http",
     srcs = [":tower-http-vendor"],
-    crate = "tower-http",
+    crate = "tower_http",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

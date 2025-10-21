@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "critical-section",
     srcs = [":critical-section-vendor"],
-    crate = "critical-section",
+    crate = "critical_section",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

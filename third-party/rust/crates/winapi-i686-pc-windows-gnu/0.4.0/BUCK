@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "winapi-i686-pc-windows-gnu",
     srcs = [":winapi-i686-pc-windows-gnu-vendor"],
-    crate = "winapi-i686-pc-windows-gnu",
+    crate = "winapi_i686_pc_windows_gnu",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
@@ -39,7 +39,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "winapi-i686-pc-windows-gnu-build-script-build",
     srcs = [":winapi-i686-pc-windows-gnu-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
     env = {

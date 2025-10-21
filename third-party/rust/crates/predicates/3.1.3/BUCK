@@ -33,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anstyle/1.0.11:anstyle",
+        "//third-party/rust/crates/anstyle/1.0.13:anstyle",
         "//third-party/rust/crates/predicates-core/1.0.9:predicates-core",
     ],
 )

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "io-lifetimes",
     srcs = [":io-lifetimes-vendor"],
-    crate = "io-lifetimes",
+    crate = "io_lifetimes",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
@@ -40,13 +40,13 @@ cargo.rust_library(
     ],
     rustc_flags = ["@$(location :io-lifetimes-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.176:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.177:libc"],
 )
 
 cargo.rust_binary(
     name = "io-lifetimes-build-script-build",
     srcs = [":io-lifetimes-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
     env = {

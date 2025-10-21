@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "document-features",
     srcs = [":document-features-vendor"],
-    crate = "document-features",
+    crate = "document_features",
     crate_root = "vendor/lib.rs",
     edition = "2018",
     env = {

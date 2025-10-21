@@ -4,7 +4,7 @@ pub mod client;
 pub mod static_pods;
 
 use crate::commands::pod::TLSConnectionArgs;
-use tracing::error;
+use tracing::{error, info};
 
 pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
     tokio::runtime::Builder::new_multi_thread()
@@ -24,6 +24,7 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
                 error!("[daemon] sync_loop exited unexpectedly");
             });
             tokio::signal::ctrl_c().await?;
+            info!("[daemon] received Ctrl-C, shutting down");
             Ok(())
         })
 }

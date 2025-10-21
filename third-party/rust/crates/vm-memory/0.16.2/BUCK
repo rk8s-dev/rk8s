@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "vm-memory",
     srcs = [":vm-memory-vendor"],
-    crate = "vm-memory",
+    crate = "vm_memory",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -34,7 +34,7 @@ cargo.rust_library(
     features = ["default"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.176:libc",
+        "//third-party/rust/crates/libc/0.2.177:libc",
         "//third-party/rust/crates/thiserror/1.0.69:thiserror",
     ],
 )

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "windows-numerics",
     srcs = [":windows-numerics-vendor"],
-    crate = "windows-numerics",
+    crate = "windows_numerics",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

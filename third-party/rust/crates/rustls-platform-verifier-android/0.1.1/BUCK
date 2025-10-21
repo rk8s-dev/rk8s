@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rustls-platform-verifier-android",
     srcs = [":rustls-platform-verifier-android-vendor"],
-    crate = "rustls-platform-verifier-android",
+    crate = "rustls_platform_verifier_android",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

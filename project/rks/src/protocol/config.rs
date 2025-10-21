@@ -22,6 +22,8 @@ pub struct Config {
     pub network_config: NetworkConfig,
     // tls connection config
     pub tls_config: TLSConfig,
+    // DNS config
+    pub dns_config: DnsConfig,
 }
 
 #[allow(dead_code)]
@@ -54,6 +56,12 @@ pub struct NetworkConfig {
 pub struct TLSConfig {
     pub enable: bool,
     pub vault_folder: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DnsConfig {
+    #[serde(rename = "Port")]
+    pub port: u16,
 }
 
 pub fn load_config(path: &str) -> anyhow::Result<&'static Config> {

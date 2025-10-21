@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "clang-sys",
     srcs = [":clang-sys-vendor"],
-    crate = "clang-sys",
+    crate = "clang_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -54,15 +54,15 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/glob/0.3.3:glob",
-        "//third-party/rust/crates/libc/0.2.176:libc",
-        "//third-party/rust/crates/libloading/0.8.9:libloading",
+        "//third-party/rust/crates/libc/0.2.177:libc",
+        "//third-party/rust/crates/libloading/0.8.8:libloading",
     ],
 )
 
 cargo.rust_binary(
     name = "clang-sys-build-script-build",
     srcs = [":clang-sys-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

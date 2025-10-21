@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "headers-core",
     srcs = [":headers-core-vendor"],
-    crate = "headers-core",
+    crate = "headers_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

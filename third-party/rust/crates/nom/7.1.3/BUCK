@@ -37,7 +37,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/memchr/2.7.5:memchr",
+        "//third-party/rust/crates/memchr/2.7.6:memchr",
         "//third-party/rust/crates/minimal-lexical/0.2.1:minimal-lexical",
     ],
 )

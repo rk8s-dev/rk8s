@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "pin-project",
     srcs = [":pin-project-vendor"],
-    crate = "pin-project",
+    crate = "pin_project",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

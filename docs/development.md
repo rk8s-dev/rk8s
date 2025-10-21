@@ -31,7 +31,16 @@ The integration of Buckal (also known as `cargo-buckal`), a plugin that enables 
 
 ## Environment Setup
 
-Follow these steps to set up your development environment:
+We provide a convenient setup script to get your development environment running quickly. Just execute `setup.sh` from the repository's root directory. The script supports Debian, Ubuntu, Fedora, and Arch Linux. Users on other systems will need to perform manual setup.
+
+For manual installation, you can follow the steps below:
+
+- Install System Tools and Dependencies (on Debian-based Linux distributions):
+
+  ```bash
+  sudo apt-get install build-essential clang lld pkg-config protobuf-compiler zstd
+  sudo apt-get install seccomp libseccomp-dev libpython3-dev openssl libssl-dev
+  ```
 
 - Install Rust:
 
@@ -57,13 +66,6 @@ Follow these steps to set up your development environment:
   ```
 
   NOTE: Buckal requires Buck2 and Python 3. Please ensure both are installed on your system before proceeding.
-
-- Install System Tools and Dependencies (on Debian-based Linux distributions):
-
-  ```bash
-  sudo apt-get install build-essential clang lld pkg-config protobuf-compiler
-  sudo apt-get install seccomp libseccomp-dev
-  ```
 
 ## Building the Monorepo
 

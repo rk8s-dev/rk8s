@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "liboci-cli",
     srcs = [":liboci-cli-vendor"],
-    crate = "liboci-cli",
+    crate = "liboci_cli",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

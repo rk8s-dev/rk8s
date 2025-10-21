@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "rustc-hash",
     srcs = [":rustc-hash-vendor"],
-    crate = "rustc-hash",
+    crate = "rustc_hash",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

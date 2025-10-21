@@ -35,6 +35,6 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/log/0.4.28:log",
-        "//third-party/rust/crates/regex/1.11.2:regex",
+        "//third-party/rust/crates/regex/1.12.1:regex",
     ],
 )

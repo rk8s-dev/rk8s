@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "openssl-probe",
     srcs = [":openssl-probe-vendor"],
-    crate = "openssl-probe",
+    crate = "openssl_probe",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

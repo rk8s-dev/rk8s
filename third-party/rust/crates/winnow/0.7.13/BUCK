@@ -37,5 +37,5 @@ cargo.rust_library(
         "std",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/memchr/2.7.5:memchr"],
+    deps = ["//third-party/rust/crates/memchr/2.7.6:memchr"],
 )

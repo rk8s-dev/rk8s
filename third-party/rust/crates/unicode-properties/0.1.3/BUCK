@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "unicode-properties",
     srcs = [":unicode-properties-vendor"],
-    crate = "unicode-properties",
+    crate = "unicode_properties",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

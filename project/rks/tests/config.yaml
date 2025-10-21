@@ -1,4 +1,4 @@
-addr: "192.168.73.128:50051"
+addr: "192.168.239.128:50051"
 xline_config:
   endpoints:
     - "http://172.20.0.3:2379"
@@ -11,3 +11,5 @@ network_config:
   SubnetMin: "10.1.1.0"
   SubnetMax: "10.1.254.0"
   SubnetLen: 24
+dns_config:
+  Port: 5300

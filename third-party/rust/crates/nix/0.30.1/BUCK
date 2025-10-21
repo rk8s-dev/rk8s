@@ -38,14 +38,14 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
         "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
-        "//third-party/rust/crates/libc/0.2.176:libc",
+        "//third-party/rust/crates/libc/0.2.177:libc",
     ],
 )
 
 cargo.rust_binary(
     name = "nix-build-script-build",
     srcs = [":nix-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

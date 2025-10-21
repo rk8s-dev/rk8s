@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "value-bag",
     srcs = [":value-bag-vendor"],
-    crate = "value-bag",
+    crate = "value_bag",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

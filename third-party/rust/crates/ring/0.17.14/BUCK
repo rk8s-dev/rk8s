@@ -57,7 +57,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "ring-build-script-build",
     srcs = [":ring-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {
@@ -82,7 +82,7 @@ cargo.rust_binary(
         "wasm32_unknown_unknown_js",
     ],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.38:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.41:cc"],
 )
 
 buildscript_run(

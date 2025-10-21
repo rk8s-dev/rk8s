@@ -42,7 +42,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
-        "//third-party/rust/crates/axum/0.8.4:axum",
+        "//third-party/rust/crates/axum/0.8.6:axum",
         "//third-party/rust/crates/base64/0.22.1:base64",
         "//third-party/rust/crates/bytes/1.10.1:bytes",
         "//third-party/rust/crates/h2/0.4.12:h2",

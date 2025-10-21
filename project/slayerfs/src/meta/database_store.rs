@@ -207,25 +207,39 @@ impl DatabaseMetaStore {
 
     /// Create a new directory
     async fn create_directory(&self, parent_inode: i64, name: String) -> Result<i64, MetaError> {
-        if self.get_access_meta(parent_inode).await?.is_none() {
+        // Start transaction
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        if AccessMeta::find_by_id(parent_inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .is_none()
+        {
+            txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::ParentNotFound(parent_inode));
         }
 
-        if let Some(contents) = self.get_content_meta(parent_inode).await? {
-            for content in contents {
-                if content.entry_name == name {
-                    return Err(MetaError::AlreadyExists {
-                        parent: parent_inode,
-                        name,
-                    });
-                }
-            }
+        // Check if entry already exists
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent_inode))
+            .filter(content_meta::Column::EntryName.eq(&name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent: parent_inode,
+                name,
+            });
         }
 
         let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let dir_permission = Permission::new(0o40755, 0, 0); // 目录权限：0o40000 (目录标志) + 0o755 (权限)
+        let dir_permission = Permission::new(0o40755, 0, 0);
         let access_meta = access_meta::ActiveModel {
             inode: Set(inode),
             permission: Set(dir_permission),
@@ -236,7 +250,7 @@ impl DatabaseMetaStore {
         };
 
         access_meta
-            .insert(&self.db)
+            .insert(&txn)
             .await
             .map_err(MetaError::Database)?;
 
@@ -248,9 +262,24 @@ impl DatabaseMetaStore {
         };
 
         content_meta
-            .insert(&self.db)
+            .insert(&txn)
             .await
             .map_err(MetaError::Database)?;
+
+        // Update parent directory mtime
+        let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent_inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .unwrap()
+            .into();
+        parent_meta.modify_time = Set(now);
+        parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
 
         Ok(inode)
     }
@@ -261,19 +290,33 @@ impl DatabaseMetaStore {
         parent_inode: i64,
         name: String,
     ) -> Result<i64, MetaError> {
-        if self.get_access_meta(parent_inode).await?.is_none() {
+        // Start transaction
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        if AccessMeta::find_by_id(parent_inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .is_none()
+        {
+            txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::ParentNotFound(parent_inode));
         }
 
-        if let Some(contents) = self.get_content_meta(parent_inode).await? {
-            for content in contents {
-                if content.entry_name == name {
-                    return Err(MetaError::AlreadyExists {
-                        parent: parent_inode,
-                        name,
-                    });
-                }
-            }
+        // Check if entry already exists
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent_inode))
+            .filter(content_meta::Column::EntryName.eq(&name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent: parent_inode,
+                name,
+            });
         }
 
         let inode = self.generate_id();
@@ -290,10 +333,7 @@ impl DatabaseMetaStore {
             nlink: Set(1),
         };
 
-        file_meta
-            .insert(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
+        file_meta.insert(&txn).await.map_err(MetaError::Database)?;
 
         let content_meta = content_meta::ActiveModel {
             inode: Set(inode),
@@ -303,9 +343,24 @@ impl DatabaseMetaStore {
         };
 
         content_meta
-            .insert(&self.db)
+            .insert(&txn)
             .await
             .map_err(MetaError::Database)?;
+
+        // Update parent directory mtime
+        let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent_inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .unwrap()
+            .into();
+        parent_meta.modify_time = Set(now);
+        parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
 
         Ok(inode)
     }
@@ -356,18 +411,14 @@ impl MetaStore for DatabaseMetaStore {
     }
 
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
-        let contents = match self.get_content_meta(parent).await? {
-            Some(contents) => contents,
-            None => return Ok(None),
-        };
+        let entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
 
-        for content in contents {
-            if content.entry_name == name {
-                return Ok(Some(content.inode));
-            }
-        }
-
-        Ok(None)
+        Ok(entry.map(|e| e.inode))
     }
 
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError> {
@@ -383,14 +434,14 @@ impl MetaStore for DatabaseMetaStore {
         let mut current_inode = 1i64;
 
         for (index, part) in parts.iter().enumerate() {
-            let contents = self.get_content_meta(current_inode).await?;
+            let entry = ContentMeta::find()
+                .filter(content_meta::Column::ParentInode.eq(current_inode))
+                .filter(content_meta::Column::EntryName.eq(*part))
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
 
-            let found_entry = match contents {
-                Some(entries) => entries.into_iter().find(|entry| entry.entry_name == *part),
-                None => return Ok(None),
-            };
-
-            match found_entry {
+            match entry {
                 Some(entry) => match entry.entry_type {
                     EntryType::Directory => {
                         current_inode = entry.inode;
@@ -447,35 +498,59 @@ impl MetaStore for DatabaseMetaStore {
     }
 
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
-        let contents = self
-            .get_content_meta(parent)
-            .await?
-            .ok_or(MetaError::ParentNotFound(parent))?;
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        let dir_entry = contents
-            .into_iter()
-            .find(|entry| entry.entry_name == name && entry.entry_type == EntryType::Directory)
+        let dir_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .filter(content_meta::Column::EntryType.eq(EntryType::Directory))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
             .ok_or(MetaError::NotFound(0))?;
 
         let dir_id = dir_entry.inode;
 
-        if let Some(child_contents) = self.get_content_meta(dir_id).await?
-            && !child_contents.is_empty()
-        {
+        // Check if directory is empty
+        let child_count = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(dir_id))
+            .count(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if child_count > 0 {
+            txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::DirectoryNotEmpty(dir_id));
         }
 
+        // Delete access meta
         AccessMeta::delete_by_id(dir_id)
-            .exec(&self.db)
+            .exec(&txn)
             .await
-            .map_err(|e| MetaError::Internal(e.to_string()))?;
+            .map_err(MetaError::Database)?;
 
+        // Delete content meta
         ContentMeta::delete_many()
             .filter(content_meta::Column::ParentInode.eq(parent))
             .filter(content_meta::Column::EntryName.eq(name))
-            .exec(&self.db)
+            .exec(&txn)
             .await
-            .map_err(|e| MetaError::Internal(e.to_string()))?;
+            .map_err(MetaError::Database)?;
+
+        // Update parent directory mtime
+        let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(parent))?
+            .into();
+        parent_meta.modify_time = Set(Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
 
         Ok(())
     }
@@ -485,31 +560,33 @@ impl MetaStore for DatabaseMetaStore {
     }
 
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
-        let contents = self
-            .get_content_meta(parent)
-            .await?
-            .ok_or(MetaError::ParentNotFound(parent))?;
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        let file_entry = contents
-            .into_iter()
-            .find(|entry| entry.entry_name == name && entry.entry_type == EntryType::File)
+        let file_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .filter(content_meta::Column::EntryType.eq(EntryType::File))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
             .ok_or(MetaError::NotFound(0))?;
 
         let file_id = file_entry.inode;
 
         let mut file_meta: file_meta::ActiveModel = FileMeta::find_by_id(file_id)
-            .one(&self.db)
+            .one(&txn)
             .await
-            .map_err(|e| MetaError::Internal(e.to_string()))?
+            .map_err(MetaError::Database)?
             .ok_or(MetaError::NotFound(file_id))?
             .into();
 
+        // Delete content meta first
         ContentMeta::delete_many()
             .filter(content_meta::Column::ParentInode.eq(parent))
             .filter(content_meta::Column::EntryName.eq(name))
-            .exec(&self.db)
+            .exec(&txn)
             .await
-            .map_err(|e| MetaError::Internal(e.to_string()))?;
+            .map_err(MetaError::Database)?;
 
         let current_nlink = match &file_meta.nlink {
             Set(n) => *n,
@@ -518,16 +595,28 @@ impl MetaStore for DatabaseMetaStore {
 
         if current_nlink > 1 {
             file_meta.nlink = Set(current_nlink - 1);
-            file_meta
-                .update(&self.db)
-                .await
-                .map_err(|e| MetaError::Internal(e.to_string()))?;
+            file_meta.update(&txn).await.map_err(MetaError::Database)?;
         } else {
             FileMeta::delete_by_id(file_id)
-                .exec(&self.db)
+                .exec(&txn)
                 .await
-                .map_err(|e| MetaError::Internal(e.to_string()))?;
+                .map_err(MetaError::Database)?;
         }
+
+        // Update parent directory mtime
+        let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(parent))?
+            .into();
+        parent_meta.modify_time = Set(Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
 
         Ok(())
     }
@@ -539,62 +628,96 @@ impl MetaStore for DatabaseMetaStore {
         new_parent: i64,
         new_name: String,
     ) -> Result<(), MetaError> {
-        if self.get_access_meta(new_parent).await?.is_none() {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        // Verify new parent exists
+        if AccessMeta::find_by_id(new_parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .is_none()
+        {
+            txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::ParentNotFound(new_parent));
         }
 
-        let old_contents = self
-            .get_content_meta(old_parent)
-            .await?
-            .ok_or(MetaError::ParentNotFound(old_parent))?;
-
-        let target_entry = old_contents
-            .into_iter()
-            .find(|entry| entry.entry_name == old_name)
+        // Find the entry to rename
+        let target_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(old_parent))
+            .filter(content_meta::Column::EntryName.eq(old_name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
             .ok_or(MetaError::NotFound(0))?;
 
-        if let Some(new_contents) = self.get_content_meta(new_parent).await?
-            && new_contents
-                .iter()
-                .any(|entry| entry.entry_name == new_name)
-        {
+        // Check if target already exists in new location
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(new_parent))
+            .filter(content_meta::Column::EntryName.eq(&new_name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::AlreadyExists {
                 parent: new_parent,
                 name: new_name,
             });
         }
 
-        let mut content_meta: content_meta::ActiveModel =
-            ContentMeta::find_by_id(target_entry.inode)
-                .one(&self.db)
-                .await
-                .map_err(|e| MetaError::Internal(e.to_string()))?
-                .ok_or(MetaError::Internal("Content meta not found".to_string()))?
-                .into();
-
-        content_meta.parent_inode = Set(new_parent);
-        content_meta.entry_name = Set(new_name);
-
-        content_meta
-            .update(&self.db)
+        // Delete old content_meta entry
+        ContentMeta::delete_many()
+            .filter(content_meta::Column::ParentInode.eq(old_parent))
+            .filter(content_meta::Column::EntryName.eq(old_name))
+            .exec(&txn)
             .await
-            .map_err(|e| MetaError::Internal(e.to_string()))?;
+            .map_err(MetaError::Database)?;
 
-        if target_entry.entry_type == EntryType::Directory {
-            let mut access_meta: access_meta::ActiveModel =
-                AccessMeta::find_by_id(target_entry.inode)
-                    .one(&self.db)
-                    .await
-                    .map_err(|e| MetaError::Internal(e.to_string()))?
-                    .ok_or(MetaError::NotFound(target_entry.inode))?
-                    .into();
+        // Insert new content_meta entry
+        let new_content_meta = content_meta::ActiveModel {
+            inode: Set(target_entry.inode),
+            parent_inode: Set(new_parent),
+            entry_name: Set(new_name),
+            entry_type: Set(target_entry.entry_type),
+        };
 
-            access_meta.modify_time = Set(Utc::now().timestamp_nanos_opt().unwrap_or(0));
-            access_meta
-                .update(&self.db)
+        new_content_meta
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Update old parent mtime
+        let mut old_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(old_parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(old_parent))?
+            .into();
+        old_parent_meta.modify_time = Set(now);
+        old_parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Update new parent mtime (if different)
+        if old_parent != new_parent {
+            let mut new_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(new_parent)
+                .one(&txn)
                 .await
-                .map_err(|e| MetaError::Internal(e.to_string()))?;
+                .map_err(MetaError::Database)?
+                .unwrap()
+                .into();
+            new_parent_meta.modify_time = Set(now);
+            new_parent_meta
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
         }
+
+        txn.commit().await.map_err(MetaError::Database)?;
 
         Ok(())
     }
@@ -607,8 +730,18 @@ impl MetaStore for DatabaseMetaStore {
             .ok_or(MetaError::NotFound(ino))?
             .into();
 
+        // Only update mtime if size actually changed
+        let old_size = match &file_meta.size {
+            Set(s) | Unchanged(s) => *s as u64,
+            _ => 0,
+        };
+
         file_meta.size = Set(size as i64);
-        file_meta.modify_time = Set(Utc::now().timestamp_nanos_opt().unwrap_or(0));
+
+        // Only update mtime when size changes (not on every call)
+        if old_size != size {
+            file_meta.modify_time = Set(Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        }
 
         file_meta
             .update(&self.db)

@@ -35,7 +35,7 @@ cargo.rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/darling_core/0.20.11:darling_core",
-        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/quote/1.0.41:quote",
         "//third-party/rust/crates/syn/2.0.106:syn",
     ],
 )

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "option-ext",
     srcs = [":option-ext-vendor"],
-    crate = "option-ext",
+    crate = "option_ext",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {

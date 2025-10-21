@@ -36,7 +36,7 @@ cargo.rust_library(
         "//third-party/rust/crates/indexmap/2.11.4:indexmap",
         "//third-party/rust/crates/itoa/1.0.15:itoa",
         "//third-party/rust/crates/ryu/1.0.20:ryu",
-        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/unsafe-libyaml/0.2.11:unsafe-libyaml",
     ],
 )

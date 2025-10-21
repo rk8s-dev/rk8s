@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "generic-array",
     srcs = [":generic-array-vendor"],
-    crate = "generic-array",
+    crate = "generic_array",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
@@ -35,13 +35,13 @@ cargo.rust_library(
     features = ["more_lengths"],
     rustc_flags = ["@$(location :generic-array-build-script-run[rustc_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/typenum/1.18.0:typenum"],
+    deps = ["//third-party/rust/crates/typenum/1.19.0:typenum"],
 )
 
 cargo.rust_binary(
     name = "generic-array-build-script-build",
     srcs = [":generic-array-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
     env = {

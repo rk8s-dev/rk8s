@@ -44,7 +44,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "ipconfig-build-script-build",
     srcs = [":ipconfig-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
     env = {

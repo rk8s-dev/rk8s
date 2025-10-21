@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "windows-threading",
     srcs = [":windows-threading-vendor"],
-    crate = "windows-threading",
+    crate = "windows_threading",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

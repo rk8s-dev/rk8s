@@ -4,14 +4,18 @@ use etcd_client::EventType;
 use futures::StreamExt;
 use hickory_proto::op::ResponseCode;
 use hickory_proto::rr::LowerName;
+use hickory_proto::rr::Name;
 use hickory_proto::rr::{RData, Record, RecordSet, RecordType};
+use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_server::ServerFuture;
 use hickory_server::authority::{
     Authority, AuthorityObject, Catalog, LookupControlFlow, LookupOptions, LookupRecords,
     MessageRequest, ZoneType,
 };
 use hickory_server::server::RequestInfo;
+use hickory_server::store::forwarder::ForwardAuthority;
 use log::{debug, error, info};
+use std::env;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -317,7 +321,7 @@ impl XlineAuthority {
         });
         info!("DNS server init_from_store");
         authority.init_from_store(&xline_store).await?;
-
+        info!("DNS server after init_from_store object_cache: {object_cache:?}");
         let (_, rev) = xline_store.pods_snapshot_with_rev().await?;
 
         let authority_clone = Arc::clone(&authority);
@@ -329,7 +333,7 @@ impl XlineAuthority {
     }
 }
 
-pub async fn run_dns_server(xline_store: Arc<XlineStore>) -> anyhow::Result<()> {
+pub async fn run_dns_server(xline_store: Arc<XlineStore>, port: u16) -> anyhow::Result<()> {
     let origin = LowerName::from_str("cluster.local.")?;
     let xline_authority = XlineAuthority::start(origin.clone(), xline_store).await?;
 
@@ -338,8 +342,14 @@ pub async fn run_dns_server(xline_store: Arc<XlineStore>) -> anyhow::Result<()> 
     let xline_authority: Arc<dyn AuthorityObject> = xline_authority;
     catalog.upsert(origin, vec![xline_authority]);
 
+    let forwarder = ForwardAuthority::builder(TokioConnectionProvider::default())
+        .map_err(|e| anyhow::anyhow!(e))?
+        .build()
+        .map_err(|e| anyhow::anyhow!(e))?;
+    catalog.upsert(LowerName::from(Name::root()), vec![Arc::new(forwarder)]);
+
     let mut server = ServerFuture::new(catalog);
-    let addr: SocketAddr = "0.0.0.0:5300".parse()?;
+    let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
     let udp_socket = UdpSocket::bind(addr).await?;
     server.register_socket(udp_socket);
 
@@ -404,6 +414,73 @@ fn parse_pod_query(name: &LowerName, origin: &LowerName) -> Option<(String, Stri
         .to_string();
 
     Some((pod, ns))
+}
+
+pub async fn setup_iptable(dns_ip: String, dns_port: u16) -> anyhow::Result<()> {
+    let br_name = env::var("BR_NAME").unwrap_or_else(|_| "cni0".to_string());
+    let ipt = iptables::new(false).map_err(|e| anyhow::anyhow!("failed to init iptables: {e}"))?;
+
+    let rule1 = format!("-i {br_name} -p udp --dport 53 -j REDIRECT --to-ports {dns_port}");
+    let rule2 = format!("-i {br_name} -p tcp --dport 53 -j REDIRECT --to-ports {dns_port}");
+    let rule3 =
+        format!("-p udp -d {dns_ip} --dport 53 -j DNAT --to-destination {dns_ip}:{dns_port}");
+    let rule4 =
+        format!("-p tcp -d {dns_ip} --dport 53 -j DNAT --to-destination {dns_ip}:{dns_port}");
+
+    let rules = [
+        ("rule1", &rule1),
+        ("rule2", &rule2),
+        ("rule3", &rule3),
+        ("rule4", &rule4),
+    ];
+
+    for (name, rule) in rules {
+        if !ipt
+            .exists("nat", "PREROUTING", rule)
+            .map_err(|e| anyhow::anyhow!("failed to check {name}: {e}"))?
+        {
+            ipt.append("nat", "PREROUTING", rule)
+                .map_err(|e| anyhow::anyhow!("failed to insert {name}: {e}"))?;
+            info!("Added iptables rule: {rule}");
+        } else {
+            info!("Rule already exists: {rule}");
+        }
+    }
+
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn cleanup_iptable(dns_ip: String, dns_port: u16) -> anyhow::Result<()> {
+    let br_name = env::var("BR_NAME").unwrap_or_else(|_| "cni0".to_string());
+    let ipt = iptables::new(false).map_err(|e| anyhow::anyhow!("failed to init iptables: {e}"))?;
+
+    let rule1 = format!("-i {br_name} -p udp --dport 53 -j REDIRECT --to-ports {dns_port}");
+    let rule2 = format!("-i {br_name} -p tcp --dport 53 -j REDIRECT --to-ports {dns_port}");
+    let rule3 =
+        format!("-p udp -d {dns_ip} --dport 53 -j DNAT --to-destination {dns_ip}:{dns_port}");
+    let rule4 =
+        format!("-p tcp -d {dns_ip} --dport 53 -j DNAT --to-destination {dns_ip}:{dns_port}");
+
+    let rules = [
+        ("rule1", &rule1),
+        ("rule2", &rule2),
+        ("rule3", &rule3),
+        ("rule4", &rule4),
+    ];
+    for (name, rule) in rules {
+        if ipt
+            .exists("nat", "PREROUTING", rule)
+            .map_err(|e| anyhow::anyhow!("failed to check {name}: {e}"))?
+        {
+            ipt.delete("nat", "PREROUTING", rule)
+                .map_err(|e| anyhow::anyhow!("failed to delete {name}: {e}"))?;
+            info!("Deleted iptables rule: {rule}");
+        } else {
+            info!("Rule does not exist, skipping delete: {rule}");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

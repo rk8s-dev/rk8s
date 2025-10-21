@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "doc-comment",
     srcs = [":doc-comment-vendor"],
-    crate = "doc-comment",
+    crate = "doc_comment",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
@@ -39,7 +39,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "doc-comment-build-script-build",
     srcs = [":doc-comment-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
     env = {

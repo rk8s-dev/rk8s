@@ -9,6 +9,7 @@ mod protocol;
 mod scheduler;
 mod vault;
 
+use crate::dns::authority::{run_dns_server, setup_iptable};
 use crate::network::init;
 use crate::node::{NodeRegistry, RksNode, Shared};
 use crate::protocol::config::{config_ref, load_config};
@@ -53,6 +54,21 @@ async fn main() -> anyhow::Result<()> {
             xline_store
                 .insert_network_config(&xline_config.prefix, &cfg.network_config)
                 .await?;
+            info!("[rks] initializing dns server");
+            let store = xline_store.clone();
+            tokio::spawn(async move {
+                if let Err(err) = run_dns_server(store, cfg.dns_config.port).await {
+                    error!("[rks] dns server exited with error: {err:?}");
+                }
+            });
+
+            let server_ip = cfg
+                .addr
+                .split(':')
+                .next()
+                .unwrap_or("127.0.0.1")
+                .to_string();
+            setup_iptable(server_ip, cfg.dns_config.port).await?;
 
             info!("[rks] listening on {}", cfg.addr);
 
@@ -75,7 +91,6 @@ async fn main() -> anyhow::Result<()> {
             .context("Failed to create Scheduler")?;
 
             scheduler.run().await;
-
             let vault = Arc::new(vault);
             let shared = Arc::new(Shared::new(
                 xline_store.clone(),

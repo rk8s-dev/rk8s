@@ -40,7 +40,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "rustversion-build-script-build",
     srcs = [":rustversion-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build/build.rs",
     edition = "2018",
     env = {

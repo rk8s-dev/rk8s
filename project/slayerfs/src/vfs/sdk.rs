@@ -66,7 +66,7 @@ impl<S: BlockStore, M: MetaStore> Client<S, M> {
     }
 
     pub async fn rename(&self, old: &str, new: &str) -> Result<(), String> {
-        self.fs.rename_file(old, new).await
+        self.fs.rename(old, new).await
     }
 
     pub async fn truncate(&self, path: &str, size: u64) -> Result<(), String> {

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "sea-query",
     srcs = [":sea-query-vendor"],
-    crate = "sea-query",
+    crate = "sea_query",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

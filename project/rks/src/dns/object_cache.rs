@@ -17,6 +17,7 @@ pub struct PodRecord {
     pub pod_ip: Option<Ipv4Addr>,
 }
 
+#[derive(Debug)]
 pub struct DnsObjectCache {
     pub service_cache: Arc<RwLock<HashMap<(String, String), ServiceRecord>>>, // key: (ns, name)
     pub pod_cache: Arc<RwLock<HashMap<(String, String), PodRecord>>>,

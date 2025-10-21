@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "async-notify",
     srcs = [":async-notify-vendor"],
-    crate = "async-notify",
+    crate = "async_notify",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {

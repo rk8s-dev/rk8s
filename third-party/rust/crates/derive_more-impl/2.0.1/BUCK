@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "derive_more-impl",
     srcs = [":derive_more-impl-vendor"],
-    crate = "derive_more-impl",
+    crate = "derive_more_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -32,15 +32,15 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "debug",
         "default",
-        "deref",
-        "deref_mut",
     ],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.40:quote",
+        "//third-party/rust/crates/quote/1.0.41:quote",
         "//third-party/rust/crates/syn/2.0.106:syn",
+        "//third-party/rust/crates/unicode-xid/0.2.6:unicode-xid",
     ],
 )

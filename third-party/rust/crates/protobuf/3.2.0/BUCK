@@ -45,7 +45,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "protobuf-build-script-build",
     srcs = [":protobuf-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

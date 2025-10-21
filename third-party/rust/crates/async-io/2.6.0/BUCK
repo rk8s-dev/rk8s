@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "async-io",
     srcs = [":async-io-vendor"],
-    crate = "async-io",
+    crate = "async_io",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -49,7 +49,7 @@ cargo.rust_library(
 cargo.rust_binary(
     name = "async-io-build-script-build",
     srcs = [":async-io-vendor"],
-    crate = "build-script-build",
+    crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     env = {

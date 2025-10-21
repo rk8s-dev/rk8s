@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "iri-string",
     srcs = [":iri-string-vendor"],
-    crate = "iri-string",
+    crate = "iri_string",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
@@ -38,7 +38,7 @@ cargo.rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/memchr/2.7.5:memchr",
-        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/memchr/2.7.6:memchr",
+        "//third-party/rust/crates/serde/1.0.228:serde",
     ],
 )

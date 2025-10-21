@@ -1,4 +1,4 @@
-use crate::config::registry::CONFIG;
+use crate::config::image::CONFIG;
 use crate::utils::cli::original_user_config_path;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};

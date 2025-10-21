@@ -28,8 +28,7 @@ impl OciImageIndex {
                     .into_iter()
                     .collect::<HashMap<_, _>>(),
                 )
-                .build()
-                .with_context(|| format!("Failed to build manifest descriptor {digest_str}"))?;
+                .build()?;
 
             descriptors.push(descriptor);
         }
@@ -40,9 +39,7 @@ impl OciImageIndex {
     }
 
     pub fn build(self) -> Result<ImageIndex> {
-        self.image_index_builder
-            .build()
-            .context("Failed to build image index")
+        Ok(self.image_index_builder.build()?)
     }
 }
 

@@ -37,7 +37,7 @@ cargo.rust_library(
         "//third-party/rust/crates/crypto-common/0.1.6:crypto-common",
         "//third-party/rust/crates/digest/0.10.7:digest",
         "//third-party/rust/crates/hmac/0.12.1:hmac",
-        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.145:serde_json",
         "//third-party/rust/crates/sha2/0.10.9:sha2",
     ],

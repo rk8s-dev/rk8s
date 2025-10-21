@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "comfy-table",
     srcs = [":comfy-table-vendor"],
-    crate = "comfy-table",
+    crate = "comfy_table",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
@@ -39,6 +39,6 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/crossterm/0.29.0:crossterm",
         "//third-party/rust/crates/unicode-segmentation/1.12.0:unicode-segmentation",
-        "//third-party/rust/crates/unicode-width/0.2.1:unicode-width",
+        "//third-party/rust/crates/unicode-width/0.2.2:unicode-width",
     ],
 )

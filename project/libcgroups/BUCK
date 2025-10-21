@@ -39,10 +39,10 @@ cargo.rust_library(
         "//project/libnetwork:liblibnetwork",
         "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset",
         "//third-party/rust/crates/nix/0.29.0:nix",
-        "//third-party/rust/crates/oci-spec/0.8.2:oci-spec",
+        "//third-party/rust/crates/oci-spec/0.8.3:oci-spec",
         "//third-party/rust/crates/procfs/0.17.0:procfs",
-        "//third-party/rust/crates/serde/1.0.226:serde",
-        "//third-party/rust/crates/thiserror/2.0.16:thiserror",
+        "//third-party/rust/crates/serde/1.0.228:serde",
+        "//third-party/rust/crates/thiserror/2.0.17:thiserror",
         "//third-party/rust/crates/tracing/0.1.41:tracing",
     ],
 )

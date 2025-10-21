@@ -1,5 +1,5 @@
+use crate::config::image::CONFIG;
 use crate::config::meta::Repositories;
-use crate::config::registry::CONFIG;
 use anyhow::Context;
 use oci_client::manifest::OciManifest;
 use oci_spec::distribution::Reference;

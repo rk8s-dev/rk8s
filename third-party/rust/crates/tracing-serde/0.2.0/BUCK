@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "tracing-serde",
     srcs = [":tracing-serde-vendor"],
-    crate = "tracing-serde",
+    crate = "tracing_serde",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
@@ -33,7 +33,7 @@ cargo.rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/serde/1.0.226:serde",
+        "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/tracing-core/0.1.34:tracing-core",
     ],
 )

@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "data-encoding",
     srcs = [":data-encoding-vendor"],
-    crate = "data-encoding",
+    crate = "data_encoding",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {

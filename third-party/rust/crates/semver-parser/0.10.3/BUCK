@@ -15,7 +15,7 @@ http_archive(
 cargo.rust_library(
     name = "semver-parser",
     srcs = [":semver-parser-vendor"],
-    crate = "semver-parser",
+    crate = "semver_parser",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
@@ -32,5 +32,5 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/pest/2.8.2:pest"],
+    deps = ["//third-party/rust/crates/pest/2.8.3:pest"],
 )

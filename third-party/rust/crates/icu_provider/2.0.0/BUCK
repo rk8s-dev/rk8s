@@ -39,7 +39,7 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/displaydoc/0.2.5:displaydoc",
         "//third-party/rust/crates/icu_locale_core/2.0.0:icu_locale_core",
-        "//third-party/rust/crates/stable_deref_trait/1.2.0:stable_deref_trait",
+        "//third-party/rust/crates/stable_deref_trait/1.2.1:stable_deref_trait",
         "//third-party/rust/crates/tinystr/0.8.1:tinystr",
         "//third-party/rust/crates/writeable/0.6.1:writeable",
         "//third-party/rust/crates/yoke/0.8.0:yoke",

@@ -35,6 +35,6 @@ cargo.rust_library(
     deps = [
         "//third-party/rust/crates/crypto-bigint/0.4.9:crypto-bigint",
         "//third-party/rust/crates/hmac/0.12.1:hmac",
-        "//third-party/rust/crates/zeroize/1.8.1:zeroize",
+        "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],
 )

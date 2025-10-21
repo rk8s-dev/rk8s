@@ -32,9 +32,8 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "debug",
         "default",
-        "deref",
-        "deref_mut",
         "std",
     ],
     visibility = ["PUBLIC"],
