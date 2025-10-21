@@ -900,9 +900,9 @@ dependencies = [
 
 [[package]]
 name = "axum"
-version = "0.8.4"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "021e862c184ae977658b36c4500f7feac3221ca5da43e3f25bd04ab6c79a29b5"
+checksum = "8a18ed336352031311f4e0b4dd2ff392d4fbb370777c9d18d7fc9d7359f73871"
 dependencies = [
  "axum-core",
  "bytes",
@@ -919,8 +919,7 @@ dependencies = [
  "mime",
  "percent-encoding",
  "pin-project-lite",
- "rustversion",
- "serde",
+ "serde_core",
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
@@ -934,9 +933,9 @@ dependencies = [
 
 [[package]]
 name = "axum-core"
-version = "0.5.2"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68464cd0412f486726fb3373129ef5d2993f90c34bc2bc1c1e9943b2f4fc7ca6"
+checksum = "59446ce19cd142f8833f856eb31f3eb097812d1479ab224f54d72428ca21ea22"
 dependencies = [
  "bytes",
  "futures-core",
@@ -945,7 +944,6 @@ dependencies = [
  "http-body-util",
  "mime",
  "pin-project-lite",
- "rustversion",
  "sync_wrapper",
  "tower-layer",
  "tower-service",
@@ -4020,6 +4018,7 @@ dependencies = [
  "bitflags 2.9.4",
  "common",
  "etcd-client 0.16.1",
+ "libvault",
  "log",
  "serde",
  "serde_yaml",
@@ -4079,7 +4078,7 @@ dependencies = [
  "derivative",
  "derive_more 0.99.20",
  "enum-map",
- "etcd-client 0.17.0",
+ "etcd-client 0.16.1",
  "foreign-types",
  "glob",
  "go-defer",
@@ -4102,6 +4101,7 @@ dependencies = [
  "reqwest",
  "rustls 0.23.32",
  "rustls-pemfile 2.2.0",
+ "rustls-webpki 0.103.7",
  "serde",
  "serde_bytes",
  "serde_derive",
@@ -4113,6 +4113,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "toml",
+ "tonic 0.13.1",
  "tracing",
  "ureq",
  "url",
@@ -5711,9 +5712,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.23"
+version = "0.12.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d429f34c8092b2d42c7c93cec323bb4adeb7c67698f70839adec842ec10c7ceb"
+checksum = "9d0946410b9f7b082a427e4ef5c8ff541a88b357bc6c637c40db3a68ac70a36f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -5962,6 +5963,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "base64 0.20.0",
  "bincode",
  "chrono",
@@ -5970,6 +5972,7 @@ dependencies = [
  "context",
  "derive_more 2.0.1",
  "dotenvy",
+ "either",
  "env_logger 0.11.8",
  "etcd-client 0.16.1",
  "futures",
@@ -5993,6 +5996,7 @@ dependencies = [
  "rand 0.9.2",
  "rcgen",
  "regex",
+ "reqwest",
  "rtnetlink",
  "rustls 0.23.32",
  "rustls-pemfile 2.2.0",
@@ -6205,7 +6209,7 @@ dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki 0.103.6",
+ "rustls-webpki 0.103.7",
  "subtle",
  "zeroize",
 ]
@@ -6276,7 +6280,7 @@ dependencies = [
  "rustls 0.23.32",
  "rustls-native-certs 0.8.1",
  "rustls-platform-verifier-android",
- "rustls-webpki 0.103.6",
+ "rustls-webpki 0.103.7",
  "security-framework 3.5.0",
  "security-framework-sys",
  "webpki-root-certs",
@@ -6301,9 +6305,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.6"
+version = "0.103.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8572f3c2cb9934231157b45499fc41e1f58c589fdfb81a844ba873265e80f8eb"
+checksum = "e10b3f4191e8a80e6b43eebabfac91e5dcecebb27a71f04e820c47ec41d314bf"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -7827,6 +7831,7 @@ dependencies = [
  "prost 0.13.5",
  "socket2 0.5.10",
  "tokio",
+ "tokio-rustls 0.26.3",
  "tokio-stream",
  "tower",
  "tower-layer",
