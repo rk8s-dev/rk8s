@@ -18,7 +18,6 @@ fn router(state: Arc<AppState>) -> Router<()> {
 }
 
 async fn generate_join_token(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    
     state
         .vault
         .generate_once_token()

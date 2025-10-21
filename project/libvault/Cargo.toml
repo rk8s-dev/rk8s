@@ -60,10 +60,13 @@ arc-swap = "1"
 blake3 = "1.8"
 
 itertools = "0.14.0"
-etcd-client = "0.17.0"
+etcd-client = { version = "0.16.1", features = ["tls"] }
 tracing = "0.1.41"
 builder-pattern = "0.4.2"
 x509-parser = "0.18.0"
+rustls-webpki = "0.103.7"
+
+tonic = { version = "0.13.1", features = ["_tls-any"] }
 
 # optional dependencies removed; keep openssl as required dependency for crypto modules.
 openssl = { version = "0.10.73", optional = true }

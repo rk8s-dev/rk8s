@@ -539,10 +539,7 @@ impl XlineSubnetRegistry {
             endpoints = config.endpoints.clone();
         }
 
-        let mut connect_opts = option
-            .config
-            .clone()
-            .unwrap_or_default();
+        let mut connect_opts = option.config.clone().unwrap_or_default();
         if let (Some(user), Some(pass)) = (&config.username, &config.password) {
             connect_opts = connect_opts.with_user(user.clone(), pass.clone());
         }

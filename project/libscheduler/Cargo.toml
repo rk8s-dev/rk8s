@@ -8,6 +8,7 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libscheduler"
 
 [dependencies]
 common = { path = "../common" }
+libvault = { path = "../libvault" }
 anyhow = "1.0.98"
 bitflags = "2.9.2"
 etcd-client = "0.16.1"

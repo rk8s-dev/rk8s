@@ -79,7 +79,10 @@ impl Vault {
             )
             .await
             .with_context(|| "Failed to write policy")?;
-        info!("[vault] published role policy pki/roles/rks-node");
+        info!(
+            target: "rks::vault",
+            "published role policy pki/roles/rks-node"
+        );
 
         let rkl_role = json!({
             "key_type": "ec",
@@ -103,7 +106,10 @@ impl Vault {
             )
             .await
             .with_context(|| "Failed to write policy")?;
-        info!("[vault] published role policy pki/roles/rkl-node");
+        info!(
+            target: "rks::vault",
+            "published role policy pki/roles/rkl-node"
+        );
 
         let xline_role = json!({
             "key_type": "ec",
@@ -127,8 +133,10 @@ impl Vault {
             )
             .await
             .with_context(|| "Failed to write policy")?;
-        info!("[vault] published role policy pki/roles/xline-node");
-
+        info!(
+            target: "rks::vault",
+            "published role policy pki/roles/xline-node"
+        );
         Ok(())
     }
 
