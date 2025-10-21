@@ -1,3 +1,5 @@
+#![allow(unused_assignments)] // zeroize-generated drop impls write fields without reading them
+
 //! This crate is the 'library' part of RustyVault, a Rust and real free replica of Hashicorp Vault.
 //! RustyVault is focused on identity-based secrets management and works in two ways independently:
 //!

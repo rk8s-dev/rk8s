@@ -305,9 +305,7 @@ pub async fn run_once(
                             if let Err(e) = handle_dns_config(ip, dns_port).await {
                                 error!("[worker] failed to apply dns config: {e}");
                                 let _ = client
-                                    .send_msg(&RksMessage::Error(format!(
-                                        "dns config failed: {e}"
-                                    )))
+                                    .send_msg(&RksMessage::Error(format!("dns config failed: {e}")))
                                     .await;
                             } else {
                                 info!("[worker] dns config applied successfully");

@@ -140,16 +140,13 @@ impl Toleration {
     }
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Default)]
 pub enum TolerationOperator {
     Exists,
+    #[default]
     Equal,
 }
 
-impl Default for TolerationOperator {
-    fn default() -> Self {
-        Self::Equal
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum TaintEffect {
@@ -257,6 +254,11 @@ impl Display for RksMessage {
                     pod_name, pod_ip
                 )
             }
+            Self::SetDns(ip, dns_port) => write!(
+                f,
+                "RksMessage::SetDns {{ ip: {}, dns_port: {} }}",
+                ip, dns_port,
+            ),
             Self::Certificate(_) => f.write_str("RksMessage::Certificate"),
         }
     }

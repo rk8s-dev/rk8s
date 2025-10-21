@@ -1,3 +1,5 @@
+#![allow(unused_assignments)] // zeroize macros synthesize drop impls that trigger this lint
+
 //! The `libvault::core` module implements several key functions that are
 //! in charge of the whole process of RustyVault. For instance, to seal or unseal the RustyVault we
 //! have the `seal()` and `unseal()` functions in this module. Also, the `handle_request()`
@@ -67,6 +69,7 @@ pub struct InitResult {
     pub root_token: String,
 }
 
+#[allow(unused_assignments)]
 #[derive(Clone, Zeroize)]
 #[zeroize(drop)]
 pub struct CoreState {
