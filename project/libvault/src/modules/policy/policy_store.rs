@@ -191,7 +191,7 @@ pub struct PolicyEntry {
     #[default(PolicyType::Acl)]
     #[serde(rename = "type")]
     pub policy_type: PolicyType,
-    pub sentinal_policy: SentinelPolicy,
+    pub sentinel_policy: SentinelPolicy,
 }
 
 /// The main policy store structure.
@@ -448,13 +448,13 @@ impl PolicyStore {
                 view.delete(&name).await?;
                 self.remove_token_policy_cache(&index)?;
                 self.policy_type_map.remove(&index);
-                self.invalidate_sentinal_policy(policy_type, "")?;
+                self.invalidate_sentinel_policy(policy_type, "")?;
             }
             PolicyType::Egp => {
                 view.delete(&name).await?;
                 self.remove_egp_cache(&index)?;
                 self.invalidate_egp_tree_path("")?;
-                self.invalidate_sentinal_policy(policy_type, "")?;
+                self.invalidate_sentinel_policy(policy_type, "")?;
             }
             _ => {
                 return Err(rv_error_string!("unknown policy type, cannot set"));
@@ -527,7 +527,7 @@ impl PolicyStore {
             templated: policy.templated,
             raw: policy.raw.clone(),
             policy_type: policy.policy_type,
-            sentinal_policy: policy.sentinal_policy,
+            sentinel_policy: policy.sentinal_policy,
         };
 
         let entry = StorageEntry::new(&policy.name, &pe)?;
@@ -594,7 +594,7 @@ impl PolicyStore {
         match &self.rgp_view {
             Some(view) => Ok(view.clone()),
             None => Err(rv_error_string!(
-                "unable to get the barrier subview for policy type rpg"
+                "unable to get the barrier subview for policy type rgp"
             )),
         }
     }
@@ -603,7 +603,7 @@ impl PolicyStore {
         match &self.egp_view {
             Some(view) => Ok(view.clone()),
             None => Err(rv_error_string!(
-                "unable to get the barrier subview for policy type epg"
+                "unable to get the barrier subview for policy type egp"
             )),
         }
     }
@@ -653,7 +653,7 @@ impl PolicyStore {
         Ok(())
     }
 
-    fn invalidate_sentinal_policy(
+    fn invalidate_sentinel_policy(
         &self,
         _policy_type: PolicyType,
         _index: &str,

@@ -1,4 +1,4 @@
-//! A Shamir threshold algorithm implementaion which is used to derive the RustyVault master key.
+//! A Shamir threshold algorithm implementation which is used to derive the RustyVault master key.
 //!
 //! This code is originated from Chris MacNaughton, we modified it to be compatible with Vault's
 //! Shamir algorithm.

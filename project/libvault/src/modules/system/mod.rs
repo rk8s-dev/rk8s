@@ -299,7 +299,7 @@ impl SystemBackend {
                         .field_type(FieldType::Str)
                         .default_value("")
                         .description(
-                            "User-friendly description for this crential backend.",
+                            "User-friendly description for this credential backend.",
                         ),
                 )
                 .field(

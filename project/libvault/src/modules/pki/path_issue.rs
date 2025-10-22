@@ -48,7 +48,7 @@ impl PkiBackend {
                 Field::builder()
                     .field_type(FieldType::Str)
                     .description(
-                        r#"The requested IP SANs, if any, in a common-delimited list"#,
+                        r#"The requested IP SANs, if any, in a comma-delimited list"#,
                     ),
             )
             .field(

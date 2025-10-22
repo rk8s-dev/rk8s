@@ -3,7 +3,7 @@
 //!
 //! Each different storage type needs to implement the `backend` trait to complete the support.
 //!
-//! Each barrier represents a specific cryptography method for ecrypting or decrypting data before
+//! Each barrier represents a specific cryptography method for encrypting or decrypting data before
 //! the data connects to a specific backend. A barrier is defined by implementing the `SecurityBarrier`
 //! trait.
 //!
@@ -12,7 +12,7 @@
 //! HTTP API -> some module (e.g. KV) -> barrier -> backend -> real storage (file, MySQL...)
 //!
 //! Typical storage types may be direct file, databases, remote network filesystem and etc.
-//! Different strage types are all as sub-module of this module.
+//! Different storage types are all as sub-module of this module.
 
 use std::{any::Any, collections::HashMap, sync::Arc};
 
@@ -61,7 +61,7 @@ impl StorageEntry {
 
 #[async_trait]
 pub trait Backend: Send + Sync {
-    //! This trait decsribes the generic methods that a storage backend needs to implement.
+    //! This trait describes the generic methods that a storage backend needs to implement.
     async fn list(&self, prefix: &str) -> Result<Vec<String>, RvError>;
     async fn get(&self, key: &str) -> Result<Option<BackendEntry>, RvError>;
     async fn put(&self, entry: &BackendEntry) -> Result<(), RvError>;
