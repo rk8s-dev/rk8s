@@ -143,14 +143,12 @@ impl Toleration {
         }
     }
 }
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[derive(Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub enum TolerationOperator {
     Exists,
     #[default]
     Equal,
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum TaintEffect {

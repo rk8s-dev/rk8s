@@ -47,6 +47,6 @@ rust_library(
         "//third-party/rust/crates/tokio-rustls/0.26.4:tokio-rustls",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
-        "//third-party/rust/crates/webpki-roots/1.0.2:webpki-roots",
+        "//third-party/rust/crates/webpki-roots/1.0.3:webpki-roots",
     ],
 )

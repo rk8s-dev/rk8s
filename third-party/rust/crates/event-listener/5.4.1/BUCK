@@ -26,13 +26,20 @@ rust_library(
     features = [
         "default",
         "parking",
+        "portable-atomic",
+        "portable-atomic-util",
+        "portable_atomic_crate",
         "std",
     ],
     rustc_flags = ["@$(location :event-listener-manifest[env_flags])"],
+    named_deps = {
+        "portable_atomic_crate": "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic",
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue",
         "//third-party/rust/crates/parking/2.2.1:parking",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/portable-atomic-util/0.2.4:portable-atomic-util",
     ],
 )

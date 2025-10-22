@@ -323,7 +323,9 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         // kernel sends 0 as handle in case of no_open, and it depends on fuse server to handle
         // this case correctly.
-        let st = if !self.no_open.load(Ordering::Relaxed) && let Some(handle_id) = handle {
+        let st = if !self.no_open.load(Ordering::Relaxed)
+            && let Some(handle_id) = handle
+        {
             let hd = self.handle_map.get(handle_id, inode).await?;
             // trace!("FS {} passthrough: do_getattr: before stat_fd", self.uuid);
             stat_fd(hd.get_file(), None)

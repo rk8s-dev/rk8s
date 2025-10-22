@@ -26,6 +26,7 @@ rust_library(
     env = {
         "OUT_DIR": "$(location :etcd-client-build-script-run[out_dir])",
     },
+    features = ["tls"],
     rustc_flags = [
         "@$(location :etcd-client-build-script-run[rustc_flags])",
         "@$(location :etcd-client-manifest[env_flags])",
@@ -48,6 +49,7 @@ rust_binary(
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
+    features = ["tls"],
     rustc_flags = ["@$(location :etcd-client-manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/tonic-build/0.13.1:tonic-build"],
@@ -58,6 +60,7 @@ buildscript_run(
     package_name = "etcd-client",
     buildscript_rule = ":etcd-client-build-script-build",
     env_srcs = [":etcd-client-manifest[env_dict]"],
+    features = ["tls"],
     version = "0.16.1",
     manifest_dir = ":etcd-client-vendor",
     visibility = ["PUBLIC"],
