@@ -1,4 +1,9 @@
-// for xfstests
+// Copyright (C) 2024 rk8s authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Example binary to mount overlay filesystem implemented by libfuse-fs.
+// Used by xfstests for overlayfs validation.
+
+use libfuse_fs::overlayfs::OverlayArgs;
 
 #[derive(Debug, Default)]
 struct Args {
@@ -107,13 +112,15 @@ async fn main() -> Result<(), std::io::Error> {
 
     set_log(&args);
 
-    let mut mount_handle = libfuse_fs::overlayfs::mount_fs_for_test(
-        args.mountpoint,
-        args.upperdir,
-        args.lowerdir,
-        true,
-        args.name,
-    )
+    let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
+        name: Some(args.name),
+        mountpoint: args.mountpoint,
+        lowerdir: args.lowerdir,
+        upperdir: args.upperdir,
+        mapping: None::<&str>,
+        privileged: true,
+        allow_other: false,
+    })
     .await;
     println!("Mounted");
 

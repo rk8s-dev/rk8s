@@ -10,7 +10,7 @@ use anyhow::Context;
 use anyhow::anyhow;
 use flate2::read::GzDecoder;
 use futures::future;
-use libfuse_fs::overlayfs::mount_fs;
+use libfuse_fs::overlayfs::{OverlayArgs, mount_fs};
 use oci_spec::image::{ImageConfiguration, ImageIndex, ImageManifest};
 use sha256::try_digest;
 use std::str::FromStr;
@@ -264,12 +264,15 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
             .unwrap_or(&OsString::from_str("unknown").unwrap())
     );
     // mount with libfuse
-    let mut mnt_handle = mount_fs(
-        merged_dir.to_str().unwrap().into(),
-        upper_dir.to_str().unwrap().into(),
-        lower_dirs,
-        true,
-    )
+    let mut mnt_handle = mount_fs(OverlayArgs {
+        lowerdir: lower_dirs,
+        upperdir: &upper_dir,
+        mountpoint: &merged_dir,
+        privileged: true,
+        mapping: None::<&str>,
+        name: None::<String>,
+        allow_other: false,
+    })
     .await;
 
     debug!("invoke libfuse_fs mount ended");

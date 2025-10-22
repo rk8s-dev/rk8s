@@ -11,7 +11,7 @@ check_rust() {
         echo "⚠️  Rust is not installed or 'rustc' is not available. Installing Rust..."
 
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source $HOME/.bashrc
+        . "$HOME/.cargo/env"
 
         echo "🔧 Rust installation completed."
 fi
@@ -28,7 +28,7 @@ check_buck2() {
 
         export ARCH="$(uname -m)"
         curl "https://github.com/facebook/buck2/releases/download/latest/buck2-${ARCH}-unknown-linux-gnu.zst" --output /tmp/buck2-${ARCH}-unknown-linux-gnu.zst --location
-        zstd -d /tmp/buck2-${ARCH}-unknown-linux-gnu.zst -o $HOME/.cargo/bin/buck2
+        zstd -d /tmp/buck2-${ARCH}-unknown-linux-gnu.zst -o $HOME/.cargo/bin/buck2 -f
         chmod +x $HOME/.cargo/bin/buck2
 
         echo "🔧 Buck2 installation completed."

@@ -67,11 +67,15 @@ pub struct Resource {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ContainerSpec {
     pub name: String,
+
     pub image: String,
+
     #[serde(default)]
     pub ports: Vec<Port>,
+
     #[serde(default)]
     pub args: Vec<String>,
+
     pub resources: Option<ContainerRes>,
 }
 

@@ -12,7 +12,7 @@ pub struct ComposeSpec {
     pub services: HashMap<String, ServiceSpec>,
 
     #[serde(default)]
-    pub volumes: Option<HashMap<String, VolumesSpec>>,
+    pub volumes: Option<HashMap<String, VolumeSpec>>,
 
     #[serde(default)]
     pub configs: Option<HashMap<String, ConfigsSpec>>,
@@ -59,7 +59,19 @@ pub struct ServiceSpec {
 pub struct VolumesSpec(pub HashMap<String, VolumeSpec>);
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct VolumeSpec {}
+pub struct VolumeSpec {
+    // Volume Driver
+    pub driver: Option<String>,
+
+    // Driver Opts
+    pub opts: Option<HashMap<String, String>>,
+
+    // Determine to use external volume
+    pub external: Option<bool>,
+
+    // Specify the external volume's name default is the key String
+    pub name: Option<String>,
+}
 
 #[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct ConfigSpec {
@@ -100,5 +112,5 @@ pub enum NetworkDriver {
     Bridge,
     Overlay,
     Host,
-    None,
+    // None,
 }

@@ -3,7 +3,9 @@
 // Simple passthrough filesystem example for integration tests.
 
 use clap::Parser;
-use libfuse_fs::passthrough::{new_passthroughfs_layer, newlogfs::LoggingFileSystem};
+use libfuse_fs::passthrough::{
+    PassthroughArgs, new_passthroughfs_layer, newlogfs::LoggingFileSystem,
+};
 use rfuse3::{MountOptions, raw::Session};
 use std::ffi::OsString;
 use tokio::signal;
@@ -25,15 +27,23 @@ struct Args {
     /// Use privileged mount instead of unprivileged (default false)
     #[arg(long, default_value_t = true)]
     privileged: bool,
+    /// Options, currently contains uid/gid mapping info
+    #[arg(long, short)]
+    options: Option<String>,
+    #[arg(long)]
+    allow_other: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    let fs = new_passthroughfs_layer(&args.rootdir)
-        .await
-        .expect("Failed to init passthrough fs");
+    let fs = new_passthroughfs_layer(PassthroughArgs {
+        root_dir: args.rootdir,
+        mapping: args.options,
+    })
+    .await
+    .expect("Failed to init passthrough fs");
     let fs = LoggingFileSystem::new(fs);
 
     let mount_path = OsString::from(&args.mountpoint);
@@ -41,7 +51,11 @@ async fn main() {
     let gid = unsafe { libc::getgid() };
 
     let mut mount_options = MountOptions::default();
-    mount_options.force_readdir_plus(true).uid(uid).gid(gid);
+    mount_options
+        .force_readdir_plus(true)
+        .uid(uid)
+        .gid(gid)
+        .allow_other(args.allow_other);
 
     let mut mount_handle = if !args.privileged {
         debug!("Mounting passthrough (unprivileged)");

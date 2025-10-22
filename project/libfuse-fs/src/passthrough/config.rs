@@ -1,8 +1,11 @@
 // Copyright (C) 2020-2022 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
+
+use crate::util::mapping::IdMappings;
 
 /// The caching policy that the file system should report to the FUSE client. By default the FUSE
 /// protocol uses close-to-open consistency. This means that any cached contents of the file are
@@ -97,7 +100,7 @@ pub struct Config {
     /// The path of the root directory.
     ///
     /// The default is `/`.
-    pub root_dir: String,
+    pub root_dir: PathBuf,
 
     /// Whether the file system should support Extended Attributes (xattr). Enabling this feature may
     /// have a significant impact on performance, especially on write parallelism. This is the result
@@ -175,6 +178,9 @@ pub struct Config {
     /// The size of the mmap max usage
     /// The default is `1024 * 1024 * 1024` (1GB).
     pub max_mmap_size: u64,
+
+    /// UID/GID mapping. Format: `uidmapping=H:T:L[:H2:T2:L2...],gidmapping=H:T:L[:H2:T2:L2...]`
+    pub mapping: IdMappings,
 }
 
 impl Default for Config {
@@ -184,7 +190,7 @@ impl Default for Config {
             attr_timeout: Duration::from_secs(5),
             cache_policy: Default::default(),
             writeback: false,
-            root_dir: String::from("/"),
+            root_dir: PathBuf::from("/"),
             xattr: false,
             do_import: true,
             no_open: false,
@@ -200,6 +206,7 @@ impl Default for Config {
             allow_direct_io: true,
             use_mmap: false,
             max_mmap_size: 1024 * 1024 * 1024,
+            mapping: IdMappings::default(),
         }
     }
 }

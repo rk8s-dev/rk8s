@@ -27,7 +27,8 @@ impl ConfigFile {
                             if let Some(ext) = file_path.extension() {
                                 let ext_str = ext.to_string_lossy().to_string();
                                 if extensions.contains(&ext_str) {
-                                    let path_str = file.path().to_string_lossy().to_string();
+                                    let path_str: String =
+                                        file.path().to_string_lossy().to_string();
                                     trace!("Found config file: {path_str}");
                                     conf_files.push(path_str);
                                 }

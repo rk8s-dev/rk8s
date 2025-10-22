@@ -4,7 +4,7 @@
 // Used by integration tests (fio & IOR) for overlayfs validation.
 
 use clap::Parser;
-use libfuse_fs::overlayfs::mount_fs;
+use libfuse_fs::overlayfs::{OverlayArgs, mount_fs};
 use tokio::signal;
 
 #[derive(Parser, Debug)]
@@ -22,18 +22,26 @@ struct Args {
     /// Use privileged mount instead of unprivileged (default false)
     #[arg(long, default_value_t = true)]
     privileged: bool,
+    /// Options, currently contains uid/gid mapping info
+    #[arg(long, short)]
+    mapping: Option<String>,
+    #[arg(long)]
+    allow_other: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    let mut mount_handle = mount_fs(
-        args.mountpoint,
-        args.upperdir,
-        args.lowerdir,
-        args.privileged,
-    )
+    let mut mount_handle = mount_fs(OverlayArgs {
+        name: None::<String>,
+        mountpoint: args.mountpoint,
+        lowerdir: args.lowerdir,
+        upperdir: args.upperdir,
+        mapping: args.mapping,
+        privileged: args.privileged,
+        allow_other: args.allow_other,
+    })
     .await;
 
     let handle = &mut mount_handle;

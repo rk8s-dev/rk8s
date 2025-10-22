@@ -204,7 +204,9 @@ mod test {
     use rfuse3::raw::{Filesystem as _, Request};
 
     use crate::{
-        overlayfs::layer::Layer, passthrough::new_passthroughfs_layer, unwrap_or_skip_eperm,
+        overlayfs::layer::Layer,
+        passthrough::{PassthroughArgs, new_passthroughfs_layer},
+        unwrap_or_skip_eperm,
     };
 
     // Mark as ignored by default; run with: RUN_PRIVILEGED_TESTS=1 cargo test -- --ignored
@@ -219,7 +221,11 @@ mod test {
             return;
         }
         let fs = unwrap_or_skip_eperm!(
-            new_passthroughfs_layer(rootdir.to_str().unwrap()).await,
+            new_passthroughfs_layer(PassthroughArgs {
+                root_dir: rootdir,
+                mapping: None::<&str>
+            })
+            .await,
             "init passthrough layer"
         );
         let _ = unwrap_or_skip_eperm!(fs.init(Request::default()).await, "fs init");
@@ -247,7 +253,11 @@ mod test {
             return;
         }
         let fs = unwrap_or_skip_eperm!(
-            new_passthroughfs_layer(rootdir.to_str().unwrap()).await,
+            new_passthroughfs_layer(PassthroughArgs {
+                root_dir: rootdir,
+                mapping: None::<&str>
+            })
+            .await,
             "init passthrough layer"
         );
         let _ = unwrap_or_skip_eperm!(fs.init(Request::default()).await, "fs init");
@@ -288,7 +298,11 @@ mod test {
             return;
         }
         let fs = unwrap_or_skip_eperm!(
-            new_passthroughfs_layer(rootdir.to_str().unwrap()).await,
+            new_passthroughfs_layer(PassthroughArgs {
+                root_dir: rootdir,
+                mapping: None::<&str>
+            })
+            .await,
             "init passthrough layer"
         );
         let _ = unwrap_or_skip_eperm!(fs.init(Request::default()).await, "fs init");

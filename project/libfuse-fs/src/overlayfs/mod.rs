@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::future::Future;
 use std::io::{Error, Result};
+use std::path::Path;
 
 use config::Config;
 use futures::StreamExt as _;
@@ -34,7 +35,8 @@ use futures::future::join_all;
 use futures::stream::iter;
 
 use crate::passthrough::newlogfs::LoggingFileSystem;
-use crate::passthrough::{PassthroughFs, new_passthroughfs_layer};
+use crate::passthrough::{PassthroughArgs, PassthroughFs, new_passthroughfs_layer};
+use crate::util::convert_stat64_to_file_attr;
 use inode_store::InodeStore;
 use layer::Layer;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -703,13 +705,38 @@ impl OverlayInode {
         Ok(childrens)
     }
 
-    // Create a new directory in upper layer for node, node must be directory.
+    /// Create a new directory in upper layer for node, node must be directory.
+    ///
+    /// Recursively ensures a directory path exists in the upper layer.
+    ///
+    /// This function is a critical part of the copy-up process. When a file or directory
+    /// needs to be copied up, this function is called on its parent to ensure the entire
+    /// directory hierarchy exists in the upper layer first. It works recursively:
+    /// 1. If the current directory is already in the upper layer, it does nothing.
+    /// 2. If not, it first calls itself on its own parent directory.
+    /// 3. Once the parent is guaranteed to be in the upper layer, it creates the current
+    ///    directory within the parent's upper-layer representation.
+    ///
+    /// Crucially, it preserves the original directory's ownership (UID/GID) and permissions
+    /// by using the [`do_getattr_helper`][crate::passthrough::PassthroughFs::do_getattr_helper] and
+    /// [`do_mkdir_helper`][crate::passthrough::PassthroughFs::do_mkdir_helper] functions.
     pub async fn create_upper_dir(
         self: Arc<Self>,
         ctx: Request,
         mode_umask: Option<(u32, u32)>,
     ) -> Result<()> {
-        let st = self.stat64(ctx).await?;
+        // To preserve original ownership, we must get the raw, unmapped host attributes.
+        // We achieve this by calling `do_getattr_helper`, which is specifically designed
+        // to bypass the ID mapping logic. This is safe and does not affect other
+        // functionalities because `do_getattr_helper` and the standard `stat64()` call
+        // both rely on the same underlying `stat` system call; they only differ in
+        // whether the resulting `uid` and `gid` are mapped.
+        let (self_layer, _, self_inode) = self.first_layer_inode().await;
+        let re = self_layer.do_getattr_helper(self_inode, None).await?;
+        let st = ReplyAttr {
+            ttl: re.1,
+            attr: convert_stat64_to_file_attr(re.0),
+        };
         if !utils::is_dir(&st.attr.kind) {
             return Err(Error::from_raw_os_error(libc::ENOTDIR));
         }
@@ -736,18 +763,65 @@ impl OverlayInode {
                 match parent_upper_inode {
                     Some(parent_ri) => {
                         let ri = match mode_umask {
+                            // We manually unfold the `mkdir` logic here instead of calling the `mkdir` method directly.
+                            // This is necessary to preserve the original directory's UID and GID during the copy-up process.
                             Some((mode, umask)) => {
-                                parent_ri.mkdir(ctx, &c_name, mode, umask).await?
+                                if !parent_ri.in_upper_layer {
+                                    return Err(Error::from_raw_os_error(libc::EROFS));
+                                }
+                                let name_osstr = OsStr::new(&c_name);
+                                let entry = parent_ri
+                                    .layer
+                                    .do_mkdir_helper(
+                                        ctx,
+                                        parent_ri.inode,
+                                        name_osstr,
+                                        mode,
+                                        umask,
+                                        st.attr.uid,
+                                        st.attr.gid,
+                                    )
+                                    .await?;
+                                RealInode {
+                                    layer: parent_ri.layer.clone(),
+                                    in_upper_layer: true,
+                                    inode: entry.attr.ino,
+                                    whiteout: false,
+                                    opaque: false,
+                                    stat: Some(ReplyAttr {
+                                        ttl: entry.ttl,
+                                        attr: entry.attr,
+                                    }),
+                                }
                             }
                             None => {
-                                parent_ri
-                                    .mkdir(
+                                if !parent_ri.in_upper_layer {
+                                    return Err(Error::from_raw_os_error(libc::EROFS));
+                                }
+                                let name_osstr = OsStr::new(&c_name);
+                                let entry = parent_ri
+                                    .layer
+                                    .do_mkdir_helper(
                                         ctx,
-                                        &c_name,
+                                        parent_ri.inode,
+                                        name_osstr,
                                         mode_from_kind_and_perm(st.attr.kind, st.attr.perm),
                                         0,
+                                        st.attr.uid,
+                                        st.attr.gid,
                                     )
-                                    .await?
+                                    .await?;
+                                RealInode {
+                                    layer: parent_ri.layer.clone(),
+                                    in_upper_layer: true,
+                                    inode: entry.attr.ino,
+                                    whiteout: false,
+                                    opaque: false,
+                                    stat: Some(ReplyAttr {
+                                        ttl: entry.ttl,
+                                        attr: entry.attr,
+                                    }),
+                                }
                             }
                         };
                         // create directory here
@@ -1970,6 +2044,12 @@ impl OverlayFs {
         Ok(())
     }
 
+    /// Copies a symbolic link from a lower layer to the upper layer.
+    ///
+    /// This function is a part of the copy-up process, triggered when a symlink that
+    /// only exists in a lower layer is modified. It reads the link target and attributes
+    /// from the lower layer and creates an identical symlink in the upper layer, crucially
+    /// preserving the original host UID and GID.
     async fn copy_symlink_up(
         &self,
         ctx: Request,
@@ -1985,7 +2065,18 @@ impl OverlayFs {
             return Err(Error::other("no parent?"));
         };
 
+        // To preserve original ownership, we must get the raw, unmapped host attributes.
+        // We achieve this by calling `do_getattr_helper`, which is specifically designed
+        // to bypass the ID mapping logic. This is safe and does not affect other
+        // functionalities because `do_getattr_helper` and the standard `stat64()` call
+        // both rely on the same underlying `stat` system call; they only differ in
+        // whether the resulting `uid` and `gid` are mapped.
         let (self_layer, _, self_inode) = node.first_layer_inode().await;
+        let re = self_layer.do_getattr_helper(self_inode, None).await?;
+        let st = ReplyAttr {
+            ttl: re.1,
+            attr: convert_stat64_to_file_attr(re.0),
+        };
 
         if !parent_node.in_upper_layer().await {
             parent_node.clone().create_upper_dir(ctx, None).await?;
@@ -2003,11 +2094,37 @@ impl OverlayFs {
                 // We already create upper dir for parent_node above.
                 let parent_real_inode =
                     parent_upper_inode.ok_or_else(|| Error::from_raw_os_error(libc::EROFS))?;
-                new_upper_real.lock().await.replace(
-                    parent_real_inode
-                        .symlink(ctx, path, &node.name.read().await)
-                        .await?,
-                );
+                // We manually unfold the `symlink` logic here instead of calling the `symlink` method directly.
+                // This is necessary to preserve the original file's UID and GID during the copy-up process.
+                if !parent_real_inode.in_upper_layer {
+                    return Err(Error::from_raw_os_error(libc::EROFS));
+                }
+                let link_name = OsStr::new(path);
+                let filename = node.name.read().await;
+                let filename = OsStr::new(filename.as_str());
+                let entry = parent_real_inode
+                    .layer
+                    .do_symlink_helper(
+                        ctx,
+                        parent_real_inode.inode,
+                        filename,
+                        link_name,
+                        st.attr.uid,
+                        st.attr.gid,
+                    )
+                    .await?;
+                let ri = RealInode {
+                    layer: parent_real_inode.layer.clone(),
+                    in_upper_layer: true,
+                    inode: entry.attr.ino,
+                    whiteout: false,
+                    opaque: false,
+                    stat: Some(ReplyAttr {
+                        ttl: entry.ttl,
+                        attr: entry.attr,
+                    }),
+                };
+                new_upper_real.lock().await.replace(ri);
                 Ok(false)
             })
             .await?;
@@ -2020,8 +2137,12 @@ impl OverlayFs {
         Ok(node)
     }
 
-    // Copy regular file from lower layer to upper layer.
-    // Caller must ensure node doesn't have upper layer.
+    /// Copies a regular file and its contents from a lower layer to the upper layer.
+    ///
+    /// This function is a core part of the copy-up process, triggered when a regular file
+    /// that only exists in a lower layer is written to. It creates an empty file in the
+    /// upper layer with the original file's attributes (mode, UID, GID), and then copies
+    /// the entire content from the lower layer file to the new upper layer file.
     async fn copy_regfile_up(
         &self,
         ctx: Request,
@@ -2030,15 +2151,25 @@ impl OverlayFs {
         if node.in_upper_layer().await {
             return Ok(node);
         }
-        //error...
+
         let parent_node = if let Some(ref n) = node.parent.lock().await.upgrade() {
             Arc::clone(n)
         } else {
             return Err(Error::other("no parent?"));
         };
 
-        let st = node.stat64(ctx).await?;
+        // To preserve original ownership, we must get the raw, unmapped host attributes.
+        // We achieve this by calling `do_getattr_helper`, which is specifically designed
+        // to bypass the ID mapping logic. This is safe and does not affect other
+        // functionalities because `do_getattr_helper` and the standard `stat64()` call
+        // both rely on the same underlying `stat` system call; they only differ in
+        // whether the resulting `uid` and `gid` are mapped.
         let (lower_layer, _, lower_inode) = node.first_layer_inode().await;
+        let re = lower_layer.do_getattr_helper(lower_inode, None).await?;
+        let st = ReplyAttr {
+            ttl: re.1,
+            attr: convert_stat64_to_file_attr(re.0),
+        };
         trace!(
             "copy_regfile_up: node {} in lower layer's inode {}",
             node.inode, lower_inode
@@ -2062,17 +2193,42 @@ impl OverlayFs {
                     error!("parent {} has no upper inode", parent_node.inode);
                     Error::from_raw_os_error(libc::EINVAL)
                 })?;
-                let (inode, h) = parent_real_inode
-                    .create(
+                // We manually unfold the `create` logic here instead of calling the `create` method directly.
+                // This is necessary to preserve the original file's UID and GID during the copy-up process.
+                if !parent_real_inode.in_upper_layer {
+                    return Err(Error::from_raw_os_error(libc::EROFS));
+                }
+                let name = node.name.read().await;
+                let name = OsStr::new(name.as_str());
+                let create_rep = parent_real_inode
+                    .layer
+                    .do_create_helper(
                         ctx,
-                        &node.name.read().await,
+                        parent_real_inode.inode,
+                        name,
                         mode,
                         flags.try_into().unwrap(),
+                        st.attr.uid,
+                        st.attr.gid,
                     )
                     .await?;
+
+                let (inode, h) = (
+                    RealInode {
+                        layer: parent_real_inode.layer.clone(),
+                        in_upper_layer: true,
+                        inode: create_rep.attr.ino,
+                        whiteout: false,
+                        opaque: false,
+                        stat: Some(ReplyAttr {
+                            ttl: create_rep.ttl,
+                            attr: create_rep.attr,
+                        }),
+                    },
+                    Some(create_rep.fh),
+                );
                 trace!(
-                    "copy_regfile_up: created upper file {} with inode {}",
-                    node.name.read().await,
+                    "copy_regfile_up: created upper file {name:?} with inode {}",
                     inode.inode
                 );
                 *upper_handle.lock().await = h.unwrap_or(0);
@@ -2550,40 +2706,74 @@ impl OverlayFs {
     }
 }
 
+/// Wrap the parameters for mounting overlay filesystem.
+#[derive(Debug, Clone)]
+pub struct OverlayArgs<P, Q, R, M, N, I>
+where
+    P: AsRef<Path>,
+    Q: AsRef<Path>,
+    R: AsRef<Path>,
+    M: AsRef<str>,
+    N: Into<String>,
+    I: IntoIterator<Item = R>,
+{
+    pub mountpoint: P,
+    pub upperdir: Q,
+    pub lowerdir: I,
+    pub privileged: bool,
+    pub mapping: Option<M>,
+    pub name: Option<N>,
+    pub allow_other: bool,
+}
+
 /// Mounts the filesystem using the given parameters and returns the mount handle.
 ///
 /// # Parameters
 /// - `mountpoint`: Path to the mount point.
 /// - `upperdir`: Path to the upper directory.
 /// - `lowerdir`: Paths to the lower directories.
-/// - `not_unprivileged`: If true, use privileged mount; otherwise, unprivileged mount.
+/// - `privileged`: If true, use privileged mount; otherwise, unprivileged mount.
+/// - `mapping`: Optional user/group ID mapping for unprivileged mounts.
+/// - `name`: Optional name for the filesystem.
+/// - `allow_other`: If true, allows other users to access the filesystem.
 ///
 /// # Returns
 /// A mount handle on success.
-pub async fn mount_fs(
-    mountpoint: String,
-    upperdir: String,
-    lowerdir: Vec<String>,
-    privileged: bool,
-) -> rfuse3::raw::MountHandle {
+pub async fn mount_fs<P, Q, R, M, N, I>(
+    args: OverlayArgs<P, Q, R, M, N, I>,
+) -> rfuse3::raw::MountHandle
+where
+    P: AsRef<Path>,
+    Q: AsRef<Path>,
+    R: AsRef<Path>,
+    M: AsRef<str>,
+    N: Into<String>,
+    I: IntoIterator<Item = R>,
+{
     // Create lower layers
     let mut lower_layers = Vec::new();
-    for lower in &lowerdir {
-        let layer = new_passthroughfs_layer(lower)
-            .await
-            .expect("Failed to create lower filesystem layer");
+    for lower in args.lowerdir {
+        let layer = new_passthroughfs_layer(PassthroughArgs {
+            root_dir: lower,
+            mapping: args.mapping.as_ref().map(|m| m.as_ref()),
+        })
+        .await
+        .expect("Failed to create lower filesystem layer");
         lower_layers.push(Arc::new(layer));
     }
     // Create upper layer
     let upper_layer = Arc::new(
-        new_passthroughfs_layer(&upperdir)
-            .await
-            .expect("Failed to create upper filesystem layer"),
+        new_passthroughfs_layer(PassthroughArgs {
+            root_dir: args.upperdir,
+            mapping: args.mapping.as_ref().map(|m| m.as_ref()),
+        })
+        .await
+        .expect("Failed to create upper filesystem layer"),
     );
 
     // Configure overlay filesystem
     let config = Config {
-        mountpoint: mountpoint.clone(),
+        mountpoint: args.mountpoint.as_ref().to_path_buf(),
         do_import: true,
         ..Default::default()
     };
@@ -2591,65 +2781,7 @@ pub async fn mount_fs(
         .expect("Failed to initialize OverlayFs");
     let logfs = LoggingFileSystem::new(overlayfs);
 
-    let mount_path: OsString = OsString::from(mountpoint);
-
-    // Obtain the current user's uid and gid
-    let uid = unsafe { libc::getuid() };
-    let gid = unsafe { libc::getgid() };
-
-    let mut mount_options = MountOptions::default();
-    mount_options.force_readdir_plus(true).uid(uid).gid(gid);
-
-    // Mount filesystem based on privilege flag and return the mount handle
-    if !privileged {
-        debug!("Mounting with unprivileged mode");
-        Session::new(mount_options)
-            .mount_with_unprivileged(logfs, mount_path)
-            .await
-            .expect("Unprivileged mount failed")
-    } else {
-        debug!("Mounting with privileged mode");
-        Session::new(mount_options)
-            .mount(logfs, mount_path)
-            .await
-            .expect("Privileged mount failed")
-    }
-}
-
-/// For xfstests
-pub async fn mount_fs_for_test(
-    mountpoint: String,
-    upperdir: String,
-    lowerdir: Vec<String>,
-    privileged: bool,
-    name: String,
-) -> rfuse3::raw::MountHandle {
-    // Create lower layers
-    let mut lower_layers = Vec::new();
-    for lower in &lowerdir {
-        let layer = new_passthroughfs_layer(lower)
-            .await
-            .expect("Failed to create lower filesystem layer");
-        lower_layers.push(Arc::new(layer));
-    }
-    // Create upper layer
-    let upper_layer = Arc::new(
-        new_passthroughfs_layer(&upperdir)
-            .await
-            .expect("Failed to create upper filesystem layer"),
-    );
-
-    // Configure overlay filesystem
-    let config = Config {
-        mountpoint: mountpoint.clone(),
-        do_import: true,
-        ..Default::default()
-    };
-    let overlayfs = OverlayFs::new(Some(upper_layer), lower_layers, config, 1)
-        .expect("Failed to initialize OverlayFs");
-    let logfs = LoggingFileSystem::new(overlayfs);
-
-    let mount_path: OsString = OsString::from(mountpoint);
+    let mount_path: OsString = OsString::from(args.mountpoint.as_ref().as_os_str());
 
     // Obtain the current user's uid and gid
     let uid = unsafe { libc::getuid() };
@@ -2660,10 +2792,13 @@ pub async fn mount_fs_for_test(
         .force_readdir_plus(true)
         .uid(uid)
         .gid(gid)
-        .fs_name(name);
+        .allow_other(args.allow_other);
+    if let Some(name) = args.name {
+        mount_options.fs_name(name);
+    }
 
     // Mount filesystem based on privilege flag and return the mount handle
-    if !privileged {
+    if !args.privileged {
         debug!("Mounting with unprivileged mode");
         Session::new(mount_options)
             .mount_with_unprivileged(logfs, mount_path)

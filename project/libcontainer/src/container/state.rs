@@ -116,6 +116,8 @@ pub struct State {
     pub use_systemd: bool,
     // Specifies if the Intel RDT subdirectory needs be cleaned up.
     pub clean_up_intel_rdt_subdirectory: Option<bool>,
+    // Specifies the container's volume usage
+    pub volumes: Option<Vec<String>>,
 }
 
 impl State {
@@ -138,6 +140,7 @@ impl State {
             creator: None,
             use_systemd: false,
             clean_up_intel_rdt_subdirectory: None,
+            volumes: None,
         }
     }
 

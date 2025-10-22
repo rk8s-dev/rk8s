@@ -3,11 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use self::super::CachePolicy;
-use std::fmt;
+use std::{fmt, path::PathBuf};
 
 #[derive(Default, Clone, Debug)]
 pub struct Config {
-    pub mountpoint: String,
+    pub mountpoint: PathBuf,
     pub do_import: bool,
     // Filesystem options.
     pub writeback: bool,

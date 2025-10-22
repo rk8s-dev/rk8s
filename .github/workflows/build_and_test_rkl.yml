@@ -21,12 +21,14 @@ jobs:
         run: |
           buck2 build //project/libbridge:libbridge
           buck2 build //project/libipam:libipam
+          buck2 build //project/libnetwork:libnetwork
 
           sudo mkdir -p /opt/cni/bin
           sudo mkdir -p /etc/cni/net.d
 
           sudo cp $(buck2 build //project/libbridge:libbridge --show-output | cut -d' ' -f2) /opt/cni/bin/libbridge
           sudo cp $(buck2 build //project/libipam:libipam --show-output | cut -d' ' -f2) /opt/cni/bin/libipam
+          sudo cp $(buck2 build //project/libnetwork:libnetwork --show-output | cut -d' ' -f2) /opt/cni/bin/libnetwork
 
       - name: Run tests
         run: |
@@ -42,5 +44,12 @@ jobs:
           done
           exit $FAIL
           '
+      
+      - name: clean up
+        run: |
+          sudo rm -rf /etc/cni/net.d
+          sudo rm -rf /run/youki
+          
+          
 
 

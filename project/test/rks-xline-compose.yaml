@@ -1,0 +1,51 @@
+name: rks-xline
+
+services:
+  rks:
+    container_name: rks
+    image: ./rks-bundle
+    command: [
+      "/bin/sh",
+      "-c",
+      "sleep 10 && rks start --config /usr/src/rks-config.yaml" # wait for xline to startup
+    ]
+    ports:
+      - "50051:50051"
+    networks:
+      - rks-xline
+    volumes:
+      - ./rks-config.yaml:/usr/src/rks-config.yaml
+    depends_on:
+      - xline
+  xline:
+    container_name: xline
+    image: ./xline-bundle
+    command:
+      - "xline"
+      - "--name"
+      - "xline"
+      - "--storage-engine"
+      - "rocksdb"
+      - "--members"
+      - "xline=127.0.0.1:2379"
+      - "--data-dir"
+      - "/usr/local/xline/data-dir"
+      - "--client-listen-urls"
+      - "http://0.0.0.0:2379"
+      - "--peer-listen-urls"
+      - "http://0.0.0.0:2380"
+      - "--client-advertise-urls"
+      - "http://127.0.0.1:2379"
+      - "--peer-advertise-urls"
+      - "http://127.0.0.1:2380"
+    ports:
+      - "2379:2379"
+    networks:
+      - rks-xline
+    volumes:
+      # - /usr/local/xline/data-dir
+networks:
+  rks-xline:
+    driver: bridge
+
+volumes:

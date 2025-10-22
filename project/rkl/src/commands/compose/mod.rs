@@ -1,24 +1,28 @@
 use std::{
+    collections::{HashMap, VecDeque},
     env::{self},
     fs::{self, File},
     path::{Path, PathBuf},
+    vec,
 };
 
 use anyhow::{Ok, Result, anyhow};
 use clap::Subcommand;
 use libcontainer::container::State;
 use liboci_cli::{Delete, List};
-use serde_json::json;
-use tracing::{debug, error, info};
+use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::{
     commands::{
         compose::{
-            config::ConfigManager, network::NetworkManager, spec::ComposeSpec,
-            volume::VolumeManager,
+            config::ConfigManager,
+            network::NetworkManager,
+            spec::{ComposeSpec, ServiceSpec},
         },
         container::{ContainerRunner, remove_container},
         delete, list,
+        volume::{PatternType, VolumeManager, VolumeMetadata, VolumePattern, string_to_pattern},
     },
     rootpath,
 };
@@ -29,7 +33,6 @@ type ComposeAction = Box<dyn FnOnce(&mut ComposeManager) -> Result<()>>;
 pub mod config;
 pub mod network;
 pub mod spec;
-pub mod volume;
 
 use clap::Args;
 
@@ -73,14 +76,22 @@ pub enum ComposeCommand {
     Ps(PsArgs),
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ComposeMetadata {
+    pub containers: Vec<State>,
+    pub volumes: Vec<String>,
+    pub project_name: String,
+}
+
 pub struct ComposeManager {
     /// the path to store the basic info of compose application
     root_path: PathBuf,
     project_name: String,
     containers: Vec<State>,
+    volumes: Vec<String>,
     network_manager: NetworkManager,
-    volume_manager: VolumeManager,
     config_manager: ConfigManager,
+    startup_order: HashMap<String, usize>,
 }
 
 impl ComposeManager {
@@ -94,9 +105,10 @@ impl ComposeManager {
             root_path,
             network_manager: NetworkManager::new(project_name.clone()),
             config_manager: ConfigManager::new(),
-            volume_manager: VolumeManager::new(),
             project_name,
             containers: vec![],
+            volumes: vec![],
+            startup_order: HashMap::new(),
         })
     }
 
@@ -114,6 +126,7 @@ impl ComposeManager {
         for container in &self.containers {
             remove_container(&self.root_path, container)?;
         }
+        self.clean_up_network()?;
 
         fs::remove_dir_all(&self.root_path)
             .map_err(|e| anyhow!("failed to delete the whole project: {}", e))
@@ -137,10 +150,12 @@ impl ComposeManager {
         // read the yaml
         let spec = parse_spec(target_path)?;
 
+        self.handle_depends_on(&spec)?;
+
         // top-field manager handle those field
         let _ = &mut self.network_manager.handle(&spec)?;
 
-        let _ = &mut self.volume_manager.handle(&spec)?;
+        self.handle_volumes(&spec)?;
 
         let _ = &mut self.config_manager.handle(&spec);
 
@@ -153,7 +168,7 @@ impl ComposeManager {
         // store the spec info into a .json file
         self.persist_compose_state()?;
 
-        info!("Project {} starts successfully", self.project_name);
+        println!("Project {} starts successfully", self.project_name);
         Ok(())
     }
 
@@ -161,16 +176,17 @@ impl ComposeManager {
     ///{
     /// "project_name": "",
     /// "containers": [ {} {},],
-    /// ""
+    /// "volumes":[]
     ///}
     fn persist_compose_state(&self) -> Result<()> {
-        let obj = json!({
-            "project_name": self.project_name,
-            "containers": &self.containers
-        });
-        let json_str = serde_json::to_string_pretty(&obj)?;
+        let metadata = ComposeMetadata {
+            containers: self.containers.clone(),
+            volumes: self.volumes.clone(),
+            project_name: self.project_name.clone(),
+        };
+        let json_str = serde_json::to_string_pretty(&metadata)?;
 
-        let file_path = self.root_path.join("state.json");
+        let file_path = self.root_path.join("metadata.json");
         fs::create_dir_all(&self.root_path)?;
         fs::write(file_path, json_str)?;
         Ok(())
@@ -187,13 +203,15 @@ impl ComposeManager {
         Ok(spec)
     }
 
-    fn run(&mut self, _: &ComposeSpec) -> Result<()> {
+    fn run(&mut self, spec: &ComposeSpec) -> Result<()> {
         let network_mapping = self.network_manager.network_service_mapping();
 
         for (network_name, services) in network_mapping {
-            info!("Creating network: {network_name}");
+            println!("Creating network: {network_name}");
+            let mut ordered: Vec<(String, ServiceSpec)> = services.clone();
+            ordered.sort_by_key(|(name, _)| self.startup_order.get(name).unwrap());
 
-            for (srv_name, srv) in services.into_iter() {
+            for (srv_name, srv) in ordered.into_iter() {
                 let container_ports = map_port_style(srv.ports.clone())?;
                 let container_spec = ContainerSpec {
                     name: srv
@@ -207,10 +225,35 @@ impl ComposeManager {
                     resources: None,
                 };
 
-                // generate the volumes Mount
-                let volumes = VolumeManager::map_to_mount(srv.volumes.clone())?;
+                // handle the services volume name
+                let mut patterns: Result<Vec<VolumePattern>> = srv
+                    .volumes
+                    .iter()
+                    .map(|v| v.as_str())
+                    .map(string_to_pattern)
+                    .collect();
 
-                debug!("get mount: {:#?}", volumes);
+                patterns = patterns.map(|mut vec| {
+                    vec.iter_mut().for_each(|pattern| {
+                        if let PatternType::Named = pattern.pattern_type {
+                            pattern.host_path = format!(
+                                "{}_{}",
+                                spec.name.clone().unwrap_or("compose_default".to_string()),
+                                pattern.host_path
+                            );
+                        }
+                    });
+                    vec
+                });
+
+                // println!("compose get volume patterns: {patterns:?}");
+                // generate the volumes Mount
+                let (mut volumes, mounts) =
+                    VolumeManager::new()?.handle_container_volume(patterns?, true)?;
+
+                self.volumes.append(&mut volumes);
+
+                debug!("get mount: {:#?}", mounts);
 
                 //  setup the network_conf file
                 self.network_manager
@@ -222,13 +265,12 @@ impl ComposeManager {
                             e
                         )
                     })?;
-                // get config
                 let configs_mounts = self.config_manager.get_mounts_by_service(&srv_name);
 
                 let mut runner =
                     ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
 
-                runner.add_mounts(volumes);
+                runner.add_mounts(mounts);
                 runner.add_mounts(configs_mounts);
 
                 match runner.run() {
@@ -237,7 +279,7 @@ impl ComposeManager {
                     }
                     Err(err) => {
                         // create one container failed delete others
-                        error!(
+                        println!(
                             "container {} created failed: {}",
                             runner.get_container_id()?,
                             err
@@ -250,9 +292,9 @@ impl ComposeManager {
                                 },
                                 self.root_path.clone(),
                             ) {
-                                error!("container {} deleted failed: {}", state.id, err)
+                                println!("container {} deleted failed: {}", state.id, err)
                             } else {
-                                info!("container {} deleted during the rollback", state.id)
+                                println!("container {} deleted during the rollback", state.id)
                             }
                         }
                         return Err(err);
@@ -261,6 +303,7 @@ impl ComposeManager {
             }
         }
         // return the compose application's state
+        //
         Ok(())
     }
 
@@ -308,6 +351,107 @@ impl ComposeManager {
             .unwrap_or("unknown");
         let timestamp = chrono::Utc::now().timestamp() % 1000; // persist 4 bits
         format!("{root}_{srv_name}_{timestamp}")
+    }
+
+    /// This function interate the named volumes in compose spec
+    /// and create it if it is has not be created
+    pub fn handle_volumes(&mut self, compose_spec: &ComposeSpec) -> Result<()> {
+        // create volumes that are pre-defined in compose specification
+        if let Some(volumes) = &compose_spec.volumes {
+            let mut global_manager = VolumeManager::new()?;
+            for (key, spec) in volumes {
+                println!("compose get volume: {}", key);
+                // use existing volume
+                let volume_name = if spec.external.unwrap_or(false) {
+                    spec.name.clone().unwrap_or_else(|| key.to_string())
+                } else {
+                    format!(
+                        "{}_{}",
+                        &compose_spec
+                            .name
+                            .clone()
+                            .unwrap_or(String::from("compose_default")),
+                        key
+                    )
+                };
+                // ignore this volume is already exists
+                global_manager
+                    .create_(
+                        volume_name.clone(),
+                        spec.driver.clone(),
+                        spec.opts.clone().unwrap_or_default(),
+                    )
+                    .or_else(|e| {
+                        if !e.to_string().contains("already exists") {
+                            Err(e)
+                        } else {
+                            std::result::Result::Ok(VolumeMetadata::default())
+                        }
+                    })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// TODO: clean the bridge that is generated by compose up
+    fn clean_up_network(&self) -> Result<()> {
+        Ok(())
+    }
+
+    /// This function handle the compose's depends_on functionality.
+    /// Use Kahn Algorithm to implement Topological sorting.
+    /// Return the final startup sequences of compose services.
+    fn handle_depends_on(&mut self, spec: &ComposeSpec) -> Result<()> {
+        // Init status
+        let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+
+        for srv_name in spec.services.keys() {
+            graph.insert(srv_name.clone(), vec![]);
+            in_degree.insert(srv_name.clone(), 0);
+        }
+
+        for (srv_name, srv_spec) in &spec.services {
+            for dep in &srv_spec.depends_on {
+                if !graph.contains_key(dep) {
+                    return Err(anyhow!("{srv_name} depends on {dep} is not defined"));
+                }
+                graph.get_mut(dep).unwrap().push(srv_name.clone());
+                *in_degree.get_mut(srv_name).unwrap() += 1
+            }
+        }
+
+        let mut result: Vec<String> = vec![];
+        let mut queue: VecDeque<String> = VecDeque::new();
+
+        for (srv, &degree) in &in_degree {
+            if degree == 0 {
+                queue.push_back(srv.clone());
+            }
+        }
+
+        while let Some(srv) = queue.pop_front() {
+            // recored the degree = 0's srv
+            result.push(srv.clone());
+
+            if let Some(deps) = graph.get(&srv) {
+                for dep in deps {
+                    let degree = in_degree.get_mut(dep).unwrap();
+                    *degree -= 1;
+                    if *degree == 0 {
+                        queue.push_back(dep.clone());
+                    }
+                }
+            }
+        }
+
+        self.startup_order = result
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (name.clone(), i))
+            .collect();
+
+        Ok(())
     }
 }
 
@@ -497,23 +641,6 @@ networks:
         assert!(spec.services.contains_key("web"));
         assert_eq!(spec.services["web"].image, "test/bundles/busybox/");
         assert_eq!(spec.services["web"].volumes[0], "/tmp/mount/dir:/mnt");
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_map_volume_style() {
-        let volumes = vec![
-            "/tmp/mount/dir:/app/data:ro".to_string(),
-            "/tmp/data:/app/data2".to_string(),
-        ];
-        let mapped = VolumeManager::string_to_pattern(volumes).unwrap();
-        assert_eq!(mapped.len(), 2);
-        assert_eq!(mapped[0].host_path, "/tmp/mount/dir");
-        assert_eq!(mapped[0].container_path, "/app/data");
-        assert!(mapped[0].read_only);
-        assert_eq!(mapped[1].host_path, "/tmp/data");
-        assert_eq!(mapped[1].container_path, "/app/data2");
-        assert!(!mapped[1].read_only);
     }
 
     #[test]

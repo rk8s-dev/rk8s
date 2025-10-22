@@ -137,9 +137,9 @@ fn create_container_helper(config: ContainerSpec, run: bool) -> Result<(), anyho
     }
 
     if !run {
-        create_container(config_path.to_str().unwrap())?;
+        create_container(config_path.to_str().unwrap(), None)?;
     } else {
-        run_container(config_path.to_str().unwrap())?;
+        run_container(config_path.to_str().unwrap(), None)?;
     }
     std::fs::remove_file(config_path)?;
     Ok(())

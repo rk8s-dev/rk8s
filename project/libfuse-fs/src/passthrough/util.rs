@@ -298,69 +298,67 @@ pub fn osstr_to_cstr(os_str: &OsStr) -> Result<CString, std::ffi::NulError> {
     Ok(c_string)
 }
 
-//TODO: There is a software permission issue here. But it doesn't matter at the moment
-// macro_rules! scoped_cred {
-//     ($name:ident, $ty:ty, $syscall_nr:expr) => {
-//         #[derive(Debug)]
-//         pub(crate) struct $name;
+macro_rules! scoped_cred {
+    ($name:ident, $ty:ty, $syscall_nr:expr) => {
+        #[derive(Debug)]
+        pub(crate) struct $name;
 
-//         impl $name {
-//             // Changes the effective uid/gid of the current thread to `val`.  Changes
-//             // the thread's credentials back to root when the returned struct is dropped.
-//             fn new(val: $ty) -> io::Result<Option<$name>> {
-//                 if val == 0 {
-//                     // Nothing to do since we are already uid 0.
-//                     return Ok(None);
-//                 }
+        impl $name {
+            // Changes the effective uid/gid of the current thread to `val`.  Changes
+            // the thread's credentials back to root when the returned struct is dropped.
+            fn new(val: $ty) -> io::Result<Option<$name>> {
+                if val == 0 {
+                    // Nothing to do since we are already uid 0.
+                    return Ok(None);
+                }
 
-//                 // We want credential changes to be per-thread because otherwise
-//                 // we might interfere with operations being carried out on other
-//                 // threads with different uids/gids.  However, posix requires that
-//                 // all threads in a process share the same credentials.  To do this
-//                 // libc uses signals to ensure that when one thread changes its
-//                 // credentials the other threads do the same thing.
-//                 //
-//                 // So instead we invoke the syscall directly in order to get around
-//                 // this limitation.  Another option is to use the setfsuid and
-//                 // setfsgid systems calls.   However since those calls have no way to
-//                 // return an error, it's preferable to do this instead.
+                // We want credential changes to be per-thread because otherwise
+                // we might interfere with operations being carried out on other
+                // threads with different uids/gids.  However, posix requires that
+                // all threads in a process share the same credentials.  To do this
+                // libc uses signals to ensure that when one thread changes its
+                // credentials the other threads do the same thing.
+                //
+                // So instead we invoke the syscall directly in order to get around
+                // this limitation.  Another option is to use the setfsuid and
+                // setfsgid systems calls.   However since those calls have no way to
+                // return an error, it's preferable to do this instead.
 
-//                 // This call is safe because it doesn't modify any memory and we
-//                 // check the return value.
-//                 let res = unsafe { libc::syscall($syscall_nr, -1, val, -1) };
-//                 if res == 0 {
-//                     Ok(Some($name))
-//                 } else {
-//                     Err(io::Error::last_os_error())
-//                 }
-//             }
-//         }
+                // This call is safe because it doesn't modify any memory and we
+                // check the return value.
+                let res = unsafe { libc::syscall($syscall_nr, -1, val, -1) };
+                if res == 0 {
+                    Ok(Some($name))
+                } else {
+                    Err(io::Error::last_os_error())
+                }
+            }
+        }
 
-//         impl Drop for $name {
-//             fn drop(&mut self) {
-//                 let res = unsafe { libc::syscall($syscall_nr, -1, 0, -1) };
-//                 if res < 0 {
-//                     error!(
-//                         "fuse: failed to change credentials back to root: {}",
-//                         io::Error::last_os_error(),
-//                     );
-//                 }
-//             }
-//         }
-//     };
-// }
+        impl Drop for $name {
+            fn drop(&mut self) {
+                let res = unsafe { libc::syscall($syscall_nr, -1, 0, -1) };
+                if res < 0 {
+                    error!(
+                        "fuse: failed to change credentials back to root: {}",
+                        io::Error::last_os_error(),
+                    );
+                }
+            }
+        }
+    };
+}
+scoped_cred!(ScopedUid, libc::uid_t, libc::SYS_setresuid);
+scoped_cred!(ScopedGid, libc::gid_t, libc::SYS_setresgid);
 
-// scoped_cred!(ScopedUid, libc::uid_t, libc::SYS_setresuid);
-// scoped_cred!(ScopedGid, libc::gid_t, libc::SYS_setresgid);
-
-// pub fn set_creds(
-//     uid: libc::uid_t,
-//     gid: libc::gid_t,
-// ) -> io::Result<(Option<ScopedUid>, Option<ScopedGid>)> {
-//     // We have to change the gid before we change the uid because if we change the uid first then we
-//     // lose the capability to change the gid.  However changing back can happen in any order.
-//     ScopedGid::new(gid).and_then(|gid| Ok((ScopedUid::new(uid)?, gid)))
-// }
+pub fn set_creds(
+    uid: libc::uid_t,
+    gid: libc::gid_t,
+) -> io::Result<(Option<ScopedUid>, Option<ScopedGid>)> {
+    // We have to change the gid before we change the uid because if we change the uid first then we
+    // lose the capability to change the gid.  However changing back can happen in any order.
+    ScopedGid::new(gid).and_then(|gid| Ok((ScopedUid::new(uid)?, gid)))
+}
 
 #[cfg(test)]
 mod tests {
