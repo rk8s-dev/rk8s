@@ -28,13 +28,13 @@ where
         kind: "Pod".to_string(),
         metadata: ObjectMeta {
             name,
-            uid: None,
             labels: HashMap::from([
                 ("app".to_string(), "my-app".to_string()),
                 ("bundle".to_string(), bundles_path("pause")),
             ]),
             namespace: String::new(),
             annotations: std::collections::HashMap::new(),
+            ..Default::default()
         },
         spec: PodSpec {
             node_name: None,

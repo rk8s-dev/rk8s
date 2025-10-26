@@ -1,12 +1,15 @@
 mod api;
 mod cli;
 mod commands;
+mod controllers;
 mod dns;
 mod network;
 mod protocol;
 mod scheduler;
 mod server;
 
+use crate::controllers::garbage_collector::GarbageCollector;
+use crate::controllers::{ControllerManager, ReplicaSetController};
 use crate::dns::authority::run_dns_server;
 use crate::network::init;
 use crate::protocol::config::load_config;
@@ -18,6 +21,7 @@ use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use log::error;
 use server::serve;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -69,9 +73,33 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("Failed to create Scheduler")?;
             scheduler.run().await;
+
+            let controller_manager = Arc::new(ControllerManager::new());
+            register_controllers(controller_manager.clone(), xline_store.clone(), 4).await?;
+            controller_manager
+                .clone()
+                .start_watch(xline_store.clone())
+                .await?;
+
             serve(cfg.addr, xline_store, local_manager, cfg.dns_config.port).await?;
         }
     }
 
+    Ok(())
+}
+
+async fn register_controllers(
+    mgr: Arc<ControllerManager>,
+    xline_store: Arc<XlineStore>,
+    workers: usize,
+) -> anyhow::Result<()> {
+    let gc = GarbageCollector::new(xline_store.clone());
+    let rs = ReplicaSetController::new(xline_store.clone());
+    mgr.clone()
+        .register(Arc::new(RwLock::new(gc)), workers)
+        .await?;
+    mgr.clone()
+        .register(Arc::new(RwLock::new(rs)), workers)
+        .await?;
     Ok(())
 }

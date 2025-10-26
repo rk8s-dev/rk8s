@@ -1,30 +1,59 @@
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use async_trait::async_trait;
-use common::PodTask;
-use common::ReplicaSet;
-use serde_yaml;
+use common::ResourceKind;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, mpsc, watch};
 use tokio::time::sleep;
 
+/// A watch event.
+/// Contains the resource yaml.
+#[derive(Debug, Clone)]
+pub enum WatchEvent {
+    Add { yaml: String },
+    Update { old_yaml: String, new_yaml: String },
+    Delete { yaml: String },
+}
+
+/// A watch response.
+/// Contains the resource kind, key, and event.
+#[derive(Debug, Clone)]
+pub struct ResourceWatchResponse {
+    pub kind: ResourceKind,
+    pub key: String,
+    pub event: WatchEvent,
+}
+
 /// Controller trait defines the contract for controllers managed by ControllerManager.
 #[async_trait]
 pub trait Controller: Send + Sync + 'static {
-    // Name used for identifying the controller.
+    /// Name used for identifying the controller.
     fn name(&self) -> &'static str;
 
-    // Reconcile the resource identified by key, e.g. resource name.
-    async fn reconcile(&self, key: &str, store: Arc<XlineStore>) -> Result<()>;
+    /// Initialize the controller.
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    /// The resources that the controller needs to watch.
+    fn watch_resources(&self) -> Vec<ResourceKind> {
+        vec![]
+    }
+
+    #[allow(unused)]
+    /// Watch response handler.
+    async fn handle_watch_response(&mut self, response: &ResourceWatchResponse) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Simple ControllerManager: registers controllers, provides enqueue, and starts watch.
 pub struct ControllerManager {
-    controllers: RwLock<HashMap<String, Arc<dyn Controller>>>,
+    controllers: RwLock<HashMap<String, Arc<RwLock<dyn Controller>>>>,
     // a work queue per controller.
-    queues: RwLock<HashMap<String, mpsc::Sender<String>>>,
+    queues: RwLock<HashMap<String, mpsc::Sender<ResourceWatchResponse>>>,
     // use for avoiding duplicates and avoid the same key gets into queue twice.
     inflight: RwLock<HashMap<String, HashSet<String>>>,
     // use for stopping the manager.
@@ -47,13 +76,13 @@ impl ControllerManager {
     // Each controller gets its own queue, and this function starts the async loop.
     pub async fn register(
         self: Arc<Self>,
-        controller: Arc<dyn Controller>,
-        workers: usize, // max number of concurrent reconcile workers
-        store: Arc<XlineStore>,
+        controller: Arc<RwLock<dyn Controller>>,
+        workers: usize, // max number of concurrent handle watch response workers
     ) -> Result<()> {
+        controller.write().await.init().await?;
         // create workqueue
-        let name = controller.name().to_string();
-        let (tx, mut rx) = mpsc::channel::<String>(1000); // each event is a resource key , for example, "registry/pods/pod"
+        let name = controller.read().await.name().to_string();
+        let (tx, mut rx) = mpsc::channel::<ResourceWatchResponse>(1000);
 
         // register this controller and its queue in the manager
         self.controllers
@@ -67,7 +96,7 @@ impl ControllerManager {
             .await
             .insert(name.clone(), HashSet::new());
 
-        // use semaphore to limit the number of concurrent reconcile workers
+        // use semaphore to limit the number of concurrent handle watch response workers
         let semaphore = Arc::new(tokio::sync::Semaphore::new(workers));
 
         // subscribe to the global stop signal so this dispatcher can exit.
@@ -78,7 +107,7 @@ impl ControllerManager {
         let name_clone = name.clone();
 
         // spawn the dispatcher loop which continuously receives keys from the queue
-        // and spawns reconcile tasks for them.
+        // and spawns handle watch response tasks for them.
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -88,31 +117,31 @@ impl ControllerManager {
 
                     opt = rx.recv() => {
                         match opt {
-                            Some(key) => {
+                            Some(resp) => {
 
                                 // need to acquire a permit from the semaphore
                                 let permit = semaphore.clone().acquire_owned().await.unwrap();
 
                                 let controller = controller_clone.clone();
-                                let store = store.clone();
                                 let name = name_clone.clone();
                                 let _manager = manager_clone.clone(); // Keep the manager alive for lifetime safety
 
-                                // spawn a new task to run reconcile for this key
+                                // spawn a new task to handle the watch response
                                 tokio::spawn(async move {
                                     if let Err(e) = retry_with_backoff(|| async {
-                                        controller.reconcile(&key, store.clone()).await
+                                        controller.write().await.handle_watch_response(&resp).await?;
+                                        Ok(())
                                     }).await {
                                         log::error!(
-                                            "controller {} reconcile {} failed: {:?}",
-                                            name, key, e
+                                            "controller {} handle watch response {} failed: {:?}",
+                                            name, resp.key, e
                                         );
                                     }
 
                                     // remove from inflight set when done
                                     let mut inflight_map = _manager.inflight.write().await;
                                     if let Some(set) = inflight_map.get_mut(&name) {
-                                        set.remove(&key);
+                                        set.remove(&resp.key);
                                     }
 
                                     // release the permit when the task is done.
@@ -130,51 +159,34 @@ impl ControllerManager {
         Ok(())
     }
 
-    // Enqueue a key for a controller, just depend on inflight set to avoid duplicates.
-    // the key may mean /registry/replicasets/name.
-    pub async fn enqueue(&self, controller_name: &str, key: String) {
-        // Only enqueue if not already present in inflight set
-        let mut inflight_map = self.inflight.write().await;
-        if let Some(set) = inflight_map.get_mut(controller_name) {
-            if set.contains(&key) {
-                return;
-            }
-            set.insert(key.clone());
-        }
-
-        let queues = self.queues.read().await;
-        if let Some(tx) = queues.get(controller_name) {
-            let _ = tx.send(key).await;
-        } else {
-            // cleanup reservation if no queue to receive
-            if let Some(set) = inflight_map.get_mut(controller_name) {
-                set.remove(&key);
-            }
-        }
-    }
-
-    // Start watch for pods and replicasets. Events are broadcast to all controllers.
+    /// Start watch for pods and replicasets. Events are broadcast to controllers who need to watch these resources.
     pub async fn start_watch(self: Arc<Self>, store: Arc<XlineStore>) -> Result<()> {
         // pods informer with reconnect loop
         let mgr_p = self.clone();
         let store_p = store.clone();
-        // NOTE: This logic manually matches Pods to ReplicaSets by label selectors, because the ownerReferences
-        // mechanism is not yet implemented. Once ownerReferences are supported, this section can be simplified to
-        // enqueue only the owning ReplicaSet directly from Pod.metadata.ownerReferences.
+
         tokio::spawn(async move {
             let mut backoff_ms = 100u64;
             loop {
                 match store_p.pods_snapshot_with_rev().await {
                     Ok((items, rev)) => {
-                        // enqueue snapshot items
+                        // broadcast snapshot items to controllers who need to watch pods.
                         for (name, _yaml) in items.into_iter() {
-                            let queues = mgr_p.queues.read().await;
-                            for (ctrl, _) in queues.iter() {
-                                let _ = mgr_p.enqueue(ctrl, name.clone()).await;
+                            let senders = mgr_p.get_senders_by_kind(ResourceKind::Pod).await;
+                            for sender in senders {
+                                let _ = sender
+                                    .send(ResourceWatchResponse {
+                                        kind: ResourceKind::Pod,
+                                        key: name.clone(),
+                                        event: WatchEvent::Add {
+                                            yaml: _yaml.clone(),
+                                        },
+                                    })
+                                    .await;
                             }
                         }
 
-                        // start watch from snapshot revision
+                        // start watch from snapshot revision and broadcast events to controllers who need to watch pods.
                         match store_p.watch_pods(rev).await {
                             Ok((_watcher, mut stream)) => {
                                 // reset backoff on successful watch
@@ -186,100 +198,61 @@ impl ControllerManager {
                                                 if let Some(kv) = ev.kv() {
                                                     let key = String::from_utf8_lossy(kv.key())
                                                         .replace("/registry/pods/", "");
-
-                                                    // Resolve Pod object: prefer curr kv, fall back to prev_kv or store lookup.
-                                                    let mut pod_opt: Option<PodTask> = None;
-                                                    let curr_yaml =
-                                                        String::from_utf8_lossy(kv.value())
-                                                            .to_string();
-                                                    if !curr_yaml.trim().is_empty() {
-                                                        if let Ok(p) = serde_yaml::from_str::<PodTask>(
-                                                            &curr_yaml,
-                                                        ) {
-                                                            pod_opt = Some(p);
-                                                        } else {
-                                                            log::debug!(
-                                                                "failed to deserialize pod from event for key={}",
-                                                                key
-                                                            );
-                                                        }
-                                                    }
-
-                                                    if pod_opt.is_none()
-                                                        && let Some(prev_kv) = ev.prev_kv()
-                                                    {
-                                                        let prev_yaml = String::from_utf8_lossy(
-                                                            prev_kv.value(),
-                                                        )
-                                                        .to_string();
-                                                        if !prev_yaml.trim().is_empty()
-                                                            && let Ok(p) =
-                                                                serde_yaml::from_str::<PodTask>(
-                                                                    &prev_yaml,
-                                                                )
-                                                        {
-                                                            pod_opt = Some(p);
-                                                        }
-                                                    }
-
-                                                    if pod_opt.is_none() {
-                                                        match store_p.get_pod_yaml(&key).await {
-                                                            Ok(Some(s)) => {
-                                                                if let Ok(p) =
-                                                                    serde_yaml::from_str::<PodTask>(
-                                                                        &s,
+                                                    let event_opt = match ev.event_type() {
+                                                        etcd_client::EventType::Put => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Update {
+                                                                    old_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            prev_kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                    new_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                })
+                                                            } else {
+                                                                Some(WatchEvent::Add {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        kv.value(),
                                                                     )
-                                                                {
-                                                                    pod_opt = Some(p);
-                                                                }
+                                                                    .to_string(),
+                                                                })
                                                             }
-                                                            Ok(None) => {
-                                                                log::debug!(
-                                                                    "no pod yaml found in store for key={}",
+                                                        }
+                                                        etcd_client::EventType::Delete => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Delete {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        prev_kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            } else {
+                                                                log::warn!(
+                                                                    "watch delete event missing prev_kv for key {}",
                                                                     key
                                                                 );
-                                                            }
-                                                            Err(e) => {
-                                                                log::warn!(
-                                                                    "error reading pod yaml from store for key={} err={:?}",
-                                                                    key,
-                                                                    e
-                                                                );
+                                                                None
                                                             }
                                                         }
-                                                    }
-
-                                                    if let Some(pod) = pod_opt {
-                                                        // Find matching ReplicaSets and enqueue their names only.
-                                                        match store_p.list_replicasets().await {
-                                                            Ok(rss) => {
-                                                                let queues =
-                                                                    mgr_p.queues.read().await;
-                                                                for rs in rss.into_iter() {
-                                                                    if crate::controllers::ReplicaSetController::selector_match(&rs, &pod) {
-                                                                        for (ctrl, _) in queues.iter() {
-                                                                            if ctrl == "replicaset" {
-                                                                                let _ = mgr_p.enqueue(ctrl, rs.metadata.name.clone()).await;
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                            Err(e) => {
-                                                                log::warn!(
-                                                                    "failed to list replicasets while handling pod event: {:?}",
-                                                                    e
-                                                                );
-                                                            }
-                                                        }
-                                                    } else {
-                                                        // Fallback: broadcast pod key to all controllers (old behavior)
-                                                        let queues = mgr_p.queues.read().await;
-                                                        for (ctrl, _) in queues.iter() {
-                                                            let _ = mgr_p
-                                                                .enqueue(ctrl, key.clone())
-                                                                .await;
-                                                        }
+                                                    };
+                                                    let Some(event) = event_opt else {
+                                                        continue;
+                                                    };
+                                                    let senders = mgr_p
+                                                        .get_senders_by_kind(ResourceKind::Pod)
+                                                        .await;
+                                                    for sender in senders {
+                                                        let _ = sender
+                                                            .send(ResourceWatchResponse {
+                                                                kind: ResourceKind::Pod,
+                                                                key: key.clone(),
+                                                                event: event.clone(),
+                                                            })
+                                                            .await;
                                                     }
                                                 }
                                             }
@@ -320,12 +293,23 @@ impl ControllerManager {
                 match store_rs.replicasets_snapshot_with_rev().await {
                     Ok((items, rev)) => {
                         for (name, _yaml) in items.into_iter() {
-                            let queues = mgr_rs.queues.read().await;
-                            for (ctrl, _) in queues.iter() {
-                                let _ = mgr_rs.enqueue(ctrl, name.clone()).await;
+                            // broadcast snapshot items to controllers who need to watch replicasets.
+                            let senders =
+                                mgr_rs.get_senders_by_kind(ResourceKind::ReplicaSet).await;
+                            for sender in senders {
+                                let _ = sender
+                                    .send(ResourceWatchResponse {
+                                        kind: ResourceKind::ReplicaSet,
+                                        key: name.clone(),
+                                        event: WatchEvent::Add {
+                                            yaml: _yaml.clone(),
+                                        },
+                                    })
+                                    .await;
                             }
                         }
 
+                        // start watch from snapshot revision and broadcast events to controllers who need to watch replicasets.
                         match store_rs.watch_replicasets(rev).await {
                             Ok((_watcher, mut stream)) => {
                                 backoff_ms = 100;
@@ -336,38 +320,63 @@ impl ControllerManager {
                                                 if let Some(kv) = ev.kv() {
                                                     let key = String::from_utf8_lossy(kv.key())
                                                         .replace("/registry/replicasets/", "");
-
-                                                    // Only enqueue if the spec actually changed.
-                                                    // If prev_kv exists, deserialize prev & curr and compare spec.
-                                                    let mut should_enqueue = true;
-                                                    if let Some(prev_kv) = ev.prev_kv() {
-                                                        let prev_yaml = String::from_utf8_lossy(
-                                                            prev_kv.value(),
+                                                    let event_opt = match ev.event_type() {
+                                                        etcd_client::EventType::Put => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Update {
+                                                                    old_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            prev_kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                    new_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                })
+                                                            } else {
+                                                                Some(WatchEvent::Add {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            }
+                                                        }
+                                                        etcd_client::EventType::Delete => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Delete {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        prev_kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            } else {
+                                                                log::warn!(
+                                                                    "watch delete event missing prev_kv for key {}",
+                                                                    key
+                                                                );
+                                                                None
+                                                            }
+                                                        }
+                                                    };
+                                                    let Some(event) = event_opt else {
+                                                        continue;
+                                                    };
+                                                    let senders = mgr_rs
+                                                        .get_senders_by_kind(
+                                                            ResourceKind::ReplicaSet,
                                                         )
-                                                        .to_string();
-                                                        let curr_yaml =
-                                                            String::from_utf8_lossy(kv.value())
-                                                                .to_string();
-                                                        let prev_rs: Result<ReplicaSet, _> =
-                                                            serde_yaml::from_str(&prev_yaml);
-                                                        let curr_rs: Result<ReplicaSet, _> =
-                                                            serde_yaml::from_str(&curr_yaml);
-
-                                                        if let (Ok(prev), Ok(curr)) =
-                                                            (prev_rs, curr_rs)
-                                                            && prev.spec == curr.spec
-                                                        {
-                                                            should_enqueue = false;
-                                                        }
-                                                    }
-
-                                                    if should_enqueue {
-                                                        let queues = mgr_rs.queues.read().await;
-                                                        for (ctrl, _) in queues.iter() {
-                                                            let _ = mgr_rs
-                                                                .enqueue(ctrl, key.clone())
-                                                                .await;
-                                                        }
+                                                        .await;
+                                                    for sender in senders {
+                                                        let _ = sender
+                                                            .send(ResourceWatchResponse {
+                                                                kind: ResourceKind::ReplicaSet,
+                                                                key: key.clone(),
+                                                                event: event.clone(),
+                                                            })
+                                                            .await;
                                                     }
                                                 }
                                             }
@@ -407,15 +416,35 @@ impl ControllerManager {
         Ok(())
     }
 
-    pub async fn shutdown(&self) {
+    pub fn shutdown(&self) {
         let _ = self.stop_tx.send(true);
-        sleep(Duration::from_millis(200)).await;
+    }
+
+    async fn get_senders_by_kind(
+        &self,
+        kind: ResourceKind,
+    ) -> Vec<mpsc::Sender<ResourceWatchResponse>> {
+        let mut ret = Vec::new();
+        for (name, ctrl) in self.controllers.read().await.iter() {
+            if ctrl.read().await.watch_resources().contains(&kind)
+                && let Some(tx) = self.queues.read().await.get(name)
+            {
+                ret.push(tx.clone());
+            }
+        }
+        ret
     }
 }
 
 impl Default for ControllerManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for ControllerManager {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 

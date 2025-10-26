@@ -1,7 +1,10 @@
 use crate::protocol::config::NetworkConfig;
 use anyhow::Result;
 use common::*;
-use etcd_client::{Client, GetOptions, PutOptions, WatchOptions, WatchStream, Watcher};
+use etcd_client::{
+    Client, Compare, CompareOp, GetOptions, PutOptions, Txn, TxnOp, WatchOptions, WatchStream,
+    Watcher,
+};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -144,6 +147,16 @@ impl XlineStore {
         let resp = client.get(key, None).await?;
         if let Some(kv) = resp.kvs().first() {
             Ok(Some(String::from_utf8_lossy(kv.value()).to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get a pod object from xline.
+    pub async fn get_pod(&self, pod_name: &str) -> Result<Option<PodTask>> {
+        if let Some(yaml) = self.get_pod_yaml(pod_name).await? {
+            let pod: PodTask = serde_yaml::from_str(&yaml)?;
+            Ok(Some(pod))
         } else {
             Ok(None)
         }
@@ -345,12 +358,46 @@ impl XlineStore {
             .map(|kv| String::from_utf8_lossy(kv.value()).to_string()))
     }
 
+    pub async fn get_replicaset_yaml_with_revision(
+        &self,
+        rs_name: &str,
+    ) -> Result<Option<(String, i64)>> {
+        let key = format!("/registry/replicasets/{rs_name}");
+        let mut client = self.client.write().await;
+        let resp = client.get(key, None).await?;
+        Ok(resp.kvs().first().map(|kv| {
+            (
+                String::from_utf8_lossy(kv.value()).to_string(),
+                kv.mod_revision(),
+            )
+        }))
+    }
+
     /// Delete a replicaset from xline.
     pub async fn delete_replicaset(&self, rs_name: &str) -> Result<()> {
         let key = format!("/registry/replicasets/{rs_name}");
         let mut client = self.client.write().await;
         client.delete(key, None).await?;
         Ok(())
+    }
+
+    pub async fn compare_and_set_replicaset_yaml(
+        &self,
+        rs_name: &str,
+        expected_mod_revision: i64,
+        rs_yaml: &str,
+    ) -> Result<bool> {
+        let key = format!("/registry/replicasets/{rs_name}");
+        let cmp = Compare::mod_revision(key.clone(), CompareOp::Equal, expected_mod_revision);
+        let then_ops = vec![TxnOp::put(key.clone(), rs_yaml, None)];
+        let else_ops = vec![TxnOp::get(key, None)];
+        let mut client = self.client.write().await;
+        let txn = Txn::new()
+            .when(vec![cmp])
+            .and_then(then_ops)
+            .or_else(else_ops);
+        let resp = client.txn(txn).await?;
+        Ok(resp.succeeded())
     }
 
     /// List all replicaset YAMLs (deserialize values).
@@ -404,5 +451,114 @@ impl XlineStore {
         let mut client = self.client.write().await;
         let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
         Ok((watcher, stream))
+    }
+
+    pub async fn get_object_yaml(&self, kind: ResourceKind, name: &str) -> Result<Option<String>> {
+        match kind {
+            ResourceKind::Pod => self.get_pod_yaml(name).await,
+            ResourceKind::Service => self.get_service_yaml(name).await,
+            // TODO
+            ResourceKind::Deployment => todo!(),
+            ResourceKind::ReplicaSet => todo!(),
+            ResourceKind::Unknown => Ok(None),
+        }
+    }
+
+    pub async fn insert_object_yaml(
+        &self,
+        kind: ResourceKind,
+        name: &str,
+        yaml: &str,
+    ) -> Result<()> {
+        match kind {
+            ResourceKind::Pod => self.insert_pod_yaml(name, yaml).await,
+            ResourceKind::Service => self.insert_service_yaml(name, yaml).await,
+            // TODO
+            ResourceKind::Deployment => todo!(),
+            ResourceKind::ReplicaSet => todo!(),
+            ResourceKind::Unknown => Ok(()),
+        }
+    }
+
+    pub async fn delete_object(
+        &self,
+        kind: ResourceKind,
+        name: &str,
+        policy: DeletePropagationPolicy,
+    ) -> Result<()> {
+        let key = match kind {
+            ResourceKind::Pod => format!("/registry/pods/{name}"),
+            ResourceKind::Service => format!("/registry/services/{name}"),
+            ResourceKind::Deployment => format!("/registry/deployments/{name}"),
+            ResourceKind::ReplicaSet => format!("/registry/replicasets/{name}"),
+            ResourceKind::Unknown => return Ok(()),
+        };
+        let yaml = self.get_object_yaml(kind, name).await?;
+        if yaml.is_none() {
+            // Object does not exist, nothing to do
+            return Ok(());
+        }
+        let origin_yaml = yaml.unwrap();
+        // get ObjectMeta
+        let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(&origin_yaml)?;
+        let meta_value = &yaml_value["metadata"];
+        let mut meta = serde_yaml::from_value::<ObjectMeta>(meta_value.clone())?;
+
+        let deletion_timestamp = chrono::Utc::now();
+        if policy == DeletePropagationPolicy::Foreground
+            || policy == DeletePropagationPolicy::Orphan
+        {
+            // foreground or orphan deletion: set deletion timestamp and then
+            // add DeleteDependents or OrphanDependents finalizer
+
+            // Set deletionTimestamp
+            meta.deletion_timestamp = Some(deletion_timestamp);
+
+            // Add DeleteDependents finalizer
+            meta.finalizers.get_or_insert_with(Vec::new).push(
+                if policy == DeletePropagationPolicy::Foreground {
+                    Finalizer::DeletingDependents
+                } else {
+                    Finalizer::OrphanDependents
+                },
+            );
+            self.update_meta(&key, &origin_yaml, &meta).await?;
+        } else {
+            // background deletion: delete immediately if no finalizers are present
+            if meta.finalizers.is_none() || meta.finalizers.as_ref().unwrap().is_empty() {
+                self.client.write().await.delete(key, None).await?;
+            } else {
+                // finalizers are present, just set deletionTimestamp
+                meta.deletion_timestamp = Some(deletion_timestamp);
+
+                self.update_meta(&key, &origin_yaml, &meta).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn update_meta(
+        &self,
+        key: &str,
+        origin_yaml: &str,
+        updated_meta: &ObjectMeta,
+    ) -> Result<()> {
+        let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(origin_yaml)?;
+        let updated_meta_yaml_value = serde_yaml::to_value(updated_meta)?;
+        let meta_map_mut = yaml_value
+            .as_mapping_mut()
+            .and_then(|m| m.get_mut(serde_yaml::Value::String("metadata".to_string())))
+            .and_then(|v| v.as_mapping_mut())
+            .ok_or_else(|| anyhow::anyhow!("Failed to get mutable metadata map"))?;
+        *meta_map_mut = updated_meta_yaml_value
+            .as_mapping()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Failed to convert updated meta to mapping"))?;
+        let updated_yaml = serde_yaml::to_string(&yaml_value)?;
+
+        let mut client = self.client.write().await;
+        client.put(key, updated_yaml, None).await?;
+        Ok(())
     }
 }
