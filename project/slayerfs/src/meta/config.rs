@@ -114,11 +114,11 @@ pub enum ConfigError {
 pub struct CacheConfig {
     /// Cache capacity settings
     #[serde(default)]
-    pub capacity: CacheCapacityConfig,
+    pub capacity: CacheCapacity,
 
     /// Cache TTL settings
     #[serde(default)]
-    pub ttl: CacheTtlConfig,
+    pub ttl: CacheTtl,
 
     /// Whether cache is enabled (default: true)
     #[serde(default = "default_cache_enabled")]
@@ -127,50 +127,26 @@ pub struct CacheConfig {
 
 /// Cache capacity configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CacheCapacityConfig {
-    /// File attributes cache capacity
-    #[serde(default = "default_attr_capacity")]
-    pub attr: usize,
-
-    /// Directory entry cache capacity
-    #[serde(default = "default_dentry_capacity")]
-    pub dentry: usize,
+pub struct CacheCapacity {
+    /// Inode metadata cache capacity (includes attr, children, parent)
+    #[serde(default = "default_inode_capacity")]
+    pub inode: usize,
 
     /// Path resolution cache capacity
     #[serde(default = "default_path_capacity")]
     pub path: usize,
-
-    /// Reverse path lookup cache capacity
-    #[serde(default = "default_inode_to_path_capacity")]
-    pub inode_to_path: usize,
-
-    /// Directory content (readdir) cache capacity
-    #[serde(default = "default_readdir_capacity")]
-    pub readdir: usize,
 }
 
 /// Cache TTL configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CacheTtlConfig {
-    /// File attributes cache TTL (in seconds)
+pub struct CacheTtl {
+    /// Inode metadata cache TTL (includes attr, children, parent)
     #[serde(default, with = "duration_serde")]
-    pub attr_ttl: Duration,
+    pub inode_ttl: Duration,
 
-    /// Directory entry cache TTL (in seconds)
-    #[serde(default, with = "duration_serde")]
-    pub dentry_ttl: Duration,
-
-    /// Path resolution cache TTL (in seconds)
+    /// Path resolution cache TTL
     #[serde(default, with = "duration_serde")]
     pub path_ttl: Duration,
-
-    /// Reverse path lookup cache TTL (in seconds)
-    #[serde(default, with = "duration_serde")]
-    pub inode_to_path_ttl: Duration,
-
-    /// Directory content (readdir) cache TTL (in seconds)
-    #[serde(default, with = "duration_serde")]
-    pub readdir_ttl: Duration,
 }
 
 // Default value functions
@@ -178,11 +154,7 @@ fn default_cache_enabled() -> bool {
     true
 }
 
-fn default_attr_capacity() -> usize {
-    10000
-}
-
-fn default_dentry_capacity() -> usize {
+fn default_inode_capacity() -> usize {
     10000
 }
 
@@ -190,27 +162,16 @@ fn default_path_capacity() -> usize {
     5000
 }
 
-fn default_inode_to_path_capacity() -> usize {
-    5000
-}
-
-fn default_readdir_capacity() -> usize {
-    1000
-}
-
-impl Default for CacheCapacityConfig {
+impl Default for CacheCapacity {
     fn default() -> Self {
         Self {
-            attr: default_attr_capacity(),
-            dentry: default_dentry_capacity(),
+            inode: default_inode_capacity(),
             path: default_path_capacity(),
-            inode_to_path: default_inode_to_path_capacity(),
-            readdir: default_readdir_capacity(),
         }
     }
 }
 
-impl CacheTtlConfig {
+impl CacheTtl {
     /// Get default TTL based on database backend type
     pub fn for_backend(backend: &str) -> Self {
         match backend {
@@ -224,55 +185,39 @@ impl CacheTtlConfig {
     /// SQLite backend defaults (10s TTL for local database)
     pub fn for_sqlite() -> Self {
         Self {
-            attr_ttl: Duration::from_secs(10),
-            dentry_ttl: Duration::from_secs(8),
+            inode_ttl: Duration::from_secs(10),
             path_ttl: Duration::from_secs(10),
-            inode_to_path_ttl: Duration::from_secs(10),
-            readdir_ttl: Duration::from_secs(5),
         }
     }
 
     /// PostgreSQL backend defaults (500ms TTL for network latency)
     pub fn for_postgres() -> Self {
         Self {
-            attr_ttl: Duration::from_millis(500),
-            dentry_ttl: Duration::from_millis(300),
+            inode_ttl: Duration::from_millis(500),
             path_ttl: Duration::from_millis(500),
-            inode_to_path_ttl: Duration::from_millis(500),
-            readdir_ttl: Duration::from_millis(300),
         }
     }
 
     /// Etcd backend defaults (100ms TTL for distributed consistency)
     pub fn for_etcd() -> Self {
         Self {
-            attr_ttl: Duration::from_millis(100),
-            dentry_ttl: Duration::from_millis(50),
+            inode_ttl: Duration::from_millis(100),
             path_ttl: Duration::from_millis(100),
-            inode_to_path_ttl: Duration::from_millis(100),
-            readdir_ttl: Duration::from_millis(50),
         }
     }
 
     /// Check if this is a zero/default TTL config
     pub fn is_zero(&self) -> bool {
-        self.attr_ttl.is_zero()
-            && self.dentry_ttl.is_zero()
-            && self.path_ttl.is_zero()
-            && self.inode_to_path_ttl.is_zero()
-            && self.readdir_ttl.is_zero()
+        self.inode_ttl.is_zero() && self.path_ttl.is_zero()
     }
 }
 
-impl Default for CacheTtlConfig {
+impl Default for CacheTtl {
     fn default() -> Self {
         // Return zero duration, will be replaced by backend-specific defaults
         Self {
-            attr_ttl: Duration::ZERO,
-            dentry_ttl: Duration::ZERO,
+            inode_ttl: Duration::ZERO,
             path_ttl: Duration::ZERO,
-            inode_to_path_ttl: Duration::ZERO,
-            readdir_ttl: Duration::ZERO,
         }
     }
 }
@@ -280,8 +225,8 @@ impl Default for CacheTtlConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            capacity: CacheCapacityConfig::default(),
-            ttl: CacheTtlConfig::default(),
+            capacity: CacheCapacity::default(),
+            ttl: CacheTtl::default(),
             enabled: true,
         }
     }
@@ -291,17 +236,11 @@ impl CacheConfig {
     /// Validate cache configuration
     pub fn validate(&self) -> Result<(), String> {
         if self.enabled {
-            if self.capacity.attr == 0 {
-                return Err("attr cache capacity must be > 0".into());
-            }
-            if self.capacity.dentry == 0 {
-                return Err("dentry cache capacity must be > 0".into());
+            if self.capacity.inode == 0 {
+                return Err("inode cache capacity must be > 0".into());
             }
             if self.capacity.path == 0 {
                 return Err("path cache capacity must be > 0".into());
-            }
-            if self.capacity.inode_to_path == 0 {
-                return Err("inode_to_path cache capacity must be > 0".into());
             }
         }
         Ok(())

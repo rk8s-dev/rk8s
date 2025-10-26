@@ -9,6 +9,7 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/slayerfs"
 [dependencies]
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "time", "net"] }
 async-trait = "0.1"
+async-recursion = "1.0"
 aws-config = { version = "1" }
 aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
 base64 = "0.21"
@@ -20,6 +21,7 @@ libc = "0.2.175"
 bytes = "1"
 hex = "0.4"
 moka = { version = "0.12", features = ["future"] }
+dashmap = "6.1"
 dirs = "6"
 sha2 = "0.10"
 anyhow = "1.0.100"

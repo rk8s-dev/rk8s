@@ -6,8 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::meta::client::MetaClient;
-use crate::meta::config::CacheTtlConfig;
-use crate::meta::config::{Config, DatabaseConfig, DatabaseType};
+use crate::meta::config::{CacheTtl, Config, DatabaseConfig, DatabaseType};
 use crate::meta::store::{MetaError, MetaStore};
 use crate::meta::stores::DatabaseMetaStore;
 use crate::meta::stores::EtcdMetaStore;
@@ -57,30 +56,14 @@ impl MetaStoreFactory {
         }
 
         // Use TTL from config, or backend-specific defaults if not specified
-        let ttl_config = if config.cache.ttl.is_zero() {
-            CacheTtlConfig::for_backend(backend_type)
+        let ttl = if config.cache.ttl.is_zero() {
+            CacheTtl::for_backend(backend_type)
         } else {
             config.cache.ttl.clone()
         };
 
-        // Convert CacheTtlConfig to client::CacheTtlConfig
-        let client_ttl = crate::meta::client::CacheTtlConfig {
-            attr_ttl: ttl_config.attr_ttl,
-            dentry_ttl: ttl_config.dentry_ttl,
-            path_ttl: ttl_config.path_ttl,
-            inode_to_path_ttl: ttl_config.inode_to_path_ttl,
-            readdir_ttl: ttl_config.readdir_ttl,
-        };
         // Create MetaClient with configured capacity and TTL
-        let cached_store = MetaClient::with_capacity_and_config(
-            raw_store,
-            config.cache.capacity.attr,
-            config.cache.capacity.dentry,
-            config.cache.capacity.path,
-            config.cache.capacity.inode_to_path,
-            config.cache.capacity.readdir,
-            client_ttl,
-        );
+        let cached_store = MetaClient::new(raw_store, config.cache.capacity.clone(), ttl);
 
         Ok(Arc::new(cached_store))
     }

@@ -8,6 +8,7 @@ use slayerfs::meta::factory::MetaStoreFactory;
 use slayerfs::vfs::fs::VFS;
 use std::path::PathBuf;
 use tokio::signal;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -81,8 +82,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 加载 .env 文件
     dotenv::dotenv().ok();
 
-    let format = tracing_subscriber::fmt::format().with_ansi(false);
-    tracing_subscriber::fmt().event_format(format).init();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .or_else(|_| tracing_subscriber::EnvFilter::try_new("info"))
+        .unwrap();
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_ansi(true))
+        .with(filter)
+        .init();
 
     #[cfg(not(target_os = "linux"))]
     {
