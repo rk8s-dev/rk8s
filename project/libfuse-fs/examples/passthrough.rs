@@ -34,11 +34,20 @@ struct Args {
     allow_other: bool,
 }
 
+fn set_log() {
+    let log_level = "trace";
+    let filter_str = format!("libfuse_fs={}", log_level);
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(filter_str));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    tracing_subscriber::fmt::init();
+    set_log();
     debug!("Starting passthrough filesystem with args: {:?}", args);
+
     let fs = new_passthroughfs_layer(PassthroughArgs {
         root_dir: args.rootdir,
         mapping: args.options,
