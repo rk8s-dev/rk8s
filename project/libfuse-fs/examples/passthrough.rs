@@ -25,7 +25,7 @@ struct Args {
     #[arg(long)]
     rootdir: String,
     /// Use privileged mount instead of unprivileged (default false)
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = false)]
     privileged: bool,
     /// Options, currently contains uid/gid mapping info
     #[arg(long, short)]
@@ -37,15 +37,16 @@ struct Args {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-
+    tracing_subscriber::fmt::init();
+    debug!("Starting passthrough filesystem with args: {:?}", args);
     let fs = new_passthroughfs_layer(PassthroughArgs {
         root_dir: args.rootdir,
         mapping: args.options,
     })
     .await
     .expect("Failed to init passthrough fs");
-    let fs = LoggingFileSystem::new(fs);
 
+    let fs = LoggingFileSystem::new(fs);
     let mount_path = OsString::from(&args.mountpoint);
     let uid = unsafe { libc::getuid() };
     let gid = unsafe { libc::getgid() };

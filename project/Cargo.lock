@@ -3602,7 +3602,7 @@ dependencies = [
 
 [[package]]
 name = "libfuse-fs"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bitflags 2.9.4",
  "bytes",
