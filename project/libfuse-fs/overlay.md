@@ -131,7 +131,7 @@ classDiagram
         }
         
         class passthrough.HandleData {
-        	<<struct>>
+        	<<Struct>>
         	- inode: u64
         	- file: std::fs::File
         	- open_flags: u32
