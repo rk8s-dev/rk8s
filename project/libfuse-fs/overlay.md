@@ -145,7 +145,7 @@ classDiagram
         }
     }
 
-    Relationships
+    %% Relationships
     OverlayFs "1" *-- "1" Config : contains
     OverlayFs "1" *-- "1" PassthroughFs : has upper layer
     OverlayFs "1" *-- "n" PassthroughFs : has lower layers
