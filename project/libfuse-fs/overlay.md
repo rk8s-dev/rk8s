@@ -85,8 +85,8 @@ classDiagram
         + inode: u64
         + handle: AtomicU64
         # A wrapper of one inode in specific layer
-	}
-	
+    }
+    
     class Config {
         <<Struct>>
         + mountpoint: PathBuf
