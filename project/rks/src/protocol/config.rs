@@ -56,6 +56,7 @@ pub struct NetworkConfig {
 pub struct TLSConfig {
     pub enable: bool,
     pub vault_folder: PathBuf,
+    pub keep_dangerous_files: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,7 +87,6 @@ pub fn ip_or_dns(addr: impl AsRef<str>) -> Either<String, String> {
         }
     }
 }
-
 pub fn to_alt_names_and_ip_sans(
     ip_or_dns: Either<String, String>,
 ) -> (Option<String>, Option<String>) {

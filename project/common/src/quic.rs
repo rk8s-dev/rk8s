@@ -8,7 +8,7 @@ macro_rules! reply_and_bail {
     ($this:expr, $message:expr, $expected:pat) => {{
         let error_msg = $crate::invalid_rks_variant_error!($message, $expected);
         $this.send_msg(&error_msg).await?;
-        anyhow::bail!("bailed out after replied");
+        anyhow::bail!(std::format!("bailed out after replied: {}", &error_msg));
     }};
 }
 

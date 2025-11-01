@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 pub struct QUICServer {
     endpoint: Arc<Endpoint>,
@@ -58,8 +58,17 @@ impl QUICServer {
 
                         Box::pin(async move {
                             loop {
-                                let until = tokio::time::Instant::now()
-                                    + deadline.duration_since(SystemTime::now()).unwrap();
+                                let now = SystemTime::now();
+                                let duration = deadline.duration_since(now)
+                                    .unwrap_or_else(|err| {
+                                    info!(
+                                            "rotation deadline already passed by {:?}, rotating immediately",
+                                            err.duration()
+                                        );
+                                    Duration::ZERO
+                                });
+
+                                let until = tokio::time::Instant::now() + duration;
                                 tokio::time::sleep_until(until).await;
 
                                 info!("deadline reached, preparing rotate certificate");

@@ -54,9 +54,6 @@ pub mod shamir;
 pub mod storage;
 pub mod utils;
 
-/// Build timestamp in UTC
-pub const BUILD_TIME: &str = build_time::build_time_utc!();
-
 /// libvault version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

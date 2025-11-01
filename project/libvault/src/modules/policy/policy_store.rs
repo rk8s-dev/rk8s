@@ -191,6 +191,7 @@ pub struct PolicyEntry {
     #[default(PolicyType::Acl)]
     #[serde(rename = "type")]
     pub policy_type: PolicyType,
+    #[serde(default)]
     pub sentinel_policy: SentinelPolicy,
 }
 

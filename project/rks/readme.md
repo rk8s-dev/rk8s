@@ -45,7 +45,7 @@ network_config:
 tls_config:
   enable: false
   vault_url: ""
-  bootstrap_token: ""
+  keep_dangerous_files: false
 ```
 -   `addr`: The address and port where the RKS service listens. `addr` is the only field that you need modify.
 -   `xline_config`: Defines the backend Xline cluster, including endpoints, a prefix key for storing data, and a lease renewal margin.

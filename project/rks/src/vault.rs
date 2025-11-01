@@ -2,11 +2,12 @@ use crate::protocol::config::{
     config_ref, ip_or_dns, local_alt_names_and_ip_sans, to_alt_names_and_ip_sans,
 };
 use anyhow::Context;
+use common::IssueCertificateRequest;
 use libvault::RustyVault;
 use libvault::core::SealConfig;
 use libvault::modules::ResponseExt;
 use libvault::modules::auth::AuthModule;
-use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
+use libvault::modules::pki::types::IssueCertificateResponse;
 use libvault::storage::Backend;
 use libvault::storage::physical::file::FileBackend;
 use libvault::storage::xline::{XlineBackend, XlineOptions};
@@ -348,12 +349,14 @@ impl Vault {
             role, req.common_name
         );
 
+        let request = req.clone();
+
         let data = self
             .vault
             .write(
                 Some(self.root_token.as_str()),
                 &format!("pki/issue/{}-node", role),
-                req.to_map()?,
+                request.to_map()?,
             )
             .await
             .with_context(|| "Failed to issue certificate")?
@@ -403,8 +406,16 @@ impl Vault {
             .with_context(|| "keys.json doesn't contain a key named with `keys`")?;
         let keys_ref = keys.iter().map(|e| e.as_slice()).collect::<Vec<_>>();
 
-        // Stage1: generate certificates for vault, therefore, it can communicate with xline backend.
+        if !config_ref().tls_config.keep_dangerous_files {
+            tokio::fs::remove_file(folder.join("keys.json")).await?;
+        }
+
+        info!(
+            target: "rks::vault",
+            "migration stage1: generate certificates for vault",
+        );
         let mut vault = Vault::with_file_backend()?;
+
         vault.vault.unseal(&keys_ref).await?;
 
         let root_cert = tokio::fs::read_to_string(folder.join("root.pem")).await?;
@@ -428,6 +439,10 @@ impl Vault {
         }
 
         // Stage2: connect to xline backend and migrate.
+        info!(
+            target: "rks::vault",
+            "migration stage2: connect to xline backend and do migration",
+        );
         let xline_backend = Arc::new(XlineBackend::with_options(xline_options));
         let mut vault = Vault::new(xline_backend)?;
 

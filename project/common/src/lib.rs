@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use libcni::ip::route::{Interface, Route};
-use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 use serde::{Deserialize, Serialize};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Display, Formatter};
@@ -16,6 +15,8 @@ pub mod _private {
 
 pub mod lease;
 pub mod quic;
+
+pub use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TypeMeta {

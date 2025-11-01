@@ -1,6 +1,7 @@
 use crate::protocol::config::{config_ref, ip_or_dns, to_alt_names_and_ip_sans};
 use crate::vault::{CertRole, Vault};
-use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
+use common::IssueCertificateRequest;
+use libvault::modules::pki::types::IssueCertificateResponse;
 use quinn::crypto::rustls::QuicServerConfig;
 use rustls::RootCertStore;
 use rustls::pki_types::pem::PemObject;

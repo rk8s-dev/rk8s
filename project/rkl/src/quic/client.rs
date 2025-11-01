@@ -1,11 +1,10 @@
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::private::Sealed;
 use crate::quic::verifier::SkipServerVerification;
-use common::RksMessage;
 use common::quic::RksConnection;
+use common::{IssueCertificateRequest, IssueCertificateResponse, RksMessage};
 use derive_more::Deref;
 use libvault::modules::pki::CertExt;
-use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig, Endpoint};
 use rustls::RootCertStore;
