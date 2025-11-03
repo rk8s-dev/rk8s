@@ -74,7 +74,7 @@ start_overlay() {
 start_passthrough() {
 	info "Starting passthrough example"
 	local run_log="$LOG_DIR/passthrough.run.log"
-	"$REPO_ROOT/project/target/debug/examples/passthrough_example" \
+	"$REPO_ROOT/project/target/debug/examples/passthrough" \
 		--mountpoint "$PT_MNT" --rootdir "$PT_SRC" \
 		>"$run_log" 2>&1 & echo $! >"$WORK_DIR/passthrough.pid"
 	sleep 2

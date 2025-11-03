@@ -1,3 +1,18 @@
+# SQLite backend with custom cache configuration
+
 database:
   type: sqlite
-  url: "sqlite://metadata.db?mode=rwc"
+  url: "sqlite:///tmp/slayerfs/metadata.db"
+
+cache:
+  enabled: true
+  
+  capacity:
+    inode: 10000          # Inode metadata cache (includes attr, children, parent)
+    path: 5000            # Path resolution cache
+  
+  # Cache TTL (in seconds, supports decimal values)
+  ttl:
+    inode_ttl: 10.0       # 10 seconds for inode metadata
+    path_ttl: 10.0        # 10 seconds for path resolution
+

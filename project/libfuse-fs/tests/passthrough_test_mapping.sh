@@ -19,7 +19,7 @@ MY_GID=$(id -g)
 UID_MAP="uidmapping=${MY_UID}:0:1:66534:${MY_UID}:1"
 GID_MAP="gidmapping=${MY_GID}:0:1:66534:${MY_GID}:1"
 
-sudo ../../target/release/examples/passthrough_example \
+sudo ../../target/release/examples/passthrough \
     --mountpoint "$TEST_ROOT/mount" \
     --rootdir "$TEST_ROOT/source" \
     -o "${UID_MAP},${GID_MAP}" \

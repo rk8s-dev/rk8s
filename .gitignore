@@ -4,6 +4,7 @@
 .zed
 .buckal
 *.code-workspace
+/target
 
 # Mac
 .DS_Store

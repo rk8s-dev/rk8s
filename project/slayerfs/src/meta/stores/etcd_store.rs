@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use etcd_client::Client as EtcdClient;
 use log::{error, info};
+use serde::de::DeserializeOwned;
 use serde_json;
 use std::collections::HashSet;
 use std::path::Path;
@@ -85,6 +86,43 @@ impl EtcdMetaStore {
         }
     }
 
+    /// Helper: get key from etcd and deserialize JSON into T.
+    ///
+    /// Strict variant: returns Err(MetaError::Internal) when etcd client returns error.
+    async fn etcd_get_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, MetaError> {
+        let mut client = self.client.clone();
+        match client.get(key.to_string(), None).await {
+            Ok(resp) => {
+                if let Some(kv) = resp.kvs().first() {
+                    let obj: T = serde_json::from_slice(kv.value()).map_err(|e| {
+                        MetaError::Internal(format!("Failed to parse {}: {}", key, e))
+                    })?;
+                    Ok(Some(obj))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => Err(MetaError::Internal(format!(
+                "Failed to get key {}: {}",
+                key, e
+            ))),
+        }
+    }
+
+    /// Lenient variant: on etcd client error, log and return Ok(None).
+    async fn etcd_get_json_lenient<T: DeserializeOwned>(
+        &self,
+        key: &str,
+    ) -> Result<Option<T>, MetaError> {
+        match self.etcd_get_json::<T>(key).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                error!("Etcd get failed for {}: {}", key, e);
+                Ok(None)
+            }
+        }
+    }
+
     /// Initialize root directory
     async fn init_root_directory(&self) -> Result<(), MetaError> {
         let children_key = Self::etcd_children_key(1);
@@ -132,29 +170,24 @@ impl EtcdMetaStore {
         }
 
         let reverse_key = Self::etcd_reverse_key(inode);
-        let mut client = self.client.clone();
-
-        match client.get(reverse_key, None).await {
-            Ok(resp) => {
-                if let Some(kv) = resp.kvs().first() {
-                    let entry_info: EtcdEntryInfo = serde_json::from_slice(kv.value())?;
-                    if !entry_info.is_file {
-                        let permission = entry_info.permission().clone();
-                        let access_meta = AccessMetaModel::from_permission(
-                            inode,
-                            permission,
-                            entry_info.access_time,
-                            entry_info.modify_time,
-                            entry_info.create_time,
-                            entry_info.nlink as i32,
-                        );
-                        return Ok(Some(access_meta));
-                    }
-                }
-                Ok(None)
-            }
-            Err(_) => Ok(None),
+        // lenient: if etcd client fails, treat as not found (caller expects Option)
+        if let Ok(Some(entry_info)) = self
+            .etcd_get_json_lenient::<EtcdEntryInfo>(&reverse_key)
+            .await
+            && !entry_info.is_file
+        {
+            let permission = entry_info.permission().clone();
+            let access_meta = AccessMetaModel::from_permission(
+                inode,
+                permission,
+                entry_info.access_time,
+                entry_info.modify_time,
+                entry_info.create_time,
+                entry_info.nlink as i32,
+            );
+            return Ok(Some(access_meta));
         }
+        Ok(None)
     }
 
     /// Get directory content metadata
@@ -163,89 +196,69 @@ impl EtcdMetaStore {
         parent_inode: i64,
     ) -> Result<Option<Vec<ContentMetaModel>>, MetaError> {
         let children_key = Self::etcd_children_key(parent_inode);
-        let mut client = self.client.clone();
+        // strict read of children list
+        let dir_children_opt = self
+            .etcd_get_json_lenient::<EtcdDirChildren>(&children_key)
+            .await?;
+        let dir_children = match dir_children_opt {
+            Some(dc) => dc,
+            None => return Ok(None),
+        };
 
-        match client.get(children_key, None).await {
-            Ok(resp) => {
-                if let Some(kv) = resp.kvs().first() {
-                    let dir_children: EtcdDirChildren = serde_json::from_slice(kv.value())?;
+        if dir_children.children.is_empty() {
+            return Ok(None);
+        }
 
-                    if dir_children.children.is_empty() {
-                        return Ok(None);
-                    }
-
-                    let mut content_list = Vec::new();
-
-                    for child_name in &dir_children.children {
-                        let forward_key = Self::etcd_forward_key(parent_inode, child_name);
-                        if let Ok(forward_resp) = client.get(forward_key, None).await
-                            && let Some(forward_kv) = forward_resp.kvs().first()
-                        {
-                            let forward_entry: EtcdForwardEntry =
-                                serde_json::from_slice(forward_kv.value())?;
-
-                            let entry_type = if forward_entry.is_file {
-                                EntryType::File
-                            } else {
-                                EntryType::Directory
-                            };
-
-                            content_list.push(ContentMetaModel {
-                                inode: forward_entry.inode,
-                                parent_inode,
-                                entry_name: child_name.clone(),
-                                entry_type,
-                            });
-                        }
-                    }
-
-                    if content_list.is_empty() {
-                        Ok(None)
-                    } else {
-                        Ok(Some(content_list))
-                    }
+        let mut content_list = Vec::new();
+        for child_name in &dir_children.children {
+            let forward_key = Self::etcd_forward_key(parent_inode, child_name);
+            if let Ok(Some(forward_entry)) = self
+                .etcd_get_json_lenient::<EtcdForwardEntry>(&forward_key)
+                .await
+            {
+                let entry_type = if forward_entry.is_file {
+                    EntryType::File
                 } else {
-                    Ok(None)
-                }
+                    EntryType::Directory
+                };
+
+                content_list.push(ContentMetaModel {
+                    inode: forward_entry.inode,
+                    parent_inode,
+                    entry_name: child_name.clone(),
+                    entry_type,
+                });
             }
-            Err(_) => Ok(None),
+        }
+
+        if content_list.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(content_list))
         }
     }
 
     /// Get file metadata
     async fn get_file_meta(&self, inode: i64) -> Result<Option<FileMetaModel>, MetaError> {
         let reverse_key = Self::etcd_reverse_key(inode);
-        let mut client = self.client.clone();
-
-        match client.get(reverse_key.clone(), None).await {
-            Ok(resp) => {
-                if let Some(kv) = resp.kvs().first() {
-                    let entry_info: EtcdEntryInfo = serde_json::from_slice(kv.value())?;
-
-                    if entry_info.is_file {
-                        let permission = entry_info.permission().clone();
-                        let file_meta = FileMetaModel::from_permission(
-                            inode,
-                            entry_info.size.unwrap_or(0),
-                            permission,
-                            entry_info.access_time,
-                            entry_info.modify_time,
-                            entry_info.create_time,
-                            entry_info.nlink as i32,
-                        );
-                        Ok(Some(file_meta))
-                    } else {
-                        Ok(None)
-                    }
-                } else {
-                    Ok(None)
-                }
-            }
-            Err(e) => {
-                error!("Failed to get file meta from Etcd: {}", e);
-                Ok(None)
-            }
+        if let Ok(Some(entry_info)) = self
+            .etcd_get_json_lenient::<EtcdEntryInfo>(&reverse_key)
+            .await
+            && entry_info.is_file
+        {
+            let permission = entry_info.permission().clone();
+            let file_meta = FileMetaModel::from_permission(
+                inode,
+                entry_info.size.unwrap_or(0),
+                permission,
+                entry_info.access_time,
+                entry_info.modify_time,
+                entry_info.create_time,
+                entry_info.nlink as i32,
+            );
+            return Ok(Some(file_meta));
         }
+        Ok(None)
     }
 
     /// Create a new directory
@@ -279,6 +292,8 @@ impl EtcdMetaStore {
             modify_time: now,
             create_time: now,
             nlink: 2,
+            parent_inode,
+            entry_name: name.clone(),
         };
 
         let forward_key = Self::etcd_forward_key(parent_inode, &name);
@@ -301,27 +316,21 @@ impl EtcdMetaStore {
         let children_json = serde_json::to_string(&children)?;
 
         let parent_children_key = Self::etcd_children_key(parent_inode);
-        let parent_children = match client.get(parent_children_key.clone(), None).await {
-            Ok(resp) => {
-                if let Some(kv) = resp.kvs().first() {
-                    let mut children: EtcdDirChildren = serde_json::from_slice(kv.value())?;
-                    children.children.insert(name.clone());
-                    children
-                } else {
-                    let mut children = EtcdDirChildren {
-                        inode: parent_inode,
-                        children: HashSet::new(),
-                    };
-                    children.children.insert(name.clone());
-                    children
-                }
+        let parent_children = match self
+            .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
+            .await?
+        {
+            Some(mut children) => {
+                children.children.insert(name.clone());
+                children
             }
-            Err(e) => {
-                error!("Failed to get parent directory children: {}", e);
-                return Err(MetaError::Config(format!(
-                    "Failed to get parent directory children: {}",
-                    e
-                )));
+            None => {
+                let mut children = EtcdDirChildren {
+                    inode: parent_inode,
+                    children: HashSet::new(),
+                };
+                children.children.insert(name.clone());
+                children
             }
         };
         let parent_children_json = serde_json::to_string(&parent_children)?;
@@ -368,7 +377,6 @@ impl EtcdMetaStore {
         }
 
         let inode = self.generate_id().await?;
-        let mut client = self.client.clone();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let file_permission = Permission::new(0o644, 0, 0);
@@ -381,6 +389,8 @@ impl EtcdMetaStore {
             modify_time: now,
             create_time: now,
             nlink: 1,
+            parent_inode,
+            entry_name: name.clone(),
         };
 
         let forward_key = Self::etcd_forward_key(parent_inode, &name);
@@ -396,31 +406,26 @@ impl EtcdMetaStore {
         let reverse_json = serde_json::to_string(&entry_info)?;
 
         let parent_children_key = Self::etcd_children_key(parent_inode);
-        let parent_children = match client.get(parent_children_key.clone(), None).await {
-            Ok(resp) => {
-                if let Some(kv) = resp.kvs().first() {
-                    let mut children: EtcdDirChildren = serde_json::from_slice(kv.value())?;
-                    children.children.insert(name.clone());
-                    children
-                } else {
-                    let mut children = EtcdDirChildren {
-                        inode: parent_inode,
-                        children: HashSet::new(),
-                    };
-                    children.children.insert(name.clone());
-                    children
-                }
+        let parent_children = match self
+            .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
+            .await?
+        {
+            Some(mut children) => {
+                children.children.insert(name.clone());
+                children
             }
-            Err(e) => {
-                error!("Failed to get parent directory children: {}", e);
-                return Err(MetaError::Config(format!(
-                    "Failed to get parent directory children: {}",
-                    e
-                )));
+            None => {
+                let mut children = EtcdDirChildren {
+                    inode: parent_inode,
+                    children: HashSet::new(),
+                };
+                children.children.insert(name.clone());
+                children
             }
         };
         let parent_children_json = serde_json::to_string(&parent_children)?;
 
+        let mut client = self.client.clone();
         client
             .put(forward_key, forward_json, None)
             .await
@@ -644,79 +649,303 @@ impl MetaStore for EtcdMetaStore {
         self.create_directory(parent, name).await
     }
 
-    async fn rmdir(&self, _parent: i64, _name: &str) -> Result<(), MetaError> {
-        Err(MetaError::Internal(
-            "rmdir not implemented for Etcd".to_string(),
-        ))
+    async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        let mut client = self.client.clone();
+
+        let forward_key = Self::etcd_forward_key(parent, name);
+        let forward_entry: EtcdForwardEntry =
+            match self.etcd_get_json::<EtcdForwardEntry>(&forward_key).await? {
+                Some(fe) => fe,
+                None => return Err(MetaError::NotFound(parent)),
+            };
+
+        let child_ino = forward_entry.inode;
+
+        if forward_entry.is_file {
+            return Err(MetaError::Internal("Not a directory".to_string()));
+        }
+
+        let children_key = Self::etcd_children_key(child_ino);
+        if let Some(children) = self.etcd_get_json::<EtcdDirChildren>(&children_key).await?
+            && !children.children.is_empty()
+        {
+            return Err(MetaError::DirectoryNotEmpty(child_ino));
+        }
+
+        client
+            .delete(forward_key, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to delete forward index: {}", e)))?;
+
+        let reverse_key = Self::etcd_reverse_key(child_ino);
+        client
+            .delete(reverse_key, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to delete reverse index: {}", e)))?;
+
+        client
+            .delete(children_key, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to delete children index: {}", e)))?;
+
+        let parent_children_key = Self::etcd_children_key(parent);
+        if let Some(mut parent_children) = self
+            .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
+            .await?
+        {
+            parent_children.children.remove(name);
+            let updated_json = serde_json::to_string(&parent_children)?;
+            client
+                .put(parent_children_key, updated_json, None)
+                .await
+                .map_err(|e| {
+                    MetaError::Internal(format!("Failed to update parent children: {}", e))
+                })?;
+        }
+
+        Ok(())
     }
 
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
         self.create_file_internal(parent, name).await
     }
 
-    async fn unlink(&self, _parent: i64, _name: &str) -> Result<(), MetaError> {
-        Err(MetaError::Internal(
-            "unlink not implemented for Etcd".to_string(),
-        ))
+    async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        let mut client = self.client.clone();
+
+        let forward_key = Self::etcd_forward_key(parent, name);
+        let forward_entry: EtcdForwardEntry =
+            match self.etcd_get_json::<EtcdForwardEntry>(&forward_key).await? {
+                Some(fe) => fe,
+                None => return Err(MetaError::NotFound(parent)),
+            };
+
+        let file_ino = forward_entry.inode;
+
+        if !forward_entry.is_file {
+            return Err(MetaError::Internal("Is a directory".to_string()));
+        }
+
+        client
+            .delete(forward_key, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to delete forward index: {}", e)))?;
+
+        let reverse_key = Self::etcd_reverse_key(file_ino);
+        client
+            .delete(reverse_key, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to delete reverse index: {}", e)))?;
+
+        let parent_children_key = Self::etcd_children_key(parent);
+        if let Some(mut parent_children) = self
+            .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
+            .await?
+        {
+            parent_children.children.remove(name);
+            let updated_json = serde_json::to_string(&parent_children)?;
+            client
+                .put(parent_children_key, updated_json, None)
+                .await
+                .map_err(|e| {
+                    MetaError::Internal(format!("Failed to update parent children: {}", e))
+                })?;
+        }
+
+        Ok(())
     }
 
     async fn rename(
         &self,
-        _old_parent: i64,
-        _old_name: &str,
-        _new_parent: i64,
-        _new_name: String,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: String,
     ) -> Result<(), MetaError> {
-        Err(MetaError::Internal(
-            "rename not implemented for Etcd".to_string(),
-        ))
+        let old_forward_key = Self::etcd_forward_key(old_parent, old_name);
+        let forward_entry = self
+            .etcd_get_json::<EtcdForwardEntry>(&old_forward_key)
+            .await?
+            .ok_or(MetaError::NotFound(old_parent))?;
+
+        let entry_ino = forward_entry.inode;
+        let is_file = forward_entry.is_file;
+
+        let new_forward_key = Self::etcd_forward_key(new_parent, &new_name);
+        if self
+            .etcd_get_json::<EtcdForwardEntry>(&new_forward_key)
+            .await?
+            .is_some()
+        {
+            return Err(MetaError::AlreadyExists {
+                parent: new_parent,
+                name: new_name,
+            });
+        }
+
+        let reverse_key = Self::etcd_reverse_key(entry_ino);
+        let mut entry_info = self
+            .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+            .await?
+            .ok_or(MetaError::NotFound(entry_ino))?;
+
+        entry_info.parent_inode = new_parent;
+        entry_info.entry_name = new_name.clone();
+        entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        let mut client = self.client.clone();
+        let updated_json = serde_json::to_string(&entry_info)?;
+        client
+            .put(reverse_key, updated_json, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to update reverse index: {}", e)))?;
+
+        let new_forward_entry = EtcdForwardEntry {
+            parent_inode: new_parent,
+            name: new_name.clone(),
+            inode: entry_ino,
+            is_file,
+        };
+        let new_forward_json = serde_json::to_string(&new_forward_entry)?;
+        client
+            .put(new_forward_key, new_forward_json, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to create forward index: {}", e)))?;
+
+        client.delete(old_forward_key, None).await.map_err(|e| {
+            MetaError::Internal(format!("Failed to delete old forward index: {}", e))
+        })?;
+
+        let old_parent_children_key = Self::etcd_children_key(old_parent);
+        if let Some(mut parent_children) = self
+            .etcd_get_json::<EtcdDirChildren>(&old_parent_children_key)
+            .await?
+        {
+            parent_children.children.remove(old_name);
+            let updated_json = serde_json::to_string(&parent_children)?;
+            client
+                .put(old_parent_children_key, updated_json, None)
+                .await
+                .map_err(|e| {
+                    MetaError::Internal(format!("Failed to update old parent children: {}", e))
+                })?;
+        }
+
+        let new_parent_children_key = Self::etcd_children_key(new_parent);
+        let parent_children = match self
+            .etcd_get_json::<EtcdDirChildren>(&new_parent_children_key)
+            .await?
+        {
+            Some(mut children) => {
+                children.children.insert(new_name.clone());
+                children
+            }
+            None => {
+                let mut children = EtcdDirChildren {
+                    inode: new_parent,
+                    children: HashSet::new(),
+                };
+                children.children.insert(new_name);
+                children
+            }
+        };
+        let children_json = serde_json::to_string(&parent_children)?;
+        client
+            .put(new_parent_children_key, children_json, None)
+            .await
+            .map_err(|e| {
+                MetaError::Internal(format!("Failed to update new parent children: {}", e))
+            })?;
+
+        Ok(())
     }
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
-        let mut client = self.client.clone();
         let reverse_key = Self::etcd_reverse_key(ino);
 
-        match client.get(reverse_key.clone(), None).await {
-            Ok(resp) => {
-                if let Some(kv) = resp.kvs().first() {
-                    let mut entry_info: EtcdEntryInfo = serde_json::from_slice(kv.value())
-                        .map_err(|e| {
-                            MetaError::Internal(format!("Failed to parse entry info: {}", e))
-                        })?;
+        let mut entry_info = self
+            .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
 
-                    if !entry_info.is_file {
-                        return Err(MetaError::Internal(
-                            "Cannot set size for directory".to_string(),
-                        ));
-                    }
-
-                    entry_info.size = Some(size as i64);
-                    entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-
-                    let updated_json = serde_json::to_string(&entry_info).map_err(|e| {
-                        MetaError::Internal(format!("Failed to serialize entry info: {}", e))
-                    })?;
-
-                    client
-                        .put(reverse_key, updated_json, None)
-                        .await
-                        .map_err(|e| {
-                            MetaError::Internal(format!(
-                                "Failed to update file size in Etcd: {}",
-                                e
-                            ))
-                        })?;
-
-                    Ok(())
-                } else {
-                    Err(MetaError::NotFound(ino))
-                }
-            }
-            Err(e) => Err(MetaError::Internal(format!(
-                "Failed to get file from Etcd: {}",
-                e
-            ))),
+        if !entry_info.is_file {
+            return Err(MetaError::Internal(
+                "Cannot set size for directory".to_string(),
+            ));
         }
+
+        entry_info.size = Some(size as i64);
+        entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        let updated_json = serde_json::to_string(&entry_info)
+            .map_err(|e| MetaError::Internal(format!("Failed to serialize entry info: {}", e)))?;
+
+        let mut client = self.client.clone();
+        client
+            .put(reverse_key, updated_json, None)
+            .await
+            .map_err(|e| {
+                MetaError::Internal(format!("Failed to update file size in Etcd: {}", e))
+            })?;
+
+        Ok(())
+    }
+
+    async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
+        if ino == 1 {
+            return Ok(None);
+        }
+
+        let reverse_key = Self::etcd_reverse_key(ino);
+        if let Some(entry_info) = self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+            Ok(Some(entry_info.parent_inode))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError> {
+        if ino == 1 {
+            return Ok(Some("/".to_string()));
+        }
+
+        let reverse_key = Self::etcd_reverse_key(ino);
+        if let Some(entry_info) = self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+            Ok(Some(entry_info.entry_name))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError> {
+        if ino == 1 {
+            return Ok(Some("/".to_string()));
+        }
+
+        let mut path_parts = Vec::new();
+        let mut current_ino = ino;
+
+        loop {
+            let reverse_key = Self::etcd_reverse_key(current_ino);
+
+            let entry_info = match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+                Some(info) => info,
+                None => return Ok(None),
+            };
+
+            path_parts.push(entry_info.entry_name);
+
+            let parent = entry_info.parent_inode;
+            if parent == 1 {
+                break;
+            }
+
+            current_ino = parent;
+        }
+
+        path_parts.reverse();
+        let path = format!("/{}", path_parts.join("/"));
+        Ok(Some(path))
     }
 
     fn root_ino(&self) -> i64 {

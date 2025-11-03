@@ -137,7 +137,7 @@ where
     // 调用 VFS：由 parent inode + name -> child inode；若找到，后续封装 ReplyEntry（暂占位）
     async fn lookup(&self, req: Request, parent: u64, name: &OsStr) -> FuseResult<ReplyEntry> {
         let name_str = name.to_string_lossy();
-        let child = self.child_of(parent as i64, name_str.as_ref());
+        let child = self.child_of(parent as i64, name_str.as_ref()).await;
         let Some(child_ino) = child else {
             return Err(libc::ENOENT.into());
         };
@@ -210,7 +210,7 @@ where
         _write_flags: u32,
         _flags: u32,
     ) -> FuseResult<ReplyWrite> {
-        let Some(path) = self.path_of(ino as i64) else {
+        let Some(path) = self.path_of(ino as i64).await else {
             return Err(libc::ENOENT.into());
         };
         let n = self
@@ -247,7 +247,7 @@ where
         set_attr: SetAttr,
     ) -> FuseResult<ReplyAttr> {
         if let Some(size) = set_attr.size {
-            let Some(path) = self.path_of(ino as i64) else {
+            let Some(path) = self.path_of(ino as i64).await else {
                 return Err(libc::ENOENT.into());
             };
             self.truncate(&path, size).await.map_err(|_| libc::EIO)?;
@@ -292,7 +292,7 @@ where
             offset: 1,
         });
         // ".."（父 inode 不易准确获取，先用 root 替代或自身）
-        let parent_ino = self.parent_of(ino as i64).unwrap_or(self.root_ino()) as u64;
+        let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
         all.push(DirectoryEntry {
             inode: parent_ino,
             kind: FuseFileType::Directory,
@@ -361,7 +361,7 @@ where
             return Err(libc::ENOENT.into());
         }
         // ".."
-        let parent_ino = self.parent_of(ino as i64).unwrap_or(self.root_ino()) as u64;
+        let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
         if let Some(pattr) = self.stat_ino(parent_ino as i64).await {
             let f = vfs_to_fuse_attr(&pattr, &req);
             all.push(DirectoryEntryPlus {
@@ -443,11 +443,11 @@ where
             return Err(libc::ENOTDIR.into());
         }
         // 冲突检查
-        if let Some(_child) = self.child_of(parent as i64, name.as_ref()) {
+        if let Some(_child) = self.child_of(parent as i64, name.as_ref()).await {
             return Err(libc::EEXIST.into());
         }
         // 构造路径并创建
-        let Some(mut p) = self.path_of(parent as i64) else {
+        let Some(mut p) = self.path_of(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
         if p != "/" {
@@ -483,7 +483,7 @@ where
         if !matches!(pattr.kind, VfsFileType::Dir) {
             return Err(libc::ENOTDIR.into());
         }
-        let Some(mut p) = self.path_of(parent as i64) else {
+        let Some(mut p) = self.path_of(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
         if p != "/" {
@@ -518,7 +518,7 @@ where
             return Err(libc::ENOTDIR.into());
         }
         // 目标必须存在且为文件
-        let Some(child) = self.child_of(parent as i64, name.as_ref()) else {
+        let Some(child) = self.child_of(parent as i64, name.as_ref()).await else {
             return Err(libc::ENOENT.into());
         };
         let Some(cattr) = self.stat_ino(child).await else {
@@ -527,7 +527,7 @@ where
         if !matches!(cattr.kind, VfsFileType::File) {
             return Err(libc::EISDIR.into());
         }
-        let Some(mut p) = self.path_of(parent as i64) else {
+        let Some(mut p) = self.path_of(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
         if p != "/" {
@@ -554,7 +554,7 @@ where
             return Err(libc::ENOTDIR.into());
         }
         // 目标应为目录
-        let Some(child) = self.child_of(parent as i64, name.as_ref()) else {
+        let Some(child) = self.child_of(parent as i64, name.as_ref()).await else {
             return Err(libc::ENOENT.into());
         };
         let Some(cattr) = self.stat_ino(child).await else {
@@ -563,7 +563,7 @@ where
         if !matches!(cattr.kind, VfsFileType::Dir) {
             return Err(libc::ENOTDIR.into());
         }
-        let Some(mut p) = self.path_of(parent as i64) else {
+        let Some(mut p) = self.path_of(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
         if p != "/" {
@@ -592,7 +592,7 @@ where
         let name = name.to_string_lossy();
         let new_name = new_name.to_string_lossy();
         // 检查源存在
-        let Some(src_ino) = self.child_of(parent as i64, name.as_ref()) else {
+        let Some(src_ino) = self.child_of(parent as i64, name.as_ref()).await else {
             return Err(libc::ENOENT.into());
         };
         let Some(_src_attr) = self.stat_ino(src_ino).await else {
@@ -610,20 +610,21 @@ where
         // 目标存在性检查
         if self
             .child_of(new_parent as i64, new_name.as_ref())
+            .await
             .is_some()
         {
             return Err(libc::EEXIST.into());
         }
 
         // 拼接路径并执行
-        let Some(mut oldp) = self.path_of(parent as i64) else {
+        let Some(mut oldp) = self.path_of(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
         if oldp != "/" {
             oldp.push('/');
         }
         oldp.push_str(&name);
-        let Some(mut newp) = self.path_of(new_parent as i64) else {
+        let Some(mut newp) = self.path_of(new_parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
         if newp != "/" {

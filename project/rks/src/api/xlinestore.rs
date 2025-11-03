@@ -325,4 +325,84 @@ impl XlineStore {
         let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
         Ok((watcher, stream))
     }
+
+    /// Insert a replicaset YAML definition into xline.
+    pub async fn insert_replicaset_yaml(&self, rs_name: &str, rs_yaml: &str) -> Result<()> {
+        let key = format!("/registry/replicasets/{rs_name}");
+        let mut client = self.client.write().await;
+        client.put(key, rs_yaml, Some(PutOptions::new())).await?;
+        Ok(())
+    }
+
+    /// Get a replicaset YAML definition from xline.
+    pub async fn get_replicaset_yaml(&self, rs_name: &str) -> Result<Option<String>> {
+        let key = format!("/registry/replicasets/{rs_name}");
+        let mut client = self.client.write().await;
+        let resp = client.get(key, None).await?;
+        Ok(resp
+            .kvs()
+            .first()
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string()))
+    }
+
+    /// Delete a replicaset from xline.
+    pub async fn delete_replicaset(&self, rs_name: &str) -> Result<()> {
+        let key = format!("/registry/replicasets/{rs_name}");
+        let mut client = self.client.write().await;
+        client.delete(key, None).await?;
+        Ok(())
+    }
+
+    /// List all replicaset YAMLs (deserialize values).
+    pub async fn list_replicasets(&self) -> Result<Vec<ReplicaSet>> {
+        let key = "/registry/replicasets/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+
+        let rss: Vec<ReplicaSet> = resp
+            .kvs()
+            .iter()
+            .filter_map(|kv| {
+                let yaml_str = String::from_utf8_lossy(kv.value());
+                serde_yaml::from_str::<ReplicaSet>(&yaml_str).ok()
+            })
+            .collect();
+
+        Ok(rss)
+    }
+
+    /// Take a snapshot of all replicasets and return them with the current revision.
+    pub async fn replicasets_snapshot_with_rev(&self) -> Result<(Vec<(String, String)>, i64)> {
+        let key_prefix = "/registry/replicasets/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key_prefix.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+        let rev = resp.header().map(|h| h.revision()).unwrap_or(0);
+        let items: Vec<(String, String)> = resp
+            .kvs()
+            .iter()
+            .map(|kv| {
+                (
+                    String::from_utf8_lossy(kv.key()).replace("/registry/replicasets/", ""),
+                    String::from_utf8_lossy(kv.value()).to_string(),
+                )
+            })
+            .collect();
+        Ok((items, rev))
+    }
+
+    /// Create a watch on all replicasets with prefix `/registry/replicasets/`, starting from a given revision.
+    pub async fn watch_replicasets(&self, start_rev: i64) -> Result<(Watcher, WatchStream)> {
+        let key_prefix = "/registry/replicasets/".to_string();
+        let opts = WatchOptions::new()
+            .with_prefix()
+            .with_prev_key()
+            .with_start_revision(start_rev);
+        let mut client = self.client.write().await;
+        let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
+        Ok((watcher, stream))
+    }
 }
