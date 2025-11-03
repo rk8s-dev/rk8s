@@ -16,8 +16,14 @@ pub async fn dispatch_worker(
             handle_heartbeat(xline_store, &node_name, status).await?;
             conn.send_msg(&RksMessage::Ack).await?;
         }
-        RksMessage::Error(err_msg) => error!("[worker dispatch] reported error: {err_msg}"),
-        RksMessage::Ack => info!("[worker dispatch] received Ack"),
+        RksMessage::Error(err_msg) => error!(
+            target: "rks::node::worker_dispatch",
+            "reported error: {err_msg}"
+        ),
+        RksMessage::Ack => info!(
+            target: "rks::node::worker_dispatch",
+            "received Ack"
+        ),
 
         RksMessage::SetPodip((pod_name, pod_ip)) => {
             if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await? {
@@ -26,17 +32,20 @@ pub async fn dispatch_worker(
                 let new_yaml = serde_yaml::to_string(&pod)?;
                 xline_store.insert_pod_yaml(&pod_name, &new_yaml).await?;
                 info!(
-                    "[worker dispatch] updated Pod {} with IP {}",
-                    pod_name, pod_ip
+                    target: "rks::node::worker_dispatch",
+                    "updated Pod {pod_name} with IP {pod_ip}"
                 );
             } else {
                 warn!(
-                    "[worker dispatch] Pod {} not found when setting IP",
-                    pod_name
+                    target: "rks::node::worker_dispatch",
+                    "Pod {pod_name} not found when setting IP"
                 );
             }
         }
-        _ => warn!("[worker dispatch] unknown or unexpected message from worker"),
+        _ => warn!(
+            target: "rks::node::worker_dispatch",
+            "unknown or unexpected message from worker"
+        ),
     }
     Ok(())
 }
@@ -57,14 +66,23 @@ pub async fn dispatch_user(
 
         RksMessage::ListPod => {
             let pods = xline_store.list_pod_names().await?;
-            info!("[user dispatch] list current pod: {pods:?}");
+            info!(
+                target: "rks::node::user_dispatch",
+                "list current pod: {pods:?}"
+            );
             conn.send_msg(&RksMessage::ListPodRes(pods)).await?;
         }
 
         RksMessage::GetNodeCount => {
-            info!("[user dispatch] GetNodeCount received");
+            info!(
+                target: "rks::node::user_dispatch",
+                "GetNodeCount received"
+            );
         }
-        _ => warn!("[user dispatch] unknown message"),
+        _ => warn!(
+            target: "rks::node::user_dispatch",
+            "unknown message"
+        ),
     }
     Ok(())
 }
@@ -80,12 +98,12 @@ async fn handle_heartbeat(
         node.spec.taints = Node::derive_taints_from_conditions(&node.status.conditions);
         let new_yaml = serde_yaml::to_string(&node)?;
         xline_store.insert_node_yaml(node_name, &new_yaml).await?;
-        info!("[worker dispatch] heartbeat updated Node {}", node_name);
-    } else {
-        warn!(
-            "[server] heartbeat received for unknown node: {}",
-            node_name
+        info!(
+            target: "rks::node::worker_dispatch",
+            "heartbeat updated Node {node_name}"
         );
+    } else {
+        warn!("heartbeat received for unknown node: {node_name}");
     }
     Ok(())
 }

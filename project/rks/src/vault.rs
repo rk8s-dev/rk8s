@@ -186,7 +186,10 @@ impl Vault {
             .and_then(|v| v.as_str())
             .with_context(|| "Failed to get private key of root ca from vault response")?;
 
-        info!("[vault] generated/exported cluster root CA");
+        info!(
+            target: "rks::vault",
+            "generated/exported cluster root CA"
+        );
 
         tokio::fs::write(folder.join("root.pem"), cert_pem).await?;
         tokio::fs::write(folder.join("root.key"), private_key).await?;
@@ -245,7 +248,7 @@ impl Vault {
 
         info!(
             target: "rks::vault",
-            "successfully wrote all certificates to xline cluster",
+            "successfully wrote all certificates to xline cluster"
         );
         Ok(())
     }
@@ -345,8 +348,9 @@ impl Vault {
         req: &IssueCertificateRequest,
     ) -> anyhow::Result<IssueCertificateResponse> {
         debug!(
-            "[vault] issuing certificate for role={} (cn={:?})",
-            role, req.common_name
+            target: "rks::vault",
+            "issuing certificate for role={role} (cn={:?})",
+            req.common_name
         );
 
         let request = req.clone();
@@ -366,7 +370,12 @@ impl Vault {
 
         let response = serde_json::from_value(Value::Object(data))
             .with_context(|| "Failed to deserialize issue certificate response")
-            .inspect(|_| info!("[vault] certificate issued for role={}", role))?;
+            .inspect(|_| {
+                info!(
+                    target: "rks::vault",
+                    "certificate issued for role={role}"
+                )
+            })?;
         Ok(response)
     }
 
@@ -384,7 +393,7 @@ impl Vault {
     pub async fn migrate() -> anyhow::Result<Self> {
         info!(
             target: "rks::vault",
-            "preparing to migrate from file backend",
+            "preparing to migrate from file backend"
         );
 
         let folder = &config_ref().tls_config.vault_folder;
@@ -412,7 +421,7 @@ impl Vault {
 
         info!(
             target: "rks::vault",
-            "migration stage1: generate certificates for vault",
+            "migration stage1: generate certificates for vault"
         );
         let mut vault = Vault::with_file_backend()?;
 
@@ -441,7 +450,7 @@ impl Vault {
         // Stage2: connect to xline backend and migrate.
         info!(
             target: "rks::vault",
-            "migration stage2: connect to xline backend and do migration",
+            "migration stage2: connect to xline backend and do migration"
         );
         let xline_backend = Arc::new(XlineBackend::with_options(xline_options));
         let mut vault = Vault::new(xline_backend)?;
@@ -467,7 +476,7 @@ impl Vault {
 
         info!(
             target: "rks::vault",
-            "successfully migrated from file backend",
+            "successfully migrated from file backend"
         );
         Ok(vault)
     }

@@ -54,11 +54,14 @@ async fn main() -> anyhow::Result<()> {
             xline_store
                 .insert_network_config(&xline_config.prefix, &cfg.network_config)
                 .await?;
-            info!("[rks] initializing dns server");
+            info!(target: "rks::main", "initializing dns server");
             let store = xline_store.clone();
             tokio::spawn(async move {
                 if let Err(err) = run_dns_server(store, cfg.dns_config.port).await {
-                    error!("[rks] dns server exited with error: {err:?}");
+                    error!(
+                        target: "rks::main",
+                        "dns server exited with error: {err:?}"
+                    );
                 }
             });
 
@@ -70,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
                 .to_string();
             setup_iptable(server_ip, cfg.dns_config.port).await?;
 
-            info!("[rks] listening on {}", cfg.addr);
+            info!(target: "rks::main", "listening on {}", cfg.addr);
 
             let sm = match init::new_subnet_manager(xline_config.clone(), option.clone()).await {
                 Ok(m) => m,

@@ -80,7 +80,10 @@ impl PodsWatcher {
                 self.conn
                     .send_msg(&RksMessage::CreatePod(Box::new(pod_task)))
                     .await?;
-                info!("[watch_pods] sent existing pod to worker: {pod_name}");
+                info!(
+                    target: "rks::node::watch_pods",
+                    "sent existing pod to worker: {pod_name}"
+                );
             }
         }
 
@@ -90,15 +93,18 @@ impl PodsWatcher {
     async fn stream_updates(&self, node_id: String, start_rev: i64) -> anyhow::Result<()> {
         let (mut watcher, mut stream) = self.shared.xline_store.watch_pods(start_rev).await?;
         info!(
-            "[watch_pods] start watching pods from revision {}",
-            start_rev
+            target: "rks::node::watch_pods",
+            "start watching pods from revision {start_rev}"
         );
 
         while let Some(resp) = stream.next().await {
             match resp {
                 Ok(resp) => self.handle_watch_event(resp, &node_id).await?,
                 Err(e) => {
-                    error!("[watch_pods] Watch error: {e}");
+                    error!(
+                        target: "rks::node::watch_pods",
+                        "watch stream error: {e}"
+                    );
                     break;
                 }
             }
@@ -118,12 +124,12 @@ impl PodsWatcher {
                 let cancel = worker_session.cancel_notify.clone();
 
                 if let Err(e) = local_manager.complete_lease(lease, cancel).await {
-                    error!("[server] complete_lease error for node={node_id}: {e:?}");
+                    error!("complete_lease error for node={node_id}: {e:?}");
                 }
                 return;
             }
 
-            error!("[server] no active worker session for node={node_id}");
+            error!("no active worker session for node={node_id}");
         });
     }
 
@@ -155,7 +161,8 @@ impl PodsWatcher {
         pod: &PodTask,
     ) -> anyhow::Result<()> {
         info!(
-            "[watch_pods] Pod {} assigned to {:?}",
+            target: "rks::node::watch_pods",
+            "Pod {} assigned to {:?}",
             pod.metadata.name, pod.spec.node_name
         );
 

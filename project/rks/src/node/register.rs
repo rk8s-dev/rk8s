@@ -37,7 +37,7 @@ impl<'a> NodeRegister<'a> {
         self.register_node_in_registry(node, &id, lease).await?;
 
         let config = self.shared.local_manager.get_network_config().await?;
-        info!("[server] get the network config : {config:?}");
+        info!("fetched network config: {config:?}");
         self.node_config_network(&id, &config, subnet, ipv6_subnet)
             .await?;
 
@@ -65,7 +65,7 @@ impl<'a> NodeRegister<'a> {
             .acquire_lease(&lease_attrs)
             .await?;
 
-        info!("[server] racquire worker node lease : {lease:?}");
+        info!("acquired worker node lease: {lease:?}");
         Ok(lease)
     }
 
@@ -84,8 +84,8 @@ impl<'a> NodeRegister<'a> {
         self.shared.xline_store.insert_node(&node).await?;
 
         info!(
-            "[server] registered worker node: {node_id}, ip: {}",
-            self.conn.remote_address().ip(),
+            "registered worker node: {node_id}, ip: {}",
+            self.conn.remote_address().ip()
         );
 
         let session = Arc::new(WorkerSession::new(msg_tx, lease));

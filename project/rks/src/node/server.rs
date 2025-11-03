@@ -59,12 +59,11 @@ impl QUICServer {
                         Box::pin(async move {
                             loop {
                                 let now = SystemTime::now();
-                                let duration = deadline.duration_since(now)
-                                    .unwrap_or_else(|err| {
+                                let duration = deadline.duration_since(now).unwrap_or_else(|err| {
                                     info!(
-                                            "rotation deadline already passed by {:?}, rotating immediately",
-                                            err.duration()
-                                        );
+                                        "rotation deadline already passed by {:?}, rotating immediately",
+                                        err.duration()
+                                    );
                                     Duration::ZERO
                                 });
 
@@ -172,7 +171,7 @@ impl AuthConnection<Verified> {
                 register.register(node.clone()).await
             }
             RksMessage::UserRequest(_req) => {
-                info!("[server] user connection established");
+                info!("user connection established");
                 Ok((false, None))
             }
             _ => reply_and_bail!(
@@ -186,7 +185,7 @@ impl AuthConnection<Verified> {
     async fn dispatch_loop(&self, is_worker: bool) -> anyhow::Result<()> {
         loop {
             let msg = self.conn.fetch_msg().await?;
-            info!("[server] fetched message: {msg}");
+            info!("fetched message: {msg}");
 
             if is_worker {
                 log_error!(dispatch_worker(msg, &self.conn, &self.shared.xline_store).await);
@@ -201,15 +200,15 @@ impl AuthConnection<Verified> {
 #[async_trait]
 impl ConnectionState for Unauthenticated {
     async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()> {
-        debug!("[server] waiting for auth request from client");
+        debug!("waiting for auth request from client");
 
         let msg = conn.conn.fetch_msg().await?;
 
-        debug!("[server] received request from client");
+        debug!("received request from client");
 
         match &msg {
             RksMessage::CertificateSign { req, token } => {
-                debug!("[server] return issued certificate to client");
+                debug!("return issued certificate to client");
 
                 let reply = match conn.shared.vault.validate_token(token).await {
                     Ok(_) => {
@@ -221,9 +220,9 @@ impl ConnectionState for Unauthenticated {
 
                 conn.conn.send_msg(&reply).await?;
 
-                debug!("[server] waiting for client to close auth connection");
+                debug!("waiting for client to close auth connection");
                 let _ = conn.conn.closed().await;
-                debug!("[server] auth connection closed by client");
+                debug!("auth connection closed by client");
             }
             _ => reply_and_bail!(conn.conn, &msg, RksMessage::CertificateSign { .. }),
         }

@@ -17,27 +17,39 @@ pub(crate) struct LeaseSynchronizer {
 impl LeaseSynchronizer {
     pub(crate) fn spawn(manager: Arc<LocalManager>, registry: Arc<NodeRegistry>) {
         tokio::spawn(async move {
-            info!("[lease] synchronizer task spawned");
+            info!(
+                target: "rks::node::lease",
+                "synchronizer task spawned"
+            );
             Self { manager, registry }.run().await;
         });
     }
 
     async fn run(self) {
         let Self { manager, registry } = self;
-        info!("[lease] subscribing to lease updates");
+        info!(
+            target: "rks::node::lease",
+            "subscribing to lease updates"
+        );
         let mut lease_rx = Self::subscribe(manager);
 
         while let Some(results) = lease_rx.recv().await {
             Self::process_results(registry.clone(), results).await;
         }
-        warn!("[lease] lease update channel closed; stopping synchronizer");
+        warn!(
+            target: "rks::node::lease",
+            "lease update channel closed; stopping synchronizer"
+        );
     }
 
     fn subscribe(manager: Arc<LocalManager>) -> mpsc::Receiver<Vec<LeaseWatchResult>> {
         let (lease_tx, lease_rx) = mpsc::channel::<Vec<LeaseWatchResult>>(16);
         tokio::spawn(async move {
             match manager.watch_leases(lease_tx).await {
-                Ok(_) => info!("[lease] watch_leases stream ended"),
+                Ok(_) => info!(
+                    target: "rks::node::lease",
+                    "watch_leases stream ended"
+                ),
                 Err(e) => error!("watch_leases terminated with error: {e:?}"),
             }
         });
@@ -50,19 +62,22 @@ impl LeaseSynchronizer {
             .flat_map(|r| r.snapshot.clone())
             .collect::<Vec<_>>();
 
-        info!("[server] received all leases: {leases:?}");
+        info!("received all leases: {leases:?}");
 
         let node_ids: Vec<String> = leases.iter().map(|l| l.attrs.node_id.clone()).collect();
 
         if node_ids.is_empty() {
-            debug!("[lease] no routed nodes in current snapshot");
+            debug!(
+                target: "rks::node::lease",
+                "no routed nodes in current snapshot"
+            );
             return;
         }
 
         for node_id in node_ids {
             let routes = calculate_routes_for_node(&node_id, &leases);
 
-            info!("[server] sending routes to {node_id}: {routes:?}");
+            info!("sending routes to {node_id}: {routes:?}");
 
             let msg = RksMessage::UpdateRoutes(node_id.clone(), routes);
             if let Some(worker) = registry.get(&node_id).await {
