@@ -1,4 +1,6 @@
-## RKS initialization
+The `libvault` serves as the certificate manager in rk8s.
+
+## RKS initialization 
 
 ```mermaid
 sequenceDiagram
