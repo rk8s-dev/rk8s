@@ -1034,25 +1034,6 @@ impl SystemBackend {
             }
         }
 
-        let entries = self.core.mounts_router.entries.read()?;
-        for (path, entry) in entries.iter() {
-            let me = entry.read()?;
-            if has_access(&me) {
-                if is_authed {
-                    secret_mounts.insert(path.clone(), Value::Object(self.mount_info(&me)));
-                } else {
-                    secret_mounts.insert(
-                        path.clone(),
-                        json!({
-                            "type": me.logical_type.clone(),
-                            "description": me.description.clone(),
-                            "options": me.options.clone(),
-                        }),
-                    );
-                }
-            }
-        }
-
         let entries = auth_module.mounts_router.entries.read()?;
         for (path, entry) in entries.iter() {
             let me = entry.read()?;

@@ -194,7 +194,7 @@ pub fn ca_issue_fields() -> HashMap<String, Arc<Field>> {
             "permitted_dns_domains",
             Field::builder()
                 .field_type(FieldType::Str)
-                .default_value("rsa")
+                .default_value("")
                 .description(
                     r#"Domains for which this certificate is allowed to
 sign or issue child certificates. If set, all DNS names (subject and alt) on

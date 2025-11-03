@@ -54,7 +54,7 @@ pub struct SentinelPolicy {}
 /// The `Policy` struct holds the main policy details including its rules and configurations.
 #[derive(Debug, Clone, Default)]
 pub struct Policy {
-    pub sentinal_policy: SentinelPolicy,
+    pub sentinel_policy: SentinelPolicy,
     pub name: String,
     pub paths: Vec<PolicyPathRules>,
     pub raw: String,

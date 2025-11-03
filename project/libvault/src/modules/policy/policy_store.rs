@@ -528,7 +528,7 @@ impl PolicyStore {
             templated: policy.templated,
             raw: policy.raw.clone(),
             policy_type: policy.policy_type,
-            sentinel_policy: policy.sentinal_policy,
+            sentinel_policy: policy.sentinel_policy,
         };
 
         let entry = StorageEntry::new(&policy.name, &pe)?;

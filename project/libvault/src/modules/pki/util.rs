@@ -181,34 +181,22 @@ pub fn generate_certificate(
 
     let mut subject_name = X509NameBuilder::new().unwrap();
     if !role_entry.country.is_empty() {
-        subject_name
-            .append_entry_by_text("C", &role_entry.country)
-            .unwrap();
+        subject_name.append_entry_by_text("C", &role_entry.country)?;
     }
     if !role_entry.province.is_empty() {
-        subject_name
-            .append_entry_by_text("ST", &role_entry.province)
-            .unwrap();
+        subject_name.append_entry_by_text("ST", &role_entry.province)?;
     }
     if !role_entry.locality.is_empty() {
-        subject_name
-            .append_entry_by_text("L", &role_entry.locality)
-            .unwrap();
+        subject_name.append_entry_by_text("L", &role_entry.locality)?;
     }
     if !role_entry.organization.is_empty() {
-        subject_name
-            .append_entry_by_text("O", &role_entry.organization)
-            .unwrap();
+        subject_name.append_entry_by_text("O", &role_entry.organization)?;
     }
     if !role_entry.ou.is_empty() {
-        subject_name
-            .append_entry_by_text("OU", &role_entry.ou)
-            .unwrap();
+        subject_name.append_entry_by_text("OU", &role_entry.ou)?;
     }
     if !common_name.is_empty() {
-        subject_name
-            .append_entry_by_text("CN", common_name)
-            .unwrap();
+        subject_name.append_entry_by_text("CN", common_name)?;
     }
     let subject = subject_name.build();
 
