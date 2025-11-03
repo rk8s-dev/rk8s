@@ -80,7 +80,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // changes the kernel offset while we are using it.
         let (_guard, dir) = data.get_file_mut().await;
 
-        // alloc buff ,pay attention to alian.
+        // Allocate buffer; pay attention to alignment.
         let mut buffer = vec![0u8; BUFFER_SIZE];
 
         // Safe because this doesn't modify any memory and we check the return value.
@@ -180,7 +180,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         // changes the kernel offset while we are using it.
         let (_guard, dir) = data.get_file_mut().await;
 
-        // alloc buff ,pay attention to alian.
+        // Allocate buffer; pay attention to alignment.
         let mut buffer = vec![0u8; BUFFER_SIZE];
 
         // Safe because this doesn't modify any memory and we check the return value.
@@ -1795,21 +1795,89 @@ impl Filesystem for PassthroughFs {
         // Let the Arc<HandleData> in scope, otherwise fd may get invalid.
         let data = self.handle_map.get(fh, inode).await?;
 
-        // Acquire the lock to get exclusive access, otherwise it may break do_readdir().
-        let (_guard, file) = data.get_file_mut().await;
+        // Check file type to determine appropriate lseek handling
+        let st = stat_fd(data.get_file(), None)?;
+        let is_dir = (st.st_mode & libc::S_IFMT) == libc::S_IFDIR;
 
-        // Safe because this doesn't modify any memory and we check the return value.
-        let res = unsafe {
-            libc::lseek(
-                file.as_raw_fd(),
-                offset as libc::off64_t,
-                whence as libc::c_int,
-            )
-        };
-        if res < 0 {
-            Err(io::Error::last_os_error().into())
+        if is_dir {
+            // Directory special handling: support SEEK_SET and SEEK_CUR with bounds checks.
+            // Acquire the lock to get exclusive access
+            let (_guard, file) = data.get_file_mut().await;
+
+            // Handle directory lseek operations according to POSIX standard
+            // This enables seekdir/telldir functionality on directories
+            match whence {
+                // SEEK_SET: set directory offset to an absolute value
+                x if x == libc::SEEK_SET as u32 => {
+                    // Validate offset bounds to prevent overflow
+                    // Directory offsets should not exceed i64::MAX
+                    if offset > i64::MAX as u64 {
+                        return Err(io::Error::from_raw_os_error(libc::EINVAL).into());
+                    }
+
+                    // Perform the seek operation using libc::lseek64
+                    // This directly manipulates the file descriptor's position
+                    let res = unsafe {
+                        libc::lseek64(file.as_raw_fd(), offset as libc::off64_t, libc::SEEK_SET)
+                    };
+                    if res < 0 {
+                        return Err(io::Error::last_os_error().into());
+                    }
+                    Ok(ReplyLSeek { offset: res as u64 })
+                }
+                // SEEK_CUR: move relative to current directory offset
+                x if x == libc::SEEK_CUR as u32 => {
+                    // Get current position using libc::lseek64 with offset 0
+                    let cur = unsafe { libc::lseek64(file.as_raw_fd(), 0, libc::SEEK_CUR) };
+                    if cur < 0 {
+                        return Err(io::Error::last_os_error().into());
+                    }
+                    let current = cur as u64;
+
+                    // Compute new offset safely to prevent arithmetic overflow
+                    if let Some(new_offset) = current.checked_add(offset) {
+                        // Ensure the new offset is within valid bounds
+                        if new_offset > i64::MAX as u64 {
+                            return Err(io::Error::from_raw_os_error(libc::EINVAL).into());
+                        }
+                        // Set the new offset using libc::lseek64
+                        let res = unsafe {
+                            libc::lseek64(
+                                file.as_raw_fd(),
+                                new_offset as libc::off64_t,
+                                libc::SEEK_SET,
+                            )
+                        };
+                        if res < 0 {
+                            return Err(io::Error::last_os_error().into());
+                        }
+                        Ok(ReplyLSeek { offset: new_offset })
+                    } else {
+                        Err(io::Error::from_raw_os_error(libc::EINVAL).into())
+                    }
+                }
+                // Other whence values are invalid for directories (e.g., SEEK_END)
+                _ => Err(io::Error::from_raw_os_error(libc::EINVAL).into()),
+            }
         } else {
-            Ok(ReplyLSeek { offset: res as u64 })
+            // File seek handling for non-directory files
+            // Acquire the lock to get exclusive access, otherwise it may break do_readdir().
+            let (_guard, file) = data.get_file_mut().await;
+
+            // Safe because this doesn't modify any memory and we check the return value.
+            // Use 64-bit seek for regular files to match kernel offsets
+            let res = unsafe {
+                libc::lseek64(
+                    file.as_raw_fd(),
+                    offset as libc::off64_t,
+                    whence as libc::c_int,
+                )
+            };
+            if res < 0 {
+                Err(io::Error::last_os_error().into())
+            } else {
+                Ok(ReplyLSeek { offset: res as u64 })
+            }
         }
     }
 }

@@ -15,6 +15,8 @@ pub struct EtcdEntryInfo {
     pub create_time: i64,
     pub permission: Permission,
     pub nlink: u32,
+    pub parent_inode: i64,
+    pub entry_name: String,
 }
 
 /// Etcd forward index entry ((parent_id, name) -> inode)

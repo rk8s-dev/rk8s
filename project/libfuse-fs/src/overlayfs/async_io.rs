@@ -13,7 +13,6 @@ use std::io::ErrorKind;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tracing::error;
 use tracing::info;
 use tracing::trace;
 
@@ -908,8 +907,6 @@ impl Filesystem for OverlayFs {
         offset: u64,
         whence: u32,
     ) -> Result<ReplyLSeek> {
-        // can this be on dir? FIXME: assume file for now
-        // we need special process if it can be called on dir
         let node = self.lookup_node(req, inode, "").await?;
 
         if node.whiteout.load(Ordering::Relaxed) {
@@ -918,14 +915,87 @@ impl Filesystem for OverlayFs {
 
         let st = node.stat64(req).await?;
         if utils::is_dir(&st.attr.kind) {
-            error!("lseek on directory");
-            return Err(Error::from_raw_os_error(libc::EINVAL).into());
-        }
+            // Special handling and security restrictions for directory operations.
+            // Use the common API to obtain the underlying layer and handle info.
+            let (layer, real_inode, real_handle) = self.find_real_info_from_handle(fh).await?;
 
-        let (layer, real_inode, real_handle) = self.find_real_info_from_handle(fh).await?;
-        layer
-            .lseek(req, real_inode, real_handle, offset, whence)
-            .await
+            // Verify that the underlying handle refers to a directory.
+            let handle_stat = match layer.getattr(req, real_inode, Some(real_handle), 0).await {
+                Ok(s) => s,
+                Err(_) => return Err(Error::from_raw_os_error(libc::EBADF).into()),
+            };
+
+            if !utils::is_dir(&handle_stat.attr.kind) {
+                return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
+            }
+
+            // Handle directory lseek operations according to POSIX standard
+            // This enables seekdir/telldir functionality on directories
+            match whence {
+                // SEEK_SET: Set the directory position to an absolute value
+                x if x == libc::SEEK_SET as u32 => {
+                    // Validate offset bounds to prevent overflow
+                    // Directory offsets should not exceed i64::MAX
+                    if offset > i64::MAX as u64 {
+                        return Err(Error::from_raw_os_error(libc::EINVAL).into());
+                    }
+
+                    // Perform the seek operation on the underlying layer
+                    // Delegate to the lower layer implementation
+                    layer
+                        .lseek(req, real_inode, real_handle, offset, whence)
+                        .await
+                }
+                // SEEK_CUR: Move relative to the current directory position
+                x if x == libc::SEEK_CUR as u32 => {
+                    // Get current position from underlying layer
+                    // This is needed to calculate the new position
+                    let current = match layer
+                        .lseek(req, real_inode, real_handle, 0, libc::SEEK_CUR as u32)
+                        .await
+                    {
+                        Ok(r) => r.offset,
+                        Err(_) => return Err(Error::from_raw_os_error(libc::EINVAL).into()),
+                    };
+
+                    // Check for potential overflow when adding the provided offset
+                    // This prevents invalid position calculations
+                    if let Some(new_offset) = current.checked_add(offset) {
+                        // Ensure the new offset is within valid bounds
+                        if new_offset > i64::MAX as u64 {
+                            return Err(Error::from_raw_os_error(libc::EINVAL).into());
+                        }
+
+                        // Actually set the underlying offset to the new value so behavior
+                        // matches passthrough which uses libc::lseek64 to set the fd offset.
+                        match layer
+                            .lseek(
+                                req,
+                                real_inode,
+                                real_handle,
+                                new_offset,
+                                libc::SEEK_SET as u32,
+                            )
+                            .await
+                        {
+                            Ok(_) => Ok(ReplyLSeek { offset: new_offset }),
+                            Err(_) => Err(Error::from_raw_os_error(libc::EINVAL).into()),
+                        }
+                    } else {
+                        Err(Error::from_raw_os_error(libc::EINVAL).into())
+                    }
+                }
+                // Any other whence value is invalid for directories
+                _ => Err(Error::from_raw_os_error(libc::EINVAL).into()),
+            }
+        } else {
+            // Keep the original lseek behavior for regular files
+            // Delegate directly to the underlying layer
+            let (layer, real_inode, real_handle) = self.find_real_info_from_handle(fh).await?;
+            layer
+                .lseek(req, real_inode, real_handle, offset, whence)
+                .await
+        }
     }
 
     async fn interrupt(&self, _req: Request, _unique: u64) -> Result<()> {

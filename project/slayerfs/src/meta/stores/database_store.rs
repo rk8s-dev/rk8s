@@ -117,7 +117,7 @@ impl DatabaseMetaStore {
         let builder = db.get_database_backend();
         let schema = Schema::new(builder);
 
-        let stmts = vec![
+        let stmts = [
             schema
                 .create_table_from_entity(AccessMeta)
                 .if_not_exists()
@@ -507,7 +507,7 @@ impl MetaStore for DatabaseMetaStore {
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
-            .ok_or(MetaError::NotFound(0))?;
+            .ok_or(MetaError::NotFound(parent))?;
 
         let dir_id = dir_entry.inode;
 
@@ -569,7 +569,9 @@ impl MetaStore for DatabaseMetaStore {
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
-            .ok_or(MetaError::NotFound(0))?;
+            .ok_or_else(|| {
+                MetaError::Internal(format!("File '{}' not found in parent {}", name, parent))
+            })?;
 
         let file_id = file_entry.inode;
 
@@ -648,7 +650,12 @@ impl MetaStore for DatabaseMetaStore {
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
-            .ok_or(MetaError::NotFound(0))?;
+            .ok_or_else(|| {
+                MetaError::Internal(format!(
+                    "Entry '{}' not found in parent {} for rename",
+                    old_name, old_parent
+                ))
+            })?;
 
         // Check if target already exists in new location
         let existing = ContentMeta::find()
@@ -708,7 +715,7 @@ impl MetaStore for DatabaseMetaStore {
                 .one(&txn)
                 .await
                 .map_err(MetaError::Database)?
-                .unwrap()
+                .ok_or(MetaError::NotFound(new_parent))?
                 .into();
             new_parent_meta.modify_time = Set(now);
             new_parent_meta
@@ -749,6 +756,65 @@ impl MetaStore for DatabaseMetaStore {
             .map_err(|e| MetaError::Internal(e.to_string()))?;
 
         Ok(())
+    }
+
+    async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
+        if ino == 1 {
+            return Ok(None);
+        }
+
+        let entry = ContentMeta::find_by_id(ino)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(entry.map(|e| e.parent_inode))
+    }
+
+    async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError> {
+        if ino == 1 {
+            return Ok(Some("/".to_string()));
+        }
+
+        let entry = ContentMeta::find_by_id(ino)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(entry.map(|e| e.entry_name))
+    }
+
+    async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError> {
+        if ino == 1 {
+            return Ok(Some("/".to_string()));
+        }
+
+        let mut path_parts = Vec::new();
+        let mut current_ino = ino;
+
+        loop {
+            let entry = content_meta::Entity::find_by_id(current_ino)
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            let Some(entry) = entry else {
+                return Ok(None);
+            };
+
+            path_parts.push(entry.entry_name);
+
+            let parent = entry.parent_inode;
+            if parent == 1 {
+                break;
+            }
+
+            current_ino = parent;
+        }
+
+        path_parts.reverse();
+        let path = format!("/{}", path_parts.join("/"));
+        Ok(Some(path))
     }
 
     fn root_ino(&self) -> i64 {

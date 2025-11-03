@@ -26,9 +26,11 @@ pub struct TypeMeta {
     pub kind: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ObjectMeta {
     pub name: String,
+    #[serde(default)]
+    pub uid: Option<String>,
     #[serde(default = "default_namespace")]
     pub namespace: String,
     #[serde(default)]
@@ -41,7 +43,7 @@ fn default_namespace() -> String {
     "default".to_string()
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
     #[serde(default)]
@@ -54,18 +56,18 @@ pub struct PodSpec {
     pub tolerations: Vec<Toleration>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ContainerRes {
     pub limits: Option<Resource>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Resource {
     pub cpu: Option<String>,
     pub memory: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ContainerSpec {
     pub name: String,
 
@@ -80,7 +82,7 @@ pub struct ContainerSpec {
     pub resources: Option<ContainerRes>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Port {
     #[serde(rename = "containerPort")]
     pub container_port: i32,
@@ -108,13 +110,13 @@ pub struct PodTask {
     pub status: PodStatus,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct PodStatus {
     #[serde(rename = "podIP")]
     pub pod_ip: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct Toleration {
     /// Empty means match all taint keys.
     pub key: Option<TaintKey>,
@@ -144,7 +146,8 @@ impl Toleration {
         }
     }
 }
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub enum TolerationOperator {
     Exists,
     #[default]
@@ -513,4 +516,72 @@ pub struct ServiceTask {
     pub kind: String,
     pub metadata: ObjectMeta,
     pub spec: ServiceSpec,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+pub struct LabelSelector {
+    #[serde(rename = "matchLabels", default)]
+    pub match_labels: HashMap<String, String>,
+
+    #[serde(rename = "matchExpressions", default)]
+    pub match_expressions: Vec<LabelSelectorRequirement>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct LabelSelectorRequirement {
+    pub key: String,
+    pub operator: LabelSelectorOperator,
+    #[serde(default)]
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+pub enum LabelSelectorOperator {
+    In,
+    NotIn,
+    Exists,
+    DoesNotExist,
+}
+
+fn default_replicas() -> i32 {
+    1
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct PodTemplateSpec {
+    pub metadata: ObjectMeta,
+    pub spec: PodSpec,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct ReplicaSetSpec {
+    #[serde(default = "default_replicas")]
+    pub replicas: i32,
+    pub selector: LabelSelector,
+    pub template: PodTemplateSpec,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ReplicaSetStatus {
+    #[serde(default)]
+    pub replicas: i32,
+    #[serde(rename = "fullyLabeledReplicas", default)]
+    pub fully_labeled_replicas: i32,
+    #[serde(rename = "readyReplicas", default)]
+    pub ready_replicas: i32,
+    #[serde(rename = "availableReplicas", default)]
+    pub available_replicas: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ReplicaSet {
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+    #[serde(rename = "kind")]
+    pub kind: String,
+    pub metadata: ObjectMeta,
+    pub spec: ReplicaSetSpec,
+    #[serde(default)]
+    pub status: ReplicaSetStatus,
 }

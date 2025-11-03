@@ -96,14 +96,13 @@ fn parse_args() -> Result<Args, std::io::Error> {
 
 fn set_log(args: &Args) {
     let log_level = match args.log_level.as_str() {
-        "error" => tracing::Level::ERROR,
-        "warn" => tracing::Level::WARN,
-        "info" => tracing::Level::INFO,
-        "debug" => tracing::Level::DEBUG,
-        "trace" => tracing::Level::TRACE,
-        _ => tracing::Level::INFO,
+        "error" | "warn" | "info" | "debug" | "trace" => args.log_level.as_str(),
+        _ => "trace",
     };
-    tracing_subscriber::fmt().with_max_level(log_level).init();
+    let filter_str = format!("libfuse_fs={}", log_level);
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(filter_str));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
 #[tokio::main]

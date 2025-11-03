@@ -4,9 +4,11 @@ use slayerfs::cadapter::localfs::LocalFsBackend;
 use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::ObjectBlockStore;
 use slayerfs::fuse::mount::mount_vfs_unprivileged;
+use slayerfs::meta::factory::MetaStoreFactory;
 use slayerfs::vfs::fs::VFS;
 use std::path::PathBuf;
 use tokio::signal;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -69,8 +71,14 @@ fn process_config_for_backend(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let format = tracing_subscriber::fmt::format().with_ansi(false);
-    tracing_subscriber::fmt().event_format(format).init();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .or_else(|_| tracing_subscriber::EnvFilter::try_new("info"))
+        .unwrap();
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_ansi(true))
+        .with(filter)
+        .init();
 
     #[cfg(not(target_os = "linux"))]
     {
@@ -141,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let config = slayerfs::meta::config::Config::from_file(&target_config_path)
             .map_err(|e| format!("Failed to load config file: {}", e))?;
-        let meta = slayerfs::meta::factory::MetaStoreFactory::create_from_config(config)
+        let meta = MetaStoreFactory::create_from_config(config)
             .await
             .map_err(|e| format!("Failed to initialize metadata storage: {}", e))?;
 

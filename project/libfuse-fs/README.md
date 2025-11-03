@@ -11,10 +11,13 @@ Features:
 
 ### Try
 ```bash
-cargo test --package libfuse-fs --lib -- overlayfs::async_io::tests::test_a_ovlfs --exact --nocapture --ignored > test.log 2>&1
-cargo test --package libfuse-fs --lib -- passthrough::tests::test_passthrough --exact --nocapture --ignored 
+# run OverlayFS demo
+cargo run --example overlay -- -o lowerdir=/usr:/bin,upperdir=/tmp/ovl_upper,workdir=/tmp/ovl_work overlay_test /tmp/ovl_mnt
+
+# run PassthroughFS demo  
+cargo run --example passthrough -- /tmp/source_dir /tmp/pt_mnt
+
 ```
-![alt text](image.png)
 
 ## Integration Tests (OverlayFS & PassthroughFS)
 
@@ -39,13 +42,27 @@ Workflow file: `.github/workflows/libfuse-fs-integration.yml` (runs on PR touchi
 ### Examples
 Example binaries used by the integration tests:
 ```bash
-cargo run --example overlayfs_example -- \
+cargo run --example overlayfs -- \
 	--mountpoint /tmp/ovl_mnt --upperdir /tmp/ovl_upper \
 	--lowerdir /usr --lowerdir /bin
 
-cargo run --example passthrough_example -- \
+cargo run --example passthrough -- \
 	--mountpoint /tmp/pt_mnt --rootdir /var/tmp
 ```
+
+### Rootless Execution
+
+For rootless execution of the passthrough filesystem, you need to grant the necessary capabilities to the binary:
+
+```bash
+# Build the example first
+cargo build --example passthrough
+
+# Grant capabilities for rootless operation
+sudo setcap cap_dac_read_search+ep ../target/debug/examples/passthrough
+```
+
+This allows the passthrough filesystem to access files with elevated permissions without requiring the entire process to run as root.
 
 ### Contributing
 All commits must be signed (`git commit -s`) and GPG signed (`-S`) per project policy.

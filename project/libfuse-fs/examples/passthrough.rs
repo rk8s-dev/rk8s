@@ -25,7 +25,7 @@ struct Args {
     #[arg(long)]
     rootdir: String,
     /// Use privileged mount instead of unprivileged (default false)
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = false)]
     privileged: bool,
     /// Options, currently contains uid/gid mapping info
     #[arg(long, short)]
@@ -34,9 +34,19 @@ struct Args {
     allow_other: bool,
 }
 
+fn set_log() {
+    let log_level = "trace";
+    let filter_str = format!("libfuse_fs={}", log_level);
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(filter_str));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    set_log();
+    debug!("Starting passthrough filesystem with args: {:?}", args);
 
     let fs = new_passthroughfs_layer(PassthroughArgs {
         root_dir: args.rootdir,
@@ -44,8 +54,8 @@ async fn main() {
     })
     .await
     .expect("Failed to init passthrough fs");
-    let fs = LoggingFileSystem::new(fs);
 
+    let fs = LoggingFileSystem::new(fs);
     let mount_path = OsString::from(&args.mountpoint);
     let uid = unsafe { libc::getuid() };
     let gid = unsafe { libc::getgid() };

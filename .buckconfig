@@ -15,9 +15,14 @@
 
 [external_cells]
   prelude = bundled
+  buckal = git
+
+[external_cell_buckal]
+  git_origin = https://github.com/buck2hub/buckal-bundles
+  commit_hash = f9c4f306b1aad816fa520fe361f4f03d28cd5b7b
 
 [parser]
   target_platform_detector_spec = target:root//...->prelude//platforms:default
 
 [project]
-  ignore = .git .buckd .idea .vscode .zed .DS_Store buck-out build
+  ignore = .git .buckd .idea .vscode .zed .DS_Store buck-out build .buckal
