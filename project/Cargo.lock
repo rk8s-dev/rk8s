@@ -3635,6 +3635,7 @@ dependencies = [
 name = "libfuse-fs"
 version = "0.1.5"
 dependencies = [
+ "async-trait",
  "bitflags 2.9.4",
  "bytes",
  "clap",
@@ -3647,7 +3648,7 @@ dependencies = [
  "nix 0.29.0",
  "radix_trie",
  "reqwest",
- "rfuse3 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rfuse3 0.0.4",
  "serde",
  "serde_json",
  "tempfile",
@@ -5441,6 +5442,7 @@ dependencies = [
  "async-lock 3.4.1",
  "async-notify",
  "async-process 2.5.0",
+ "async-trait",
  "bincode",
  "bytes",
  "clap",
