@@ -1007,7 +1007,7 @@ mod tests {
     use tokio::signal;
     use tracing_subscriber::EnvFilter;
 
-    use super::BoxedLayer;
+    use crate::unionfs::BoxedLayer;
     use crate::{
         passthrough::{PassthroughArgs, new_passthroughfs_layer, newlogfs::LoggingFileSystem},
         unionfs::{OverlayFs, config::Config},

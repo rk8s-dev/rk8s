@@ -46,7 +46,7 @@ use tokio::sync::{Mutex, RwLock};
 pub type Inode = u64;
 pub type Handle = u64;
 
-type BoxedLayer = dyn Layer;
+pub(crate) type BoxedLayer = dyn Layer;
 //type BoxedFileSystem = Box<dyn FileSystem<Inode = Inode, Handle = Handle> + Send + Sync>;
 const INODE_ALLOC_BATCH: u64 = 0x1_0000_0000;
 // RealInode represents one inode object in specific layer.
