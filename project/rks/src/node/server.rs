@@ -31,6 +31,7 @@ struct RotateContext {
 
 impl QUICServer {
     pub async fn new(addr: SocketAddr, vault: Option<Arc<Vault>>) -> anyhow::Result<Self> {
+        // Create QUIC endpoint and server certificate
         let (config, certs) = build_quic_config(vault.as_deref()).await?;
 
         let deadline = match certs {
@@ -89,7 +90,10 @@ impl QUICServer {
         }
     }
 
+    /// Launch the RKS server to listen for incoming QUIC connections.
+    /// Each connection will be handled in a dedicated task.
     pub async fn serve(&self, shared: Arc<Shared>) -> anyhow::Result<()> {
+        // Accept loop
         loop {
             self.rotate_background();
 
@@ -141,9 +145,12 @@ pub trait ConnectionState: Sealed {
         Self: Sized;
 }
 
+/// Typed connection wrapper that tracks authentication state at compile time.
 pub struct AuthConnection<State> {
     conn: RksConnection,
     shared: Arc<Shared>,
+    // The state type parameter (Verified/Unauthenticated) forces callers to only
+    // use APIs allowed for that phase of the handshake without runtime checks.
     state: PhantomData<State>,
 }
 
@@ -165,6 +172,7 @@ impl<State: ConnectionState> AuthConnection<State> {
 
 impl AuthConnection<Verified> {
     async fn classify_connection(&self) -> anyhow::Result<(bool, Option<String>)> {
+        // Initial handshake to classify connection (RegisterNode or UserRequest)
         let msg = self.conn.fetch_msg().await?;
         match &msg {
             RksMessage::RegisterNode(node) => {
@@ -184,6 +192,7 @@ impl AuthConnection<Verified> {
     }
 
     async fn dispatch_loop(&self, is_worker: bool) -> anyhow::Result<()> {
+        // Main loop: accept application messages for ongoing communication
         loop {
             let msg = self.conn.fetch_msg().await?;
             info!("fetched message: {msg}");
@@ -237,10 +246,13 @@ impl ConnectionState for Unauthenticated {
 
 #[async_trait]
 impl ConnectionState for Verified {
+    /// Handle an individual connection (worker or user).
+    /// Classifies client type and spawns watchers for workers.
     async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()> {
         let (is_worker, node_id) = conn.classify_connection().await?;
 
         if is_worker && let Some(node_id) = node_id {
+            // Start watching pods if this is a registered worker node
             let watcher = PodsWatcher::new(node_id, conn.conn.clone(), conn.shared.clone());
             watcher.spawn()?;
         }

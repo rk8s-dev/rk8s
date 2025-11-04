@@ -44,7 +44,7 @@ network_config:
   SubnetLen: 24
 tls_config:
   enable: false
-  vault_url: ""
+  vault_folder: ""
   keep_dangerous_files: false
 dns_config:
   Port: 9090

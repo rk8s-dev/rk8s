@@ -81,6 +81,7 @@ impl RksNode {
     }
 
     fn start_background_tasks(&self) {
+        // Check if lastheartbeattime times out
         heartbeat::watch(
             self.shared.xline_store.clone(),
             Duration::from_secs(50), // grace
@@ -88,6 +89,7 @@ impl RksNode {
         );
         info!("Heartbeat monitor started");
 
+        // Spawn task to propagate lease updates to workers
         LeaseSynchronizer::spawn(
             self.shared.local_manager.clone(),
             self.shared.node_registry.clone(),

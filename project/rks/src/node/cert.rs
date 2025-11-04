@@ -10,6 +10,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::server::WebPkiClientVerifier;
 use std::sync::Arc;
 
+/// Generate a self-signed TLS certificate and configure QUIC server.
 fn build_no_tls_config() -> anyhow::Result<quinn::ServerConfig> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
     let cert_der = CertificateDer::from(cert.serialize_der()?);
@@ -19,6 +20,7 @@ fn build_no_tls_config() -> anyhow::Result<quinn::ServerConfig> {
     Ok(server_config)
 }
 
+/// Set up the QUIC server endpoint with TLS certificate.
 pub async fn build_quic_config(
     vault: Option<&Vault>,
 ) -> anyhow::Result<(quinn::ServerConfig, Option<Vec<CertificateDer<'static>>>)> {

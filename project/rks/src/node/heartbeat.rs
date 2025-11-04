@@ -33,6 +33,7 @@ async fn handle_node_heartbeats(
 
 fn process_heartbeat_timeout(node: &mut Node, grace: Duration) -> bool {
     if node.update_ready_status_on_timeout(grace) {
+        // If expired is true, it means out of date; change status only when timeout is reached
         node.spec.taints = Node::derive_taints_from_conditions(&node.status.conditions);
         return true;
     }
@@ -50,6 +51,7 @@ async fn persist_node(
     Ok(())
 }
 
+/// Evict all pods running on a given node if they don't tolerate NoExecute taints.
 pub(crate) async fn evict_pods_for_node(node_id: &str, xline_store: Arc<XlineStore>) {
     let pods = match xline_store.list_pod_names().await {
         Ok(names) => names,
@@ -74,9 +76,11 @@ pub(crate) async fn evict_pods_for_node(node_id: &str, xline_store: Arc<XlineSto
         }
 
         let taint = Taint::new(TaintKey::NodeNotReady, TaintEffect::NoExecute);
+        // Check if pod has a matching toleration
         let has_toleration = pod.spec.tolerations.iter().any(|tol| tol.tolerate(&taint));
 
         if !has_toleration {
+            // Evict if no toleration found
             info!("Evicting pod {} from node {}", pod.metadata.name, node_id);
             if let Err(e) = xline_store.delete_pod(&pod.metadata.name).await {
                 error!("Failed to evict pod {}: {:?}", pod.metadata.name, e);

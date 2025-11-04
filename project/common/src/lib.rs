@@ -183,7 +183,7 @@ macro_rules! invalid_rks_variant_error {
     };
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum RksMessage {
     //request
     CreatePod(Box<PodTask>),
@@ -216,7 +216,7 @@ pub enum RksMessage {
     Certificate(IssueCertificateResponse),
 }
 
-impl Display for RksMessage {
+impl std::fmt::Debug for RksMessage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             // request
@@ -266,6 +266,91 @@ impl Display for RksMessage {
                 ip, dns_port,
             ),
             Self::Certificate(_) => f.write_str("RksMessage::Certificate"),
+        }
+    }
+}
+
+impl Display for RksMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // request
+            Self::CreatePod(pod) => write!(
+                f,
+                "Create pod '{}' in namespace '{}'",
+                pod.metadata.name, pod.metadata.namespace
+            ),
+            Self::DeletePod(pod_name) => write!(f, "Delete pod '{}'", pod_name),
+            Self::ListPod => f.write_str("List pods"),
+            Self::GetNodeCount => f.write_str("Get node count"),
+            Self::RegisterNode(node) => write!(
+                f,
+                "Register node '{}' (namespace '{}')",
+                node.metadata.name, node.metadata.namespace
+            ),
+            Self::UserRequest(payload) => write!(f, "User request: {}", payload),
+            Self::Heartbeat { node_name, status } => {
+                let ready_state = status
+                    .conditions
+                    .iter()
+                    .find(|cond| matches!(cond.condition_type, NodeConditionType::Ready))
+                    .map(|cond| match &cond.status {
+                        ConditionStatus::True => "ready",
+                        ConditionStatus::False => "not ready",
+                        ConditionStatus::Unknown => "status unknown",
+                    });
+
+                let msg = ready_state
+                    .map(|state| format!("Heartbeat from node '{}' ({})", node_name, state))
+                    .unwrap_or(format!("Heartbeat from node '{}'", node_name));
+                write!(f, "{}", msg)
+            }
+            Self::SetNetwork(config) => write!(
+                f,
+                "Apply network settings for node '{}' (subnet: {})",
+                config.node_id, config.subnet_env
+            ),
+            Self::UpdateRoutes(node_name, routes) => write!(
+                f,
+                "Update {} route(s) on node '{}'",
+                routes.len(),
+                node_name
+            ),
+            Self::SetDns(ip, dns_port) => {
+                write!(f, "Configure DNS server {}:{}", ip, dns_port)
+            }
+            Self::CertificateSign { token, .. } => {
+                write!(f, "Submit certificate signing request (token: {})", token)
+            }
+
+            // response
+            Self::Ack => f.write_str("Acknowledge message receipt"),
+            Self::Error(err_msg) => write!(f, "Error: {}", err_msg),
+            Self::NodeCount(count) => write!(f, "Reported node count: {}", count),
+            Self::ListPodRes(pods) => {
+                if pods.is_empty() {
+                    return f.write_str("List pods response: no pods found");
+                }
+
+                let preview = pods
+                    .iter()
+                    .take(3)
+                    .map(|name| name.as_str())
+                    .collect::<Vec<_>>();
+
+                if pods.len() > preview.len() {
+                    return write!(
+                        f,
+                        "List pods response: {} (+{} more)",
+                        preview.join(", "),
+                        pods.len() - preview.len()
+                    );
+                }
+                write!(f, "List pods response: {}", preview.join(", "))
+            }
+            Self::SetPodip((pod_name, pod_ip)) => {
+                write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
+            }
+            Self::Certificate(_) => f.write_str("Certificate response received"),
         }
     }
 }

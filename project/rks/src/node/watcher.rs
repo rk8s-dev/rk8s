@@ -9,6 +9,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use tonic::codegen::tokio_stream::StreamExt;
 
+/// Watches pod changes from Xline and pushes create/delete events to the worker node.
 #[derive(Clone)]
 pub struct PodsWatcher {
     node_id: String,
@@ -72,10 +73,12 @@ impl PodsWatcher {
 
     async fn send_initial_snapshot(&self) -> anyhow::Result<(String, i64)> {
         let node_id = self.node_id.clone();
+        // Get current snapshot and revision
         let (pods, rev) = self.shared.xline_store.pods_snapshot_with_rev().await?;
 
         for (pod_name, pod_yaml) in pods {
             let pod_task = serde_yaml::from_str::<PodTask>(&pod_yaml)?;
+            // Send snapshot to the worker
             if pod_task.spec.node_name.as_deref() == Some(node_id.as_str()) {
                 self.conn
                     .send_msg(&RksMessage::CreatePod(Box::new(pod_task)))
@@ -91,6 +94,7 @@ impl PodsWatcher {
     }
 
     async fn stream_updates(&self, node_id: String, start_rev: i64) -> anyhow::Result<()> {
+        // Start watching for changes
         let (mut watcher, mut stream) = self.shared.xline_store.watch_pods(start_rev).await?;
         info!(
             target: "rks::node::watch_pods",
@@ -144,6 +148,7 @@ impl PodsWatcher {
         if let Some(prev_kv) = prev_kv {
             let prev_pod: PodTask = serde_yaml::from_slice(prev_kv.value())?;
 
+            // Only updating node_name can be watched and send to node
             if prev_pod.spec.node_name.is_none() && new_pod.spec.node_name.is_some() {
                 self.enqueue_create(node_id, kv.value(), &new_pod).await?;
             }
@@ -151,6 +156,7 @@ impl PodsWatcher {
             return Ok(());
         }
 
+        // If the nodename is assigned at first, be watched by node
         self.enqueue_create(node_id, kv.value(), &new_pod).await
     }
 

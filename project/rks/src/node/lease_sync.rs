@@ -31,6 +31,7 @@ impl LeaseSynchronizer {
             target: "rks::node::lease",
             "subscribing to lease updates"
         );
+        // Channel for receiving lease watch results
         let mut lease_rx = Self::subscribe(manager);
 
         while let Some(results) = lease_rx.recv().await {
@@ -44,6 +45,7 @@ impl LeaseSynchronizer {
 
     fn subscribe(manager: Arc<LocalManager>) -> mpsc::Receiver<Vec<LeaseWatchResult>> {
         let (lease_tx, lease_rx) = mpsc::channel::<Vec<LeaseWatchResult>>(16);
+        // Spawn task to propagate lease updates to workers
         tokio::spawn(async move {
             match manager.watch_leases(lease_tx).await {
                 Ok(_) => info!(
@@ -91,6 +93,7 @@ impl LeaseSynchronizer {
     }
 }
 
+/// Calculate routes for a node from all current leases.
 fn calculate_routes_for_node(node_id: &str, leases: &[Lease]) -> Vec<Route> {
     leases
         .iter()
