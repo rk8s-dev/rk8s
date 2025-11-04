@@ -9,6 +9,7 @@
 use bytes::Bytes;
 pub use filesystem::Filesystem;
 use futures_util::future::Either;
+pub use object_safe_filesystem::{DirectoryPlusStream, DirectoryStream, ObjectSafeFilesystem};
 pub use request::Request;
 #[cfg(any(feature = "async-io-runtime", feature = "tokio-runtime"))]
 pub use session::{MountHandle, Session};
@@ -19,6 +20,7 @@ pub(crate) mod abi;
 mod connection;
 mod filesystem;
 pub mod flags;
+mod object_safe_filesystem;
 pub mod reply;
 mod request;
 pub(crate) mod session;
@@ -29,6 +31,7 @@ pub mod prelude {
     pub use super::Filesystem;
     pub use super::Request;
     pub use super::Session;
+    pub use super::{DirectoryPlusStream, DirectoryStream};
     pub use crate::notify::Notify;
     pub use crate::FileType;
     pub use crate::SetAttr;
