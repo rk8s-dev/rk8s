@@ -166,6 +166,9 @@ impl ContainerRunner {
                 ports: vec![],
                 args: vec![],
                 resources: None,
+                liveness_probe: None,
+                readiness_probe: None,
+                startup_probe: None,
             },
             config: None,
             container_id: container_id.to_string(),
@@ -756,6 +759,9 @@ mod test {
             ports: vec![],
             args: vec!["/bin/echo".to_string(), "hi".to_string()],
             resources: None,
+            liveness_probe: None,
+            readiness_probe: None,
+            startup_probe: None,
         };
         let runner = ContainerRunner::from_spec(spec.clone(), None).unwrap();
         assert_eq!(runner.container_id, "demo1");
@@ -779,6 +785,9 @@ mod test {
                 ports: vec![],
                 args: vec![],
                 resources: None,
+                liveness_probe: None,
+                readiness_probe: None,
+                startup_probe: None,
             },
             None,
         )

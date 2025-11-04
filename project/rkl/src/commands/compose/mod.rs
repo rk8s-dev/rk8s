@@ -223,6 +223,9 @@ impl ComposeManager {
                     ports: container_ports,
                     args: srv.command.clone(),
                     resources: None,
+                    liveness_probe: None,
+                    readiness_probe: None,
+                    startup_probe: None,
                 };
 
                 // handle the services volume name

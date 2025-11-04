@@ -68,6 +68,94 @@ pub struct ContainerSpec {
     pub args: Vec<String>,
 
     pub resources: Option<ContainerRes>,
+
+    #[serde(rename = "livenessProbe", default)]
+    pub liveness_probe: Option<Probe>,
+
+    #[serde(rename = "readinessProbe", default)]
+    pub readiness_probe: Option<Probe>,
+
+    #[serde(rename = "startupProbe", default)]
+    pub startup_probe: Option<Probe>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProbeAction {
+    Exec(ExecAction),
+    HttpGet(HttpGetAction),
+    TcpSocket(TcpSocketAction),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct Probe {
+    pub action: Option<ProbeAction>,
+
+    #[serde(rename = "initialDelaySeconds", default)]
+    pub initial_delay_seconds: Option<u32>,
+
+    #[serde(rename = "periodSeconds", default)]
+    pub period_seconds: Option<u32>,
+
+    #[serde(rename = "timeoutSeconds", default)]
+    pub timeout_seconds: Option<u32>,
+
+    #[serde(rename = "successThreshold", default)]
+    pub success_threshold: Option<u32>,
+
+    #[serde(rename = "failureThreshold", default)]
+    pub failure_threshold: Option<u32>,
+}
+
+impl Probe {
+    /// Validates that the probe has exactly one action specified
+    pub fn validate(&self) -> Result<(), String> {
+        match &self.action {
+            Some(_) => Ok(()),
+            None => Err(
+                "probe must specify exactly one action (exec, httpGet, or tcpSocket)".to_string(),
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct ExecAction {
+    #[serde(default)]
+    pub command: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct HttpGetAction {
+    #[serde(default = "default_http_path")]
+    pub path: String,
+
+    pub port: u16,
+
+    #[serde(default)]
+    pub host: Option<String>,
+}
+
+fn default_http_path() -> String {
+    "/".to_string()
+}
+
+impl Default for HttpGetAction {
+    fn default() -> Self {
+        Self {
+            path: default_http_path(),
+            port: 0,
+            host: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct TcpSocketAction {
+    pub port: u16,
+
+    #[serde(default)]
+    pub host: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -102,6 +190,46 @@ pub struct PodTask {
 pub struct PodStatus {
     #[serde(rename = "podIP")]
     pub pod_ip: Option<String>,
+
+    #[serde(rename = "containerStatuses", default)]
+    pub container_statuses: Vec<ContainerStatus>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+pub struct ContainerStatus {
+    pub name: String,
+
+    #[serde(rename = "readinessProbe", default)]
+    pub readiness_probe: Option<ContainerProbeStatus>,
+
+    #[serde(rename = "livenessProbe", default)]
+    pub liveness_probe: Option<ContainerProbeStatus>,
+
+    #[serde(rename = "startupProbe", default)]
+    pub startup_probe: Option<ContainerProbeStatus>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "PascalCase")]
+pub enum ProbeCondition {
+    #[default]
+    Pending,
+    Ready,
+    Failing,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+pub struct ContainerProbeStatus {
+    pub state: ProbeCondition,
+
+    #[serde(rename = "consecutiveSuccesses", default)]
+    pub consecutive_successes: u32,
+
+    #[serde(rename = "consecutiveFailures", default)]
+    pub consecutive_failures: u32,
+
+    #[serde(rename = "lastError", default)]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]

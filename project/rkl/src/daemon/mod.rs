@@ -3,6 +3,7 @@ use sync_loop::SyncLoop;
 pub mod static_pods;
 //mod status_access;
 pub mod client;
+pub mod probe;
 use client::init_crypto;
 
 #[tokio::main]

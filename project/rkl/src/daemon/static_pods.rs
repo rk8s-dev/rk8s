@@ -6,12 +6,14 @@ use tokio::io::AsyncReadExt;
 use tracing::{error, warn};
 
 use futures::FutureExt;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::commands::pod;
 use crate::task::TaskRunner;
 use common::PodTask;
 
+use crate::daemon::probe::{build_probe_registrations, deregister_pod_probes, register_pod_probes};
 use crate::daemon::sync_loop::{Event, State, WithEvent};
 
 /// Check and ensure that the pod status is consistent with the requirements every five seconds.
@@ -75,11 +77,30 @@ async fn run_new_pods(state: Arc<State>, pods: Vec<PodTask>) {
         .for_each(|p| {
             let runner = TaskRunner::from_task(p.clone()).unwrap();
             let name = runner.task.metadata.name.clone();
-            let res = pod::run_pod_from_taskrunner(runner);
-            if let Err(e) = res {
-                error!("Failed to run pod {}: {e}", name);
-            } else {
-                (*current_pods).push(p);
+            match pod::run_pod_from_taskrunner(runner) {
+                Ok(result) => {
+                    match build_probe_registrations(&result.pod_task, &result.pod_ip) {
+                        Ok(registrations) => {
+                            if let Err(err) =
+                                register_pod_probes(&result.pod_task.metadata.name, registrations)
+                            {
+                                warn!(
+                                    "Failed to register probes for static pod {}: {err:?}",
+                                    result.pod_task.metadata.name
+                                );
+                            }
+                        }
+                        Err(err) => warn!(
+                            "Failed to build probes for static pod {}: {err:?}",
+                            result.pod_task.metadata.name
+                        ),
+                    }
+
+                    (*current_pods).push(p);
+                }
+                Err(e) => {
+                    error!("Failed to run pod {}: {e}", name);
+                }
             }
         });
 }
@@ -94,23 +115,44 @@ async fn stop_removed_pods(state: Arc<State>, pods: &Vec<PodTask>) -> Result<(),
     // must get write lock to avoid other thread operate pods simitaneously.
     let mut current_pods = state.pods_mut().await;
 
-    let del_err_vec: Vec<_> = (*current_pods)
-        .iter()
-        .filter(|&p| {
-            let hs = calculate_hash(p);
-            !pods_hash.contains(&hs)
-        })
-        .map(|p| pod::standalone::delete_pod(&p.metadata.name))
-        .filter(|r| r.is_err())
-        .collect();
-    if !del_err_vec.is_empty() {
-        return Err(anyhow!("{del_err_vec:?}"));
+    let mut errors = Vec::new();
+    let mut to_keep = Vec::new();
+
+    let mut deregister_handles: Vec<JoinHandle<()>> = Vec::new();
+
+    for pod in current_pods.drain(..) {
+        let hs = calculate_hash(&pod);
+        if pods_hash.contains(&hs) {
+            to_keep.push(pod);
+            continue;
+        }
+
+        match pod::standalone::delete_pod(&pod.metadata.name) {
+            Ok(_) => {
+                // spawn deregistration but keep the JoinHandle so we can observe failures
+                let pod_name = pod.metadata.name.clone();
+                let handle = tokio::spawn(async move {
+                    // ensure panics inside deregister are captured by the task runtime
+                    deregister_pod_probes(&pod_name).await;
+                });
+                deregister_handles.push(handle);
+            }
+            Err(e) => errors.push(e),
+        }
     }
 
-    (*current_pods) = current_pods
-        .drain(..)
-        .filter(|p| pods_hash.contains(&calculate_hash(p)))
-        .collect();
+    // Await all deregistration tasks and log if any panicked or failed to run
+    for h in deregister_handles {
+        if let Err(join_err) = h.await {
+            error!("deregister_pod_probes task panicked or was cancelled: {join_err:?}");
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(anyhow!("{errors:?}"));
+    }
+
+    *current_pods = to_keep;
     Ok(())
 }
 
