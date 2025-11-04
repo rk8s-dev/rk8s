@@ -1,5 +1,6 @@
 use crate::protocol::config::{config_ref, ip_or_dns, to_alt_names_and_ip_sans};
 use crate::vault::{CertRole, Vault};
+use anyhow::Context;
 use common::IssueCertificateRequest;
 use libvault::modules::pki::types::IssueCertificateResponse;
 use quinn::crypto::rustls::QuicServerConfig;
@@ -19,12 +20,14 @@ fn build_no_tls_config() -> anyhow::Result<quinn::ServerConfig> {
 }
 
 pub async fn build_quic_config(
-    vault: &Vault,
+    vault: Option<&Vault>,
 ) -> anyhow::Result<(quinn::ServerConfig, Option<Vec<CertificateDer<'static>>>)> {
     let cfg = config_ref();
     if !cfg.tls_config.enable {
         return Ok((build_no_tls_config()?, None));
     }
+
+    let vault = vault.context("Vault is required when TLS is enabled")?;
 
     let (alt_names, ip_sans) = to_alt_names_and_ip_sans(ip_or_dns(&cfg.addr));
     let req = IssueCertificateRequest {

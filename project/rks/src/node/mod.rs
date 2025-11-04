@@ -99,7 +99,7 @@ impl RksNode {
 pub struct Shared {
     pub xline_store: Arc<XlineStore>,
     pub local_manager: Arc<LocalManager>,
-    pub vault: Arc<Vault>,
+    pub vault: Option<Arc<Vault>>,
     pub node_registry: Arc<NodeRegistry>,
 }
 
@@ -107,7 +107,7 @@ impl Shared {
     pub fn new(
         xline_store: Arc<XlineStore>,
         local_manager: Arc<LocalManager>,
-        vault: Arc<Vault>,
+        vault: Option<Arc<Vault>>,
         node_registry: Arc<NodeRegistry>,
     ) -> Self {
         Self {

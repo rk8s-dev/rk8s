@@ -25,13 +25,13 @@ pub struct QUICServer {
 }
 
 struct RotateContext {
-    vault: Arc<Vault>,
+    vault: Option<Arc<Vault>>,
     deadline: Option<SystemTime>,
 }
 
 impl QUICServer {
-    pub async fn new(addr: SocketAddr, vault: Arc<Vault>) -> anyhow::Result<Self> {
-        let (config, certs) = build_quic_config(&vault).await?;
+    pub async fn new(addr: SocketAddr, vault: Option<Arc<Vault>>) -> anyhow::Result<Self> {
+        let (config, certs) = build_quic_config(vault.as_deref()).await?;
 
         let deadline = match certs {
             Some(certs) => Some(certs[0].rotate_deadline(2.0 / 3.0)?),
@@ -45,16 +45,16 @@ impl QUICServer {
     }
 
     fn rotate_background(&self) {
-        if let Some(deadline) = self.context.deadline {
+        if let (Some(deadline), Some(vault)) = (self.context.deadline, self.context.vault.clone()) {
             info!("next rotation deadline: {}", format_rfc3339(deadline));
 
-            let vault = self.context.vault.clone();
             let endpoint = self.endpoint.clone();
 
             tokio::spawn(async move {
                 let result =
                     || -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>> {
                         let mut deadline = deadline;
+                        let vault = vault.clone();
 
                         Box::pin(async move {
                             loop {
@@ -72,7 +72,8 @@ impl QUICServer {
 
                                 info!("deadline reached, preparing rotate certificate");
 
-                                let (config, certs) = build_quic_config(&vault).await?;
+                                let (config, certs) =
+                                    build_quic_config(Some(vault.as_ref())).await?;
 
                                 let certs = certs.unwrap();
                                 deadline = certs[0].rotate_deadline(2.0 / 3.0)?;
@@ -205,17 +206,21 @@ impl ConnectionState for Unauthenticated {
         let msg = conn.conn.fetch_msg().await?;
 
         debug!("received request from client");
-
         match &msg {
             RksMessage::CertificateSign { req, token } => {
                 debug!("return issued certificate to client");
 
-                let reply = match conn.shared.vault.validate_token(token).await {
-                    Ok(_) => {
-                        let res = conn.shared.vault.issue_cert(CertRole::Rkl, req).await?;
-                        RksMessage::Certificate(res)
-                    }
-                    Err(e) => RksMessage::Error(format!("Invalid join token: {e}")),
+                let reply = match conn.shared.vault.as_ref() {
+                    Some(vault) => match vault.validate_token(token).await {
+                        Ok(_) => {
+                            let res = vault.issue_cert(CertRole::Rkl, req).await?;
+                            RksMessage::Certificate(res)
+                        }
+                        Err(e) => RksMessage::Error(format!("Invalid join token: {e}")),
+                    },
+                    None => RksMessage::Error(
+                        "TLS authentication is disabled on the server".to_string(),
+                    ),
                 };
 
                 conn.conn.send_msg(&reply).await?;

@@ -76,6 +76,7 @@ If you don't want to enable tls authentication, keep the `enable` set to false. 
 6. When you are starting a rkl node and wanting it to join cluster, you must save the root certificates into file, which is the file named with `root.pem` in backend folder. In additional, get a join token by `rks gen join-token`.
 7. Run `sudo rkl pod <operator> --enable-tls --join-token <join-token> --root-cert-path <root.pem-path>` to start rkl nodes.
 
+**Note**: you must use `https` protocol to connect to xline.
 ### 4. Create pods
 Here is an example of pod.yaml:
 ```yaml

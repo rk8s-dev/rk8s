@@ -25,7 +25,15 @@ async fn generate_join_token(State(state): State<Arc<AppState>>) -> impl IntoRes
         .unwrap_or_else(|e| e.to_string())
 }
 
-pub async fn start_internal_server(vault: Arc<Vault>) -> anyhow::Result<()> {
+pub async fn start_internal_server(vault: Option<Arc<Vault>>) -> anyhow::Result<()> {
+    let Some(vault) = vault else {
+        info!(
+            target: "rks::internal_server",
+            "internal server disabled because TLS authentication is disabled",
+        );
+        return Ok(());
+    };
+
     let state = Arc::new(AppState { vault });
 
     let router = router(state);

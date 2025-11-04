@@ -49,96 +49,41 @@ impl Vault {
 
     pub fn with_file_backend() -> anyhow::Result<Self> {
         let path = &config_ref().tls_config.vault_folder;
-
         let backend = FileBackend::with_folder(path)?;
-        Ok(Self {
-            vault: RustyVault::new(Arc::new(backend), None)?,
-            root_token: String::new(),
-        })
+        Self::new(Arc::new(backend))
+    }
+
+    pub async fn write_policy(&self, cert: CertRole) -> anyhow::Result<()> {
+        let role = json!({
+            "key_type": "ec",
+            "key_bits": 256,
+            "allow_ip_sans": true,
+            "allowed_domains": format!("{cert}.svc.cluster.local"),
+            "allow_subdomains": true,
+            "server_flag": true,
+            "client_flag": true,
+            "ttl": "180d",
+            "max_ttl": "360d",
+            "no_store": false,
+            "generate_lease": false,
+        });
+
+        self.vault
+            .write(
+                Some(self.root_token.to_string()),
+                format!("pki/roles/{cert}-node"),
+                role.to_map()?,
+            )
+            .await
+            .with_context(|| "Failed to write policy")?;
+        info!("Published role policy pki/roles/{cert}-node");
+        Ok(())
     }
 
     async fn write_policies(&self) -> anyhow::Result<()> {
-        let rks_role = json!({
-            "key_type": "ec",
-            "key_bits": 256,
-            "allow_ip_sans": true,
-            "allowed_domains": "rks.svc.cluster.local",
-            "allow_subdomains": true,
-            "server_flag": true,
-            "client_flag": true,
-            "ttl": "180d",
-            "max_ttl": "360d",
-            "no_store": false,
-            "generate_lease": false,
-        });
-
-        self.vault
-            .write(
-                Some(self.root_token.as_str()),
-                "pki/roles/rks-node",
-                rks_role.to_map()?,
-            )
-            .await
-            .with_context(|| "Failed to write policy")?;
-        info!(
-            target: "rks::vault",
-            "published role policy pki/roles/rks-node"
-        );
-
-        let rkl_role = json!({
-            "key_type": "ec",
-            "key_bits": 256,
-            "allow_ip_sans": true,
-            "allowed_domains": "rkl.svc.cluster.local",
-            "allow_subdomains": true,
-            "server_flag": true,
-            "client_flag": true,
-            "ttl": "180d",
-            "max_ttl": "360d",
-            "no_store": false,
-            "generate_lease": false,
-        });
-
-        self.vault
-            .write(
-                Some(self.root_token.as_str()),
-                "pki/roles/rkl-node",
-                rkl_role.to_map()?,
-            )
-            .await
-            .with_context(|| "Failed to write policy")?;
-        info!(
-            target: "rks::vault",
-            "published role policy pki/roles/rkl-node"
-        );
-
-        let xline_role = json!({
-            "key_type": "ec",
-            "key_bits": 256,
-            "allow_ip_sans": true,
-            "allowed_domains": "xline.svc.cluster.local",
-            "allow_subdomains": true,
-            "server_flag": true,
-            "client_flag": true,
-            "ttl": "180d",
-            "max_ttl": "360d",
-            "no_store": false,
-            "generate_lease": false,
-        });
-
-        self.vault
-            .write(
-                Some(self.root_token.as_str()),
-                "pki/roles/xline-node",
-                xline_role.to_map()?,
-            )
-            .await
-            .with_context(|| "Failed to write policy")?;
-        info!(
-            target: "rks::vault",
-            "published role policy pki/roles/xline-node"
-        );
-        Ok(())
+        self.write_policy(CertRole::Rks).await?;
+        self.write_policy(CertRole::Rkl).await?;
+        self.write_policy(CertRole::Xline).await
     }
 
     async fn generate_root_ca(&self, folder: impl AsRef<Path>) -> anyhow::Result<()> {
@@ -186,10 +131,7 @@ impl Vault {
             .and_then(|v| v.as_str())
             .with_context(|| "Failed to get private key of root ca from vault response")?;
 
-        info!(
-            target: "rks::vault",
-            "generated/exported cluster root CA"
-        );
+        info!("generated/exported cluster root CA");
 
         tokio::fs::write(folder.join("root.pem"), cert_pem).await?;
         tokio::fs::write(folder.join("root.key"), private_key).await?;
@@ -246,18 +188,12 @@ impl Vault {
             tokio::fs::write(folder.join("private.key"), &res.private_key).await?;
         }
 
-        info!(
-            target: "rks::vault",
-            "successfully wrote all certificates to xline cluster"
-        );
+        info!("successfully wrote all certificates to xline cluster");
         Ok(())
     }
 
     pub async fn generate_certs(&mut self) -> anyhow::Result<()> {
-        info!(
-            target: "rks::vault",
-            "initializing seal configuration"
-        );
+        info!("initializing seal configuration");
 
         let keys = self
             .vault
@@ -268,7 +204,6 @@ impl Vault {
             .await?;
 
         info!(
-            target: "rks::vault",
             "initialization complete: shares={}, threshold={}",
             keys.secret_shares.len(),
             3
@@ -282,10 +217,7 @@ impl Vault {
 
         self.vault.unseal(&secrets).await?;
         self.root_token = keys.root_token.clone();
-        info!(
-            target: "rks::vault",
-            "unseal succeeded and root token stored in memory"
-        );
+        info!("unseal succeeded and root token stored in memory");
 
         self.vault
             .mount(self.root_token.as_str().into(), "pki", "pki")
@@ -348,7 +280,6 @@ impl Vault {
         req: &IssueCertificateRequest,
     ) -> anyhow::Result<IssueCertificateResponse> {
         debug!(
-            target: "rks::vault",
             "issuing certificate for role={role} (cn={:?})",
             req.common_name
         );
@@ -370,12 +301,7 @@ impl Vault {
 
         let response = serde_json::from_value(Value::Object(data))
             .with_context(|| "Failed to deserialize issue certificate response")
-            .inspect(|_| {
-                info!(
-                    target: "rks::vault",
-                    "certificate issued for role={role}"
-                )
-            })?;
+            .inspect(|_| info!("certificate issued for role={role}"))?;
         Ok(response)
     }
 
@@ -391,38 +317,18 @@ impl Vault {
     }
 
     pub async fn migrate() -> anyhow::Result<Self> {
-        info!(
-            target: "rks::vault",
-            "preparing to migrate from file backend"
-        );
+        info!("preparing to migrate from file backend");
 
         let folder = &config_ref().tls_config.vault_folder;
 
-        let keys = serde_json::from_str::<Value>(
-            &tokio::fs::read_to_string(folder.join("keys.json")).await?,
-        )?;
-        let keys = keys
-            .as_object()
-            .unwrap()
-            .get("keys")
-            .and_then(|v| v.as_array())
-            .map(|v| {
-                v.iter()
-                    .map(|e| e.as_str().map(|e| e.as_bytes()).unwrap())
-                    .map(|e| base64::decode(e).unwrap())
-                    .collect::<Vec<_>>()
-            })
-            .with_context(|| "keys.json doesn't contain a key named with `keys`")?;
+        let keys = extract_keys(&folder.join("keys.json")).await?;
         let keys_ref = keys.iter().map(|e| e.as_slice()).collect::<Vec<_>>();
 
         if !config_ref().tls_config.keep_dangerous_files {
             tokio::fs::remove_file(folder.join("keys.json")).await?;
         }
 
-        info!(
-            target: "rks::vault",
-            "migration stage1: generate certificates for vault"
-        );
+        info!("migration stage1: generate certificates for vault");
         let mut vault = Vault::with_file_backend()?;
 
         vault.vault.unseal(&keys_ref).await?;
@@ -442,16 +348,9 @@ impl Vault {
         let resp = vault.issue_cert(CertRole::Rks, &req).await?;
         let cfg = config_ref();
         let mut xline_options = XlineOptions::new(cfg.xline_config.endpoints.clone());
-        if cfg.tls_config.enable {
-            xline_options =
-                xline_options.with_tls(&root_cert, &resp.certificate, &resp.private_key)?;
-        }
+        xline_options = xline_options.with_tls(&root_cert, &resp.certificate, &resp.private_key)?;
 
-        // Stage2: connect to xline backend and migrate.
-        info!(
-            target: "rks::vault",
-            "migration stage2: connect to xline backend and do migration"
-        );
+        info!("migration stage2: connect to xline backend and do migration");
         let xline_backend = Arc::new(XlineBackend::with_options(xline_options));
         let mut vault = Vault::new(xline_backend)?;
 
@@ -474,10 +373,22 @@ impl Vault {
 
         vault.root_token = root_token;
 
-        info!(
-            target: "rks::vault",
-            "successfully migrated from file backend"
-        );
+        info!("successfully migrated from file backend");
         Ok(vault)
     }
+}
+
+async fn extract_keys(path: &Path) -> anyhow::Result<Vec<Vec<u8>>> {
+    let keys = serde_json::from_str::<Value>(&tokio::fs::read_to_string(path).await?)?;
+    keys.as_object()
+        .unwrap()
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .map(|v| {
+            v.iter()
+                .map(|e| e.as_str().map(|e| e.as_bytes()).unwrap())
+                .map(|e| base64::decode(e).unwrap())
+                .collect::<Vec<_>>()
+        })
+        .with_context(|| "keys.json doesn't contain a key named with `keys`")
 }

@@ -54,9 +54,16 @@ pub struct NetworkConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TLSConfig {
+    #[serde(default)]
     pub enable: bool,
+    #[serde(default = "default_vault_folder")]
     pub vault_folder: PathBuf,
+    #[serde(default)]
     pub keep_dangerous_files: bool,
+}
+
+fn default_vault_folder() -> PathBuf {
+    PathBuf::from("./backend")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +94,7 @@ pub fn ip_or_dns(addr: impl AsRef<str>) -> Either<String, String> {
         }
     }
 }
+
 pub fn to_alt_names_and_ip_sans(
     ip_or_dns: Either<String, String>,
 ) -> (Option<String>, Option<String>) {
