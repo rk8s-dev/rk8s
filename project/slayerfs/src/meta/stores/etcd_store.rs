@@ -13,12 +13,13 @@ use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
 use etcd_client::{Client as EtcdClient, Compare, CompareOp, Txn, TxnOp};
-use log::{error, info};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::collections::HashSet;
+use serde_json;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
+use tracing::{error, info, warn};
 
 /// Etcd-based metadata store
 pub struct EtcdMetaStore {
@@ -146,32 +147,27 @@ impl EtcdMetaStore {
     /// Initialize root directory
     async fn init_root_directory(&self) -> Result<(), MetaError> {
         let children_key = Self::etcd_children_key(1);
+        let root_children = EtcdDirChildren::new(1, HashMap::new());
+        let children_json = serde_json::to_string(&root_children)?;
+
         let mut client = self.client.clone();
 
-        if let Ok(resp) = client.get(children_key.clone(), None).await
-            && !resp.kvs().is_empty()
-        {
-            info!("Root directory already initialized for Etcd backend");
-            return Ok(());
+        // Atomically create root directory only if it doesn't exist
+        // version == 0 means the key is currently not present
+        let txn = Txn::new()
+            .when([Compare::version(children_key.clone(), CompareOp::Equal, 0)])
+            .and_then([TxnOp::put(children_key.clone(), children_json, None)]);
+
+        let resp = client.txn(txn).await.map_err(|e| {
+            MetaError::Config(format!("Failed to initialize root directory: {}", e))
+        })?;
+
+        if resp.succeeded() {
+            info!("Root directory initialized for Etcd backend");
+        } else {
+            info!("Root directory already exists for Etcd backend");
         }
 
-        let root_children = EtcdDirChildren {
-            inode: 1,
-            children: HashSet::new(),
-        };
-
-        let children_json = serde_json::to_string(&root_children)?;
-        client
-            .put(children_key, children_json, None)
-            .await
-            .map_err(|e| {
-                MetaError::Config(format!(
-                    "Failed to initialize root directory in Etcd: {}",
-                    e
-                ))
-            })?;
-
-        info!("Root directory initialized for Etcd backend");
         Ok(())
     }
 
@@ -229,13 +225,50 @@ impl EtcdMetaStore {
             return Ok(None);
         }
 
+        // Optimization: Batch fetch all forward entries with a single prefix query
+        // Instead of N individual queries, use one range request for f:{parent_inode}:
+        let mut client = self.client.clone();
+        let forward_prefix = format!("f:{}:", parent_inode);
+
+        let forward_entries_map: HashMap<String, EtcdForwardEntry> = match client
+            .get(
+                forward_prefix.clone(),
+                Some(etcd_client::GetOptions::new().with_prefix()),
+            )
+            .await
+        {
+            Ok(resp) => {
+                let mut map = HashMap::new();
+                for kv in resp.kvs() {
+                    if let Ok(entry) = serde_json::from_slice::<EtcdForwardEntry>(kv.value()) {
+                        // Extract child name from key: "f:{parent}:{name}" -> name
+                        let key_str = String::from_utf8_lossy(kv.key());
+                        if let Some(name) = key_str.strip_prefix(&forward_prefix) {
+                            map.insert(name.to_string(), entry);
+                        }
+                    }
+                }
+                map
+            }
+            Err(e) => {
+                error!(
+                    "Failed to batch fetch forward entries for parent_inode {}: {}. Directory will appear empty.",
+                    parent_inode, e
+                );
+                return Err(MetaError::Internal(format!(
+                    "Failed to batch fetch forward entries for parent_inode {}: {}",
+                    parent_inode, e
+                )));
+            }
+        };
+
         let mut content_list = Vec::new();
-        for child_name in &dir_children.children {
-            let forward_key = Self::etcd_forward_key(parent_inode, child_name);
-            if let Ok(Some(forward_entry)) = self
-                .etcd_get_json_lenient::<EtcdForwardEntry>(&forward_key)
-                .await
-            {
+        // Sort children names to ensure consistent order (matching BTreeMap in cache)
+        let mut sorted_names: Vec<_> = dir_children.children.keys().collect();
+        sorted_names.sort();
+
+        for child_name in sorted_names {
+            if let Some(forward_entry) = forward_entries_map.get(child_name.as_str()) {
                 let entry_type = if forward_entry.is_file {
                     EntryType::File
                 } else {
@@ -284,6 +317,7 @@ impl EtcdMetaStore {
 
     /// Create a new directory
     async fn create_directory(&self, parent_inode: i64, name: String) -> Result<i64, MetaError> {
+        // Step 1: Verify parent exists
         if self.get_access_meta(parent_inode).await?.is_none() {
             return Err(MetaError::ParentNotFound(parent_inode));
         }
@@ -300,7 +334,6 @@ impl EtcdMetaStore {
         }
 
         let inode = self.generate_id(INODE_ID_KEY).await?;
-        let mut client = self.client.clone();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let dir_permission = Permission::new(0o40755, 0, 0);
@@ -331,50 +364,75 @@ impl EtcdMetaStore {
         let reverse_json = serde_json::to_string(&entry_info)?;
 
         let children_key = Self::etcd_children_key(inode);
-        let children = EtcdDirChildren {
-            inode,
-            children: HashSet::new(),
-        };
+        let children = EtcdDirChildren::new(inode, HashMap::new());
         let children_json = serde_json::to_string(&children)?;
 
-        let parent_children_key = Self::etcd_children_key(parent_inode);
-        let parent_children = match self
-            .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
-            .await?
+        // Step 2: Atomic transaction - create all keys only if forward key doesn't exist
+        info!(
+            "Creating directory with transaction: parent={}, name={}, inode={}",
+            parent_inode, name, inode
+        );
+
+        let operations = vec![
+            (forward_key.as_str(), forward_json.as_str()),
+            (reverse_key.as_str(), reverse_json.as_str()),
+            (children_key.as_str(), children_json.as_str()),
+        ];
+
+        self.create_entry(&forward_key, &operations, parent_inode, &name)
+            .await?;
+
+        // Step 3: Update parent's children set
+        // If this fails, forward/reverse/children keys are created
+        // but parent's children map is not updated. Consider using compensation or
+        // background reconciliation.
+        let name_for_closure = name.clone();
+        let inode_for_closure = inode;
+        match self
+            .update_parent_children(
+                parent_inode,
+                move |children| {
+                    children.insert(name_for_closure.clone(), inode_for_closure);
+                },
+                10,
+            )
+            .await
         {
-            Some(mut children) => {
-                children.children.insert(name.clone());
-                children
+            Ok(_) => {
+                info!(
+                    "Directory created successfully: parent={}, name={}, inode={}",
+                    parent_inode, name, inode
+                );
+                Ok(inode)
             }
-            None => {
-                let mut children = EtcdDirChildren {
-                    inode: parent_inode,
-                    children: HashSet::new(),
-                };
-                children.children.insert(name.clone());
-                children
+            Err(e) => {
+                // Compensation: Try to rollback the created entry
+                error!(
+                    "Failed to update parent children for dir creation, attempting rollback: parent={}, name={}, inode={}, error={}",
+                    parent_inode, name, inode, e
+                );
+
+                let rollback_keys = vec![
+                    forward_key.as_str(),
+                    reverse_key.as_str(),
+                    children_key.as_str(),
+                ];
+
+                if let Err(rollback_err) =
+                    self.delete_entry(&forward_key, &rollback_keys, inode).await
+                {
+                    error!(
+                        "Failed to rollback directory creation: inode={}, error={}. Manual cleanup may be required.",
+                        inode, rollback_err
+                    );
+                }
+
+                Err(MetaError::Internal(format!(
+                    "Failed to create directory: {}",
+                    e
+                )))
             }
-        };
-        let parent_children_json = serde_json::to_string(&parent_children)?;
-
-        client
-            .put(forward_key, forward_json, None)
-            .await
-            .map_err(|e| MetaError::Config(format!("Failed to create forward index: {}", e)))?;
-        client
-            .put(reverse_key, reverse_json, None)
-            .await
-            .map_err(|e| MetaError::Config(format!("Failed to create reverse index: {}", e)))?;
-        client
-            .put(children_key, children_json, None)
-            .await
-            .map_err(|e| MetaError::Config(format!("Failed to create children index: {}", e)))?;
-        client
-            .put(parent_children_key, parent_children_json, None)
-            .await
-            .map_err(|e| MetaError::Config(format!("Failed to update parent children: {}", e)))?;
-
-        Ok(inode)
+        }
     }
 
     /// Create a new file
@@ -383,6 +441,7 @@ impl EtcdMetaStore {
         parent_inode: i64,
         name: String,
     ) -> Result<i64, MetaError> {
+        // Step 1: Verify parent exists
         if self.get_access_meta(parent_inode).await?.is_none() {
             return Err(MetaError::ParentNotFound(parent_inode));
         }
@@ -428,41 +487,63 @@ impl EtcdMetaStore {
         let reverse_key = Self::etcd_reverse_key(inode);
         let reverse_json = serde_json::to_string(&entry_info)?;
 
-        let parent_children_key = Self::etcd_children_key(parent_inode);
-        let parent_children = match self
-            .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
-            .await?
+        // Step 2: Atomic transaction - create keys only if forward key doesn't exist
+        info!(
+            "Creating file with transaction: parent={}, name={}, inode={}",
+            parent_inode, name, inode
+        );
+
+        let operations = vec![
+            (forward_key.as_str(), forward_json.as_str()),
+            (reverse_key.as_str(), reverse_json.as_str()),
+        ];
+
+        self.create_entry(&forward_key, &operations, parent_inode, &name)
+            .await?;
+
+        // Step 3: Update parent's children set
+        // If this fails, forward/reverse keys are created
+        // but parent's children map is not updated. Rollback is attempted below.
+        let name_for_closure = name.clone();
+        let inode_for_closure = inode;
+        match self
+            .update_parent_children(
+                parent_inode,
+                move |children| {
+                    children.insert(name_for_closure.clone(), inode_for_closure);
+                },
+                10,
+            )
+            .await
         {
-            Some(mut children) => {
-                children.children.insert(name.clone());
-                children
+            Ok(_) => {
+                info!(
+                    "File created successfully: parent={}, name={}, inode={}",
+                    parent_inode, name, inode
+                );
+                Ok(inode)
             }
-            None => {
-                let mut children = EtcdDirChildren {
-                    inode: parent_inode,
-                    children: HashSet::new(),
-                };
-                children.children.insert(name.clone());
-                children
+            Err(e) => {
+                // Compensation: Try to rollback the created entry
+                error!(
+                    "Failed to update parent children for file creation, attempting rollback: parent={}, name={}, inode={}, error={}",
+                    parent_inode, name, inode, e
+                );
+
+                let rollback_keys = vec![forward_key.as_str(), reverse_key.as_str()];
+
+                if let Err(rollback_err) =
+                    self.delete_entry(&forward_key, &rollback_keys, inode).await
+                {
+                    error!(
+                        "Failed to rollback file creation: inode={}, error={}. Manual cleanup may be required.",
+                        inode, rollback_err
+                    );
+                }
+
+                Err(MetaError::Internal(format!("Failed to create file: {}", e)))
             }
-        };
-        let parent_children_json = serde_json::to_string(&parent_children)?;
-
-        let mut client = self.client.clone();
-        client
-            .put(forward_key, forward_json, None)
-            .await
-            .map_err(|e| MetaError::Config(format!("Failed to create forward index: {}", e)))?;
-        client
-            .put(reverse_key, reverse_json, None)
-            .await
-            .map_err(|e| MetaError::Config(format!("Failed to create reverse index: {}", e)))?;
-        client
-            .put(parent_children_key, parent_children_json, None)
-            .await
-            .map_err(|e| MetaError::Config(format!("Failed to update parent children: {}", e)))?;
-
-        Ok(inode)
+        }
     }
 
     /// Generate unique ID using Etcd atomic counter
@@ -495,7 +576,6 @@ impl EtcdMetaStore {
                     let next_id = current_id + 1;
 
                     // Use transaction for atomic compare-and-swap
-                    use etcd_client::{Compare, CompareOp, Txn, TxnOp};
 
                     let cmp = Compare::mod_revision(counter_key, CompareOp::Equal, mod_revision);
                     let put_op = TxnOp::put(counter_key, next_id.to_string(), None);
@@ -577,6 +657,156 @@ impl EtcdMetaStore {
         }
         Err(MetaError::MaxRetriesExceeded)
     }
+
+    /// Get a clone of the etcd client (for Watch Worker)
+    pub fn get_client(&self) -> EtcdClient {
+        self.client.clone()
+    }
+
+    /// Create entry with conflict check
+    ///
+    /// Atomically creates multiple key-value pairs only if the check key doesn't exist.
+    /// This ensures no duplicate entries are created in concurrent scenarios.
+    ///
+    /// Uses `version == 0` check which correctly handles both cases:
+    /// - Key never existed: version is 0
+    /// - Key was deleted: version becomes 0 after deletion
+    async fn create_entry(
+        &self,
+        check_key: &str,
+        entries: &[(&str, &str)],
+        parent: i64,
+        name: &str,
+    ) -> Result<(), MetaError> {
+        let mut client = self.client.clone();
+        // Use version instead of create_revision to handle deleted keys correctly
+        // version == 0 means the key is currently not present (never existed or deleted)
+        let mut txn = Txn::new().when([Compare::version(check_key, CompareOp::Equal, 0)]);
+        let mut ops = Vec::new();
+        for (key, value) in entries {
+            ops.push(TxnOp::put(*key, *value, None));
+        }
+        txn = txn.and_then(ops);
+
+        let resp = client
+            .txn(txn)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Create entry transaction failed: {}", e)))?;
+
+        if resp.succeeded() {
+            Ok(())
+        } else {
+            Err(MetaError::AlreadyExists {
+                parent,
+                name: name.to_string(),
+            })
+        }
+    }
+
+    /// Delete entry with existence check
+    ///
+    /// Atomically deletes multiple keys only if the check key exists.
+    /// This ensures the entry exists before attempting deletion.
+    ///
+    /// Uses `version > 0` check to verify key currently exists.
+    async fn delete_entry(
+        &self,
+        check_key: &str,
+        keys: &[&str],
+        ino: i64,
+    ) -> Result<(), MetaError> {
+        let mut client = self.client.clone();
+        // Use version > 0 to check if key currently exists
+        let mut txn = Txn::new().when([Compare::version(check_key, CompareOp::Greater, 0)]);
+        let mut ops = Vec::new();
+        for key in keys {
+            ops.push(TxnOp::delete(*key, None));
+        }
+        txn = txn.and_then(ops);
+
+        let resp = client
+            .txn(txn)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Delete entry transaction failed: {}", e)))?;
+
+        if resp.succeeded() {
+            Ok(())
+        } else {
+            Err(MetaError::NotFound(ino))
+        }
+    }
+
+    /// Update parent directory children
+    ///
+    /// Uses optimistic concurrency control to safely update the children map
+    /// in multi-client scenarios. Retries on conflicts up to max_retries.
+    async fn update_parent_children(
+        &self,
+        parent_ino: i64,
+        updater: impl Fn(&mut HashMap<String, i64>) + Send + Sync,
+        max_retries: usize,
+    ) -> Result<(), MetaError> {
+        let key = Self::etcd_children_key(parent_ino);
+        let mut client = self.client.clone();
+
+        for retry in 0..max_retries {
+            let resp = client.get(key.clone(), None).await.map_err(|e| {
+                MetaError::Internal(format!("Failed to get parent children: {}", e))
+            })?;
+
+            let (mut children_map, mod_revision) = if let Some(kv) = resp.kvs().first() {
+                let children: EtcdDirChildren = serde_json::from_slice(kv.value())
+                    .map_err(|e| MetaError::Internal(format!("Failed to parse children: {}", e)))?;
+                (children.children.clone(), kv.mod_revision())
+            } else {
+                (HashMap::new(), 0)
+            };
+
+            updater(&mut children_map);
+
+            let new_children = EtcdDirChildren::new(parent_ino, children_map);
+            let new_json = serde_json::to_string(&new_children)
+                .map_err(|e| MetaError::Internal(format!("Failed to serialize children: {}", e)))?;
+
+            let txn = if mod_revision == 0 {
+                Txn::new()
+                    .when([Compare::version(key.clone(), CompareOp::Equal, 0)])
+                    .and_then([TxnOp::put(key.clone(), new_json, None)])
+            } else {
+                Txn::new()
+                    .when([Compare::mod_revision(
+                        key.clone(),
+                        CompareOp::Equal,
+                        mod_revision,
+                    )])
+                    .and_then([TxnOp::put(key.clone(), new_json, None)])
+            };
+
+            let txn_resp = client.txn(txn).await.map_err(|e| {
+                MetaError::Internal(format!("Update children transaction failed: {}", e))
+            })?;
+
+            if txn_resp.succeeded() {
+                return Ok(());
+            } else if retry < max_retries - 1 {
+                info!(
+                    "Concurrent update detected for parent {}, retrying ({}/{})",
+                    parent_ino,
+                    retry + 1,
+                    max_retries
+                );
+                continue;
+            } else {
+                return Err(MetaError::Internal(format!(
+                    "Failed to update parent {} children after {} retries",
+                    parent_ino, max_retries
+                )));
+            }
+        }
+        Err(MetaError::Internal(
+            "Update parent children failed: unreachable".to_string(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -618,18 +848,12 @@ impl MetaStore for EtcdMetaStore {
     }
 
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
-        let contents = match self.get_content_meta(parent).await? {
-            Some(contents) => contents,
-            None => return Ok(None),
-        };
-
-        for content in contents {
-            if content.entry_name == name {
-                return Ok(Some(content.inode));
-            }
+        let forward_key = Self::etcd_forward_key(parent, name);
+        if let Some(entry) = self.etcd_get_json::<EtcdForwardEntry>(&forward_key).await? {
+            Ok(Some(entry.inode))
+        } else {
+            Ok(None)
         }
-
-        Ok(None)
     }
 
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError> {
@@ -709,8 +933,6 @@ impl MetaStore for EtcdMetaStore {
     }
 
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
-        let mut client = self.client.clone();
-
         let forward_key = Self::etcd_forward_key(parent, name);
         let forward_entry: EtcdForwardEntry =
             match self.etcd_get_json::<EtcdForwardEntry>(&forward_key).await? {
@@ -731,38 +953,71 @@ impl MetaStore for EtcdMetaStore {
             return Err(MetaError::DirectoryNotEmpty(child_ino));
         }
 
-        client
-            .delete(forward_key, None)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Failed to delete forward index: {}", e)))?;
+        info!(
+            "Deleting directory with transaction: parent={}, name={}, inode={}",
+            parent, name, child_ino
+        );
 
+        // Step 1: Delete the directory entries first (forward, reverse, children keys)
+        // This ensures the directory is properly deleted before updating parent
         let reverse_key = Self::etcd_reverse_key(child_ino);
-        client
-            .delete(reverse_key, None)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Failed to delete reverse index: {}", e)))?;
+        let children_key = Self::etcd_children_key(child_ino);
+        let delete_keys = vec![
+            forward_key.as_str(),
+            reverse_key.as_str(),
+            children_key.as_str(),
+        ];
 
-        client
-            .delete(children_key, None)
+        match self
+            .delete_entry(&forward_key, &delete_keys, child_ino)
             .await
-            .map_err(|e| MetaError::Internal(format!("Failed to delete children index: {}", e)))?;
-
-        let parent_children_key = Self::etcd_children_key(parent);
-        if let Some(mut parent_children) = self
-            .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
-            .await?
         {
-            parent_children.children.remove(name);
-            let updated_json = serde_json::to_string(&parent_children)?;
-            client
-                .put(parent_children_key, updated_json, None)
-                .await
-                .map_err(|e| {
-                    MetaError::Internal(format!("Failed to update parent children: {}", e))
-                })?;
-        }
+            Ok(_) => {
+                // Step 2: Directory deleted successfully, now update parent children map
+                // If this fails, forward key is deleted but parent still references it
+                // This is acceptable: lookup will fail (forward key gone), no dangling data
+                let name_for_closure = name.to_string();
 
-        Ok(())
+                match self
+                    .update_parent_children(
+                        parent,
+                        move |children| {
+                            children.remove(&name_for_closure);
+                        },
+                        10,
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        info!(
+                            "Directory deleted successfully: parent={}, name={}, inode={}",
+                            parent, name, child_ino
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        // Parent update failed, but directory is deleted
+                        // Forward key is deleted, so lookup will fail correctly
+                        // Log warning but don't fail the operation
+                        warn!(
+                            "Rmdir succeeded but failed to update parent children map: parent={}, name={}, inode={}, error={}. Forward key deleted, lookup will fail correctly.",
+                            parent, name, child_ino, e
+                        );
+                        // Return success since the directory is effectively deleted
+                        // (forward key deleted = directory is unreachable)
+                        Ok(())
+                    }
+                }
+            }
+            Err(e) => {
+                // Deletion failed
+                error!(
+                    "Directory deletion failed: parent={}, name={}, inode={}, error={}",
+                    parent, name, child_ino, e
+                );
+                Err(e)
+            }
+        }
     }
 
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
@@ -785,13 +1040,7 @@ impl MetaStore for EtcdMetaStore {
             return Err(MetaError::Internal("Is a directory".to_string()));
         }
 
-        // Delete content meta first (forward index)
-        client
-            .delete(forward_key, None)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Failed to delete forward index: {}", e)))?;
-
-        // Update file metadata - mark as deleted or decrease nlink
+        // Get current file metadata
         let reverse_key = Self::etcd_reverse_key(file_ino);
         let mut entry_info: EtcdEntryInfo =
             match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
@@ -799,6 +1048,7 @@ impl MetaStore for EtcdMetaStore {
                 None => return Err(MetaError::NotFound(file_ino)),
             };
 
+        // Update file metadata - mark as deleted or decrease nlink
         if entry_info.nlink > 1 {
             // File has multiple links, just decrease nlink
             entry_info.nlink -= 1;
@@ -813,28 +1063,78 @@ impl MetaStore for EtcdMetaStore {
         let updated_json = serde_json::to_string(&entry_info)
             .map_err(|e| MetaError::Internal(format!("Failed to serialize entry info: {}", e)))?;
 
-        client
-            .put(reverse_key, updated_json, None)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Failed to update file metadata: {}", e)))?;
+        info!(
+            "Unlinking file with atomic transaction: parent={}, name={}, inode={}",
+            parent, name, file_ino
+        );
 
-        // Update parent directory children and mtime
-        let parent_children_key = Self::etcd_children_key(parent);
-        if let Some(mut parent_children) = self
-            .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
-            .await?
-        {
-            parent_children.children.remove(name);
-            let updated_json = serde_json::to_string(&parent_children)?;
-            client
-                .put(parent_children_key, updated_json, None)
-                .await
-                .map_err(|e| {
-                    MetaError::Internal(format!("Failed to update parent children: {}", e))
-                })?;
+        // Step 1: Perform atomic transaction first (delete forward key, update metadata)
+        // This ensures the file is properly marked as deleted before updating parent
+        let txn = Txn::new()
+            .when([Compare::version(forward_key.clone(), CompareOp::Greater, 0)])
+            .and_then([
+                TxnOp::delete(forward_key.clone(), None),
+                TxnOp::put(reverse_key.clone(), updated_json.clone(), None),
+            ]);
+
+        match client.txn(txn).await {
+            Ok(resp) if resp.succeeded() => {
+                // Step 2: Atomic transaction succeeded, now update parent children map
+                // If this fails, forward key is deleted but parent still references it
+                // This is acceptable: lookup will fail (forward key gone), no dangling data
+                let name_for_closure = name.to_string();
+
+                match self
+                    .update_parent_children(
+                        parent,
+                        move |children| {
+                            children.remove(&name_for_closure);
+                        },
+                        10,
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        info!(
+                            "File unlinked successfully: parent={}, name={}, inode={}",
+                            parent, name, file_ino
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        // Parent update failed, but atomic transaction succeeded
+                        // Forward key is deleted, so lookup will fail correctly
+                        // Log warning but don't fail the operation
+                        warn!(
+                            "Unlink succeeded but failed to update parent children map: parent={}, name={}, inode={}, error={}. Forward key deleted, lookup will fail correctly.",
+                            parent, name, file_ino, e
+                        );
+                        // Return success since the file is effectively unlinked
+                        // (forward key deleted = file is unreachable)
+                        Ok(())
+                    }
+                }
+            }
+            Ok(_) => {
+                // Transaction failed (forward key not found)
+                error!(
+                    "Atomic unlink transaction failed (file not found): parent={}, name={}, inode={}",
+                    parent, name, file_ino
+                );
+                Err(MetaError::NotFound(file_ino))
+            }
+            Err(e) => {
+                // Transaction error
+                error!(
+                    "Atomic unlink transaction error: parent={}, name={}, inode={}, error={}",
+                    parent, name, file_ino, e
+                );
+                Err(MetaError::Internal(format!(
+                    "Atomic unlink transaction failed: {}",
+                    e
+                )))
+            }
         }
-
-        Ok(())
     }
 
     async fn rename(
@@ -853,35 +1153,19 @@ impl MetaStore for EtcdMetaStore {
         let entry_ino = forward_entry.inode;
         let is_file = forward_entry.is_file;
 
-        let new_forward_key = Self::etcd_forward_key(new_parent, &new_name);
-        if self
-            .etcd_get_json::<EtcdForwardEntry>(&new_forward_key)
-            .await?
-            .is_some()
-        {
-            return Err(MetaError::AlreadyExists {
-                parent: new_parent,
-                name: new_name,
-            });
-        }
-
         let reverse_key = Self::etcd_reverse_key(entry_ino);
         let mut entry_info = self
             .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
             .await?
             .ok_or(MetaError::NotFound(entry_ino))?;
 
+        // Prepare updated entry info
         entry_info.parent_inode = new_parent;
         entry_info.entry_name = new_name.clone();
         entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let updated_reverse_json = serde_json::to_string(&entry_info)?;
 
-        let mut client = self.client.clone();
-        let updated_json = serde_json::to_string(&entry_info)?;
-        client
-            .put(reverse_key, updated_json, None)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Failed to update reverse index: {}", e)))?;
-
+        let new_forward_key = Self::etcd_forward_key(new_parent, &new_name);
         let new_forward_entry = EtcdForwardEntry {
             parent_inode: new_parent,
             name: new_name.clone(),
@@ -889,88 +1173,204 @@ impl MetaStore for EtcdMetaStore {
             is_file,
         };
         let new_forward_json = serde_json::to_string(&new_forward_entry)?;
-        client
-            .put(new_forward_key, new_forward_json, None)
+
+        info!(
+            "Renaming with atomic transaction: {} (parent={}) -> {} (parent={}), inode={}",
+            old_name, old_parent, new_name, new_parent, entry_ino
+        );
+
+        // Atomic transaction: rename forward index AND update reverse index
+        let mut client = self.client.clone();
+        let txn = Txn::new()
+            .when([
+                Compare::create_revision(old_forward_key.clone(), CompareOp::NotEqual, 0),
+                Compare::create_revision(new_forward_key.clone(), CompareOp::Equal, 0),
+            ])
+            .and_then([
+                TxnOp::put(new_forward_key.clone(), new_forward_json, None),
+                TxnOp::delete(old_forward_key.clone(), None),
+                TxnOp::put(reverse_key.clone(), updated_reverse_json, None),
+            ]);
+
+        let resp = client
+            .txn(txn)
             .await
-            .map_err(|e| MetaError::Internal(format!("Failed to create forward index: {}", e)))?;
+            .map_err(|e| MetaError::Internal(format!("Atomic rename transaction failed: {}", e)))?;
 
-        client.delete(old_forward_key, None).await.map_err(|e| {
-            MetaError::Internal(format!("Failed to delete old forward index: {}", e))
-        })?;
-
-        let old_parent_children_key = Self::etcd_children_key(old_parent);
-        if let Some(mut parent_children) = self
-            .etcd_get_json::<EtcdDirChildren>(&old_parent_children_key)
-            .await?
-        {
-            parent_children.children.remove(old_name);
-            let updated_json = serde_json::to_string(&parent_children)?;
-            client
-                .put(old_parent_children_key, updated_json, None)
+        if !resp.succeeded() {
+            // Check which condition failed
+            let source_resp = client
+                .get(old_forward_key, None)
                 .await
-                .map_err(|e| {
-                    MetaError::Internal(format!("Failed to update old parent children: {}", e))
-                })?;
+                .map_err(|e| MetaError::Internal(format!("Failed to check source: {}", e)))?;
+
+            if source_resp.kvs().is_empty() {
+                return Err(MetaError::NotFound(entry_ino));
+            } else {
+                return Err(MetaError::AlreadyExists {
+                    parent: new_parent,
+                    name: new_name,
+                });
+            }
         }
 
-        let new_parent_children_key = Self::etcd_children_key(new_parent);
-        let parent_children = match self
-            .etcd_get_json::<EtcdDirChildren>(&new_parent_children_key)
-            .await?
-        {
-            Some(mut children) => {
-                children.children.insert(new_name.clone());
-                children
+        // Atomic transaction succeeded, now update parent children maps
+        // If parent updates fail, forward/reverse keys already reflect the new state
+        // This is acceptable: lookup will work correctly with new forward key
+
+        // Update parent children maps
+        // Note: Parent children map updates are NOT atomic with the forward/reverse key updates
+        // This is a known limitation. If these updates fail:
+        // - Forward key points to new location (correct)
+        // - Parent children map may be stale (but lookup still works via forward key)
+        // - Consider this acceptable as forward key is the source of truth
+
+        if old_parent != new_parent {
+            // Different parents: remove from old, add to new
+            let old_name_for_closure = old_name.to_string();
+            match self
+                .update_parent_children(
+                    old_parent,
+                    move |children| {
+                        children.remove(&old_name_for_closure);
+                    },
+                    10,
+                )
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!(
+                        "Rename succeeded but failed to update old parent children map: old_parent={}, name={}, inode={}, error={}. Forward key updated, lookup will work correctly.",
+                        old_parent, old_name, entry_ino, e
+                    );
+                    // Don't fail the operation - forward key is already updated
+                }
             }
-            None => {
-                let mut children = EtcdDirChildren {
-                    inode: new_parent,
-                    children: HashSet::new(),
-                };
-                children.children.insert(new_name);
-                children
+
+            let new_name_for_closure = new_name.clone();
+            let entry_ino_for_closure = entry_ino;
+            match self
+                .update_parent_children(
+                    new_parent,
+                    move |children| {
+                        children.insert(new_name_for_closure.clone(), entry_ino_for_closure);
+                    },
+                    10,
+                )
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!(
+                        "Rename succeeded but failed to update new parent children map: new_parent={}, name={}, inode={}, error={}. Forward key updated, lookup will work correctly.",
+                        new_parent, new_name, entry_ino, e
+                    );
+                    // Don't fail the operation - forward key is already updated
+                }
             }
-        };
-        let children_json = serde_json::to_string(&parent_children)?;
-        client
-            .put(new_parent_children_key, children_json, None)
-            .await
-            .map_err(|e| {
-                MetaError::Internal(format!("Failed to update new parent children: {}", e))
-            })?;
+        } else if old_name != new_name {
+            // Same parent, different name: single atomic update
+            let old_name_for_closure = old_name.to_string();
+            let new_name_for_closure = new_name.clone();
+            let entry_ino_for_closure = entry_ino;
+            match self
+                .update_parent_children(
+                    new_parent,
+                    move |children| {
+                        children.remove(&old_name_for_closure);
+                        children.insert(new_name_for_closure.clone(), entry_ino_for_closure);
+                    },
+                    10,
+                )
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!(
+                        "Rename succeeded but failed to update parent children map: parent={}, old_name={}, new_name={}, inode={}, error={}. Forward key updated, lookup will work correctly.",
+                        new_parent, old_name, new_name, entry_ino, e
+                    );
+                    // Don't fail the operation - forward key is already updated
+                }
+            }
+        }
+
+        info!(
+            "Rename completed successfully: {} -> {}, inode={}",
+            old_name, new_name, entry_ino
+        );
 
         Ok(())
     }
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
-
-        let mut entry_info = self
-            .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
-            .await?
-            .ok_or(MetaError::NotFound(ino))?;
-
-        if !entry_info.is_file {
-            return Err(MetaError::Internal(
-                "Cannot set size for directory".to_string(),
-            ));
-        }
-
-        entry_info.size = Some(size as i64);
-        entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-
-        let updated_json = serde_json::to_string(&entry_info)
-            .map_err(|e| MetaError::Internal(format!("Failed to serialize entry info: {}", e)))?;
-
         let mut client = self.client.clone();
-        client
-            .put(reverse_key, updated_json, None)
-            .await
-            .map_err(|e| {
-                MetaError::Internal(format!("Failed to update file size in Etcd: {}", e))
+
+        // Use optimistic locking to prevent lost updates
+        for retry in 0..10 {
+            let resp = client
+                .get(reverse_key.clone(), None)
+                .await
+                .map_err(|e| MetaError::Internal(format!("Failed to get file metadata: {}", e)))?;
+
+            let (mut entry_info, mod_revision) = if let Some(kv) = resp.kvs().first() {
+                let info: EtcdEntryInfo = serde_json::from_slice(kv.value())
+                    .map_err(|e| MetaError::Internal(format!("Failed to parse metadata: {}", e)))?;
+                (info, kv.mod_revision())
+            } else {
+                return Err(MetaError::NotFound(ino));
+            };
+
+            if !entry_info.is_file {
+                return Err(MetaError::Internal(
+                    "Cannot set size for directory".to_string(),
+                ));
+            }
+
+            entry_info.size = Some(size as i64);
+            entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+            let updated_json = serde_json::to_string(&entry_info).map_err(|e| {
+                MetaError::Internal(format!("Failed to serialize entry info: {}", e))
             })?;
 
-        Ok(())
+            // Use CAS to ensure atomicity
+            let txn = Txn::new()
+                .when([Compare::mod_revision(
+                    reverse_key.clone(),
+                    CompareOp::Equal,
+                    mod_revision,
+                )])
+                .and_then([TxnOp::put(reverse_key.clone(), updated_json, None)]);
+
+            let txn_resp = client
+                .txn(txn)
+                .await
+                .map_err(|e| MetaError::Internal(format!("Failed to update file size: {}", e)))?;
+
+            if txn_resp.succeeded() {
+                return Ok(());
+            } else if retry < 9 {
+                info!(
+                    "Concurrent update detected for inode {}, retrying ({}/10)",
+                    ino,
+                    retry + 1
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                continue;
+            } else {
+                return Err(MetaError::Internal(format!(
+                    "Failed to update file size after 10 retries (inode: {})",
+                    ino
+                )));
+            }
+        }
+
+        Err(MetaError::Internal(
+            "set_file_size: unreachable".to_string(),
+        ))
     }
 
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
@@ -1125,5 +1525,8 @@ impl MetaStore for EtcdMetaStore {
 
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
         self.generate_id(key).await
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

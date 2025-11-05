@@ -149,4 +149,6 @@ pub trait MetaStore: Send + Sync {
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError>;
 
     async fn next_id(&self, key: &str) -> Result<i64, MetaError>;
+    /// Allow downcasting to concrete types
+    fn as_any(&self) -> &dyn std::any::Any;
 }

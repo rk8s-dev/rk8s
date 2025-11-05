@@ -65,7 +65,7 @@ impl MetaStoreFactory {
         // Create MetaClient with configured capacity and TTL
         let cached_store = MetaClient::new(raw_store, config.cache.capacity.clone(), ttl);
 
-        Ok(Arc::new(cached_store))
+        Ok(cached_store)
     }
 
     /// Create raw MetaStore without caching

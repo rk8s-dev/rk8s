@@ -209,6 +209,7 @@ impl DatabaseMetaStore {
     ) -> Result<Option<Vec<ContentMetaModel>>, MetaError> {
         let contents = ContentMeta::find()
             .filter(content_meta::Column::ParentInode.eq(parent_inode))
+            .order_by_asc(content_meta::Column::EntryName) // Sort by name to match ls order
             .all(&self.db)
             .await
             .map_err(MetaError::Database)?;
@@ -922,5 +923,8 @@ impl MetaStore for DatabaseMetaStore {
                 "next_id not supported for key {other}"
             ))),
         }
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
