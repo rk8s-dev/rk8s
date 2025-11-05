@@ -366,11 +366,18 @@ impl Filesystem for OverlayFs {
 
         self.handles.lock().await.insert(hd, Arc::new(handle_data));
 
+        let mut opts = OpenOptions::empty();
+        match self.config.cache_policy {
+            CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
+            CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
+            _ => {}
+        }
+
         trace!("OPEN: returning handle: {hd}");
 
         Ok(ReplyOpen {
             fh: hd,
-            flags: flags as u32,
+            flags: opts.bits(),
         })
     }
 
@@ -837,8 +844,8 @@ impl Filesystem for OverlayFs {
         let mut opts = OpenOptions::empty();
         match self.config.cache_policy {
             CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
-            CachePolicy::Auto => opts |= OpenOptions::DIRECT_IO,
             CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
+            _ => {}
         }
 
         Ok(ReplyCreated {
