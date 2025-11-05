@@ -530,6 +530,21 @@ impl Node {
             .find(|cond| cond.is_ready())
     }
 
+    pub fn set_last_heartbeat_time(&mut self, now: DateTime<Utc>) {
+        if let Some(cond) = self.ready_condition_mut() {
+            cond.last_heartbeat_time = Some(now.to_rfc3339());
+        }
+    }
+
+    pub fn last_heartbeat_time(&self) -> Option<DateTime<Utc>> {
+        self.ready_condition().and_then(|cond| {
+            cond.last_heartbeat_time
+                .as_deref()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|t| t.with_timezone(&Utc))
+        })
+    }
+
     pub fn update_ready_status_on_timeout(&mut self, grace: Duration) -> bool {
         if let Some(cond) = self.ready_condition_mut()
             && cond.is_expired(grace)

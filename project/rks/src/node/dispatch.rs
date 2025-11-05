@@ -1,5 +1,6 @@
 use crate::api::xlinestore::XlineStore;
 use crate::commands::{create, delete};
+use chrono::Utc;
 use common::quic::RksConnection;
 use common::{Node, NodeStatus, PodTask, RksMessage};
 use log::{error, info, warn};
@@ -95,15 +96,20 @@ async fn handle_heartbeat(
     if let Some(node_yaml) = xline_store.get_node_yaml(node_name).await? {
         let mut node: Node = serde_yaml::from_str(&node_yaml)?;
         node.status = status;
+
+        // Use rks clock as heartbeat time.
+        node.set_last_heartbeat_time(Utc::now());
         node.spec.taints = Node::derive_taints_from_conditions(&node.status.conditions);
+
         let new_yaml = serde_yaml::to_string(&node)?;
         xline_store.insert_node_yaml(node_name, &new_yaml).await?;
         info!(
             target: "rks::node::worker_dispatch",
             "heartbeat updated Node {node_name}"
         );
-    } else {
-        warn!("heartbeat received for unknown node: {node_name}");
+        return Ok(());
     }
+
+    warn!("heartbeat received for unknown node: {node_name}");
     Ok(())
 }
