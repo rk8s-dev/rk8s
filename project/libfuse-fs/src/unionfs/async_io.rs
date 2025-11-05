@@ -1,9 +1,5 @@
-use super::Inode;
-use super::OverlayFs;
 use super::utils;
-use crate::overlayfs::HandleData;
-use crate::overlayfs::RealHandle;
-use crate::overlayfs::{AtomicU64, CachePolicy};
+use super::{CachePolicy, HandleData, Inode, OverlayFs, RealHandle};
 use crate::util::open_options::OpenOptions;
 use rfuse3::raw::prelude::*;
 use rfuse3::*;
@@ -12,7 +8,7 @@ use std::io::Error;
 use std::io::ErrorKind;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 use tracing::trace;
 
@@ -366,18 +362,11 @@ impl Filesystem for OverlayFs {
 
         self.handles.lock().await.insert(hd, Arc::new(handle_data));
 
-        let mut opts = OpenOptions::empty();
-        match self.config.cache_policy {
-            CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
-            CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
-            _ => {}
-        }
-
         trace!("OPEN: returning handle: {hd}");
 
         Ok(ReplyOpen {
             fh: hd,
-            flags: opts.bits(),
+            flags: flags as u32,
         })
     }
 
@@ -844,8 +833,8 @@ impl Filesystem for OverlayFs {
         let mut opts = OpenOptions::empty();
         match self.config.cache_policy {
             CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
+            CachePolicy::Auto => opts |= OpenOptions::DIRECT_IO,
             CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
-            _ => {}
         }
 
         Ok(ReplyCreated {
@@ -1018,9 +1007,10 @@ mod tests {
     use tokio::signal;
     use tracing_subscriber::EnvFilter;
 
+    use crate::unionfs::BoxedLayer;
     use crate::{
-        overlayfs::{OverlayFs, config::Config},
         passthrough::{PassthroughArgs, new_passthroughfs_layer, newlogfs::LoggingFileSystem},
+        unionfs::{OverlayFs, config::Config},
     };
 
     #[tokio::test]
@@ -1036,7 +1026,7 @@ mod tests {
         let upperdir = PathBuf::from("/home/luxian/upper");
 
         // Create lower layers
-        let mut lower_layers = Vec::new();
+        let mut lower_layers: Vec<Arc<BoxedLayer>> = Vec::new();
         for lower in &lowerdir {
             let layer = new_passthroughfs_layer(PassthroughArgs {
                 root_dir: lower.clone(),
@@ -1044,10 +1034,10 @@ mod tests {
             })
             .await
             .unwrap();
-            lower_layers.push(Arc::new(layer));
+            lower_layers.push(Arc::new(layer) as Arc<BoxedLayer>);
         }
         // Create upper layer
-        let upper_layer = Arc::new(
+        let upper_layer: Arc<BoxedLayer> = Arc::new(
             new_passthroughfs_layer(PassthroughArgs {
                 root_dir: upperdir,
                 mapping: None::<&str>,

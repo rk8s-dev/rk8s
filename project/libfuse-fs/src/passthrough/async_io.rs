@@ -491,6 +491,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                         uid.unwrap_or(self.cfg.mapping.get_uid(req.uid)),
                         gid.unwrap_or(self.cfg.mapping.get_gid(req.gid)),
                     )?;
+                    // Maybe buggy because `open_file` may call `open_by_handle_at`, which requires CAP_DAC_READ_SEARCH.
                     data.open_file(final_flags, &self.proc_self_fd)?
                 }
             }
@@ -560,6 +561,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         self.validate_path_component(name)?;
 
         let data = self.inode_map.get(parent).await?;
+        let file = data.get_file()?;
 
         let res = {
             let _guard = set_creds(
@@ -567,7 +569,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 gid.unwrap_or(self.cfg.mapping.get_gid(req.gid)),
             )?;
 
-            let file = data.get_file()?;
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe { libc::mkdirat(file.as_raw_fd(), name.as_ptr(), mode & !umask) }
         };
@@ -617,6 +618,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         self.validate_path_component(name)?;
 
         let data = self.inode_map.get(parent).await?;
+        let file = data.get_file()?;
 
         let res = {
             let _guard = set_creds(
@@ -624,7 +626,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 gid.unwrap_or(self.cfg.mapping.get_gid(req.gid)),
             )?;
 
-            let file = data.get_file()?;
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe { libc::symlinkat(link.as_ptr(), file.as_raw_fd(), name.as_ptr()) }
         };
@@ -1097,8 +1098,14 @@ impl Filesystem for PassthroughFs {
                         buf.truncate(bytes_read); // Adjust the buffer size
                     }
                 } else {
-                    error!("read error: {ret}");
-                    return Err(Errno::from(ret as i32));
+                    let e = io::Error::last_os_error();
+                    // if e.raw_os_error() == Some(libc::EINVAL) {
+                    //     // Handle EINVAL for sparse files by returning zeroed data
+                    //     buf.clear();
+                    // } else {
+                    error!("read error: {e:?}");
+                    return Err(Errno::from(e.raw_os_error().unwrap_or(-1)));
+                    // }
                 }
             }
         }
@@ -1145,6 +1152,17 @@ impl Filesystem for PassthroughFs {
                 let size = data.len();
 
                 self.check_fd_flags(&handle_data, raw_fd, flags).await?;
+                // // Debug for O_DIRECT alignment issues
+                // if (flags & libc::O_DIRECT as u32) != 0 {
+                //     let block_size = 512;
+                //     debug!(
+                //         "Alignment check (block_size={}): offset_ok={}, len_ok={}, addr_ok={}",
+                //         block_size,
+                //         offset % block_size as u64 == 0,
+                //         size % block_size == 0,
+                //         (data.as_ptr() as usize) % block_size == 0
+                //     );
+                // }
                 let ret = unsafe {
                     libc::pwrite(
                         raw_fd as c_int,
@@ -1156,8 +1174,9 @@ impl Filesystem for PassthroughFs {
                 if ret >= 0 {
                     ret
                 } else {
-                    error!("write error: {ret}");
-                    return Err(Errno::from(ret as i32));
+                    let e = io::Error::last_os_error();
+                    error!("write error: {e:?}");
+                    return Err(Errno::from(e.raw_os_error().unwrap_or(-1)));
                 }
             }
         };
@@ -1313,7 +1332,9 @@ impl Filesystem for PassthroughFs {
             )
         };
         if res < 0 {
-            return Err(io::Error::last_os_error().into());
+            let e = io::Error::last_os_error();
+            // error!("getxattr error: {e:?}");
+            return Err(e.into());
         }
 
         if size == 0 {
@@ -1351,7 +1372,9 @@ impl Filesystem for PassthroughFs {
             )
         };
         if res < 0 {
-            return Err(io::Error::last_os_error().into());
+            let e = io::Error::last_os_error();
+            // error!("listxattr error: {e:?}");
+            return Err(e.into());
         }
 
         if size == 0 {

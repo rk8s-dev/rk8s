@@ -22,7 +22,7 @@ use futures::StreamExt as _;
 use rfuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyEntry, ReplyOpen, ReplyStatFs,
 };
-use rfuse3::raw::{Filesystem, Request, Session};
+use rfuse3::raw::{DirectoryPlusStream, DirectoryStream, Request, Session};
 use std::sync::{Arc, Weak};
 use tracing::debug;
 use tracing::error;
@@ -35,7 +35,7 @@ use futures::future::join_all;
 use futures::stream::iter;
 
 use crate::passthrough::newlogfs::LoggingFileSystem;
-use crate::passthrough::{PassthroughArgs, PassthroughFs, new_passthroughfs_layer};
+use crate::passthrough::{PassthroughArgs, new_passthroughfs_layer};
 use crate::util::convert_stat64_to_file_attr;
 use inode_store::InodeStore;
 use layer::Layer;
@@ -46,14 +46,14 @@ use tokio::sync::{Mutex, RwLock};
 pub type Inode = u64;
 pub type Handle = u64;
 
-type BoxedLayer = PassthroughFs;
+pub(crate) type BoxedLayer = dyn Layer;
 //type BoxedFileSystem = Box<dyn FileSystem<Inode = Inode, Handle = Handle> + Send + Sync>;
 const INODE_ALLOC_BATCH: u64 = 0x1_0000_0000;
 // RealInode represents one inode object in specific layer.
 // Also, each RealInode maps to one Entry, which should be 'forgotten' after drop.
 // Important note: do not impl Clone trait for it or refcount will be messed up.
 pub(crate) struct RealInode {
-    pub layer: Arc<PassthroughFs>,
+    pub layer: Arc<BoxedLayer>,
     pub in_upper_layer: bool,
     pub inode: u64,
     // File is whiteouted, we need to hide it.
@@ -91,8 +91,8 @@ pub enum CachePolicy {
 }
 pub struct OverlayFs {
     config: Config,
-    lower_layers: Vec<Arc<PassthroughFs>>,
-    upper_layer: Option<Arc<PassthroughFs>>,
+    lower_layers: Vec<Arc<BoxedLayer>>,
+    upper_layer: Option<Arc<BoxedLayer>>,
     // All inodes in FS.
     inodes: RwLock<InodeStore>,
     // Open file handles.
@@ -108,7 +108,7 @@ pub struct OverlayFs {
 
 // This is a wrapper of one inode in specific layer, It can't impl Clone trait.
 struct RealHandle {
-    layer: Arc<PassthroughFs>,
+    layer: Arc<BoxedLayer>,
     in_upper_layer: bool,
     inode: u64,
     handle: AtomicU64,
@@ -126,7 +126,7 @@ struct HandleData {
 // Important: do not impl 'Copy' trait for it or refcount will be messed up.
 impl RealInode {
     async fn new(
-        layer: Arc<PassthroughFs>,
+        layer: Arc<BoxedLayer>,
         in_upper_layer: bool,
         inode: u64,
         whiteout: bool,
@@ -718,8 +718,8 @@ impl OverlayInode {
     ///    directory within the parent's upper-layer representation.
     ///
     /// Crucially, it preserves the original directory's ownership (UID/GID) and permissions
-    /// by using the [`do_getattr_helper`][crate::passthrough::PassthroughFs::do_getattr_helper] and
-    /// [`do_mkdir_helper`][crate::passthrough::PassthroughFs::do_mkdir_helper] functions.
+    /// by using [`do_getattr_helper`][crate::unionfs::layer::Layer::do_getattr_helper] and
+    /// [`mkdir_with_context`][crate::unionfs::layer::Layer::mkdir_with_context] with [`OperationContext`][crate::context::OperationContext].
     pub async fn create_upper_dir(
         self: Arc<Self>,
         ctx: Request,
@@ -770,16 +770,19 @@ impl OverlayInode {
                                     return Err(Error::from_raw_os_error(libc::EROFS));
                                 }
                                 let name_osstr = OsStr::new(&c_name);
+                                let op_ctx = crate::context::OperationContext::with_credentials(
+                                    ctx,
+                                    st.attr.uid,
+                                    st.attr.gid,
+                                );
                                 let entry = parent_ri
                                     .layer
-                                    .do_mkdir_helper(
-                                        ctx,
+                                    .mkdir_with_context(
+                                        op_ctx,
                                         parent_ri.inode,
                                         name_osstr,
                                         mode,
                                         umask,
-                                        st.attr.uid,
-                                        st.attr.gid,
                                     )
                                     .await?;
                                 RealInode {
@@ -799,16 +802,19 @@ impl OverlayInode {
                                     return Err(Error::from_raw_os_error(libc::EROFS));
                                 }
                                 let name_osstr = OsStr::new(&c_name);
+                                let op_ctx = crate::context::OperationContext::with_credentials(
+                                    ctx,
+                                    st.attr.uid,
+                                    st.attr.gid,
+                                );
                                 let entry = parent_ri
                                     .layer
-                                    .do_mkdir_helper(
-                                        ctx,
+                                    .mkdir_with_context(
+                                        op_ctx,
                                         parent_ri.inode,
                                         name_osstr,
                                         mode_from_kind_and_perm(st.attr.kind, st.attr.perm),
                                         0,
-                                        st.attr.uid,
-                                        st.attr.gid,
                                     )
                                     .await?;
                                 RealInode {
@@ -1325,9 +1331,7 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-    ) -> Result<
-        impl futures_util::stream::Stream<Item = std::result::Result<DirectoryEntry, Errno>> + Send + 'a,
-    > {
+    ) -> Result<DirectoryStream<'a>> {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
             Some(dir) => dir.node.clone(),
@@ -1364,7 +1368,8 @@ impl OverlayFs {
         }
 
         if offset >= childrens.len() as u64 {
-            return Ok(iter(vec![].into_iter()));
+            let empty: Vec<std::result::Result<DirectoryEntry, Errno>> = Vec::new();
+            return Ok(Box::pin(iter(empty.into_iter())) as DirectoryStream<'a>);
         }
         let mut d: Vec<std::result::Result<DirectoryEntry, Errno>> = Vec::new();
 
@@ -1380,7 +1385,7 @@ impl OverlayFs {
             d.push(Ok(dir_entry));
         }
 
-        Ok(iter(d.into_iter()))
+        Ok(Box::pin(iter(d.into_iter())) as DirectoryStream<'a>)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1390,11 +1395,7 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-    ) -> Result<
-        impl futures_util::stream::Stream<Item = std::result::Result<DirectoryEntryPlus, Errno>>
-        + Send
-        + 'a,
-    > {
+    ) -> Result<DirectoryPlusStream<'a>> {
         // lookup the directory
         let ovl_inode = match self.handles.lock().await.get(&handle) {
             Some(dir) => {
@@ -1439,7 +1440,8 @@ impl OverlayFs {
         }
 
         if offset >= childrens.len() as u64 {
-            return Ok(iter(vec![].into_iter()));
+            let empty: Vec<std::result::Result<DirectoryEntryPlus, Errno>> = Vec::new();
+            return Ok(Box::pin(iter(empty.into_iter())) as DirectoryPlusStream<'a>);
         }
         let mut d: Vec<std::result::Result<DirectoryEntryPlus, Errno>> = Vec::new();
 
@@ -1463,7 +1465,7 @@ impl OverlayFs {
             }
         }
 
-        Ok(iter(d.into_iter()))
+        Ok(Box::pin(iter(d.into_iter())) as DirectoryPlusStream<'a>)
     }
 
     async fn do_mkdir(
@@ -2102,16 +2104,14 @@ impl OverlayFs {
                 let link_name = OsStr::new(path);
                 let filename = node.name.read().await;
                 let filename = OsStr::new(filename.as_str());
+                let op_ctx = crate::context::OperationContext::with_credentials(
+                    ctx,
+                    st.attr.uid,
+                    st.attr.gid,
+                );
                 let entry = parent_real_inode
                     .layer
-                    .do_symlink_helper(
-                        ctx,
-                        parent_real_inode.inode,
-                        filename,
-                        link_name,
-                        st.attr.uid,
-                        st.attr.gid,
-                    )
+                    .symlink_with_context(op_ctx, parent_real_inode.inode, filename, link_name)
                     .await?;
                 let ri = RealInode {
                     layer: parent_real_inode.layer.clone(),
@@ -2200,16 +2200,19 @@ impl OverlayFs {
                 }
                 let name = node.name.read().await;
                 let name = OsStr::new(name.as_str());
+                let op_ctx = crate::context::OperationContext::with_credentials(
+                    ctx,
+                    st.attr.uid,
+                    st.attr.gid,
+                );
                 let create_rep = parent_real_inode
                     .layer
-                    .do_create_helper(
-                        ctx,
+                    .create_with_context(
+                        op_ctx,
                         parent_real_inode.inode,
                         name,
                         mode,
                         flags.try_into().unwrap(),
-                        st.attr.uid,
-                        st.attr.gid,
                     )
                     .await?;
 
@@ -2751,7 +2754,7 @@ where
     I: IntoIterator<Item = R>,
 {
     // Create lower layers
-    let mut lower_layers = Vec::new();
+    let mut lower_layers: Vec<Arc<BoxedLayer>> = Vec::new();
     for lower in args.lowerdir {
         let layer = new_passthroughfs_layer(PassthroughArgs {
             root_dir: lower,
@@ -2759,10 +2762,10 @@ where
         })
         .await
         .expect("Failed to create lower filesystem layer");
-        lower_layers.push(Arc::new(layer));
+        lower_layers.push(Arc::new(layer) as Arc<BoxedLayer>);
     }
     // Create upper layer
-    let upper_layer = Arc::new(
+    let upper_layer: Arc<BoxedLayer> = Arc::new(
         new_passthroughfs_layer(PassthroughArgs {
             root_dir: args.upperdir,
             mapping: args.mapping.as_ref().map(|m| m.as_ref()),
