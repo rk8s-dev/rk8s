@@ -24,6 +24,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
+        "//project/libvault:libvault",
         "//third-party/rust/crates/anyhow/1.0.100:anyhow",
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
         "//third-party/rust/crates/etcd-client/0.16.1:etcd-client",

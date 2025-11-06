@@ -1,9 +1,11 @@
 // #[macro_use]
 // extern crate log;
 
+pub mod context;
 pub mod overlayfs;
 pub mod passthrough;
 mod server;
+pub mod unionfs;
 mod util;
 
 // Test utilities (only compiled during tests)

@@ -26,6 +26,8 @@ rust_library(
     features = [
         "debug",
         "default",
+        "deref",
+        "deref_mut",
         "std",
     ],
     rustc_flags = ["@$(location :derive_more-manifest[env_flags])"],

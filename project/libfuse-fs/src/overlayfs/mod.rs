@@ -168,7 +168,7 @@ impl RealInode {
             Ok(v1) => Ok(Some(v1)),
             Err(e) => match e.raw_os_error() {
                 Some(raw_error) => {
-                    if raw_error != libc::ENOENT || raw_error != libc::ENAMETOOLONG {
+                    if raw_error == libc::ENOENT || raw_error == libc::ENAMETOOLONG {
                         return Ok(None);
                     }
                     Err(e)

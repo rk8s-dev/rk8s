@@ -13,8 +13,9 @@ pub async fn watch_create(pod_yaml: String, conn: &Connection, node_id: &str) ->
         && pod_task.spec.node_name.as_deref() == Some(node_id)
     {
         info!(
-            "[watch_pods] PUT matched node={} pod_name={:?}",
-            node_id, pod_task.metadata.name
+            target: "rks::node::watch_pods",
+            "PUT matched node={node_id} pod_name={:?}",
+            pod_task.metadata.name
         );
 
         let msg = RksMessage::CreatePod(Box::new(pod_task));
@@ -35,7 +36,8 @@ pub async fn user_create(
 ) -> Result<()> {
     if (xline_store.get_pod_yaml(&pod_task.metadata.name).await?).is_some() {
         error!(
-            "[user_create] Pod {} already exists, creation skipped",
+            target: "rks::commands::user_create",
+            "Pod {} already exists, creation skipped",
             pod_task.metadata.name
         );
 
@@ -52,7 +54,10 @@ pub async fn user_create(
     let pod_yaml = match serde_yaml::to_string(&pod_task) {
         Ok(yaml) => yaml,
         Err(e) => {
-            eprintln!("[user_create] Failed to serialize pod task: {e}");
+            error!(
+                target: "rks::commands::user_create",
+                "failed to serialize pod task: {e}"
+            );
             let response = RksMessage::Error(format!("Serialization error: {e}"));
             let data = bincode::serialize(&response).unwrap_or_else(|_| vec![]);
             if let Ok(mut stream) = conn.open_uni().await {
@@ -68,7 +73,8 @@ pub async fn user_create(
         .await?;
 
     info!(
-        "[user_create] created pod {} (written to Xline)",
+        target: "rks::commands::user_create",
+        "created pod {} (written to Xline)",
         pod_task.metadata.name
     );
 

@@ -27,8 +27,11 @@ rust_library(
         "http1",
         "http2",
         "native-tokio",
+        "ring",
         "rustls-native-certs",
         "tls12",
+        "webpki-roots",
+        "webpki-tokio",
     ],
     rustc_flags = ["@$(location :hyper-rustls-manifest[env_flags])"],
     named_deps = {
@@ -44,5 +47,6 @@ rust_library(
         "//third-party/rust/crates/tokio-rustls/0.26.4:tokio-rustls",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
+        "//third-party/rust/crates/webpki-roots/1.0.3:webpki-roots",
     ],
 )

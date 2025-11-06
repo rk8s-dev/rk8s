@@ -25,9 +25,13 @@ rust_library(
     edition = "2021",
     features = [
         "default",
+        "portable-atomic",
         "std",
     ],
     rustc_flags = ["@$(location :concurrent-queue-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils"],
+    deps = [
+        "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils",
+        "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic",
+    ],
 )

@@ -1,5 +1,7 @@
 use etcd_client::{Client, EventType, WatchOptions, WatchResponse};
+use libvault::storage::xline::XlineOptions;
 use tokio::{select, sync::mpsc::UnboundedReceiver};
+
 pub mod model;
 mod utils;
 
@@ -15,12 +17,12 @@ use crate::{
 /// # Argument
 /// - unassume_rx: a receiver passing pod's name that bind failed.
 pub async fn run_scheduler_with_xline(
-    endpoints: &[&str],
+    xline_option: XlineOptions,
     strategy: ScoringStrategy,
     plugins: Plugins,
     mut unassume_rx: UnboundedReceiver<String>,
 ) -> Result<UnboundedReceiver<Result<Assignment, anyhow::Error>>, anyhow::Error> {
-    let mut client = Client::connect(endpoints, None).await?;
+    let mut client = Client::connect(xline_option.endpoints, xline_option.config).await?;
     let mut scheduler = Scheduler::new(strategy, plugins);
     let exist_nodes = list_nodes(&mut client).await?;
     let exist_pods = list_pods(&mut client).await?;
@@ -142,7 +144,7 @@ async fn handle_pod_update(
                     }
                     EventType::Delete => {
                         let name = String::from_utf8_lossy(kv.key()).to_string();
-                        let node_name = name.split('/').filter(|s| !s.is_empty()).next_back();
+                        let node_name = name.split('/').rfind(|s| !s.is_empty());
                         if let Some(n) = node_name {
                             scheduler.remove_cache_pod(n).await;
                         }
@@ -169,7 +171,7 @@ async fn handle_node_update(
                     }
                     EventType::Delete => {
                         let name = String::from_utf8_lossy(kv.key()).to_string();
-                        let node_name = name.split('/').filter(|s| !s.is_empty()).next_back();
+                        let node_name = name.split('/').rfind(|s| !s.is_empty());
                         if let Some(n) = node_name {
                             scheduler.remove_cache_node(n).await;
                         }

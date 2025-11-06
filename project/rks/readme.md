@@ -35,17 +35,25 @@ xline_config:
     - "http://172.20.0.3:2379"
     - "http://172.20.0.4:2379"
     - "http://172.20.0.5:2379"
-    prefix: "/coreos.com/network"
-    subnet_lease_renew_margin: 60
+  prefix: "/coreos.com/network"
+  subnet_lease_renew_margin: 60
 network_config:
   Network: "10.1.0.0/16"
   SubnetMin: "10.1.1.0"
   SubnetMax: "10.1.254.0"
   SubnetLen: 24
+tls_config:
+  enable: false
+  vault_folder: ""
+  keep_dangerous_files: false
+dns_config:
+  Port: 9090
 ```
 -   `addr`: The address and port where the RKS service listens. `addr` is the only field that you need modify.
 -   `xline_config`: Defines the backend Xline cluster, including endpoints, a prefix key for storing data, and a lease renewal margin.
- -   `network_config`: Specifies the network settings managed by RKS, such as the overall network range (`10.1.0.0/16`), the minimum and maximum subnets to allocate, and the subnet length (`/24`).
+-   `network_config`: Specifies the network settings managed by RKS, such as the overall network range (`10.1.0.0/16`), the minimum and maximum subnets to allocate, and the subnet length (`/24`).
+-   `tls_config`: RKS uses QUIC to communicate with RKL, and libvault is used as certificates manager. Set `enable = false` to disable authentication, otherwise set `vault_url` to configurate it. If `keep_dangerous_files` is false, the seal keys will be removed for security. 
+-   `dns_config`: RKS also serves as a dns server, set `Port` to specify its port.
 
 Then,we can start RKS:
 ```bash
@@ -56,6 +64,19 @@ We will start RKL on two separate machines to connect to RKS：
 ```bash
 sudo RKS_ADDRESS=10.20.173.26:50051 project/target/debug/rkl pod daemon 
 ```
+
+#### 3.1 Use TLS handshake
+
+If you don't want to enable tls authentication, keep the `enable` set to false. Otherwise, please refer the following steps:   
+1. Ensure the xline nodes are online.
+2. Run `rks gen certs config.yaml` to generate essential certificates. It will use the `vault_folder` as a file backend.
+3. Then, the vault folder you specified will include root certificate, root private key, unseal keys, root token and xline certificates.
+4. Install these certificates for xline.
+5. Run `sudo rks start --config config.yaml` to migrate from an existed file backend, then the rks node is ready to wait for client connections.
+6. When you are starting a rkl node and wanting it to join cluster, you must save the root certificates into file, which is the file named with `root.pem` in backend folder. In additional, get a join token by `rks gen join-token`.
+7. Run `sudo rkl pod <operator> --enable-tls --join-token <join-token> --root-cert-path <root.pem-path>` to start rkl nodes.
+
+**Note**: you must use `https` protocol to connect to xline.
 ### 4. Create pods
 Here is an example of pod.yaml:
 ```yaml
@@ -70,17 +91,17 @@ spec:
   node_name:
   containers:
     - name: container1
-    image: ./rk8s/project/test/bundles/busybox
-    args:
-      - "dd"
-      - "if=/dev/zero"
-      - "of=/dev/null"
-    ports:
-      - containerPort: 80
-    resources:
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
+      image: ./rk8s/project/test/bundles/busybox
+      args:
+        - "dd"
+        - "if=/dev/zero"
+        - "of=/dev/null"
+      ports:
+        - containerPort: 80
+      resources:
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
 status:
 ```
 In the `/project/test/bundles` directory, a test bundle is provided.  

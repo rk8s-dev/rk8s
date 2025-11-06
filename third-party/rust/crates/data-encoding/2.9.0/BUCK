@@ -25,6 +25,7 @@ rust_library(
     edition = "2018",
     features = [
         "alloc",
+        "default",
         "std",
     ],
     rustc_flags = ["@$(location :data-encoding-manifest[env_flags])"],

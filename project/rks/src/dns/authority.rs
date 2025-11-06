@@ -239,7 +239,10 @@ impl XlineAuthority {
                         }
                     }
                     Err(e) => {
-                        error!("[start_watch_tasks] Watch error: {e}");
+                        error!(
+                            target: "rks::dns::watch_tasks",
+                            "watch error: {e}"
+                        );
                         break;
                     }
                 }
@@ -300,7 +303,10 @@ impl XlineAuthority {
                         }
                     }
                     Err(e) => {
-                        error!("[watch_services] Watch error: {e}");
+                        error!(
+                            target: "rks::dns::watch_services",
+                            "watch error: {e}"
+                        );
                         break;
                     }
                 }

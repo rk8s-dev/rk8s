@@ -21,6 +21,7 @@ use crate::network::lease::LeaseWatchResult;
 use crate::network::manager::{Cursor, WatchCursor, is_index_too_small};
 use crate::protocol::config::XlineConfig;
 use libnetwork::subnet::{make_subnet_key, parse_subnet_key};
+use libvault::storage::xline::XlineOptions;
 
 #[derive(Debug, thiserror::Error)]
 pub enum XlineRegistryError {
@@ -529,15 +530,40 @@ impl XlineSubnetRegistry {
         Ok((cli, kv))
     }
 
-    pub async fn new(
+    async fn connect_with_options(
+        config: &XlineConfig,
+        option: &XlineOptions,
+    ) -> Result<(Client, KvClient), XlineRegistryError> {
+        let mut endpoints = option.endpoints.clone();
+        if endpoints.is_empty() {
+            endpoints = config.endpoints.clone();
+        }
+
+        let mut connect_opts = option.config.clone().unwrap_or_default();
+        if let (Some(user), Some(pass)) = (&config.username, &config.password) {
+            connect_opts = connect_opts.with_user(user.clone(), pass.clone());
+        }
+
+        let cli = Client::connect(endpoints, Some(connect_opts)).await?;
+        let kv_api = cli.kv_client();
+        Ok((cli, kv_api))
+    }
+
+    async fn new_internal(
         config: XlineConfig,
         cli_new_func: Option<XlineNewFunc>,
+        option: Option<XlineOptions>,
     ) -> Result<Self, XlineRegistryError> {
-        let config_arc = Arc::new(config.clone());
-        let func: XlineNewFunc =
-            cli_new_func.unwrap_or(|cfg| Box::pin(Self::new_xline_client(cfg)));
+        let default_func: XlineNewFunc = |cfg| Box::pin(Self::new_xline_client(cfg));
 
-        let (cli, kv_api) = func(config_arc).await?;
+        let (cli, kv_api, func) = if let Some(option) = option {
+            let (cli, kv_api) = Self::connect_with_options(&config, &option).await?;
+            (cli, kv_api, default_func)
+        } else {
+            let func = cli_new_func.unwrap_or(default_func);
+            let (cli, kv_api) = func(Arc::new(config.clone())).await?;
+            (cli, kv_api, func)
+        };
 
         let pattern = format!("{}/([^/]*)(/|/config)?$", config.prefix);
         let network_regex = Regex::new(&pattern).unwrap();
@@ -549,6 +575,20 @@ impl XlineSubnetRegistry {
             xline_cfg: config,
             network_regex,
         })
+    }
+
+    pub async fn new(
+        config: XlineConfig,
+        cli_new_func: Option<XlineNewFunc>,
+    ) -> Result<Self, XlineRegistryError> {
+        Self::new_internal(config, cli_new_func, None).await
+    }
+
+    pub async fn new_with_options(
+        config: XlineConfig,
+        option: XlineOptions,
+    ) -> Result<Self, XlineRegistryError> {
+        Self::new_internal(config, None, Some(option)).await
     }
 
     async fn kv(&self) -> tokio::sync::MutexGuard<'_, KvClient> {
@@ -663,7 +703,7 @@ mod tests {
             .await
             .expect("failed to create subnet");
 
-        println!("Lease expiration: {exp}");
+        info!("Lease expiration: {exp}");
 
         let (lease_opt, _) = registry
             .get_subnet(sn4, Some(sn6))
@@ -724,7 +764,7 @@ mod tests {
 
         tokio::select! {
             Some(watch_result) = rx.recv() => {
-                println!("Received watch event: {watch_result:?}");
+                info!("Received watch event: {watch_result:?}");
                 assert!(!watch_result.is_empty());
             }
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {

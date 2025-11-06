@@ -26,6 +26,7 @@ rust_library(
     features = [
         "alloc",
         "aws-lc-rs",
+        "default",
         "ring",
         "std",
     ],

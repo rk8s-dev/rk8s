@@ -59,6 +59,7 @@ serde = { version = "1.0", features = ["derive"] }
 slab = "0.4.9"
 tracing = { version = "0.1.41", features = ["attributes"] }
 trait-make = "0.1"
+async-trait = "0.1.89"
 which = { version = "4.4.2", optional = true }
 
 [dependencies.tokio]
