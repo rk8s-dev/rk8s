@@ -34,6 +34,7 @@ impl Model {
         &self.permission
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_permission(
         inode: i64,
         size: i64,

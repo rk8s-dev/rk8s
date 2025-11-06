@@ -130,7 +130,10 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
         &self,
         deleted_inodes: &[i64],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        info!("cleaning up {} deleted file metadata records", deleted_inodes.len());
+        info!(
+            "cleaning up {} deleted file metadata records",
+            deleted_inodes.len()
+        );
 
         for &inode in deleted_inodes {
             debug!("cleaning up file metadata for inode {}", inode);

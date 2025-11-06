@@ -845,10 +845,7 @@ impl MetaStore for DatabaseMetaStore {
             .ok_or(MetaError::NotFound(ino))?
             .into();
 
-        file_meta
-            .delete(&txn)
-            .await
-            .map_err(|e| MetaError::Database(e))?;
+        file_meta.delete(&txn).await.map_err(MetaError::Database)?;
 
         txn.commit().await.map_err(MetaError::Database)?;
 
