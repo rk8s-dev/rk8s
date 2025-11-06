@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use tokio::{fs, io::AsyncWriteExt};
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct RustfsLikeBackend {
     root: PathBuf,
 }

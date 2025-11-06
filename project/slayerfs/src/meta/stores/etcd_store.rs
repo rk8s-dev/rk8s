@@ -255,6 +255,7 @@ impl EtcdMetaStore {
                 entry_info.modify_time,
                 entry_info.create_time,
                 entry_info.nlink as i32,
+                false,
             );
             return Ok(Some(file_meta));
         }
@@ -954,5 +955,14 @@ impl MetaStore for EtcdMetaStore {
 
     async fn initialize(&self) -> Result<(), MetaError> {
         Ok(())
+    }
+
+    async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
+        todo!()
+    }
+
+    async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
+        let _ = ino;
+        todo!()
     }
 }

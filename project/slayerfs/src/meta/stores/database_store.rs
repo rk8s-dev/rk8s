@@ -331,6 +331,7 @@ impl DatabaseMetaStore {
             modify_time: Set(now),
             create_time: Set(now),
             nlink: Set(1),
+            deleted: Set(false),
         };
 
         file_meta.insert(&txn).await.map_err(MetaError::Database)?;
@@ -599,10 +600,9 @@ impl MetaStore for DatabaseMetaStore {
             file_meta.nlink = Set(current_nlink - 1);
             file_meta.update(&txn).await.map_err(MetaError::Database)?;
         } else {
-            FileMeta::delete_by_id(file_id)
-                .exec(&txn)
-                .await
-                .map_err(MetaError::Database)?;
+            file_meta.deleted = Set(true);
+            file_meta.nlink = Set(0);
+            file_meta.update(&txn).await.map_err(MetaError::Database)?;
         }
 
         // Update parent directory mtime
@@ -822,6 +822,36 @@ impl MetaStore for DatabaseMetaStore {
     }
 
     async fn initialize(&self) -> Result<(), MetaError> {
+        Ok(())
+    }
+
+    async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
+        let deleted_files = FileMeta::find()
+            .filter(file_meta::Column::Deleted.eq(true))
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(deleted_files.into_iter().map(|f| f.inode).collect())
+    }
+
+    async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let file_meta: file_meta::ActiveModel = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(ino))?
+            .into();
+
+        file_meta
+            .delete(&txn)
+            .await
+            .map_err(|e| MetaError::Database(e))?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
         Ok(())
     }
 }

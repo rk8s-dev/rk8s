@@ -18,6 +18,10 @@ pub struct Model {
 
     #[sea_orm(column_type = "Integer")]
     pub nlink: i32,
+
+    /// 文件是否被标记为待删除（用于垃圾回收）
+    #[sea_orm(column_type = "Boolean", default_value = "false")]
+    pub deleted: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -38,6 +42,7 @@ impl Model {
         modify_time: i64,
         create_time: i64,
         nlink: i32,
+        deleted: bool,
     ) -> Self {
         Self {
             inode,
@@ -47,6 +52,7 @@ impl Model {
             modify_time,
             create_time,
             nlink,
+            deleted,
         }
     }
 

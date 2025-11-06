@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait ObjectBackend: Send + Sync {
+pub trait ObjectBackend: Clone + Send + Sync {
     async fn put_object(
         &self,
         key: &str,
@@ -22,6 +22,7 @@ pub trait ObjectBackend: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
+#[derive(Clone)]
 pub struct ObjectClient<B: ObjectBackend> {
     backend: B,
 }

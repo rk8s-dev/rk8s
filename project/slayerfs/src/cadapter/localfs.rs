@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use tokio::{fs, io::AsyncWriteExt};
 
+#[derive(Clone)]
 pub struct LocalFsBackend {
     root: PathBuf,
 }
