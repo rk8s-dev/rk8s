@@ -209,7 +209,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 handle.unmount().await?;
                 println!("Filesystem unmounted");
-                drop(gc_handle);
+                gc_handle.abort();
+                let _ = gc_handle.await;
             }
         }
 

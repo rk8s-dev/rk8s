@@ -12,7 +12,7 @@ pub async fn start_upload_workers() {
     // TODO: implement upload worker pool
 }
 
-/// 垃圾收集配置
+/// Garbage collection configuration
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct GcConfig {
@@ -107,23 +107,26 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
         &self,
         deleted_inodes: &[i64],
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let mut deleted_objects: usize = 0;
+
         for &inode in deleted_inodes {
             debug!("Deleting object for inode {}", inode);
 
             if let Some(stat) = self.meta_store.stat(inode).await? {
-                let chunk_count = stat.size / self.config.layout.chunk_size;
+                let chunk_count = stat.size.div_ceil(self.config.layout.chunk_size);
                 let blocks_per_chunk = self.config.layout.blocks_per_chunk();
 
                 for chunk_id in 0..chunk_count {
                     for block_index in 0..blocks_per_chunk {
                         let key = format!("chunks/{chunk_id}/{block_index}");
                         self.object_client.delete_object(&key).await?;
+                        deleted_objects += 1;
                     }
                 }
             }
         }
 
-        Ok(deleted_inodes.len())
+        Ok(deleted_objects)
     }
 
     async fn cleanup_deleted_file_metadata(
@@ -150,8 +153,7 @@ pub async fn start_gc<B: ObjectBackend>(
     object_client: Arc<ObjectClient<B>>,
     config: Option<GcConfig>,
 ) {
-    let mut config = config.unwrap_or_default();
-    config.interval_secs = 10;
+    let config = config.unwrap_or_default();
     let gc = MarkBasedGarbageCollector::new(meta_store, object_client, config);
 
     gc.start().await;

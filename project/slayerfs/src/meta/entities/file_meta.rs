@@ -19,7 +19,7 @@ pub struct Model {
     #[sea_orm(column_type = "Integer")]
     pub nlink: i32,
 
-    /// 文件是否被标记为待删除（用于垃圾回收）
+    /// Whether the file is marked for deletion (for garbage collection)
     #[sea_orm(column_type = "Boolean", default_value = "false")]
     pub deleted: bool,
 }

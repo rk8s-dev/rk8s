@@ -132,7 +132,7 @@ pub trait MetaStore: Send + Sync {
 
     async fn initialize(&self) -> Result<(), MetaError>;
 
-    /// 获取所有被标记为待删除的文件inode列表（用于垃圾回收）
+    /// Returns all file inodes marked for deletion (for garbage collection)
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError>;
 
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError>;
