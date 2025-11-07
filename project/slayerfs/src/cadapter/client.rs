@@ -15,6 +15,7 @@ pub trait ObjectBackend: Send + Sync {
     async fn delete_object(&self, key: &str) -> Result<()>;
 }
 
+#[derive(Clone)]
 pub struct ObjectClient<B: ObjectBackend> {
     backend: B,
 }
