@@ -152,7 +152,7 @@ impl DatabaseMetaStore {
         }
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let root_permission = Permission::new(0o40755, 0, 0); // 目录权限：0o40000 (目录标志) + 0o755 (权限)
+        let root_permission = Permission::new(0o40755, 0, 0); // Directory bits: 0o40000 (dir flag) + 0o755 (mode)
         let root_dir = access_meta::ActiveModel {
             inode: Set(1),
             permission: Set(root_permission),

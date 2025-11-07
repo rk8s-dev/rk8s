@@ -1,6 +1,7 @@
-//! S3 适配器：基于 aws-sdk-s3 的简化实现，支持大对象的分段上传、基础重试与校验。
+//! S3 adapter: simplified aws-sdk-s3 implementation with multipart upload, retries, and validation.
 
 use crate::cadapter::client::ObjectBackend;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::primitives::SdkBody;
@@ -60,9 +61,7 @@ pub struct S3Backend {
 #[allow(dead_code)]
 impl S3Backend {
     /// Create new S3 backend with default configuration
-    pub async fn new(
-        bucket: impl Into<String>,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new(bucket: impl Into<String>) -> Result<Self> {
         let config = S3Config {
             bucket: bucket.into(),
             ..Default::default()
@@ -71,11 +70,9 @@ impl S3Backend {
     }
 
     /// Create new S3 backend with custom configuration
-    pub async fn with_config(
-        config: S3Config,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn with_config(config: S3Config) -> Result<Self> {
         if config.bucket.is_empty() {
-            return Err("Bucket name cannot be empty".into());
+            return Err(anyhow!("Bucket name cannot be empty"));
         }
 
         let mut aws_config_loader = aws_config::defaults(BehaviorVersion::latest());
@@ -107,11 +104,7 @@ impl S3Backend {
     }
 
     /// Put small objects directly (simpler than multipart upload)
-    async fn put_object_simple(
-        &self,
-        key: &str,
-        data: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn put_object_simple(&self, key: &str, data: &[u8]) -> Result<()> {
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -135,17 +128,13 @@ impl S3Backend {
                     sleep(Duration::from_millis(delay)).await;
                     continue;
                 }
-                Err(e) => return Err(Box::new(e)),
+                Err(e) => return Err(e.into()),
             }
         }
     }
 
     /// Handle multipart upload for large objects
-    async fn multipart_upload(
-        &self,
-        key: &str,
-        data: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn multipart_upload(&self, key: &str, data: &[u8]) -> Result<()> {
         // Create multipart upload
         let create = self
             .client
@@ -157,7 +146,7 @@ impl S3Backend {
 
         let upload_id = create
             .upload_id()
-            .ok_or("Missing upload_id in create_multipart_upload response")?
+            .ok_or_else(|| anyhow!("Missing upload_id in create_multipart_upload response"))?
             .to_string();
 
         // Ensure we clean up the multipart upload if it fails
@@ -230,7 +219,7 @@ impl S3Backend {
         // Execute all parts concurrently
         let results: Vec<(i32, Option<String>)> = match futures::future::try_join_all(parts).await {
             Ok(v) => v,
-            Err(e) => return Err(Box::new(e)),
+            Err(e) => return Err(e.into()),
         };
 
         // Build completed parts
@@ -294,11 +283,7 @@ impl Drop for MultipartCleanupGuard {
 
 #[async_trait]
 impl ObjectBackend for S3Backend {
-    async fn put_object(
-        &self,
-        key: &str,
-        data: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         // Small objects use direct put_object; large objects use multipart upload
         if data.len() <= self.config.part_size {
             return self.put_object_simple(key, data).await;
@@ -308,10 +293,7 @@ impl ObjectBackend for S3Backend {
         self.multipart_upload(key, data).await
     }
 
-    async fn get_object(
-        &self,
-        key: &str,
-    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>> {
         let resp = self
             .client
             .get_object()
@@ -333,16 +315,13 @@ impl ObjectBackend for S3Backend {
                 if msg.contains("NoSuchKey") || msg.contains("NotFound") {
                     Ok(None)
                 } else {
-                    Err(Box::new(e))
+                    Err(e.into())
                 }
             }
         }
     }
 
-    async fn get_etag(
-        &self,
-        key: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_etag(&self, key: &str) -> Result<String> {
         let resp = self
             .client
             .head_object()
@@ -353,10 +332,7 @@ impl ObjectBackend for S3Backend {
         Ok(resp.e_tag().unwrap_or_default().to_string())
     }
 
-    async fn delete_object(
-        &self,
-        key: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn delete_object(&self, key: &str) -> Result<()> {
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -374,7 +350,7 @@ impl ObjectBackend for S3Backend {
                     sleep(Duration::from_millis(delay)).await;
                     continue;
                 }
-                Err(e) => return Err(Box::new(e)),
+                Err(e) => return Err(e.into()),
             }
         }
     }
