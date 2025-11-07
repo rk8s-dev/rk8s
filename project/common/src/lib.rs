@@ -39,6 +39,26 @@ pub struct ObjectMeta {
     pub annotations: HashMap<String, String>,
 }
 
+/// A lightweight reference to another object (similar to Kubernetes' ObjectReference).
+/// Used for optional cross-references (e.g. EndpointAddress.targetRef).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct ObjectReference {
+    #[serde(rename = "apiVersion", default)]
+    pub api_version: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub uid: Option<String>,
+    #[serde(rename = "resourceVersion", default)]
+    pub resource_version: Option<String>,
+    #[serde(rename = "fieldPath", default)]
+    pub field_path: Option<String>,
+}
+
 fn default_namespace() -> String {
     "default".to_string()
 }
@@ -600,6 +620,8 @@ fn default_service_type() -> String {
 pub struct ServicePort {
     #[serde(rename = "port")]
     pub port: i32,
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(rename = "targetPort", default)]
     pub target_port: Option<i32>,
     #[serde(rename = "protocol", default = "default_protocol")]
@@ -684,4 +706,46 @@ pub struct ReplicaSet {
     pub spec: ReplicaSetSpec,
     #[serde(default)]
     pub status: ReplicaSetStatus,
+}
+
+/// Endpoint related types (similar to Kubernetes Endpoints)
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct EndpointPort {
+    pub port: i32,
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub app_protocol: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct EndpointAddress {
+    pub ip: String,
+    #[serde(rename = "nodeName", default)]
+    pub node_name: Option<String>,
+    /// Optional reference to the target object (keeps shape simple - use ObjectReference)
+    #[serde(rename = "targetRef", default)]
+    pub target_ref: Option<ObjectReference>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct EndpointSubset {
+    #[serde(default)]
+    pub addresses: Vec<EndpointAddress>,
+    #[serde(rename = "notReadyAddresses", default)]
+    pub not_ready_addresses: Vec<EndpointAddress>,
+    #[serde(default)]
+    pub ports: Vec<EndpointPort>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Endpoint {
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+    #[serde(rename = "kind")]
+    pub kind: String,
+    pub metadata: ObjectMeta,
+    #[serde(default)]
+    pub subsets: Vec<EndpointSubset>,
 }

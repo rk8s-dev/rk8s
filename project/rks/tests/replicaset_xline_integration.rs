@@ -1,4 +1,5 @@
 use anyhow::Result;
+use libvault::storage::xline::XlineOptions;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,8 +38,9 @@ async fn setup_store_and_manager() -> Result<(
 )> {
     let cfg = load_test_config()?;
     let endpoints: Vec<String> = cfg.xline_config.endpoints;
-    let endpoint_refs: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
-    let store: Arc<XlineStore> = Arc::new(XlineStore::new(&endpoint_refs).await?);
+    let option = XlineOptions::new(endpoints);
+    let store: Arc<XlineStore> =
+        Arc::new(XlineStore::new(option).await.expect("connect xline failed"));
     let mgr = Arc::new(ControllerManager::new());
     let rs_ctrl = Arc::new(ReplicaSetController::new());
     mgr.clone()

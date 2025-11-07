@@ -11,5 +11,9 @@ network_config:
   SubnetMin: "10.1.1.0"
   SubnetMax: "10.1.254.0"
   SubnetLen: 24
+tls_config:
+  enable: false
+  vault_folder: ""
+  keep_dangerous_files: false
 dns_config:
   Port: 5300

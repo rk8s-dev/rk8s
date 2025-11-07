@@ -3844,7 +3844,6 @@ dependencies = [
  "fixedbitset",
  "libbpf-sys",
  "libc",
- "libnetwork",
  "mockall 0.13.1",
  "nix 0.29.0",
  "oci-spec",
