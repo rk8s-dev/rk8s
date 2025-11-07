@@ -838,14 +838,29 @@ impl MetaStore for DatabaseMetaStore {
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        let file_meta: file_meta::ActiveModel = FileMeta::find_by_id(ino)
+        let file_meta = FileMeta::find_by_id(ino)
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
-            .ok_or(MetaError::NotFound(ino))?
-            .into();
+            .ok_or(MetaError::NotFound(ino))?;
 
-        file_meta.delete(&txn).await.map_err(MetaError::Database)?;
+        // Note: In database design, files and directories are stored in different tables.
+        // Files are stored in file_meta table, directories in access_meta table.
+        // So if we found a record in file_meta table, it must be a file.
+
+        // Check if the file is marked as deleted
+        if !file_meta.deleted {
+            return Err(MetaError::Internal(
+                "File is not marked as deleted".to_string(),
+            ));
+        }
+
+        // Delete the file metadata
+        let file_meta_active: file_meta::ActiveModel = file_meta.into();
+        file_meta_active
+            .delete(&txn)
+            .await
+            .map_err(MetaError::Database)?;
 
         txn.commit().await.map_err(MetaError::Database)?;
 

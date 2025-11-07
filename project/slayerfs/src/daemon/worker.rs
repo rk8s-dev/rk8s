@@ -55,30 +55,50 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
         }
     }
 
+    /// Start the garbage collector with graceful shutdown support
     pub async fn start(&self) {
         let mut interval = interval(Duration::from_secs(self.config.interval_secs));
 
         info!("GC interval {} seconds", self.config.interval_secs);
 
-        loop {
-            interval.tick().await;
+        // Simple shutdown signal handling
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-            match self.run_gc_cycle().await {
-                Ok((deleted_files, deleted_objects)) => {
-                    if deleted_files > 0 || deleted_objects > 0 {
-                        info!(
-                            "GC interval {} seconds completed, cleaned up {} deleted files and deleted {} data objects",
-                            self.config.interval_secs, deleted_files, deleted_objects
-                        );
-                    } else {
-                        debug!("GC interval completed, no files to clean up");
+        // Setup Ctrl+C handler
+        tokio::spawn(async move {
+            if let Ok(()) = tokio::signal::ctrl_c().await {
+                info!("Received Ctrl+C, shutting down GC gracefully");
+                let _ = shutdown_tx.send(());
+            }
+        });
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    match self.run_gc_cycle().await {
+                        Ok((deleted_files, deleted_objects)) => {
+                            if deleted_files > 0 || deleted_objects > 0 {
+                                info!(
+                                    "GC interval {} seconds completed, cleaned up {} deleted files and deleted {} data objects",
+                                    self.config.interval_secs, deleted_files, deleted_objects
+                                );
+                            } else {
+                                debug!("GC interval completed, no files to clean up");
+                            }
+                        }
+                        Err(e) => {
+                            error!("GC interval execution failed: {}", e);
+                        }
                     }
                 }
-                Err(e) => {
-                    error!("GC interval execution failed: {}", e);
+                _ = &mut shutdown_rx => {
+                    info!("GC shutting down gracefully");
+                    break;
                 }
             }
         }
+
+        info!("GC stopped");
     }
 
     /// Execute a full garbage collection cycle
@@ -147,6 +167,7 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
     }
 }
 
+/// Start garbage collector with graceful shutdown support
 #[allow(dead_code)]
 pub async fn start_gc<B: ObjectBackend>(
     meta_store: Arc<dyn MetaStore>,

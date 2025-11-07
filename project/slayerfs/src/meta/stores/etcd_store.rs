@@ -255,7 +255,7 @@ impl EtcdMetaStore {
                 entry_info.modify_time,
                 entry_info.create_time,
                 entry_info.nlink as i32,
-                false,
+                entry_info.deleted,
             );
             return Ok(Some(file_meta));
         }
