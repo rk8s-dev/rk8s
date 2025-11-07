@@ -88,7 +88,7 @@ impl SyncLoop {
     /// }
     ///
     /// async fn tick_handler(_state: std::sync::Arc<State>, _data: Box<()>, _: WithEvent<Tick>) {
-    ///     println!("Hello World!");
+    ///     info!("Hello World!");
     /// }
     /// ```
     ///
@@ -250,6 +250,7 @@ mod test {
     use futures::FutureExt;
     use std::time::Duration;
     use tokio::time::sleep;
+    use tracing::info;
 
     struct Tick;
     impl Event<()> for Tick {
@@ -262,7 +263,7 @@ mod test {
     }
 
     async fn tick_handler(_state: std::sync::Arc<State>, _data: Box<()>, _: WithEvent<Tick>) {
-        println!("Hello World!");
+        info!("Hello World!");
     }
 
     struct Nothing;

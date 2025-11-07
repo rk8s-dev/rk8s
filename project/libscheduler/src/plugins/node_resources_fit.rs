@@ -12,17 +12,12 @@ pub struct Fit;
 
 const SCORING_STRATEGY_CONFIG_KEY: &str = "ScoringStrategyConfig";
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum ScoringStrategy {
+    #[default]
     LeastAllocated,
     MostAllocated,
     RequestedToCapacityRatio,
-}
-
-impl Default for ScoringStrategy {
-    fn default() -> Self {
-        Self::LeastAllocated
-    }
 }
 
 impl Plugin for Fit {

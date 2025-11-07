@@ -7,6 +7,7 @@ use rkl::commands::compose::compose_execute;
 use serial_test::serial;
 use std::{env, fs::File, io::Write, path::Path};
 use test_common::*;
+use tracing::{error, info};
 
 mod test_common;
 
@@ -131,7 +132,7 @@ fn create_compose_helper(compose_config: &str, project_name: &str) -> Result<(),
     let path_str = format!("/run/youki/compose/{project_name}");
     let compose_dir = Path::new(&path_str);
     if compose_dir.exists() {
-        println!("project {project_name} already exists, deleting it to create a new one");
+        info!("project {project_name} already exists, deleting it to create a new one");
         std::fs::remove_dir_all(compose_dir)?;
     }
 
@@ -147,7 +148,7 @@ fn create_compose_helper(compose_config: &str, project_name: &str) -> Result<(),
 fn try_create_compose(compose_config: String, project_name: &str) {
     let res = create_compose_helper(&compose_config, project_name);
     if res.is_err() {
-        println!(
+        error!(
             "  
             Failed to create compose application. This may be not a test failed, but caused by wrong config.
             tips:  

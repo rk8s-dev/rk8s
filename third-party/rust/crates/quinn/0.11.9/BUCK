@@ -33,6 +33,7 @@ rust_library(
         "platform-verifier",
         "ring",
         "runtime-tokio",
+        "rustls",
         "rustls-ring",
     ],
     rustc_flags = [
@@ -69,6 +70,7 @@ rust_binary(
         "platform-verifier",
         "ring",
         "runtime-tokio",
+        "rustls",
         "rustls-ring",
     ],
     rustc_flags = ["@$(location :quinn-manifest[env_flags])"],
@@ -88,6 +90,7 @@ buildscript_run(
         "platform-verifier",
         "ring",
         "runtime-tokio",
+        "rustls",
         "rustls-ring",
     ],
     version = "0.11.9",

@@ -1,11 +1,23 @@
+use chrono::{DateTime, Utc};
 use libcni::ip::route::{Interface, Route};
 use serde::{Deserialize, Serialize};
+use std::convert::{TryFrom, TryInto};
+use std::fmt::{Display, Formatter};
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, Ipv6Addr},
+    time::Duration,
 };
 
+pub mod _private {
+    pub use log::error;
+}
+
 pub mod lease;
+pub mod quic;
+
+pub use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TypeMeta {
     #[serde(rename = "apiVersion")]
@@ -119,6 +131,7 @@ pub struct Toleration {
     #[serde(default)]
     pub value: String,
 }
+
 impl Toleration {
     pub fn tolerate(&self, taint: &Taint) -> bool {
         if self.effect.is_some() && self.effect.as_ref().unwrap() != &taint.effect {
@@ -133,16 +146,12 @@ impl Toleration {
         }
     }
 }
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub enum TolerationOperator {
     Exists,
+    #[default]
     Equal,
-}
-
-impl Default for TolerationOperator {
-    fn default() -> Self {
-        Self::Equal
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -163,7 +172,18 @@ pub enum TaintKey {
     NodeOutOfService,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[macro_export]
+macro_rules! invalid_rks_variant_error {
+    ($message:expr, $expected:pat) => {
+        RksMessage::Error(format!(
+            "invalid message, expected: {}, but got: {}",
+            stringify!($expected),
+            $message
+        ))
+    };
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum RksMessage {
     //request
     CreatePod(Box<PodTask>),
@@ -181,6 +201,11 @@ pub enum RksMessage {
     UpdateRoutes(String, Vec<Route>),
     SetDns(String, u16),
 
+    CertificateSign {
+        token: String,
+        req: IssueCertificateRequest,
+    },
+
     //response
     Ack,
     Error(String),
@@ -188,6 +213,146 @@ pub enum RksMessage {
     ListPodRes(Vec<String>),
     // (Podname, Podip)
     SetPodip((String, String)),
+    Certificate(IssueCertificateResponse),
+}
+
+impl std::fmt::Debug for RksMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // request
+            Self::CreatePod(_) => f.write_str("RksMessage::CreatePod { .. }"),
+            Self::DeletePod(pod_name) => {
+                write!(f, "RksMessage::DeletePod {{ pod_name: {} }}", pod_name)
+            }
+            Self::ListPod => f.write_str("RksMessage::ListPod"),
+            Self::GetNodeCount => f.write_str("RksMessage::GetNodeCount"),
+            Self::RegisterNode(_) => f.write_str("RksMessage::RegisterNode { .. }"),
+            Self::UserRequest(_) => f.write_str("RksMessage::UserRequest { .. }"),
+            Self::Heartbeat { node_name, status } => {
+                write!(
+                    f,
+                    "RksMessage::Heartbeat {{ node_name: {}, status: {:?} }}",
+                    node_name, status
+                )
+            }
+            Self::SetNetwork(_) => f.write_str("RksMessage::SetNetwork { .. }"),
+            Self::UpdateRoutes(node_name, routes) => {
+                write!(
+                    f,
+                    "RksMessage::UpdateRoutes {{ node_name: {}, routes_count: {} }}",
+                    node_name,
+                    routes.len()
+                )
+            }
+            Self::CertificateSign { .. } => f.write_str("RksMessage::CertificateSign { .. }"),
+
+            // response
+            Self::Ack => f.write_str("RksMessage::Ack"),
+            Self::Error(err_msg) => write!(f, "RksMessage::Error({})", err_msg),
+            Self::NodeCount(count) => write!(f, "RksMessage::NodeCount({})", count),
+            Self::ListPodRes(pods) => {
+                write!(f, "RksMessage::ListPodRes {{ count: {} }}", pods.len())
+            }
+            Self::SetPodip((pod_name, pod_ip)) => {
+                write!(
+                    f,
+                    "RksMessage::SetPodip {{ pod_name: {}, pod_ip: {} }}",
+                    pod_name, pod_ip
+                )
+            }
+            Self::SetDns(ip, dns_port) => write!(
+                f,
+                "RksMessage::SetDns {{ ip: {}, dns_port: {} }}",
+                ip, dns_port,
+            ),
+            Self::Certificate(_) => f.write_str("RksMessage::Certificate"),
+        }
+    }
+}
+
+impl Display for RksMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // request
+            Self::CreatePod(pod) => write!(
+                f,
+                "Create pod '{}' in namespace '{}'",
+                pod.metadata.name, pod.metadata.namespace
+            ),
+            Self::DeletePod(pod_name) => write!(f, "Delete pod '{}'", pod_name),
+            Self::ListPod => f.write_str("List pods"),
+            Self::GetNodeCount => f.write_str("Get node count"),
+            Self::RegisterNode(node) => write!(
+                f,
+                "Register node '{}' (namespace '{}')",
+                node.metadata.name, node.metadata.namespace
+            ),
+            Self::UserRequest(payload) => write!(f, "User request: {}", payload),
+            Self::Heartbeat { node_name, status } => {
+                let ready_state = status
+                    .conditions
+                    .iter()
+                    .find(|cond| matches!(cond.condition_type, NodeConditionType::Ready))
+                    .map(|cond| match &cond.status {
+                        ConditionStatus::True => "ready",
+                        ConditionStatus::False => "not ready",
+                        ConditionStatus::Unknown => "status unknown",
+                    });
+
+                let msg = ready_state
+                    .map(|state| format!("Heartbeat from node '{}' ({})", node_name, state))
+                    .unwrap_or(format!("Heartbeat from node '{}'", node_name));
+                write!(f, "{}", msg)
+            }
+            Self::SetNetwork(config) => write!(
+                f,
+                "Apply network settings for node '{}' (subnet: {})",
+                config.node_id, config.subnet_env
+            ),
+            Self::UpdateRoutes(node_name, routes) => write!(
+                f,
+                "Update {} route(s) on node '{}'",
+                routes.len(),
+                node_name
+            ),
+            Self::SetDns(ip, dns_port) => {
+                write!(f, "Configure DNS server {}:{}", ip, dns_port)
+            }
+            Self::CertificateSign { token, .. } => {
+                write!(f, "Submit certificate signing request (token: {})", token)
+            }
+
+            // response
+            Self::Ack => f.write_str("Acknowledge message receipt"),
+            Self::Error(err_msg) => write!(f, "Error: {}", err_msg),
+            Self::NodeCount(count) => write!(f, "Reported node count: {}", count),
+            Self::ListPodRes(pods) => {
+                if pods.is_empty() {
+                    return f.write_str("List pods response: no pods found");
+                }
+
+                let preview = pods
+                    .iter()
+                    .take(3)
+                    .map(|name| name.as_str())
+                    .collect::<Vec<_>>();
+
+                if pods.len() > preview.len() {
+                    return write!(
+                        f,
+                        "List pods response: {} (+{} more)",
+                        preview.join(", "),
+                        pods.len() - preview.len()
+                    );
+                }
+                write!(f, "List pods response: {}", preview.join(", "))
+            }
+            Self::SetPodip((pod_name, pod_ip)) => {
+                write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
+            }
+            Self::Certificate(_) => f.write_str("Certificate response received"),
+        }
+    }
 }
 
 /// Node spec
@@ -214,6 +379,63 @@ impl Taint {
         }
     }
 }
+
+impl TryFrom<&NodeCondition> for Taint {
+    type Error = ();
+
+    fn try_from(condition: &NodeCondition) -> Result<Self, Self::Error> {
+        match condition.condition_type {
+            NodeConditionType::Ready
+                if matches!(
+                    condition.status,
+                    ConditionStatus::False | ConditionStatus::Unknown
+                ) =>
+            {
+                Ok(Taint::new(TaintKey::NodeNotReady, TaintEffect::NoExecute))
+            }
+            NodeConditionType::MemoryPressure
+                if matches!(condition.status, ConditionStatus::True) =>
+            {
+                Ok(Taint::new(
+                    TaintKey::NodeMemoryPressure,
+                    TaintEffect::NoSchedule,
+                ))
+            }
+            NodeConditionType::DiskPressure
+                if matches!(condition.status, ConditionStatus::True) =>
+            {
+                Ok(Taint::new(
+                    TaintKey::NodeDiskPressure,
+                    TaintEffect::NoSchedule,
+                ))
+            }
+            NodeConditionType::PIDPressure if matches!(condition.status, ConditionStatus::True) => {
+                Ok(Taint::new(
+                    TaintKey::NodeUnschedulable,
+                    TaintEffect::NoSchedule,
+                ))
+            }
+            NodeConditionType::NetworkUnavailable
+                if matches!(condition.status, ConditionStatus::True) =>
+            {
+                Ok(Taint::new(
+                    TaintKey::NodeNetworkUnavailable,
+                    TaintEffect::NoSchedule,
+                ))
+            }
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<NodeCondition> for Taint {
+    type Error = ();
+
+    fn try_from(value: NodeCondition) -> Result<Self, Self::Error> {
+        (&value).try_into()
+    }
+}
+
 /// Node status
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeStatus {
@@ -261,6 +483,30 @@ pub enum ConditionStatus {
     Unknown,
 }
 
+impl NodeCondition {
+    pub fn is_ready(&self) -> bool {
+        matches!(self.condition_type, NodeConditionType::Ready)
+    }
+
+    pub fn heartbeat_age(&self, now: DateTime<Utc>) -> Option<Duration> {
+        let timestamp = self.last_heartbeat_time.as_ref()?;
+        let heartbeat = chrono::DateTime::parse_from_rfc3339(timestamp)
+            .ok()?
+            .with_timezone(&Utc);
+        now.signed_duration_since(heartbeat).to_std().ok()
+    }
+
+    pub fn is_expired_at(&self, grace: Duration, now: DateTime<Utc>) -> bool {
+        self.heartbeat_age(now)
+            .map(|elapsed| elapsed > grace)
+            .unwrap_or(true)
+    }
+
+    pub fn is_expired(&self, grace: Duration) -> bool {
+        self.is_expired_at(grace, Utc::now())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Node {
     #[serde(rename = "apiVersion")]
@@ -270,6 +516,53 @@ pub struct Node {
     pub metadata: ObjectMeta,
     pub spec: NodeSpec,
     pub status: NodeStatus,
+}
+
+impl Node {
+    pub fn ready_condition(&self) -> Option<&NodeCondition> {
+        self.status.conditions.iter().find(|cond| cond.is_ready())
+    }
+
+    pub fn ready_condition_mut(&mut self) -> Option<&mut NodeCondition> {
+        self.status
+            .conditions
+            .iter_mut()
+            .find(|cond| cond.is_ready())
+    }
+
+    pub fn set_last_heartbeat_time(&mut self, now: DateTime<Utc>) {
+        if let Some(cond) = self.ready_condition_mut() {
+            cond.last_heartbeat_time = Some(now.to_rfc3339());
+        }
+    }
+
+    pub fn last_heartbeat_time(&self) -> Option<DateTime<Utc>> {
+        self.ready_condition().and_then(|cond| {
+            cond.last_heartbeat_time
+                .as_deref()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|t| t.with_timezone(&Utc))
+        })
+    }
+
+    pub fn update_ready_status_on_timeout(&mut self, grace: Duration) -> bool {
+        if let Some(cond) = self.ready_condition_mut()
+            && cond.is_expired(grace)
+            && !matches!(cond.status, ConditionStatus::Unknown)
+        {
+            cond.status = ConditionStatus::Unknown;
+            cond.last_heartbeat_time = Some(Utc::now().to_rfc3339());
+            return true;
+        }
+        false
+    }
+
+    pub fn derive_taints_from_conditions(conditions: &[NodeCondition]) -> Vec<Taint> {
+        conditions
+            .iter()
+            .filter_map(|condition| condition.try_into().ok())
+            .collect()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

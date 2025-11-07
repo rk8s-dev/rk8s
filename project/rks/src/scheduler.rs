@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use common::PodTask;
 use libscheduler::{
@@ -7,10 +8,9 @@ use libscheduler::{
     plugins::{Plugins, node_resources_fit::ScoringStrategy},
     with_xline::run_scheduler_with_xline,
 };
+use libvault::storage::xline::XlineOptions;
 use log::{debug, error};
 use tokio::sync::mpsc;
-
-use crate::api::xlinestore::XlineStore;
 
 pub struct Scheduler {
     assignment_rx: mpsc::UnboundedReceiver<Result<Assignment, anyhow::Error>>,
@@ -19,15 +19,14 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub async fn try_new(
-        xline_endpoints: &[&str],
+        xline_options: XlineOptions,
         xline_store: Arc<XlineStore>,
         scoring_strategy: ScoringStrategy,
         plugins: Plugins,
     ) -> Result<Self> {
         let (_unassume_tx, unassume_rx) = mpsc::unbounded_channel();
         let assignment_rx =
-            run_scheduler_with_xline(xline_endpoints, scoring_strategy, plugins, unassume_rx)
-                .await?;
+            run_scheduler_with_xline(xline_options, scoring_strategy, plugins, unassume_rx).await?;
 
         Ok(Self {
             assignment_rx,

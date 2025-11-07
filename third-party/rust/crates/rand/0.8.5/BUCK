@@ -25,6 +25,7 @@ rust_library(
     edition = "2018",
     features = [
         "alloc",
+        "default",
         "getrandom",
         "libc",
         "rand_chacha",
