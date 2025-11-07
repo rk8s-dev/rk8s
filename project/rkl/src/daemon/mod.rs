@@ -1,10 +1,13 @@
-pub mod sync_loop;
 pub mod client;
+pub mod probe;
 pub mod static_pods;
+pub mod sync_loop;
 
 //mod status_access;
-use client::init_crypto;
+use crate::commands::pod::TLSConnectionArgs;
 use sync_loop::SyncLoop;
+use tracing::{error, info};
+
 pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

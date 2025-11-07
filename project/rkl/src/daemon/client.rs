@@ -1,5 +1,7 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+
 use tokio::time;
 
 use crate::commands::pod;
@@ -14,8 +16,6 @@ use libnetwork::{
     config::{NetworkConfig, validate_network_config},
     ip::{IPStack, PublicIPOpts, lookup_ext_iface},
 };
-use std::collections::HashMap;
-use tracing::info;
 
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
@@ -292,12 +292,9 @@ pub async fn run_once(
                                     }
 
                                     let _ = client
-                                    .send_msg(&RksMessage::SetPodip((
-                                        pod_name,
-                                        result,
-                                    )))
-                                    .await;
-                                },
+                                        .send_msg(&RksMessage::SetPodip((pod_name, result.pod_ip)))
+                                        .await;
+                                }
 
                                 Err(e) => {
                                     error!("[worker] run_pod_from_taskrunner failed: {e:?}");
