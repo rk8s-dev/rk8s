@@ -1002,10 +1002,10 @@ impl MetaStore for EtcdMetaStore {
                 if entry_info.is_file && entry_info.deleted {
                     // Extract inode from key (format: "r:{inode}")
                     let key_str = String::from_utf8_lossy(kv.key());
-                    if let Some(inode_str) = key_str.strip_prefix("r:") {
-                        if let Ok(inode) = inode_str.parse::<i64>() {
-                            deleted_files.push(inode);
-                        }
+                    if let Some(inode_str) = key_str.strip_prefix("r:")
+                        && let Ok(inode) = inode_str.parse::<i64>()
+                    {
+                        deleted_files.push(inode);
                     }
                 }
             }
