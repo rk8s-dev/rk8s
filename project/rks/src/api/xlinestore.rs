@@ -5,6 +5,7 @@ use etcd_client::{
     Client, Compare, CompareOp, GetOptions, PutOptions, Txn, TxnOp, WatchOptions, WatchStream,
     Watcher,
 };
+use libvault::storage::xline::XlineOptions;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -19,8 +20,8 @@ pub struct XlineStore {
 #[allow(unused)]
 impl XlineStore {
     /// Create a new XlineStore instance by connecting to the given endpoints.
-    pub async fn new(endpoints: &[&str]) -> Result<Self> {
-        let client = Client::connect(endpoints, None).await?;
+    pub async fn new(option: XlineOptions) -> Result<Self> {
+        let client = Client::connect(option.endpoints, option.config).await?;
         Ok(Self {
             client: Arc::new(RwLock::new(client)),
         })
@@ -112,6 +113,16 @@ impl XlineStore {
         Ok(())
     }
 
+    pub async fn insert_node(&self, node: &Node) -> Result<()> {
+        let node_name = node.metadata.name.clone();
+        if node_name.is_empty() {
+            anyhow::bail!("node.metadata.name is empty");
+        }
+
+        let node_yaml = serde_yaml::to_string(node)?;
+        self.insert_node_yaml(&node_name, &node_yaml).await
+    }
+
     // Example (currently unused):
     pub async fn get_node_yaml(&self, node_name: &str) -> Result<Option<String>> {
         let key = format!("/registry/nodes/{node_name}");
@@ -154,11 +165,9 @@ impl XlineStore {
 
     /// Get a pod object from xline.
     pub async fn get_pod(&self, pod_name: &str) -> Result<Option<PodTask>> {
-        if let Some(yaml) = self.get_pod_yaml(pod_name).await? {
-            let pod: PodTask = serde_yaml::from_str(&yaml)?;
-            Ok(Some(pod))
-        } else {
-            Ok(None)
+        match self.get_pod_yaml(pod_name).await? {
+            Some(yaml) => Ok(Some(serde_yaml::from_str::<PodTask>(&yaml)?)),
+            None => Ok(None),
         }
     }
 

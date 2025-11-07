@@ -23,12 +23,13 @@ use libnetwork::{
     config::NetworkConfig,
     ip::{self, PublicIPOpts},
 };
+use libvault::storage::xline::XlineOptions;
 
 //const DEFAULT_SUBNET_FILE: &str = "/run/flannel/subnet.env";
 const DEFAULT_SUBNET_FILE: &str = "/etc/cni/net.d/subnet.env";
 
-pub async fn new_subnet_manager(cfg: XlineConfig) -> Result<LocalManager> {
-    let xline_registry = XlineSubnetRegistry::new(cfg, None)
+pub async fn new_subnet_manager(cfg: XlineConfig, option: XlineOptions) -> Result<LocalManager> {
+    let xline_registry = XlineSubnetRegistry::new_with_options(cfg, option)
         .await
         .expect("failed to create XlineSubnetRegistry");
 
@@ -50,7 +51,7 @@ pub async fn init_network(cfg: &mut XlineConfig, cancel_token: CancellationToken
         );
     }
 
-    let sm = match new_subnet_manager(cfg.clone()).await {
+    let sm = match new_subnet_manager(cfg.clone(), XlineOptions::new(cfg.endpoints.clone())).await {
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create subnet manager: {e:?}");

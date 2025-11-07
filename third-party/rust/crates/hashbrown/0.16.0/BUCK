@@ -23,6 +23,19 @@ rust_library(
     crate = "hashbrown",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
+    features = [
+        "allocator-api2",
+        "default",
+        "default-hasher",
+        "equivalent",
+        "inline-more",
+        "raw-entry",
+    ],
     rustc_flags = ["@$(location :hashbrown-manifest[env_flags])"],
     visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust/crates/allocator-api2/0.2.21:allocator-api2",
+        "//third-party/rust/crates/equivalent/1.0.2:equivalent",
+        "//third-party/rust/crates/foldhash/0.2.0:foldhash",
+    ],
 )

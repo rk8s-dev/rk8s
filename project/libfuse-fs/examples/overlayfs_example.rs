@@ -21,7 +21,7 @@ struct Args {
     #[arg(long)]
     lowerdir: Vec<String>,
     /// Use privileged mount instead of unprivileged (default false)
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = false)]
     privileged: bool,
     /// Options, currently contains uid/gid mapping info
     #[arg(long, short)]

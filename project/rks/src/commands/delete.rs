@@ -15,14 +15,20 @@ pub async fn watch_delete(
     if let Ok(pod_task) = serde_yaml::from_str::<PodTask>(&pod_yaml)
         && pod_task.spec.node_name.as_deref() == Some(node_id)
     {
-        info!("[watch_pods] DELETE pod_name={pod_name} for node={node_id}");
+        info!(
+            target: "rks::node::watch_pods",
+            "DELETE pod_name={pod_name} for node={node_id}"
+        );
 
         let msg = RksMessage::DeletePod(pod_name.clone());
         let data = bincode::serialize(&msg)?;
         if let Ok(mut stream) = conn.open_uni().await {
             stream.write_all(&data).await?;
             stream.finish()?;
-            info!("[watch_pods] sent delete pod to worker {node_id}");
+            info!(
+                target: "rks::node::watch_pods",
+                "sent delete pod to worker {node_id}"
+            );
         }
     }
     Ok(())
@@ -34,7 +40,10 @@ pub async fn user_delete(
     conn: &Connection,
 ) -> Result<()> {
     xline_store.delete_pod(&pod_name).await?;
-    println!("[user_delete] deleted pod {pod_name} (written to xline)");
+    info!(
+        target: "rks::commands::user_delete",
+        "deleted pod {pod_name} (written to xline)"
+    );
 
     let response = RksMessage::Ack;
     let data = bincode::serialize(&response)?;

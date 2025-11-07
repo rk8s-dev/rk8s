@@ -25,5 +25,4 @@ rust_library(
     edition = "2021",
     rustc_flags = ["@$(location :windows-targets-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu"],
 )

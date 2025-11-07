@@ -1,7 +1,4 @@
 use anyhow::Result;
-use bincode;
-use quinn::crypto::rustls::QuicClientConfig;
-use quinn::{ClientConfig as QuinnClientConfig, Endpoint};
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tokio::time;
 
@@ -16,18 +13,16 @@ use libnetwork::{
     config::{NetworkConfig, validate_network_config},
     ip::{IPStack, PublicIPOpts, lookup_ext_iface},
 };
-use rustls::DigitallySignedStruct;
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::crypto::CryptoProvider;
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig as RustlsClientConfig, RootCertStore, SignatureScheme};
 use std::collections::HashMap;
 
+use crate::commands::pod::TLSConnectionArgs;
+use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
 use sysinfo::{Disks, System};
+use tracing::{error, info, warn};
 
 fn get_subnet_file_path() -> String {
     if let Ok(path) = env::var("SUBNET_FILE_PATH") {
-        println!("Using custom subnet file path: {path}");
+        info!("Using custom subnet file path: {path}");
         return path;
     }
 
@@ -40,7 +35,7 @@ fn get_subnet_file_path() -> String {
             .open(cni_path)
             .is_ok()
     {
-        println!("Using CNI standard path: {cni_path}");
+        info!("Using CNI standard path: {cni_path}");
         return cni_path.to_string();
     }
 
@@ -49,62 +44,19 @@ fn get_subnet_file_path() -> String {
         let user_path = format!("{user_dir}/subnet.env");
 
         if fs::create_dir_all(&user_dir).is_ok() {
-            println!("Using user directory: {user_path}");
+            info!("Using user directory: {user_path}");
             return user_path;
         }
     }
 
     let default_path = "/tmp/subnet.env";
-    println!("Using default temporary path: {default_path}");
+    info!("Using default temporary path: {default_path}");
     default_path.to_string()
-}
-
-/// Skip certificate verification
-#[derive(Debug)]
-pub struct SkipServerVerification;
-
-impl ServerCertVerifier for SkipServerVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::RSA_PSS_SHA256,
-        ]
-    }
 }
 
 /// Run worker loop based on environment variables.
 /// This function will keep reconnecting if errors occur.
-pub async fn run_forever() -> Result<()> {
+pub async fn run_forever(tls_cfg: TLSConnectionArgs) -> Result<()> {
     //We should give the ipaddr of rks here
     let server_addr: String =
         env::var("RKS_ADDRESS").unwrap_or_else(|_| "192.168.73.128:50051".to_string());
@@ -127,10 +79,18 @@ pub async fn run_forever() -> Result<()> {
     } else {
         generate_node(&ext_iface).await?
     };
+
     let ext_iface = Arc::new(ext_iface);
     loop {
-        if let Err(e) = run_once(server_addr, node.clone(), ext_iface.clone()).await {
-            eprintln!("[rkl_worker] error: {e:?}, retrying in 3s");
+        if let Err(e) = run_once(
+            server_addr,
+            node.clone(),
+            ext_iface.clone(),
+            tls_cfg.clone(),
+        )
+        .await
+        {
+            error!("[rkl_worker] error: {e:?}, retrying in 3s");
             time::sleep(Duration::from_secs(3)).await;
         } else {
             time::sleep(Duration::from_secs(1)).await;
@@ -155,19 +115,8 @@ pub async fn run_once(
     server_addr: SocketAddr,
     node: Node,
     ext_iface: Arc<ExternalInterface>,
+    tls_cfg: TLSConnectionArgs,
 ) -> Result<()> {
-    // Skip certificate verification
-    let mut tls = RustlsClientConfig::builder()
-        .with_root_certificates(RootCertStore::empty())
-        .with_no_client_auth();
-    tls.dangerous()
-        .set_certificate_verifier(Arc::new(SkipServerVerification));
-
-    let quic_crypto = QuicClientConfig::try_from(tls)?;
-    let client_cfg: QuinnClientConfig = QuinnClientConfig::new(Arc::new(quic_crypto));
-    let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())?;
-    endpoint.set_default_client_config(client_cfg);
-
     let subnet_file_path = get_subnet_file_path();
     let link_index = env::var("LINK_INDEX")
         .unwrap_or_else(|_| "1".to_string())
@@ -182,38 +131,24 @@ pub async fn run_once(
         node.metadata.name.clone(),
     );
 
-    println!("Network receiver created for node: {}", node.metadata.name);
+    info!("Network receiver created for node: {}", node.metadata.name);
 
-    // establish connection with retry
-    let connection = loop {
-        match endpoint.connect(server_addr, "localhost") {
-            Ok(connecting) => match connecting.await {
-                Ok(conn) => break conn,
-                Err(e) => {
-                    eprintln!("[worker] connect failed: {e}, retrying 2s");
-                    time::sleep(Duration::from_secs(2)).await;
-                }
-            },
-            Err(e) => {
-                eprintln!("[worker] endpoint connect error: {e}, retrying 2s");
-                time::sleep(Duration::from_secs(2)).await;
-            }
-        }
-    };
-    println!("[worker] connected to RKS at {server_addr}");
+    let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string(), &tls_cfg).await?;
+    info!("[worker] connected to RKS at {server_addr}");
 
     // register to rks by sending RegisterNode(Box<Node>)
     let register_msg = RksMessage::RegisterNode(Box::new(node.clone()));
-    send_uni(&connection, &register_msg).await?;
-    println!("[worker] sent RegisterNode({})", node.metadata.name);
+    client.send_msg(&register_msg).await?;
+    info!("[worker] sent RegisterNode({})", node.metadata.name);
 
     // heartbeat
-    let hb_conn = connection.clone();
+    let hb_conn = client.clone();
     let node_name = node.metadata.name.clone();
+    let heartbeat_iface = ext_iface.clone();
     tokio::spawn(async move {
         loop {
             time::sleep(Duration::from_secs(5)).await;
-            match generate_node(&ext_iface).await {
+            match generate_node(&heartbeat_iface).await {
                 Ok(node) => {
                     let mut status = node.status;
                     status.conditions = vec![
@@ -229,14 +164,14 @@ pub async fn run_once(
                         status,
                     };
 
-                    if let Err(e) = send_uni(&hb_conn, &hb).await {
-                        eprintln!("[worker heartbeat] send failed: {e}");
+                    if let Err(e) = hb_conn.send_msg(&hb).await {
+                        error!("[worker heartbeat] send failed: {e}");
                     } else {
-                        println!("[worker] heartbeat sent");
+                        info!("[worker] heartbeat sent");
                     }
                 }
                 Err(e) => {
-                    eprintln!("[worker heartbeat] generate_node failed: {e}");
+                    error!("[worker heartbeat] generate_node failed: {e}");
                 }
             }
         }
@@ -244,46 +179,46 @@ pub async fn run_once(
 
     //Main receive loop: handle CreatePod/DeletePod/Network...
     loop {
-        match connection.accept_uni().await {
+        match client.accept_uni().await {
             Ok(mut recv) => {
                 let mut buf = vec![0u8; 4096];
                 match recv.read(&mut buf).await {
                     Ok(Some(n)) => match bincode::deserialize::<RksMessage>(&buf[..n]) {
                         Ok(RksMessage::Ack) => {
-                            println!("[worker] got register Ack");
+                            info!("[worker] got register Ack");
                         }
                         Ok(RksMessage::Error(e)) => {
-                            eprintln!("[worker] register error: {e}");
+                            error!("[worker] register error: {e}");
                         }
                         Ok(RksMessage::SetNetwork(cfg)) => {
-                            println!("[worker] received network config: {cfg:?}");
+                            info!("[worker] received network config: {cfg:?}");
 
                             if let Err(e) = handle_network_config(&network_receiver, &cfg).await {
-                                eprintln!("[worker] failed to apply network config: {e}");
-                                let _ = send_uni(
-                                    &connection,
-                                    &RksMessage::Error(format!("network config failed: {e}")),
-                                )
-                                .await;
+                                error!("[worker] failed to apply network config: {e}");
+                                let _ = client
+                                    .send_msg(&RksMessage::Error(format!(
+                                        "network config failed: {e}"
+                                    )))
+                                    .await;
                             } else {
-                                println!("[worker] network config applied successfully");
-                                let _ = send_uni(&connection, &RksMessage::Ack).await;
+                                info!("[worker] network config applied successfully");
+                                let _ = client.send_msg(&RksMessage::Ack).await;
                             }
                         }
                         Ok(RksMessage::UpdateRoutes(_id, routes)) => {
-                            println!("[worker] received routes update: {routes:?}");
+                            info!("[worker] received routes update: {routes:?}");
                             let route_msg = NetworkConfigMessage::Route { routes };
                             if let Err(e) = network_receiver.handle_network_config(route_msg).await
                             {
-                                eprintln!("[worker] failed to apply routes: {e}");
-                                let _ = send_uni(
-                                    &connection,
-                                    &RksMessage::Error(format!("routes update failed: {e}")),
-                                )
-                                .await;
+                                error!("[worker] failed to apply routes: {e}");
+                                let _ = client
+                                    .send_msg(&RksMessage::Error(format!(
+                                        "routes update failed: {e}"
+                                    )))
+                                    .await;
                             } else {
-                                println!("[worker] routes applied successfully");
-                                let _ = send_uni(&connection, &RksMessage::Ack).await;
+                                info!("[worker] routes applied successfully");
+                                let _ = client.send_msg(&RksMessage::Ack).await;
                             }
                         }
                         Ok(RksMessage::CreatePod(pod_box)) => {
@@ -294,22 +229,20 @@ pub async fn run_once(
                             if let Some(target) = target_opt
                                 && target != node.metadata.name
                             {
-                                eprintln!(
+                                warn!(
                                     "[worker] CreatePod skipped: target={} self={}",
                                     target, node.metadata.name
                                 );
-                                let _ = send_uni(
-                                    &connection,
-                                    &RksMessage::Error(format!(
+                                let _ = client
+                                    .send_msg(&RksMessage::Error(format!(
                                         "pod {} target node mismatch: target={}, self={}",
                                         pod.metadata.name, target, node.metadata.name
-                                    )),
-                                )
-                                .await;
+                                    )))
+                                    .await;
                                 continue;
                             }
 
-                            println!(
+                            info!(
                                 "[worker] CreatePod name={} assigned_to={}",
                                 pod.metadata.name,
                                 target_opt.unwrap_or("<unspecified>")
@@ -319,89 +252,84 @@ pub async fn run_once(
                             let runner = match TaskRunner::from_task(pod.clone()) {
                                 Ok(r) => r,
                                 Err(e) => {
-                                    eprintln!("[worker] TaskRunner::from_task failed: {e:?}");
-                                    let _ = send_uni(
-                                        &connection,
-                                        &RksMessage::Error(format!(
+                                    error!("[worker] TaskRunner::from_task failed: {e:?}");
+                                    let _ = client
+                                        .send_msg(&RksMessage::Error(format!(
                                             "create {} failed: {e}",
                                             pod.metadata.name
-                                        )),
-                                    )
-                                    .await;
+                                        )))
+                                        .await;
                                     continue;
                                 }
                             };
 
                             match pod::run_pod_from_taskrunner(runner) {
                                 Ok(podip) => {
-                                    let _ = send_uni(
-                                        &connection,
-                                        &RksMessage::SetPodip((pod.metadata.name.clone(), podip)),
-                                    )
-                                    .await;
+                                    let _ = client
+                                        .send_msg(&RksMessage::SetPodip((
+                                            pod.metadata.name.clone(),
+                                            podip,
+                                        )))
+                                        .await;
                                 }
                                 Err(e) => {
-                                    eprintln!("[worker] run_pod_from_taskrunner failed: {e:?}");
-                                    let _ = send_uni(
-                                        &connection,
-                                        &RksMessage::Error(format!(
+                                    error!("[worker] run_pod_from_taskrunner failed: {e:?}");
+                                    let _ = client
+                                        .send_msg(&RksMessage::Error(format!(
                                             "create {} failed: {e}",
                                             pod.metadata.name
-                                        )),
-                                    )
-                                    .await;
+                                        )))
+                                        .await;
                                 }
                             }
                         }
                         Ok(RksMessage::DeletePod(name)) => {
-                            println!("[worker] DeletePod {name}");
+                            info!("[worker] DeletePod {name}");
                             match pod::standalone::delete_pod(&name) {
                                 Ok(_) => {
-                                    let _ = send_uni(&connection, &RksMessage::Ack).await;
+                                    let _ = client.send_msg(&RksMessage::Ack).await;
                                 }
                                 Err(e) => {
-                                    eprintln!("[worker] delete_pod failed: {e:?}");
-                                    let _ = send_uni(
-                                        &connection,
-                                        &RksMessage::Error(format!("delete {name} failed: {e}")),
-                                    )
-                                    .await;
+                                    error!("[worker] delete_pod failed: {e:?}");
+                                    let _ = client
+                                        .send_msg(&RksMessage::Error(format!(
+                                            "delete {name} failed: {e}"
+                                        )))
+                                        .await;
                                 }
                             }
                         }
                         Ok(RksMessage::SetDns(ip, dns_port)) => {
-                            println!("[worker] received dns config: {ip}:{dns_port}");
+                            info!("[worker] received dns config: {ip}:{dns_port}");
 
                             if let Err(e) = handle_dns_config(ip, dns_port).await {
-                                eprintln!("[worker] failed to apply dns config: {e}");
-                                let _ = send_uni(
-                                    &connection,
-                                    &RksMessage::Error(format!("dns config failed: {e}")),
-                                )
-                                .await;
+                                error!("[worker] failed to apply dns config: {e}");
+                                let _ = client
+                                    .send_msg(&RksMessage::Error(format!("dns config failed: {e}")))
+                                    .await;
                             } else {
-                                println!("[worker] dns config applied successfully");
-                                let _ = send_uni(&connection, &RksMessage::Ack).await;
+                                info!("[worker] dns config applied successfully");
+                                let _ = client.send_msg(&RksMessage::Ack).await;
                             }
                         }
                         Ok(other) => {
-                            println!("[worker] unexpected message: {other:?}");
+                            warn!("[worker] unexpected message: {other:?}");
                         }
                         Err(err) => {
-                            eprintln!("[worker] deserialize failed: {err}");
-                            eprintln!("[worker] raw: {:?}", &buf[..n]);
+                            error!("[worker] deserialize failed: {err}");
+                            error!("[worker] raw: {:?}", &buf[..n]);
                         }
                     },
                     Ok(None) => {
-                        eprintln!("[worker] uni stream closed early");
+                        warn!("[worker] uni stream closed early");
                     }
                     Err(e) => {
-                        eprintln!("[worker] read error: {e}");
+                        error!("[worker] read error: {e}");
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[worker] accept_uni error: {e}, breaking to reconnect");
+                error!("[worker] accept_uni error: {e}, breaking to reconnect");
                 break Ok(());
             }
         }
@@ -412,7 +340,7 @@ async fn handle_network_config(
     network_receiver: &NetworkReceiver,
     node_cfg: &NodeNetworkConfig,
 ) -> Result<()> {
-    println!(
+    info!(
         "[worker] Processing network configuration for node: {}",
         node_cfg.node_id
     );
@@ -462,22 +390,8 @@ async fn handle_network_config(
 
     network_receiver.handle_network_config(config_msg).await?;
 
-    println!("[worker] Network configuration processed successfully");
+    info!("[worker] Network configuration processed successfully");
     Ok(())
-}
-
-/// Send a message over a unidirectional stream
-async fn send_uni(conn: &quinn::Connection, msg: &RksMessage) -> Result<()> {
-    let mut uni = conn.open_uni().await?;
-    let data = bincode::serialize(msg)?;
-    uni.write_all(&data).await?;
-    uni.finish()?;
-    Ok(())
-}
-
-pub fn init_crypto() {
-    CryptoProvider::install_default(rustls::crypto::ring::default_provider())
-        .expect("failed to install default CryptoProvider");
 }
 
 pub async fn generate_node(ext_iface: &ExternalInterface) -> Result<Node> {

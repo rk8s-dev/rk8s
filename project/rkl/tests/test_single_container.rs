@@ -8,6 +8,7 @@ use rkl::commands::container::{
 use serde_json::Value;
 use serial_test::serial;
 use test_common::*;
+use tracing::error;
 
 pub fn get_container_config<T, S>(args: Vec<S>, name: T) -> ContainerSpec
 where
@@ -147,7 +148,7 @@ fn create_container_helper(config: ContainerSpec, run: bool) -> Result<(), anyho
 fn try_create_container(config: ContainerSpec, run: bool) {
     let res = create_container_helper(config, run);
     if res.is_err() {
-        println!(
+        error!(
             "  
             Failed to create container. This may be not a test failed, but caused by wrong config.
             tips:
