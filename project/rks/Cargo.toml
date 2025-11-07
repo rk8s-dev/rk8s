@@ -7,6 +7,50 @@ description = "Cluster scheduler and dispatcher for the RK8s container orchestra
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rks"
 
 [dependencies]
+common = { workspace = true }
+libcni = { workspace = true }
+libscheduler = { workspace = true }
+libnetwork = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive"] }
+quinn = { workspace = true }
+rustls = { workspace = true }
+serde_yaml = { workspace = true }
+bincode = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+rcgen = { workspace = true }
+etcd-client = { workspace = true }
+ipnetwork = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+log = { workspace = true }
+lazy_static = { workspace = true }
+regex = { workspace = true }
+context = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+native-tls = { workspace = true }
+tonic = { workspace = true }
+rand = { workspace = true }
+netlink-packet-route = { workspace = true }
+rtnetlink = { workspace = true }
+nix = { workspace = true, features = ["net"] }
+dotenvy = { workspace = true }
+tempfile = { workspace = true }
+tokio-util = { workspace = true }
+env_logger = { workspace = true }
+once_cell = { workspace = true }
+futures-util = { workspace = true }
+time = { workspace = true }
+hickory-server = { workspace = true }
+hickory-proto = { workspace = true }
+hickory-resolver = { workspace = true }
+iptables = { workspace = true }
+
+[dev-dependencies]
+serial_test = { workspace = true }
 common = { path = "../common" }
 libcni = { path = "../libcni" }
 libscheduler = { path = "../libscheduler" }

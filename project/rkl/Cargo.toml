@@ -15,6 +15,58 @@ name = "rkl"
 path = "src/main.rs"
 
 [dependencies]
+common = { workspace = true }
+libnetwork = { workspace = true }
+rkb = { workspace = true }
+libipam = { workspace = true }
+libcgroups = { workspace = true }
+libcontainer = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+tracing = { workspace = true, features = ["attributes"] }
+tracing-subscriber = { workspace = true, features = ["json","env-filter"] }
+tokio = { workspace = true, features = ["rt-multi-thread","macros","full"] }
+serde = { workspace = true, features = ["derive"] }
+uuid = { workspace = true, features = ["v4"] }
+nix = { workspace = true, features = ["fs","mount"] }
+libcni = { workspace = true }
+libfuse-fs = { workspace = true }
+anyhow = { workspace = true }
+protobuf = { workspace = true }
+liboci-cli = { workspace = true }
+tracing-journald = { workspace = true }
+serde_json = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+serde_yaml = { workspace = true }
+prost-types = { workspace = true }
+http-body = { workspace = true }
+hyper = { workspace = true }
+serial_test = { workspace = true }
+oci-spec = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+sha256 = { workspace = true }
+futures = { workspace = true }
+daemonize = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+tabwriter = { workspace = true }
+bincode = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+gethostname = { workspace = true }
+sysinfo = { workspace = true }
+ipnetwork = { workspace = true }
+log = { workspace = true }
+lazy_static = { workspace = true }
+regex = { workspace = true }
+dotenvy = { workspace = true }
+netlink-packet-route = { workspace = true }
+json = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+cni-plugin = { workspace = true }
 common = { path = "../common" }
 libnetwork = { path = "../libnetwork", version = "0.1.0" }
 rkb = { path = "../rkb", version = "0.1.0" }
@@ -72,9 +124,9 @@ rand = "0.9.2"
 cni-plugin = "0.2.1"
 
 [dev-dependencies]
-tempfile = "3"
-scopeguard = "1.2.0"
+tempfile = { workspace = true }
+scopeguard = { workspace = true }
 
 [build-dependencies]
-tonic-build = "0.13"
-prost-build = "0.13.5"
+tonic-build = { workspace = true }
+prost-build = { workspace = true }

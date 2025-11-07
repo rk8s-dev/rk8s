@@ -11,6 +11,11 @@ name = "common"
 path = "src/lib.rs"
 
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
+libcni = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+ipnetwork = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 libcni = { path = "../libcni" }
 serde_json = "1.0"
