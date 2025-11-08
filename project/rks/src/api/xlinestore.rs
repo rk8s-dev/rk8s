@@ -3,6 +3,7 @@ use anyhow::Result;
 use common::*;
 use etcd_client::{Client, GetOptions, PutOptions, WatchOptions, WatchStream, Watcher};
 use libvault::storage::xline::XlineOptions;
+use log::error;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -300,15 +301,6 @@ impl XlineStore {
         let resp = client
             .get(key.clone(), Some(GetOptions::new().with_prefix()))
             .await?;
-
-        // let endpoints: Vec<Endpoint> = resp
-        //     .kvs()
-        //     .iter()
-        //     .filter_map(|kv| {
-        //         let yaml_str = String::from_utf8_lossy(kv.value());
-        //         serde_yaml::from_str::<Endpoint>(&yaml_str).ok()
-        //     })
-        //     .collect();
         let endpoints: Vec<Endpoint> = resp
             .kvs()
             .iter()
@@ -317,7 +309,7 @@ impl XlineStore {
                 match serde_yaml::from_str::<Endpoint>(&yaml_str) {
                     Ok(ep) => Some(ep),
                     Err(e) => {
-                        log::error!(
+                        error!(
                             "failed to parse Endpoint at key {:?}: {}\nvalue:\n{}",
                             kv.key(),
                             e,

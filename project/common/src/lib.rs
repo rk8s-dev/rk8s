@@ -716,6 +716,7 @@ pub struct EndpointPort {
     pub protocol: String,
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(rename = "appProtocol")]
     pub app_protocol: Option<String>,
 }
 
