@@ -4,6 +4,7 @@ use anyhow::Result;
 use common::{
     ContainerSpec, ObjectMeta, OwnerReference, PodSpec, PodStatus, PodTask, Resource, ResourceKind,
 };
+use libvault::storage::xline::XlineOptions;
 use rks::{
     api::xlinestore::XlineStore,
     controllers::{ControllerManager, garbage_collector::GarbageCollector},
@@ -31,7 +32,6 @@ fn get_xline_endpoints() -> Vec<String> {
 
 async fn get_store() -> Option<Arc<XlineStore>> {
     let endpoints = get_xline_endpoints();
-    let endpoints_str: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
     let option = XlineOptions::new(endpoints);
 
     match tokio::time::timeout(Duration::from_secs(5), XlineStore::new(option)).await {
