@@ -580,15 +580,15 @@ async fn partition_dependents_by_identity(
 
     for dependent in dependents {
         let read_guard = dependent.read().await;
-        for owner in read_guard.owners() {
-            if owner.uid != identity.uid
-                || owner.name != identity.name
-                || owner.kind != identity.kind
-            {
-                unmatched.push(dependent.clone());
-            } else {
-                matched.push(dependent.clone());
-            }
+        // Check if any owner matches the identity
+        let has_matching_owner = read_guard.owners().iter().any(|owner| {
+            owner.uid == identity.uid && owner.name == identity.name && owner.kind == identity.kind
+        });
+
+        if has_matching_owner {
+            matched.push(dependent.clone());
+        } else {
+            unmatched.push(dependent.clone());
         }
     }
     (matched, unmatched)

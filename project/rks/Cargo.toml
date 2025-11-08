@@ -56,8 +56,8 @@ either = "1.15.0"
 axum = "0.8.6"
 reqwest = "0.12.24"
 iptables = "0.6"
-uuid = { version = "1.18.0", features = ["serde", "v4"] }
-lru = "0.16.1"
+uuid = { version = "1.18.1", features = ["serde", "v4"] }
+lru = "0.16.2"
 
 [dev-dependencies]
 serial_test = "3.2.0"

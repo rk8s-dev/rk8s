@@ -24,7 +24,7 @@ fn get_xline_endpoints() -> Vec<String> {
     });
 
     match load_config(&config_path) {
-        Ok(config) => config.xline_config.endpoints,
+        Ok(config) => config.xline_config.endpoints.clone(),
         Err(_) => vec!["127.0.0.1:2379".to_string()], // fallback
     }
 }
@@ -32,8 +32,9 @@ fn get_xline_endpoints() -> Vec<String> {
 async fn get_store() -> Option<Arc<XlineStore>> {
     let endpoints = get_xline_endpoints();
     let endpoints_str: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
+    let option = XlineOptions::new(endpoints);
 
-    match tokio::time::timeout(Duration::from_secs(5), XlineStore::new(&endpoints_str)).await {
+    match tokio::time::timeout(Duration::from_secs(5), XlineStore::new(option)).await {
         Ok(Ok(store)) => Some(Arc::new(store)),
         Ok(Err(err)) => {
             eprintln!("Skipping graph builder test: unable to connect to xline ({err})");
@@ -276,7 +277,7 @@ async fn test_gc_deletes_pod_with_dangling_owner() -> Result<()> {
 
     let (_mgr, _gc) = setup_gc(store.clone()).await?;
 
-    sleep(Duration::from_millis(10000)).await;
+    sleep(Duration::from_millis(1000)).await;
     assert!(store.get_pod(&dependent_name).await?.is_none());
 
     clean_store(&store).await?;

@@ -2,11 +2,15 @@ use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use async_trait::async_trait;
 use common::ResourceKind;
+use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, mpsc, watch};
 use tokio::time::sleep;
+
+pub static CONTROLLER_MANAGER: Lazy<Arc<ControllerManager>> =
+    Lazy::new(|| Arc::new(ControllerManager::new()));
 
 /// A watch event.
 /// Contains the resource yaml.

@@ -635,7 +635,7 @@ async fn remove_finalizer(
 }
 
 pub fn parse_meta_from_yaml(yaml: &str) -> anyhow::Result<ObjectMeta> {
-    let doc: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+    let doc: serde_yaml::Value = serde_yaml::from_str(yaml)?;
     let meta_value = &doc["metadata"];
     let meta = serde_yaml::from_value::<ObjectMeta>(meta_value.clone())?;
     Ok(meta)

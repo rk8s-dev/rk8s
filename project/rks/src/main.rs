@@ -11,7 +11,7 @@ mod scheduler;
 mod vault;
 
 use crate::controllers::garbage_collector::GarbageCollector;
-use crate::controllers::{ControllerManager, ReplicaSetController};
+use crate::controllers::{CONTROLLER_MANAGER, ControllerManager, ReplicaSetController};
 use crate::dns::authority::{run_dns_server, setup_iptable};
 use crate::network::init;
 use crate::network::manager::LocalManager;
@@ -60,9 +60,9 @@ async fn handle_start_command() -> anyhow::Result<()> {
 
     let local_manager = init_local_manager(cfg, &xline_options).await?;
     launch_scheduler(xline_options, xline_store.clone()).await?;
-    let controller_manager = Arc::new(ControllerManager::new());
-    register_controllers(controller_manager.clone(), xline_store.clone(), 4).await?;
-    controller_manager
+
+    register_controllers(CONTROLLER_MANAGER.clone(), xline_store.clone(), 4).await?;
+    CONTROLLER_MANAGER
         .clone()
         .start_watch(xline_store.clone())
         .await?;

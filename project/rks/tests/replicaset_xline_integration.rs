@@ -42,7 +42,8 @@ async fn setup_store_and_manager() -> Result<(
     let cfg = load_test_config()?;
     let endpoints: Vec<String> = cfg.xline_config.endpoints;
     let endpoint_refs: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
-    let store: Arc<XlineStore> = Arc::new(XlineStore::new(&endpoint_refs).await?);
+    let option = XlineOptions::new(endpoints);
+    let store: Arc<XlineStore> = Arc::new(XlineStore::new(option).await?);
 
     // clean up any existing ReplicaSets or Pods from previous tests
     cleanup_pods_by_prefix(&store, "test-rs").await?;
