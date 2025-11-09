@@ -2,20 +2,23 @@
 //!
 //! Uses Etcd/etcd as the backend for metadata storage
 
-use crate::meta::Permission;
+use crate::chuck::SliceDesc;
+use crate::chuck::slice::key_for_slice;
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
 use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
+use crate::meta::{INODE_ID_KEY, Permission};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
-use etcd_client::Client as EtcdClient;
+use etcd_client::{Client as EtcdClient, Compare, CompareOp, Txn, TxnOp};
 use log::{error, info};
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde_json;
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::Duration;
 
 /// Etcd-based metadata store
 pub struct EtcdMetaStore {
@@ -107,6 +110,23 @@ impl EtcdMetaStore {
                 key, e
             ))),
         }
+    }
+
+    async fn etcd_put_json<T: Serialize>(
+        &self,
+        key: impl AsRef<str>,
+        obj: &T,
+    ) -> Result<(), MetaError> {
+        let mut client = self.client.clone();
+
+        let json = serde_json::to_string(obj)?;
+        let key = key.as_ref();
+
+        client
+            .put(key, json, None)
+            .await
+            .map(|_| ())
+            .map_err(|e| MetaError::Internal(format!("Failed to put key {key}: {e}")))
     }
 
     /// Lenient variant: on etcd client error, log and return Ok(None).
@@ -279,7 +299,7 @@ impl EtcdMetaStore {
             }
         }
 
-        let inode = self.generate_id().await?;
+        let inode = self.generate_id(INODE_ID_KEY).await?;
         let mut client = self.client.clone();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -378,7 +398,7 @@ impl EtcdMetaStore {
             }
         }
 
-        let inode = self.generate_id().await?;
+        let inode = self.generate_id(INODE_ID_KEY).await?;
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let file_permission = Permission::new(0o644, 0, 0);
@@ -447,9 +467,8 @@ impl EtcdMetaStore {
 
     /// Generate unique ID using Etcd atomic counter
     /// Uses compare-and-swap to ensure atomicity in distributed environment
-    async fn generate_id(&self) -> Result<i64, MetaError> {
+    async fn generate_id(&self, counter_key: &str) -> Result<i64, MetaError> {
         let mut client = self.client.clone();
-        let counter_key = "slayerfs:next_inode_id";
 
         // Retry loop for CAS operation
         // TODO: think about how to keep in sync with remote
@@ -520,6 +539,43 @@ impl EtcdMetaStore {
         Err(MetaError::Config(
             "Failed to generate ID: max retries exceeded".to_string(),
         ))
+    }
+
+    async fn atomic_update<F, T>(&self, key: &str, f: F, init: T) -> Result<(), MetaError>
+    where
+        F: Fn(T) -> T,
+        T: Serialize + DeserializeOwned + Clone,
+    {
+        let mut client = self.client.clone();
+
+        for _ in 0..10 {
+            let resp = client
+                .get(key, None)
+                .await
+                .map_err(|e| MetaError::Config(format!("Failed to get key: {e}")))?;
+
+            let (current, version) = match resp.kvs().first() {
+                Some(kv) => (f(serde_json::from_slice::<T>(kv.value())?), kv.version()),
+                None => (init.clone(), 0),
+            };
+            let current = serde_json::to_string(&current)?;
+
+            let compare = Compare::version(key, CompareOp::Equal, version);
+            let op = TxnOp::put(key, current, None);
+            let txn = Txn::new().when([compare]).and_then([op]);
+
+            match client.txn(txn).await {
+                Ok(txn_resp) if txn_resp.succeeded() => return Ok(()),
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(MetaError::Config(format!(
+                        "Failed to execute transaction: {e}"
+                    )));
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Err(MetaError::MaxRetriesExceeded)
     }
 }
 
@@ -1045,5 +1101,30 @@ impl MetaStore for EtcdMetaStore {
             .map_err(|e| MetaError::Internal(format!("Failed to remove file metadata: {}", e)))?;
 
         Ok(())
+    }
+
+    async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
+        let key = chunk_id.to_string();
+        self.etcd_get_json(&key)
+            .await
+            .map(|e| e.unwrap_or_default())
+    }
+
+    async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
+        let key = key_for_slice(chunk_id);
+        self.atomic_update(
+            &key,
+            |source: Vec<SliceDesc>| {
+                let mut new = source.clone();
+                new.push(slice);
+                new
+            },
+            vec![slice],
+        )
+        .await
+    }
+
+    async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
+        self.generate_id(key).await
     }
 }

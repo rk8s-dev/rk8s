@@ -14,9 +14,9 @@ pub use crate::meta::store::{DirEntry, FileAttr, FileType};
 #[allow(clippy::upper_case_acronyms)]
 pub struct VFS<S: BlockStore, M: MetaStore> {
     layout: ChunkLayout,
-    store: tokio::sync::Mutex<S>,
+    store: S,
     meta: M,
-    base: i64,
+    base: u64,
     root: i64,
 }
 
@@ -65,11 +65,11 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         meta.initialize().await.map_err(|e| e.to_string())?;
 
         let root_ino = meta.root_ino();
-        let base = 1_000_000_000i64;
+        let base = 1_000_000_000u64;
 
         Ok(Self {
             layout,
-            store: tokio::sync::Mutex::new(store),
+            store,
             meta,
             base,
             root: root_ino,
@@ -98,8 +98,12 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         }
     }
 
-    fn chunk_id_for(&self, ino: i64, chunk_index: u64) -> i64 {
-        ino.checked_mul(self.base).unwrap_or(ino) + chunk_index as i64
+    fn chunk_id_for(&self, ino: i64, chunk_index: u64) -> u64 {
+        let ino_u64 = u64::try_from(ino).expect("inode must be non-negative");
+        ino_u64
+            .checked_mul(self.base)
+            .and_then(|v| v.checked_add(chunk_index))
+            .expect("chunk_id overflow")
     }
 
     /// Recursively create directories (mkdir -p behavior).
@@ -357,12 +361,11 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         let mut cursor = 0usize;
         for sp in spans {
             let cid = self.chunk_id_for(ino, sp.chunk_index);
-            let guard = self.store.lock().await;
-            let writer = ChunkWriter::new(self.layout, cid, &*guard);
+            let writer = ChunkWriter::new(self.layout, cid, &self.store, &self.meta);
             let take = sp.len;
             let buf = &data[cursor..cursor + take];
             writer
-                .write(sp.offset_in_chunk, buf)
+                .write(sp.offset_in_chunk as u32, buf)
                 .await
                 .map_err(|e| e.to_string())?;
             cursor += take;
@@ -386,13 +389,11 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         let mut out = Vec::with_capacity(len);
         for sp in spans {
             let cid = self.chunk_id_for(ino, sp.chunk_index);
-            let guard = self.store.lock().await;
-            let reader = ChunkReader::new(self.layout, cid, &*guard);
+            let reader = ChunkReader::new(self.layout, cid, &self.store, &self.meta);
             let part = reader
-                .read(sp.offset_in_chunk, sp.len)
+                .read(sp.offset_in_chunk as u32, sp.len)
                 .await
                 .map_err(|e| e.to_string())?;
-            drop(guard);
             out.extend(part);
         }
         Ok(out)

@@ -6,6 +6,8 @@ use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::ObjectBlockStore;
 use crate::chuck::writer::ChunkWriter;
+use crate::meta::create_meta_store_from_url;
+use std::convert::TryInto;
 use std::error::Error;
 use std::path::Path;
 
@@ -17,9 +19,14 @@ pub async fn e2e_localfs_demo<P: AsRef<Path>>(root: P) -> Result<(), Box<dyn Err
 
     // 2) Choose a chunk_id and use the default layout
     let layout = ChunkLayout::default();
-    let chunk_id: i64 = 1001;
+    let chunk_id: u64 = 1001;
 
-    // 3) Prepare data that starts halfway through a block and spans 1.5 blocks
+    // 3) Build a lightweight metadata store (in-memory sqlite)
+    let meta = create_meta_store_from_url("sqlite::memory:")
+        .await
+        .map_err(|e| format!("failed to init meta store: {e}"))?;
+
+    // 4) Prepare data that starts halfway through a block and spans 1.5 blocks
     let half = (layout.block_size / 2) as usize;
     let len = layout.block_size as usize + half; // 1.5 blocks
     let mut data = vec![0u8; len];
@@ -27,16 +34,23 @@ pub async fn e2e_localfs_demo<P: AsRef<Path>>(root: P) -> Result<(), Box<dyn Err
         *b = (i % 251) as u8;
     }
 
-    // 4) Write, touching two blocks
+    // 5) Write, touching two blocks
     {
-        let writer = ChunkWriter::new(layout, chunk_id, &store);
-        writer.write(half as u64, &data).await?;
+        let writer = ChunkWriter::new(layout, chunk_id, &store, &meta);
+        writer
+            .write(
+                half.try_into().expect("chunk offset must fit in u32"),
+                &data,
+            )
+            .await?;
     }
 
-    // 5) Read and verify
+    // 6) Read and verify
     {
-        let reader = ChunkReader::new(layout, chunk_id, &store);
-        let out = reader.read(half as u64, len).await?;
+        let reader = ChunkReader::new(layout, chunk_id, &store, &meta);
+        let out = reader
+            .read(half.try_into().expect("chunk offset must fit in u32"), len)
+            .await?;
         if out != data {
             return Err("data mismatch".into());
         }

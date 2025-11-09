@@ -27,7 +27,6 @@ impl Scheduler {
         let (_unassume_tx, unassume_rx) = mpsc::unbounded_channel();
         let assignment_rx =
             run_scheduler_with_xline(xline_options, scoring_strategy, plugins, unassume_rx).await?;
-
         Ok(Self {
             assignment_rx,
             xline_store,

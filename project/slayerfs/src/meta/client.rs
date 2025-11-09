@@ -1,3 +1,4 @@
+use crate::chuck::SliceDesc;
 use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
 use crate::vfs::fs::FileType;
@@ -1429,6 +1430,18 @@ impl MetaStore for MetaClient {
 
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
         self.store.remove_file_metadata(ino).await
+    }
+
+    async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
+        self.store.get_slices(chunk_id).await
+    }
+
+    async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
+        self.store.append_slice(chunk_id, slice).await
+    }
+
+    async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
+        self.store.next_id(key).await
     }
 }
 

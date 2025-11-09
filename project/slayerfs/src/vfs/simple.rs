@@ -5,6 +5,7 @@ use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
 use crate::chuck::writer::ChunkWriter;
 use crate::meta::MetaStore;
+use std::convert::TryInto;
 
 /// Minimal VFS object that holds the block store and metadata store.
 pub struct SimpleVfs<S: BlockStore, M: MetaStore> {
@@ -38,14 +39,19 @@ impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
     pub async fn pwrite_chunk(
         &mut self,
         ino: i64,
-        chunk_id: i64,
+        chunk_id: u64,
         off_in_chunk: u64,
         data: &[u8],
     ) -> Result<(), String> {
         // Perform the write first
-        let writer = ChunkWriter::new(self.layout, chunk_id, &self.store);
+        let writer = ChunkWriter::new(self.layout, chunk_id, &self.store, &self.meta);
         writer
-            .write(off_in_chunk, data)
+            .write(
+                off_in_chunk
+                    .try_into()
+                    .expect("chunk offset must fit in u32"),
+                data,
+            )
             .await
             .map_err(|e| e.to_string())?;
 
@@ -63,13 +69,18 @@ impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
     pub async fn pread_chunk(
         &self,
         _ino: i64,
-        chunk_id: i64,
+        chunk_id: u64,
         off_in_chunk: u64,
         len: usize,
     ) -> Result<Vec<u8>, String> {
-        let reader = ChunkReader::new(self.layout, chunk_id, &self.store);
+        let reader = ChunkReader::new(self.layout, chunk_id, &self.store, &self.meta);
         reader
-            .read(off_in_chunk, len)
+            .read(
+                off_in_chunk
+                    .try_into()
+                    .expect("chunk offset must fit in u32"),
+                len,
+            )
             .await
             .map_err(|e| e.to_string())
     }
@@ -94,7 +105,7 @@ mod tests {
         let mut vfs = SimpleVfs::new(layout, store, meta);
 
         let ino = vfs.create("test_file.txt".to_string()).await.unwrap();
-        let chunk_id = 1i64;
+        let chunk_id = 1u64;
         let half = (layout.block_size / 2) as usize;
         let len = layout.block_size as usize + half;
         let mut data = vec![0u8; len];

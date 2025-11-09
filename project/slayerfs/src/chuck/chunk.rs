@@ -109,14 +109,14 @@ impl Hash for ChunkKey {
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct ChunkMeta {
-    pub chunk_id: i64,
+    pub chunk_id: u64,
     pub ino: i64,
     pub index: i32,
 }
 
 impl ChunkMeta {
     #[allow(dead_code)]
-    pub fn new(chunk_id: i64, ino: i64, index: i32) -> Self {
+    pub fn new(chunk_id: u64, ino: i64, index: i32) -> Self {
         Self {
             chunk_id,
             ino,

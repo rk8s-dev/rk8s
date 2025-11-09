@@ -24,13 +24,13 @@ use tracing::info;
 pub trait BlockStore {
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64>;
 
-    async fn read_range(&self, key: BlockKey, offset: u32, len: usize) -> anyhow::Result<Vec<u8>>;
+    async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()>;
 
     #[allow(dead_code)]
     async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()>;
 }
 
-pub type BlockKey = (i64 /*chunk_id*/, u32 /*block_index*/);
+pub type BlockKey = (u64 /*chunk_id*/, u32 /*block_index*/);
 
 /// Simple in-memory implementation for local development/testing.
 #[derive(Default)]
@@ -63,18 +63,19 @@ impl BlockStore for InMemoryBlockStore {
         Ok(data.len() as u64)
     }
 
-    async fn read_range(&self, key: BlockKey, offset: u32, len: usize) -> anyhow::Result<Vec<u8>> {
+    async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
+        buf.fill(0);
         let guard = self.map.read().await;
-        let mut out = vec![0u8; len];
-        if let Some(buf) = guard.get(&key) {
+        if let Some(src) = guard.get(&key) {
             let start = offset as usize;
-            let end = start + len;
-            let copy_end = end.min(buf.len());
+            let end = start + buf.len();
+            let copy_end = end.min(src.len());
             if copy_end > start {
-                out[..(copy_end - start)].copy_from_slice(&buf[start..copy_end]);
+                let len = copy_end - start;
+                buf[..len].copy_from_slice(&src[start..copy_end]);
             }
         }
-        Ok(out)
+        Ok(())
     }
 
     async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
@@ -170,11 +171,12 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         Ok(data.len() as u64)
     }
 
-    async fn read_range(&self, key: BlockKey, offset: u32, len: usize) -> anyhow::Result<Vec<u8>> {
+    async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
         let key_str = Self::key_for(key);
+        let len = buf.len();
+        buf.fill(0);
         let start = offset as usize;
         let end = start + len;
-        let mut buf = vec![0u8; len];
 
         let etag = self
             .client
@@ -188,7 +190,7 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
                 buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
             }
             info!("Read block range from cache");
-            return Ok(buf);
+            return Ok(());
         }
 
         let block = match self.client.get_object(&key_str).await {
@@ -208,7 +210,7 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
         }
         let _ = self.block_cache.insert(&cache_key, &block).await;
-        Ok(buf)
+        Ok(())
     }
 
     async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
@@ -256,8 +258,9 @@ mod tests {
             .await
             .unwrap();
 
-        let out = store
-            .read_range((42, 3), layout.block_size / 4, data.len())
+        let mut out = vec![0u8; data.len()];
+        store
+            .read_range((42, 3), layout.block_size / 4, &mut out)
             .await
             .unwrap();
         assert_eq!(out, data);
@@ -275,14 +278,16 @@ mod tests {
             .await
             .unwrap();
         // First read should miss the cache.
-        let data1 = store
-            .read_range((42, 3), layout.block_size / 4, data.len())
+        let mut data1 = vec![0u8; data.len()];
+        store
+            .read_range((42, 3), layout.block_size / 4, &mut data1)
             .await
             .unwrap();
 
         // Second read of the same data should hit the cache.
-        let data2 = store
-            .read_range((42, 3), layout.block_size / 4, data.len())
+        let mut data2 = vec![0u8; data.len()];
+        store
+            .read_range((42, 3), layout.block_size / 4, &mut data2)
             .await
             .unwrap();
         assert_eq!(data1, data2);

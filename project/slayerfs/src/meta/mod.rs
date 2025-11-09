@@ -18,6 +18,7 @@
 //! - `database_store`: Database-based metadata store (SQLite/PostgreSQL)
 //! - `etcd_store`: Etcd-based metadata store (Etcd/etcd)
 //! - `factory`: Factory for creating appropriate MetaStore implementations
+
 pub mod client;
 pub mod config;
 pub mod entities;
@@ -31,3 +32,7 @@ pub mod stores;
 pub use factory::create_meta_store_from_url;
 pub use permission::Permission;
 pub use store::MetaStore;
+
+pub const INODE_ID_KEY: &str = "slayerfs:next_inode_id";
+
+pub const SLICE_ID_KEY: &str = "slayerfs:next_slice_id";
