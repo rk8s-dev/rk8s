@@ -1,4 +1,4 @@
-//! FUSE/SDK 友好的简化 VFS：基于路径的 create/mkdir/read/write/readdir/stat。
+//! FUSE/SDK-friendly VFS with path-based create/mkdir/read/write/readdir/stat support.
 
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::reader::ChunkReader;
@@ -46,7 +46,7 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Some(meta_attr)
     }
 
-    /// 按 inode 列目录项
+    /// List directory entries by inode
     pub async fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
         let meta_entries = self.meta.readdir(ino).await.ok()?;
 
@@ -76,8 +76,8 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         })
     }
 
-    /// 规范化路径（内部）：
-    /// - 去除多余分隔，确保以 `/` 开头；不解析 `.`/`..`（后续可扩展）。
+    /// Normalize a path by stripping redundant separators and ensuring it starts with `/`.
+    /// Does not resolve `.` or `..`.
     fn norm_path(p: &str) -> String {
         if p.is_empty() {
             return "/".into();
@@ -88,7 +88,7 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         if out.is_empty() { "/".into() } else { out }
     }
 
-    /// 拆分为父目录与基名（内部）。
+    /// Split a normalized path into parent directory and basename.
     fn split_dir_file(path: &str) -> (String, String) {
         let n = path.rfind('/').unwrap_or(0);
         if n == 0 {
@@ -102,11 +102,10 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         ino.checked_mul(self.base).unwrap_or(ino) + chunk_index as i64
     }
 
-    /// mkdir -p 风格：创建多级目录。
-    /// 递归创建目录（mkdir -p）：
-    /// - 若部分路径段存在且为"文件"，返回错误 `"not a directory"`。
-    /// - 幂等：已存在则返回现有 inode。
-    /// - 返回：目标目录的 inode。
+    /// Recursively create directories (mkdir -p behavior).
+    /// - If an intermediate component exists as a file, return `"not a directory"`.
+    /// - Idempotent: existing directories simply return their inode.
+    /// - Returns the inode of the target directory.
     pub async fn mkdir_p(&self, path: &str) -> Result<i64, String> {
         let path = Self::norm_path(path);
         if &path == "/" {
@@ -142,11 +141,9 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Ok(cur_ino)
     }
 
-    /// 创建文件（父目录已存在或通过 mkdir_p 创建）。
-    /// 创建普通文件：
-    /// - 如父目录不存在，会先行 `mkdir_p`。
-    /// - 如同名目录已存在，返回 `"is a directory"`；同名文件存在则返回其 inode。
-    /// - 返回：新建或已有文件的 inode。
+    /// Create a regular file (running `mkdir_p` on its parent if needed).
+    /// - If a directory with the same name exists, returns `"is a directory"`.
+    /// - If the file already exists, returns its inode instead of creating a new one.
     pub async fn create_file(&self, path: &str) -> Result<i64, String> {
         let path = Self::norm_path(path);
         let (dir, name) = Self::split_dir_file(&path);
@@ -171,9 +168,7 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Ok(ino)
     }
 
-    /// 获取文件属性：
-    /// - kind 和 size 来源于 MetaStore。
-    /// - 未找到返回 None。
+    /// Fetch a file's attributes (kind/size come from the MetaStore); returns None when missing.
     pub async fn stat(&self, path: &str) -> Option<FileAttr> {
         let path = Self::norm_path(path);
         let (ino, _) = self.meta.lookup_path(&path).await.ok()??;
@@ -181,9 +176,8 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Some(meta_attr)
     }
 
-    /// 列举目录：
-    /// - 返回目录项列表；路径不存在或非目录返回 None。
-    /// - 不包含 "." 与".."（可按需添加）。
+    /// List directory entries; returns None if the path is missing or not a directory.
+    /// `.` and `..` are not included.
     pub async fn readdir(&self, path: &str) -> Option<Vec<DirEntry>> {
         let path = Self::norm_path(path);
         let (ino, _) = self.meta.lookup_path(&path).await.ok()??;
@@ -201,16 +195,13 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Some(entries)
     }
 
-    /// 路径是否存在。
+    /// Check whether a path exists.
     pub async fn exists(&self, path: &str) -> bool {
         let path = Self::norm_path(path);
         matches!(self.meta.lookup_path(&path).await, Ok(Some(_)))
     }
 
-    /// 删除文件（不支持目录）。
-    /// 删除文件：
-    /// - 仅适用于普通文件；若为目录则返回 `"is a directory"`。
-    /// - 调整命名空间并移除路径映射；底层数据清理由后续 GC 处理。
+    /// Remove a regular file (directories are not supported here).
     pub async fn unlink(&self, path: &str) -> Result<(), String> {
         let path = Self::norm_path(path);
         let (dir, name) = Self::split_dir_file(&path);
@@ -252,9 +243,7 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Ok(())
     }
 
-    /// 删除空目录（不允许删除根）。
-    /// 删除空目录：
-    /// - 根目录不可删除；非空返回 `"directory not empty"`。
+    /// Remove an empty directory (root cannot be removed; non-empty dirs error out).
     pub async fn rmdir(&self, path: &str) -> Result<(), String> {
         let path = Self::norm_path(path);
         if path == "/" {
@@ -305,8 +294,7 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Ok(())
     }
 
-    /// 通用重命名（支持文件和目录）
-    /// - 支持文件和目录；目标不得存在；目标父目录若不存在会自动创建。
+    /// Rename files or directories. The destination must not exist; parent directories are created as needed.
     pub async fn rename(&self, old: &str, new: &str) -> Result<(), String> {
         let old = Self::norm_path(old);
         let new = Self::norm_path(new);
@@ -338,9 +326,8 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Ok(())
     }
 
-    /// 截断/扩展文件大小（仅更新元数据，数据洞由读路径零填充）。
-    /// 截断/扩展文件大小：
-    /// - 大小收缩不会即时清理块数据（后续可增加惰性 GC）。
+    /// Truncate/extend file size (metadata only; holes are read as zeros).
+    /// Shrinking does not eagerly reclaim block data.
     pub async fn truncate(&self, path: &str, size: u64) -> Result<(), String> {
         let path = Self::norm_path(path);
         let (ino, _) = self
@@ -355,10 +342,8 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
             .map_err(|e| e.to_string())
     }
 
-    /// 写文件（按文件偏移），内部映射到多个 Chunk 写入。
-    /// 写入：将文件偏移-长度映射为若干 Chunk 写。
-    /// - 分片写入每个相关块；写完后一次性更新 size。
-    /// - 返回写入的字节数；当前未保证跨多块的强原子性（后续可引入更细粒度事务）。
+    /// Write data by file offset. Internally splits the range into per-chunk writes.
+    /// Writes each affected chunk fragment and updates the size once at the end.
     pub async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
         let path = Self::norm_path(path);
         let (ino, _) = self
@@ -372,14 +357,17 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         let mut cursor = 0usize;
         for sp in spans {
             let cid = self.chunk_id_for(ino, sp.chunk_index);
-            let mut guard = self.store.lock().await;
-            let mut w = ChunkWriter::new(self.layout, cid, &mut *guard);
+            let guard = self.store.lock().await;
+            let writer = ChunkWriter::new(self.layout, cid, &*guard);
             let take = sp.len;
             let buf = &data[cursor..cursor + take];
-            let _slice = w.write(sp.offset_in_chunk, buf).await;
+            writer
+                .write(sp.offset_in_chunk, buf)
+                .await
+                .map_err(|e| e.to_string())?;
             cursor += take;
         }
-        // 一次性更新 size
+        // Update size once after writes finish
         let new_size = offset + data.len() as u64;
         self.meta
             .set_file_size(ino, new_size)
@@ -388,7 +376,7 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         Ok(data.len())
     }
 
-    /// 读文件（按文件偏移）。
+    /// Read data by file offset.
     /// Read by inode directly
     pub async fn read_ino(&self, ino: i64, offset: u64, len: usize) -> Result<Vec<u8>, String> {
         if len == 0 {
@@ -399,8 +387,11 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         for sp in spans {
             let cid = self.chunk_id_for(ino, sp.chunk_index);
             let guard = self.store.lock().await;
-            let r = ChunkReader::new(self.layout, cid, &*guard);
-            let part = r.read(sp.offset_in_chunk, sp.len).await;
+            let reader = ChunkReader::new(self.layout, cid, &*guard);
+            let part = reader
+                .read(sp.offset_in_chunk, sp.len)
+                .await
+                .map_err(|e| e.to_string())?;
             drop(guard);
             out.extend(part);
         }

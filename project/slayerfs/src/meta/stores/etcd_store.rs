@@ -255,6 +255,7 @@ impl EtcdMetaStore {
                 entry_info.modify_time,
                 entry_info.create_time,
                 entry_info.nlink as i32,
+                entry_info.deleted,
             );
             return Ok(Some(file_meta));
         }
@@ -294,6 +295,7 @@ impl EtcdMetaStore {
             nlink: 2,
             parent_inode,
             entry_name: name.clone(),
+            deleted: false,
         };
 
         let forward_key = Self::etcd_forward_key(parent_inode, &name);
@@ -391,6 +393,7 @@ impl EtcdMetaStore {
             nlink: 1,
             parent_inode,
             entry_name: name.clone(),
+            deleted: false,
         };
 
         let forward_key = Self::etcd_forward_key(parent_inode, &name);
@@ -726,17 +729,40 @@ impl MetaStore for EtcdMetaStore {
             return Err(MetaError::Internal("Is a directory".to_string()));
         }
 
+        // Delete content meta first (forward index)
         client
             .delete(forward_key, None)
             .await
             .map_err(|e| MetaError::Internal(format!("Failed to delete forward index: {}", e)))?;
 
+        // Update file metadata - mark as deleted or decrease nlink
         let reverse_key = Self::etcd_reverse_key(file_ino);
-        client
-            .delete(reverse_key, None)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Failed to delete reverse index: {}", e)))?;
+        let mut entry_info: EtcdEntryInfo =
+            match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+                Some(info) => info,
+                None => return Err(MetaError::NotFound(file_ino)),
+            };
 
+        if entry_info.nlink > 1 {
+            // File has multiple links, just decrease nlink
+            entry_info.nlink -= 1;
+        } else {
+            // Last link, mark as deleted
+            entry_info.deleted = true;
+            entry_info.nlink = 0;
+        }
+
+        entry_info.modify_time = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        let updated_json = serde_json::to_string(&entry_info)
+            .map_err(|e| MetaError::Internal(format!("Failed to serialize entry info: {}", e)))?;
+
+        client
+            .put(reverse_key, updated_json, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to update file metadata: {}", e)))?;
+
+        // Update parent directory children and mtime
         let parent_children_key = Self::etcd_children_key(parent);
         if let Some(mut parent_children) = self
             .etcd_get_json::<EtcdDirChildren>(&parent_children_key)
@@ -953,6 +979,71 @@ impl MetaStore for EtcdMetaStore {
     }
 
     async fn initialize(&self) -> Result<(), MetaError> {
+        Ok(())
+    }
+
+    async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
+        let mut client = self.client.clone();
+
+        // Get all keys with reverse index prefix "r:"
+        let resp = client
+            .get(
+                "r:".to_string(),
+                Some(etcd_client::GetOptions::new().with_prefix()),
+            )
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to scan for deleted files: {}", e)))?;
+
+        let mut deleted_files = Vec::new();
+
+        for kv in resp.kvs() {
+            if let Ok(entry_info) = serde_json::from_slice::<EtcdEntryInfo>(kv.value()) {
+                // Only include files that are marked as deleted
+                if entry_info.is_file && entry_info.deleted {
+                    // Extract inode from key (format: "r:{inode}")
+                    let key_str = String::from_utf8_lossy(kv.key());
+                    if let Some(inode_str) = key_str.strip_prefix("r:")
+                        && let Ok(inode) = inode_str.parse::<i64>()
+                    {
+                        deleted_files.push(inode);
+                    }
+                }
+            }
+        }
+
+        Ok(deleted_files)
+    }
+
+    async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
+        let mut client = self.client.clone();
+
+        let reverse_key = Self::etcd_reverse_key(ino);
+
+        // Check if the file exists and is marked as deleted
+        let entry_info: EtcdEntryInfo =
+            match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+                Some(info) => info,
+                None => return Err(MetaError::NotFound(ino)),
+            };
+
+        if !entry_info.is_file {
+            return Err(MetaError::Internal(
+                "Cannot remove directory metadata with remove_file_metadata".to_string(),
+            ));
+        }
+
+        if !entry_info.deleted {
+            return Err(MetaError::Internal(
+                "File is not marked as deleted".to_string(),
+            ));
+        }
+
+        // Delete the reverse index entry (file metadata)
+        client
+            .delete(reverse_key, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to remove file metadata: {}", e)))?;
+
         Ok(())
     }
 }

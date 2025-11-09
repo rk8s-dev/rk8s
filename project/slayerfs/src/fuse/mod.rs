@@ -45,7 +45,7 @@ mod mount_tests {
     use std::io::Write;
     use std::time::Duration as StdDuration;
 
-    // Linux 下的基本挂载冒烟测试：受环境变量 SLAYERFS_FUSE_TEST 控制
+    // Basic Linux mount smoke test controlled by SLAYERFS_FUSE_TEST
     #[tokio::test]
     async fn smoke_mount_and_basic_ops() {
         if std::env::var("SLAYERFS_FUSE_TEST").ok().as_deref() != Some("1") {
@@ -64,11 +64,11 @@ mod mount_tests {
 
         let fs = VFS::new(layout, store, meta).await.expect("create VFS");
 
-        // 准备挂载点
+        // Prepare the mount point
         let mnt = tempfile::tempdir().expect("tmp mount");
         let mnt_path = mnt.path().to_path_buf();
 
-        // 挂载（后台，直到卸载）
+        // Mount in the background (until unmount)
         let handle = match mount_vfs_unprivileged(fs, &mnt_path).await {
             Ok(h) => h,
             Err(e) => {
@@ -77,10 +77,10 @@ mod mount_tests {
             }
         };
 
-        // 给内核/守护线程一点时间完成 INIT
+        // Give kernel/daemon a bit of time to finish INIT
         tokio::time::sleep(StdDuration::from_millis(2000)).await;
 
-        // 目录/文件基本操作
+        // Basic directory/file operations
         let dir = mnt_path.join("a");
         fs::create_dir(&dir).expect("mkdir");
         let file_path = dir.join("hello.txt");
@@ -92,7 +92,7 @@ mod mount_tests {
         let content = fs::read(&file_path).expect("read back");
         assert_eq!(content, b"abc");
 
-        // 列目录
+        // List the directory
         let list = fs::read_dir(&dir)
             .expect("readdir")
             .filter_map(|e| e.ok())
@@ -100,10 +100,10 @@ mod mount_tests {
             .collect::<Vec<_>>();
         assert!(list.iter().any(|n| n.to_string_lossy() == "hello.txt"));
 
-        // 删除并卸载
+        // Delete and unmount
         fs::remove_file(&file_path).expect("unlink");
 
-        // 主动卸载并等待结束
+        // Explicitly unmount and wait
         if let Err(e) = handle.unmount().await {
             eprintln!("unmount error: {e}");
         }
@@ -114,27 +114,27 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    // GAT：目录条目流（readdir）
+    // GAT: directory entry stream (readdir)
     type DirEntryStream<'a>
         = Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntry>> + Send + 'a>>
     where
         Self: 'a;
 
-    // GAT：目录条目（plus）流（readdirplus）
+    // GAT: directory entry plus stream (readdirplus)
     type DirEntryPlusStream<'a>
         = Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntryPlus>> + Send + 'a>>
     where
         Self: 'a;
 
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
-        // 选择一个保守的最大写入值（1MiB）。可按后端能力调整或做成可配置。
+        // Use a conservative max write size (1 MiB). Tune per backend or make configurable.
         let max_write = NonZeroU32::new(1024 * 1024).unwrap();
         Ok(ReplyInit { max_write })
     }
 
     async fn destroy(&self, _req: Request) {}
 
-    // 调用 VFS：由 parent inode + name -> child inode；若找到，后续封装 ReplyEntry（暂占位）
+    // Call into VFS to resolve parent inode + name → child inode; if found, build ReplyEntry
     async fn lookup(&self, req: Request, parent: u64, name: &OsStr) -> FuseResult<ReplyEntry> {
         let name_str = name.to_string_lossy();
         let child = self.child_of(parent as i64, name_str.as_ref()).await;
@@ -145,7 +145,7 @@ where
             return Err(libc::ENOENT.into());
         };
         let attr = vfs_to_fuse_attr(&vattr, &req);
-        // generation 暂置 0；ttl 设为 1s，可调
+        // Keep generation at 0 and set TTL to 1s (tunable)
         Ok(ReplyEntry {
             ttl: Duration::from_secs(1),
             attr,
@@ -153,9 +153,9 @@ where
         })
     }
 
-    // 打开文件：此实现采用无状态 IO，返回 fh=0
+    // Open file: stateless IO, always return fh=0
     async fn open(&self, _req: Request, ino: u64, _flags: u32) -> FuseResult<ReplyOpen> {
-        // 验证 inode 存在且是文件
+        // Verify the inode exists and is a file
         let Some(attr) = self.stat_ino(ino as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -165,7 +165,7 @@ where
         Ok(ReplyOpen { fh: 0, flags: 0 })
     }
 
-    // 打开目录：无状态
+    // Open directory: stateless
     async fn opendir(&self, _req: Request, ino: u64, _flags: u32) -> FuseResult<ReplyOpen> {
         let Some(attr) = self.stat_ino(ino as i64).await else {
             return Err(libc::ENOENT.into());
@@ -176,7 +176,7 @@ where
         Ok(ReplyOpen { fh: 0, flags: 0 })
     }
 
-    // 读文件：映射到 VFS::read（通过 inode 构造路径）
+    // Read file: map to VFS::read (path derived from inode)
     async fn read(
         &self,
         _req: Request,
@@ -199,7 +199,7 @@ where
         })
     }
 
-    // 写文件：映射到 VFS::write（通过 inode 构造路径）
+    // Write file: map to VFS::write (path derived from inode)
     async fn write(
         &self,
         _req: Request,
@@ -220,7 +220,7 @@ where
         Ok(ReplyWrite { written: n })
     }
 
-    // 调用 VFS 获取 inode 属性（若 fh 有效则可忽略 flags）
+    // Ask VFS for inode attributes (flags ignored when fh is valid)
     async fn getattr(
         &self,
         req: Request,
@@ -238,7 +238,7 @@ where
         })
     }
 
-    // 设置属性：当前仅支持 size（truncate）
+    // Set attributes: currently only size (truncate) is supported
     async fn setattr(
         &self,
         req: Request,
@@ -252,7 +252,7 @@ where
             };
             self.truncate(&path, size).await.map_err(|_| libc::EIO)?;
         }
-        // 返回最新属性
+        // Return the refreshed attributes
         let Some(vattr) = self.stat_ino(ino as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -263,7 +263,7 @@ where
         })
     }
 
-    // 调用 VFS 列目录，逐项构造 DirectoryEntry 并以流返回（含错误码检查与偏移处理）
+    // Call VFS to list directory and stream DirectoryEntry items (with error/offset handling)
     async fn readdir<'a>(
         &'a self,
         _req: Request,
@@ -282,7 +282,7 @@ where
             Some(v) => v,
         };
 
-        // 组装含 "." 与 ".." 的目录项，offset 为“上一个 entry 的偏移”，从 offset+1 开始输出
+        // Assemble entries including '.' and '..'; offsets reference the previous entry so start at offset+1
         let mut all: Vec<DirectoryEntry> = Vec::with_capacity(entries.len() + 2);
         // "."
         all.push(DirectoryEntry {
@@ -291,7 +291,7 @@ where
             name: OsString::from("."),
             offset: 1,
         });
-        // ".."（父 inode 不易准确获取，先用 root 替代或自身）
+        // '..' (parent inode is tricky; use root or self for now)
         let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
         all.push(DirectoryEntry {
             inode: parent_ino,
@@ -299,7 +299,7 @@ where
             name: OsString::from(".."),
             offset: 2,
         });
-        // 真实子项
+        // Actual child entries
         for (i, e) in entries.iter().enumerate() {
             all.push(DirectoryEntry {
                 inode: e.ino as u64,
@@ -309,7 +309,7 @@ where
             });
         }
 
-        // 从 offset 后开始
+        // Start after the requested offset
         let start = if offset <= 0 { 0 } else { offset as usize };
         let slice = if start >= all.len() {
             Vec::new()
@@ -321,7 +321,7 @@ where
         Ok(ReplyDirectory::<Self::DirEntryStream<'a>> { entries: boxed })
     }
 
-    // 带属性的目录读取（lookup+readdir）：返回 DirectoryEntryPlus 流
+    // Directory read with attributes (lookup + readdir), returning DirectoryEntryPlus
     async fn readdirplus<'a>(
         &'a self,
         req: Request,
@@ -393,7 +393,7 @@ where
             });
         }
 
-        // 按 offset 截断
+        // Truncate according to offset
         let start = if offset == 0 { 0 } else { offset as usize };
         let slice = if start >= all.len() {
             Vec::new()
@@ -405,14 +405,14 @@ where
         Ok(ReplyDirectoryPlus { entries: boxed })
     }
 
-    // 文件系统统计：返回保守/占位值
+    // Filesystem statfs: return conservative placeholder values
     async fn statfs(&self, _req: Request, _ino: u64) -> FuseResult<ReplyStatFs> {
-        // 由于此处无法安全读取内部实现细节，返回保守常量；后续可接入真实统计。
+        // Can't safely inspect internals here, so return conservative constants; can be hooked up later.
         let bsize: u32 = 4096;
         let frsize: u32 = 4096;
         let files: u64 = 0;
         let ffree: u64 = u64::MAX;
-        // blocks/bfree/bavail 暂未知，返回 0；namelen 取常见上限 255。
+        // blocks/bfree/bavail unknown → return 0; namelen capped at 255.
         Ok(ReplyStatFs {
             blocks: 0,
             bfree: 0,
@@ -425,7 +425,7 @@ where
         })
     }
 
-    // 创建目录（单级）。若已存在则返回 EEXIST。
+    // Create a single-level directory; return EEXIST if it already exists.
     async fn mkdir(
         &self,
         req: Request,
@@ -435,18 +435,18 @@ where
         _umask: u32,
     ) -> FuseResult<ReplyEntry> {
         let name = name.to_string_lossy();
-        // 父必须是目录
+        // Parent must be a directory
         let Some(pattr) = self.stat_ino(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
         if !matches!(pattr.kind, VfsFileType::Dir) {
             return Err(libc::ENOTDIR.into());
         }
-        // 冲突检查
+        // Check for conflicts
         if let Some(_child) = self.child_of(parent as i64, name.as_ref()).await {
             return Err(libc::EEXIST.into());
         }
-        // 构造路径并创建
+        // Build the path and create
         let Some(mut p) = self.path_of(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -466,7 +466,7 @@ where
         })
     }
 
-    // 创建并打开文件
+    // Create and open a file
     async fn create(
         &self,
         req: Request,
@@ -476,7 +476,7 @@ where
         _flags: u32,
     ) -> FuseResult<ReplyCreated> {
         let name = name.to_string_lossy();
-        // 父检查
+        // Validate parent
         let Some(pattr) = self.stat_ino(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -507,17 +507,17 @@ where
         })
     }
 
-    // 删除文件
+    // Remove a file
     async fn unlink(&self, _req: Request, parent: u64, name: &OsStr) -> FuseResult<()> {
         let name = name.to_string_lossy();
-        // 父目录存在与类型检查
+        // Ensure parent directory exists and has the right type
         let Some(pattr) = self.stat_ino(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
         if !matches!(pattr.kind, VfsFileType::Dir) {
             return Err(libc::ENOTDIR.into());
         }
-        // 目标必须存在且为文件
+        // Target must exist and be a file
         let Some(child) = self.child_of(parent as i64, name.as_ref()).await else {
             return Err(libc::ENOENT.into());
         };
@@ -544,7 +544,7 @@ where
         })
     }
 
-    // 删除空目录
+    // Remove an empty directory
     async fn rmdir(&self, _req: Request, parent: u64, name: &OsStr) -> FuseResult<()> {
         let name = name.to_string_lossy();
         let Some(pattr) = self.stat_ino(parent as i64).await else {
@@ -553,7 +553,7 @@ where
         if !matches!(pattr.kind, VfsFileType::Dir) {
             return Err(libc::ENOTDIR.into());
         }
-        // 目标应为目录
+        // Target must be a directory
         let Some(child) = self.child_of(parent as i64, name.as_ref()).await else {
             return Err(libc::ENOENT.into());
         };
@@ -580,7 +580,7 @@ where
         })
     }
 
-    // 重命名（支持文件和目录）
+    // Rename (files or directories)
     async fn rename(
         &self,
         _req: Request,
@@ -591,7 +591,7 @@ where
     ) -> FuseResult<()> {
         let name = name.to_string_lossy();
         let new_name = new_name.to_string_lossy();
-        // 检查源存在
+        // Ensure the source exists
         let Some(src_ino) = self.child_of(parent as i64, name.as_ref()).await else {
             return Err(libc::ENOENT.into());
         };
@@ -599,7 +599,7 @@ where
             return Err(libc::ENOENT.into());
         };
 
-        // 检查目标父
+        // Validate the destination parent
         let Some(pattr) = self.stat_ino(new_parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -607,7 +607,7 @@ where
             return Err(libc::ENOTDIR.into());
         }
 
-        // 目标存在性检查
+        // Ensure destination does not already exist
         if self
             .child_of(new_parent as i64, new_name.as_ref())
             .await
@@ -616,7 +616,7 @@ where
             return Err(libc::EEXIST.into());
         }
 
-        // 拼接路径并执行
+        // Build full paths and perform the rename
         let Some(mut oldp) = self.path_of(parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -640,8 +640,8 @@ where
         })
     }
 
-    // ===== 资源释放与同步：无状态实现，直接成功返回 =====
-    // 关闭文件句柄
+    // ===== Resource release & sync: stateless implementation, return success =====
+    // Close file handle
     async fn release(
         &self,
         _req: Request,
@@ -654,7 +654,7 @@ where
         Ok(())
     }
 
-    // 刷新文件（close 路径的回调）
+    // Flush file (close path callback)
     async fn flush(
         &self,
         _req: Request,
@@ -665,12 +665,12 @@ where
         Ok(())
     }
 
-    // 同步文件内容到后端
+    // Sync file content to backend
     async fn fsync(&self, _req: Request, _inode: u64, _fh: u64, _datasync: bool) -> FuseResult<()> {
         Ok(())
     }
 
-    // 关闭目录句柄
+    // Close directory handle
     async fn releasedir(
         &self,
         _req: Request,
@@ -681,7 +681,7 @@ where
         Ok(())
     }
 
-    // 同步目录内容到后端
+    // Sync directory content to backend
     async fn fsyncdir(
         &self,
         _req: Request,
@@ -692,13 +692,13 @@ where
         Ok(())
     }
 
-    // 忘记（内核引用计数回收），当前不维护 inode 引用，no-op
+    // Forget (kernel reference drop); no inode ref tracking yet so no-op
     async fn forget(&self, _req: Request, _inode: u64, _nlookup: u64) {}
 
-    // 批量忘记（batch forget），no-op
+    // Batch forget; no-op
     async fn batch_forget(&self, _req: Request, _inodes: &[(u64, u64)]) {}
 
-    // 中断某个进行中的请求（目前无内部跟踪），no-op
+    // Interrupt an in-flight request (no tracking), so no-op
     async fn interrupt(&self, _req: Request, _unique: u64) -> FuseResult<()> {
         Ok(())
     }
@@ -713,13 +713,13 @@ fn vfs_kind_to_fuse(k: VfsFileType) -> FuseFileType {
 }
 
 fn vfs_to_fuse_attr(v: &VfsFileAttr, req: &Request) -> rfuse3::raw::reply::FileAttr {
-    // 时间与权限占位：按 kind 赋默认权限；时间用当前时间
+    // Time/permission placeholders: derive mode from kind, timestamps use now
     let now = Timestamp::from(SystemTime::now());
     let perm = match v.kind {
         VfsFileType::Dir => 0o755,
         VfsFileType::File => 0o644,
     } as u16;
-    // blocks 字段按 512B 块计算
+    // blocks fields expressed in 512B units
     let blocks = v.size.div_ceil(512);
     rfuse3::raw::reply::FileAttr {
         ino: v.ino as u64,

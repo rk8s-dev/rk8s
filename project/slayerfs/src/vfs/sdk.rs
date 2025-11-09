@@ -1,16 +1,16 @@
-//! SDK 接口：提供面向应用/SDK 的简化文件系统 API（参考 JuiceFS 风格）。
+//! SDK interface: simplified filesystem APIs for applications/SDKs (JuiceFS-style).
 //!
-//! 设计目标：
-//! - 路径级接口：mkdir_p/create/read/write/readdir/stat
-//! - 可插拔后端：复用 Fs 上的 BlockStore + MetaStore
-//! - 提供 LocalFs 的便捷构造
+//! Goals:
+//! - Path-level APIs: mkdir_p/create/read/write/readdir/stat
+//! - Pluggable backend: reuse Fs-level BlockStore and MetaStore
+//! - Provide a convenient LocalFs constructor
 
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
 use crate::meta::{MetaStore, create_meta_store_from_url};
 use crate::vfs::fs::{DirEntry, FileAttr, VFS};
 
-/// SDK 客户端（泛型后端）。
+/// SDK client parametrized by its backend.
 pub struct Client<S: BlockStore, M: MetaStore> {
     fs: VFS<S, M>,
 }
@@ -56,7 +56,7 @@ impl<S: BlockStore, M: MetaStore> Client<S, M> {
         self.fs.stat(path).await.ok_or_else(|| "not found".into())
     }
 
-    // ---- 新增：删除/重命名/截断 ----
+    // Extra helpers: delete / rename / truncate
     pub async fn unlink(&self, path: &str) -> Result<(), String> {
         self.fs.unlink(path).await
     }
@@ -74,7 +74,7 @@ impl<S: BlockStore, M: MetaStore> Client<S, M> {
     }
 }
 
-// ============== 便捷构造（LocalFs 后端） ==============
+// ============== Convenience builder (LocalFs backend) ==============
 
 use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
@@ -155,7 +155,7 @@ mod tests {
         let st = cli.stat("/x/y/b.txt").await.unwrap();
         assert!(st.size >= (layout.block_size * 2) as u64);
         cli.unlink("/x/y/b.txt").await.unwrap();
-        // 目录空了，允许删除
+        // Directory is empty, so removal is allowed
         cli.rmdir("/x/y").await.unwrap();
     }
 }

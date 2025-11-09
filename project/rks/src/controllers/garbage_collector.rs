@@ -351,6 +351,12 @@ async fn attempt_to_orphan_item(
         (guard.identity().clone(), guard.dependents().clone())
     };
 
+    log::info!(
+        "[Garbage Collector] Orphaning dependents of object {} of kind {}",
+        identity.name,
+        identity.kind
+    );
+
     orphan_dependents(xline_store, &identity, &dependents_snapshot).await?;
 
     remove_finalizer(xline_store, owner, Finalizer::OrphanDependents).await?;
@@ -396,7 +402,7 @@ async fn attempt_to_delete_item(
     absent_owner_cache: Arc<RwLock<LruCache<ObjectReference, ()>>>,
     node: Arc<RwLock<Node>>,
 ) -> Result<(), AttemptToDeleteItemError> {
-    log::debug!(
+    log::info!(
         "[Garbage Collector] Attempting to delete item: {}",
         node.read().await.identity().name
     );
@@ -436,6 +442,12 @@ async fn attempt_to_delete_item(
             },
         }));
 
+        log::debug!(
+            "[Garbage Collector] Object {} of kind {} does not exist in xline, sending virtual delete event to GraphBuilder",
+            identity.name,
+            identity.kind
+        );
+
         return Err(AttemptToDeleteItemError::SentVirtualDeleteEvent);
     }
     let obj_yaml = obj_yaml.unwrap();
@@ -453,10 +465,23 @@ async fn attempt_to_delete_item(
             },
         }));
 
+        log::debug!(
+            "[Garbage Collector] Object {} of kind {} has UID mismatch(xline: {}, object: {}), sending virtual delete event to GraphBuilder",
+            identity.name,
+            identity.kind,
+            meta.uid,
+            identity.uid
+        );
+
         return Err(AttemptToDeleteItemError::SentVirtualDeleteEvent);
     }
 
     if is_deleting_dependents {
+        log::debug!(
+            "[Garbage Collector] Object {} of kind {} is deleting dependents, processing deleting dependents",
+            identity.name,
+            identity.kind
+        );
         return process_deleting_dependents(
             xline_store,
             attempt_to_delete_tx.clone(),
@@ -468,6 +493,11 @@ async fn attempt_to_delete_item(
     let owner_refs = meta.owner_references.clone();
     if owner_refs.is_none() {
         // No owners, no action needed
+        log::info!(
+            "[Garbage Collector] Object {} of kind {} has no owners, no action needed",
+            identity.name,
+            identity.kind
+        );
         return Ok(());
     }
 
@@ -482,10 +512,19 @@ async fn attempt_to_delete_item(
     .await?;
 
     if !solid.is_empty() {
-        log::debug!("Solid owners exist , will not delete");
+        log::info!(
+            "Solid owners exist for object {} of kind {}, will not delete",
+            identity.name,
+            identity.kind
+        );
 
         if dangling.is_empty() && waiting_for_dependents_deletion.is_empty() {
             // All owners are solid, no action needed
+            log::debug!(
+                "[Garbage Collector] All owners of object {} of kind {} are solid, no action needed",
+                identity.name,
+                identity.kind
+            );
             return Ok(());
         }
 
@@ -534,8 +573,10 @@ async fn attempt_to_delete_item(
             }
         }
 
-        log::debug!(
-            "[Garbage Collector] At least one owner of item has DeleteDependentsFinalizer, and the item itself has dependents, so it is going to be deleted in Foreground"
+        log::info!(
+            "[Garbage Collector] At least one owner of object {} of kind {} has DeleteDependentsFinalizer, and the item itself has dependents, so it is going to be deleted in Foreground",
+            identity.name,
+            identity.kind
         );
 
         delete_object(
@@ -553,8 +594,8 @@ async fn attempt_to_delete_item(
             DeletePropagationPolicy::Background
         };
 
-        log::debug!(
-            "Deleting object {} of kind {:?} with policy {:?}",
+        log::info!(
+            "[Garbage Collector] Deleting object {} of kind {} with policy {:?}",
             identity.name,
             identity.kind,
             policy
@@ -729,7 +770,7 @@ async fn process_deleting_dependents(
 ) -> Result<(), AttemptToDeleteItemError> {
     let blocking_dependents = node.read().await.blocking_dependents().await;
     if blocking_dependents.is_empty() {
-        log::debug!(
+        log::info!(
             "[Garbage Collector] No more blocking dependents, removing DeletingDependents finalizer from {}",
             node.read().await.identity().name
         );
@@ -739,7 +780,7 @@ async fn process_deleting_dependents(
     } else {
         for dependent in blocking_dependents {
             if !dependent.read().await.is_deleting_dependents() {
-                log::debug!(
+                log::info!(
                     "[Garbage Collector] Found dependent {} that not in deleting dependents state yet, sending attempt to delete because its owner is waiting for dependents deletion",
                     dependent.read().await.identity().name
                 );
@@ -758,12 +799,24 @@ async fn remove_finalizer(
     node: &RwLock<Node>,
     finalizer: Finalizer,
 ) -> anyhow::Result<()> {
+    log::debug!(
+        "[Garbage Collector] Removing finalizer {} from object {} of kind {}",
+        finalizer,
+        node.read().await.identity().name,
+        node.read().await.identity().kind
+    );
+
     let read_guard = node.read().await;
     let origin_yaml = xline_store
         .get_object_yaml(read_guard.identity().kind, &read_guard.identity().name)
         .await?;
 
     if origin_yaml.is_none() {
+        log::debug!(
+            "[Garbage Collector] Object {} of kind {} does not exist in xline, skipping finalizer removal",
+            node.read().await.identity().name,
+            node.read().await.identity().kind
+        );
         return Ok(());
     }
 

@@ -131,4 +131,9 @@ pub trait MetaStore: Send + Sync {
     fn root_ino(&self) -> i64;
 
     async fn initialize(&self) -> Result<(), MetaError>;
+
+    /// Returns all file inodes marked for deletion (for garbage collection)
+    async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError>;
+
+    async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError>;
 }

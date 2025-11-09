@@ -135,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let layout = ChunkLayout::default();
         let client = ObjectClient::new(LocalFsBackend::new(&backend_storage));
-        let store = ObjectBlockStore::new(client);
+        let store = ObjectBlockStore::new(client.clone());
 
         let config_content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Cannot read config file: {}", e))?;
@@ -153,7 +153,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
             .map_err(|e| format!("Failed to initialize metadata storage: {}", e))?;
 
-        let fs = VFS::new(layout, store, meta).await.expect("create VFS");
+        let fs = VFS::new(layout, store, meta.clone())
+            .await
+            .expect("create VFS");
+
+        println!("Starting garbage collector...");
+
+        let gc_handle = tokio::spawn({
+            let meta_store = meta.clone();
+            let object_client = client.clone();
+            async move {
+                use slayerfs::daemon::worker::start_gc;
+                use std::sync::Arc;
+
+                start_gc(meta_store, Arc::new(object_client), None).await;
+            }
+        });
 
         println!("Mounting filesystem...");
 
@@ -188,11 +203,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("Press Ctrl+C to exit and unmount filesystem...");
 
-        signal::ctrl_c().await?;
-        println!("\nUnmounting filesystem...");
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                println!("\nUnmounting filesystem...");
 
-        handle.unmount().await?;
-        println!("Filesystem unmounted");
+                handle.unmount().await?;
+                println!("Filesystem unmounted");
+                gc_handle.abort();
+                let _ = gc_handle.await;
+            }
+        }
+
         Ok(())
     }
 }

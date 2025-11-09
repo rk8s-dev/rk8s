@@ -1,33 +1,33 @@
-//! Chunk 布局与索引工具
+//! Chunk layout and indexing utilities.
 //!
-//! - 提供与 JuiceFS 类似的 chunk/block 固定大小切分方案。
-//! - 提供根据文件偏移计算 (chunk_index, offset_in_chunk) 的函数。
-//! - 提供 `ChunkLayout` 以自定义大小；默认常量用于快速上手。
-//! - 提供 `ChunkKey` 与内存级索引占位（后续由 `meta` 层替换）。
+//! - JuiceFS-style fixed-size chunk/block partitioning.
+//! - Helpers to compute (chunk_index, offset_in_chunk) from file offsets.
+//! - `ChunkLayout` for custom sizes with sensible defaults.
+//! - `ChunkKey` placeholders for in-memory indexing (to be replaced by `meta`).
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-/// 默认 Chunk 尺寸（64 MiB）。
+/// Default chunk size (64 MiB).
 pub const DEFAULT_CHUNK_SIZE: u64 = 64 * 1024 * 1024;
-/// 默认 Block 尺寸（4 MiB）。
+/// Default block size (4 MiB).
 pub const DEFAULT_BLOCK_SIZE: u32 = 4 * 1024 * 1024;
 
-/// 使用默认布局：返回文件偏移所在的 chunk 序号（从 0 开始）。
+/// With the default layout, return the zero-based chunk index for a file offset.
 #[inline]
 #[allow(dead_code)]
 pub fn chunk_index_of(file_offset: u64) -> u64 {
     file_offset / DEFAULT_CHUNK_SIZE
 }
 
-/// 使用默认布局：返回文件偏移在其 chunk 内的偏移量。
+/// With the default layout, return the intra-chunk offset for a file offset.
 #[inline]
 #[allow(dead_code)]
 pub fn within_chunk_offset(file_offset: u64) -> u64 {
     file_offset % DEFAULT_CHUNK_SIZE
 }
 
-/// Chunk 与 Block 的布局参数。
+/// Layout parameters for chunks and blocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkLayout {
     pub chunk_size: u64,
@@ -74,7 +74,7 @@ impl ChunkLayout {
         (offset_in_chunk % self.block_size as u64) as u32
     }
 
-    /// 返回给定 chunk 索引对应的文件级字节范围 [start, end)（end 为开区间）。
+    /// Return the file byte range [start, end) covered by a chunk index (end exclusive).
     #[inline]
     #[allow(dead_code)]
     pub fn chunk_byte_range(&self, chunk_index: u64) -> (u64, u64) {
@@ -84,7 +84,7 @@ impl ChunkLayout {
     }
 }
 
-/// 逻辑 chunk 的键（内存索引使用）。
+/// Logical chunk key used by the in-memory index.
 #[derive(Debug, Clone, Copy, Eq)]
 #[allow(dead_code)]
 pub struct ChunkKey {
@@ -105,7 +105,7 @@ impl Hash for ChunkKey {
     }
 }
 
-/// chunk 元数据占位（未来可扩展如校验、时间戳等）。
+/// Placeholder for chunk metadata (e.g., checksum, timestamps).
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct ChunkMeta {
@@ -125,7 +125,7 @@ impl ChunkMeta {
     }
 }
 
-/// 简单的内存索引：维护每个 chunk 下已提交的 slice 数量（示例用）。
+/// Simple in-memory index: track how many slices are committed for each chunk (demo only).
 #[derive(Default)]
 #[allow(dead_code)]
 pub struct InMemoryChunkIndex {

@@ -1322,8 +1322,16 @@ impl MetaStore for MetaClient {
         Ok(())
     }
 
-    fn root_ino(&self) -> i64 {
-        self.store.root_ino()
+    async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        self.store.set_file_size(ino, size).await?;
+
+        // Update cached attribute
+        if let Some(node) = self.inode_cache.get_node(ino).await {
+            let mut attr = node.attr.write().await;
+            attr.size = size;
+        }
+
+        Ok(())
     }
 
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
@@ -1407,20 +1415,20 @@ impl MetaStore for MetaClient {
         Ok(Some(format!("/{}", path_segments.join("/"))))
     }
 
-    async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
-        self.store.set_file_size(ino, size).await?;
-
-        // Update cached attribute
-        if let Some(node) = self.inode_cache.get_node(ino).await {
-            let mut attr = node.attr.write().await;
-            attr.size = size;
-        }
-
-        Ok(())
+    fn root_ino(&self) -> i64 {
+        self.store.root_ino()
     }
 
     async fn initialize(&self) -> Result<(), MetaError> {
         self.store.initialize().await
+    }
+
+    async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
+        self.store.get_deleted_files().await
+    }
+
+    async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
+        self.store.remove_file_metadata(ino).await
     }
 }
 

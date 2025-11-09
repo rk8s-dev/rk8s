@@ -13,7 +13,7 @@ fn init_logger() {
     LOGGER.get_or_init(|| {
         env_logger::builder()
             .is_test(false)
-            .filter_level(LevelFilter::Debug)
+            .filter_level(LevelFilter::Info)
             .try_init()
             .ok();
     });
@@ -49,6 +49,62 @@ async fn test_run_dns_server_startup() {
     };
 
     info!("test get pods: {pods:?}");
+    let handle = tokio::spawn(async move {
+        let _ = run_dns_server(store, 5300).await;
+    });
+
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to listen for ctrl_c");
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_headless_service_a_records() {
+    init_logger();
+
+    let store = load_store().await;
+
+    // create a headless Service (clusterIP: None)
+    let svc_yaml = r#"apiVersion: v1
+kind: Service
+metadata:
+    name: test-headless
+    namespace: default
+spec:
+    clusterIP: None
+    ports:
+        - port: 8080
+          name: http
+"#;
+
+    store
+        .insert_service_yaml("test-headless", svc_yaml)
+        .await
+        .expect("insert service error");
+
+    // create Endpoints for the headless service with two backend IPs
+    let endpoints_yaml = r#"apiVersion: v1
+kind: Endpoints
+metadata:
+    name: test-headless
+    namespace: default
+subsets:
+  - addresses:
+      - ip: 10.20.30.3
+      - ip: 10.20.30.4
+    ports:
+      - port: 8080
+        name: http
+"#;
+
+    store
+        .insert_endpoint_yaml("test-headless", endpoints_yaml)
+        .await
+        .expect("insert endpoints error");
+
+    //query name: test-headless.default.svc.cluster.local.
     let handle = tokio::spawn(async move {
         let _ = run_dns_server(store, 5300).await;
     });
