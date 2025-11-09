@@ -24,14 +24,6 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkWriter<'a, B, S> {
         }
     }
 
-    /*pub async fn flush(&self) -> Result<()> {
-        let mut lock = self.slices.lock().unwrap();
-        for slice in lock.drain(..) {
-            self.meta_store.append_slice(self.chunk_id, slice).await?;
-        }
-        Ok(())
-    }*/
-
     /// Split a chunk-local write (offset + buffer) into block writes.
     pub async fn write(&self, offset: u32, buf: &[u8]) -> Result<()> {
         let slice_id = self.meta.next_id(SLICE_ID_KEY).await?;

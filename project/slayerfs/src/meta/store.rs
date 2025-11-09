@@ -79,9 +79,6 @@ pub enum MetaError {
     #[error("error: max retries exceeded")]
     MaxRetriesExceeded,
 
-    #[error("error: continue backoff")]
-    ContinueBackoff,
-
     #[error("Database error: {0}")]
     Database(#[from] sea_orm::DbErr),
 

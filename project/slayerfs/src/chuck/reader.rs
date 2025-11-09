@@ -37,7 +37,7 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkReader<'a, B, S> {
         let mut need_read = Vec::new();
 
         for slice in slices.into_iter().rev() {
-            let ranges = intervals.cut(slice.offset, slice.offset + slice.length)?;
+            let ranges = intervals.cut(slice.offset, slice.offset + slice.length);
 
             need_read.extend(ranges.into_iter().map(|(l, r)| SliceDesc {
                 offset: l,
@@ -76,9 +76,9 @@ impl<T: Copy + Ord> Intervals<T> {
         Intervals(vec![(l, r)])
     }
 
-    pub fn cut(&mut self, slice_l: T, slice_r: T) -> Result<Vec<(T, T)>> {
+    pub fn cut(&mut self, slice_l: T, slice_r: T) -> Vec<(T, T)> {
         if self.0.is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         let mut remaining = Vec::new();
@@ -106,11 +106,11 @@ impl<T: Copy + Ord> Intervals<T> {
         }
 
         if !touched {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         self.0 = remaining.into_iter().filter(|(l, r)| l < r).collect();
-        Ok(cut)
+        cut
     }
 }
 
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn test_intervals_cut_partial_left() {
         let mut intervals = Intervals::new(40, 140);
-        let results = intervals.cut(10, 60).unwrap();
+        let results = intervals.cut(10, 60);
         assert_eq!(results, [(40, 60)]);
         assert_eq!(intervals_as_vec(&intervals), vec![(60, 140)]);
     }
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_intervals_cut_partial_right() {
         let mut intervals = Intervals::new(40, 140);
-        let results = intervals.cut(100, 180).unwrap();
+        let results = intervals.cut(100, 180);
         assert_eq!(results, [(100, 140)]);
         assert_eq!(intervals_as_vec(&intervals), vec![(40, 100)]);
     }
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn test_intervals_cut_no_overlap() {
         let mut intervals = Intervals::new(40, 140);
-        let results = intervals.cut(200, 240).unwrap();
+        let results = intervals.cut(200, 240);
         assert!(results.is_empty());
         assert_eq!(intervals_as_vec(&intervals), vec![(40, 140)]);
     }
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn test_intervals_cut_spans_multiple_ranges() {
         let mut intervals = intervals_from_ranges(&[(100, 250), (300, 500)]);
-        let results = intervals.cut(150, 400).unwrap();
+        let results = intervals.cut(150, 400);
         assert_eq!(results, vec![(150, 250), (300, 400)]);
         assert_eq!(intervals_as_vec(&intervals), vec![(100, 150), (400, 500)]);
     }
@@ -196,16 +196,16 @@ mod tests {
     fn test_intervals_multiple_sequential_cuts() {
         let mut intervals = Intervals::new(0, 1000);
 
-        intervals.cut(200, 400).unwrap();
+        intervals.cut(200, 400);
         assert_eq!(intervals_as_vec(&intervals), vec![(0, 200), (400, 1000)]);
 
-        intervals.cut(600, 800).unwrap();
+        intervals.cut(600, 800);
         assert_eq!(
             intervals_as_vec(&intervals),
             vec![(0, 200), (400, 600), (800, 1000)]
         );
 
-        let results = intervals.cut(100, 900).unwrap();
+        let results = intervals.cut(100, 900);
         assert_eq!(results, vec![(100, 200), (400, 600), (800, 900)]);
         assert_eq!(intervals_as_vec(&intervals), vec![(0, 100), (900, 1000)]);
     }
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn test_intervals_cut_consumes_entire_ranges() {
         let mut intervals = intervals_from_ranges(&[(0, 100), (200, 300)]);
-        let results = intervals.cut(0, 400).unwrap();
+        let results = intervals.cut(0, 400);
         assert_eq!(results, vec![(0, 100), (200, 300)]);
         assert!(intervals_as_vec(&intervals).is_empty());
     }
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn test_intervals_cut_with_touching_edges() {
         let mut intervals = intervals_from_ranges(&[(0, 50), (50, 100), (100, 150)]);
-        let results = intervals.cut(25, 125).unwrap();
+        let results = intervals.cut(25, 125);
         assert_eq!(results, vec![(25, 50), (50, 100), (100, 125)]);
         assert_eq!(intervals_as_vec(&intervals), vec![(0, 25), (125, 150)]);
     }
@@ -249,7 +249,7 @@ mod tests {
         ];
 
         for &(l, r) in &ops {
-            let got = intervals.cut(l, r).unwrap();
+            let got = intervals.cut(l, r);
             let expected_cut = naive_cut(&mut expected, l, r);
             assert_eq!(got, expected_cut, "cut mismatch for [{}, {})", l, r);
             assert_eq!(
@@ -282,7 +282,7 @@ mod tests {
         ];
 
         for &(l, r) in &ops {
-            let got = intervals.cut(l, r).unwrap();
+            let got = intervals.cut(l, r);
             let expected_cut = naive_cut(&mut expected, l, r);
             assert_eq!(got, expected_cut, "cut mismatch for [{}, {})", l, r);
             assert_eq!(

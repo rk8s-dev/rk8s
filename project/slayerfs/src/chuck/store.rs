@@ -30,7 +30,7 @@ pub trait BlockStore {
     async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()>;
 }
 
-pub type BlockKey = (u64 /*chunk_id*/, u32 /*block_index*/);
+pub type BlockKey = (u64 /*slice_id*/, u32 /*block_index*/);
 
 /// Simple in-memory implementation for local development/testing.
 #[derive(Default)]

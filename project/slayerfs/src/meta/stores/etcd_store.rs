@@ -1104,7 +1104,7 @@ impl MetaStore for EtcdMetaStore {
     }
 
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
-        let key = chunk_id.to_string();
+        let key = key_for_slice(chunk_id);
         self.etcd_get_json(&key)
             .await
             .map(|e| e.unwrap_or_default())
@@ -1114,10 +1114,9 @@ impl MetaStore for EtcdMetaStore {
         let key = key_for_slice(chunk_id);
         self.atomic_update(
             &key,
-            |source: Vec<SliceDesc>| {
-                let mut new = source.clone();
-                new.push(slice);
-                new
+            |mut source: Vec<SliceDesc>| {
+                source.push(slice);
+                source
             },
             vec![slice],
         )
