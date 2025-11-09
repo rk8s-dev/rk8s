@@ -1,3 +1,4 @@
+use crate::chuck::SliceDesc;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -16,3 +17,14 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for SliceDesc {
+    fn from(model: Model) -> Self {
+        Self {
+            slice_id: model.slice_id as u64,
+            chunk_id: model.chunk_id as u64,
+            offset: model.offset as u32,
+            length: model.length as u32,
+        }
+    }
+}

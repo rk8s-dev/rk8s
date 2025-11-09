@@ -10,17 +10,17 @@ use std::sync::{Arc, Mutex};
 pub struct ChunkWriter<'a, B, S> {
     layout: ChunkLayout,
     chunk_id: u64,
-    block_store: &'a B,
-    meta_store: &'a S,
+    store: &'a B,
+    meta: &'a S,
 }
 
 impl<'a, B: BlockStore, S: MetaStore> ChunkWriter<'a, B, S> {
-    pub fn new(layout: ChunkLayout, chunk_id: u64, block_store: &'a B, meta_store: &'a S) -> Self {
+    pub fn new(layout: ChunkLayout, chunk_id: u64, store: &'a B, meta: &'a S) -> Self {
         Self {
             layout,
             chunk_id,
-            block_store,
-            meta_store,
+            store,
+            meta,
         }
     }
 
@@ -34,7 +34,7 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkWriter<'a, B, S> {
 
     /// Split a chunk-local write (offset + buffer) into block writes.
     pub async fn write(&self, offset: u32, buf: &[u8]) -> Result<()> {
-        let slice_id = self.meta_store.next_id(SLICE_ID_KEY).await?;
+        let slice_id = self.meta.next_id(SLICE_ID_KEY).await?;
         let slice = SliceDesc {
             slice_id: slice_id as u64,
             chunk_id: self.chunk_id,
@@ -42,10 +42,10 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkWriter<'a, B, S> {
             length: buf.len() as u32,
         };
 
-        let writer = SliceIO::<Write, _>::new(slice, self.layout, self.block_store);
+        let writer = SliceIO::<Write, _>::new(slice, self.layout, self.store);
 
         let desc = writer.write(buf).await?;
-        self.meta_store.append_slice(self.chunk_id, desc).await?;
+        self.meta.append_slice(self.chunk_id, desc).await?;
         Ok(())
     }
 }

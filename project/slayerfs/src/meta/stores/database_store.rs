@@ -898,15 +898,7 @@ impl MetaStore for DatabaseMetaStore {
             .await
             .map_err(MetaError::Database)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| SliceDesc {
-                slice_id: row.slice_id as u64,
-                chunk_id: row.chunk_id as u64,
-                offset: row.offset as u32,
-                length: row.length as u32,
-            })
-            .collect())
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {

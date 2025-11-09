@@ -360,12 +360,12 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         let spans: Vec<ChunkSpan> = split_file_range_into_chunks(self.layout, offset, data.len());
         let mut cursor = 0usize;
         for sp in spans {
-            let cid = self.chunk_id_for(ino, sp.chunk_index);
+            let cid = self.chunk_id_for(ino, sp.index);
             let writer = ChunkWriter::new(self.layout, cid, &self.store, &self.meta);
             let take = sp.len;
             let buf = &data[cursor..cursor + take];
             writer
-                .write(sp.offset_in_chunk as u32, buf)
+                .write(sp.offset as u32, buf)
                 .await
                 .map_err(|e| e.to_string())?;
             cursor += take;
@@ -388,10 +388,10 @@ impl<S: BlockStore, M: MetaStore> VFS<S, M> {
         let spans: Vec<ChunkSpan> = split_file_range_into_chunks(self.layout, offset, len);
         let mut out = Vec::with_capacity(len);
         for sp in spans {
-            let cid = self.chunk_id_for(ino, sp.chunk_index);
+            let cid = self.chunk_id_for(ino, sp.index);
             let reader = ChunkReader::new(self.layout, cid, &self.store, &self.meta);
             let part = reader
-                .read(sp.offset_in_chunk as u32, sp.len)
+                .read(sp.offset as u32, sp.len)
                 .await
                 .map_err(|e| e.to_string())?;
             out.extend(part);

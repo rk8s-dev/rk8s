@@ -5,8 +5,8 @@ use super::chunk::ChunkLayout;
 /// A range within a chunk for a portion of the file span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkSpan {
-    pub chunk_index: u64,
-    pub offset_in_chunk: u64,
+    pub index: u64,
+    pub offset: u64,
     pub len: usize,
 }
 
@@ -28,8 +28,8 @@ pub fn split_file_range_into_chunks(
         let cap = layout.chunk_size - off_in_chunk;
         let take = cap.min(remaining) as usize;
         out.push(ChunkSpan {
-            chunk_index: ci,
-            offset_in_chunk: off_in_chunk,
+            index: ci,
+            offset: off_in_chunk,
             len: take,
         });
         file_offset += take as u64;
@@ -47,8 +47,8 @@ mod tests {
         let layout = ChunkLayout::default();
         let spans = split_file_range_into_chunks(layout, 123, 4096);
         assert_eq!(spans.len(), 1);
-        assert_eq!(spans[0].chunk_index, 0);
-        assert_eq!(spans[0].offset_in_chunk, 123);
+        assert_eq!(spans[0].index, 0);
+        assert_eq!(spans[0].offset, 123);
         assert_eq!(spans[0].len, 4096);
     }
 
@@ -58,11 +58,11 @@ mod tests {
         let start = layout.chunk_size - 10;
         let spans = split_file_range_into_chunks(layout, start, 100);
         assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].chunk_index, 0);
-        assert_eq!(spans[0].offset_in_chunk, layout.chunk_size - 10);
+        assert_eq!(spans[0].index, 0);
+        assert_eq!(spans[0].offset, layout.chunk_size - 10);
         assert_eq!(spans[0].len, 10);
-        assert_eq!(spans[1].chunk_index, 1);
-        assert_eq!(spans[1].offset_in_chunk, 0);
+        assert_eq!(spans[1].index, 1);
+        assert_eq!(spans[1].offset, 0);
         assert_eq!(spans[1].len, 90);
     }
 

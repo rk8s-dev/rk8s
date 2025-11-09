@@ -11,17 +11,17 @@ use std::cmp::{max, min};
 pub struct ChunkReader<'a, B, S> {
     layout: ChunkLayout,
     chunk_id: u64,
-    block_store: &'a B,
-    meta_store: &'a S,
+    store: &'a B,
+    meta: &'a S,
 }
 
 impl<'a, B: BlockStore, S: MetaStore> ChunkReader<'a, B, S> {
-    pub fn new(layout: ChunkLayout, chunk_id: u64, block_store: &'a B, meta_store: &'a S) -> Self {
+    pub fn new(layout: ChunkLayout, chunk_id: u64, store: &'a B, meta: &'a S) -> Self {
         Self {
             layout,
             chunk_id,
-            block_store,
-            meta_store,
+            store,
+            meta,
         }
     }
 
@@ -32,7 +32,7 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkReader<'a, B, S> {
 
         let mut buf = vec![0; len];
 
-        let slices = self.meta_store.get_slices(self.chunk_id).await?;
+        let slices = self.meta.get_slices(self.chunk_id).await?;
         let mut intervals = Intervals::new(offset, offset + len as u32);
         let mut need_read = Vec::new();
 
@@ -48,7 +48,7 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkReader<'a, B, S> {
 
         let results = futures::stream::iter(need_read.into_iter())
             .map(|desc| {
-                let (layout, store) = (self.layout, self.block_store);
+                let (layout, store) = (self.layout, self.store);
                 async move {
                     let mut tmp = vec![0; desc.length as usize];
                     let slice = SliceIO::<Read, _>::new(desc, layout, store);
