@@ -24,7 +24,160 @@ pub mod graph;
 pub mod graph_builder;
 pub mod types;
 
-#[allow(unused)]
+/// GarbageCollector implements cascading deletion using OwnerReference mechanism.
+///
+/// # Overview
+///
+/// The `GarbageCollector` manages the lifecycle of rk8s resources by tracking ownership
+/// relationships through `OwnerReference` fields. When an owner object is deleted, the garbage
+/// collector automatically handles the deletion of its dependent objects according to the
+/// specified deletion propagation policy.
+///
+/// # OwnerReference Mechanism
+///
+/// The OwnerReference mechanism establishes parent-child relationships between rk8s resources:
+///
+/// - **Owner**: A resource that owns one or more dependent resources
+/// - **Dependent**: A resource that references its owner(s) via `metadata.ownerReferences`
+///
+/// ## OwnerReference Structure
+///
+/// Each `OwnerReference` contains:
+/// - `apiVersion`: API version of the owner resource
+/// - `kind`: Resource kind (e.g., Pod, ReplicaSet)
+/// - `name`: Name of the owner resource
+/// - `uid`: Unique identifier of the owner resource
+/// - `controller`: Whether this owner is the controller of the dependent
+/// - `block_owner_deletion`: Whether the dependent blocks deletion of the owner
+///
+/// ## Deletion Propagation Policies
+///
+/// When deleting an owner, you can specify how dependents should be handled:
+///
+/// 1. **Background** (default): Delete the owner immediately, and let the garbage collector
+///    delete dependents in the background. This is the fastest deletion method.
+///
+/// 2. **Foreground**: Mark the owner for deletion, but don't delete it until all its dependents
+///    are deleted. The owner gets a `DeletingDependents` finalizer and waits for all blocking
+///    dependents to be removed.
+///
+/// 3. **Orphan**: Delete the owner, but leave dependents as orphaned objects (remove owner
+///    references from dependents). The owner gets an `OrphanDependents` finalizer and
+///    will be deleted after all dependents' owner references are removed.
+///
+/// ## How It Works
+///
+/// 1. **Graph Building**: The `GraphBuilder` maintains a dependency graph by watching resource
+///    changes and tracking owner-dependant relationships.
+///
+/// 2. **Deletion Processing**: When an object is marked for deletion:
+///    - The garbage collector checks if all owners are deleted or being deleted
+///    - If an owner has `block_owner_deletion=true`, the dependent blocks the owner's deletion
+///    - The collector classifies owners into:
+///      - **Solid owners**: Exist and are not being deleted
+///      - **Dangling owners**: Do not exist (orphaned references)
+///      - **Waiting for dependents deletion**: Being deleted with `DeletingDependents` finalizer
+///
+/// 3. **Cascade Deletion**: Based on the deletion policy and owner state:
+///    - Objects with solid owners are not deleted
+///    - Objects with only dangling owners are deleted
+///    - Objects with owners waiting for dependents deletion trigger foreground deletion
+///
+/// # Usage
+///
+/// ## Creating a GarbageCollector
+///
+/// ```rust,no_run
+/// use std::sync::Arc;
+/// use crate::api::xlinestore::XlineStore;
+/// use crate::controllers::garbage_collector::GarbageCollector;
+///
+/// let xline_store = Arc::new(XlineStore::new(...));
+/// let gc = GarbageCollector::new(xline_store);
+/// ```
+///
+/// ## Setting Owner References
+///
+/// When creating a dependent resource, set its owner references:
+///
+/// ```yaml
+/// apiVersion: v1
+/// kind: Pod
+/// metadata:
+///   name: my-pod
+///   ownerReferences:
+///   - apiVersion: apps/v1
+///     kind: ReplicaSet
+///     name: my-replicaset
+///     uid: "123e4567-e89b-12d3-a456-426614174000"
+///     controller: true
+///     blockOwnerDeletion: true
+/// ```
+///
+/// ## Deletion Behavior
+///
+/// ### Background
+///
+/// Set the deletion propagation policy to Background, the owner will be deleted immediately and its dependents will be deleted in the background.
+///
+/// ```rust,no_run
+/// let policy = DeletePropagationPolicy::Background;
+/// store.delete_object(ResourceKind::ReplicaSet, "my-replicaset", policy).await?;
+/// ```
+///
+/// ### Foreground
+///
+/// Set the deletion propagation policy to Foreground, the owner will be marked for deletion and its dependents will be deleted in the foreground.
+///
+/// ```rust,no_run
+/// let policy = DeletePropagationPolicy::Foreground;
+/// store.delete_object(ResourceKind::ReplicaSet, "my-replicaset", policy).await?;
+/// ```
+///
+/// ### Orphan
+///
+/// Set the deletion propagation policy to Orphan, the owner will be deleted and its dependents will be orphaned.
+/// The owner gets an `OrphanDependents` finalizer and will be deleted after all dependents' owner references are removed.
+///
+/// ```rust,no_run
+/// let policy = DeletePropagationPolicy::Orphan;
+/// store.delete_object(ResourceKind::ReplicaSet, "my-replicaset", policy).await?;
+/// ```
+///
+/// # Architecture
+///
+/// The garbage collector uses two main worker pools:
+///
+/// - **Delete Workers**: Process objects queued for deletion, handling cascade deletion logic
+/// - **Orphan Workers**: Process objects that need to have their owner references removed
+///
+/// Both worker pools run concurrently and process items from their respective queues.
+///
+/// # Example Scenarios
+///
+/// ## Scenario 1: Simple Cascade Deletion
+///
+/// 1. ReplicaSet owns 3 Pods (each Pod has ownerReference pointing to ReplicaSet)
+/// 2. User deletes ReplicaSet with Background policy
+/// 3. GarbageCollector deletes ReplicaSet immediately
+/// 4. GarbageCollector detects Pods with dangling owner references
+/// 5. All 3 Pods are automatically deleted
+///
+/// ## Scenario 2: Foreground Deletion
+///
+/// 1. ReplicaSet owns Pods, and Pods have `blockOwnerDeletion: true`
+/// 2. User deletes ReplicaSet with Foreground policy
+/// 3. ReplicaSet gets `DeletingDependents` finalizer and deletion timestamp
+/// 4. GarbageCollector deletes all Pods first
+/// 5. Once all Pods are deleted, ReplicaSet's finalizer is removed and it's deleted
+///
+/// ## Scenario 3: Orphan Policy
+///
+/// 1. ReplicaSet owns Pods
+/// 2. User deletes ReplicaSet with Orphan policy
+/// 3. ReplicaSet gets `OrphanDependents` finalizer
+/// 4. GarbageCollector removes owner references from all Pods
+/// 5. ReplicaSet is deleted, Pods remain as orphaned objects
 pub struct GarbageCollector {
     xline_store: Arc<XlineStore>,
     attempt_to_delete_tx: UnboundedSender<Arc<RwLock<Node>>>,
@@ -69,6 +222,9 @@ impl Controller for GarbageCollector {
 }
 
 impl GarbageCollector {
+    /// Creates a new controller instance and wires its dependency graph builder
+    /// to the async work queues. Typically called once during controller
+    /// manager bootstrapping.
     pub fn new(xline_store: Arc<XlineStore>) -> Self {
         let (attempt_to_delete_tx, attempt_to_delete_rx) = tokio::sync::mpsc::unbounded_channel();
         let (attempt_to_orphan_tx, attempt_to_orphan_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -87,6 +243,8 @@ impl GarbageCollector {
         }
     }
 
+    /// Spawns worker tasks that continually pop nodes from the delete queue and
+    /// attempt to cascade deletions until ownership constraints are satisfied.
     async fn run_process_attempt_to_delete(&mut self, num_workers: usize) {
         for i in 0..num_workers {
             let attempt_to_delete_rx = self.attempt_to_delete_rx.clone();
@@ -151,6 +309,8 @@ impl GarbageCollector {
         }
     }
 
+    /// Spawns worker tasks that orphan dependents once their owners request
+    /// `OrphanDependents` propagation.
     async fn run_process_attempt_to_orphan(&mut self, num_workers: usize) {
         for i in 0..num_workers {
             let attempt_to_orphan_rx = self.attempt_to_orphan_rx.clone();
@@ -186,9 +346,12 @@ async fn attempt_to_orphan_item(
     xline_store: &XlineStore,
     owner: &RwLock<Node>,
 ) -> anyhow::Result<()> {
-    let read_guard = owner.read().await;
+    let (identity, dependents_snapshot) = {
+        let guard = owner.read().await;
+        (guard.identity().clone(), guard.dependents().clone())
+    };
 
-    orphan_dependents(xline_store, read_guard.identity(), read_guard.dependents()).await?;
+    orphan_dependents(xline_store, &identity, &dependents_snapshot).await?;
 
     remove_finalizer(xline_store, owner, Finalizer::OrphanDependents).await?;
     Ok(())
@@ -438,7 +601,7 @@ async fn patch_new_owner_references(
         meta.owner_references = Some(new_owner_refs.clone());
     }
     let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(origin_yaml)?;
-    let updated_meta_yaml_value = serde_yaml::to_value(meta)?;
+    let updated_meta_yaml_value = serde_yaml::to_value(&meta)?;
     let meta_map_mut = yaml_value
         .as_mapping_mut()
         .and_then(|m| m.get_mut(serde_yaml::Value::String("metadata".to_string())))
@@ -611,7 +774,7 @@ async fn remove_finalizer(
         finalizers.retain(|f| f != &finalizer);
     }
     let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(&origin_yaml)?;
-    let updated_meta_yaml_value = serde_yaml::to_value(meta)?;
+    let updated_meta_yaml_value = serde_yaml::to_value(&meta)?;
     let meta_map_mut = yaml_value
         .as_mapping_mut()
         .and_then(|m| m.get_mut(serde_yaml::Value::String("metadata".to_string())))

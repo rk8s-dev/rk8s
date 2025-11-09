@@ -31,29 +31,202 @@ pub struct ResourceWatchResponse {
 }
 
 /// Controller trait defines the contract for controllers managed by ControllerManager.
+///
+/// Controllers are used to watch rk8s resource changes (such as Pods, ReplicaSets, etc.)
+/// and execute corresponding processing logic. Each controller must implement this trait and
+/// register with the manager via `ControllerManager::register`.
+///
+/// # Usage
+///
+/// 1. **Implement the Controller trait**: Implement all required methods for your controller struct
+/// 2. **Register the controller**: Use `ControllerManager::register` to register the controller with the manager
+/// 3. **Start watching**: Call `ControllerManager::start_watch` to begin watching resource changes
+///
+/// # Example
+///
+/// ```no_run
+/// use crate::controllers::manager::{Controller, ResourceWatchResponse, WatchEvent};
+/// use common::ResourceKind;
+/// use async_trait::async_trait;
+/// use anyhow::Result;
+///
+/// struct MyController {
+///     // Your controller state
+/// }
+///
+/// #[async_trait]
+/// impl Controller for MyController {
+///     fn name(&self) -> &'static str {
+///         "my-controller"
+///     }
+///
+///     async fn init(&mut self) -> Result<()> {
+///         // Initialization logic, e.g., load config, establish connections, etc.
+///         Ok(())
+///     }
+///
+///     fn watch_resources(&self) -> Vec<ResourceKind> {
+///         // Return the resource types to watch
+///         vec![ResourceKind::Pod, ResourceKind::ReplicaSet]
+///     }
+///
+///     async fn handle_watch_response(&mut self, response: &ResourceWatchResponse) -> Result<()> {
+///         // Handle resource change events
+///         match &response.event {
+///             WatchEvent::Add { yaml } => {
+///                 // Handle resource add event
+///             }
+///             WatchEvent::Update { old_yaml, new_yaml } => {
+///                 // Handle resource update event
+///             }
+///             WatchEvent::Delete { yaml } => {
+///                 // Handle resource delete event
+///             }
+///         }
+///         Ok(())
+///     }
+/// }
+/// ```
 #[async_trait]
 pub trait Controller: Send + Sync + 'static {
-    /// Name used for identifying the controller.
+    /// Returns the controller's name, used for identification and logging.
+    ///
+    /// Each controller's name should be unique. It's recommended to use meaningful names,
+    /// such as "replicaset-controller".
     fn name(&self) -> &'static str;
 
-    /// Initialize the controller.
+    /// Initializes the controller, called once during registration.
+    ///
+    /// You can perform initialization logic here, such as:
+    /// - Loading configuration
+    /// - Initializing internal state
+    /// - Starting background tasks
+    ///
+    /// If initialization fails, the controller will not be registered.
+    ///
+    /// # Default Implementation
+    ///
+    /// The default implementation returns `Ok(())`. If no initialization logic is needed,
+    /// you don't need to override this method.
     async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    /// The resources that the controller needs to watch.
+    /// Returns the list of resource types that the controller needs to watch.
+    ///
+    /// The controller will only receive events for resource types declared in the list. For example:
+    /// - If you return `vec![ResourceKind::Pod]`, it will only receive Pod resource events
+    /// - If you return an empty list, it will not receive any events
+    ///
+    /// # Default Implementation
+    ///
+    /// The default implementation returns an empty list. You need to override this method
+    /// to specify which resources to watch.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// fn watch_resources(&self) -> Vec<ResourceKind> {
+    ///     vec![ResourceKind::Pod, ResourceKind::ReplicaSet]
+    /// }
+    /// ```
     fn watch_resources(&self) -> Vec<ResourceKind> {
         vec![]
     }
 
+    /// Handles resource watch response events.
+    ///
+    /// This method is called when watched resources change (add, update, delete).
+    /// The method executes in a separate async task, supporting concurrent processing of multiple events.
+    ///
+    /// # Parameters
+    ///
+    /// * `response` - Contains the resource kind, resource key, and event details
+    ///
+    /// # Error Handling
+    ///
+    /// If processing fails, it will automatically retry (up to 5 times with exponential backoff).
+    /// If all retries fail, an error log will be recorded, but it won't affect processing of other events.
+    ///
+    /// # Concurrency Control
+    ///
+    /// The number of concurrently processed events is controlled by the `workers` parameter
+    /// in `ControllerManager::register`.
+    ///
+    /// # Default Implementation
+    ///
+    /// The default implementation returns `Ok(())`. You need to override this method
+    /// to implement specific business logic.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use crate::controllers::manager::{ResourceWatchResponse, WatchEvent};
+    ///
+    /// async fn handle_watch_response(&mut self, response: &ResourceWatchResponse) -> Result<()> {
+    ///     log::info!("Received {} resource event: {}", response.kind, response.key);
+    ///     
+    ///     match &response.event {
+    ///         WatchEvent::Add { yaml } => {
+    ///             // Parse yaml and handle add logic
+    ///         }
+    ///         WatchEvent::Update { old_yaml, new_yaml } => {
+    ///             // Compare old and new yaml and handle update logic
+    ///         }
+    ///         WatchEvent::Delete { yaml } => {
+    ///             // Handle delete logic
+    ///         }
+    ///     }
+    ///     
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused)]
-    /// Watch response handler.
     async fn handle_watch_response(&mut self, response: &ResourceWatchResponse) -> Result<()> {
         Ok(())
     }
 }
 
-/// Simple ControllerManager: registers controllers, provides enqueue, and starts watch.
+/// ControllerManager manages the lifecycle and event distribution of multiple controllers.
+///
+/// ControllerManager is responsible for:
+/// - Registering and managing multiple controllers
+/// - Watching Kubernetes resource changes (Pods, ReplicaSets, etc.)
+/// - Distributing resource events to corresponding controllers
+/// - Controlling the number of concurrent processing tasks
+/// - Providing graceful shutdown mechanism
+///
+/// # Workflow
+///
+/// 1. **Create manager**: Use the global singleton `CONTROLLER_MANAGER`
+/// 2. **Register controllers**: Call `register` to register each controller
+/// 3. **Start watching**: Call `start_watch` to begin watching resource changes
+/// 4. **Event processing**: The manager automatically distributes events to corresponding controller queues, controllers process asynchronously
+/// 5. **Shutdown**: Call `shutdown` to gracefully shut down all controllers
+///
+/// # Usage
+///
+/// ```no_run
+/// use crate::controllers::manager::{ControllerManager, CONTROLLER_MANAGER};
+/// use std::sync::Arc;
+///
+/// // Use global singleton
+/// let manager = CONTROLLER_MANAGER.clone();
+///
+/// // Register controller (assuming MyController implements Controller trait)
+/// let controller = Arc::new(RwLock::new(MyController::new()));
+/// manager.clone().register(controller, 10).await?; // 10 concurrent worker threads
+///
+/// // Start watching (requires XlineStore instance)
+/// manager.clone().start_watch(store).await?;
+/// ```
+///
+/// # Features
+///
+/// - **Auto-reconnect**: Automatically reconnects when watch connection is lost, with exponential backoff
+/// - **Concurrency control**: Each controller can configure maximum concurrent processing count
+/// - **Auto-retry**: Automatically retries on processing failure (up to 5 times)
+/// - **Graceful shutdown**: Supports stopping all controllers via `shutdown` method
 pub struct ControllerManager {
     controllers: RwLock<HashMap<String, Arc<RwLock<dyn Controller>>>>,
     // a work queue per controller.
@@ -65,7 +238,16 @@ pub struct ControllerManager {
 }
 
 impl ControllerManager {
-    // Initialize a new ControllerManager.
+    /// Creates a new ControllerManager instance.
+    ///
+    /// It's generally recommended to use the global singleton `CONTROLLER_MANAGER`,
+    /// unless you need multiple independent manager instances.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let manager = Arc::new(ControllerManager::new());
+    /// ```
     pub fn new() -> Self {
         let (stop_tx, _) = watch::channel(false);
         Self {
@@ -76,12 +258,52 @@ impl ControllerManager {
         }
     }
 
-    // Register a controller and spawn a dispatcher task that consumes its work queue.
-    // Each controller gets its own queue, and this function starts the async loop.
+    /// Registers a controller and starts its event processing loop.
+    ///
+    /// This method will:
+    /// 1. Call the controller's `init` method for initialization
+    /// 2. Create a work queue for the controller (capacity 1000)
+    /// 3. Spawn an async task that consumes events from the queue and calls the controller's `handle_watch_response` method
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - Must be `Arc<Self>` because it will be cloned and used in async tasks internally
+    /// * `controller` - The controller to register, must be `Arc<RwLock<dyn Controller>>`
+    /// * `workers` - Maximum number of concurrent processing tasks, uses a semaphore to control the number of simultaneously processed events
+    ///
+    /// # Returns
+    ///
+    /// Returns an error if controller initialization fails. Otherwise returns `Ok(())`.
+    ///
+    /// # Concurrency
+    ///
+    /// Each controller has its own concurrency limit. For example, if `workers = 10`,
+    /// at most 10 events will be processed concurrently. Events exceeding the limit will wait in the queue.
+    ///
+    /// # Error Handling
+    ///
+    /// If `handle_watch_response` processing fails, it will automatically retry (up to 5 times with exponential backoff).
+    /// After retries fail, an error log is recorded, but it won't affect processing of other events.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let manager = CONTROLLER_MANAGER.clone();
+    /// let controller = Arc::new(RwLock::new(MyController::new()));
+    ///
+    /// // Register controller, allowing up to 10 concurrent processing tasks
+    /// manager.register(controller, 10).await?;
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Controllers must be registered before calling `start_watch`
+    /// - Each controller name can only be registered once
+    /// - Controllers will run until `shutdown` is called or the manager is dropped
     pub async fn register(
         self: Arc<Self>,
         controller: Arc<RwLock<dyn Controller>>,
-        workers: usize, // max number of concurrent handle watch response workers
+        workers: usize,
     ) -> Result<()> {
         controller.write().await.init().await?;
         // create workqueue
@@ -163,7 +385,53 @@ impl ControllerManager {
         Ok(())
     }
 
-    /// Start watch for pods and replicasets. Events are broadcast to controllers who need to watch these resources.
+    /// Starts watching Pod and ReplicaSet resources and broadcasts events to controllers that need to watch these resources.
+    ///
+    /// This method will:
+    /// 1. Get a snapshot of all current resources
+    /// 2. Send each resource in the snapshot as an `Add` event to corresponding controllers
+    /// 3. Start continuous watching from the snapshot revision
+    /// 4. Send subsequent `Add`, `Update`, and `Delete` events to corresponding controllers
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - Must be `Arc<Self>` because it will be used in background tasks internally
+    /// * `store` - XlineStore instance for accessing etcd storage
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` immediately. Actual watching happens in background async tasks.
+    ///
+    /// # Auto-reconnect
+    ///
+    /// If the watch connection is lost or errors occur, it will automatically reconnect using an exponential backoff strategy:
+    /// - Initial delay: 100ms
+    /// - Maximum delay: 30s
+    /// - Delay doubles on each retry
+    ///
+    /// # Event Distribution
+    ///
+    /// Only controllers that declared they need to watch the corresponding resource type via `watch_resources` will receive events.
+    /// For example, only controllers whose `watch_resources` returns a list containing `ResourceKind::Pod` will receive Pod events.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let manager = CONTROLLER_MANAGER.clone();
+    /// let store = Arc::new(XlineStore::new(...));
+    ///
+    /// // Register controllers first
+    /// manager.clone().register(my_controller, 10).await?;
+    ///
+    /// // Then start watching
+    /// manager.start_watch(store).await?;
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Must be called after registering all controllers
+    /// - This method spawns two background tasks (watching Pods and ReplicaSets respectively) and does not block
+    /// - Watching will continue until the program exits or `shutdown` is called
     pub async fn start_watch(self: Arc<Self>, store: Arc<XlineStore>) -> Result<()> {
         // pods informer with reconnect loop
         let mgr_p = self.clone();
@@ -420,10 +688,44 @@ impl ControllerManager {
         Ok(())
     }
 
+    /// Gracefully shuts down the ControllerManager, stopping all controller processing loops.
+    ///
+    /// After calling this method:
+    /// - All controller dispatcher tasks will receive a stop signal and exit
+    /// - Events currently being processed will complete, but new events won't be processed
+    /// - Watch tasks will continue running, but events won't be distributed
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// // Shutdown on program exit
+    /// manager.shutdown();
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - This method is idempotent and can be safely called multiple times
+    /// - This method will also be automatically called if the manager is dropped
     pub fn shutdown(&self) {
         let _ = self.stop_tx.send(true);
     }
 
+    /// Gets all queue senders for controllers that need to watch the specified resource kind.
+    ///
+    /// This method iterates through all registered controllers, finds those whose `watch_resources`
+    /// includes the specified resource kind, and returns their queue senders.
+    ///
+    /// # Parameters
+    ///
+    /// * `kind` - The resource kind (e.g., `ResourceKind::Pod`, `ResourceKind::ReplicaSet`)
+    ///
+    /// # Returns
+    ///
+    /// Returns a list of queue senders for all controllers that need to watch this resource kind.
+    ///
+    /// # Internal Use
+    ///
+    /// This method is used internally by `start_watch` to broadcast events to corresponding controllers.
     async fn get_senders_by_kind(
         &self,
         kind: ResourceKind,

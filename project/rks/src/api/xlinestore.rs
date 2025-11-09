@@ -173,10 +173,12 @@ impl XlineStore {
 
     /// Delete a pod from xline.
     pub async fn delete_pod(&self, pod_name: &str) -> Result<()> {
-        let key = format!("/registry/pods/{pod_name}");
-        let mut client = self.client.write().await;
-        client.delete(key, None).await?;
-        Ok(())
+        self.delete_object(
+            ResourceKind::Pod,
+            pod_name,
+            DeletePropagationPolicy::Background,
+        )
+        .await
     }
 
     pub async fn delete_node(&self, node_name: &str) -> Result<()> {
@@ -330,10 +332,12 @@ impl XlineStore {
 
     /// Delete a service from xline.
     pub async fn delete_service(&self, service_name: &str) -> Result<()> {
-        let key = format!("/registry/services/{service_name}");
-        let mut client = self.client.write().await;
-        client.delete(key, None).await?;
-        Ok(())
+        self.delete_object(
+            ResourceKind::Service,
+            service_name,
+            DeletePropagationPolicy::Background,
+        )
+        .await
     }
 
     /// Create a watch on all pods with prefix `/registry/services/`, starting from a given revision.
@@ -384,10 +388,12 @@ impl XlineStore {
 
     /// Delete a replicaset from xline.
     pub async fn delete_replicaset(&self, rs_name: &str) -> Result<()> {
-        let key = format!("/registry/replicasets/{rs_name}");
-        let mut client = self.client.write().await;
-        client.delete(key, None).await?;
-        Ok(())
+        self.delete_object(
+            ResourceKind::ReplicaSet,
+            rs_name,
+            DeletePropagationPolicy::Background,
+        )
+        .await
     }
 
     pub async fn compare_and_set_replicaset_yaml(
@@ -468,7 +474,7 @@ impl XlineStore {
             ResourceKind::Service => self.get_service_yaml(name).await,
             // TODO
             ResourceKind::Deployment => todo!(),
-            ResourceKind::ReplicaSet => todo!(),
+            ResourceKind::ReplicaSet => self.get_replicaset_yaml(name).await,
             ResourceKind::Unknown => Ok(None),
         }
     }
@@ -484,7 +490,7 @@ impl XlineStore {
             ResourceKind::Service => self.insert_service_yaml(name, yaml).await,
             // TODO
             ResourceKind::Deployment => todo!(),
-            ResourceKind::ReplicaSet => todo!(),
+            ResourceKind::ReplicaSet => self.insert_replicaset_yaml(name, yaml).await,
             ResourceKind::Unknown => Ok(()),
         }
     }

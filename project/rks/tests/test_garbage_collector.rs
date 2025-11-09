@@ -1,13 +1,15 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
 use common::{
-    ContainerSpec, ObjectMeta, OwnerReference, PodSpec, PodStatus, PodTask, Resource, ResourceKind,
+    ContainerSpec, LabelSelector, ObjectMeta, OwnerReference, PodSpec, PodStatus, PodTask,
+    PodTemplateSpec, ReplicaSet, ReplicaSetSpec, Resource, ResourceKind,
 };
 use libvault::storage::xline::XlineOptions;
 use rks::{
     api::xlinestore::XlineStore,
-    controllers::{ControllerManager, garbage_collector::GarbageCollector},
+    controllers::{ControllerManager, ReplicaSetController, garbage_collector::GarbageCollector},
     protocol::config::load_config,
 };
 use serial_test::serial;
@@ -84,6 +86,96 @@ fn pod_with_meta(name: &str, uid: Uuid, owners: Option<Vec<OwnerReference>>) -> 
     }
 }
 
+fn replicaset_with_meta(name: &str, uid: Uuid, replicas: i32) -> ReplicaSet {
+    let mut labels = HashMap::new();
+    labels.insert("app".to_string(), name.to_string());
+
+    ReplicaSet {
+        api_version: "apps/v1".to_string(),
+        kind: "ReplicaSet".to_string(),
+        metadata: ObjectMeta {
+            name: name.to_string(),
+            namespace: "default".to_string(),
+            uid,
+            labels: labels.clone(),
+            ..Default::default()
+        },
+        spec: ReplicaSetSpec {
+            replicas,
+            selector: LabelSelector {
+                match_labels: labels.clone(),
+                match_expressions: vec![],
+            },
+            template: PodTemplateSpec {
+                metadata: ObjectMeta {
+                    name: format!("{}-pod-template", name),
+                    namespace: "default".to_string(),
+                    labels: labels.clone(),
+                    ..Default::default()
+                },
+                spec: PodSpec {
+                    node_name: None,
+                    containers: vec![ContainerSpec {
+                        name: "main".to_string(),
+                        image: "busybox:latest".to_string(),
+                        ports: vec![],
+                        args: vec![],
+                        resources: Some(common::ContainerRes {
+                            limits: Some(Resource {
+                                cpu: Some("100m".to_string()),
+                                memory: Some("50Mi".to_string()),
+                            }),
+                        }),
+                    }],
+                    init_containers: vec![],
+                    tolerations: vec![],
+                },
+            },
+        },
+        status: Default::default(),
+    }
+}
+
+async fn wait_for_replicaset_pods(
+    store: &XlineStore,
+    rs_name: &str,
+    expected_count: usize,
+    timeout: Duration,
+) -> Result<Vec<PodTask>> {
+    let start = Instant::now();
+    loop {
+        let pods = store.list_pods().await?;
+        let matching: Vec<PodTask> = pods
+            .into_iter()
+            .filter(|p| {
+                p.metadata
+                    .owner_references
+                    .as_ref()
+                    .map(|refs| {
+                        refs.iter()
+                            .any(|o| o.kind == ResourceKind::ReplicaSet && o.name == rs_name)
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        if matching.len() == expected_count {
+            return Ok(matching);
+        }
+
+        if Instant::now().duration_since(start) > timeout {
+            anyhow::bail!(
+                "timeout waiting for {} pods owned by ReplicaSet {} (found {})",
+                expected_count,
+                rs_name,
+                matching.len()
+            );
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn clean_store(store: &XlineStore) -> Result<()> {
     let pods = store
         .list_pods()
@@ -94,6 +186,17 @@ async fn clean_store(store: &XlineStore) -> Result<()> {
 
     for pod in pods {
         store.delete_pod(&pod.metadata.name).await?;
+    }
+
+    let replicasets = store
+        .list_replicasets()
+        .await?
+        .into_iter()
+        .filter(|rs| rs.metadata.name.starts_with("garbage-collector-test"))
+        .collect::<Vec<_>>();
+
+    for rs in replicasets {
+        store.delete_replicaset(&rs.metadata.name).await?;
     }
     Ok(())
 }
@@ -107,6 +210,23 @@ async fn setup_gc(
     mgr.clone().start_watch(store.clone()).await?;
     sleep(Duration::from_millis(500)).await;
     Ok((mgr, gc))
+}
+
+async fn setup_gc_with_rs(
+    store: Arc<XlineStore>,
+) -> Result<(
+    Arc<ControllerManager>,
+    Arc<RwLock<GarbageCollector>>,
+    Arc<RwLock<ReplicaSetController>>,
+)> {
+    let mgr = Arc::new(ControllerManager::new());
+    let gc = Arc::new(RwLock::new(GarbageCollector::new(store.clone())));
+    let rs_ctrl = Arc::new(RwLock::new(ReplicaSetController::new(store.clone())));
+    mgr.clone().register(gc.clone(), 4).await?;
+    mgr.clone().register(rs_ctrl.clone(), 2).await?;
+    mgr.clone().start_watch(store.clone()).await?;
+    sleep(Duration::from_millis(500)).await;
+    Ok((mgr, gc, rs_ctrl))
 }
 
 fn yaml_contains_finalizer(yaml: &str, finalizer: &str) -> Result<bool> {
@@ -1161,6 +1281,419 @@ async fn test_gc_three_level_cascade_on_owner_delete() -> Result<()> {
         }
         if Instant::now() >= dependent2_deadline {
             panic!("dependent2 pod {dependent2_name} was not deleted after owner removal");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    clean_store(&store).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_gc_replicaset_background_cascade_deletion() -> Result<()> {
+    let store = get_store().await;
+    if store.is_none() {
+        return Ok(());
+    }
+    let store = store.unwrap();
+    clean_store(&store).await?;
+
+    let rs_uid = Uuid::new_v4();
+    let rs_name = format!("garbage-collector-test-rs-background-{}", rs_uid);
+
+    let rs = replicaset_with_meta(&rs_name, rs_uid, 2);
+    let rs_yaml = serde_yaml::to_string(&rs)?;
+    store.insert_replicaset_yaml(&rs_name, &rs_yaml).await?;
+
+    let (_mgr, _gc, _rs_ctrl) = setup_gc_with_rs(store.clone()).await?;
+
+    // 等待 ReplicaSet 创建 Pod
+    let pods = wait_for_replicaset_pods(&store, &rs_name, 2, Duration::from_secs(10)).await?;
+    assert_eq!(pods.len(), 2, "ReplicaSet should create 2 pods");
+
+    // 删除 ReplicaSet (Background 策略)
+    store
+        .delete_object(
+            ResourceKind::ReplicaSet,
+            &rs_name,
+            common::DeletePropagationPolicy::Background,
+        )
+        .await?;
+
+    // 验证 ReplicaSet 被删除
+    assert!(store.get_replicaset_yaml(&rs_name).await?.is_none());
+
+    // 验证 Pod 被级联删除
+    let pods_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let remaining_pods =
+            wait_for_replicaset_pods(&store, &rs_name, 0, Duration::from_millis(100))
+                .await
+                .unwrap_or_default();
+        if remaining_pods.is_empty() {
+            break;
+        }
+        if Instant::now() >= pods_deadline {
+            panic!("pods owned by ReplicaSet {rs_name} were not deleted under background policy");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    clean_store(&store).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_gc_replicaset_foreground_deletion_clears_finalizer() -> Result<()> {
+    let store = get_store().await;
+    if store.is_none() {
+        return Ok(());
+    }
+    let store = store.unwrap();
+    clean_store(&store).await?;
+
+    let rs_uid = Uuid::new_v4();
+    let rs_name = format!("garbage-collector-test-rs-foreground-{}", rs_uid);
+
+    let rs = replicaset_with_meta(&rs_name, rs_uid, 2);
+    let rs_yaml = serde_yaml::to_string(&rs)?;
+    store.insert_replicaset_yaml(&rs_name, &rs_yaml).await?;
+
+    let (_mgr, gc, _rs_ctrl) = setup_gc_with_rs(store.clone()).await?;
+
+    // 等待 ReplicaSet 创建 Pod
+    let pods = wait_for_replicaset_pods(&store, &rs_name, 2, Duration::from_secs(10)).await?;
+    assert_eq!(pods.len(), 2, "ReplicaSet should create 2 pods");
+
+    // 等待 ReplicaSet 被添加到依赖图中并被观察
+    let uid_to_node_table = {
+        let gc_guard = gc.read().await;
+        gc_guard.dependency_graph_builder.uid_to_node_table.clone()
+    };
+    let rs_observed_deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Some(rs_node) = uid_to_node_table.get(&rs_uid).await {
+            let rs_guard = rs_node.read().await;
+            if rs_guard.is_observed() {
+                break;
+            }
+        }
+        if Instant::now() >= rs_observed_deadline {
+            panic!("ReplicaSet {rs_name} was not observed in dependency graph");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 删除 ReplicaSet (Foreground 策略)
+    store
+        .delete_object(
+            ResourceKind::ReplicaSet,
+            &rs_name,
+            common::DeletePropagationPolicy::Foreground,
+        )
+        .await?;
+
+    // 验证 Pod 被删除
+    let pods_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let remaining_pods =
+            wait_for_replicaset_pods(&store, &rs_name, 0, Duration::from_millis(100))
+                .await
+                .unwrap_or_default();
+        if remaining_pods.is_empty() {
+            break;
+        }
+        if Instant::now() >= pods_deadline {
+            panic!("pods owned by ReplicaSet {rs_name} were not deleted under foreground policy");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 验证 finalizer 被清除
+    let finalizer_deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match store.get_replicaset_yaml(&rs_name).await? {
+            None => break,
+            Some(yaml) => {
+                if !yaml_contains_finalizer(&yaml, "DeletingDependents")? {
+                    break;
+                }
+            }
+        }
+        if Instant::now() >= finalizer_deadline {
+            panic!("DeletingDependents finalizer still present on ReplicaSet {rs_name}");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    clean_store(&store).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_gc_replicaset_orphan_policy_removes_owner_reference() -> Result<()> {
+    let store = get_store().await;
+    if store.is_none() {
+        return Ok(());
+    }
+    let store = store.unwrap();
+    clean_store(&store).await?;
+
+    let rs_uid = Uuid::new_v4();
+    let rs_name = format!("garbage-collector-test-rs-orphan-{}", rs_uid);
+
+    let rs = replicaset_with_meta(&rs_name, rs_uid, 2);
+    let rs_yaml = serde_yaml::to_string(&rs)?;
+    store.insert_replicaset_yaml(&rs_name, &rs_yaml).await?;
+
+    let (_mgr, gc, _rs_ctrl) = setup_gc_with_rs(store.clone()).await?;
+
+    // 等待 ReplicaSet 创建 Pod
+    let pods = wait_for_replicaset_pods(&store, &rs_name, 2, Duration::from_secs(10)).await?;
+    assert_eq!(pods.len(), 2, "ReplicaSet should create 2 pods");
+    let pod_name = &pods[0].metadata.name;
+
+    // 等待 ReplicaSet 被添加到依赖图中并被观察
+    let uid_to_node_table = {
+        let gc_guard = gc.read().await;
+        gc_guard.dependency_graph_builder.uid_to_node_table.clone()
+    };
+    let rs_observed_deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Some(rs_node) = uid_to_node_table.get(&rs_uid).await {
+            let rs_guard = rs_node.read().await;
+            if rs_guard.is_observed() {
+                break;
+            }
+        }
+        if Instant::now() >= rs_observed_deadline {
+            panic!("ReplicaSet {rs_name} was not observed in dependency graph");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 删除 ReplicaSet (Orphan 策略)
+    store
+        .delete_object(
+            ResourceKind::ReplicaSet,
+            &rs_name,
+            common::DeletePropagationPolicy::Orphan,
+        )
+        .await?;
+
+    // 验证 Pod 的 owner reference 被移除
+    let clear_owner_reference_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(yaml) = store.get_pod_yaml(pod_name).await? {
+            if !yaml_contains_owner_reference(&yaml, rs_uid)? {
+                break;
+            }
+        } else {
+            panic!("pod {pod_name} unexpectedly deleted during orphan policy test");
+        }
+
+        if Instant::now() >= clear_owner_reference_deadline {
+            panic!("owner reference for ReplicaSet {rs_uid} still present on pod {pod_name}");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 验证 finalizer 被清除
+    let clear_finalizer_deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match store.get_replicaset_yaml(&rs_name).await? {
+            None => break,
+            Some(yaml) => {
+                if !yaml_contains_finalizer(&yaml, "OrphanDependents")? {
+                    break;
+                }
+            }
+        }
+
+        if Instant::now() >= clear_finalizer_deadline {
+            panic!("OrphanDependents finalizer still present on ReplicaSet {rs_name}");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 验证 Pod 仍然存在（没有被删除）
+    assert!(
+        store.get_pod(pod_name).await?.is_some(),
+        "pod {pod_name} should still exist after orphan policy"
+    );
+
+    clean_store(&store).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_gc_replicaset_dependency_graph_sync() -> Result<()> {
+    let store = get_store().await;
+    if store.is_none() {
+        return Ok(());
+    }
+    let store = store.unwrap();
+    clean_store(&store).await?;
+
+    let rs_uid = Uuid::new_v4();
+    let rs_name = format!("garbage-collector-test-rs-graph-{}", rs_uid);
+
+    let rs = replicaset_with_meta(&rs_name, rs_uid, 2);
+    let rs_yaml = serde_yaml::to_string(&rs)?;
+    store.insert_replicaset_yaml(&rs_name, &rs_yaml).await?;
+
+    let (_mgr, gc, _rs_ctrl) = setup_gc_with_rs(store.clone()).await?;
+
+    // 等待 ReplicaSet 创建 Pod
+    let pods = wait_for_replicaset_pods(&store, &rs_name, 2, Duration::from_secs(10)).await?;
+    assert_eq!(pods.len(), 2, "ReplicaSet should create 2 pods");
+
+    // 验证所有 Pod 都有正确的 owner reference
+    for pod in &pods {
+        let pod_yaml = store.get_pod_yaml(&pod.metadata.name).await?;
+        assert!(pod_yaml.is_some(), "Pod {} should exist", pod.metadata.name);
+        let pod_yaml = pod_yaml.unwrap();
+        assert!(
+            yaml_contains_owner_reference(&pod_yaml, rs_uid)?,
+            "Pod {} should have owner reference to ReplicaSet {}",
+            pod.metadata.name,
+            rs_uid
+        );
+    }
+
+    // 验证依赖图包含 ReplicaSet 和 Pod
+    let uid_to_node_table = {
+        let gc_guard = gc.read().await;
+        gc_guard.dependency_graph_builder.uid_to_node_table.clone()
+    };
+
+    let graph_ready_deadline = Instant::now() + Duration::from_secs(15);
+    let pod_uids: Vec<Uuid> = pods.iter().map(|p| p.metadata.uid).collect();
+    loop {
+        let rs_node_exists = uid_to_node_table.contains_key(&rs_uid).await;
+        let mut all_pods_in_graph = true;
+        for uid in &pod_uids {
+            if !uid_to_node_table.contains_key(uid).await {
+                all_pods_in_graph = false;
+                break;
+            }
+        }
+
+        if rs_node_exists && all_pods_in_graph {
+            break;
+        }
+        if Instant::now() >= graph_ready_deadline {
+            panic!("dependency graph was not populated for ReplicaSet and its pods");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 验证所有 Pod 节点都有正确的 owner reference
+    for pod_uid in &pod_uids {
+        let pod_node = uid_to_node_table
+            .get(pod_uid)
+            .await
+            .expect("Pod node missing");
+        let pod_guard = pod_node.read().await;
+        let has_rs_owner = pod_guard
+            .owners()
+            .iter()
+            .any(|o| o.uid == rs_uid && o.kind == ResourceKind::ReplicaSet);
+        assert!(
+            has_rs_owner,
+            "Pod {} should have owner reference to ReplicaSet {}",
+            pod_uid, rs_uid
+        );
+    }
+
+    // 等待 ReplicaSet 节点从虚拟节点转换为真实节点（如果它最初是虚拟的）
+    let rs_observed_deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Some(rs_node) = uid_to_node_table.get(&rs_uid).await {
+            let rs_guard = rs_node.read().await;
+            if rs_guard.is_observed() {
+                break;
+            }
+        }
+        if Instant::now() >= rs_observed_deadline {
+            panic!("ReplicaSet node was not observed in dependency graph");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 验证 ReplicaSet 节点有正确的 dependents
+    // 等待所有 Pod 都被添加到 ReplicaSet 的 dependents 中
+    let dependents_ready_deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Some(rs_node) = uid_to_node_table.get(&rs_uid).await {
+            let rs_guard = rs_node.read().await;
+            let dependents_count = rs_guard.dependents_length();
+            if dependents_count == 2 {
+                // 验证所有 Pod UID 都在 dependents 中
+                let mut found_pods = 0;
+                for dep in rs_guard.dependents() {
+                    let dep_uid = dep.read().await.identity().uid;
+                    if pod_uids.contains(&dep_uid) {
+                        found_pods += 1;
+                    }
+                }
+                if found_pods == 2 {
+                    break;
+                }
+            }
+        }
+        if Instant::now() >= dependents_ready_deadline {
+            let actual_count = if let Some(rs_node) = uid_to_node_table.get(&rs_uid).await {
+                rs_node.read().await.dependents_length()
+            } else {
+                0
+            };
+            // 打印调试信息
+            let mut dependent_uids = Vec::new();
+            if let Some(rs_node) = uid_to_node_table.get(&rs_uid).await {
+                let rs_guard = rs_node.read().await;
+                for dep in rs_guard.dependents() {
+                    dependent_uids.push(dep.read().await.identity().uid);
+                }
+            }
+            panic!(
+                "ReplicaSet node should have 2 dependents, but has {}. Dependent UIDs: {:?}, Expected Pod UIDs: {:?}",
+                actual_count, dependent_uids, pod_uids
+            );
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 删除 ReplicaSet
+    store
+        .delete_object(
+            ResourceKind::ReplicaSet,
+            &rs_name,
+            common::DeletePropagationPolicy::Background,
+        )
+        .await?;
+
+    // 验证依赖图被清理
+    let graph_cleanup_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let rs_missing = !uid_to_node_table.contains_key(&rs_uid).await;
+        let mut pods_missing = true;
+        for uid in &pod_uids {
+            if uid_to_node_table.contains_key(uid).await {
+                pods_missing = false;
+                break;
+            }
+        }
+
+        if rs_missing && pods_missing {
+            break;
+        }
+        if Instant::now() >= graph_cleanup_deadline {
+            panic!("dependency graph retained nodes for deleted ReplicaSet and pods");
         }
         sleep(Duration::from_millis(100)).await;
     }

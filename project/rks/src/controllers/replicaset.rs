@@ -98,6 +98,14 @@ impl ReplicaSetController {
 
     /// Reconcile given ReplicaSet: ensure desired number of pods exist, update status.
     pub async fn reconcile(&self, rs: &mut ReplicaSet) -> Result<()> {
+        if rs.metadata.deletion_timestamp.is_some() {
+            log::debug!(
+                "ReplicaSet {} is being deleted, skip reconcile",
+                rs.metadata.name
+            );
+            return Ok(());
+        }
+
         let pods = self.store.list_pods().await?;
         let mut matching: Vec<PodTask> = pods
             .into_iter()
@@ -150,6 +158,10 @@ impl ReplicaSetController {
                 let name =
                     Self::generate_unique_name(&rs.metadata.name, self.store.as_ref()).await?;
                 pod.metadata.name = name.clone();
+                // generate a new unique UID for each Pod
+                pod.metadata.uid = uuid::Uuid::new_v4();
+                // set creation timestamp
+                pod.metadata.creation_timestamp = Some(chrono::Utc::now());
                 // ensure selector labels present on pod
                 for (k, v) in rs.spec.selector.match_labels.iter() {
                     pod.metadata.labels.insert(k.clone(), v.clone());

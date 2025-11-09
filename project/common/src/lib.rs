@@ -41,18 +41,14 @@ pub struct ObjectMeta {
     #[serde(default)]
     pub annotations: HashMap<String, String>,
     #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_references: Option<Vec<OwnerReference>>,
     #[serde(default)]
     #[serde(with = "chrono::serde::ts_seconds_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub creation_timestamp: Option<DateTime<Utc>>,
     #[serde(default)]
     #[serde(with = "chrono::serde::ts_seconds_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub deletion_timestamp: Option<DateTime<Utc>>,
     #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub finalizers: Option<Vec<Finalizer>>,
 }
 
@@ -111,6 +107,13 @@ impl From<&str> for ResourceKind {
     }
 }
 
+/// Owner reference that establishes ownership relationships between resources.
+///
+/// This is a core mechanism for managing resource dependencies. The `GarbageCollector`
+/// uses `OwnerReference` to implement cascading deletion: when an owner resource is deleted,
+/// the garbage collector automatically handles the deletion of dependent resources based on
+/// the deletion propagation policy. It tracks owner-dependant relationships through these
+/// references.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone, Default)]
 pub struct OwnerReference {
     #[serde(rename = "apiVersion")]
@@ -123,6 +126,10 @@ pub struct OwnerReference {
     pub block_owner_deletion: Option<bool>,
 }
 
+/// Finalizer used to perform cleanup operations when a resource is deleted.
+///
+/// When a resource contains finalizers, it will not be immediately deleted even if a delete
+/// request is received. Instead, it waits until all finalizers are removed before actual deletion.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum Finalizer {
     DeletingDependents,
@@ -150,6 +157,18 @@ impl fmt::Display for Finalizer {
     }
 }
 
+/// Delete propagation policy for cascading deletion.
+///
+/// When deleting an owner resource, you can specify how its dependents should be handled:
+///
+/// - **Foreground**: Mark the owner for deletion, but don't delete it until all its dependents
+///   are deleted. The owner gets a `DeletingDependents` finalizer and waits for all blocking
+///   dependents to be removed.
+/// - **Background**: Delete the owner immediately, and let the garbage collector delete its
+///   dependents in the background. This is the fastest deletion method.
+/// - **Orphan**: Delete the owner, but leave dependents as orphaned objects (remove owner
+///   references from dependents). The owner gets an `OrphanDependents` finalizer and
+///   will be deleted after all dependents' owner references are removed.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum DeletePropagationPolicy {
     Foreground,
