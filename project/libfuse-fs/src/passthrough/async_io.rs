@@ -827,17 +827,20 @@ impl Filesystem for PassthroughFs {
             //
             // At FUSE level, we cannot reliably distinguish these cases because VFS
             // converts both to actual timestamps. We use a heuristic:
-            // - If nsec == 0 and timestamp is in the past: likely utime(&times)
+            // - If both nsec == 0 and timestamp is in the past: likely utime(&times)
             // - Otherwise: likely utime(NULL) which gets current time with nsec precision
 
             let atime_ts = set_attr.atime.unwrap();
             let mtime_ts = set_attr.mtime.unwrap();
 
+            // SAFETY: libc::time with null pointer is a read-only syscall that always
+            // succeeds and doesn't modify memory.
             let now = unsafe { libc::time(std::ptr::null_mut()) };
 
-            // Heuristic: utime(&times) typically sets whole seconds (nsec=0) to past times
-            // utime(NULL) sets current time which usually has non-zero nsec
-            let is_utime_times = (atime_ts.nsec == 0 || mtime_ts.nsec == 0)
+            // Heuristic: utime(&times) typically sets whole seconds (both nsec=0) to past times.
+            // utime(NULL) sets current time which usually has non-zero nsec.
+            // Both conditions must be satisfied to avoid false positives.
+            let is_utime_times = (atime_ts.nsec == 0 && mtime_ts.nsec == 0)
                 && (atime_ts.sec < now || mtime_ts.sec < now);
 
             let st = stat_fd(&file, None)?;
@@ -860,7 +863,6 @@ impl Filesystem for PassthroughFs {
                     }
                 }
             }
-
             let mut tvs: [libc::timespec; 2] = [
                 libc::timespec {
                     tv_sec: 0,
@@ -1946,7 +1948,7 @@ impl Filesystem for PassthroughFs {
         }
     }
 
-    /// copy a range of data from one file to another using the copy_file_range system call.
+    /// Copy a range of data from one file to another using the copy_file_range system call.
     /// This can improve performance by reducing data copying between userspace and kernel.
     #[allow(clippy::too_many_arguments)]
     async fn copy_file_range(
@@ -1969,26 +1971,25 @@ impl Filesystem for PassthroughFs {
         let fd_in = data_in.borrow_fd().as_raw_fd();
         let fd_out = data_out.borrow_fd().as_raw_fd();
 
-        // Seek to the requested offsets
-        unsafe {
-            if libc::lseek64(fd_in, offset_in as i64, libc::SEEK_SET) < 0 {
-                return Err(io::Error::last_os_error().into());
-            }
-            if libc::lseek64(fd_out, offset_out as i64, libc::SEEK_SET) < 0 {
-                return Err(io::Error::last_os_error().into());
-            }
-        }
+        // Convert offsets to i64 for the system call
+        let mut off_in = offset_in as i64;
+        let mut off_out = offset_out as i64;
 
-        // Call the copy_file_range system call
-        // Use NULL for offsets to copy from/to current file positions
-        // Safe because this doesn't modify any memory and we check the return value.
+        // Convert length to usize, checking for overflow on 32-bit systems
+        let len: usize = length
+            .try_into()
+            .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+
+        // SAFETY: copy_file_range is a read-only operation that doesn't modify memory
+        // outside the kernel. We pass valid file descriptors and pointers to offset values.
+        // The syscall uses the offset pointers atomically without modifying file positions.
         let res = unsafe {
             libc::copy_file_range(
                 fd_in,
-                std::ptr::null_mut(), // NULL means use current position
+                &mut off_in as *mut i64, // Pass offset pointer directly
                 fd_out,
-                std::ptr::null_mut(), // NULL means use current position
-                length as usize,
+                &mut off_out as *mut i64, // Pass offset pointer directly
+                len,
                 0, // flags
             )
         };

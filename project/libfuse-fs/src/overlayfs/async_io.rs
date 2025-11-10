@@ -450,10 +450,10 @@ impl Filesystem for OverlayFs {
         }
     }
 
-    /// copy a range of data from one file to another. This can improve performance because it
-    /// reduce data copy: in normal, data will copy from FUSE server to kernel, then to user-space,
-    /// then to kernel, finally send back to FUSE server. By implement this method, data will only
-    /// copy in FUSE server internal.
+    /// Copy a range of data from one file to another. This can improve performance because it
+    /// reduces data copying: normally, data will be copied from FUSE server to kernel, then to
+    /// user-space, then to kernel, and finally sent back to FUSE server. By implementing this
+    /// method, data will only be copied internally within the FUSE server.
     #[allow(clippy::too_many_arguments)]
     async fn copy_file_range(
         &self,
@@ -503,7 +503,6 @@ impl Filesystem for OverlayFs {
             )
             .await
     }
-
     /// get filesystem statistics.
     async fn statfs(&self, req: Request, inode: Inode) -> Result<ReplyStatFs> {
         self.do_statvfs(req, inode).await.map_err(|e| e.into())
