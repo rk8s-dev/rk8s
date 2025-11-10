@@ -862,7 +862,7 @@ impl Filesystem for PassthroughFs {
                     let has_user_write = st.st_uid == uid && st.st_mode & 0o200 != 0;
                     let has_group_write = st.st_gid == gid && st.st_mode & 0o020 != 0;
                     let has_other_write = st.st_mode & 0o002 != 0;
-                    
+
                     if !has_user_write && !has_group_write && !has_other_write {
                         return Err(io::Error::from_raw_os_error(libc::EPERM).into());
                     }
