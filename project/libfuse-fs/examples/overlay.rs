@@ -128,6 +128,10 @@ async fn main() -> Result<(), std::io::Error> {
         upperdir: args.upperdir,
         mapping: None::<&str>,
         privileged: true,
+        // SECURITY: allow_other permits all users to access this filesystem.
+        // This is required for testing with xfstests which uses different UIDs.
+        // In production, set to false unless you specifically need multi-user access
+        // and have proper permission checks in place.
         allow_other: true,
     })
     .await;
