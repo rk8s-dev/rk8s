@@ -821,6 +821,46 @@ impl Filesystem for PassthroughFs {
         }
 
         if set_attr.atime.is_some() && set_attr.mtime.is_some() {
+            // POSIX utime() permission rules:
+            // - utime(NULL): requires owner OR write permission
+            // - utime(&times): requires owner only
+            //
+            // At FUSE level, we cannot reliably distinguish these cases because VFS
+            // converts both to actual timestamps. We use a heuristic:
+            // - If nsec == 0 and timestamp is in the past: likely utime(&times)
+            // - Otherwise: likely utime(NULL) which gets current time with nsec precision
+
+            let atime_ts = set_attr.atime.unwrap();
+            let mtime_ts = set_attr.mtime.unwrap();
+
+            let now = unsafe { libc::time(std::ptr::null_mut()) };
+
+            // Heuristic: utime(&times) typically sets whole seconds (nsec=0) to past times
+            // utime(NULL) sets current time which usually has non-zero nsec
+            let is_utime_times = (atime_ts.nsec == 0 || mtime_ts.nsec == 0)
+                && (atime_ts.sec < now || mtime_ts.sec < now);
+
+            let st = stat_fd(&file, None)?;
+            let uid = self.cfg.mapping.get_uid(req.uid);
+            let gid = self.cfg.mapping.get_gid(req.gid);
+
+            let is_owner = st.st_uid == uid;
+
+            if !is_owner {
+                if is_utime_times {
+                    // utime(&times): only owner allowed
+                    return Err(io::Error::from_raw_os_error(libc::EPERM).into());
+                } else {
+                    // utime(NULL): check for write permission
+                    let has_write_perm = (st.st_uid == uid && st.st_mode & 0o200 != 0)
+                        || (st.st_gid == gid && st.st_mode & 0o020 != 0)
+                        || (st.st_mode & 0o002 != 0);
+                    if !has_write_perm {
+                        return Err(io::Error::from_raw_os_error(libc::EPERM).into());
+                    }
+                }
+            }
+
             let mut tvs: [libc::timespec; 2] = [
                 libc::timespec {
                     tv_sec: 0,
@@ -831,8 +871,10 @@ impl Filesystem for PassthroughFs {
                     tv_nsec: libc::UTIME_OMIT,
                 },
             ];
-            tvs[0].tv_sec = set_attr.atime.unwrap().sec;
-            tvs[1].tv_sec = set_attr.mtime.unwrap().sec;
+            tvs[0].tv_sec = atime_ts.sec;
+            tvs[0].tv_nsec = atime_ts.nsec as i64;
+            tvs[1].tv_sec = mtime_ts.sec;
+            tvs[1].tv_nsec = mtime_ts.nsec as i64;
 
             // Safe because this doesn't modify any memory and we check the return value.
             let res = match data {
@@ -1901,6 +1943,60 @@ impl Filesystem for PassthroughFs {
             } else {
                 Ok(ReplyLSeek { offset: res as u64 })
             }
+        }
+    }
+
+    /// copy a range of data from one file to another using the copy_file_range system call.
+    /// This can improve performance by reducing data copying between userspace and kernel.
+    #[allow(clippy::too_many_arguments)]
+    async fn copy_file_range(
+        &self,
+        _req: Request,
+        inode_in: Inode,
+        fh_in: u64,
+        offset_in: u64,
+        inode_out: Inode,
+        fh_out: u64,
+        offset_out: u64,
+        length: u64,
+        _flags: u64,
+    ) -> Result<ReplyCopyFileRange> {
+        // Get the handle data for both source and destination files
+        let data_in = self.handle_map.get(fh_in, inode_in).await?;
+        let data_out = self.handle_map.get(fh_out, inode_out).await?;
+
+        // Get file descriptors
+        let fd_in = data_in.borrow_fd().as_raw_fd();
+        let fd_out = data_out.borrow_fd().as_raw_fd();
+
+        // Seek to the requested offsets
+        unsafe {
+            if libc::lseek64(fd_in, offset_in as i64, libc::SEEK_SET) < 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+            if libc::lseek64(fd_out, offset_out as i64, libc::SEEK_SET) < 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+        }
+
+        // Call the copy_file_range system call
+        // Use NULL for offsets to copy from/to current file positions
+        // Safe because this doesn't modify any memory and we check the return value.
+        let res = unsafe {
+            libc::copy_file_range(
+                fd_in,
+                std::ptr::null_mut(), // NULL means use current position
+                fd_out,
+                std::ptr::null_mut(), // NULL means use current position
+                length as usize,
+                0, // flags
+            )
+        };
+
+        if res < 0 {
+            Err(io::Error::last_os_error().into())
+        } else {
+            Ok(ReplyCopyFileRange { copied: res as u64 })
         }
     }
 }
