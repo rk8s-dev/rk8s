@@ -37,7 +37,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tabwriter::TabWriter;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 pub mod config;
 
@@ -228,7 +228,7 @@ impl ContainerRunner {
             // exist
             true => {
                 self.start_container(None)?;
-                println!("Container: {id} runs successfully!");
+                info!("Container: {id} runs successfully!");
                 Ok(())
             }
             // not exist
@@ -236,7 +236,7 @@ impl ContainerRunner {
                 // create container
                 let CreateContainerResponse { container_id } = self.create_container()?;
                 self.start_container(None)?;
-                println!("Container: {container_id} runs successfully!");
+                info!("Container: {container_id} runs successfully!");
                 Ok(())
             }
         }
@@ -344,7 +344,8 @@ impl ContainerRunner {
         }
         let bundle_dir = Path::new(&bundle_path);
         if !bundle_dir.exists() {
-            println!("current root: {:?}", env::current_dir()?);
+            let current_root = env::current_dir()?;
+            debug!("current root: {:?}", current_root);
             return Err(anyhow!("Bundle directory does not exist: {:?}", bundle_dir));
         }
 
@@ -522,14 +523,14 @@ pub fn run_container(path: &str, volumes: Option<Vec<String>>) -> Result<(), any
             if runner.load_container()?.can_start() {
                 runner.start_container(None)?;
             }
-            println!(
+            warn!(
                 "Container: {id} can not start, status: {}! Creating a new one...",
                 runner.load_container()?.status()
             );
             delete_container(&id)?;
             let CreateContainerResponse { container_id } = runner.create_container()?;
             runner.start_container(None)?;
-            println!("Container: {container_id} runs successfully!");
+            info!("Container: {container_id} runs successfully!");
             Ok(())
         }
         // not exist
@@ -537,7 +538,7 @@ pub fn run_container(path: &str, volumes: Option<Vec<String>>) -> Result<(), any
             // create container
             let CreateContainerResponse { container_id } = runner.create_container()?;
             runner.start_container(None)?;
-            println!("Container: {container_id} runs successfully!");
+            info!("Container: {container_id} runs successfully!");
             Ok(())
         }
     }
@@ -601,7 +602,7 @@ pub fn remove_container_network(pid: Pid) -> Result<()> {
 pub fn start_container(container_id: &str) -> Result<()> {
     let mut runner = ContainerRunner::from_container_id(container_id, None)?;
     runner.start_container(Some(container_id.to_string()))?;
-    println!("container {container_id} start successfully");
+    info!("container {container_id} start successfully");
     Ok(())
 }
 

@@ -21,7 +21,7 @@ bincode = "1.3.3"
 futures = "0.3.31"       
 anyhow = "1.0.98"       
 rcgen = "0.12.1"
-etcd-client = "0.16.1"
+etcd-client = { version = "0.16.1", features = ["tls"] }
 ipnetwork = "0.17"
 serde_json = "1.0.107"
 chrono = {version = "0.4.41", features = ["serde"]}
@@ -47,6 +47,14 @@ time = "0.3"
 hickory-server = { version = "0.25.2", features = ["resolver"] }
 hickory-proto = "0.25.2"
 hickory-resolver = "0.25.2"
+libvault = { path = "../libvault" }
+derive_more = { version = "2.0.0", features = ["deref", "deref_mut"] }
+rustls-pemfile = "2.2.0"
+base64 = "0.20.0"
+humantime = "2.3.0"
+either = "1.15.0"
+axum = "0.8.6"
+reqwest = "0.12.24"
 iptables = "0.6"
 
 [dev-dependencies]

@@ -26,7 +26,9 @@ rust_library(
     features = [
         "alloc",
         "default",
+        "zeroize_derive",
     ],
     rustc_flags = ["@$(location :zeroize-manifest[env_flags])"],
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/zeroize_derive/1.4.2:zeroize_derive"],
 )

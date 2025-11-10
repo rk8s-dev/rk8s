@@ -2,8 +2,8 @@ use common::{
     ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec, NodeStatus,
     ObjectMeta, PodSpec, PodStatus, PodTask, Resource,
 };
-//use libnetwork::config::validate_network_config;
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
+use libvault::storage::xline::XlineOptions;
 use serial_test::serial;
 use std::{collections::HashMap, sync::Arc};
 
@@ -21,16 +21,20 @@ fn get_xline_endpoints() -> Vec<String> {
     });
 
     match load_config(&config_path) {
-        Ok(config) => config.xline_config.endpoints,
+        Ok(config) => config.xline_config.endpoints.clone(),
         Err(_) => vec!["127.0.0.1:2379".to_string()], // fallback
     }
 }
 
-async fn get_store() -> Option<XlineStore> {
+fn build_xline_options() -> XlineOptions {
     let endpoints = get_xline_endpoints();
-    let endpoints_str: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
+    XlineOptions::new(endpoints)
+}
 
-    let xline_store = match XlineStore::new(&endpoints_str).await {
+async fn get_store() -> Option<XlineStore> {
+    let option = build_xline_options();
+
+    let xline_store = match XlineStore::new(option).await {
         Ok(store) => store,
         Err(_) => {
             println!("Skipping test - xline not available");
@@ -124,15 +128,12 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
 }
 
 async fn run_scheduler(xline_store: Arc<XlineStore>) -> Result<()> {
-    let endpoints = get_xline_endpoints();
-    let endpoints_str: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
-
     // Create and run the actual Scheduler
     let scoring_strategy = ScoringStrategy::LeastAllocated;
     let plugins = Plugins::default();
 
     let scheduler = Scheduler::try_new(
-        &endpoints_str,
+        build_xline_options(),
         xline_store.clone(),
         scoring_strategy,
         plugins,
@@ -178,13 +179,11 @@ async fn test_scheduler_creation_with_xline() {
         return;
     }
     let xline_store = xline_store.unwrap();
-    let endpoints = get_xline_endpoints();
-    let endpoints_str: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
     let scoring_strategy = ScoringStrategy::LeastAllocated;
     let plugins = Plugins::default();
 
     let result = Scheduler::try_new(
-        &endpoints_str,
+        build_xline_options(),
         Arc::new(xline_store),
         scoring_strategy,
         plugins,

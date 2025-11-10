@@ -1,8 +1,8 @@
-//! 通用工具：将文件范围按 chunk 进行拆分。
+//! Utility helpers for splitting file ranges into chunk-local spans.
 
 use super::chunk::ChunkLayout;
 
-/// 文件范围在某个 chunk 内的一段。
+/// A range within a chunk for a portion of the file span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkSpan {
     pub chunk_index: u64,
@@ -10,7 +10,7 @@ pub struct ChunkSpan {
     pub len: usize,
 }
 
-/// 将文件的 [file_offset, file_offset+len) 拆分为若干 chunk 局部范围。
+/// Split `[file_offset, file_offset+len)` into chunk-local spans.
 pub fn split_file_range_into_chunks(
     layout: ChunkLayout,
     mut file_offset: u64,

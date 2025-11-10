@@ -23,7 +23,11 @@ rust_library(
     crate = "tokio_rustls",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    features = ["tls12"],
+    features = [
+        "logging",
+        "ring",
+        "tls12",
+    ],
     rustc_flags = ["@$(location :tokio-rustls-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [

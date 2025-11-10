@@ -18,6 +18,10 @@ pub struct Model {
 
     #[sea_orm(column_type = "Integer")]
     pub nlink: i32,
+
+    /// Whether the file is marked for deletion (for garbage collection)
+    #[sea_orm(column_type = "Boolean", default_value = "false")]
+    pub deleted: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -30,6 +34,7 @@ impl Model {
         &self.permission
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_permission(
         inode: i64,
         size: i64,
@@ -38,6 +43,7 @@ impl Model {
         modify_time: i64,
         create_time: i64,
         nlink: i32,
+        deleted: bool,
     ) -> Self {
         Self {
             inode,
@@ -47,6 +53,7 @@ impl Model {
             modify_time,
             create_time,
             nlink,
+            deleted,
         }
     }
 

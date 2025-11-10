@@ -139,9 +139,9 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None)?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
 
-    println!("Pod: {pod_name}");
+    info!("Pod: {pod_name}");
 
-    println!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
+    info!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
     let _ = state(
         State {
             container_id: pod_info.pod_sandbox_id.clone(),
@@ -149,7 +149,7 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
         root_path.clone(),
     );
 
-    println!("Containers:");
+    info!("Containers:");
     for container_name in &pod_info.container_names {
         let _container_state = state(
             State {

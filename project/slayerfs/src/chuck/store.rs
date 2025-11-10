@@ -1,11 +1,10 @@
-//! 存储后端抽象：块级读写接口 + 内存实现（异步）。
+//! Storage backends: asynchronous block-level IO traits and in-memory implementations.
 
-use super::chunk::ChunkLayout;
 use crate::{
     cadapter::client::{ObjectBackend, ObjectClient},
     chuck::cache::{ChunksCache, ChunksCacheConfig},
 };
-use anyhow;
+use anyhow::{self, Context};
 use async_trait::async_trait;
 use futures::executor::block_on;
 use hex::encode;
@@ -13,48 +12,31 @@ use libc::{KEYCTL_CAPS0_CAPABILITIES, SYS_remap_file_pages, VM_VFS_CACHE_PRESSUR
 use moka::{Entry, ops::compute::Op};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf};
-use tokio::io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::{
+    io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+    sync::RwLock,
+};
 use tracing::info;
 
-/// 抽象块存储接口（后续可由 cadapter/S3 等实现）。
+/// Abstract block store interface (cadapter/S3/etc. can implement this).
 #[async_trait]
 // ensure offset_in_block + data.len() <= block_size
 pub trait BlockStore {
-    async fn write_block_range(
-        &mut self,
-        chunk_id: i64,
-        block_index: u32,
-        offset_in_block: u32,
-        data: &[u8],
-        layout: ChunkLayout,
-    );
+    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64>;
 
-    async fn read_block_range(
-        &self,
-        chunk_id: i64,
-        block_index: u32,
-        offset_in_block: u32,
-        len: usize,
-        layout: ChunkLayout,
-    ) -> Vec<u8>;
+    async fn read_range(&self, key: BlockKey, offset: u32, len: usize) -> anyhow::Result<Vec<u8>>;
 
     #[allow(dead_code)]
-    async fn delete_block_range(
-        &mut self,
-        chunk_id: i64,
-        block_index: u32,
-        len: usize,
-    ) -> anyhow::Result<()>;
+    async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()>;
 }
 
-#[allow(dead_code)]
-type BlockKey = (i64 /*chunk_id*/, u32 /*block_index*/);
+pub type BlockKey = (i64 /*chunk_id*/, u32 /*block_index*/);
 
-/// 简单内存实现：用于本地开发/测试。
+/// Simple in-memory implementation for local development/testing.
 #[derive(Default)]
 #[allow(dead_code)]
 pub struct InMemoryBlockStore {
-    map: HashMap<BlockKey, Vec<u8>>, // 每个块固定大小
+    map: RwLock<HashMap<BlockKey, Vec<u8>>>,
 }
 
 #[allow(dead_code)]
@@ -62,79 +44,52 @@ impl InMemoryBlockStore {
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            map: RwLock::new(HashMap::new()),
         }
-    }
-
-    #[allow(dead_code)]
-    fn ensure_block(&mut self, key: BlockKey, block_size: usize) -> &mut Vec<u8> {
-        let entry = self.map.entry(key).or_insert_with(|| vec![0u8; block_size]);
-        if entry.len() < block_size {
-            entry.resize(block_size, 0);
-        }
-        entry
     }
 }
 
 #[async_trait]
 impl BlockStore for InMemoryBlockStore {
-    async fn write_block_range(
-        &mut self,
-        chunk_id: i64,
-        block_index: u32,
-        offset_in_block: u32,
-        data: &[u8],
-        layout: ChunkLayout,
-    ) {
-        let block_size = layout.block_size as usize;
-        let buf = self.ensure_block((chunk_id, block_index), block_size);
-        let start = offset_in_block as usize;
+    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
+        let mut guard = self.map.write().await;
+        let entry = guard.entry(key).or_insert_with(Vec::new);
+        let start = offset as usize;
         let end = start + data.len();
-        debug_assert!(end <= block_size, "write exceeds block boundary");
-        buf[start..end].copy_from_slice(data);
+        if entry.len() < end {
+            entry.resize(end, 0);
+        }
+        entry[start..end].copy_from_slice(data);
+        Ok(data.len() as u64)
     }
 
-    async fn read_block_range(
-        &self,
-        chunk_id: i64,
-        block_index: u32,
-        offset_in_block: u32,
-        len: usize,
-        layout: ChunkLayout,
-    ) -> Vec<u8> {
-        let start = offset_in_block as usize;
-        let end = start + len;
-        if let Some(buf) = self.map.get(&(chunk_id, block_index)) {
-            let mut out = vec![0u8; len];
+    async fn read_range(&self, key: BlockKey, offset: u32, len: usize) -> anyhow::Result<Vec<u8>> {
+        let guard = self.map.read().await;
+        let mut out = vec![0u8; len];
+        if let Some(buf) = guard.get(&key) {
+            let start = offset as usize;
+            let end = start + len;
             let copy_end = end.min(buf.len());
             if copy_end > start {
                 out[..(copy_end - start)].copy_from_slice(&buf[start..copy_end]);
             }
-            out
-        } else {
-            // 未写入的洞返回 0
-            let _ = layout; // 抑制未使用
-            vec![0u8; len]
         }
+        Ok(out)
     }
 
-    // Delete the block range [block_index,blcok_inde + len)
-    async fn delete_block_range(
-        &mut self,
-        chunk_id: i64,
-        block_index: u32,
-        len: usize,
-    ) -> anyhow::Result<()> {
+    async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
+        let (chunk_id, block_index) = key;
+        let mut guard = self.map.write().await;
         let start = block_index;
         let end = start + len as u32;
         for i in start..end {
-            self.map.remove(&(chunk_id, i));
+            guard.remove(&(chunk_id, i));
         }
         Ok(())
     }
 }
 
-/// 通过 cadapter::client 后端实现的 BlockStore（键空间：chunks/{chunk_id}/{block_index}）。
+/// BlockStore backed by cadapter::client (key space `chunks/{chunk_id}/{block_index}`).
 pub struct ObjectBlockStore<B: ObjectBackend> {
     client: ObjectClient<B>,
     block_cache: ChunksCache,
@@ -171,129 +126,113 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
         })
     }
 
-    fn key_for(chunk_id: i64, block_index: u32) -> String {
+    fn key_for(key: BlockKey) -> String {
+        let (chunk_id, block_index) = key;
         format!("chunks/{chunk_id}/{block_index}")
     }
 }
 
 #[async_trait]
 impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
-    async fn write_block_range(
-        &mut self,
-        chunk_id: i64,
-        block_index: u32,
-        offset_in_block: u32,
-        data: &[u8],
-        layout: ChunkLayout,
-    ) {
-        // 读取已有对象（若存在），在内存拼接后整体写回；MVP 简化。
-        let key = Self::key_for(chunk_id, block_index);
-        let bs = layout.block_size as usize;
-        // 处理对象可能不存在的情况
-        let existing = match self.client.get_object(&key).await {
-            Ok(data) => data,
+    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
+        let key_str = Self::key_for(key);
+        let existing = self.client.get_object(&key_str).await;
+        let mut buf = match existing {
+            Ok(Some(data)) => data,
+            Ok(None) => Vec::new(),
             Err(e) => {
-                // 检查是否是 "对象不存在" 错误
                 let error_str = format!("{:?}", e);
                 if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
-                    None // 对象不存在是正常情况
+                    Vec::new()
                 } else {
-                    panic!("object store get failed: {:?}", e); // 其他错误仍然 panic
+                    return Err(anyhow::anyhow!("object store get failed: {:?}", e));
                 }
             }
         };
-        let mut buf = existing.unwrap_or_else(|| vec![0u8; bs]);
-        if buf.len() < bs {
-            buf.resize(bs, 0);
-        }
-        let start = offset_in_block as usize;
+        let start = offset as usize;
         let end = start + data.len();
+        if buf.len() < end {
+            buf.resize(end, 0);
+        }
         buf[start..end].copy_from_slice(data);
         self.client
-            .put_object(&key, &buf)
+            .put_object(&key_str, &buf)
             .await
-            .expect("object store put failed");
+            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
 
         let etag = self
             .client
-            .get_etag(&key)
+            .get_etag(&key_str)
             .await
             .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key, etag);
+        let cache_key = format!("{}{}", key_str, etag);
         let _ = self.block_cache.remove(&cache_key).await;
+        Ok(data.len() as u64)
     }
 
-    async fn read_block_range(
-        &self,
-        chunk_id: i64,
-        block_index: u32,
-        offset_in_block: u32,
-        len: usize,
-        layout: ChunkLayout,
-    ) -> Vec<u8> {
-        let key = Self::key_for(chunk_id, block_index);
-        let start = offset_in_block as usize;
+    async fn read_range(&self, key: BlockKey, offset: u32, len: usize) -> anyhow::Result<Vec<u8>> {
+        let key_str = Self::key_for(key);
+        let start = offset as usize;
         let end = start + len;
         let mut buf = vec![0u8; len];
-        let _ = layout;
 
         let etag = self
             .client
-            .get_etag(&key)
+            .get_etag(&key_str)
             .await
             .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key, etag);
-        match self.block_cache.get(&cache_key).await {
-            Some(block) => {
-                buf.copy_from_slice(&block[start..end]);
-                info!("Read block range from cache");
+        let cache_key = format!("{}{}", key_str, etag);
+        if let Some(block) = self.block_cache.get(&cache_key).await {
+            let copy_end = end.min(block.len());
+            if copy_end > start {
+                buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
             }
-            None => {
-                let block = match self.client.get_object(&key).await {
-                    Ok(data) => data.unwrap_or_else(|| vec![0u8; len]),
-                    Err(e) => {
-                        // 检查是否是 "对象不存在" 错误
-                        let error_str = format!("{:?}", e);
-                        if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
-                            vec![0u8; len] // 对象不存在时返回零填充的块
-                        } else {
-                            panic!("object store get failed: {:?}", e);
-                        }
-                    }
-                };
-                buf.copy_from_slice(&block[start..end]);
-                self.block_cache.insert(&cache_key, &block).await.unwrap();
-            }
+            info!("Read block range from cache");
+            return Ok(buf);
         }
 
-        buf
+        let block = match self.client.get_object(&key_str).await {
+            Ok(Some(data)) => data,
+            Ok(None) => vec![0u8; end],
+            Err(e) => {
+                let error_str = format!("{:?}", e);
+                if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
+                    vec![0u8; end]
+                } else {
+                    return Err(anyhow::anyhow!("object store get failed: {:?}", e));
+                }
+            }
+        };
+        let copy_end = end.min(block.len());
+        if copy_end > start {
+            buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
+        }
+        let _ = self.block_cache.insert(&cache_key, &block).await;
+        Ok(buf)
     }
 
-    async fn delete_block_range(
-        &mut self,
-        chunk_id: i64,
-        block_index: u32,
-        len: usize,
-    ) -> anyhow::Result<()> {
+    async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
+        let (chunk_id, block_index) = key;
         let start = block_index;
         let end = start + len as u32;
-
         for i in start..end {
-            let key = Self::key_for(chunk_id, i);
-            self.client.delete_object(&key).await.unwrap();
+            let key_str = Self::key_for((chunk_id, i));
+            self.client
+                .delete_object(&key_str)
+                .await
+                .map_err(|e| anyhow::anyhow!("object store delete failed: {key_str}, {e:?}"))?;
         }
-
         Ok(())
     }
 }
 
-/// 便捷别名：基于真实 S3Backend 的 BlockStore
+/// Convenience alias: BlockStore backed by the real S3 backend.
 #[allow(dead_code)]
 pub type S3BlockStore = ObjectBlockStore<crate::cadapter::s3::S3Backend>;
-/// 便捷别名：基于 RustfsLikeBackend 的 BlockStore
+/// Convenience alias: BlockStore backed by the Rustfs-like backend.
 #[allow(dead_code)]
 pub type RustfsBlockStore = ObjectBlockStore<crate::cadapter::rustfs::RustfsLikeBackend>;
-/// 便捷别名：基于 LocalFsBackend 的 BlockStore（mock 本地目录）
+/// Convenience alias: BlockStore backed by the LocalFs mock backend.
 #[allow(dead_code)]
 pub type LocalFsBlockStore = ObjectBlockStore<crate::cadapter::localfs::LocalFsBackend>;
 
@@ -308,17 +247,19 @@ mod tests {
     async fn test_localfs_block_store_put_get() {
         let tmp = tempfile::tempdir().unwrap();
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
-        let mut store = ObjectBlockStore::new(client);
+        let store = ObjectBlockStore::new(client);
         let layout = ChunkLayout::default();
 
         let data = vec![7u8; layout.block_size as usize / 2];
         store
-            .write_block_range(42, 3, layout.block_size / 4, &data, layout)
-            .await;
+            .write_range((42, 3), layout.block_size / 4, &data)
+            .await
+            .unwrap();
 
         let out = store
-            .read_block_range(42, 3, layout.block_size / 4, data.len(), layout)
-            .await;
+            .read_range((42, 3), layout.block_size / 4, data.len())
+            .await
+            .unwrap();
         assert_eq!(out, data);
     }
 
@@ -326,21 +267,24 @@ mod tests {
     async fn test_cache_effectiveness() -> io::Result<()> {
         let tmp = tempfile::tempdir()?;
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
-        let mut store = ObjectBlockStore::new(client);
+        let store = ObjectBlockStore::new(client);
         let layout = ChunkLayout::default();
         let data = vec![7u8; layout.block_size as usize / 2];
         store
-            .write_block_range(42, 3, layout.block_size / 4, &data, layout)
-            .await;
-        // 第一次读取 - 应该缓存未命中
+            .write_range((42, 3), layout.block_size / 4, &data)
+            .await
+            .unwrap();
+        // First read should miss the cache.
         let data1 = store
-            .read_block_range(42, 3, layout.block_size / 4, data.len(), layout)
-            .await;
+            .read_range((42, 3), layout.block_size / 4, data.len())
+            .await
+            .unwrap();
 
-        // 第二次读取相同数据 - 应该缓存命中
+        // Second read of the same data should hit the cache.
         let data2 = store
-            .read_block_range(42, 3, layout.block_size / 4, data.len(), layout)
-            .await;
+            .read_range((42, 3), layout.block_size / 4, data.len())
+            .await
+            .unwrap();
         assert_eq!(data1, data2);
 
         Ok(())

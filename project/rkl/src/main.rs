@@ -1,17 +1,20 @@
 // src/main.rs
 
 use clap::{Parser, Subcommand};
+use rustls::crypto::CryptoProvider;
 
 mod bundle;
 mod commands;
 mod cri;
 mod daemon;
 mod network;
+mod quic;
 mod rootpath;
 mod task;
 
 use commands::{compose::ComposeCommand, container::ContainerCommand, pod::PodCommand};
 use commands::{compose::compose_execute, container::container_execute, pod::pod_execute};
+use tracing::error;
 
 use crate::commands::volume::{VolumeCommand, volume_execute};
 
@@ -58,6 +61,9 @@ enum Workload {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    CryptoProvider::install_default(rustls::crypto::ring::default_provider())
+        .expect("failed to install default CryptoProvider");
+
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env().add_directive(
@@ -71,6 +77,5 @@ fn main() -> Result<(), anyhow::Error> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let cli = Cli::parse();
-    cli.run()
-        .inspect_err(|err| eprintln!("Failed to run: {err}"))
+    cli.run().inspect_err(|err| error!("Failed to run: {err}"))
 }

@@ -5,6 +5,8 @@ pub mod daemon;
 pub mod network;
 mod rootpath;
 pub mod task;
+//mod status_access;
+mod quic;
 
 // re-export selected public API
 pub use commands::compose::{ComposeCommand, compose_execute};

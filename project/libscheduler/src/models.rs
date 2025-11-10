@@ -152,20 +152,15 @@ impl NodeSelectorRequirement {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum NodeSelectorOperator {
     NodeSelectorOpIn,
     NodeSelectorOpNotIn,
+    #[default]
     NodeSelectorOpExists,
     NodeSelectorOpDoesNotExist,
     NodeSelectorOpGt,
     NodeSelectorOpLt,
-}
-
-impl Default for NodeSelectorOperator {
-    fn default() -> Self {
-        Self::NodeSelectorOpExists
-    }
 }
 
 #[derive(Clone, Default, Debug)]

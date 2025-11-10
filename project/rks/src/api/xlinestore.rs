@@ -2,6 +2,8 @@ use crate::protocol::config::NetworkConfig;
 use anyhow::Result;
 use common::*;
 use etcd_client::{Client, GetOptions, PutOptions, WatchOptions, WatchStream, Watcher};
+use libvault::storage::xline::XlineOptions;
+use log::error;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -16,8 +18,8 @@ pub struct XlineStore {
 #[allow(unused)]
 impl XlineStore {
     /// Create a new XlineStore instance by connecting to the given endpoints.
-    pub async fn new(endpoints: &[&str]) -> Result<Self> {
-        let client = Client::connect(endpoints, None).await?;
+    pub async fn new(option: XlineOptions) -> Result<Self> {
+        let client = Client::connect(option.endpoints, option.config).await?;
         Ok(Self {
             client: Arc::new(RwLock::new(client)),
         })
@@ -109,6 +111,16 @@ impl XlineStore {
         Ok(())
     }
 
+    pub async fn insert_node(&self, node: &Node) -> Result<()> {
+        let node_name = node.metadata.name.clone();
+        if node_name.is_empty() {
+            anyhow::bail!("node.metadata.name is empty");
+        }
+
+        let node_yaml = serde_yaml::to_string(node)?;
+        self.insert_node_yaml(&node_name, &node_yaml).await
+    }
+
     // Example (currently unused):
     pub async fn get_node_yaml(&self, node_name: &str) -> Result<Option<String>> {
         let key = format!("/registry/nodes/{node_name}");
@@ -146,6 +158,13 @@ impl XlineStore {
             Ok(Some(String::from_utf8_lossy(kv.value()).to_string()))
         } else {
             Ok(None)
+        }
+    }
+
+    pub async fn get_pod(&self, pod_name: &str) -> Result<Option<PodTask>> {
+        match self.get_pod_yaml(pod_name).await? {
+            Some(yaml) => Ok(Some(serde_yaml::from_str::<PodTask>(&yaml)?)),
+            None => Ok(None),
         }
     }
 
@@ -275,12 +294,55 @@ impl XlineStore {
         Ok(services)
     }
 
+    /// List all endpoints (deserialize values).
+    pub async fn list_endpoints(&self) -> Result<Vec<Endpoint>> {
+        let key = "/registry/endpoints/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+        let endpoints: Vec<Endpoint> = resp
+            .kvs()
+            .iter()
+            .filter_map(|kv| {
+                let yaml_str = String::from_utf8_lossy(kv.value());
+                match serde_yaml::from_str::<Endpoint>(&yaml_str) {
+                    Ok(ep) => Some(ep),
+                    Err(e) => {
+                        error!(
+                            "failed to parse Endpoint at key {:?}: {}\nvalue:\n{}",
+                            kv.key(),
+                            e,
+                            yaml_str
+                        );
+                        None
+                    }
+                }
+            })
+            .collect();
+        Ok(endpoints)
+    }
+
     /// Insert a service YAML definition into xline.
     pub async fn insert_service_yaml(&self, service_name: &str, service_yaml: &str) -> Result<()> {
         let key = format!("/registry/services/{service_name}");
         let mut client = self.client.write().await;
         client
             .put(key, service_yaml, Some(PutOptions::new()))
+            .await?;
+        Ok(())
+    }
+
+    /// Insert an endpoints YAML definition into xline.
+    pub async fn insert_endpoint_yaml(
+        &self,
+        endpoint_name: &str,
+        endpoint_yaml: &str,
+    ) -> Result<()> {
+        let key = format!("/registry/endpoints/{endpoint_name}");
+        let mut client = self.client.write().await;
+        client
+            .put(key, endpoint_yaml, Some(PutOptions::new()))
             .await?;
         Ok(())
     }
@@ -317,6 +379,18 @@ impl XlineStore {
     /// Create a watch on all pods with prefix `/registry/services/`, starting from a given revision.
     pub async fn watch_services(&self, start_rev: i64) -> Result<(Watcher, WatchStream)> {
         let key_prefix = "/registry/services/".to_string();
+        let opts = WatchOptions::new()
+            .with_prefix()
+            .with_prev_key()
+            .with_start_revision(start_rev);
+        let mut client = self.client.write().await;
+        let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
+        Ok((watcher, stream))
+    }
+
+    /// Create a watch on all endpoints with prefix `/registry/endpoints/`, starting from a given revision.
+    pub async fn watch_endpoints(&self, start_rev: i64) -> Result<(Watcher, WatchStream)> {
+        let key_prefix = "/registry/endpoints/".to_string();
         let opts = WatchOptions::new()
             .with_prefix()
             .with_prev_key()

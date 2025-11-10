@@ -23,6 +23,10 @@ rust_library(
     crate = "displaydoc",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
+    features = [
+        "default",
+        "std",
+    ],
     rustc_flags = ["@$(location :displaydoc-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],

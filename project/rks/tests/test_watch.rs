@@ -1,5 +1,6 @@
 use etcd_client::EventType;
 use futures::StreamExt;
+use libvault::storage::xline::XlineOptions;
 use rks::api::xlinestore::XlineStore;
 use rks::protocol::config::load_config;
 use serial_test::serial;
@@ -14,17 +15,8 @@ async fn load_store() -> Arc<XlineStore> {
         )
     });
     let config = load_config(&config_path).expect("Failed to load config");
-    let endpoints: Vec<&str> = config
-        .xline_config
-        .endpoints
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
-    Arc::new(
-        XlineStore::new(&endpoints)
-            .await
-            .expect("connect xline failed"),
-    )
+    let option = XlineOptions::new(config.xline_config.endpoints.clone());
+    Arc::new(XlineStore::new(option).await.expect("connect xline failed"))
 }
 
 #[tokio::test]
