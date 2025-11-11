@@ -5,7 +5,7 @@ use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
 use crate::chuck::writer::ChunkWriter;
 use crate::meta::MetaStore;
-use dashmap::DashMap;
+use dashmap::{DashMap, Entry};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,11 +35,11 @@ impl HandleRegistry {
 
     async fn allocate(&self, ino: i64, flags: HandleFlags) -> u64 {
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
-        self.handle_ino.insert(fh, ino);
         self.handles
             .entry(ino)
             .or_default()
             .push(FileHandle::new(fh, flags));
+        self.handle_ino.insert(fh, ino);
         fh
     }
 
@@ -579,11 +579,14 @@ where
             .await
             .map_err(|e| e.to_string())?;
         self.state.modified.touch(ino).await;
+        if let Some(inode) = self.state.files.inode(ino) {
+            inode.update_size(size);
+        }
         Ok(())
     }
 
     /// Write data by file offset. Internally splits the range into per-chunk writes.
-    /// Writes each affected chunk fragment and updates the size once at the end.
+    /// Writes each affected chunk fragment. Updates the file size at the end only if the write extends the file.
     pub async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
         let path = Self::norm_path(path);
         let (ino, kind) = self
@@ -614,7 +617,7 @@ where
                 .set_file_size(ino, target_size)
                 .await
                 .map_err(|e| e.to_string())?;
-            inode.update_size(target_size).map_err(|e| e.to_string())?;
+            inode.update_size(target_size);
         }
         self.state.modified.touch(ino).await;
         Ok(written)
@@ -692,26 +695,34 @@ where
     }
 
     async fn ensure_inode_registered(&self, ino: i64) -> Result<Arc<Inode>, String> {
-        if let Some(entry) = self.state.files.inode.get(&ino) {
-            return Ok(Arc::clone(entry.value()));
+        // fast path to check whether there is an existing inode.
+        if let Some(inode) = self.state.files.inode(ino) {
+            return Ok(inode.clone());
         }
 
-        let attr = self
-            .core
-            .meta
-            .stat(ino)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "not found".to_string())?;
-        if attr.kind != FileType::File {
-            return Err("not a file".into());
-        }
+        // double-check: lock the entry and do the check again.
+        match self.state.files.inode.entry(ino) {
+            Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
+            Entry::Vacant(entry) => {
+                let attr = self
+                    .core
+                    .meta
+                    .stat(ino)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| "not found".to_string())?;
+                if attr.kind != FileType::File {
+                    return Err("not a file".into());
+                }
 
-        let inode = Inode::new(ino, attr.size);
-        self.state
-            .files
-            .ensure_init(Arc::clone(&inode), Arc::clone(&self.core.chunk_io));
-        Ok(inode)
+                let inode = Inode::new(ino, attr.size);
+                self.state
+                    .files
+                    .ensure_init(Arc::clone(&inode), Arc::clone(&self.core.chunk_io));
+                entry.insert(inode.clone());
+                Ok(inode)
+            }
+        }
     }
 }
 

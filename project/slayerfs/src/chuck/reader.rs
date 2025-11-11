@@ -12,6 +12,7 @@ pub struct ChunkReader<'a, B, S> {
     layout: ChunkLayout,
     chunk_id: u64,
     slices: Vec<SliceDesc>,
+    prepared: bool,
     store: &'a B,
     meta: &'a S,
 }
@@ -22,6 +23,7 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkReader<'a, B, S> {
             layout,
             chunk_id,
             slices: Vec::new(),
+            prepared: false,
             store,
             meta,
         }
@@ -30,6 +32,7 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkReader<'a, B, S> {
     /// Load slice metadata for the current chunk. Must be called before `read`.
     pub async fn prepare_slices(&mut self) -> anyhow::Result<()> {
         self.slices = self.meta.get_slices(self.chunk_id).await?;
+        self.prepared = true;
         Ok(())
     }
 
@@ -38,7 +41,7 @@ impl<'a, B: BlockStore, S: MetaStore> ChunkReader<'a, B, S> {
             return Ok(Vec::new());
         }
         ensure!(
-            !self.slices.is_empty(),
+            self.prepared,
             "ChunkReader::read requires prepare_slices() to run first"
         );
 

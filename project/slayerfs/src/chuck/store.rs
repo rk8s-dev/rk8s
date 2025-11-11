@@ -21,7 +21,7 @@ use tracing::info;
 /// Abstract block store interface (cadapter/S3/etc. can implement this).
 #[async_trait]
 // ensure offset_in_block + data.len() <= block_size
-pub trait BlockStore {
+pub trait BlockStore: Send + Sync {
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64>;
 
     async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()>;

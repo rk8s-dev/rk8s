@@ -1,4 +1,3 @@
-use anyhow::Context;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -28,9 +27,9 @@ impl Inode {
         *self.length_rx.borrow()
     }
 
-    pub fn update_size(&self, new_size: u64) -> anyhow::Result<()> {
+    pub fn update_size(&self, new_size: u64) {
         self.length_tx
             .send(new_size)
-            .with_context(|| "Failed to update file size")
+            .expect("Inode invarant violated: all receivers dropped in update_size");
     }
 }
