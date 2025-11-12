@@ -93,7 +93,7 @@
               clippy
               analyzer
             ]
-            ++ cargoComponents ++ (with pkgs; [openssl pkg-config grpc-tools libseccomp]);
+            ++ cargoComponents ++ (with pkgs; [openssl grpc-tools libseccomp]);
         };
       };
 
