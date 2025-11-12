@@ -98,40 +98,75 @@ impl ReplicaSetController {
 
     /// Reconcile given ReplicaSet: ensure desired number of pods exist, update status.
     pub async fn reconcile(&self, rs: &mut ReplicaSet) -> Result<()> {
-        if rs.metadata.deletion_timestamp.is_some() {
-            log::debug!(
-                "ReplicaSet {} is being deleted, skip reconcile",
-                rs.metadata.name
-            );
-            return Ok(());
+        let pods = self.store.list_pods().await?;
+
+        // Separate owned pods and orphan pods using owns_or_can_adopt_pod
+        let mut owned_pods = Vec::new();
+        let mut orphan_pods = Vec::new();
+
+        for pod in pods {
+            if !Self::selector_match(rs, &pod) {
+                continue;
+            }
+
+            // Check if this pod is already owned by this ReplicaSet
+            let is_owned = pod
+                .metadata
+                .owner_references
+                .as_ref()
+                .is_some_and(|owners| {
+                    owners.iter().any(|owner| {
+                        owner.kind == ResourceKind::ReplicaSet && owner.uid == rs.metadata.uid
+                    })
+                });
+
+            if is_owned {
+                owned_pods.push(pod);
+            } else if Self::owns_or_can_adopt_pod(rs, &pod) {
+                // Can adopt but not yet owned (orphan pod)
+                orphan_pods.push(pod);
+            }
+            // else: owned by other ReplicaSet, ignore
         }
 
-        let pods = self.store.list_pods().await?;
-        let mut matching: Vec<PodTask> = pods
-            .into_iter()
-            .filter(|p| {
-                let matches = Self::selector_match(rs, p);
-                let owned = matches && Self::owns_or_can_adopt_pod(rs, p);
-                if log::log_enabled!(log::Level::Trace) && matches {
-                    log::trace!(
-                        "ReplicaSet {} evaluating pod {}: owned={}",
-                        rs.metadata.name,
-                        p.metadata.name,
-                        owned
-                    );
-                }
-                owned
-            })
-            .collect();
-
-        let actual = matching.len() as i32;
+        let mut matching = owned_pods.clone();
         let desired = rs.spec.replicas;
+
         log::debug!(
-            "ReplicaSet {} reconcile start: actual={} desired={}",
+            "ReplicaSet {} reconcile start: owned={} orphans={} desired={}",
             rs.metadata.name,
-            actual,
+            owned_pods.len(),
+            orphan_pods.len(),
             desired
         );
+
+        // Always claim ALL matching orphan pods, regardless of replica count
+        for orphan_pod in orphan_pods {
+            // Add ownerReference to orphan pod
+            let mut pod = orphan_pod.clone();
+            pod.metadata.owner_references = Some(vec![OwnerReference {
+                api_version: rs.api_version.clone(),
+                kind: ResourceKind::ReplicaSet,
+                name: rs.metadata.name.clone(),
+                uid: rs.metadata.uid,
+                controller: true,
+                block_owner_deletion: Some(true),
+            }]);
+
+            let yaml = serde_yaml::to_string(&pod)?;
+            self.store
+                .insert_pod_yaml(&pod.metadata.name, &yaml)
+                .await?;
+            log::info!(
+                "ReplicaSet {} adopted orphan pod {}",
+                rs.metadata.name,
+                pod.metadata.name
+            );
+
+            matching.push(pod);
+        }
+
+        let actual = matching.len() as i32;
 
         // update status counters
         rs.status.replicas = actual;
@@ -158,10 +193,6 @@ impl ReplicaSetController {
                 let name =
                     Self::generate_unique_name(&rs.metadata.name, self.store.as_ref()).await?;
                 pod.metadata.name = name.clone();
-                // generate a new unique UID for each Pod
-                pod.metadata.uid = uuid::Uuid::new_v4();
-                // set creation timestamp
-                pod.metadata.creation_timestamp = Some(chrono::Utc::now());
                 // ensure selector labels present on pod
                 for (k, v) in rs.spec.selector.match_labels.iter() {
                     pod.metadata.labels.insert(k.clone(), v.clone());
@@ -190,7 +221,7 @@ impl ReplicaSetController {
             for pod in matching.into_iter().take(to_delete) {
                 let pod_name = pod.metadata.name.clone();
                 self.store.delete_pod(&pod_name).await?;
-                log::debug!(
+                log::info!(
                     "ReplicaSet {} deleted pod {} while reconciling",
                     rs.metadata.name,
                     pod_name

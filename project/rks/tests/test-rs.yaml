@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ReplicaSet
+metadata:
+  name: test-nginx-rs
+  namespace: default
+  labels:
+    app: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        app: nginx
+        tier: frontend
+        bundle: ./rk8s/project/test/bundles/pause
+    spec:
+      containers:
+        - name: nginx
+          image: ./rk8s/project/test/bundles/busybox
+          args:
+            - "sleep"
+            - "3600"
+          ports:
+            - containerPort: 80
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
