@@ -125,7 +125,7 @@ where
         = Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntryPlus>> + Send + 'a>>
     where
         Self: 'a;
-
+    */
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
         // Use a conservative max write size (1 MiB). Tune per backend or make configurable.
         let max_write = NonZeroU32::new(1024 * 1024).unwrap();
@@ -263,14 +263,21 @@ where
         })
     }
 
+<<<<<<< HEAD
     // Call VFS to list directory and stream DirectoryEntry items (with error/offset handling)
+=======
+    // 调用 VFS 列目录，逐项构造 DirectoryEntry 并以流返回（含错误码检查与偏移处理）
+    #[allow(refining_impl_trait)]
+>>>>>>> 558a0756 (feat(log): Adjust the organizational form of rk8s to Workspace)
     async fn readdir<'a>(
         &'a self,
         _req: Request,
         ino: u64,
         _fh: u64,
         offset: i64,
-    ) -> FuseResult<ReplyDirectory<Self::DirEntryStream<'a>>> {
+    ) -> FuseResult<
+        ReplyDirectory<Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntry>> + Send + 'a>>>,
+    > {
         let entries = match self.readdir_ino(ino as i64).await {
             None => {
                 if self.stat_ino(ino as i64).await.is_some() {
@@ -317,11 +324,17 @@ where
             all[start..].to_vec()
         };
         let stream_iter = stream::iter(slice.into_iter().map(Ok));
-        let boxed: Self::DirEntryStream<'a> = Box::pin(stream_iter);
-        Ok(ReplyDirectory::<Self::DirEntryStream<'a>> { entries: boxed })
+        let boxed: Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntry>> + Send + 'a>> =
+            Box::pin(stream_iter);
+        Ok(ReplyDirectory { entries: boxed })
     }
 
+<<<<<<< HEAD
     // Directory read with attributes (lookup + readdir), returning DirectoryEntryPlus
+=======
+    // 带属性的目录读取（lookup+readdir）：返回 DirectoryEntryPlus 流
+    #[allow(refining_impl_trait)]
+>>>>>>> 558a0756 (feat(log): Adjust the organizational form of rk8s to Workspace)
     async fn readdirplus<'a>(
         &'a self,
         req: Request,
@@ -329,7 +342,9 @@ where
         _fh: u64,
         offset: u64,
         _lock_owner: u64,
-    ) -> FuseResult<ReplyDirectoryPlus<Self::DirEntryPlusStream<'a>>> {
+    ) -> FuseResult<
+        ReplyDirectoryPlus<Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntryPlus>> + Send + 'a>>>,
+    > {
         let entries = match self.readdir_ino(ino as i64).await {
             None => {
                 if self.stat_ino(ino as i64).await.is_some() {
@@ -401,7 +416,8 @@ where
             all[start..].to_vec()
         };
         let stream_iter = stream::iter(slice.into_iter().map(Ok));
-        let boxed: Self::DirEntryPlusStream<'a> = Box::pin(stream_iter);
+        let boxed: Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntryPlus>> + Send + 'a>> =
+            Box::pin(stream_iter);
         Ok(ReplyDirectoryPlus { entries: boxed })
     }
 

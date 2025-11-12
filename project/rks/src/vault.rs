@@ -2,6 +2,8 @@ use crate::protocol::config::{
     config_ref, ip_or_dns, local_alt_names_and_ip_sans, to_alt_names_and_ip_sans,
 };
 use anyhow::Context;
+use base64::Engine as _;
+use base64::engine::general_purpose;
 use common::IssueCertificateRequest;
 use libvault::RustyVault;
 use libvault::core::SealConfig;
@@ -16,9 +18,6 @@ use serde_json::{Value, json};
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
-use base64::engine::general_purpose;
-use base64::Engine as _;
-
 
 #[derive(Clone, Copy)]
 pub enum CertRole {

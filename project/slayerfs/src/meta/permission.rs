@@ -6,7 +6,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 
 bitflags! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
     pub struct AclFlags: u8 {
         const READ    = 0b001;
         const WRITE   = 0b010;
@@ -33,21 +33,21 @@ pub struct Acl {
 }
 
 impl Acl {
-    pub fn check_permission(&self, uid: u32, gids: &[u32], flag: AclFlags) -> bool {
+    pub fn check_permission(&self, uid: u32, gids: &[u32], flag: &AclFlags) -> bool {
         for entry in &self.entries {
             match &entry.subject {
                 AclSubject::User(u) if *u == uid => {
-                    if entry.flags.contains(flag) {
+                    if entry.flags.contains(*flag) {
                         return true;
                     }
                 }
                 AclSubject::Group(g) if gids.contains(g) => {
-                    if entry.flags.contains(flag) {
+                    if entry.flags.contains(*flag) {
                         return true;
                     }
                 }
                 AclSubject::Other => {
-                    if entry.flags.contains(flag) {
+                    if entry.flags.contains(*flag) {
                         return true;
                     }
                 }
@@ -116,7 +116,7 @@ impl Permission {
             return true;
         }
         if let Some(acl) = &self.acl
-            && acl.check_permission(uid, gids, flag)
+            && acl.check_permission(uid, gids, &flag)
         {
             return true;
         }

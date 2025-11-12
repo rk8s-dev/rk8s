@@ -42,13 +42,12 @@ async fn setup_store_and_manager() -> Result<(
 
     let cfg = load_test_config()?;
     let endpoints: Vec<String> = cfg.xline_config.endpoints;
-    let option = XlineOptions::new(endpoints);
-    let store: Arc<XlineStore> = Arc::new(XlineStore::new(option).await?);
-
-    // clean up any existing ReplicaSets or Pods from previous tests
-    cleanup_pods_by_prefix(&store, "test-rs").await?;
-    cleanup_replicasets_by_prefix(&store, "test-rs").await?;
-
+    let endpoint_refs: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
+    let options = XlineOptions {
+        endpoints: endpoints.clone(),
+        config: None,
+    };
+    let store: Arc<XlineStore> = Arc::new(XlineStore::new(options).await?);
     let mgr = Arc::new(ControllerManager::new());
     let rs_ctrl = Arc::new(RwLock::new(ReplicaSetController::new(store.clone())));
     mgr.clone().register(rs_ctrl.clone(), 2).await?;
