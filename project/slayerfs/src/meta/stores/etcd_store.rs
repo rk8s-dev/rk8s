@@ -657,7 +657,6 @@ impl EtcdMetaStore {
         }
         Err(MetaError::MaxRetriesExceeded)
     }
-
     /// Get a clone of the etcd client (for Watch Worker)
     pub fn get_client(&self) -> EtcdClient {
         self.client.clone()

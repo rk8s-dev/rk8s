@@ -19,7 +19,24 @@ pub mod cache;
 pub mod demo;
 pub mod fs;
 pub mod handles;
+pub mod inode;
+pub mod io;
 pub mod sdk;
 pub mod simple;
 
 // Module implementation TODOs remain.
+
+const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
+
+pub fn chunk_id_for(ino: i64, chunk_index: u64) -> u64 {
+    let ino_u64 = u64::try_from(ino).expect("inode must be non-negative");
+    ino_u64
+        .checked_mul(CHUNK_ID_BASE)
+        .and_then(|v| v.checked_add(chunk_index))
+        .unwrap_or_else(|| {
+            panic!(
+                "chunk_id overflow for inode {} chunk_index {}",
+                ino, chunk_index
+            )
+        })
+}
