@@ -114,6 +114,7 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
+    /*
     // GAT: directory entry stream (readdir)
     type DirEntryStream<'a>
         = Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntry>> + Send + 'a>>
@@ -263,12 +264,8 @@ where
         })
     }
 
-<<<<<<< HEAD
-    // Call VFS to list directory and stream DirectoryEntry items (with error/offset handling)
-=======
     // 调用 VFS 列目录，逐项构造 DirectoryEntry 并以流返回（含错误码检查与偏移处理）
     #[allow(refining_impl_trait)]
->>>>>>> 558a0756 (feat(log): Adjust the organizational form of rk8s to Workspace)
     async fn readdir<'a>(
         &'a self,
         _req: Request,
@@ -329,12 +326,8 @@ where
         Ok(ReplyDirectory { entries: boxed })
     }
 
-<<<<<<< HEAD
-    // Directory read with attributes (lookup + readdir), returning DirectoryEntryPlus
-=======
     // 带属性的目录读取（lookup+readdir）：返回 DirectoryEntryPlus 流
     #[allow(refining_impl_trait)]
->>>>>>> 558a0756 (feat(log): Adjust the organizational form of rk8s to Workspace)
     async fn readdirplus<'a>(
         &'a self,
         req: Request,
