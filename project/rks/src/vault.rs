@@ -16,6 +16,9 @@ use serde_json::{Value, json};
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
+use base64::engine::general_purpose;
+use base64::Engine as _;
+
 
 #[derive(Clone, Copy)]
 pub enum CertRole {
@@ -148,7 +151,7 @@ impl Vault {
 
         let keys = secrets
             .iter()
-            .map(|&e| base64::encode(e))
+            .map(|&e| general_purpose::STANDARD.encode(e))
             .collect::<Vec<_>>();
 
         let keys_path = folder.join("keys.json");
@@ -387,7 +390,7 @@ async fn extract_keys(path: &Path) -> anyhow::Result<Vec<Vec<u8>>> {
         .map(|v| {
             v.iter()
                 .map(|e| e.as_str().map(|e| e.as_bytes()).unwrap())
-                .map(|e| base64::decode(e).unwrap())
+                .map(|e| general_purpose::STANDARD.decode(e).unwrap())
                 .collect::<Vec<_>>()
         })
         .with_context(|| "keys.json doesn't contain a key named with `keys`")

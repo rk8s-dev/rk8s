@@ -29,7 +29,7 @@
 
 use std::ops::DerefMut;
 
-use rand::{RngCore, thread_rng};
+use rand::{RngCore, rng};
 use zeroize::Zeroizing;
 
 use crate::errors::RvError;
@@ -81,7 +81,7 @@ pub struct ShamirSecret {
 impl ShamirSecret {
     pub fn with_secret(secret: &[u8], threshold: u8) -> ShamirSecret {
         let mut coefficients: Vec<Vec<u8>> = vec![];
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut rand_container = vec![0u8; (threshold - 1) as usize];
         for c in secret {
             rng.fill_bytes(&mut rand_container);
