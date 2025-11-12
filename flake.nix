@@ -61,8 +61,14 @@
             alejandra.enable = true;
 
             # Rust format/lints
-            rustfmt.enable = true;
-            clippy.enable = true;
+            rustfmt = {
+              enable = true;
+              args = ["--manifest-path" "project/Cargo.toml"];
+            };
+            clippy = {
+              enable = true;
+              args = ["--manifest-path" "project/Cargo.toml"];
+            };
 
             # Optional: run a fast build check (uncomment if desired)
             # cargo-check.enable = true;
