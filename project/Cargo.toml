@@ -204,15 +204,15 @@ typetag = "0.2.20"
 ureq = "2.10.0"
 url = "2.5.7"
 uzers = "0.12.1"
-uuid = { version = "1.18.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
+uuid = { version = "1.18.1", features = ["v4", "serde", "fast-rng", "macro-diagnostics"] }
 vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"
 walkdir = "2.5.0"
 webpki-roots = "0.26.3"
 which = "4.4.2"
 x509-parser = "0.18.0"
+lru = "0.16"
 zeroize = { version = "1.7.0", features = ["zeroize_derive"] }
-
 quickcheck = "1.0.3"
 mockall = "0.13.1"
 scopeguard = "1.2.0"

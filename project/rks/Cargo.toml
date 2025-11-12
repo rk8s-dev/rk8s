@@ -55,5 +55,8 @@ base64 = { workspace = true }
 reqwest = { workspace = true }
 either = { workspace = true }
 tokio-stream = { workspace = true }
+uuid = { workspace = true }
+lru = { workspace = true }
+
 [dev-dependencies]
 serial_test = { workspace = true }
