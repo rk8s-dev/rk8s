@@ -1,6 +1,9 @@
 use std::sync::Arc;
 use tokio::sync::watch;
 
+/// The `inode`, which holds some states about file attributes, as a local cache.
+/// Slayerfs ensure `close-to-open` semantics, that is to say, each `open` operation must see
+/// the newest file states. Otherwise, it is permitted to see stale states.
 #[derive(Clone)]
 pub struct Inode {
     ino: i64,
@@ -30,6 +33,6 @@ impl Inode {
     pub fn update_size(&self, new_size: u64) {
         self.length_tx
             .send(new_size)
-            .expect("Inode invarant violated: all receivers dropped in update_size");
+            .expect("Inode invariant violated: all receivers dropped in update_size");
     }
 }

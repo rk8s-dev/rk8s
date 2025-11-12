@@ -573,15 +573,15 @@ where
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "not found".to_string())?;
+        if let Some(inode) = self.state.files.inode(ino) {
+            inode.update_size(size);
+        }
         self.core
             .meta
             .set_file_size(ino, size)
             .await
             .map_err(|e| e.to_string())?;
         self.state.modified.touch(ino).await;
-        if let Some(inode) = self.state.files.inode(ino) {
-            inode.update_size(size);
-        }
         Ok(())
     }
 
@@ -612,12 +612,12 @@ where
 
         let target_size = offset + data.len() as u64;
         if target_size > inode.file_size() {
+            inode.update_size(target_size);
             self.core
                 .meta
                 .set_file_size(ino, target_size)
                 .await
                 .map_err(|e| e.to_string())?;
-            inode.update_size(target_size);
         }
         self.state.modified.touch(ino).await;
         Ok(written)

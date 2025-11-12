@@ -41,8 +41,8 @@ where
         }
 
         // Lock the corresponding writer so a concurrent writer can't append a new slice while
-        // we are sampling chunk metadata.  Without this guard, the per-chunk readers could see
-        // a half-updated slice set and end up reading the wrong data.
+        // we are sampling chunk metadata. Without this guard, the per-chunk readers could see
+        // a stale slice set and end up reading the wrong data.
         let writer_guard = self.writer.lock().await;
 
         let spans: Vec<ChunkSpan> =
@@ -56,7 +56,7 @@ where
         }
 
         // Once every chunk has fetched its slice metadata, no existing slice will be mutated
-        // (writers only append new slices).  That means the buffered `ChunkReader`s are safe to
+        // (writers only append new slices). That means the buffered `ChunkReader`s are safe to
         // use without holding the writer lock, so we can release the guard and avoid blocking
         // concurrent writes while we drain the per-chunk futures below.
         drop(writer_guard);

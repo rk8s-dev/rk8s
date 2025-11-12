@@ -33,5 +33,10 @@ pub fn chunk_id_for(ino: i64, chunk_index: u64) -> u64 {
     ino_u64
         .checked_mul(CHUNK_ID_BASE)
         .and_then(|v| v.checked_add(chunk_index))
-        .expect("chunk_id overflow")
+        .unwrap_or_else(|| {
+            panic!(
+                "chunk_id overflow for inode {} chunk_index {}",
+                ino, chunk_index
+            )
+        })
 }
