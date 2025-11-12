@@ -67,7 +67,7 @@ cni-plugin = { workspace = true }
 derive_more = { workspace = true }
 base64 = { workspace = true }
 
-protobuf = "=3.2.0"
+protobuf = { workspace = true }
 prost = "0.13.5"
 prost-types = "0.12.6"
 tonic = "0.13"
@@ -76,8 +76,5 @@ prost-build = "0.13.5"
 
 [dev-dependencies]
 tempfile = { workspace = true }
-scopeguard = "1.2.0"
+scopeguard = { workspace = true }
 
-[build-dependencies]
-tonic-build = "0.13"
-prost-build = "0.13.5"
