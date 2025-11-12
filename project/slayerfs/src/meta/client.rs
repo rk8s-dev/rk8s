@@ -1599,7 +1599,6 @@ impl MetaStore for MetaClient {
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
         self.store.next_id(key).await
     }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

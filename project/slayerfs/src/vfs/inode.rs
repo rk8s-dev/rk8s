@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::watch;
 
-/// The `inode`, which holds some states about file attributes, as a local cache.
+/// The `Inode`, which holds file attribute state, as a local cache.
 /// Slayerfs ensure `close-to-open` semantics, that is to say, each `open` operation must see
 /// the newest file states. Otherwise, it is permitted to see stale states.
 #[derive(Clone)]
