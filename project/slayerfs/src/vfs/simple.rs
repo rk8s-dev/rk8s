@@ -73,7 +73,8 @@ impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
         off_in_chunk: u64,
         len: usize,
     ) -> Result<Vec<u8>, String> {
-        let reader = ChunkReader::new(self.layout, chunk_id, &self.store, &self.meta);
+        let mut reader = ChunkReader::new(self.layout, chunk_id, &self.store, &self.meta);
+        reader.prepare_slices().await.map_err(|e| e.to_string())?;
         reader
             .read(
                 off_in_chunk

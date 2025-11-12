@@ -28,6 +28,9 @@ where
             host_port: 0,
         }],
         resources: None,
+        liveness_probe: None,
+        readiness_probe: None,
+        startup_probe: None,
     }
 }
 

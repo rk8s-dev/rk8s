@@ -1,8 +1,11 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+
 use tokio::time;
 
 use crate::commands::pod;
+use crate::daemon::probe::{build_probe_registrations, deregister_pod_probes, register_pod_probes};
 use crate::network::receiver::{NetworkConfigMessage, NetworkReceiver};
 use crate::task::TaskRunner;
 use chrono::Utc;
@@ -13,7 +16,6 @@ use libnetwork::{
     config::{NetworkConfig, validate_network_config},
     ip::{IPStack, PublicIPOpts, lookup_ext_iface},
 };
-use std::collections::HashMap;
 
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
@@ -257,14 +259,36 @@ pub async fn run_once(
                             };
 
                             match pod::run_pod_from_taskrunner(runner) {
-                                Ok(podip) => {
+                                Ok(result) => {
+                                    let pod_name = result.pod_task.metadata.name.clone();
+
+                                    match build_probe_registrations(
+                                        &result.pod_task,
+                                        &result.pod_ip,
+                                    ) {
+                                        Ok(registrations) => {
+                                            if let Err(err) =
+                                                register_pod_probes(&pod_name, registrations)
+                                            {
+                                                eprintln!(
+                                                    "[worker] registering probes for pod {} failed: {err:?}",
+                                                    pod_name
+                                                );
+                                            }
+                                        }
+                                        Err(err) => {
+                                            eprintln!(
+                                                "[worker] building probe registrations for pod {} failed: {err:?}",
+                                                pod_name
+                                            );
+                                        }
+                                    }
+
                                     let _ = client
-                                        .send_msg(&RksMessage::SetPodip((
-                                            pod.metadata.name.clone(),
-                                            podip,
-                                        )))
+                                        .send_msg(&RksMessage::SetPodip((pod_name, result.pod_ip)))
                                         .await;
                                 }
+
                                 Err(e) => {
                                     error!("[worker] run_pod_from_taskrunner failed: {e:?}");
                                     let _ = client
@@ -280,6 +304,14 @@ pub async fn run_once(
                             info!("[worker] DeletePod {name}");
                             match pod::standalone::delete_pod(&name) {
                                 Ok(_) => {
+                                    // Ensure probe deregistration completes before sending the Ack.
+                                    // Previously this was spawned as a detached task which could
+                                    // panic or fail silently. Awaiting here surfaces errors and
+                                    // ensures cleanup has finished when the controller receives
+                                    // the acknowledgement.
+                                    info!(pod = %name, "deregistering probes for pod");
+                                    deregister_pod_probes(&name).await;
+                                    info!(pod = %name, "probes deregistered for pod");
                                     let _ = client.send_msg(&RksMessage::Ack).await;
                                 }
                                 Err(e) => {

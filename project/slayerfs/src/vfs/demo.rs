@@ -47,7 +47,8 @@ pub async fn e2e_localfs_demo<P: AsRef<Path>>(root: P) -> Result<(), Box<dyn Err
 
     // 6) Read and verify
     {
-        let reader = ChunkReader::new(layout, chunk_id, &store, &meta);
+        let mut reader = ChunkReader::new(layout, chunk_id, &store, &meta);
+        reader.prepare_slices().await?;
         let out = reader
             .read(half.try_into().expect("chunk offset must fit in u32"), len)
             .await?;

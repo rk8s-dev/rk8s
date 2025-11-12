@@ -106,7 +106,8 @@ mod tests {
         assert_eq!(slices[0].length, slices[1].length);
         assert_eq!(slices[0].length, half as u32);
 
-        let reader = ChunkReader::new(layout, 9, &store, &meta);
+        let mut reader = ChunkReader::new(layout, 9, &store, &meta);
+        reader.prepare_slices().await.unwrap();
         let out = reader.read(0, half).await.unwrap();
         assert!(out.iter().all(|&b| b == 2));
     }

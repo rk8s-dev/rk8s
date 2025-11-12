@@ -1,9 +1,11 @@
-pub mod sync_loop;
-use sync_loop::SyncLoop;
 pub mod client;
+pub mod probe;
 pub mod static_pods;
+pub mod sync_loop;
 
+//mod status_access;
 use crate::commands::pod::TLSConnectionArgs;
+use sync_loop::SyncLoop;
 use tracing::{error, info};
 
 pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
