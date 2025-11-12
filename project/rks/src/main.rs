@@ -1,6 +1,7 @@
 mod api;
 mod cli;
 mod commands;
+mod controllers;
 mod dns;
 mod internal;
 mod network;
@@ -9,6 +10,8 @@ mod protocol;
 mod scheduler;
 mod vault;
 
+use crate::controllers::garbage_collector::GarbageCollector;
+use crate::controllers::{CONTROLLER_MANAGER, ControllerManager, ReplicaSetController};
 use crate::dns::authority::{run_dns_server, setup_iptable};
 use crate::network::init;
 use crate::network::manager::LocalManager;
@@ -23,6 +26,7 @@ use libvault::storage::xline::XlineOptions;
 use log::{error, info};
 use rustls::crypto::CryptoProvider;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -56,6 +60,12 @@ async fn handle_start_command() -> anyhow::Result<()> {
 
     let local_manager = init_local_manager(cfg, &xline_options).await?;
     launch_scheduler(xline_options, xline_store.clone()).await?;
+
+    register_controllers(CONTROLLER_MANAGER.clone(), xline_store.clone(), 4).await?;
+    CONTROLLER_MANAGER
+        .clone()
+        .start_watch(xline_store.clone())
+        .await?;
 
     let shared = Arc::new(Shared::new(
         xline_store.clone(),
@@ -149,5 +159,21 @@ async fn launch_scheduler(
     .context("Failed to create Scheduler")?;
 
     scheduler.run().await;
+    Ok(())
+}
+
+async fn register_controllers(
+    mgr: Arc<ControllerManager>,
+    xline_store: Arc<XlineStore>,
+    workers: usize,
+) -> anyhow::Result<()> {
+    let gc = GarbageCollector::new(xline_store.clone());
+    let rs = ReplicaSetController::new(xline_store.clone());
+    mgr.clone()
+        .register(Arc::new(RwLock::new(gc)), workers)
+        .await?;
+    mgr.clone()
+        .register(Arc::new(RwLock::new(rs)), workers)
+        .await?;
     Ok(())
 }

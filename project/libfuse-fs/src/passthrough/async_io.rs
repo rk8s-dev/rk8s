@@ -821,6 +821,53 @@ impl Filesystem for PassthroughFs {
         }
 
         if set_attr.atime.is_some() && set_attr.mtime.is_some() {
+            // POSIX utime() permission rules:
+            // - utime(NULL): requires owner OR write permission
+            // - utime(&times): requires owner only
+            //
+            // At FUSE level, we cannot reliably distinguish these cases because VFS
+            // converts both to actual timestamps. We use a heuristic:
+            // - If both nsec == 0 and timestamp is in the past: likely utime(&times)
+            // - Otherwise: likely utime(NULL) which gets current time with nsec precision
+
+            let atime_ts = set_attr.atime.unwrap();
+            let mtime_ts = set_attr.mtime.unwrap();
+
+            // SAFETY: libc::time with null pointer is a read-only syscall that always
+            // succeeds and doesn't modify memory.
+            let now = unsafe { libc::time(std::ptr::null_mut()) };
+
+            // Heuristic: utime(&times) typically sets whole seconds (both nsec=0) to past times.
+            // utime(NULL) sets current time which usually has non-zero nsec.
+            // Both timestamps and both conditions must be satisfied to avoid false positives.
+            let is_utime_times = (atime_ts.nsec == 0 && mtime_ts.nsec == 0)
+                && (atime_ts.sec < now && mtime_ts.sec < now);
+
+            let st = stat_fd(&file, None)?;
+            let uid = self.cfg.mapping.get_uid(req.uid);
+            let gid = self.cfg.mapping.get_gid(req.gid);
+
+            let is_owner = st.st_uid == uid;
+
+            if !is_owner {
+                if is_utime_times {
+                    // utime(&times): only owner allowed
+                    return Err(io::Error::from_raw_os_error(libc::EPERM).into());
+                } else {
+                    // utime(NULL): check for write permission
+                    // Check user, group, and other permissions
+                    // NOTE: This currently only checks the primary gid. A complete POSIX-compliant
+                    // implementation should check all supplementary groups from req.groups if available.
+                    // However, rfuse3::Request currently doesn't expose supplementary group information.
+                    let has_user_write = st.st_uid == uid && st.st_mode & 0o200 != 0;
+                    let has_group_write = st.st_gid == gid && st.st_mode & 0o020 != 0;
+                    let has_other_write = st.st_mode & 0o002 != 0;
+
+                    if !has_user_write && !has_group_write && !has_other_write {
+                        return Err(io::Error::from_raw_os_error(libc::EPERM).into());
+                    }
+                }
+            }
             let mut tvs: [libc::timespec; 2] = [
                 libc::timespec {
                     tv_sec: 0,
@@ -831,8 +878,10 @@ impl Filesystem for PassthroughFs {
                     tv_nsec: libc::UTIME_OMIT,
                 },
             ];
-            tvs[0].tv_sec = set_attr.atime.unwrap().sec;
-            tvs[1].tv_sec = set_attr.mtime.unwrap().sec;
+            tvs[0].tv_sec = atime_ts.sec;
+            tvs[0].tv_nsec = atime_ts.nsec as i64;
+            tvs[1].tv_sec = mtime_ts.sec;
+            tvs[1].tv_nsec = mtime_ts.nsec as i64;
 
             // Safe because this doesn't modify any memory and we check the return value.
             let res = match data {
@@ -1901,6 +1950,73 @@ impl Filesystem for PassthroughFs {
             } else {
                 Ok(ReplyLSeek { offset: res as u64 })
             }
+        }
+    }
+
+    /// Copy a range of data from one file to another using the copy_file_range system call.
+    /// This can improve performance by reducing data copying between userspace and kernel.
+    #[allow(clippy::too_many_arguments)]
+    async fn copy_file_range(
+        &self,
+        _req: Request,
+        inode_in: Inode,
+        fh_in: u64,
+        offset_in: u64,
+        inode_out: Inode,
+        fh_out: u64,
+        offset_out: u64,
+        length: u64,
+        flags: u64,
+    ) -> Result<ReplyCopyFileRange> {
+        // Get the handle data for both source and destination files
+        let data_in = self.handle_map.get(fh_in, inode_in).await?;
+        let data_out = self.handle_map.get(fh_out, inode_out).await?;
+
+        // Get file descriptors
+        let fd_in = data_in.borrow_fd().as_raw_fd();
+        let fd_out = data_out.borrow_fd().as_raw_fd();
+
+        // Validate and reject unsupported flags
+        // Linux copy_file_range currently doesn't define any flags (should be 0)
+        if flags != 0 {
+            return Err(io::Error::from_raw_os_error(libc::EINVAL).into());
+        }
+
+        // Convert offsets to i64, checking for overflow (offsets > i64::MAX would wrap to negative)
+        let mut off_in: i64 = offset_in
+            .try_into()
+            .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+        let mut off_out: i64 = offset_out
+            .try_into()
+            .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+
+        // Convert length to usize, checking for overflow on 32-bit systems
+        let len: usize = length
+            .try_into()
+            .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+
+        // SAFETY: copy_file_range reads from fd_in and writes to fd_out. We pass valid
+        // file descriptors and pointers to offset values. The syscall updates the offset
+        // pointers to reflect the new positions after the copy, but doesn't modify the
+        // file descriptor positions themselves (when offsets are non-NULL).
+        let res = unsafe {
+            libc::copy_file_range(
+                fd_in,
+                &mut off_in as *mut i64, // Pass offset pointer directly
+                fd_out,
+                &mut off_out as *mut i64, // Pass offset pointer directly
+                len,
+                0, // flags (must be 0, already validated above)
+            )
+        };
+
+        if res < 0 {
+            Err(io::Error::last_os_error().into())
+        } else {
+            // res is guaranteed >= 0 here, safe to cast to usize then u64
+            Ok(ReplyCopyFileRange {
+                copied: res as usize as u64,
+            })
         }
     }
 }

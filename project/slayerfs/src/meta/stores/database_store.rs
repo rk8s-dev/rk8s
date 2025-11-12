@@ -2,10 +2,12 @@
 //!
 //! Supports SQLite and PostgreSQL backends via SeaORM
 
-use crate::meta::Permission;
+use crate::chuck::SliceDesc;
 use crate::meta::config::{Config, DatabaseType};
+use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
 use crate::meta::entities::*;
 use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
+use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -19,6 +21,7 @@ pub struct DatabaseMetaStore {
     db: DatabaseConnection,
     _config: Config,
     next_inode: AtomicU64,
+    next_slice: AtomicU64,
 }
 
 impl DatabaseMetaStore {
@@ -36,10 +39,12 @@ impl DatabaseMetaStore {
         Self::init_schema(&db).await?;
 
         let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
+        let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
         let store = Self {
             db,
             _config,
             next_inode,
+            next_slice,
         };
         store.init_root_directory().await?;
 
@@ -56,10 +61,12 @@ impl DatabaseMetaStore {
         Self::init_schema(&db).await?;
 
         let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
+        let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
         let store = Self {
             db,
             _config,
             next_inode,
+            next_slice,
         };
         store.init_root_directory().await?;
 
@@ -88,6 +95,18 @@ impl DatabaseMetaStore {
         let next = max_access.max(max_file) + 1;
         info!("Initialized next inode counter to: {}", next);
         Ok(next)
+    }
+
+    async fn init_next_slice(db: &DatabaseConnection) -> Result<u64, MetaError> {
+        let max_slice = SliceMeta::find()
+            .order_by_desc(slice_meta::Column::SliceId)
+            .one(db)
+            .await
+            .map_err(MetaError::Database)?
+            .map(|r| r.slice_id as u64)
+            .unwrap_or(0);
+
+        Ok(max_slice + 1)
     }
 
     /// Create database connection
@@ -130,6 +149,10 @@ impl DatabaseMetaStore {
                 .create_table_from_entity(FileMeta)
                 .if_not_exists()
                 .to_owned(),
+            schema
+                .create_table_from_entity(SliceMeta)
+                .if_not_exists()
+                .to_owned(),
         ];
 
         for (i, stmt) in stmts.iter().enumerate() {
@@ -152,7 +175,7 @@ impl DatabaseMetaStore {
         }
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let root_permission = Permission::new(0o40755, 0, 0); // 目录权限：0o40000 (目录标志) + 0o755 (权限)
+        let root_permission = Permission::new(0o40755, 0, 0); // Directory bits: 0o40000 (dir flag) + 0o755 (mode)
         let root_dir = access_meta::ActiveModel {
             inode: Set(1),
             permission: Set(root_permission),
@@ -186,6 +209,7 @@ impl DatabaseMetaStore {
     ) -> Result<Option<Vec<ContentMetaModel>>, MetaError> {
         let contents = ContentMeta::find()
             .filter(content_meta::Column::ParentInode.eq(parent_inode))
+            .order_by_asc(content_meta::Column::EntryName) // Sort by name to match ls order
             .all(&self.db)
             .await
             .map_err(MetaError::Database)?;
@@ -865,5 +889,42 @@ impl MetaStore for DatabaseMetaStore {
         txn.commit().await.map_err(MetaError::Database)?;
 
         Ok(())
+    }
+
+    async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
+        let rows = SliceMeta::find()
+            .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
+            .order_by_asc(slice_meta::Column::Id)
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
+        let model = slice_meta::ActiveModel {
+            chunk_id: Set(chunk_id as i64),
+            slice_id: Set(slice.slice_id as i64),
+            offset: Set(slice.offset as i32),
+            length: Set(slice.length as i32),
+            ..Default::default()
+        };
+
+        model.insert(&self.db).await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
+        match key {
+            SLICE_ID_KEY => Ok(self.next_slice.fetch_add(1, Ordering::SeqCst) as i64),
+            INODE_ID_KEY => Ok(self.next_inode.fetch_add(1, Ordering::SeqCst) as i64),
+            other => Err(MetaError::NotSupported(format!(
+                "next_id not supported for key {other}"
+            ))),
+        }
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

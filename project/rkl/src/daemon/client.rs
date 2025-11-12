@@ -440,10 +440,10 @@ pub async fn generate_node(ext_iface: &ExternalInterface) -> Result<Node> {
         kind: "Node".to_string(),
         metadata: ObjectMeta {
             name: hostname,
-            uid: None,
             namespace: "default".to_string(),
             labels: HashMap::new(),
             annotations: HashMap::new(),
+            ..Default::default()
         },
         spec: NodeSpec {
             pod_cidr: "0".to_string(),

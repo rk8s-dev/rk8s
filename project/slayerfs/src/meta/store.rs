@@ -1,6 +1,7 @@
 //! Metadata store abstract interface
 //!
 //! Defines unified interface for filesystem metadata operations
+use crate::chuck::SliceDesc;
 use crate::meta::entities::content_meta::EntryType;
 use async_trait::async_trait;
 
@@ -75,6 +76,9 @@ pub enum MetaError {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    #[error("error: max retries exceeded")]
+    MaxRetriesExceeded,
+
     #[error("Database error: {0}")]
     Database(#[from] sea_orm::DbErr),
 
@@ -86,6 +90,9 @@ pub enum MetaError {
 
     #[error("Config error: {0}")]
     Config(String),
+
+    #[error("error: {0}")]
+    Anyhow(#[from] anyhow::Error),
 }
 
 /// Metadata store abstract interface
@@ -136,4 +143,12 @@ pub trait MetaStore: Send + Sync {
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError>;
 
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError>;
+
+    async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError>;
+
+    async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError>;
+
+    async fn next_id(&self, key: &str) -> Result<i64, MetaError>;
+    /// Allow downcasting to concrete types
+    fn as_any(&self) -> &dyn std::any::Any;
 }

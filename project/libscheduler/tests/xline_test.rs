@@ -86,10 +86,10 @@ fn create_test_node(name: &str, cpu: &str, memory: &str) -> Node {
         kind: "Node".to_string(),
         metadata: ObjectMeta {
             name: name.to_string(),
-            uid: None,
             namespace: "".to_string(),
             labels: HashMap::new(),
             annotations: HashMap::new(),
+            ..Default::default()
         },
         spec: XlineNodeSpec {
             pod_cidr: "10.244.0.0/24".to_string(),
@@ -134,10 +134,10 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
         kind: "Pod".to_string(),
         metadata: ObjectMeta {
             name: name.to_string(),
-            uid: None,
             namespace: "default".to_string(),
             labels: HashMap::new(),
             annotations: HashMap::new(),
+            ..Default::default()
         },
         spec: XlinePodSpec {
             node_name: None,

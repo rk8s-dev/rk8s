@@ -1,57 +1,60 @@
-//! Slice 生命周期与 block 映射
+//! Slice lifecycle and block mapping utilities.
 //!
-//! 目标：把位于某个 Chunk 内的一段连续字节区间（Slice），拆分成按 Block 对齐的
-//! 若干片段（[`BlockSpan`]），供块存储层按块写入/读取。
+//! Goal: take a contiguous region (slice) inside a chunk and split it into block-aligned
+//! fragments (`BlockSpan`) so the block store can write/read block by block.
 //!
-//! 术语回顾：
-//! - Chunk：逻辑连续的数据区域（例如 64MiB），被划分为多个等长 Block（例如 4MiB）。
-//! - Block：Chunk 内的固定大小分片，是对象存储的最小写入/读取单元。
-//! - Slice：位于某个 Chunk 内、任意偏移与长度的连续范围，不一定与块边界对齐。
+//! Terminology recap:
+//! - Chunk: logical contiguous region (e.g., 64 MiB) further divided into equal-sized blocks (e.g., 4 MiB).
+//! - Block: fixed-size portion inside a chunk, the smallest IO unit for object storage.
+//! - Slice: arbitrary contiguous range within a chunk that may start/end mid-block.
 //!
-//! 映射结果特性：
-//! - 生成的 [`BlockSpan`] 列表按 `block_index` 单调递增；
-//! - 各片段在同一块内不重叠，且跨块相邻；
-//! - 所有 `len_in_block` 之和等于 Slice 的 `length`；
-//! - 时间复杂度 O(跨越的块数)，额外空间 O(跨越的块数)。
+//! Mapping properties:
+//! - The generated [`BlockSpan`] list is monotonic by block index (`BlockSpan::index`).
+//! - Spans within a block never overlap and adjacent blocks are contiguous.
+//! - The sum of all `len_in_block` equals the slice `length`.
+//! - Complexity O(number of covered blocks) in time and space.
 //!
-//! 小示意图（S 表示 Slice 覆盖部分）：
+//! Visual guide (S marks the covered region):
 //!
-//!   Block 0: |------SSSS|  (从块内偏移 wbo 开始)
+//!   Block 0: |------SSSS|  (start at within-block offset)
 //!   Block 1: |SSSSSSSSS|
-//!   Block 2: |SSSS------|  (到块内偏移 < block_size 结束)
+//!   Block 2: |SSSS------|  (stop before block_size)
 //!
-//! 注意：本模块假定传入的 Slice 完全位于一个 Chunk 之内，不做跨 Chunk 校验。
+//! Note: this module assumes the provided slice stays inside a single chunk; cross-chunk validation is not performed.
 
 use super::chunk::ChunkLayout;
+use crate::chuck::BlockStore;
+use crate::meta::MetaStore;
+use anyhow::Context;
+use std::marker::PhantomData;
 
-/// 一个切片在某个 block 上覆盖的范围。
+/// Portion of a slice that resides inside a single block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockSpan {
-    pub block_index: u32,
-    /// 在该 block 内的起始偏移（字节）。
-    pub offset_in_block: u32,
-    /// 在该 block 内覆盖的长度（字节）。
-    pub len_in_block: u32,
+    pub index: u32,
+    /// Start offset within the block (bytes).
+    pub offset: u32,
+    /// Length covered inside the block (bytes).
+    pub len: u32,
 }
 
-/// Slice 的基本描述（位于某个 chunk 内的连续范围）。
+/// Basic slice descriptor for a chunk-local contiguous range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SliceDesc {
-    pub slice_id: i64,
-    pub chunk_id: i64,
-    /// 相对 chunk 起始的偏移（字节）。
-    pub offset: u64,
-    /// 长度（字节）。
+    pub slice_id: u64,
+    pub chunk_id: u64,
+    /// Offset relative to the start of the chunk (bytes).
+    pub offset: u32,
+    /// Length in bytes.
     pub length: u32,
 }
 
 impl SliceDesc {
-    /// 将当前 slice 映射为一组 block 跨度。
+    /// Map this slice into a list of block spans.
     ///
-    /// - 当 `length == 0` 时返回空列表；
-    /// - 每个返回项的 `(block_index, offset_in_block, len_in_block)` 均满足
-    ///   `offset_in_block + len_in_block <= block_size`；
-    /// - 返回序列覆盖从 `offset` 起始、长度为 `length` 的全部范围。
+    /// - Returns an empty list when `length == 0`.
+    /// - Each returned span stays within block bounds (`offset + len <= block_size`).
+    /// - The spans cover the entire `[offset, offset+length)` range.
     pub fn block_spans(&self, layout: ChunkLayout) -> Vec<BlockSpan> {
         if self.length == 0 {
             return Vec::new();
@@ -59,27 +62,103 @@ impl SliceDesc {
 
         let mut spans = Vec::new();
         let mut remaining = self.length as u64;
-        let mut cur_off_in_chunk = self.offset;
+        let mut cur_off_in_chunk = self.offset as u64;
 
         while remaining > 0 {
-            // 计算当前偏移所处的块索引与块内偏移
+            // Determine the block index and within-block offset for the current position
             let bi = layout.block_index_of(cur_off_in_chunk);
             let wbo = layout.within_block_offset(cur_off_in_chunk) as u64;
-            // 本块剩余可容纳的字节数
+            // Remaining capacity in this block
             let cap = layout.block_size as u64 - wbo;
-            // 实际取本块容量与剩余长度的较小者
+            // Take the min of remaining capacity and remaining length
             let take = cap.min(remaining);
             spans.push(BlockSpan {
-                block_index: bi,
-                offset_in_block: wbo as u32,
-                len_in_block: take as u32,
+                index: bi,
+                offset: wbo as u32,
+                len: take as u32,
             });
-            // 推进到下一个起点
+            // Advance to the next starting point
             cur_off_in_chunk += take;
             remaining -= take;
         }
         spans
     }
+}
+
+pub struct Write;
+
+pub struct Read;
+
+pub struct SliceIO<'a, State, B> {
+    desc: SliceDesc,
+    layout: ChunkLayout,
+    store: &'a B,
+    _io_mode: PhantomData<State>,
+}
+
+impl<'a, State, B> SliceIO<'a, State, B>
+where
+    B: BlockStore,
+{
+    pub fn new(desc: SliceDesc, layout: ChunkLayout, store: &'a B) -> SliceIO<'a, State, B> {
+        Self {
+            desc,
+            layout,
+            store,
+            _io_mode: PhantomData,
+        }
+    }
+}
+
+impl<'a, B> SliceIO<'a, Write, B>
+where
+    B: BlockStore,
+{
+    pub async fn write(&self, buf: &[u8]) -> anyhow::Result<SliceDesc> {
+        let spans = self.desc.block_spans(self.layout);
+        let mut cursor = 0;
+
+        for (index, span) in spans.iter().enumerate() {
+            let take = span.len as usize;
+            let data = &buf[cursor..(cursor + take)];
+
+            self.store
+                .write_range((self.desc.slice_id, index as u32), span.offset, data)
+                .await?;
+            cursor += take;
+        }
+        Ok(self.desc)
+    }
+}
+
+impl<'a, B> SliceIO<'a, Read, B>
+where
+    B: BlockStore,
+{
+    pub async fn read(&self, buf: &mut [u8]) -> anyhow::Result<()> {
+        debug_assert_eq!(buf.len(), self.desc.length as usize);
+        let spans = self.desc.block_spans(self.layout);
+        let mut cursor = 0usize;
+
+        for (index, span) in spans.iter().enumerate() {
+            let take = span.len as usize;
+            let out = &mut buf[cursor..cursor + take];
+            self.store
+                .read_range((self.desc.slice_id, index as u32), span.offset, out)
+                .await?;
+            cursor += take;
+        }
+        Ok(())
+    }
+}
+
+pub fn key_for_slice(chunk_id: u64) -> String {
+    format!("slices/{chunk_id}")
+}
+
+#[allow(dead_code)]
+pub fn key_for_block_of_slice(slice_id: u64, index: u64) -> String {
+    format!("{slice_id}/{index}")
 }
 
 #[cfg(test)]
@@ -98,15 +177,15 @@ mod tests {
         };
         let spans = s.block_spans(layout);
         assert_eq!(spans.len(), 1);
-        assert_eq!(spans[0].block_index, 0);
-        assert_eq!(spans[0].offset_in_block, 0);
-        assert_eq!(spans[0].len_in_block, DEFAULT_BLOCK_SIZE / 2);
+        assert_eq!(spans[0].index, 0);
+        assert_eq!(spans[0].offset, 0);
+        assert_eq!(spans[0].len, DEFAULT_BLOCK_SIZE / 2);
     }
 
     #[test]
     fn test_cross_two_blocks() {
         let layout = ChunkLayout::default();
-        let half = (layout.block_size / 2) as u64;
+        let half = layout.block_size / 2;
         let s = SliceDesc {
             slice_id: 1,
             chunk_id: 1,
@@ -115,11 +194,11 @@ mod tests {
         };
         let spans = s.block_spans(layout);
         assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].block_index, 0);
-        assert_eq!(spans[0].offset_in_block, (layout.block_size / 2));
-        assert_eq!(spans[0].len_in_block, layout.block_size / 2);
-        assert_eq!(spans[1].block_index, 1);
-        assert_eq!(spans[1].offset_in_block, 0);
-        assert_eq!(spans[1].len_in_block, layout.block_size / 2);
+        assert_eq!(spans[0].index, 0);
+        assert_eq!(spans[0].offset, (layout.block_size / 2));
+        assert_eq!(spans[0].len, layout.block_size / 2);
+        assert_eq!(spans[1].index, 1);
+        assert_eq!(spans[1].offset, 0);
+        assert_eq!(spans[1].len, layout.block_size / 2);
     }
 }

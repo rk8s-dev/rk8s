@@ -1,26 +1,24 @@
 use crate::api::xlinestore::XlineStore;
 use crate::controllers::Controller;
+use crate::controllers::manager::{ResourceWatchResponse, WatchEvent};
 use anyhow::Result;
 use async_trait::async_trait;
-use common::{LabelSelectorOperator, PodTask, PodTemplateSpec, ReplicaSet};
+use common::{
+    LabelSelectorOperator, OwnerReference, PodTask, PodTemplateSpec, ReplicaSet, ResourceKind,
+};
 use rand::random;
+use std::collections::HashSet;
 use std::sync::Arc;
 
-pub struct ReplicaSetController {}
-
-impl ReplicaSetController {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for ReplicaSetController {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct ReplicaSetController {
+    store: Arc<XlineStore>,
 }
 
 impl ReplicaSetController {
+    pub fn new(store: Arc<XlineStore>) -> Self {
+        Self { store }
+    }
+
     /// Match selector: supports MatchLabels and MatchExpressions.
     pub fn selector_match(rs: &ReplicaSet, pod: &PodTask) -> bool {
         // namespace must match
@@ -68,6 +66,23 @@ impl ReplicaSetController {
         true
     }
 
+    fn owns_or_can_adopt_pod(rs: &ReplicaSet, pod: &PodTask) -> bool {
+        match pod.metadata.owner_references.as_ref() {
+            Some(owners) => owners.iter().any(|owner| {
+                if owner.kind != ResourceKind::ReplicaSet {
+                    return false;
+                }
+
+                if owner.uid == rs.metadata.uid {
+                    return true;
+                }
+
+                owner.controller && owner.name == rs.metadata.name
+            }),
+            None => true,
+        }
+    }
+
     /// Generate a unique pod name based on base name and random suffix.
     pub async fn generate_unique_name(base: &str, store: &XlineStore) -> Result<String> {
         loop {
@@ -82,15 +97,41 @@ impl ReplicaSetController {
     }
 
     /// Reconcile given ReplicaSet: ensure desired number of pods exist, update status.
-    pub async fn reconcile(&self, rs: &mut ReplicaSet, store: &XlineStore) -> Result<()> {
-        let pods = store.list_pods().await?;
+    pub async fn reconcile(&self, rs: &mut ReplicaSet) -> Result<()> {
+        if rs.metadata.deletion_timestamp.is_some() {
+            log::debug!(
+                "ReplicaSet {} is being deleted, skip reconcile",
+                rs.metadata.name
+            );
+            return Ok(());
+        }
+
+        let pods = self.store.list_pods().await?;
         let mut matching: Vec<PodTask> = pods
             .into_iter()
-            .filter(|p| Self::selector_match(rs, p))
+            .filter(|p| {
+                let matches = Self::selector_match(rs, p);
+                let owned = matches && Self::owns_or_can_adopt_pod(rs, p);
+                if log::log_enabled!(log::Level::Trace) && matches {
+                    log::trace!(
+                        "ReplicaSet {} evaluating pod {}: owned={}",
+                        rs.metadata.name,
+                        p.metadata.name,
+                        owned
+                    );
+                }
+                owned
+            })
             .collect();
 
         let actual = matching.len() as i32;
         let desired = rs.spec.replicas;
+        log::debug!(
+            "ReplicaSet {} reconcile start: actual={} desired={}",
+            rs.metadata.name,
+            actual,
+            desired
+        );
 
         // update status counters
         rs.status.replicas = actual;
@@ -114,14 +155,32 @@ impl ReplicaSetController {
                     status: Default::default(),
                 };
                 // ensure name unique
-                let name = Self::generate_unique_name(&rs.metadata.name, store).await?;
+                let name =
+                    Self::generate_unique_name(&rs.metadata.name, self.store.as_ref()).await?;
                 pod.metadata.name = name.clone();
+                // generate a new unique UID for each Pod
+                pod.metadata.uid = uuid::Uuid::new_v4();
+                // set creation timestamp
+                pod.metadata.creation_timestamp = Some(chrono::Utc::now());
                 // ensure selector labels present on pod
                 for (k, v) in rs.spec.selector.match_labels.iter() {
                     pod.metadata.labels.insert(k.clone(), v.clone());
                 }
+                pod.metadata.owner_references = Some(vec![OwnerReference {
+                    api_version: rs.api_version.clone(),
+                    kind: ResourceKind::ReplicaSet,
+                    name: rs.metadata.name.clone(),
+                    uid: rs.metadata.uid,
+                    controller: true,
+                    block_owner_deletion: Some(true),
+                }]);
                 let yaml = serde_yaml::to_string(&pod)?;
-                store.insert_pod_yaml(&name, &yaml).await?;
+                self.store.insert_pod_yaml(&name, &yaml).await?;
+                log::debug!(
+                    "ReplicaSet {} created pod {} while reconciling",
+                    rs.metadata.name,
+                    name
+                );
                 matching.push(pod);
             }
         } else if actual > desired {
@@ -130,7 +189,12 @@ impl ReplicaSetController {
             matching.sort_by_key(|p| p.status.pod_ip.is_some()); // not ready first (None => true sorts before)
             for pod in matching.into_iter().take(to_delete) {
                 let pod_name = pod.metadata.name.clone();
-                store.delete_pod(&pod_name).await?;
+                self.store.delete_pod(&pod_name).await?;
+                log::debug!(
+                    "ReplicaSet {} deleted pod {} while reconciling",
+                    rs.metadata.name,
+                    pod_name
+                );
             }
         }
 
@@ -138,18 +202,38 @@ impl ReplicaSetController {
     }
 
     // Implement Controller trait wrapper: load ReplicaSet by name then call reconcile above and persist status.
-    pub async fn reconcile_by_name(&self, key: &str, store: Arc<XlineStore>) -> Result<()> {
-        if let Some(yaml) = store.get_replicaset_yaml(key).await? {
+    pub async fn reconcile_by_name(&self, key: &str) -> Result<()> {
+        let mut attempts = 0;
+        loop {
+            let Some((yaml, revision)) = self.store.get_replicaset_yaml_with_revision(key).await?
+            else {
+                return Ok(());
+            };
+
             let mut rs: ReplicaSet = serde_yaml::from_str(&yaml)?;
-            // perform reconcile logic
-            self.reconcile(&mut rs, &store).await?;
-            // persist updated replicaset (including status)
+            let name = rs.metadata.name.clone();
+
+            self.reconcile(&mut rs).await?;
+
             let new_yaml = serde_yaml::to_string(&rs)?;
-            store
-                .insert_replicaset_yaml(&rs.metadata.name, &new_yaml)
-                .await?;
+            if self
+                .store
+                .compare_and_set_replicaset_yaml(&name, revision, &new_yaml)
+                .await?
+            {
+                return Ok(());
+            }
+
+            attempts += 1;
+            if attempts >= 5 {
+                log::warn!(
+                    "ReplicaSetController reconcile_by_name {} failed due to concurrent updates",
+                    key
+                );
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        Ok(())
     }
 }
 
@@ -159,7 +243,99 @@ impl Controller for ReplicaSetController {
         "replicaset"
     }
 
-    async fn reconcile(&self, key: &str, store: Arc<XlineStore>) -> Result<()> {
-        self.reconcile_by_name(key, store).await
+    fn watch_resources(&self) -> Vec<ResourceKind> {
+        vec![ResourceKind::ReplicaSet, ResourceKind::Pod]
+    }
+
+    async fn handle_watch_response(&mut self, response: &ResourceWatchResponse) -> Result<()> {
+        match response.kind {
+            ResourceKind::ReplicaSet => {
+                log::debug!(
+                    "ReplicaSetController handling ReplicaSet event: key={}",
+                    response.key
+                );
+                self.reconcile_by_name(&response.key).await?;
+            }
+            ResourceKind::Pod => {
+                log::debug!(
+                    "ReplicaSetController handling Pod event: key={}",
+                    response.key
+                );
+                let mut pods_to_check: Vec<PodTask> = Vec::new();
+                match &response.event {
+                    WatchEvent::Add { yaml } => {
+                        pods_to_check.push(serde_yaml::from_str::<PodTask>(yaml)?);
+                    }
+                    WatchEvent::Update { old_yaml, new_yaml } => {
+                        pods_to_check.push(serde_yaml::from_str::<PodTask>(new_yaml)?);
+                        pods_to_check.push(serde_yaml::from_str::<PodTask>(old_yaml)?);
+                    }
+                    WatchEvent::Delete { yaml } => {
+                        pods_to_check.push(serde_yaml::from_str::<PodTask>(yaml)?);
+                    }
+                }
+
+                if pods_to_check.is_empty() {
+                    return Ok(());
+                }
+
+                let mut reconciled: HashSet<String> = HashSet::new();
+                let mut replicasets_cache: Option<Vec<ReplicaSet>> = None;
+
+                for pod in pods_to_check.iter() {
+                    let mut owner_triggered = false;
+
+                    if let Some(owner_refs) = pod.metadata.owner_references.as_ref() {
+                        for owner in owner_refs
+                            .iter()
+                            .filter(|o| o.kind == ResourceKind::ReplicaSet)
+                        {
+                            owner_triggered = true;
+                            if reconciled.insert(owner.name.clone()) {
+                                log::debug!(
+                                    "Pod {} owned by ReplicaSet {}, triggering reconcile",
+                                    pod.metadata.name,
+                                    owner.name
+                                );
+                                self.reconcile_by_name(&owner.name).await?;
+                            }
+                        }
+                    }
+
+                    if owner_triggered {
+                        continue;
+                    }
+
+                    let replicasets = match replicasets_cache.as_ref() {
+                        Some(rs) => rs,
+                        None => {
+                            let rs = self.store.list_replicasets().await?;
+                            log::debug!(
+                                "ReplicaSetController label-matching Pod event against {} ReplicaSets",
+                                rs.len()
+                            );
+                            replicasets_cache = Some(rs);
+                            replicasets_cache.as_ref().unwrap()
+                        }
+                    };
+
+                    for rs in replicasets.iter() {
+                        if Self::selector_match(rs, pod)
+                            && reconciled.insert(rs.metadata.name.clone())
+                        {
+                            log::debug!(
+                                "Pod {} label-matched ReplicaSet {}, triggering reconcile",
+                                pod.metadata.name,
+                                rs.metadata.name
+                            );
+                            self.reconcile_by_name(&rs.metadata.name).await?;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }

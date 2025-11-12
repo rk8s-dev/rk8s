@@ -1,8 +1,9 @@
 //! Etcd backend-specific data structures
 
 use crate::meta::Permission;
+use crate::meta::store::{FileAttr, FileType};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 /// Etcd entry information (reverse index: inode -> file/directory attributes)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,11 +30,18 @@ pub struct EtcdForwardEntry {
     pub is_file: bool,
 }
 
-/// Etcd directory children collection (dir_id -> children names)
+/// Etcd directory children collection (dir_id -> name to inode mapping)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EtcdDirChildren {
     pub inode: i64,
-    pub children: HashSet<String>,
+    pub children: HashMap<String, i64>,
+}
+
+impl EtcdDirChildren {
+    /// Create new children collection with name->inode mapping
+    pub fn new(inode: i64, children: HashMap<String, i64>) -> Self {
+        Self { inode, children }
+    }
 }
 #[allow(dead_code)]
 impl EtcdEntryInfo {
@@ -55,5 +63,33 @@ impl EtcdEntryInfo {
 
     pub fn gid(&self) -> u32 {
         self.permission.gid
+    }
+
+    /// Converts EtcdEntryInfo to FileAttr for cache updates
+    ///
+    /// # Arguments
+    ///
+    /// * `ino` - The inode number (extracted from the r:{ino} key)
+    ///
+    /// # Returns
+    ///
+    /// FileAttr suitable for direct cache insertion
+    pub fn to_file_attr(&self, ino: i64) -> FileAttr {
+        FileAttr {
+            ino,
+            size: self.size.unwrap_or(0).max(0) as u64,
+            kind: if self.is_file {
+                FileType::File
+            } else {
+                FileType::Dir
+            },
+            mode: self.permission.mode,
+            uid: self.permission.uid,
+            gid: self.permission.gid,
+            atime: self.access_time,
+            mtime: self.modify_time,
+            ctime: self.create_time,
+            nlink: self.nlink,
+        }
     }
 }

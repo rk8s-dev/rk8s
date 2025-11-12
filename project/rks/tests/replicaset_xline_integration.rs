@@ -1,12 +1,15 @@
 use anyhow::Result;
+use libvault::storage::xline::XlineOptions;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::sync::RwLock;
+use tokio::time::{Instant, sleep};
 
 use common::{
-    ContainerSpec, LabelSelector, ObjectMeta, PodSpec, PodTemplateSpec, ReplicaSet, ReplicaSetSpec,
+    ContainerSpec, LabelSelector, ObjectMeta, PodSpec, PodTask, PodTemplateSpec, ReplicaSet,
+    ReplicaSetSpec,
 };
 use rks::api::xlinestore::XlineStore;
 use rks::controllers::{ControllerManager, ReplicaSetController};
@@ -33,17 +36,22 @@ fn load_test_config() -> Result<TestCfg> {
 async fn setup_store_and_manager() -> Result<(
     Arc<XlineStore>,
     Arc<ControllerManager>,
-    Arc<ReplicaSetController>,
+    Arc<RwLock<ReplicaSetController>>,
 )> {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let cfg = load_test_config()?;
     let endpoints: Vec<String> = cfg.xline_config.endpoints;
-    let endpoint_refs: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
-    let store: Arc<XlineStore> = Arc::new(XlineStore::new(&endpoint_refs).await?);
+    let option = XlineOptions::new(endpoints);
+    let store: Arc<XlineStore> = Arc::new(XlineStore::new(option).await?);
+
+    // clean up any existing ReplicaSets or Pods from previous tests
+    cleanup_pods_by_prefix(&store, "test-rs").await?;
+    cleanup_replicasets_by_prefix(&store, "test-rs").await?;
+
     let mgr = Arc::new(ControllerManager::new());
-    let rs_ctrl = Arc::new(ReplicaSetController::new());
-    mgr.clone()
-        .register(rs_ctrl.clone(), 2, store.clone())
-        .await?;
+    let rs_ctrl = Arc::new(RwLock::new(ReplicaSetController::new(store.clone())));
+    mgr.clone().register(rs_ctrl.clone(), 2).await?;
     mgr.clone().start_watch(store.clone()).await?;
     tokio::time::sleep(Duration::from_secs(1)).await;
     Ok((store, mgr, rs_ctrl))
@@ -60,7 +68,7 @@ fn make_test_replicaset(name: &str, replicas: i32) -> ReplicaSet {
             namespace: "default".to_string(),
             labels: HashMap::new(),
             annotations: HashMap::new(),
-            uid: None,
+            ..Default::default()
         },
         spec: ReplicaSetSpec {
             replicas,
@@ -74,7 +82,7 @@ fn make_test_replicaset(name: &str, replicas: i32) -> ReplicaSet {
                     namespace: "default".to_string(),
                     labels: labels.clone(),
                     annotations: HashMap::new(),
-                    uid: None,
+                    ..Default::default()
                 },
                 spec: PodSpec {
                     node_name: None,
@@ -103,6 +111,66 @@ async fn cleanup_pods_by_prefix(store: &Arc<XlineStore>, prefix: &str) -> Result
         }
     }
     Ok(())
+}
+
+async fn cleanup_replicasets_by_prefix(store: &Arc<XlineStore>, prefix: &str) -> Result<()> {
+    let replicasets = store.list_replicasets().await?;
+    for rs in replicasets {
+        if rs.metadata.name.contains(prefix) {
+            let _ = store.delete_replicaset(&rs.metadata.name).await;
+        }
+    }
+    Ok(())
+}
+
+async fn wait_for_pod_prefix_count(
+    store: &Arc<XlineStore>,
+    prefix: &str,
+    expected: usize,
+    timeout: Duration,
+) -> Result<Vec<PodTask>> {
+    let start = Instant::now();
+    loop {
+        let pods = store.list_pods().await?;
+        let matching: Vec<PodTask> = pods
+            .into_iter()
+            .filter(|p| p.metadata.name.contains(prefix))
+            .collect();
+
+        if matching.len() == expected {
+            return Ok(matching);
+        }
+
+        if Instant::now().duration_since(start) > timeout {
+            let details: Vec<String> = matching
+                .iter()
+                .map(|p| {
+                    let owners = p
+                        .metadata
+                        .owner_references
+                        .as_ref()
+                        .map(|refs| {
+                            refs.iter()
+                                .map(|o| format!("{}:{}", o.kind, o.name))
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        })
+                        .unwrap_or_else(|| "<none>".to_string());
+                    format!("{}[owners:{}]", p.metadata.name, owners)
+                })
+                .collect();
+
+            return Err(anyhow::anyhow!(
+                "timed out waiting for {} pods with prefix {} (found {} -> [{}])",
+                expected,
+                prefix,
+                matching.len(),
+                details.join("; ")
+            ));
+        }
+
+        sleep(Duration::from_millis(500)).await;
+    }
 }
 
 /// Ensures that creating a ReplicaSet automatically creates the desired number of Pods.
@@ -199,7 +267,8 @@ async fn test_replicaset_scales_down() -> Result<()> {
     store
         .insert_replicaset_yaml(&rs.metadata.name, &yaml)
         .await?;
-    sleep(Duration::from_secs(3)).await;
+    let _ =
+        wait_for_pod_prefix_count(&store, "test-rs-scale-down", 3, Duration::from_secs(15)).await?;
 
     let mut updated_rs = rs.clone();
     updated_rs.spec.replicas = 1;
@@ -207,14 +276,8 @@ async fn test_replicaset_scales_down() -> Result<()> {
     store
         .insert_replicaset_yaml(&updated_rs.metadata.name, &yaml)
         .await?;
-
-    sleep(Duration::from_secs(3)).await;
-
-    let pods = store.list_pods().await?;
-    let matching: Vec<_> = pods
-        .into_iter()
-        .filter(|p| p.metadata.name.contains("test-rs-scale-down"))
-        .collect();
+    let matching =
+        wait_for_pod_prefix_count(&store, "test-rs-scale-down", 1, Duration::from_secs(15)).await?;
 
     // cleanup
     let _ = store.delete_replicaset(&rs.metadata.name).await;
@@ -238,7 +301,8 @@ async fn test_replicaset_scales_up() -> Result<()> {
     store
         .insert_replicaset_yaml(&rs.metadata.name, &yaml)
         .await?;
-    sleep(Duration::from_secs(3)).await;
+    let _ =
+        wait_for_pod_prefix_count(&store, "test-rs-scale-up", 1, Duration::from_secs(15)).await?;
 
     let mut updated_rs = rs.clone();
     updated_rs.spec.replicas = 3;
@@ -246,14 +310,8 @@ async fn test_replicaset_scales_up() -> Result<()> {
     store
         .insert_replicaset_yaml(&updated_rs.metadata.name, &yaml)
         .await?;
-
-    sleep(Duration::from_secs(4)).await;
-
-    let pods = store.list_pods().await?;
-    let matching: Vec<_> = pods
-        .into_iter()
-        .filter(|p| p.metadata.name.contains("test-rs-scale-up"))
-        .collect();
+    let matching =
+        wait_for_pod_prefix_count(&store, "test-rs-scale-up", 3, Duration::from_secs(20)).await?;
 
     // cleanup
     let _ = store.delete_replicaset(&rs.metadata.name).await;
@@ -263,13 +321,56 @@ async fn test_replicaset_scales_up() -> Result<()> {
     Ok(())
 }
 
+/// Ensures that a ReplicaSet can scale up and then scale down within the same workflow.
+#[serial]
+#[tokio::test]
+async fn test_replicaset_create_then_scale_up_and_down() -> Result<()> {
+    let (store, _mgr, _rs_ctrl) = setup_store_and_manager().await?;
+    let rs = make_test_replicaset("test-rs-scale-both", 1);
+    let yaml = serde_yaml::to_string(&rs)?;
+    store
+        .insert_replicaset_yaml(&rs.metadata.name, &yaml)
+        .await?;
+    let _ =
+        wait_for_pod_prefix_count(&store, "test-rs-scale-both", 1, Duration::from_secs(15)).await?;
+
+    let mut scaled_up_rs = rs.clone();
+    scaled_up_rs.spec.replicas = 3;
+    let yaml = serde_yaml::to_string(&scaled_up_rs)?;
+    store
+        .insert_replicaset_yaml(&scaled_up_rs.metadata.name, &yaml)
+        .await?;
+    let _ =
+        wait_for_pod_prefix_count(&store, "test-rs-scale-both", 3, Duration::from_secs(20)).await?;
+
+    let mut scaled_down_rs = scaled_up_rs.clone();
+    scaled_down_rs.spec.replicas = 1;
+    let yaml = serde_yaml::to_string(&scaled_down_rs)?;
+    store
+        .insert_replicaset_yaml(&scaled_down_rs.metadata.name, &yaml)
+        .await?;
+    let matching =
+        wait_for_pod_prefix_count(&store, "test-rs-scale-both", 1, Duration::from_secs(20)).await?;
+
+    // cleanup
+    let _ = store.delete_replicaset(&rs.metadata.name).await;
+    let _ = cleanup_pods_by_prefix(&store, "test-rs-scale-both").await;
+
+    assert_eq!(
+        matching.len(),
+        1,
+        "replicaset should scale back down to 1 pod"
+    );
+    Ok(())
+}
+
 /// Ensures that two ReplicaSets with different label selectors manage only their own Pods.
 #[serial]
 #[tokio::test]
 async fn test_two_replicasets_independent() -> Result<()> {
     let (store, _mgr, _rs_ctrl) = setup_store_and_manager().await?;
 
-    let mut rs_a = make_test_replicaset("rs-a", 2);
+    let mut rs_a = make_test_replicaset("test-rs-independent-a", 2);
     rs_a.spec
         .selector
         .match_labels
@@ -284,7 +385,7 @@ async fn test_two_replicasets_independent() -> Result<()> {
         .insert_replicaset_yaml(&rs_a.metadata.name, &yaml_a)
         .await?;
 
-    let mut rs_b = make_test_replicaset("rs-b", 1);
+    let mut rs_b = make_test_replicaset("test-rs-independent-b", 1);
     rs_b.spec
         .selector
         .match_labels
@@ -304,18 +405,16 @@ async fn test_two_replicasets_independent() -> Result<()> {
     let pods = store.list_pods().await?;
     let pods_a: Vec<_> = pods
         .iter()
-        .filter(|p| p.metadata.name.contains("rs-a"))
+        .filter(|p| p.metadata.name.contains("test-rs-independent-a"))
         .collect();
     let pods_b: Vec<_> = pods
         .iter()
-        .filter(|p| p.metadata.name.contains("rs-b"))
+        .filter(|p| p.metadata.name.contains("test-rs-independent-b"))
         .collect();
 
     // cleanup
-    let _ = store.delete_replicaset(&rs_a.metadata.name).await;
-    let _ = store.delete_replicaset(&rs_b.metadata.name).await;
-    let _ = cleanup_pods_by_prefix(&store, "rs-a").await;
-    let _ = cleanup_pods_by_prefix(&store, "rs-b").await;
+    let _ = cleanup_replicasets_by_prefix(&store, "test-rs-independent").await;
+    let _ = cleanup_pods_by_prefix(&store, "test-rs-independent").await;
 
     assert_eq!(pods_a.len(), 2, "RS A should manage 2 pods");
     assert_eq!(pods_b.len(), 1, "RS B should manage 1 pod");

@@ -1,25 +1,18 @@
-//! 高层对象客户端，封装后端 put/get。
+//! High-level object client wrapping backend put/get operations.
 
+use anyhow::Result;
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait ObjectBackend: Clone + Send + Sync {
-    async fn put_object(
-        &self,
-        key: &str,
-        data: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    async fn get_object(
-        &self,
-        key: &str,
-    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>>;
-    async fn get_etag(&self, key: &str)
-    -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+pub trait ObjectBackend: Send + Sync {
+    async fn put_object(&self, key: &str, data: &[u8]) -> Result<()>;
+
+    async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>>;
+
+    async fn get_etag(&self, key: &str) -> Result<String>;
+
     #[allow(dead_code)]
-    async fn delete_object(
-        &self,
-        key: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn delete_object(&self, key: &str) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -32,33 +25,20 @@ impl<B: ObjectBackend> ObjectClient<B> {
         Self { backend }
     }
 
-    pub async fn put_object(
-        &self,
-        key: &str,
-        data: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         self.backend.put_object(key, data).await
     }
 
-    pub async fn get_object(
-        &self,
-        key: &str,
-    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>> {
         self.backend.get_object(key).await
     }
 
-    pub async fn get_etag(
-        &self,
-        key: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_etag(&self, key: &str) -> Result<String> {
         self.backend.get_etag(key).await
     }
 
     #[allow(dead_code)]
-    pub async fn delete_object(
-        &self,
-        key: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn delete_object(&self, key: &str) -> Result<()> {
         self.backend.delete_object(key).await
     }
 }

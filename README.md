@@ -169,8 +169,9 @@ cargo build -p rks
 2. **Set up networking:**
 ```bash
 cargo build -p libbridge
-sudo mkdir -p /opt/cni/bin
-sudo mv target/debug/libbridge /opt/cni/bin/
+cargo build -p libipam
+sudo install -Dm755 target/debug/libbridge /opt/cni/bin/libbridge
+sudo install -Dm755 target/debug/libipam /opt/cni/bin/libipam
 ```
 
 3. **Prepare container images:**

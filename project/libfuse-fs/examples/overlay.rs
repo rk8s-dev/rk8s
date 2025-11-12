@@ -121,7 +121,6 @@ async fn main() -> Result<(), std::io::Error> {
         libc::dup2(file.as_raw_fd(), libc::STDOUT_FILENO);
         libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO);
     }
-
     let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
         name: Some(args.name),
         mountpoint: args.mountpoint,
@@ -129,7 +128,11 @@ async fn main() -> Result<(), std::io::Error> {
         upperdir: args.upperdir,
         mapping: None::<&str>,
         privileged: true,
-        allow_other: false,
+        // SECURITY: allow_other permits all users to access this filesystem.
+        // This is required for testing with xfstests which uses different UIDs.
+        // In production, set to false unless you specifically need multi-user access
+        // and have proper permission checks in place.
+        allow_other: true,
     })
     .await;
     println!("Mounted");

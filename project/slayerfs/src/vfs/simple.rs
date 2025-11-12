@@ -1,12 +1,13 @@
-//! 简化版 VFS：提供最小的 open/write/read 流程，便于对接 FUSE 和 SDK。
+//! Minimal VFS: provides the smallest open/write/read workflow for FUSE or SDK integration.
 
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
 use crate::chuck::writer::ChunkWriter;
 use crate::meta::MetaStore;
+use std::convert::TryInto;
 
-/// 一个最小的 VFS 对象，持有块存储与元数据存储。
+/// Minimal VFS object that holds the block store and metadata store.
 pub struct SimpleVfs<S: BlockStore, M: MetaStore> {
     layout: ChunkLayout,
     store: S,
@@ -23,7 +24,7 @@ impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
         }
     }
 
-    /// 创建文件，返回 inode 编号。
+    /// Create a file and return its inode.
     pub async fn create(&mut self, filename: String) -> Result<i64, String> {
         let root_ino = self.meta.root_ino();
         let ino = self
@@ -34,19 +35,27 @@ impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
         Ok(ino)
     }
 
-    /// 在指定文件的某个 chunk 上写入（偏移为 chunk 内偏移）。
+    /// Write data into a specific chunk (offset is chunk-local).
     pub async fn pwrite_chunk(
         &mut self,
         ino: i64,
-        chunk_id: i64,
+        chunk_id: u64,
         off_in_chunk: u64,
         data: &[u8],
     ) -> Result<(), String> {
-        // 写数据
-        let mut writer = ChunkWriter::new(self.layout, chunk_id, &mut self.store);
-        let slice = writer.write(off_in_chunk, data).await;
+        // Perform the write first
+        let writer = ChunkWriter::new(self.layout, chunk_id, &self.store, &self.meta);
+        writer
+            .write(
+                off_in_chunk
+                    .try_into()
+                    .expect("chunk offset must fit in u32"),
+                data,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
 
-        // 简化: 使用 chunk 内偏移近似文件大小
+        // Simplified sizing: approximate the file size with chunk-local offset
         let new_size = off_in_chunk + data.len() as u64;
         self.meta
             .set_file_size(ino, new_size)
@@ -56,16 +65,24 @@ impl<S: BlockStore, M: MetaStore> SimpleVfs<S, M> {
         Ok(())
     }
 
-    /// 在指定文件的某个 chunk 上读取（偏移为 chunk 内偏移）。
+    /// Read data from a specific chunk (offset is chunk-local).
     pub async fn pread_chunk(
         &self,
         _ino: i64,
-        chunk_id: i64,
+        chunk_id: u64,
         off_in_chunk: u64,
         len: usize,
-    ) -> Vec<u8> {
-        let reader = ChunkReader::new(self.layout, chunk_id, &self.store);
-        reader.read(off_in_chunk, len).await
+    ) -> Result<Vec<u8>, String> {
+        let reader = ChunkReader::new(self.layout, chunk_id, &self.store, &self.meta);
+        reader
+            .read(
+                off_in_chunk
+                    .try_into()
+                    .expect("chunk offset must fit in u32"),
+                len,
+            )
+            .await
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -88,7 +105,7 @@ mod tests {
         let mut vfs = SimpleVfs::new(layout, store, meta);
 
         let ino = vfs.create("test_file.txt".to_string()).await.unwrap();
-        let chunk_id = 1i64;
+        let chunk_id = 1u64;
         let half = (layout.block_size / 2) as usize;
         let len = layout.block_size as usize + half;
         let mut data = vec![0u8; len];
@@ -98,7 +115,10 @@ mod tests {
         vfs.pwrite_chunk(ino, chunk_id, half as u64, &data)
             .await
             .unwrap();
-        let out = vfs.pread_chunk(ino, chunk_id, half as u64, len).await;
+        let out = vfs
+            .pread_chunk(ino, chunk_id, half as u64, len)
+            .await
+            .unwrap();
         assert_eq!(out, data);
     }
 }

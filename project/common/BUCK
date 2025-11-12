@@ -35,5 +35,6 @@ rust_library(
         "//third-party/rust/crates/quinn/0.11.9:quinn",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.145:serde_json",
+        "//third-party/rust/crates/uuid/1.18.1:uuid",
     ],
 )

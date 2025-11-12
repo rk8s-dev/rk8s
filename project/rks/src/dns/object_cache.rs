@@ -3,11 +3,14 @@ use std::net::Ipv4Addr;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
+use common::{EndpointSubset, ServicePort};
+
 #[derive(Clone, Debug)]
 pub struct ServiceRecord {
     pub name: String,
     pub namespace: String,
     pub cluster_ip: Option<Ipv4Addr>,
+    pub ports: Vec<ServicePort>,
 }
 
 #[derive(Clone, Debug)]
@@ -17,10 +20,18 @@ pub struct PodRecord {
     pub pod_ip: Option<Ipv4Addr>,
 }
 
+#[derive(Clone, Debug)]
+pub struct EndpointRecord {
+    pub name: String,
+    pub namespace: String,
+    pub subsets: Vec<EndpointSubset>,
+}
+
 #[derive(Debug)]
 pub struct DnsObjectCache {
     pub service_cache: Arc<RwLock<HashMap<(String, String), ServiceRecord>>>, // key: (ns, name)
     pub pod_cache: Arc<RwLock<HashMap<(String, String), PodRecord>>>,
+    pub endpoints_cache: Arc<RwLock<HashMap<(String, String), EndpointRecord>>>,
 }
 
 impl DnsObjectCache {
@@ -28,6 +39,7 @@ impl DnsObjectCache {
         Self {
             service_cache: Arc::new(RwLock::new(HashMap::new())),
             pod_cache: Arc::new(RwLock::new(HashMap::new())),
+            endpoints_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }

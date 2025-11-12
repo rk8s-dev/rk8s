@@ -1365,14 +1365,14 @@ mod tests {
     use tempfile::tempdir;
     use tokio;
 
-    // 测试工具函数：创建临时存储目录
+    // Test helper: create a temporary storage directory
     async fn setup_test_storage() -> (DiskStorage, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
         let storage = DiskStorage::new(temp_dir.path()).await.unwrap();
         (storage, temp_dir)
     }
 
-    // 测试工具函数：生成测试数据
+    // Test helper: generate sample data
     fn generate_test_data(size: usize) -> Vec<u8> {
         (0..size).map(|i| (i % 256) as u8).collect()
     }
@@ -1382,7 +1382,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let dir_path = temp_dir.path().join("subdir");
 
-        // 确保目录不存在
+        // Ensure the directory does not exist
         assert!(!dir_path.exists());
 
         let _storage = DiskStorage::new(&dir_path).await.unwrap();
@@ -1394,7 +1394,7 @@ mod tests {
     async fn test_new_existing_directory() {
         let temp_dir = tempdir().unwrap();
 
-        // 目录已存在
+        // Directory already exists
         assert!(temp_dir.path().exists());
 
         let _storage = DiskStorage::new(temp_dir.path()).await.unwrap();
@@ -1410,17 +1410,17 @@ mod tests {
             "etag_with_underscores",
             "etag with spaces",
             "etag@with#special$chars%",
-            "中文标签",
+            "ChineseLabel",
             "🚀emoji-etag",
-            "",       // 空字符串
-            "a",      // 单字符
-            &binding, // 长字符串
+            "",       // Empty string
+            "a",      // Single character
+            &binding, // Long string
         ];
 
         for etag in etags {
             let filename = DiskStorage::key_to_filename(etag);
             assert!(!filename.is_empty());
-            // 文件名应该是有效的（不包含路径分隔符等）
+            // Filenames should be valid (no path separators, etc.)
             assert!(!filename.contains('/'));
             assert!(!filename.contains('\\'));
             assert!(!filename.contains(':'));
@@ -1433,10 +1433,10 @@ mod tests {
         let etag = "test_etag_1";
         let test_data = b"Hello, World!".to_vec();
 
-        // 存储数据
+        // Store the data
         storage.store(etag, &test_data).await.unwrap();
 
-        // 加载数据
+        // Load the data
         let loaded_data = storage.load(etag).await.unwrap();
         assert_eq!(loaded_data, test_data);
     }
@@ -1446,7 +1446,7 @@ mod tests {
         let (storage, _temp_dir) = setup_test_storage().await;
         let etag = "large_data_etag";
 
-        // 生成1MB的测试数据
+        // Generate 1 MiB of test data
         let large_data = generate_test_data(1024 * 1024);
 
         storage.store(etag, &large_data).await.unwrap();
@@ -1474,10 +1474,10 @@ mod tests {
         let data2 = b"Second version".to_vec();
 
         storage.store(etag, &data1).await.unwrap();
-        storage.store(etag, &data2).await.unwrap(); // 应该覆盖
+        storage.store(etag, &data2).await.unwrap(); // Should overwrite the first copy
 
         let loaded_data = storage.load(etag).await.unwrap();
-        assert_eq!(loaded_data, data2); // 应该是第二个版本
+        assert_eq!(loaded_data, data2); // Should match the second version
     }
 
     #[tokio::test]
@@ -1499,10 +1499,10 @@ mod tests {
         let test_data = b"Data to remove".to_vec();
 
         storage.store(etag, &test_data).await.unwrap();
-        assert!(storage.load(etag).await.is_ok()); // 文件存在
+        assert!(storage.load(etag).await.is_ok()); // File exists
 
         storage.remove(etag).await.unwrap();
-        assert!(storage.load(etag).await.is_err()); // 文件应该被删除
+        assert!(storage.load(etag).await.is_err()); // File should have been removed
     }
 
     #[tokio::test]
@@ -1524,7 +1524,7 @@ mod tests {
         let data1 = b"Data 1".to_vec();
         let data2 = b"Data 2".to_vec();
 
-        // 存储 → 加载 → 存储 → 加载 → 删除 → 尝试加载
+        // Store → load → store → load → delete → attempt load
         storage.store(etag, &data1).await.unwrap();
         assert_eq!(storage.load(etag).await.unwrap(), data1);
 
@@ -1541,7 +1541,7 @@ mod tests {
 
         let mut handles = vec![];
 
-        // 启动多个并发任务
+        // Launch multiple concurrent tasks
         for i in 0..10 {
             let storage_clone = DiskStorage {
                 base_dir: storage.base_dir.clone(),
@@ -1557,7 +1557,7 @@ mod tests {
             }));
         }
 
-        // 等待所有任务完成
+        // Wait for every task to finish
         for handle in handles {
             handle.await.unwrap();
         }
@@ -1571,7 +1571,7 @@ mod tests {
         let filename1 = DiskStorage::key_to_filename(etag1);
         let filename2 = DiskStorage::key_to_filename(etag2);
 
-        // 不同的etag应该生成不同的文件名
+        // Different etags should produce different filenames
         assert_ne!(filename1, filename2);
     }
 
@@ -1581,7 +1581,7 @@ mod tests {
         let etag = "file_creation_test";
         let test_data = b"Test data".to_vec();
 
-        // 存储前检查目录为空（除了可能的系统文件）
+        // Ensure the directory is empty before storing (except system files)
         let mut entries = fs::read_dir(&storage.base_dir).await.unwrap();
         let mut initial_count = 0;
         while entries.next_entry().await.unwrap().is_some() {
@@ -1590,7 +1590,7 @@ mod tests {
 
         storage.store(etag, &test_data).await.unwrap();
 
-        // 检查文件确实被创建
+        // Verify that the file is actually created
         let mut entries = fs::read_dir(&storage.base_dir).await.unwrap();
         let mut final_count = 0;
         while entries.next_entry().await.unwrap().is_some() {
@@ -1604,18 +1604,18 @@ mod tests {
         let (storage, _temp_dir) = setup_test_storage().await;
         let etag = "error_test_etag";
 
-        // 测试加载不存在的文件时的错误消息
+        // Test error message when loading a missing file
         let load_error = storage.load(etag).await.unwrap_err();
         let error_string = load_error.to_string();
         assert!(error_string.contains("does not exist"));
 
-        // 测试删除不存在的文件时的错误消息
+        // Test error message when deleting a missing file
         let remove_error = storage.remove(etag).await.unwrap_err();
         let error_string = remove_error.to_string();
         assert!(error_string.contains("does not exist"));
     }
 
-    // ========== AccessStats 测试 ==========
+    // ========== AccessStats tests ==========
 
     #[tokio::test]
     async fn test_access_stats_basic_functionality() {
@@ -1624,20 +1624,20 @@ mod tests {
         let max_entries = 100;
         let stats = AccessStats::new(short_window_size, medium_window_size, max_entries);
 
-        // 初始状态应该没有访问
+        // Should have zero access initially
         assert_eq!(stats.get_short_window_frequency(), 0.0);
         assert_eq!(stats.get_medium_window_frequency(), 0.0);
 
-        // 记录几次访问
+        // Record a few accesses
         for _ in 0..5 {
             stats.record_access();
         }
 
-        // 检查访问频率
+        // Check the access frequency
         assert!(stats.get_short_window_frequency() > 0.0);
         assert!(stats.get_medium_window_frequency() > 0.0);
 
-        // 检查加权频率
+        // Check the weighted frequency
         let weighted_freq = stats.get_weighted_access_frequency(0.7, 0.3);
         assert!(weighted_freq > 0.0);
     }
@@ -1655,7 +1655,7 @@ mod tests {
 
         let mut handles = vec![];
 
-        // 启动多个并发任务记录访问
+        // Launch multiple concurrent tasks to record accesses
         for _ in 0..10 {
             let stats_clone = stats.clone();
             handles.push(tokio::spawn(async move {
@@ -1665,14 +1665,14 @@ mod tests {
             }));
         }
 
-        // 等待所有任务完成
+        // Wait for every task to finish
         for handle in handles {
             handle.await.unwrap();
         }
 
-        // 验证总访问次数通过频率计算
+        // Verify total access count via frequency calculation
         let frequency = stats.get_short_window_frequency();
-        assert!(frequency > 0.0); // 应该有访问记录
+        assert!(frequency > 0.0); // There should be recorded accesses
     }
 
     #[tokio::test]
@@ -1682,18 +1682,18 @@ mod tests {
         let max_entries = 100;
         let stats = AccessStats::new(short_window_size, medium_window_size, max_entries);
 
-        // 记录访问
+        // Record an access
         stats.record_access();
         stats.record_access();
 
-        // 短时间窗口内应该有访问记录
+        // There should be accesses in the short window
         assert!(stats.get_short_window_frequency() > 0.0);
 
-        // 等待时间桶过期（这里我们模拟，实际中需要等待真实时间）
-        // 注意：这个测试可能需要调整，因为我们的桶是1秒一个
+        // Wait for the time bucket to expire (simulated here; real code would wait)
+        // Note: this test may need tuning because our buckets are 1-second each
         tokio::time::sleep(Duration::from_secs(2)).await;
 
-        // 在2秒的时间窗口内应该仍有访问记录
+        // Accesses should remain within the 2-second window
         let frequency_2s = stats.get_short_window_frequency();
         assert!(frequency_2s > 0.0);
     }
@@ -1718,28 +1718,28 @@ mod tests {
 
         let key = "test_key".to_string();
 
-        // 初始状态不应该提升
+        // Should not promote initially
         assert!(!policy.should_promote(key.clone()).await);
 
-        // 记录多次访问
+        // Record multiple accesses
         for _ in 0..10 {
             policy.record_access(key.clone()).await;
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        // 等待一小段时间让访问记录生效
+        // Wait briefly so the access records take effect
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        // 现在应该满足提升条件
-        // 注意：由于时间桶的实现，可能需要更多访问才能达到阈值
+        // Promotion conditions should now be satisfied
+        // Note: due to bucket implementation, more accesses may be required
         let additional_accesses = 50;
         for _ in 0..additional_accesses {
             policy.record_access(key.clone()).await;
         }
 
-        // 检查是否满足提升条件
+        // Check whether promotion conditions are met
         let should_promote = policy.should_promote(key.clone()).await;
-        // 如果访问频率足够高，应该被提升
+        // If the frequency is high enough, promotion should occur
         if should_promote {
             println!("Key promoted successfully");
         } else {
@@ -1754,26 +1754,26 @@ mod tests {
         let max_entries = 100;
         let stats = AccessStats::new(short_window_size, medium_window_size, max_entries);
 
-        // 快速记录10次访问
+        // Quickly record 10 accesses
         for _ in 0..10 {
             stats.record_access();
         }
 
-        // 计算短期频率
+        // Compute the short-term frequency
         let short_frequency = stats.get_short_window_frequency();
         assert!(short_frequency > 0.0);
 
-        // 计算中期频率
+        // Compute the mid-term frequency
         let medium_frequency = stats.get_medium_window_frequency();
         assert!(medium_frequency > 0.0);
 
-        // 中期频率应该更低或相等（因为时间窗口更大）
+        // Mid-term frequency should be lower or equal (larger window)
         assert!(medium_frequency <= short_frequency);
 
-        // 测试加权频率计算
+        // Test the weighted frequency calculation
         let weighted_freq = stats.get_weighted_access_frequency(0.7, 0.3);
         assert!(weighted_freq > 0.0);
-        // 加权频率应该在短期和中期频率之间
+        // Weighted frequency should fall between short and mid-term values
         assert!(weighted_freq >= medium_frequency);
         assert!(weighted_freq <= short_frequency);
     }

@@ -51,6 +51,7 @@ rust_binary(
         "//third-party/rust/crates/iptables/0.6.0:iptables",
         "//third-party/rust/crates/lazy_static/1.5.0:lazy_static",
         "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/lru/0.16.2:lru",
         "//third-party/rust/crates/native-tls/0.2.14:native-tls",
         "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route",
         "//third-party/rust/crates/nix/0.29.0:nix",
@@ -72,6 +73,7 @@ rust_binary(
         "//third-party/rust/crates/tokio-util/0.7.16:tokio-util",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
         "//third-party/rust/crates/tonic/0.13.1:tonic",
+        "//third-party/rust/crates/uuid/1.18.1:uuid",
     ],
 )
 
@@ -112,6 +114,7 @@ rust_library(
         "//third-party/rust/crates/iptables/0.6.0:iptables",
         "//third-party/rust/crates/lazy_static/1.5.0:lazy_static",
         "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/lru/0.16.2:lru",
         "//third-party/rust/crates/native-tls/0.2.14:native-tls",
         "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route",
         "//third-party/rust/crates/nix/0.29.0:nix",
@@ -133,5 +136,6 @@ rust_library(
         "//third-party/rust/crates/tokio-util/0.7.16:tokio-util",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
         "//third-party/rust/crates/tonic/0.13.1:tonic",
+        "//third-party/rust/crates/uuid/1.18.1:uuid",
     ],
 )

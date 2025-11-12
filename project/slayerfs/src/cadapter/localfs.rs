@@ -1,6 +1,7 @@
-//! 本地文件目录后端，用于 mock 存储适配器（实现 ObjectBackend）。
+//! Local filesystem backend used to mock an object store (implements `ObjectBackend`).
 
 use crate::cadapter::client::ObjectBackend;
+use anyhow::Result;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use tokio::{fs, io::AsyncWriteExt};
@@ -23,11 +24,7 @@ impl LocalFsBackend {
 
 #[async_trait]
 impl ObjectBackend for LocalFsBackend {
-    async fn put_object(
-        &self,
-        key: &str,
-        data: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         let path = self.path_for(key);
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).await?;
@@ -38,22 +35,16 @@ impl ObjectBackend for LocalFsBackend {
         Ok(())
     }
 
-    async fn get_object(
-        &self,
-        key: &str,
-    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>> {
         let path = self.path_for(key);
         match fs::read(path).await {
             Ok(buf) => Ok(Some(buf)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(Box::new(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
-    async fn get_etag(
-        &self,
-        key: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_etag(&self, key: &str) -> Result<String> {
         let path = self.path_for(key);
         match fs::metadata(path).await {
             Ok(metadata) => {
@@ -61,19 +52,16 @@ impl ObjectBackend for LocalFsBackend {
                 Ok(format!("{modified:?}"))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("".to_string()),
-            Err(e) => Err(Box::new(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
-    async fn delete_object(
-        &self,
-        key: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn delete_object(&self, key: &str) -> Result<()> {
         let path = self.path_for(key);
         match fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(Box::new(e)),
+            Err(e) => Err(e.into()),
         }
     }
 }
