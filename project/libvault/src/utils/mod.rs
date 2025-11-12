@@ -7,7 +7,8 @@ use blake3;
 use chrono::prelude::*;
 use humantime::{format_rfc3339, parse_duration, parse_rfc3339};
 use openssl::hash::{Hasher, MessageDigest};
-use rand::{Rng, rng};
+use rand::Rng;
+use rand::rngs::OsRng; 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashSet;
 
@@ -298,7 +299,7 @@ impl BHashSet {
 
 pub fn generate_uuid() -> String {
     let mut buf = [0u8; 16];
-    rng().fill(&mut buf);
+    OsRng.fill(&mut buf);
 
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
