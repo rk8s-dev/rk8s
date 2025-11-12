@@ -170,7 +170,7 @@ cargo build -p rks
 ```bash
 cargo build -p libbridge
 cargo build -p libipam
-sudo install -Dm755 target/debug/libbridge /opt/cni/bin/libbridge  
+sudo install -Dm755 target/debug/libbridge /opt/cni/bin/libbridge
 sudo install -Dm755 target/debug/libipam   /opt/cni/bin/libipam
 ```
 
