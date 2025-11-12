@@ -9,6 +9,7 @@ use common::{
 use rand::random;
 use std::collections::HashSet;
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub struct ReplicaSetController {
     store: Arc<XlineStore>,
@@ -193,6 +194,8 @@ impl ReplicaSetController {
                 let name =
                     Self::generate_unique_name(&rs.metadata.name, self.store.as_ref()).await?;
                 pod.metadata.name = name.clone();
+                // ensure uid unique
+                pod.metadata.uid = Uuid::new_v4();
                 // ensure selector labels present on pod
                 for (k, v) in rs.spec.selector.match_labels.iter() {
                     pod.metadata.labels.insert(k.clone(), v.clone());
@@ -285,7 +288,26 @@ impl Controller for ReplicaSetController {
                     "ReplicaSetController handling ReplicaSet event: key={}",
                     response.key
                 );
-                self.reconcile_by_name(&response.key).await?;
+                // reconcile only when the spec has changed
+                let mut should_reconcile = false;
+                match &response.event {
+                    WatchEvent::Add { yaml: _ } => {
+                        should_reconcile = true;
+                    }
+                    WatchEvent::Update { old_yaml, new_yaml } => {
+                        let old_rs: ReplicaSet = serde_yaml::from_str(old_yaml)?;
+                        let new_rs: ReplicaSet = serde_yaml::from_str(new_yaml)?;
+                        if old_rs.spec != new_rs.spec {
+                            should_reconcile = true;
+                        }
+                    }
+                    WatchEvent::Delete { yaml: _ } => {
+                        should_reconcile = false;
+                    }
+                }
+                if should_reconcile {
+                    self.reconcile_by_name(&response.key).await?;
+                }
             }
             ResourceKind::Pod => {
                 log::debug!(
