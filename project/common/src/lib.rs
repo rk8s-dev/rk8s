@@ -44,10 +44,8 @@ pub struct ObjectMeta {
     #[serde(default)]
     pub owner_references: Option<Vec<OwnerReference>>,
     #[serde(default)]
-    #[serde(with = "chrono::serde::ts_seconds_option")]
     pub creation_timestamp: Option<DateTime<Utc>>,
     #[serde(default)]
-    #[serde(with = "chrono::serde::ts_seconds_option")]
     pub deletion_timestamp: Option<DateTime<Utc>>,
     #[serde(default)]
     pub finalizers: Option<Vec<Finalizer>>,
