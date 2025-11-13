@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 use tempfile::TempDir;
@@ -13,19 +14,16 @@ use tokio::runtime::{Builder, Runtime};
 
 use slayerfs::cadapter::client::ObjectClient;
 use slayerfs::cadapter::localfs::LocalFsBackend;
+use slayerfs::cadapter::s3::{S3Backend, S3Config};
 use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::chuck::store::ObjectBlockStore;
+use slayerfs::chuck::store::{BlockKey, BlockStore, ObjectBlockStore};
 use slayerfs::meta::{MetaStore, create_meta_store_from_url};
 use slayerfs::vfs::fs::VFS;
 
 const MB: usize = 1024 * 1024;
 const KB: usize = 1024;
 
-type LocalStore = ObjectBlockStore<LocalFsBackend>;
-type BenchFs = VFS<LocalStore, Arc<dyn MetaStore>>;
-type SharedFs = Arc<BenchFs>;
-
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct BenchConfig {
     block_size_bytes: usize,
     big_file_bytes: usize,
@@ -34,6 +32,22 @@ struct BenchConfig {
     threads: usize,
     sample_size: usize,
     layout: ChunkLayout,
+    backend: BackendMode,
+    meta_url: String,
+}
+
+#[derive(Clone)]
+enum BackendMode {
+    Local,
+    S3(S3BackendOpts),
+}
+
+#[derive(Clone, Default)]
+struct S3BackendOpts {
+    bucket: String,
+    region: Option<String>,
+    endpoint: Option<String>,
+    force_path_style: bool,
 }
 
 impl BenchConfig {
@@ -60,6 +74,10 @@ impl BenchConfig {
         let mut layout = ChunkLayout::default();
         layout.block_size = block_size_u32;
 
+        let backend = BackendMode::from_env();
+        let meta_url =
+            env::var("SLAYERFS_BENCH_META_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
+
         Self {
             block_size_bytes,
             big_file_bytes: big_mb.max(1) * MB,
@@ -68,6 +86,8 @@ impl BenchConfig {
             threads: threads.max(1),
             sample_size: sample_size.max(10),
             layout,
+            backend,
+            meta_url,
         }
     }
 
@@ -80,10 +100,67 @@ impl BenchConfig {
     }
 }
 
+impl BackendMode {
+    fn from_env() -> Self {
+        let value = env::var("SLAYERFS_BENCH_BACKEND")
+            .unwrap_or_else(|_| "local".to_string())
+            .to_lowercase();
+        match value.as_str() {
+            "s3" => {
+                let bucket = env::var("SLAYERFS_BENCH_S3_BUCKET")
+                    .expect("SLAYERFS_BENCH_S3_BUCKET must be set when backend is s3");
+                let region = env::var("SLAYERFS_BENCH_S3_REGION").ok();
+                let endpoint = env::var("SLAYERFS_BENCH_S3_ENDPOINT").ok();
+                let force_path_style =
+                    env_bool("SLAYERFS_BENCH_S3_FORCE_PATH_STYLE").unwrap_or(false);
+                BackendMode::S3(S3BackendOpts {
+                    bucket,
+                    region,
+                    endpoint,
+                    force_path_style,
+                })
+            }
+            _ => BackendMode::Local,
+        }
+    }
+}
+
 struct BenchEnv {
     fs: SharedFs,
-    _root: BenchRoot,
+    _root: Option<BenchRoot>,
 }
+
+enum BenchStore {
+    Local(ObjectBlockStore<LocalFsBackend>),
+    S3(ObjectBlockStore<S3Backend>),
+}
+
+#[async_trait]
+impl BlockStore for BenchStore {
+    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
+        match self {
+            BenchStore::Local(store) => store.write_range(key, offset, data).await,
+            BenchStore::S3(store) => store.write_range(key, offset, data).await,
+        }
+    }
+
+    async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
+        match self {
+            BenchStore::Local(store) => store.read_range(key, offset, buf).await,
+            BenchStore::S3(store) => store.read_range(key, offset, buf).await,
+        }
+    }
+
+    async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
+        match self {
+            BenchStore::Local(store) => store.delete_range(key, len).await,
+            BenchStore::S3(store) => store.delete_range(key, len).await,
+        }
+    }
+}
+
+type BenchFs = VFS<BenchStore, Arc<dyn MetaStore>>;
+type SharedFs = Arc<BenchFs>;
 
 enum BenchRoot {
     Temp(TempDir),
@@ -108,14 +185,12 @@ impl Drop for BenchRoot {
 }
 
 impl BenchEnv {
-    async fn new(layout: ChunkLayout) -> Result<Self> {
-        let root = create_root_dir()?;
-        let client = ObjectClient::new(LocalFsBackend::new(root.path()));
-        let store = ObjectBlockStore::new(client);
-        let meta = create_meta_store_from_url("sqlite::memory:")
+    async fn new(cfg: &BenchConfig) -> Result<Self> {
+        let (store, root) = create_backend_store(cfg).await?;
+        let meta = create_meta_store_from_url(&cfg.meta_url)
             .await
             .context("create meta store")?;
-        let fs = VFS::new(layout, store, meta)
+        let fs = VFS::new(cfg.layout, store, meta)
             .await
             .map_err(|e| anyhow!("init vfs: {e}"))?;
         Ok(Self {
@@ -146,8 +221,44 @@ fn create_root_dir() -> Result<BenchRoot> {
     }
 }
 
+async fn create_backend_store(cfg: &BenchConfig) -> Result<(BenchStore, Option<BenchRoot>)> {
+    match &cfg.backend {
+        BackendMode::Local => {
+            let root = create_root_dir()?;
+            let client = ObjectClient::new(LocalFsBackend::new(root.path()));
+            let store = ObjectBlockStore::new(client);
+            Ok((BenchStore::Local(store), Some(root)))
+        }
+        BackendMode::S3(opts) => {
+            let s3_config = S3Config {
+                bucket: opts.bucket.clone(),
+                region: opts.region.clone(),
+                endpoint: opts.endpoint.clone(),
+                force_path_style: opts.force_path_style,
+                ..Default::default()
+            };
+            let backend = S3Backend::with_config(s3_config)
+                .await
+                .context("initialize s3 backend")?;
+            let client = ObjectClient::new(backend);
+            let store = ObjectBlockStore::new(client);
+            Ok((BenchStore::S3(store), None))
+        }
+    }
+}
+
 fn env_usize(name: &str) -> Option<usize> {
     env::var(name).ok()?.parse().ok()
+}
+
+fn env_bool(name: &str) -> Option<bool> {
+    env::var(name)
+        .ok()
+        .and_then(|v| match v.to_lowercase().as_str() {
+            "1" | "true" | "yes" => Some(true),
+            "0" | "false" | "no" => Some(false),
+            _ => None,
+        })
 }
 
 fn tokio_runtime() -> Runtime {
@@ -168,49 +279,49 @@ where
 }
 
 async fn run_big_write(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
-    let env = BenchEnv::new(cfg.layout).await?;
+    let env = BenchEnv::new(cfg).await?;
     let fs = env.fs();
     let base = format!("/bench/run-{iter}/big");
     fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    measure_future(write_big_files(fs, *cfg, base)).await
+    measure_future(write_big_files(fs, cfg, base)).await
 }
 
 async fn run_big_read(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
-    let env = BenchEnv::new(cfg.layout).await?;
+    let env = BenchEnv::new(cfg).await?;
     let fs = env.fs();
     let base = format!("/bench/run-{iter}/big");
     fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    write_big_files(fs.clone(), *cfg, base.clone()).await?;
-    measure_future(read_big_files(fs, *cfg, base)).await
+    write_big_files(fs.clone(), cfg, base.clone()).await?;
+    measure_future(read_big_files(fs, cfg, base)).await
 }
 
 async fn run_small_write(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
-    let env = BenchEnv::new(cfg.layout).await?;
+    let env = BenchEnv::new(cfg).await?;
     let fs = env.fs();
     let base = format!("/bench/run-{iter}/small");
     fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    measure_future(write_small_files(fs, *cfg, base)).await
+    measure_future(write_small_files(fs, cfg, base)).await
 }
 
 async fn run_small_read(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
-    let env = BenchEnv::new(cfg.layout).await?;
+    let env = BenchEnv::new(cfg).await?;
     let fs = env.fs();
     let base = format!("/bench/run-{iter}/small");
     fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    write_small_files(fs.clone(), *cfg, base.clone()).await?;
-    measure_future(read_small_files(fs, *cfg, base)).await
+    write_small_files(fs.clone(), cfg, base.clone()).await?;
+    measure_future(read_small_files(fs, cfg, base)).await
 }
 
 async fn run_small_stat(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
-    let env = BenchEnv::new(cfg.layout).await?;
+    let env = BenchEnv::new(cfg).await?;
     let fs = env.fs();
     let base = format!("/bench/run-{iter}/small");
     fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    write_small_files(fs.clone(), *cfg, base.clone()).await?;
-    measure_future(stat_small_files(fs, *cfg, base)).await
+    write_small_files(fs.clone(), cfg, base.clone()).await?;
+    measure_future(stat_small_files(fs, cfg, base)).await
 }
 
-async fn write_big_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Result<()> {
+async fn write_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
     if cfg.big_file_bytes == 0 {
         return Ok(());
     }
@@ -240,7 +351,7 @@ async fn write_big_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Result
     Ok(())
 }
 
-async fn read_big_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Result<()> {
+async fn read_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
     if cfg.big_file_bytes == 0 {
         return Ok(());
     }
@@ -275,7 +386,7 @@ async fn read_big_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Result<
     Ok(())
 }
 
-async fn write_small_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Result<()> {
+async fn write_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
     let mut handles = Vec::with_capacity(cfg.threads);
     for tid in 0..cfg.threads {
         let fs = fs.clone();
@@ -306,7 +417,7 @@ async fn write_small_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Resu
     Ok(())
 }
 
-async fn read_small_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Result<()> {
+async fn read_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
     let mut handles = Vec::with_capacity(cfg.threads);
     for tid in 0..cfg.threads {
         let fs = fs.clone();
@@ -333,7 +444,7 @@ async fn read_small_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Resul
     Ok(())
 }
 
-async fn stat_small_files(fs: SharedFs, cfg: BenchConfig, base: String) -> Result<()> {
+async fn stat_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
     let mut handles = Vec::with_capacity(cfg.threads);
     for tid in 0..cfg.threads {
         let fs = fs.clone();

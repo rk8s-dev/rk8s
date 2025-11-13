@@ -18,18 +18,26 @@ cargo bench --bench slayerfs_bench
 
 常用环境变量（括号内为默认值）：
 
-| 变量 | 含义 |
-| ---- | ---- |
-| `SLAYERFS_BENCH_THREADS` (4) | 并发线程数 |
+| 变量 | 含义                                           |
+| ---- |----------------------------------------------|
+| `SLAYERFS_BENCH_THREADS` (4) | 并发线程数                                        |
 | `SLAYERFS_BENCH_BLOCK_MB` (1) | 单次 IO 块大小（MiB），同时写入 `ChunkLayout.block_size` |
-| `SLAYERFS_BENCH_BIG_FILE_MB` (1024) | 每个大文件的逻辑大小（MiB） |
-| `SLAYERFS_BENCH_SMALL_FILE_KB` (128) | 小文件大小（KiB） |
-| `SLAYERFS_BENCH_SMALL_FILE_COUNT` (100) | 每线程小文件数量 |
-| `SLAYERFS_BENCH_SAMPLE_SIZE` (≥10) | Criterion 样本数，至少 10 个 |
-| `SLAYERFS_BENCH_FLAMEGRAPH`（未设置） | 任意值即可开启火焰图采集 |
-| `SLAYERFS_BENCH_DATA_DIR`（未设置） | 指定对象根目录；默认用系统临时目录并在结束后删除 |
+| `SLAYERFS_BENCH_BIG_FILE_MB` (1024) | 每个大文件的逻辑大小（MiB）                              |
+| `SLAYERFS_BENCH_SMALL_FILE_KB` (128) | 小文件大小（KiB）                                   |
+| `SLAYERFS_BENCH_SMALL_FILE_COUNT` (100) | 每线程小文件数量                                     |
+| `SLAYERFS_BENCH_SAMPLE_SIZE` (≥10) | Criterion 样本数，至少 10 个                        |
+| `SLAYERFS_BENCH_FLAMEGRAPH`（未设置） | 任意值即可开启火焰图采集                                 |
+| `SLAYERFS_BENCH_DATA_DIR`（未设置） | 指定对象根目录；默认用系统临时目录并在结束后删除                     |
+| `SLAYERFS_BENCH_BACKEND`（local） | 对象存储类型：`local` 或 `s3`                        |
+| `SLAYERFS_BENCH_S3_BUCKET`（空） | 当 `BACKEND=s3` 时必须指定的 S3 桶                   |
+| `SLAYERFS_BENCH_S3_REGION`（空） | 可选，S3 区域                                     |
+| `SLAYERFS_BENCH_S3_ENDPOINT`（空） | 可选，自定义兼容端点/MinIO                             |
+| `SLAYERFS_BENCH_S3_FORCE_PATH_STYLE`（未设置） | 可选布尔值，设为 `true` 可强制 path-style 访问            |
+| `SLAYERFS_BENCH_META_URL`（`sqlite::memory:`） | 元数据后端 URL，兼容 SQLite/PostgreSQL/Etcd 等          |
 
 不设置 `SLAYERFS_BENCH_DATA_DIR` 时，测试数据会写入 `TempDir` 并随运行结束自动清理。若指定该变量，每次运行都会在该目录下创建 `slayerfs_bench_<timestamp>` 子目录并在结束后删除，方便放在大容量磁盘上做长测。
+
+当 `SLAYERFS_BENCH_BACKEND=s3` 时，基准使用真正的 S3/兼容对象存储，请务必提供专用桶（通过 `SLAYERFS_BENCH_S3_BUCKET`）并根据环境设置 `REGION`、`ENDPOINT`、`FORCE_PATH_STYLE` 等变量。未指定时默认仍使用本地 LocalFs。
 
 示例（缩小数据量，适合快速检查）：
 
