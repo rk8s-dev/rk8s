@@ -33,7 +33,7 @@ pub mod unix_sock_addr;
 /// A hash set that stores Blake3 hashes of arbitrary byte data.
 ///
 /// BHashSet  (Blake Hash Set) provides a space-efficient way to track whether
-/// specific byte sequences have been "used" or seen before. Instead of storing
+///  specific byte sequences have been "used" or seen before. Instead of storing
 /// the actual data, it stores 32-byte Blake3 hashes, providing excellent
 /// collision resistance while using constant space per item.
 ///
