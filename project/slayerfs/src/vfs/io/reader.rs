@@ -4,7 +4,7 @@ use crate::vfs::chunk_id_for;
 use crate::vfs::fs::ChunkIoFactory;
 use crate::vfs::inode::Inode;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 use super::FileWriter;
 

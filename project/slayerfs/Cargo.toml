@@ -47,3 +47,9 @@ if-addrs = "0.6"
 
 [dev-dependencies]
 mockall = "0.12"
+criterion = { version = "0.5", features = ["html_reports"] }
+pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
+
+[[bench]]
+name = "slayerfs_bench"
+harness = false
