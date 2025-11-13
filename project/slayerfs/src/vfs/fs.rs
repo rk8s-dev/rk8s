@@ -875,7 +875,7 @@ where
             .writer(ino)
             .ok_or_else(|| "file writer is not initialized".to_string())?;
 
-        let guard = writer.lock().await;
+        let guard = writer.write().await;
         let written = guard.write(offset, data).await.map_err(|e| e.to_string())?;
 
         let target_size = offset + data.len() as u64;
