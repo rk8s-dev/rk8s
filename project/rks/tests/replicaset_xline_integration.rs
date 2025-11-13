@@ -42,7 +42,7 @@ async fn setup_store_and_manager() -> Result<(
 
     let cfg = load_test_config()?;
     let endpoints: Vec<String> = cfg.xline_config.endpoints;
-    let endpoint_refs: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
+    let _endpoint_refs: Vec<&str> = endpoints.iter().map(|s| s.as_str()).collect();
     let options = XlineOptions {
         endpoints: endpoints.clone(),
         config: None,
