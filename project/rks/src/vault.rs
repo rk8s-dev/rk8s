@@ -2,8 +2,8 @@ use crate::protocol::config::{
     config_ref, ip_or_dns, local_alt_names_and_ip_sans, to_alt_names_and_ip_sans,
 };
 use anyhow::Context;
-use base64::Engine as _;
 use base64::engine::general_purpose;
+use base64::engine::general_purpose::STANDARD;
 use common::IssueCertificateRequest;
 use libvault::RustyVault;
 use libvault::core::SealConfig;

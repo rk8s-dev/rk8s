@@ -65,8 +65,7 @@ hex = { workspace = true }
 rand = { workspace = true }
 cni-plugin = { workspace = true }
 derive_more = { workspace = true }
-base64 = { workspace = true }
-
+base64 = "=0.22.1"
 protobuf = { workspace = true }
 prost = "0.13.5"
 prost-types = "0.12.6"

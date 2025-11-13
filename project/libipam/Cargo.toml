@@ -19,3 +19,4 @@ log = { workspace = true }
 async-std = { workspace = true }
 semver = { workspace = true }
 thiserror = { workspace = true }
+base64 = "=0.22.1"

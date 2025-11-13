@@ -33,3 +33,4 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "time", "fmt"
 uuid = { workspace = true, features = ["v4", "fast-rng", "macro-diagnostics"] }
 reqwest = { workspace = true, features = ["json"] }
 rand = { workspace = true }
+base64 = "=0.22.1"

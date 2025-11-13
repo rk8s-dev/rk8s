@@ -6,7 +6,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 
 bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize)]
     pub struct AclFlags: u8 {
         const READ    = 0b001;
         const WRITE   = 0b010;

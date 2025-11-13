@@ -17,7 +17,7 @@ serde_json = { workspace = true }
 serde_bytes = { workspace = true }
 serde_yaml = { workspace = true }
 go-defer = { workspace = true }
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["std", "rand_chacha"] }
 derivative = { workspace = true }
 enum-map = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
@@ -41,7 +41,7 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 webpki-roots = { workspace = true }
 glob = { workspace = true }
-base64 = { workspace = true }
+base64 = "=0.22.1"
 ipnetwork = { workspace = true }
 blake2b_simd = { workspace = true }
 derive_more = { workspace = true }

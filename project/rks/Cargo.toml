@@ -19,7 +19,7 @@ quinn = { workspace = true }
 rustls = { workspace = true }
 serde_yaml = { workspace = true }
 bincode = { workspace = true }
-futures = { workspace = true }
+futures = "0.3.31"
 anyhow = { workspace = true }
 rcgen = { workspace = true }
 etcd-client = { workspace = true }
@@ -51,10 +51,10 @@ hickory-resolver = { workspace = true }
 iptables = { workspace = true }
 axum = { workspace = true }
 humantime = { workspace = true }
-base64 = { workspace = true }
+base64 = "=0.22.1"
 reqwest = { workspace = true }
 either = { workspace = true }
-tokio-stream = { workspace = true }
+tokio-stream = "0.1.17"
 uuid = { workspace = true }
 lru = { workspace = true }
 

@@ -8,7 +8,7 @@ use chrono::prelude::*;
 use humantime::{format_rfc3339, parse_duration, parse_rfc3339};
 use openssl::hash::{Hasher, MessageDigest};
 use rand::Rng;
-use rand::rngs::OsRng; 
+use rand::rngs::OsRng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashSet;
 

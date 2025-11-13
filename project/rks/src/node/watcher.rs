@@ -7,7 +7,7 @@ use etcd_client::{KeyValue, WatchResponse};
 use log::{error, info};
 use std::ops::Deref;
 use std::sync::Arc;
-use tokio_stream::StreamExt;
+use futures::StreamExt;
 
 /// Watches pod changes from Xline and pushes create/delete events to the worker node.
 #[derive(Clone)]

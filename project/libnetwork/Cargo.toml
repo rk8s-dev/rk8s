@@ -21,6 +21,7 @@ ipnetwork = { workspace = true }
 regex = { workspace = true }
 lazy_static = { workspace = true }
 netlink-packet-route = { workspace = true }
+base64 = "=0.22.1"
 
 [dev-dependencies]
 tempfile = { workspace = true }

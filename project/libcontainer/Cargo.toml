@@ -48,3 +48,4 @@ tempfile = { workspace = true }
 anyhow = { workspace = true }
 rand = { workspace = true }
 scopeguard = "1.2.0"
+base64 = "=0.22.1"

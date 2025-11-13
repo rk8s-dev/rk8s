@@ -18,3 +18,4 @@ serde_yaml = { workspace = true }
 serial_test = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
+base64 = "=0.22.1"

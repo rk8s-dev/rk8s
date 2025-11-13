@@ -32,6 +32,7 @@ memmap2 = { workspace = true }
 tracing = { workspace = true }
 itertools = { workspace = true }
 async-trait = { workspace = true }
+base64 = "=0.22.1"
 
 [dev-dependencies]
 tempfile = { workspace = true }

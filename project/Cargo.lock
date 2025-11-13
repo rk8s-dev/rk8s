@@ -514,9 +514,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.14.1"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "879b6c89592deb404ba4dc0ae6b58ffd1795c78991cbb5b8bc441c48a070440d"
+checksum = "5932a7d9d28b0d2ea34c6b3779d35e3dd6f6345317c34e73438c4f1f29144151"
 dependencies = [
  "aws-lc-sys",
  "zeroize",
@@ -524,9 +524,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.32.3"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "107a4e9d9cab9963e04e84bb8dee0e25f2a987f9a8bad5ed054abd439caa8f8c"
+checksum = "1826f2e4cfc2cd19ee53c42fbf68e2f81ec21108e0b7ecf6a71cf062137360fc"
 dependencies = [
  "bindgen",
  "cc",
@@ -1509,6 +1509,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "bincode",
  "bytes",
  "chrono",
@@ -1780,9 +1781,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3"
+checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
 dependencies = [
  "generic-array",
  "typenum",
@@ -2075,6 +2076,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.6",
  "axum-extra",
+ "base64 0.22.1",
  "bcrypt",
  "chrono",
  "clap",
@@ -2678,9 +2680,9 @@ dependencies = [
 
 [[package]]
 name = "generic-array"
-version = "0.14.9"
+version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bb6743198531e02858aeaea5398fcc883e71851fcbcb5a2f773e2fb6cb1edf2"
+checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
@@ -3603,6 +3605,15 @@ dependencies = [
 
 [[package]]
 name = "itertools"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
@@ -3772,6 +3783,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-std",
+ "base64 0.22.1",
  "cni-plugin",
  "futures",
  "ipnetwork",
@@ -3802,6 +3814,7 @@ name = "libcgroups"
 version = "0.5.3"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "clap",
  "env_logger 0.11.8",
  "errno",
@@ -3828,6 +3841,7 @@ name = "libcni"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bitflags 2.10.0",
  "cni-plugin",
  "env_logger 0.11.8",
@@ -3856,6 +3870,7 @@ name = "libcontainer"
 version = "0.5.3"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "caps",
  "chrono",
  "fastrand 2.3.0",
@@ -3887,6 +3902,7 @@ name = "libfuse-fs"
 version = "0.1.5"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bitflags 2.10.0",
  "bytes",
  "clap",
@@ -3917,6 +3933,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-std",
+ "base64 0.22.1",
  "cni-plugin",
  "ipnetwork",
  "log",
@@ -3950,6 +3967,7 @@ name = "libnetwork"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "cni-plugin",
  "common",
  "futures",
@@ -3991,6 +4009,7 @@ name = "libscheduler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bitflags 2.10.0",
  "common",
  "etcd-client",
@@ -4348,6 +4367,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 
 [[package]]
+name = "multimap"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
+
+[[package]]
 name = "native-tls"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4512,9 +4537,9 @@ dependencies = [
 
 [[package]]
 name = "num-bigint-dig"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82c79c15c05d4bf82b6f5ef163104cc81a760d8e874d38ac50ab67c8877b647b"
+checksum = "e661dda6640fad38e827a6d4a310ff4763082116fe217f279885c97f511bb0b7"
 dependencies = [
  "lazy_static",
  "libm",
@@ -4852,6 +4877,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
  "fixedbitset 0.4.2",
+ "indexmap 2.12.0",
+]
+
+[[package]]
+name = "petgraph"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
+dependencies = [
+ "fixedbitset 0.5.7",
  "indexmap 2.12.0",
 ]
 
@@ -5217,8 +5252,8 @@ dependencies = [
  "itertools 0.10.5",
  "lazy_static",
  "log",
- "multimap",
- "petgraph",
+ "multimap 0.8.3",
+ "petgraph 0.6.5",
  "prost 0.10.4",
  "prost-types 0.10.1",
  "regex",
@@ -5235,9 +5270,9 @@ dependencies = [
  "heck 0.5.0",
  "itertools 0.14.0",
  "log",
- "multimap",
+ "multimap 0.10.1",
  "once_cell",
- "petgraph",
+ "petgraph 0.7.1",
  "prettyplease 0.2.37",
  "prost 0.13.5",
  "prost-types 0.13.5",
@@ -5266,7 +5301,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.110",
@@ -5765,6 +5800,7 @@ dependencies = [
  "async-notify",
  "async-process 2.5.0",
  "async-trait",
+ "base64 0.22.1",
  "bincode",
  "bytes",
  "clap",
@@ -6005,9 +6041,9 @@ dependencies = [
 
 [[package]]
 name = "rsa"
-version = "0.9.8"
+version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78928ac1ed176a5ca1d17e578a1825f3d81ca54cf41053a592584b020cfd691b"
+checksum = "40a0376c50d0358279d9d643e4bf7b7be212f1f4ff1da9070a7b54d22ef75c88"
 dependencies = [
  "const-oid",
  "digest",
@@ -6867,7 +6903,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "base64 0.22.1",
- "bitflags 2.10.0",
+ "bitflags 1.3.2",
  "bytes",
  "chrono",
  "clap",

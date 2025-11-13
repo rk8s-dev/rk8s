@@ -114,7 +114,6 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    /*
     // GAT: directory entry stream (readdir)
     type DirEntryStream<'a>
         = Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntry>> + Send + 'a>>
@@ -126,7 +125,6 @@ where
         = Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntryPlus>> + Send + 'a>>
     where
         Self: 'a;
-    */
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
         // Use a conservative max write size (1 MiB). Tune per backend or make configurable.
         let max_write = NonZeroU32::new(1024 * 1024).unwrap();
@@ -263,8 +261,6 @@ where
             attr,
         })
     }
-
-    // 调用 VFS 列目录，逐项构造 DirectoryEntry 并以流返回（含错误码检查与偏移处理）
     #[allow(refining_impl_trait)]
     async fn readdir<'a>(
         &'a self,

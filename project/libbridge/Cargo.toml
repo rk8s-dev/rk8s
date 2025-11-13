@@ -26,3 +26,4 @@ serde_json = { workspace = true }
 semver = { workspace = true }
 thiserror = { workspace = true }
 ipnetwork = { workspace = true }
+base64 = "=0.22.1"

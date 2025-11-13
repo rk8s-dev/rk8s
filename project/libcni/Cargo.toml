@@ -29,3 +29,4 @@ env_logger = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 json = { workspace = true }
 once_cell = { workspace = true }
+base64 = "=0.22.1"
