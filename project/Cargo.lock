@@ -44,6 +44,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "250f629c0161ad8107cf89319e990051fae62832fd343083bea452d93e2205fd"
 
 [[package]]
+name = "aligned_box"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ebdec4a15fc241b75eb9a55d320cef51549f95f739f8ce3dce24b19b9e5f24a"
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5866,6 +5872,7 @@ dependencies = [
 name = "rfuse3"
 version = "0.0.4"
 dependencies = [
+ "aligned_box",
  "async-fs",
  "async-global-executor",
  "async-io 2.6.0",
