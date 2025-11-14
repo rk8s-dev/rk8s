@@ -1,5 +1,5 @@
 use std::env;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,12 +11,15 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use pprof::criterion::{Output, PProfProfiler};
 use tempfile::TempDir;
 use tokio::runtime::{Builder, Runtime};
+use tokio::task::spawn_blocking;
 
 use slayerfs::cadapter::client::ObjectClient;
 use slayerfs::cadapter::localfs::LocalFsBackend;
 use slayerfs::cadapter::s3::{S3Backend, S3Config};
 use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::{BlockKey, BlockStore, ObjectBlockStore};
+#[cfg(target_os = "linux")]
+use slayerfs::fuse::mount::mount_vfs_unprivileged;
 use slayerfs::meta::{MetaStore, create_meta_store_from_url};
 use slayerfs::vfs::fs::VFS;
 
@@ -34,6 +37,7 @@ struct BenchConfig {
     layout: ChunkLayout,
     backend: BackendMode,
     meta_url: String,
+    mode: BenchMode,
 }
 
 #[derive(Clone)]
@@ -48,6 +52,12 @@ struct S3BackendOpts {
     region: Option<String>,
     endpoint: Option<String>,
     force_path_style: bool,
+}
+
+#[derive(Clone, Copy)]
+enum BenchMode {
+    Direct,
+    Fuse,
 }
 
 impl BenchConfig {
@@ -77,6 +87,7 @@ impl BenchConfig {
         let backend = BackendMode::from_env();
         let meta_url =
             env::var("SLAYERFS_BENCH_META_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
+        let mode = BenchMode::from_env();
 
         Self {
             block_size_bytes,
@@ -88,6 +99,7 @@ impl BenchConfig {
             layout,
             backend,
             meta_url,
+            mode,
         }
     }
 
@@ -125,9 +137,22 @@ impl BackendMode {
     }
 }
 
+impl BenchMode {
+    fn from_env() -> Self {
+        let value = env::var("SLAYERFS_BENCH_MODE")
+            .unwrap_or_else(|_| "direct".to_string())
+            .to_lowercase();
+        match value.as_str() {
+            "fuse" => BenchMode::Fuse,
+            _ => BenchMode::Direct,
+        }
+    }
+}
+
 struct BenchEnv {
-    fs: SharedFs,
-    _root: Option<BenchRoot>,
+    driver: BenchDriver,
+    _data_root: Option<BenchRoot>,
+    fuse_guard: Option<FuseGuard>,
 }
 
 enum BenchStore {
@@ -162,6 +187,182 @@ impl BlockStore for BenchStore {
 type BenchFs = VFS<BenchStore, Arc<dyn MetaStore>>;
 type SharedFs = Arc<BenchFs>;
 
+#[derive(Clone)]
+struct BenchDriver(Arc<BenchDriverInner>);
+
+enum BenchDriverInner {
+    Direct(SharedFs),
+    Fuse(FuseDriver),
+}
+
+#[derive(Clone)]
+struct FuseDriver {
+    mount_dir: Arc<PathBuf>,
+}
+
+impl FuseDriver {
+    fn new(mount_dir: PathBuf) -> Self {
+        Self {
+            mount_dir: Arc::new(mount_dir),
+        }
+    }
+
+    fn full_path(&self, path: &str) -> PathBuf {
+        let trimmed = path.trim_start_matches('/');
+        if trimmed.is_empty() {
+            self.mount_dir.as_ref().clone()
+        } else {
+            self.mount_dir.join(trimmed)
+        }
+    }
+
+    async fn mkdir_p(&self, path: &str) -> Result<()> {
+        let full = self.full_path(path);
+        let mount_root = self.mount_dir.clone();
+        spawn_blocking(move || -> Result<()> {
+            if full == *mount_root {
+                return Ok(());
+            }
+            fs::create_dir_all(&full).context("fuse mkdir")?;
+            Ok(())
+        })
+        .await??;
+        Ok(())
+    }
+
+    async fn create_file(&self, path: &str) -> Result<()> {
+        let full = self.full_path(path);
+        spawn_blocking(move || -> Result<()> {
+            if let Some(parent) = full.parent() {
+                fs::create_dir_all(parent).context("fuse create mkdir")?;
+            }
+            OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(&full)
+                .context("fuse create")?;
+            Ok(())
+        })
+        .await??;
+        Ok(())
+    }
+
+    async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
+        let full = self.full_path(path);
+        let payload = data.to_vec();
+        spawn_blocking(move || -> Result<()> {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(&full)
+                .context("fuse write open")?;
+            file.seek(SeekFrom::Start(offset))
+                .context("fuse write seek")?;
+            file.write_all(&payload).context("fuse write data")?;
+            file.flush().context("fuse write flush")?;
+            Ok(())
+        })
+        .await??;
+        Ok(())
+    }
+
+    async fn read(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>> {
+        let full = self.full_path(path);
+        let buf = spawn_blocking(move || -> Result<Vec<u8>> {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut file = OpenOptions::new()
+                .read(true)
+                .open(&full)
+                .context("fuse read open")?;
+            file.seek(SeekFrom::Start(offset))
+                .context("fuse read seek")?;
+            let mut buf = vec![0u8; len];
+            let mut read = 0usize;
+            while read < len {
+                let n = file.read(&mut buf[read..]).context("fuse read data")?;
+                if n == 0 {
+                    buf.truncate(read);
+                    break;
+                }
+                read += n;
+            }
+            Ok(buf)
+        })
+        .await?;
+        Ok(buf?)
+    }
+
+    async fn stat(&self, path: &str) -> Result<u64> {
+        let full = self.full_path(path);
+        let size = spawn_blocking(move || -> Result<u64> {
+            let meta = fs::metadata(&full).context("fuse stat")?;
+            Ok(meta.len())
+        })
+        .await?;
+        Ok(size?)
+    }
+}
+
+impl BenchDriver {
+    fn direct(fs: SharedFs) -> Self {
+        Self(Arc::new(BenchDriverInner::Direct(fs)))
+    }
+
+    fn fuse(driver: FuseDriver) -> Self {
+        Self(Arc::new(BenchDriverInner::Fuse(driver)))
+    }
+
+    async fn mkdir_p(&self, path: &str) -> Result<()> {
+        match &*self.0 {
+            BenchDriverInner::Direct(fs) => {
+                fs.mkdir_p(path).await.map_err(|e| anyhow!(e))?;
+                Ok(())
+            }
+            BenchDriverInner::Fuse(driver) => driver.mkdir_p(path).await,
+        }
+    }
+
+    async fn create_file(&self, path: &str) -> Result<()> {
+        match &*self.0 {
+            BenchDriverInner::Direct(fs) => {
+                fs.create_file(path).await.map_err(|e| anyhow!(e))?;
+                Ok(())
+            }
+            BenchDriverInner::Fuse(driver) => driver.create_file(path).await,
+        }
+    }
+
+    async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
+        match &*self.0 {
+            BenchDriverInner::Direct(fs) => {
+                fs.write(path, offset, data).await.map_err(|e| anyhow!(e))?;
+                Ok(())
+            }
+            BenchDriverInner::Fuse(driver) => driver.write(path, offset, data).await,
+        }
+    }
+
+    async fn read(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>> {
+        match &*self.0 {
+            BenchDriverInner::Direct(fs) => {
+                fs.read(path, offset, len).await.map_err(|e| anyhow!(e))
+            }
+            BenchDriverInner::Fuse(driver) => driver.read(path, offset, len).await,
+        }
+    }
+
+    async fn stat(&self, path: &str) -> Result<u64> {
+        match &*self.0 {
+            BenchDriverInner::Direct(fs) => {
+                let attr = fs.stat(path).await.ok_or_else(|| anyhow!("not found"))?;
+                Ok(attr.size)
+            }
+            BenchDriverInner::Fuse(driver) => driver.stat(path).await,
+        }
+    }
+}
+
 enum BenchRoot {
     Temp(TempDir),
     Managed(PathBuf),
@@ -184,23 +385,83 @@ impl Drop for BenchRoot {
     }
 }
 
+#[cfg(target_os = "linux")]
+struct FuseGuard {
+    _mount_dir: TempDir,
+    handle: rfuse3::raw::MountHandle,
+}
+
+#[cfg(target_os = "linux")]
+impl FuseGuard {
+    async fn unmount(self) -> std::io::Result<()> {
+        self.handle.unmount().await
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+struct FuseGuard;
+
+#[cfg(not(target_os = "linux"))]
+impl FuseGuard {
+    async fn unmount(self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl BenchEnv {
     async fn new(cfg: &BenchConfig) -> Result<Self> {
         let (store, root) = create_backend_store(cfg).await?;
         let meta = create_meta_store_from_url(&cfg.meta_url)
             .await
             .context("create meta store")?;
-        let fs = VFS::new(cfg.layout, store, meta)
+        let vfs = VFS::new(cfg.layout, store, meta)
             .await
             .map_err(|e| anyhow!("init vfs: {e}"))?;
-        Ok(Self {
-            fs: Arc::new(fs),
-            _root: root,
-        })
+
+        match cfg.mode {
+            BenchMode::Direct => {
+                let driver = BenchDriver::direct(Arc::new(vfs));
+                Ok(Self {
+                    driver,
+                    _data_root: root,
+                    fuse_guard: None,
+                })
+            }
+            BenchMode::Fuse => {
+                #[cfg(target_os = "linux")]
+                {
+                    let mount_dir = TempDir::new().context("create fuse mount dir")?;
+                    let mount_path = mount_dir.path().to_path_buf();
+                    let handle = mount_vfs_unprivileged(vfs, mount_dir.path())
+                        .await
+                        .context("mount fuse")?;
+                    let driver = BenchDriver::fuse(FuseDriver::new(mount_path));
+                    Ok(Self {
+                        driver,
+                        _data_root: root,
+                        fuse_guard: Some(FuseGuard {
+                            _mount_dir: mount_dir,
+                            handle,
+                        }),
+                    })
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    Err(anyhow!("FUSE mode is only supported on Linux"))
+                }
+            }
+        }
     }
 
-    fn fs(&self) -> SharedFs {
-        Arc::clone(&self.fs)
+    fn driver(&self) -> BenchDriver {
+        self.driver.clone()
+    }
+
+    async fn teardown(self) -> Result<()> {
+        if let Some(guard) = self.fuse_guard {
+            guard.unmount().await.context("unmount fuse")?;
+        }
+        Ok(())
     }
 }
 
@@ -280,66 +541,70 @@ where
 
 async fn run_big_write(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let env = BenchEnv::new(cfg).await?;
-    let fs = env.fs();
+    let driver = env.driver();
     let base = format!("/bench/run-{iter}/big");
-    fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    measure_future(write_big_files(fs, cfg, base)).await
+    let cost = measure_future(write_big_files(driver, cfg, base)).await?;
+    env.teardown().await?;
+    Ok(cost)
 }
 
 async fn run_big_read(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let env = BenchEnv::new(cfg).await?;
-    let fs = env.fs();
+    let driver = env.driver();
     let base = format!("/bench/run-{iter}/big");
-    fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    write_big_files(fs.clone(), cfg, base.clone()).await?;
-    measure_future(read_big_files(fs, cfg, base)).await
+    write_big_files(driver.clone(), cfg, base.clone()).await?;
+    let cost = measure_future(read_big_files(driver, cfg, base)).await?;
+    env.teardown().await?;
+    Ok(cost)
 }
 
 async fn run_small_write(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let env = BenchEnv::new(cfg).await?;
-    let fs = env.fs();
+    let driver = env.driver();
     let base = format!("/bench/run-{iter}/small");
-    fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    measure_future(write_small_files(fs, cfg, base)).await
+    let cost = measure_future(write_small_files(driver, cfg, base)).await?;
+    env.teardown().await?;
+    Ok(cost)
 }
 
 async fn run_small_read(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let env = BenchEnv::new(cfg).await?;
-    let fs = env.fs();
+    let driver = env.driver();
     let base = format!("/bench/run-{iter}/small");
-    fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    write_small_files(fs.clone(), cfg, base.clone()).await?;
-    measure_future(read_small_files(fs, cfg, base)).await
+    write_small_files(driver.clone(), cfg, base.clone()).await?;
+    let cost = measure_future(read_small_files(driver, cfg, base)).await?;
+    env.teardown().await?;
+    Ok(cost)
 }
 
 async fn run_small_stat(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let env = BenchEnv::new(cfg).await?;
-    let fs = env.fs();
+    let driver = env.driver();
     let base = format!("/bench/run-{iter}/small");
-    fs.mkdir_p(&base).await.map_err(|e| anyhow!(e))?;
-    write_small_files(fs.clone(), cfg, base.clone()).await?;
-    measure_future(stat_small_files(fs, cfg, base)).await
+    write_small_files(driver.clone(), cfg, base.clone()).await?;
+    let cost = measure_future(stat_small_files(driver, cfg, base)).await?;
+    env.teardown().await?;
+    Ok(cost)
 }
 
-async fn write_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
+async fn write_big_files(driver: BenchDriver, cfg: &BenchConfig, base: String) -> Result<()> {
     if cfg.big_file_bytes == 0 {
         return Ok(());
     }
+    driver.mkdir_p(&base).await?;
     let mut handles = Vec::with_capacity(cfg.threads);
     for tid in 0..cfg.threads {
         let path = format!("{base}/big-{tid}.dat");
-        let fs = fs.clone();
+        let driver = driver.clone();
         let block_size = cfg.block_size_bytes;
         let total = cfg.big_file_bytes;
         handles.push(tokio::spawn(async move {
-            fs.create_file(&path).await.map_err(|e| anyhow!(e))?;
+            driver.create_file(&path).await?;
             let mut written = 0usize;
             let payload = make_block_payload(block_size, tid);
             while written < total {
                 let len = (total - written).min(block_size);
-                fs.write(&path, written as u64, &payload[..len])
-                    .await
-                    .map_err(|e| anyhow!(e))?;
+                driver.write(&path, written as u64, &payload[..len]).await?;
                 written += len;
             }
             Result::<()>::Ok(())
@@ -348,27 +613,25 @@ async fn write_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Resul
     for handle in handles {
         handle.await??;
     }
+    flush_os_caches();
     Ok(())
 }
 
-async fn read_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
+async fn read_big_files(driver: BenchDriver, cfg: &BenchConfig, base: String) -> Result<()> {
     if cfg.big_file_bytes == 0 {
         return Ok(());
     }
     let mut handles = Vec::with_capacity(cfg.threads);
     for tid in 0..cfg.threads {
         let path = format!("{base}/big-{tid}.dat");
-        let fs = fs.clone();
+        let driver = driver.clone();
         let block_size = cfg.block_size_bytes;
         let total = cfg.big_file_bytes;
         handles.push(tokio::spawn(async move {
             let mut read = 0usize;
             while read < total {
                 let len = (total - read).min(block_size);
-                let data = fs
-                    .read(&path, read as u64, len)
-                    .await
-                    .map_err(|e| anyhow!(e))?;
+                let data = driver.read(&path, read as u64, len).await?;
                 if data.len() != len {
                     return Err(anyhow!(
                         "unexpected read length: expected {len}, got {}",
@@ -386,10 +649,11 @@ async fn read_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result
     Ok(())
 }
 
-async fn write_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
+async fn write_small_files(driver: BenchDriver, cfg: &BenchConfig, base: String) -> Result<()> {
+    driver.mkdir_p(&base).await?;
     let mut handles = Vec::with_capacity(cfg.threads);
     for tid in 0..cfg.threads {
-        let fs = fs.clone();
+        let driver = driver.clone();
         let base = base.clone();
         let block_size = cfg.block_size_bytes;
         let file_size = cfg.small_file_bytes;
@@ -398,13 +662,11 @@ async fn write_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Res
             let payload = make_block_payload(block_size, tid);
             for idx in 0..file_cnt {
                 let path = small_file_path(&base, tid, idx);
-                fs.create_file(&path).await.map_err(|e| anyhow!(e))?;
+                driver.create_file(&path).await?;
                 let mut written = 0usize;
                 while written < file_size {
                     let len = (file_size - written).min(block_size);
-                    fs.write(&path, written as u64, &payload[..len])
-                        .await
-                        .map_err(|e| anyhow!(e))?;
+                    driver.write(&path, written as u64, &payload[..len]).await?;
                     written += len;
                 }
             }
@@ -414,20 +676,21 @@ async fn write_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Res
     for handle in handles {
         handle.await??;
     }
+    flush_os_caches();
     Ok(())
 }
 
-async fn read_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
+async fn read_small_files(driver: BenchDriver, cfg: &BenchConfig, base: String) -> Result<()> {
     let mut handles = Vec::with_capacity(cfg.threads);
     for tid in 0..cfg.threads {
-        let fs = fs.clone();
+        let driver = driver.clone();
         let base = base.clone();
         let file_size = cfg.small_file_bytes;
         let file_cnt = cfg.small_file_count;
         handles.push(tokio::spawn(async move {
             for idx in 0..file_cnt {
                 let path = small_file_path(&base, tid, idx);
-                let data = fs.read(&path, 0, file_size).await.map_err(|e| anyhow!(e))?;
+                let data = driver.read(&path, 0, file_size).await?;
                 if data.len() != file_size {
                     return Err(anyhow!(
                         "unexpected read length: expected {file_size}, got {}",
@@ -444,18 +707,16 @@ async fn read_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Resu
     Ok(())
 }
 
-async fn stat_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Result<()> {
+async fn stat_small_files(driver: BenchDriver, cfg: &BenchConfig, base: String) -> Result<()> {
     let mut handles = Vec::with_capacity(cfg.threads);
     for tid in 0..cfg.threads {
-        let fs = fs.clone();
+        let driver = driver.clone();
         let base = base.clone();
         let file_cnt = cfg.small_file_count;
         handles.push(tokio::spawn(async move {
             for idx in 0..file_cnt {
                 let path = small_file_path(&base, tid, idx);
-                if fs.stat(&path).await.is_none() {
-                    return Err(anyhow!("stat failed for {path}"));
-                }
+                driver.stat(&path).await?;
             }
             Result::<()>::Ok(())
         }));
@@ -477,6 +738,14 @@ fn make_block_payload(size: usize, salt: usize) -> Vec<u8> {
 fn small_file_path(base: &str, tid: usize, idx: usize) -> String {
     format!("{base}/thread-{tid}/file-{idx}.dat")
 }
+
+#[cfg(unix)]
+fn flush_os_caches() {
+    unsafe { libc::sync() };
+}
+
+#[cfg(not(unix))]
+fn flush_os_caches() {}
 
 fn bench_big_files(c: &mut Criterion) {
     let cfg = BenchConfig::from_env();

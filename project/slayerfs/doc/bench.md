@@ -28,11 +28,13 @@ cargo bench --bench slayerfs_bench
 | `SLAYERFS_BENCH_SAMPLE_SIZE` (≥10)      | Criterion 样本数，至少 10 个                        |
 | `SLAYERFS_BENCH_FLAMEGRAPH`（未设置）        | 任意值即可开启火焰图采集                                 |
 | `SLAYERFS_BENCH_DATA_DIR`（未设置）          | 指定对象根目录；默认用系统临时目录并在结束后删除                     |
+| `SLAYERFS_BENCH_MODE`（direct）            | 压测模式：`direct` 直接调用 VFS，`fuse` 通过 FUSE 挂载（仅 Linux） |
 | `SLAYERFS_BENCH_BACKEND`（local）         | 对象存储类型：`local` 或 `s3`                        |
 | `SLAYERFS_BENCH_S3_BUCKET`（空）           | 当 `BACKEND=s3` 时必须指定的 S3 桶                   |
 | `SLAYERFS_BENCH_S3_REGION`（空）           | 可选，S3 区域                                     |
 | `SLAYERFS_BENCH_S3_ENDPOINT`（空）         | 可选，自定义兼容端点/MinIO                             |
 | `SLAYERFS_BENCH_S3_FORCE_PATH_STYLE`（未设置） | 可选布尔值，设为 `true` 可强制 path-style 访问            |
+| `SLAYERFS_BENCH_META_URL`（`sqlite::memory:`） | 元数据后端 URL，兼容 SQLite/PostgreSQL/Redis/Etcd 等 |
 
 SLAYERFS_BENCH_BIG_FILE_MB=256 \
 cargo bench --bench slayerfs_bench -- --warm-up-time 1 --profile-time 5
