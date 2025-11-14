@@ -41,3 +41,27 @@ cargo bench --bench slayerfs_bench -- --warm-up-time 1 --profile-time 5
 ```
 
 运行结束后，可在 `target/criterion/slayerfs_big_file/read/1/profile/flamegraph.svg` 等目录中查看火焰图。
+
+> **提示**：这里展示的吞吐/延迟更多用于排查热点、配合火焰图定位问题，并不直接等同于生产环境的绝对性能。默认配置会大量命中缓存，也跳过 FUSE/内核调度开销（结果是导致结果异常偏高）；若要做真实性能测试，请开启 `SLAYERFS_BENCH_MODE=fuse` 或直接在挂载点用 fio 之类工具，并视情况关闭缓存、提前 `drop_caches`。
+
+## 使用 perf 分析 FUSE 场景
+
+当你在 FUSE 挂载点运行 fio 等压力测试时，可以用 `perf` 直接对 `slayerfs` 进程取样：
+
+```
+# 1. 用带符号的 release 版本启动 FUSE
+RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_RELEASE_DEBUG=true \
+  cargo build --release --example mount_local
+sudo perf record -F 99 -g -- \
+  ./target/release/examples/mount_local data mountpoint
+
+# 2. 在另一个终端运行 fio（或其他工作负载）
+fio --directory=mountpoint --rw=read --size=4G --bs=1M --direct=1 ...
+
+# 3. 压测结束后回到 perf 那个终端按 Ctrl+C，生成火焰图
+sudo perf script | inferno-collapse-perf > out.folded
+inferno-flamegraph out.folded > flame.svg
+```
+
+wrap 模式会捕获进程的所有线程，并覆盖从启动到关闭的完整生命周期；如果服务器需要长时间常驻，可以在 wrap 命令中配合 `timeout` 或 `sleep` 控制采样窗口，避免生成过大的 `perf.data`。同样务必开启 `debug = true` 与 `RUSTFLAGS="-C force-frame-pointers=yes"`，以免火焰图里充满 `unknown`。最终得到的 `flame.svg` 可以与 `slayerfs_bench` 的结果互相印证，帮助你在真实 FUSE 负载下定位瓶颈。如果缺少`inferno-flamegraph`请使用`cargo install inferno`，并确保`~/.cargo/bin`已经加入了PATH。
+
