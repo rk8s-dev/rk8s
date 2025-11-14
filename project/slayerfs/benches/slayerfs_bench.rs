@@ -261,10 +261,10 @@ fn env_bool(name: &str) -> Option<bool> {
         })
 }
 
-fn tokio_runtime() -> Runtime {
+fn tokio_runtime(thread_num: usize) -> Runtime {
     Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(2)
+        .worker_threads(thread_num.max(2))
         .build()
         .expect("failed to build tokio runtime")
 }
@@ -480,7 +480,7 @@ fn small_file_path(base: &str, tid: usize, idx: usize) -> String {
 
 fn bench_big_files(c: &mut Criterion) {
     let cfg = BenchConfig::from_env();
-    let runtime = tokio_runtime();
+    let runtime = tokio_runtime(cfg.threads);
     let mut group = c.benchmark_group("slayerfs_big_file");
     group.sample_size(cfg.sample_size);
     group.throughput(Throughput::Bytes(cfg.big_total_bytes()));
@@ -516,7 +516,7 @@ fn bench_big_files(c: &mut Criterion) {
 
 fn bench_small_files(c: &mut Criterion) {
     let cfg = BenchConfig::from_env();
-    let runtime = tokio_runtime();
+    let runtime = tokio_runtime(cfg.threads);
     let mut group = c.benchmark_group("slayerfs_small_file");
     group.sample_size(cfg.sample_size);
     group.throughput(Throughput::Elements(cfg.small_total_files()));
@@ -552,7 +552,7 @@ fn bench_small_files(c: &mut Criterion) {
 
 fn bench_small_stats(c: &mut Criterion) {
     let cfg = BenchConfig::from_env();
-    let runtime = tokio_runtime();
+    let runtime = tokio_runtime(cfg.threads);
     let mut group = c.benchmark_group("slayerfs_stat");
     group.sample_size(cfg.sample_size);
     group.throughput(Throughput::Elements(cfg.small_total_files()));

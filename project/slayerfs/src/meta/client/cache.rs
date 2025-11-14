@@ -6,7 +6,7 @@ use crate::chuck::SliceDesc;
 use crate::meta::entities::etcd::EtcdEntryInfo;
 use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
 use crate::vfs::fs::FileType;
-use dashmap::DashMap;
+use dashmap::{DashMap, Entry};
 use moka::future::Cache;
 use moka::notification::RemovalCause;
 use tokio::sync::RwLock;
@@ -54,7 +54,7 @@ pub(crate) struct InodeEntry {
     pub(crate) parent: Arc<RwLock<Option<i64>>>,
     /// Directory children with loading state tracking (only used if THIS inode is a directory)
     pub(crate) children: Arc<RwLock<ChildrenState>>,
-    /// Slices belong to a chunk
+    /// Cache slice metadata per chunk index
     pub(crate) slices: DashMap<u64, Vec<SliceDesc>>,
 }
 
@@ -280,8 +280,13 @@ impl InodeCache {
 
     pub(crate) async fn get_slices(&self, inode: i64, chunk_index: u64) -> Option<Vec<SliceDesc>> {
         let node = self.ttl_manager.get(&inode).await?;
-        let slices = node.slices.get(&chunk_index)?;
-        Some(slices.clone())
+
+        // Use entry api to ensure consistency, it will lock the bucket.
+        let entry = node.slices.entry(chunk_index);
+        match entry {
+            Entry::Occupied(entry) => entry.get().clone().into(),
+            Entry::Vacant(_) => None,
+        }
     }
 
     pub(crate) async fn replace_children(&self, parent_ino: i64, children: HashMap<String, i64>) {
