@@ -280,6 +280,9 @@ pub enum MetaError {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    #[error("continue retry")]
+    ContinueRetry,
+
     #[error("error: max retries exceeded")]
     MaxRetriesExceeded,
 

@@ -4,6 +4,7 @@
 
 use crate::chuck::SliceDesc;
 use crate::chuck::slice::key_for_slice;
+use crate::meta::backoff::backoff;
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
@@ -627,37 +628,47 @@ impl EtcdMetaStore {
         F: Fn(T) -> T,
         T: Serialize + DeserializeOwned + Clone,
     {
-        let mut client = self.client.clone();
+        let client = self.client.clone();
 
-        for _ in 0..10 {
-            let resp = client
-                .get(key, None)
-                .await
-                .map_err(|e| MetaError::Config(format!("Failed to get key: {e}")))?;
+        let f = || {
+            // Cloning client is cheap.
+            let mut client = client.clone();
 
-            let (current, version) = match resp.kvs().first() {
-                Some(kv) => (f(serde_json::from_slice::<T>(kv.value())?), kv.version()),
-                None => (init.clone(), 0),
-            };
-            let current = serde_json::to_string(&current)?;
+            // A clone we cannot avoid :(
+            let init = init.clone();
 
-            let compare = Compare::version(key, CompareOp::Equal, version);
-            let op = TxnOp::put(key, current, None);
-            let txn = Txn::new().when([compare]).and_then([op]);
+            // Capture f by ref to avoid clone.
+            let f = &f;
 
-            match client.txn(txn).await {
-                Ok(txn_resp) if txn_resp.succeeded() => return Ok(()),
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(MetaError::Config(format!(
+            async move {
+                let resp = client
+                    .get(key, None)
+                    .await
+                    .map_err(|e| MetaError::Config(format!("Failed to get key: {e}")))?;
+
+                let (current, version) = match resp.kvs().first() {
+                    Some(kv) => (f(serde_json::from_slice::<T>(kv.value())?), kv.version()),
+                    None => (init, 0),
+                };
+                let current = serde_json::to_string(&current)?;
+
+                let compare = Compare::version(key, CompareOp::Equal, version);
+                let op = TxnOp::put(key, current, None);
+                let txn = Txn::new().when([compare]).and_then([op]);
+
+                match client.txn(txn).await {
+                    Ok(txn_resp) if txn_resp.succeeded() => Ok(()),
+                    Ok(_) => Err(MetaError::ContinueRetry),
+                    Err(e) => Err(MetaError::Config(format!(
                         "Failed to execute transaction: {e}"
-                    )));
+                    ))),
                 }
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        Err(MetaError::MaxRetriesExceeded)
+        };
+
+        backoff(10, f).await
     }
+
     /// Get a clone of the etcd client (for Watch Worker)
     pub fn get_client(&self) -> EtcdClient {
         self.client.clone()

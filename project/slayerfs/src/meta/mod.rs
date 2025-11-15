@@ -12,6 +12,7 @@
 //! - Ensure critical write-path updates (blocks + slice_blocks + slices + inode.size)
 //!   are committed atomically.
 //!
+pub mod backoff;
 pub mod client;
 pub mod config;
 pub mod entities;

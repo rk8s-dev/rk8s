@@ -63,5 +63,5 @@ sudo perf script | inferno-collapse-perf > out.folded
 inferno-flamegraph out.folded > flame.svg
 ```
 
-wrap 模式会捕获进程的所有线程，并覆盖从启动到关闭的完整生命周期；如果服务器需要长时间常驻，可以在 wrap 命令中配合 `timeout` 或 `sleep` 控制采样窗口，避免生成过大的 `perf.data`。同样务必开启 `debug = true` 与 `RUSTFLAGS="-C force-frame-pointers=yes"`，以免火焰图里充满 `unknown`。最终得到的 `flame.svg` 可以与 `slayerfs_bench` 的结果互相印证，帮助你在真实 FUSE 负载下定位瓶颈。如果缺少`inferno-flamegraph`请使用`cargo install inferno`，并确保`~/.cargo/bin`已经加入了PATH。
+wrap 模式会捕获进程的所有线程，并覆盖从启动到关闭的完整生命周期；如果服务器需要长时间常驻，可以在 wrap 命令中配合 `timeout` 或 `sleep` 控制采样窗口，避免生成过大的 `perf.data`。同样务必开启 `debug = true` 与 `RUSTFLAGS="-C force-frame-pointers=yes"`，以免火焰图里充满 `unknown`。最终得到的 `flame.svg` 可以与 `slayerfs_bench` 的结果互相印证，帮助你在真实 FUSE 负载下定位瓶颈如果缺少`inferno-flamegraph`请使用`cargo install inferno`，并确保`~/.cargo/bin`已经加入了PATH。
 
