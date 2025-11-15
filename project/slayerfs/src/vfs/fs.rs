@@ -1001,7 +1001,7 @@ mod tests {
     use crate::cadapter::localfs::LocalFsBackend;
     use crate::chuck::store::InMemoryBlockStore;
     use crate::chuck::store::ObjectBlockStore;
-    use crate::meta::create_meta_store_from_url;
+    use crate::meta::factory::create_meta_store_from_url;
     use async_trait::async_trait;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

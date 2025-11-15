@@ -48,8 +48,7 @@ macro_rules! backoff {
 mod tests {
     use crate::meta::backoff::backoff;
     use crate::meta::store::MetaError;
-    use rand::{RngCore, rng};
-    use std::sync::Arc;
+    use rand::RngCore;
     use std::sync::atomic::{AtomicI32, Ordering};
 
     #[tokio::test]

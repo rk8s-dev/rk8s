@@ -23,6 +23,7 @@ use std::{collections::HashSet, process};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{info, warn};
 
+use crate::vfs::extract_ino_and_chunk_index;
 use cache::InodeCache;
 use chrono::{DateTime, Utc};
 use hostname::get as get_hostname;
@@ -652,6 +653,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
 }
 
 #[async_trait]
+#[allow(dead_code)]
 impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
     fn name(&self) -> &'static str {
         self.store.name()
@@ -1071,12 +1073,22 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
     }
 
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
+        let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        if let Some(slices) = self.inode_cache.get_slices(inode, chunk_index).await {
+            return Ok(slices);
+        }
         self.store.get_slices(chunk_id).await
     }
 
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         self.ensure_writable()?;
-        self.store.append_slice(chunk_id, slice).await
+
+        let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        self.store.append_slice(chunk_id, slice).await?;
+        self.inode_cache
+            .append_slice(inode, chunk_index, slice)
+            .await;
+        Ok(())
     }
 
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
@@ -1129,6 +1141,7 @@ mod tests {
     use super::*;
     use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
     use crate::meta::stores::database_store::DatabaseMetaStore;
+    use crate::vfs::chunk_id_for;
     use std::time::Duration;
 
     async fn create_test_client() -> Arc<MetaClient<DatabaseMetaStore>> {
@@ -1469,6 +1482,38 @@ mod tests {
             path, "/dir2/moved_file.txt",
             "get_path should return new path"
         );
+    }
+
+    #[tokio::test]
+    async fn test_slice_operations() {
+        let client = create_test_client().await;
+
+        let ino = client.create_file(1, "text".to_string()).await.unwrap();
+        let chunk_id = chunk_id_for(ino, 1);
+
+        let test_slices = (1..=10)
+            .map(|e| SliceDesc {
+                slice_id: e,
+                chunk_id,
+                offset: 0,
+                length: 100,
+            })
+            .collect::<Vec<_>>();
+
+        for desc in test_slices.iter().copied() {
+            client.append_slice(chunk_id, desc).await.unwrap();
+        }
+
+        let from_method = client.get_slices(chunk_id).await.unwrap();
+        assert_eq!(test_slices, from_method);
+
+        let (ino, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        let from_cached = client
+            .inode_cache
+            .get_slices(ino, chunk_index)
+            .await
+            .unwrap();
+        assert_eq!(test_slices, from_cached);
     }
 
     /// Test scenario: Complex sequence of mixed operations

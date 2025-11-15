@@ -48,7 +48,7 @@ mod tests {
     use crate::chuck::ChunkReader;
     use crate::chuck::chunk::DEFAULT_BLOCK_SIZE;
     use crate::chuck::store::InMemoryBlockStore;
-    use crate::meta::create_meta_store_from_url;
+    use crate::meta::factory::create_meta_store_from_url;
 
     #[tokio::test]
     async fn test_writer_cross_blocks() {

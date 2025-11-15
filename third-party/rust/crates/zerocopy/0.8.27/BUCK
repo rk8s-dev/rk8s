@@ -26,12 +26,17 @@ rust_library(
     env = {
         "OUT_DIR": "$(location :zerocopy-build-script-run[out_dir])",
     },
-    features = ["simd"],
+    features = [
+        "derive",
+        "simd",
+        "zerocopy-derive",
+    ],
     rustc_flags = [
         "@$(location :zerocopy-build-script-run[rustc_flags])",
         "@$(location :zerocopy-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
+    deps = ["//third-party/rust/crates/zerocopy-derive/0.8.27:zerocopy-derive"],
 )
 
 rust_binary(
@@ -40,7 +45,11 @@ rust_binary(
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    features = ["simd"],
+    features = [
+        "derive",
+        "simd",
+        "zerocopy-derive",
+    ],
     rustc_flags = ["@$(location :zerocopy-manifest[env_flags])"],
     visibility = [],
 )
@@ -50,7 +59,11 @@ buildscript_run(
     package_name = "zerocopy",
     buildscript_rule = ":zerocopy-build-script-build",
     env_srcs = [":zerocopy-manifest[env_dict]"],
-    features = ["simd"],
+    features = [
+        "derive",
+        "simd",
+        "zerocopy-derive",
+    ],
     version = "0.8.27",
     manifest_dir = ":zerocopy-vendor",
     visibility = ["PUBLIC"],
