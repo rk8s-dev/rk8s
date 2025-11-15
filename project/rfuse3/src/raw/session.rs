@@ -5093,6 +5093,8 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 request.unique, in_header.nodeid, write_in
             );
 
+            // Special handling for O_DIRECT writes: ensure the buffer is 4096-byte aligned.
+            // Currently we only encounter this case in xfstests.
             use std::borrow::Cow;
             const ALIGNMENT: usize = 4096;
             let mut aligned_buf =
@@ -5471,6 +5473,13 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 ReplyXAttr::Size(size) => {
                     let getxattr_out = fuse_getxattr_out { size, _padding: 0 };
 
+                    // Found in xfstests.
+                    // FUSE getxattr follows a two-step protocol:
+                    // 1) When size == 0, the kernel is only querying the required buffer size.
+                    //    The filesystem should return success and provide the attribute length.
+                    // 2) When size > 0, the kernel expects the actual attribute data.
+                    //    If the provided buffer is too small (attribute grew), return ERANGE
+                    //    and report the new required size.
                     let error_code = if getxattr_in.size == 0 {
                         0
                     } else {

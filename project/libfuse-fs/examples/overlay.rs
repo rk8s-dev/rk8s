@@ -111,6 +111,8 @@ async fn main() -> Result<(), std::io::Error> {
 
     set_log(&args);
 
+    // This is commented out because some testcase(fsstress) may output huge logs, exhausting disk space.
+    // Uncomment this when we need to debug.
     // let file = std::fs::OpenOptions::new()
     //     .create(true)
     //     .write(true)
@@ -128,6 +130,10 @@ async fn main() -> Result<(), std::io::Error> {
         upperdir: args.upperdir,
         mapping: None::<&str>,
         privileged: true,
+        // SECURITY: allow_other permits all users to access this filesystem.
+        // This is required for testing with xfstests which uses different UIDs.
+        // In production, set to false unless you specifically need multi-user access
+        // and have proper permission checks in place.
         allow_other: true,
     })
     .await;
