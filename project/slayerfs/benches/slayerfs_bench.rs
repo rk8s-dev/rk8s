@@ -20,7 +20,8 @@ use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::{BlockKey, BlockStore, ObjectBlockStore};
 #[cfg(target_os = "linux")]
 use slayerfs::fuse::mount::mount_vfs_unprivileged;
-use slayerfs::meta::{MetaStore, create_meta_store_from_url};
+use slayerfs::meta::factory::create_meta_store_from_url;
+use slayerfs::meta::stores::DatabaseMetaStore;
 use slayerfs::vfs::fs::VFS;
 
 const MB: usize = 1024 * 1024;
@@ -184,7 +185,7 @@ impl BlockStore for BenchStore {
     }
 }
 
-type BenchFs = VFS<BenchStore, Arc<dyn MetaStore>>;
+type BenchFs = VFS<BenchStore, Arc<DatabaseMetaStore>>;
 type SharedFs = Arc<BenchFs>;
 
 #[derive(Clone)]
@@ -414,7 +415,7 @@ impl BenchEnv {
         let meta = create_meta_store_from_url(&cfg.meta_url)
             .await
             .context("create meta store")?;
-        let vfs = VFS::new(cfg.layout, store, meta)
+        let vfs = VFS::new(cfg.layout, store, meta.store())
             .await
             .map_err(|e| anyhow!("init vfs: {e}"))?;
 
