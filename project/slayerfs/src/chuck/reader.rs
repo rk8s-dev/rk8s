@@ -314,7 +314,10 @@ mod tests {
     async fn test_reader_zero_fills_holes() {
         let layout = ChunkLayout::default();
         let store = InMemoryBlockStore::new();
-        let meta = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .unwrap()
+            .store();
         // Only write the first half of the second block
         {
             let w = ChunkWriter::new(layout, 7, &store, &meta);

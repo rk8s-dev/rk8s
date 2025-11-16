@@ -6,13 +6,17 @@ use crate::chuck::SliceDesc;
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
 use crate::meta::entities::*;
-use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
+use crate::meta::store::{
+    DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
+    StatFsSnapshot,
+};
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
 use log::info;
 use sea_orm::*;
+use sea_query::Index;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -162,6 +166,19 @@ impl DatabaseMetaStore {
                 MetaError::Database(e)
             })?;
         }
+
+        let index_stmt = Index::create()
+            .if_not_exists()
+            .name("idx_content_meta_inode")
+            .table(ContentMeta)
+            .col(content_meta::Column::Inode)
+            .to_owned();
+
+        let index_sql = builder.build(&index_stmt);
+        db.execute(index_sql).await.map_err(|e| {
+            eprintln!("Failed to create index idx_content_meta_inode: {}", e);
+            MetaError::Database(e)
+        })?;
 
         info!("Database schema initialized successfully");
         Ok(())
@@ -356,6 +373,7 @@ impl DatabaseMetaStore {
             create_time: Set(now),
             nlink: Set(1),
             deleted: Set(false),
+            symlink_target: Set(None),
         };
 
         file_meta.insert(&txn).await.map_err(MetaError::Database)?;
@@ -395,6 +413,10 @@ impl DatabaseMetaStore {
         let id = self.next_inode.fetch_add(1, Ordering::SeqCst);
         id as i64
     }
+
+    fn now_nanos() -> i64 {
+        Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    }
 }
 
 #[async_trait]
@@ -402,10 +424,20 @@ impl MetaStore for DatabaseMetaStore {
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         if let Ok(Some(file_meta)) = self.get_file_meta(ino).await {
             let permission = file_meta.permission();
+            let kind = if file_meta.symlink_target.is_some() {
+                FileType::Symlink
+            } else {
+                FileType::File
+            };
+            let size = if let Some(target) = &file_meta.symlink_target {
+                target.len() as u64
+            } else {
+                file_meta.size as u64
+            };
             return Ok(Some(FileAttr {
                 ino: file_meta.inode,
-                size: file_meta.size as u64,
-                kind: FileType::File,
+                size,
+                kind,
                 mode: permission.mode,
                 uid: permission.uid,
                 gid: permission.gid,
@@ -478,6 +510,13 @@ impl MetaStore for DatabaseMetaStore {
                             return Ok(None);
                         }
                     }
+                    EntryType::Symlink => {
+                        if index == parts.len() - 1 {
+                            return Ok(Some((entry.inode, FileType::Symlink)));
+                        } else {
+                            return Ok(None);
+                        }
+                    }
                 },
                 None => return Ok(None),
             }
@@ -507,6 +546,7 @@ impl MetaStore for DatabaseMetaStore {
             let kind = match content.entry_type {
                 EntryType::File => FileType::File,
                 EntryType::Directory => FileType::Dir,
+                EntryType::Symlink => FileType::Symlink,
             };
             entries.push(DirEntry {
                 name: content.entry_name,
@@ -590,13 +630,17 @@ impl MetaStore for DatabaseMetaStore {
         let file_entry = ContentMeta::find()
             .filter(content_meta::Column::ParentInode.eq(parent))
             .filter(content_meta::Column::EntryName.eq(name))
-            .filter(content_meta::Column::EntryType.eq(EntryType::File))
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
             .ok_or_else(|| {
                 MetaError::Internal(format!("File '{}' not found in parent {}", name, parent))
             })?;
+
+        if file_entry.entry_type == EntryType::Directory {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotDirectory(file_entry.inode));
+        }
 
         let file_id = file_entry.inode;
 
@@ -615,19 +659,23 @@ impl MetaStore for DatabaseMetaStore {
             .await
             .map_err(MetaError::Database)?;
 
+        let now = Self::now_nanos();
         let current_nlink = match &file_meta.nlink {
-            Set(n) => *n,
+            Set(n) | Unchanged(n) => *n,
             _ => 1,
         };
 
         if current_nlink > 1 {
             file_meta.nlink = Set(current_nlink - 1);
-            file_meta.update(&txn).await.map_err(MetaError::Database)?;
+            file_meta.deleted = Set(false);
         } else {
             file_meta.deleted = Set(true);
             file_meta.nlink = Set(0);
-            file_meta.update(&txn).await.map_err(MetaError::Database)?;
         }
+
+        file_meta.modify_time = Set(now);
+        file_meta.create_time = Set(now);
+        file_meta.update(&txn).await.map_err(MetaError::Database)?;
 
         // Update parent directory mtime
         let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent)
@@ -645,6 +693,183 @@ impl MetaStore for DatabaseMetaStore {
         txn.commit().await.map_err(MetaError::Database)?;
 
         Ok(())
+    }
+
+    async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        if ino == 1 {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to the root inode".into(),
+            ));
+        }
+
+        let Some(file) = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        else {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotFound(ino));
+        };
+
+        if file.deleted || file.nlink <= 0 {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotSupported(
+                "cannot create hard link to deleted file".into(),
+            ));
+        }
+
+        let parent_dir = AccessMeta::find_by_id(parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(parent))?;
+
+        if !parent_dir.permission().is_directory() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotDirectory(parent));
+        }
+
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent,
+                name: name.to_string(),
+            });
+        }
+
+        let now = Self::now_nanos();
+        let entry_type = if file.symlink_target.is_some() {
+            EntryType::Symlink
+        } else {
+            EntryType::File
+        };
+
+        let new_entry = content_meta::ActiveModel {
+            inode: Set(ino),
+            parent_inode: Set(parent),
+            entry_name: Set(name.to_string()),
+            entry_type: Set(entry_type),
+        };
+        new_entry.insert(&txn).await.map_err(MetaError::Database)?;
+
+        let new_nlink = file.nlink.saturating_add(1);
+        let mut file_active: file_meta::ActiveModel = file.into();
+        file_active.nlink = Set(new_nlink);
+        file_active.modify_time = Set(now);
+        file_active.create_time = Set(now);
+        file_active.deleted = Set(false);
+        file_active
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let mut parent_active: access_meta::ActiveModel = parent_dir.into();
+        parent_active.modify_time = Set(now);
+        parent_active
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        self.stat(ino).await?.ok_or(MetaError::NotFound(ino))
+    }
+
+    async fn symlink(
+        &self,
+        parent: i64,
+        name: &str,
+        target: &str,
+    ) -> Result<(i64, FileAttr), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let parent_dir = AccessMeta::find_by_id(parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(parent))?;
+
+        if !parent_dir.permission().is_directory() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotDirectory(parent));
+        }
+
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent,
+                name: name.to_string(),
+            });
+        }
+
+        let now = Self::now_nanos();
+        let inode = self.generate_id();
+        let owner_uid = parent_dir.permission().uid;
+        let owner_gid = parent_dir.permission().gid;
+        let perm = Permission::new(0o120777, owner_uid, owner_gid);
+
+        let file_meta = file_meta::ActiveModel {
+            inode: Set(inode),
+            size: Set(target.len() as i64),
+            permission: Set(perm),
+            access_time: Set(now),
+            modify_time: Set(now),
+            create_time: Set(now),
+            nlink: Set(1),
+            deleted: Set(false),
+            symlink_target: Set(Some(target.to_string())),
+        };
+        file_meta.insert(&txn).await.map_err(MetaError::Database)?;
+
+        let content_meta = content_meta::ActiveModel {
+            inode: Set(inode),
+            parent_inode: Set(parent),
+            entry_name: Set(name.to_string()),
+            entry_type: Set(EntryType::Symlink),
+        };
+        content_meta
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let mut parent_active: access_meta::ActiveModel = parent_dir.into();
+        parent_active.modify_time = Set(now);
+        parent_active
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        let attr = self.stat(inode).await?.ok_or(MetaError::NotFound(inode))?;
+        Ok((inode, attr))
+    }
+
+    async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
+        let file = FileMeta::find_by_id(ino)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        file.symlink_target
+            .ok_or_else(|| MetaError::NotSupported(format!("inode {ino} is not a symbolic link")))
     }
 
     async fn rename(
@@ -771,7 +996,7 @@ impl MetaStore for DatabaseMetaStore {
 
         // Only update mtime when size changes (not on every call)
         if old_size != size {
-            file_meta.modify_time = Set(Utc::now().timestamp_nanos_opt().unwrap_or(0));
+            file_meta.modify_time = Set(Self::now_nanos());
         }
 
         file_meta
@@ -782,12 +1007,166 @@ impl MetaStore for DatabaseMetaStore {
         Ok(())
     }
 
+    async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        if let Some(mut file) = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            let mut permission = file.permission().clone();
+            let mut ctime_update = false;
+            let now = Self::now_nanos();
+
+            if let Some(mode) = req.mode {
+                permission.chmod(mode);
+                ctime_update = true;
+            }
+
+            if let Some(uid) = req.uid {
+                let gid = req.gid.unwrap_or(permission.gid);
+                permission.chown(uid, gid);
+                ctime_update = true;
+            }
+
+            if req.uid.is_none()
+                && let Some(gid) = req.gid
+            {
+                permission.chown(permission.uid, gid);
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::CLEAR_SUID) {
+                permission.mode &= !0o4000;
+                ctime_update = true;
+            }
+            if flags.contains(SetAttrFlags::CLEAR_SGID) {
+                permission.mode &= !0o2000;
+                ctime_update = true;
+            }
+
+            file.permission = permission;
+
+            if let Some(size) = req.size {
+                let new_size = size as i64;
+                if file.size != new_size {
+                    file.size = new_size;
+                    file.modify_time = now;
+                }
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
+                file.access_time = now;
+            } else if let Some(atime) = req.atime {
+                file.access_time = atime;
+            }
+
+            if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
+                file.modify_time = now;
+                ctime_update = true;
+            } else if let Some(mtime) = req.mtime {
+                file.modify_time = mtime;
+                ctime_update = true;
+            }
+
+            if let Some(ctime) = req.ctime {
+                file.create_time = ctime;
+            } else if ctime_update {
+                file.create_time = now;
+            }
+
+            let active: file_meta::ActiveModel = file.into();
+            active.update(&txn).await.map_err(MetaError::Database)?;
+
+            txn.commit().await.map_err(MetaError::Database)?;
+            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+        }
+
+        if let Some(mut dir) = AccessMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            let mut permission = dir.permission().clone();
+            let mut ctime_update = false;
+            let now = Self::now_nanos();
+
+            if let Some(mode) = req.mode {
+                permission.chmod(mode);
+                ctime_update = true;
+            }
+
+            if let Some(uid) = req.uid {
+                let gid = req.gid.unwrap_or(permission.gid);
+                permission.chown(uid, gid);
+                ctime_update = true;
+            }
+
+            if req.uid.is_none()
+                && let Some(gid) = req.gid
+            {
+                permission.chown(permission.uid, gid);
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::CLEAR_SUID) {
+                permission.mode &= !0o4000;
+                ctime_update = true;
+            }
+            if flags.contains(SetAttrFlags::CLEAR_SGID) {
+                permission.mode &= !0o2000;
+                ctime_update = true;
+            }
+
+            dir.permission = permission;
+
+            if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
+                dir.access_time = now;
+            } else if let Some(atime) = req.atime {
+                dir.access_time = atime;
+            }
+
+            if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
+                dir.modify_time = now;
+                ctime_update = true;
+            } else if let Some(mtime) = req.mtime {
+                dir.modify_time = mtime;
+                ctime_update = true;
+            }
+
+            if let Some(ctime) = req.ctime {
+                dir.create_time = ctime;
+            } else if ctime_update {
+                dir.create_time = now;
+            }
+
+            let active: access_meta::ActiveModel = dir.into();
+            active.update(&txn).await.map_err(MetaError::Database)?;
+
+            txn.commit().await.map_err(MetaError::Database)?;
+            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+        }
+
+        txn.rollback().await.map_err(MetaError::Database)?;
+        Err(MetaError::NotFound(ino))
+    }
+
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
         if ino == 1 {
             return Ok(None);
         }
 
-        let entry = ContentMeta::find_by_id(ino)
+        let entry = ContentMeta::find()
+            .filter(content_meta::Column::Inode.eq(ino))
+            .order_by_asc(content_meta::Column::ParentInode)
+            .order_by_asc(content_meta::Column::EntryName)
             .one(&self.db)
             .await
             .map_err(MetaError::Database)?;
@@ -800,12 +1179,79 @@ impl MetaStore for DatabaseMetaStore {
             return Ok(Some("/".to_string()));
         }
 
-        let entry = ContentMeta::find_by_id(ino)
+        let entry = ContentMeta::find()
+            .filter(content_meta::Column::Inode.eq(ino))
+            .order_by_asc(content_meta::Column::ParentInode)
+            .order_by_asc(content_meta::Column::EntryName)
             .one(&self.db)
             .await
             .map_err(MetaError::Database)?;
 
         Ok(entry.map(|e| e.entry_name))
+    }
+
+    async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        if let Some(mut file) = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            if file.symlink_target.is_some() {
+                txn.rollback().await.map_err(MetaError::Database)?;
+                return Err(MetaError::NotSupported(
+                    "opening symlink targets is not implemented".into(),
+                ));
+            }
+
+            let now = Self::now_nanos();
+            let truncate = flags.contains(OpenFlags::TRUNC);
+
+            file.access_time = now;
+            if truncate {
+                file.size = 0;
+                file.modify_time = now;
+                file.create_time = now;
+            }
+
+            let active: file_meta::ActiveModel = file.into();
+            active.update(&txn).await.map_err(MetaError::Database)?;
+
+            txn.commit().await.map_err(MetaError::Database)?;
+            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+        }
+
+        if flags.contains(OpenFlags::TRUNC) {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotSupported(
+                "truncate flag only supported for regular files".into(),
+            ));
+        }
+
+        if let Some(mut dir) = AccessMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            dir.access_time = Self::now_nanos();
+            let active: access_meta::ActiveModel = dir.into();
+            active.update(&txn).await.map_err(MetaError::Database)?;
+
+            txn.commit().await.map_err(MetaError::Database)?;
+            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+        }
+
+        txn.rollback().await.map_err(MetaError::Database)?;
+        Err(MetaError::NotFound(ino))
+    }
+
+    async fn close(&self, ino: i64) -> Result<(), MetaError> {
+        if self.stat(ino).await?.is_some() {
+            Ok(())
+        } else {
+            Err(MetaError::NotFound(ino))
+        }
     }
 
     async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError> {
@@ -817,7 +1263,10 @@ impl MetaStore for DatabaseMetaStore {
         let mut current_ino = ino;
 
         loop {
-            let entry = content_meta::Entity::find_by_id(current_ino)
+            let entry = ContentMeta::find()
+                .filter(content_meta::Column::Inode.eq(current_ino))
+                .order_by_asc(content_meta::Column::ParentInode)
+                .order_by_asc(content_meta::Column::EntryName)
                 .one(&self.db)
                 .await
                 .map_err(MetaError::Database)?;
@@ -847,6 +1296,28 @@ impl MetaStore for DatabaseMetaStore {
 
     async fn initialize(&self) -> Result<(), MetaError> {
         Ok(())
+    }
+
+    async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
+        let files = FileMeta::find()
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let used_space: u64 = files.iter().map(|file| file.size.max(0) as u64).sum();
+
+        let file_count = files.len() as u64;
+        let dir_count = AccessMeta::find()
+            .count(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(StatFsSnapshot {
+            total_space: used_space,
+            available_space: 0,
+            used_inodes: file_count + dir_count,
+            available_inodes: 0,
+        })
     }
 
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {

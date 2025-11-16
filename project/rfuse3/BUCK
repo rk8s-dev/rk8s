@@ -28,6 +28,7 @@ rust_library(
     rustc_flags = ["@$(location :rfuse3-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
+        "//third-party/rust/crates/aligned_box/0.3.0:aligned_box",
         "//third-party/rust/crates/async-notify/0.3.0:async-notify",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/bincode/1.3.3:bincode",

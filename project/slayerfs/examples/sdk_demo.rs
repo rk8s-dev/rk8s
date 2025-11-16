@@ -15,7 +15,9 @@ async fn main() {
     };
 
     let layout = ChunkLayout::default();
-    let mut cli = LocalClient::new_local(&root, layout).await;
+    let mut cli = LocalClient::new_local(&root, layout)
+        .await
+        .expect("init LocalClient");
 
     // Prepare paths
     let dir = "/demo/ns";
@@ -23,6 +25,8 @@ async fn main() {
     let file_a = "/demo/ns/a.txt";
     let file_b = "/demo/ns/b.txt";
     let file_a2 = "/demo/renamed/a_renamed.txt";
+    let file_a_hard = "/demo/renamed/a_hardlink.txt";
+    let file_a_symlink = "/demo/renamed/a_symlink";
 
     // Ensure directory and files
     cli.mkdir_p(dir).await.expect("mkdir_p");
@@ -115,6 +119,21 @@ async fn main() {
         root, file_a2, st_a2.size, st_a2.kind
     );
 
+    let hard_attr = cli
+        .link(file_a2, file_a_hard)
+        .await
+        .expect("create hard link");
+    println!(
+        "hard link inode={} nlink={} -> {}",
+        hard_attr.ino, hard_attr.nlink, file_a_hard
+    );
+
+    cli.symlink(file_a_symlink, file_a2)
+        .await
+        .expect("create symlink");
+    let symlink_target = cli.readlink(file_a_symlink).await.expect("read symlink");
+    println!("symlink {} -> {}", file_a_symlink, symlink_target);
+
     // Truncate shrink, verify size, and do an in-bound write/read near tail
     cli.truncate(file_a2, layout.block_size as u64)
         .await
@@ -156,6 +175,8 @@ async fn main() {
     // Cleanup: unlink files and remove directories
     cli.unlink(file_b).await.expect("unlink b");
     // After moving a.txt -> a_renamed.txt, remove in new location
+    cli.unlink(file_a_symlink).await.expect("unlink symlink");
+    cli.unlink(file_a_hard).await.expect("unlink hard link");
     cli.unlink(file_a2).await.expect("unlink a2");
     // Remove both directories; dir2 becomes empty after unlink
     cli.rmdir(dir2).await.expect("rmdir dir2");

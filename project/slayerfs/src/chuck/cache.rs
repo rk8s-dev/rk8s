@@ -24,15 +24,15 @@ use tracing::{debug, error, info, trace, warn};
 ///
 /// # Architecture Overview
 ///
-/// ```
-/// ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-/// │   Hot Cache     │    │   Cold Cache    │    │  Disk Storage   │
-/// │   (1024 items)  │◄──►│   (1024 items)  │◄──►│   (Persistent)  │
-/// │   Fast Access   │    │   Metadata Only │    │   SHA256 Files  │
-/// └─────────────────┘    └─────────────────┘    └─────────────────┘
-///         ▲                       │                       ▲
-///         │                       │                       │
-///         ▼                       ▼                       ▼
+/// ```text
+/// +-----------------+    +-----------------+    +-----------------+
+/// |   Hot Cache     |    |   Cold Cache    |    |  Disk Storage   |
+/// |   (1024 items)  |<-->|   (1024 items)  |<-->|   (Persistent)  |
+/// |   Fast Access   |    |   Metadata Only |    |   SHA256 Files  |
+/// +-----------------+    +-----------------+    +-----------------+
+///         ^                       |                       ^
+///         |                       |                       |
+///         v                       v                       v
 ///    Adaptive Promotion     Access Pattern Tracking    Fallback Storage
 ///    Strategy Engine        & Frequency Analysis       for Large Data
 /// ```
@@ -41,7 +41,7 @@ use tracing::{debug, error, info, trace, warn};
 ///
 /// The promotion decision uses a multi-dimensional scoring system:
 ///
-/// ```rust
+/// ```text
 /// weighted_frequency = short_freq * short_weight + medium_freq * medium_weight
 /// adaptive_threshold = base_threshold * system_factor * hitrate_factor
 /// promote_if = weighted_frequency >= adaptive_threshold
@@ -61,7 +61,7 @@ use tracing::{debug, error, info, trace, warn};
 /// # Example Configurations
 ///
 /// ## Performance-Optimized (Low Latency)
-/// ```rust
+/// ```text
 /// ChunksCacheConfig {
 ///     base_promotion_threshold: 5.0,
 ///     short_window_weight: 0.8,
@@ -71,7 +71,7 @@ use tracing::{debug, error, info, trace, warn};
 /// ```
 ///
 /// ## Memory-Conservative (Resource Constrained)
-/// ```rust
+/// ```text
 /// ChunksCacheConfig {
 ///     base_promotion_threshold: 15.0,
 ///     short_window_weight: 0.6,
@@ -294,22 +294,22 @@ impl DiskStorage {
 ///
 /// # Architecture
 ///
-/// ```
-/// Time Progress ─────────────────────────────────────────►
+/// ```text
+/// Time Progress ----------------------------------------------->
 ///
 /// Short Window (10s, 1s granularity):
-/// ┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
-/// │0│1│2│3│4│5│6│7│8│9│ ← Buckets (circular)
-/// └─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
-///  │                 │
-///  ▼                 ▼
-/// Old Data        Recent Data
+/// +--+--+--+--+--+--+--+--+--+--+
+/// |0 |1 |2 |3 |4 |5 |6 |7 |8 |9 |
+/// +--+--+--+--+--+--+--+--+--+--+
+///  |                            |
+///  v                            v
+/// Old Data                  Recent Data
 ///
 /// Medium Window (60s, 5s granularity):
-/// ┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐
-/// │ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ 8 │ 9 │10 │11 │ ← Buckets
-/// └───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
-///  0-5s 5-10s           55-60s
+/// +---+---+---+---+---+---+---+---+---+---+---+---+
+/// | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |10 |11 |
+/// +---+---+---+---+---+---+---+---+---+---+---+---+
+///  0-5s  5-10s                     55-60s
 /// ```
 ///
 /// # Performance Characteristics
@@ -321,11 +321,13 @@ impl DiskStorage {
 ///
 /// # Usage Examples
 ///
-/// ```rust
+/// ```ignore
+/// use std::time::Duration;
+///
 /// let stats = AccessStats::new(
 ///     Duration::from_secs(10),  // Short window
 ///     Duration::from_secs(60),  // Medium window
-///     100,                      // Max entries (legacy)
+///     100,                      // Legacy compat parameter
 /// );
 ///
 /// // Record an access (thread-safe, O(1))
@@ -640,7 +642,7 @@ impl AccessStats {
 ///
 /// # Adaptive Decision Logic
 ///
-/// ```rust
+/// ```ignore
 /// // High load scenario
 /// if system_load > 0.8 {
 ///     // Be more aggressive: lower threshold by 30%
@@ -829,7 +831,7 @@ impl SystemMetrics {
 ///
 /// The promotion decision follows this multi-step process:
 ///
-/// ```rust
+/// ```ignore
 /// // 1. Calculate adaptive threshold based on system state
 /// let adaptive_threshold = base_threshold * load_factor * hitrate_factor;
 ///
@@ -1131,14 +1133,18 @@ impl Policy {
 /// # Usage Examples
 ///
 /// ## Basic Usage
-/// ```rust
+/// ```ignore
+/// # use slayerfs::chuck::cache::ChunksCache;
+/// # async fn demo() -> anyhow::Result<()> {
 /// let cache = ChunksCache::new().await?;
 /// cache.insert("key1", &data).await?;
 /// let value = cache.get(&"key1".to_string()).await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## Custom Configuration
-/// ```rust
+/// ```ignore
 /// let config = ChunksCacheConfig {
 ///     base_promotion_threshold: 5.0,        // More aggressive
 ///     short_window_weight: 0.8,            // Prioritize bursts
@@ -1149,7 +1155,9 @@ impl Policy {
 /// ```
 ///
 /// ## Performance-Tuned Configuration
-/// ```rust
+/// ```ignore
+/// use std::time::Duration;
+///
 /// let config = ChunksCacheConfig {
 ///     hot_cache_size: 2048,                 // Larger hot cache
 ///     base_promotion_threshold: 3.0,        // Very aggressive

@@ -102,7 +102,10 @@ mod tests {
         let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
         let store = ObjectBlockStore::new(client);
 
-        let meta = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .unwrap()
+            .store();
         let mut vfs = SimpleVfs::new(layout, store, meta);
 
         let ino = vfs.create("test_file.txt".to_string()).await.unwrap();

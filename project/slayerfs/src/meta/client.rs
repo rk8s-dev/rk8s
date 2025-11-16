@@ -1,937 +1,80 @@
+mod cache;
+mod path_trie;
+#[allow(dead_code)]
+mod session;
+
 use crate::chuck::SliceDesc;
 use crate::meta::config::{CacheCapacity, CacheTtl};
-use crate::meta::entities::etcd::EtcdEntryInfo;
-use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
+use crate::meta::layer::MetaLayer;
+use crate::meta::store::{
+    DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SessionInfo, SetAttrFlags, SetAttrRequest,
+    StatFsSnapshot,
+};
 use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker, WatchConfig};
 use crate::vfs::fs::FileType;
-use async_recursion::async_recursion;
 use async_trait::async_trait;
 use dashmap::DashMap;
+use if_addrs::get_if_addrs;
 use moka::future::Cache;
-use moka::notification::RemovalCause;
-use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock, mpsc};
+use std::{collections::HashSet, process};
+use tokio::sync::{Mutex, mpsc};
 use tracing::{info, warn};
 
-/// Type alias for children map to reduce complexity
-/// BTreeMap provides ordered iteration for consistent ls output
-type ChildrenMap = BTreeMap<String, i64>;
+use cache::InodeCache;
+use chrono::{DateTime, Utc};
+use hostname::get as get_hostname;
+use path_trie::PathTrie;
+use serde::Serialize;
+use session::SessionManager;
 
-/// Trie node for efficient path prefix matching
-///
-/// Each node represents a path component (directory or file name).
-/// The tree structure allows O(depth) prefix-based invalidation.
-struct TrieNode {
-    /// Child nodes keyed by path component name
-    children: HashMap<String, Arc<RwLock<TrieNode>>>,
-    /// Inodes that this path resolves to (usually 1, but could be more for hard links)
-    inodes: Vec<i64>,
-    /// Whether this node represents a complete path (not just a prefix)
-    is_terminal: bool,
+const ROOT_INODE: i64 = 1;
+
+#[derive(Serialize)]
+struct SessionInfoPayload {
+    version: String,
+    host_name: String,
+    ip_addrs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mount_point: Option<String>,
+    mount_time: DateTime<Utc>,
+    process_id: u32,
 }
 
-impl TrieNode {
-    fn new() -> Self {
+/// Configuration options for `MetaClient` that correspond to the core metadata
+/// behaviours implemented by the Go `baseMeta`. Only a minimal subset of
+/// fields is supported for now; additional knobs can be added as the Rust
+/// client gains feature parity.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct MetaClientOptions {
+    /// Optional mount point string used for diagnostics and session payloads.
+    pub mount_point: Option<String>,
+    /// Interval used by the background session heartbeat task.
+    pub session_heartbeat: Duration,
+    /// When true, metadata mutating operations return `MetaError::NotSupported`.
+    pub read_only: bool,
+    /// Disable background maintenance tasks (reserved for future use).
+    pub no_background_jobs: bool,
+    /// When true, lookups fall back to case-insensitive matching similar to
+    /// JuiceFS `CaseInsensi`.
+    pub case_insensitive: bool,
+}
+
+impl Default for MetaClientOptions {
+    fn default() -> Self {
         Self {
-            children: HashMap::new(),
-            inodes: Vec::new(),
-            is_terminal: false,
+            mount_point: None,
+            session_heartbeat: DEFAULT_SESSION_HEARTBEAT,
+            read_only: false,
+            no_background_jobs: false,
+            case_insensitive: false,
         }
     }
 }
-
-/// Path Trie for efficient path-to-inode mapping and prefix-based invalidation
-///
-/// # Architecture
-///
-/// Instead of storing flat path strings, we use a prefix tree (Trie) where:
-/// - Each node represents a path component (e.g., "dir1", "file.txt")
-/// - Paths like "/a/b/c" are stored as: root → "a" → "b" → "c"
-/// - Terminal nodes store the inode numbers they resolve to
-///
-/// - Shared prefixes: "/a/b/c1" and "/a/b/c2" share "/a/b" nodes
-/// - Automatic cleanup: Removing "/a" removes all "/a/*" children
-/// - No orphaned entries: Tree structure ensures consistency
-struct PathTrie {
-    root: Arc<RwLock<TrieNode>>,
-}
-
-impl PathTrie {
-    fn new() -> Self {
-        Self {
-            root: Arc::new(RwLock::new(TrieNode::new())),
-        }
-    }
-
-    /// Inserts a path-to-inode mapping into the trie
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The absolute path (e.g., "/a/b/c")
-    /// * `ino` - The inode number this path resolves to
-    ///
-    /// O(depth) where depth = number of path components
-    async fn insert(&self, path: &str, ino: i64) {
-        let components = Self::split_path(path);
-        let mut current = self.root.clone();
-
-        for component in components {
-            let mut node = current.write().await;
-            let next = node
-                .children
-                .entry(component.to_string())
-                .or_insert_with(|| Arc::new(RwLock::new(TrieNode::new())))
-                .clone();
-            drop(node);
-            current = next;
-        }
-
-        let mut terminal_node = current.write().await;
-        terminal_node.is_terminal = true;
-        if !terminal_node.inodes.contains(&ino) {
-            terminal_node.inodes.push(ino);
-        }
-    }
-
-    /// Retrieves all inodes associated with a specific path
-    ///
-    /// # Returns
-    ///
-    /// * `Some(Vec<i64>)` - List of inodes if path exists
-    /// * `None` - If path not found in trie
-    #[allow(unused)]
-    async fn get(&self, path: &str) -> Option<Vec<i64>> {
-        let components = Self::split_path(path);
-        let mut current = self.root.clone();
-
-        for component in components {
-            let node = current.read().await;
-            let next = node.children.get(component).cloned();
-            drop(node);
-
-            current = next?;
-        }
-
-        let node = current.read().await;
-        if node.is_terminal && !node.inodes.is_empty() {
-            Some(node.inodes.clone())
-        } else {
-            None
-        }
-    }
-
-    /// Removes a path and all its descendants from the trie
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The path prefix to remove (e.g., "/a/b")
-    ///
-    /// # Returns
-    ///
-    /// Vector of (path, inodes) tuples for all removed paths
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Trie contains: /a, /a/b, /a/b/c, /a/b/d
-    /// trie.remove_by_prefix("/a/b").await;
-    /// // Removes: /a/b, /a/b/c, /a/b/d
-    /// // Keeps: /a
-    /// ```
-    async fn remove_by_prefix(&self, path: &str) -> Vec<(String, Vec<i64>)> {
-        let components = Self::split_path(path);
-
-        if components.is_empty() {
-            // Removing root - clear everything
-            let mut root = self.root.write().await;
-            let removed = Self::collect_all_paths_from_node(&root, "").await;
-            root.children.clear();
-            root.inodes.clear();
-            root.is_terminal = false;
-            return removed;
-        }
-
-        // Navigate to parent of target node
-        let mut current = self.root.clone();
-        for (i, component) in components.iter().enumerate() {
-            let node = current.read().await;
-
-            if i == components.len() - 1 {
-                // This is the parent of the node we want to remove
-                let child = node.children.get(*component).cloned();
-                drop(node);
-
-                if let Some(child_node) = child {
-                    // Collect all paths in this subtree before removing
-                    let child_guard = child_node.read().await;
-                    let removed = Self::collect_all_paths_from_node(&child_guard, path).await;
-                    drop(child_guard);
-
-                    // Remove the subtree
-                    let mut parent = current.write().await;
-                    parent.children.remove(*component);
-
-                    return removed;
-                }
-                return Vec::new();
-            }
-
-            let next = node.children.get(*component).cloned();
-            drop(node);
-
-            if let Some(next_node) = next {
-                current = next_node;
-            } else {
-                return Vec::new(); // Path not found
-            }
-        }
-
-        Vec::new()
-    }
-
-    /// Recursively collects all paths in a subtree
-    ///
-    /// # Arguments
-    ///
-    /// * `node` - The root node of the subtree
-    /// * `prefix` - The path prefix leading to this node
-    ///
-    /// # Returns
-    ///
-    /// Vector of (path, inodes) tuples for all complete paths in the subtree
-    #[async_recursion]
-    async fn collect_all_paths_from_node(node: &TrieNode, prefix: &str) -> Vec<(String, Vec<i64>)> {
-        let mut paths = Vec::new();
-
-        // If this node is terminal, add its path with inodes
-        if node.is_terminal {
-            paths.push((prefix.to_string(), node.inodes.clone()));
-        }
-
-        // Recursively collect from children
-        for (component, child_arc) in &node.children {
-            let child = child_arc.read().await;
-            let child_prefix = if prefix.is_empty() {
-                format!("/{}", component)
-            } else {
-                format!("{}/{}", prefix, component)
-            };
-
-            let child_paths = Self::collect_all_paths_from_node(&child, &child_prefix).await;
-            paths.extend(child_paths);
-        }
-
-        paths
-    }
-
-    /// Splits a path into components for trie navigation
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// split_path("/a/b/c") => ["a", "b", "c"]
-    /// split_path("/") => []
-    /// split_path("/foo") => ["foo"]
-    /// ```
-    fn split_path(path: &str) -> Vec<&str> {
-        path.trim_start_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect()
-    }
-
-    /// Clears all entries from the trie
-    #[allow(unused)]
-    async fn clear(&self) {
-        let mut root = self.root.write().await;
-        root.children.clear();
-        root.inodes.clear();
-        root.is_terminal = false;
-    }
-}
-
-#[derive(Clone)]
-enum ChildrenState {
-    /// Children not yet loaded from database
-    NotLoaded,
-    /// Partially loaded - only entries added via incremental operations (mkdir/create_file)
-    /// Should reload from DB on next readdir to ensure completeness
-    Partial(Arc<ChildrenMap>),
-    /// Fully loaded from database - safe to return in readdir without reloading
-    Complete(Arc<ChildrenMap>),
-}
-
-impl ChildrenState {
-    /// Check if children are fully loaded
-    fn is_complete(&self) -> bool {
-        matches!(self, ChildrenState::Complete(_))
-    }
-
-    /// Get the underlying map if available (both Partial and Complete)
-    fn get_map(&self) -> Option<&Arc<ChildrenMap>> {
-        match self {
-            ChildrenState::Partial(map) | ChildrenState::Complete(map) => Some(map),
-            ChildrenState::NotLoaded => None,
-        }
-    }
-}
-
-/// Inode metadata entry in cache
-///
-/// Represents a cached inode with mutable fields that can be updated in-place.
-/// Uses RwLock for async-safe concurrent access to mutable data.
-///
-/// # Structure
-///
-/// Each `InodeEntry` caches metadata for a single inode (file or directory):
-/// - **`attr`**: Attributes of THIS inode (size, permissions, timestamps, etc.)
-/// - **`parent`**: Parent directory's inode number (for upward traversal to build paths)
-/// - **`children`**: If THIS inode is a directory, stores its child entries (for readdir)
-///
-/// # Example
-///
-/// For a file `/a/b/file.txt` with inode 100, parent directory `/a/b` with inode 50:
-/// ```ignore
-/// InodeEntry {
-///     attr: FileAttr { ino: 100, kind: File, ... },  // THIS file's attributes
-///     parent: Some(50),                               // Parent directory's inode
-///     children: NotLoaded,                            // Files don't have children
-/// }
-/// ```
-///
-/// For a directory `/a/b` with inode 50, parent `/a` with inode 10, containing `file.txt` (ino 100):
-/// ```ignore
-/// InodeEntry {
-///     attr: FileAttr { ino: 50, kind: Directory, ... },  // THIS directory's attributes
-///     parent: Some(10),                                   // Parent directory's inode (/a)
-///     children: Complete({ "file.txt" -> 100 }),          // THIS directory's children
-/// }
-/// ```
-#[derive(Clone)]
-struct InodeEntry {
-    /// File attributes (size, permissions, timestamps, etc.) of THIS inode
-    attr: Arc<RwLock<FileAttr>>,
-    /// Parent directory's inode number (None for root directory)
-    /// Used for upward path traversal: child -> parent -> grandparent -> ... -> root
-    parent: Arc<RwLock<Option<i64>>>,
-    /// Directory children with loading state tracking (only used if THIS inode is a directory)
-    /// Maps child names to their inode numbers for readdir operations
-    children: Arc<RwLock<ChildrenState>>,
-}
-
-impl InodeEntry {
-    fn new(attr: FileAttr, parent: Option<i64>) -> Self {
-        Self {
-            attr: Arc::new(RwLock::new(attr)),
-            parent: Arc::new(RwLock::new(parent)),
-            children: Arc::new(RwLock::new(ChildrenState::NotLoaded)),
-        }
-    }
-
-    async fn get_parent(&self) -> Option<i64> {
-        *self.parent.read().await
-    }
-
-    async fn set_parent(&self, parent_ino: i64) {
-        *self.parent.write().await = Some(parent_ino);
-    }
-}
-
-/// Dual-layer inode cache: Moka for TTL/LRU + DashMap for concurrent mutations
-///
-/// Architecture:
-/// - `entries`: DashMap for lock-free concurrent read/write access to cached data
-/// - `ttl_manager`: Moka cache for automatic expiration and capacity management
-struct InodeCache {
-    entries: Arc<DashMap<i64, Arc<InodeEntry>>>,
-    ttl_manager: Cache<i64, Arc<InodeEntry>>,
-}
-
-impl InodeCache {
-    /// Creates a new InodeCache with specified capacity and TTL.
-    ///
-    /// # Arguments
-    ///
-    /// * `capacity` - Maximum number of inode entries to cache
-    /// * `ttl` - Time-to-live duration for cached entries
-    ///
-    /// # Design
-    ///
-    /// Uses a dual-layer architecture:
-    /// - `entries`: DashMap for zero-copy in-place mutations
-    /// - `ttl_manager`: Moka cache for automatic TTL-based eviction and LRU
-    fn new(capacity: u64, ttl: Duration) -> Self {
-        let entries = Arc::new(DashMap::new());
-        let entries_clone = entries.clone();
-
-        let ttl_manager = Cache::builder()
-            .max_capacity(capacity)
-            .time_to_live(ttl)
-            .eviction_listener(
-                move |key: Arc<i64>, _value: Arc<InodeEntry>, cause: RemovalCause| {
-                    info!("InodeCache: Evicting inode {} (cause: {:?})", key, cause);
-                    entries_clone.remove(&*key);
-                },
-            )
-            .build();
-
-        Self {
-            entries,
-            ttl_manager,
-        }
-    }
-
-    /// Inserts or updates an inode node in the cache.
-    ///
-    /// # Arguments
-    ///
-    /// * `ino` - The inode number
-    /// * `attr` - File attributes for this inode
-    /// * `parent` - Optional parent inode number
-    ///
-    /// # Behavior
-    ///
-    /// - If node exists: Updates attributes and parent, preserves children
-    /// - If node doesn't exist: Creates a new node with children unloaded (None)
-    ///
-    /// # When to Call
-    ///
-    /// 1. **After loading from database**: Cache the inode metadata
-    ///    ```ignore
-    ///    let attr = store.stat(ino).await?;
-    ///    cache.insert_node(ino, attr, Some(parent_ino));
-    ///    ```
-    ///
-    /// 2. **After file/directory creation**: Cache the newly created inode
-    ///    ```ignore
-    ///    let new_ino = store.create_file(parent, name).await?;
-    ///    let attr = store.stat(new_ino).await?;
-    ///    cache.insert_node(new_ino, attr, Some(parent));
-    ///    ```
-    ///
-    /// 3. **After attribute changes**: Update cached attributes
-    ///    ```ignore
-    ///    store.set_file_size(ino, new_size).await?;
-    ///    let updated_attr = store.stat(ino).await?;
-    ///    cache.insert_node(ino, updated_attr, None); // parent unchanged
-    ///    ```
-    ///
-    /// 4. **After moving a file/directory** (rename to different parent): Update parent
-    ///    ```ignore
-    ///    // Move /a/file.txt to /b/file.txt
-    ///    store.rename(old_parent, name, new_parent, name).await?;
-    ///    // Only the moved item's parent changes, children don't need updates
-    ///    cache.insert_node(file_ino, attr, Some(new_parent));
-    ///    ```
-    ///
-    /// # Note
-    ///
-    /// When moving a directory, you **do NOT** need to recursively update its children's
-    /// parent pointers. Each inode only tracks its direct parent. For example:
-    /// - Move `/a/dir` to `/b/dir`: Only update `dir`'s parent (from `a` to `b`)
-    /// - Files in `/b/dir/file.txt`: Their parent is still `dir` (unchanged)
-    /// - Paths are computed dynamically by traversing parent links
-    async fn insert_node(&self, ino: i64, attr: FileAttr, parent: Option<i64>) {
-        // Check if node already exists
-        if let Some(existing_node) = self.ttl_manager.get(&ino).await {
-            // Node exists, only update attr and parent, preserve children
-            *existing_node.attr.write().await = attr;
-            if let Some(p) = parent {
-                existing_node.set_parent(p).await;
-            }
-        } else {
-            // Node doesn't exist, create new one
-            let node = Arc::new(InodeEntry::new(attr, parent));
-            self.entries.insert(ino, node.clone());
-            self.ttl_manager.insert(ino, node).await;
-        }
-    }
-
-    /// Ensures a node is loaded in cache, fetching from store if necessary.
-    ///
-    /// # Arguments
-    ///
-    /// * `ino` - The inode number to ensure is cached
-    /// * `store` - Reference to the metadata store for fallback queries
-    /// * `parent` - Optional parent inode number (for new nodes)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - Node was already in cache or successfully loaded
-    /// * `Ok(false)` - Node doesn't exist in store
-    /// * `Err(MetaError)` - Database error occurred
-    ///
-    /// # When to Call
-    ///
-    /// Use this helper to reduce boilerplate code when you need to ensure
-    /// a node exists in cache before performing operations on it:
-    async fn ensure_node_in_cache(
-        &self,
-        ino: i64,
-        store: &Arc<dyn MetaStore + Send + Sync>,
-        parent: Option<i64>,
-    ) -> Result<bool, MetaError> {
-        if self.get_node(ino).await.is_some() {
-            return Ok(true);
-        }
-
-        if let Some(attr) = store.stat(ino).await? {
-            self.insert_node(ino, attr, parent).await;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Incrementally adds a child entry to a parent directory's children map.
-    ///
-    /// # Arguments
-    ///
-    /// * `parent_ino` - The parent directory's inode number
-    /// * `name` - The name of the child entry
-    /// * `child_ino` - The child's inode number
-    ///
-    /// # Behavior
-    ///
-    /// - Creates Partial state if children not yet loaded
-    /// - Adds to existing map (preserves state - Partial or Complete)
-    ///
-    /// # When to Call
-    ///
-    /// 1. **After creating a file/directory**: Add to parent's children
-    ///    ```ignore
-    ///    let new_ino = store.create_file(parent, "file.txt").await?;
-    ///    cache.add_child(parent, "file.txt".to_string(), new_ino);
-    ///    ```
-    ///
-    /// 2. **After lookup from database**: Cache the parent-child relationship
-    ///    ```ignore
-    ///    let child_ino = store.lookup(parent, "name").await?;
-    ///    cache.add_child(parent, "name".to_string(), child_ino);
-    ///    ```
-    ///
-    /// 3. **After rename (move to new parent)**: Add to new parent's children
-    ///    ```ignore
-    ///    store.rename(old_parent, "file", new_parent, "file").await?;
-    ///    cache.remove_child(old_parent, "file");  // Remove from old parent
-    ///    cache.add_child(new_parent, "file".to_string(), ino);  // Add to new parent
-    ///    ```
-    ///
-    /// # Important
-    ///
-    /// Entries added to NotLoaded or Partial state remain Partial, meaning a subsequent
-    /// readdir will reload from the database to ensure completeness.
-    async fn add_child(&self, parent_ino: i64, name: String, child_ino: i64) {
-        if let Some(parent_node) = self.ttl_manager.get(&parent_ino).await {
-            let mut children_lock = parent_node.children.write().await;
-
-            // Get or create the children map
-            let new_map = match &*children_lock {
-                ChildrenState::NotLoaded => {
-                    let mut map = BTreeMap::new();
-                    map.insert(name, child_ino);
-                    ChildrenState::Partial(Arc::new(map))
-                }
-                ChildrenState::Partial(existing_map) | ChildrenState::Complete(existing_map) => {
-                    // TODO: Optimize to avoid full clone on each addition
-                    let mut map = (**existing_map).clone();
-                    map.insert(name, child_ino);
-                    match &*children_lock {
-                        ChildrenState::Complete(_) => ChildrenState::Complete(Arc::new(map)),
-                        _ => ChildrenState::Partial(Arc::new(map)),
-                    }
-                }
-            };
-
-            *children_lock = new_map;
-        }
-    }
-
-    /// Loads a complete set of children entries from the database.
-    ///
-    /// # Arguments
-    ///
-    /// * `parent_ino` - The parent directory's inode number
-    /// * `entries` - Complete list of (name, child_ino) tuples from database
-    ///
-    /// # Behavior
-    ///
-    /// - Replaces any existing children map with fresh data from database
-    /// - Marks children as Complete (fully loaded)
-    /// - This ensures subsequent readdir calls will use the cache without reloading
-    ///
-    /// # When to Call
-    ///
-    /// 1. **After readdir from database**: Load the complete directory listing
-    ///    ```ignore
-    ///    let entries = store.readdir(dir_ino).await?;
-    ///    let children_data: Vec<(String, i64)> =
-    ///        entries.iter().map(|e| (e.name.clone(), e.ino)).collect();
-    ///    cache.load_children(dir_ino, children_data);
-    ///    ```
-    ///
-    /// 2. **To refresh stale Partial state**: When you know the cache might be incomplete
-    ///    ```ignore
-    ///    // If previous operations used add_child (Partial state)
-    ///    // but now we need the complete listing
-    ///    let full_listing = store.readdir(parent).await?;
-    ///    cache.load_children(parent, full_listing);
-    ///    ```
-    ///
-    /// # Important
-    ///
-    /// This is the **only** method that marks children as Complete. It's the authoritative
-    /// source that ensures cache consistency with the database.
-    async fn load_children(&self, parent_ino: i64, entries: Vec<(String, i64)>) {
-        if let Some(parent_node) = self.ttl_manager.get(&parent_ino).await {
-            let mut children_lock = parent_node.children.write().await;
-
-            // Create new children map and populate with database data
-            let new_children = Arc::new(entries.into_iter().collect::<BTreeMap<_, _>>());
-
-            // Replace with fresh data from database and mark as Complete
-            *children_lock = ChildrenState::Complete(new_children);
-        }
-    }
-
-    /// Removes a child entry from a parent directory's children map.
-    ///
-    /// # Arguments
-    ///
-    /// * `parent_ino` - The parent directory's inode number
-    /// * `name` - The name of the child entry to remove
-    ///
-    /// # Returns
-    ///
-    /// * `Some(i64)` - The inode number of the removed child
-    /// * `None` - If the parent doesn't exist or the child name isn't found
-    ///
-    /// # When to Call
-    ///
-    /// 1. **After deleting a file**: Remove from parent's children
-    ///    ```ignore
-    ///    store.unlink(parent, "file.txt").await?;
-    ///    cache.remove_child(parent, "file.txt");
-    ///    ```
-    ///
-    /// 2. **After deleting a directory**: Remove from parent's children
-    ///    ```ignore
-    ///    store.rmdir(parent, "dirname").await?;
-    ///    cache.remove_child(parent, "dirname");
-    ///    ```
-    ///
-    /// 3. **After rename (move from old parent)**: Remove from old parent
-    ///    ```ignore
-    ///    store.rename(old_parent, "file", new_parent, "newname").await?;
-    ///    let child_ino = cache.remove_child(old_parent, "file").unwrap();
-    ///    cache.add_child(new_parent, "newname".to_string(), child_ino);
-    ///    ```
-    ///
-    /// # Side Effects
-    ///
-    /// - Removes the child from the parent's children map
-    /// - Invalidates the child's inode cache entry (triggers TTL eviction)
-    async fn remove_child(&self, parent_ino: i64, name: &str) -> Option<i64> {
-        if let Some(parent_node) = self.ttl_manager.get(&parent_ino).await {
-            let mut children_lock = parent_node.children.write().await;
-            if let Some(children_map) = children_lock.get_map() {
-                // TODO: Optimize to avoid full clone on each removal
-                let mut map = (**children_map).clone();
-                let child_ino = map.remove(name);
-
-                if let Some(ino) = child_ino {
-                    // Update the state with modified map
-                    *children_lock = match &*children_lock {
-                        ChildrenState::Complete(_) => ChildrenState::Complete(Arc::new(map)),
-                        _ => ChildrenState::Partial(Arc::new(map)),
-                    };
-
-                    self.ttl_manager.invalidate(&ino).await;
-                }
-
-                return child_ino;
-            }
-        }
-        None
-    }
-
-    /// Looks up a child inode by name in a parent directory.
-    ///
-    /// # Arguments
-    ///
-    /// * `parent_ino` - The parent directory's inode number
-    /// * `name` - The name of the child to look up
-    ///
-    /// # Returns
-    ///
-    /// * `Some(i64)` - The child's inode number if found in cache
-    /// * `None` - If parent doesn't exist, children not loaded, or name not found
-    ///
-    /// # When to Call
-    ///
-    /// 1. **Before database lookup**: Try cache first for performance
-    ///    ```ignore
-    ///    if let Some(ino) = cache.lookup(parent, "file.txt") {
-    ///        return Ok(Some(ino));  // Cache hit!
-    ///    }
-    ///    // Cache miss, query database
-    ///    let ino = store.lookup(parent, "file.txt").await?;
-    ///    ```
-    ///
-    /// 2. **During path resolution**: Walk the path using cached lookups
-    ///    ```ignore
-    ///    let mut current = root_ino;
-    ///    for segment in path.split('/') {
-    ///        if let Some(child) = cache.lookup(current, segment) {
-    ///            current = child;  // Continue with cached data
-    ///        } else {
-    ///            // Load from database
-    ///        }
-    ///    }
-    ///    ```
-    ///
-    /// # Note
-    ///
-    /// This searches cached children in both Partial and Complete states.
-    /// Returns None if children are NotLoaded or name doesn't exist.
-    async fn lookup(&self, parent_ino: i64, name: &str) -> Option<i64> {
-        let parent_node = self.ttl_manager.get(&parent_ino).await?;
-        let children_lock = parent_node.children.read().await;
-        let children_map = children_lock.get_map()?;
-        children_map.get(name).copied()
-    }
-
-    /// Reads directory contents from cache.
-    ///
-    /// # Arguments
-    ///
-    /// * `ino` - The directory's inode number
-    ///
-    /// # Returns
-    ///
-    /// * `Some(Vec<DirEntry>)` - List of directory entries if fully loaded in cache
-    /// * `None` - If directory not in cache, or children not fully loaded from DB
-    ///
-    /// # When to Call
-    ///
-    /// 1. **Before database readdir**: Try cache first
-    ///    ```ignore
-    ///    if let Some(entries) = cache.readdir(dir_ino) {
-    ///        return Ok(entries);  // Cache hit!
-    ///    }
-    ///    // Cache miss, load from database
-    ///    let entries = store.readdir(dir_ino).await?;
-    ///    cache.load_children(dir_ino, entries);
-    ///    ```
-    ///
-    /// 2. **To verify cache completeness**: Check if we can serve from cache
-    ///    ```ignore
-    ///    match cache.readdir(ino) {
-    ///        Some(entries) => /* Use cached data */,
-    ///        None => /* Need to reload from DB */,
-    ///    }
-    ///    ```
-    ///
-    /// # Behavior
-    ///
-    /// - Only returns cached entries if state is **Complete**
-    /// - Returns None for Partial or NotLoaded states
-    /// - This ensures we don't return incomplete listings when entries were only
-    ///   added incrementally via add_child without a full database load
-    ///
-    /// # Performance
-    ///
-    /// For each cached child, queries its FileType from the inode cache.
-    /// If a child's attributes aren't cached, defaults to FileType::File.
-    async fn readdir(&self, ino: i64) -> Option<Vec<DirEntry>> {
-        let node = self.ttl_manager.get(&ino).await?;
-        let children_lock = node.children.read().await;
-
-        // Only return cached results if children have been fully loaded from database
-        if !children_lock.is_complete() {
-            return None;
-        }
-
-        let children_map = children_lock.get_map()?;
-        let mut entries = Vec::new();
-
-        for (name, child_ino) in children_map.iter() {
-            // Query child node's type from its attributes
-            let kind = if let Some(child) = self.ttl_manager.get(child_ino).await {
-                child.attr.read().await.kind
-            } else {
-                // Fallback: assume it's a file if not found in cache
-                // TODO: May think about save more data in parent?
-                FileType::File
-            };
-
-            entries.push(DirEntry {
-                ino: *child_ino,
-                name: name.clone(),
-                kind,
-            });
-        }
-
-        Some(entries)
-    }
-
-    /// Retrieves file attributes from cache.
-    ///
-    /// # Arguments
-    ///
-    /// * `ino` - The inode number
-    ///
-    /// # Returns
-    ///
-    /// * `Some(FileAttr)` - Cached file attributes if found
-    /// * `None` - If inode not in cache
-    ///
-    /// # When to Call
-    ///
-    /// 1. **Before database stat**: Try cache first
-    ///    ```ignore
-    ///    if let Some(attr) = cache.get_attr(ino) {
-    ///        return Ok(Some(attr));  // Cache hit!
-    ///    }
-    ///    // Cache miss, query database
-    ///    let attr = store.stat(ino).await?;
-    ///    ```
-    ///
-    /// 2. **To check file type**: Get cached metadata
-    ///    ```ignore
-    ///    if let Some(attr) = cache.get_attr(ino) {
-    ///        if attr.kind == FileType::Directory {
-    ///            // It's a directory
-    ///        }
-    ///    }
-    ///    ```
-    ///
-    /// 3. **After modify operations**: Verify cached state
-    ///    ```ignore
-    ///    cache.insert_node(ino, new_attr, None);
-    ///    let cached = cache.get_attr(ino).unwrap();
-    ///    assert_eq!(cached.size, new_size);
-    ///    ```
-    async fn get_attr(&self, ino: i64) -> Option<FileAttr> {
-        let node = self.ttl_manager.get(&ino).await?;
-        Some(node.attr.read().await.clone())
-    }
-
-    /// Updates file attributes in cache (in-place modification).
-    ///
-    /// # Arguments
-    ///
-    /// * `ino` - The inode number
-    /// * `attr` - New file attributes to set
-    ///
-    /// # Note
-    ///
-    /// Only updates the cache; does not persist to underlying storage.
-    #[allow(unused)]
-    async fn update_attr(&self, ino: i64, attr: FileAttr) {
-        if let Some(node) = self.ttl_manager.get(&ino).await {
-            *node.attr.write().await = attr;
-        }
-    }
-
-    /// Retrieves the cached inode node (full entry with all fields).
-    ///
-    /// # Arguments
-    ///
-    /// * `ino` - The inode number
-    ///
-    /// # Returns
-    ///
-    /// * `Some(Arc<InodeEntry>)` - Shared reference to the cached inode node
-    /// * `None` - If inode not in cache
-    ///
-    /// # When to Call
-    ///
-    /// 1. **To access parent information**: Get the parent inode
-    ///    ```ignore
-    ///    if let Some(node) = cache.get_node(ino) {
-    ///        let parent = node.get_parent().await;
-    ///    }
-    ///    ```
-    ///
-    /// 2. **To check if inode is cached**: Before loading from database
-    ///    ```ignore
-    ///    if cache.get_node(parent).is_none() {
-    ///        // Parent not in cache, need to load it first
-    ///        let parent_attr = store.stat(parent).await?;
-    ///        cache.insert_node(parent, parent_attr, None);
-    ///    }
-    ///    ```
-    ///
-    /// 3. **To update parent pointer**: After rename/move
-    ///    ```ignore
-    ///    if let Some(child_node) = cache.get_node(child_ino) {
-    ///        child_node.set_parent(new_parent).await;
-    ///    }
-    ///    ```
-    ///
-    /// 4. **To traverse parent chain**: Build full path
-    ///    ```ignore
-    ///    let mut current = ino;
-    ///    while let Some(node) = cache.get_node(current) {
-    ///        if let Some(parent) = node.get_parent().await {
-    ///            current = parent;
-    ///        } else {
-    ///            break;  // Reached root
-    ///        }
-    ///    }
-    ///    ```
-    async fn get_node(&self, ino: i64) -> Option<Arc<InodeEntry>> {
-        self.ttl_manager.get(&ino).await
-    }
-
-    /// Invalidates all cached entries (emergency cache clear).
-    ///
-    /// # Warning
-    ///
-    /// This completely clears both the lifecycle cache and storage map.
-    /// Should only be used in testing or catastrophic failure scenarios.
-    #[allow(unused)]
-    fn invalidate_all(&self) {
-        self.ttl_manager.invalidate_all();
-        self.entries.clear();
-    }
-
-    /// Directly updates inode metadata from watch event.
-    ///
-    /// # Arguments
-    ///
-    /// * `ino` - The inode number to update
-    /// * `metadata` - The new EtcdEntryInfo metadata
-    ///
-    /// If the inode is not in cache, this is a no-op (we don't create new entries).
-    async fn update_metadata(&self, ino: i64, metadata: EtcdEntryInfo) {
-        if let Some(node) = self.ttl_manager.get(&ino).await {
-            let new_attr = metadata.to_file_attr(ino);
-            *node.attr.write().await = new_attr;
-        }
-    }
-
-    /// Directly replaces directory children from watch event.
-    ///
-    /// # Arguments
-    ///
-    /// * `parent_ino` - The parent directory inode
-    /// * `children` - The new children map from c: key PUT event (name -> inode)
-    ///
-    /// If the parent is not in cache, this is a no-op.
-    async fn replace_children(&self, parent_ino: i64, children: HashMap<String, i64>) {
-        if let Some(parent_node) = self.ttl_manager.get(&parent_ino).await {
-            let mut children_lock = parent_node.children.write().await;
-
-            let new_children = Arc::new(children.into_iter().collect::<BTreeMap<_, _>>());
-
-            *children_lock = ChildrenState::Complete(new_children);
-        }
-    }
-}
+const DEFAULT_SESSION_HEARTBEAT: Duration = Duration::from_secs(30);
 
 /// Metadata client with intelligent caching
 ///
@@ -939,8 +82,13 @@ impl InodeCache {
 /// - Inode attributes (file metadata)
 /// - Directory children (directory listings)
 /// - Path-to-inode mappings (path resolution)
-pub struct MetaClient {
-    store: Arc<dyn MetaStore + Send + Sync>,
+pub struct MetaClient<T: MetaStore> {
+    store: Arc<T>,
+    options: MetaClientOptions,
+    root: AtomicI64,
+    #[allow(dead_code)]
+    session_id: AtomicU64,
+    umounting: AtomicBool,
     inode_cache: InodeCache,
     /// it's absolute path.
     /// Used for quick lookups and invalidation
@@ -953,6 +101,10 @@ pub struct MetaClient {
     /// it's absolute path.
     inode_to_paths: Arc<DashMap<i64, Vec<String>>>,
 
+    /// Manages background session heartbeats when enabled by callers.
+    #[allow(dead_code)]
+    session_manager: Arc<SessionManager>,
+
     /// Watch Worker for etcd cache invalidation (for now only used for etcd).
     /// TODO: Now that we use the watch worker to invalidate cache in real-time,
     /// may want to consider a more detailed data caching approach.
@@ -960,7 +112,7 @@ pub struct MetaClient {
     watch_worker: Option<Arc<EtcdWatchWorker>>,
 }
 
-impl MetaClient {
+impl<T: MetaStore + 'static> MetaClient<T> {
     /// Creates a new MetaClient with cache configuration.
     ///
     /// # Arguments
@@ -972,14 +124,23 @@ impl MetaClient {
     /// # Returns
     ///
     /// A new `MetaClient` instance with initialized caches
-    pub fn new(
-        store: Arc<dyn MetaStore + Send + Sync>,
+    #[allow(dead_code)]
+    pub fn new(store: Arc<T>, capacity: CacheCapacity, ttl: CacheTtl) -> Arc<Self> {
+        Self::with_options(store, capacity, ttl, MetaClientOptions::default())
+    }
+
+    /// Creates a new `MetaClient` with cache configuration and additional
+    /// behavioural options ported from the JuiceFS `baseMeta` implementation.
+    pub fn with_options(
+        store: Arc<T>,
         capacity: CacheCapacity,
         ttl: CacheTtl,
+        options: MetaClientOptions,
     ) -> Arc<Self> {
         // Detect if this is an etcd backend and start Watch Worker
-        let watch_worker = if let Some(etcd_store) = store.as_any().downcast_ref::<EtcdMetaStore>()
-        {
+        let watch_worker = if options.no_background_jobs {
+            None
+        } else if let Some(etcd_store) = store.as_any().downcast_ref::<EtcdMetaStore>() {
             let client = etcd_store.get_client();
 
             // Create Watch Worker configuration
@@ -1009,9 +170,16 @@ impl MetaClient {
             None
         };
 
+        let root_ino = store.root_ino();
+        let session_heartbeat = options.session_heartbeat;
+
         // Create MetaClient
         let client = Arc::new(Self {
             store,
+            options,
+            root: AtomicI64::new(root_ino),
+            session_id: AtomicU64::new(0),
+            umounting: AtomicBool::new(false),
             inode_cache: InodeCache::new(capacity.inode as u64, ttl.inode_ttl),
             path_cache: Cache::builder()
                 .max_capacity(capacity.path as u64)
@@ -1019,20 +187,186 @@ impl MetaClient {
                 .build(),
             path_trie: Arc::new(PathTrie::new()),
             inode_to_paths: Arc::new(DashMap::new()),
+            session_manager: Arc::new(SessionManager::new(session_heartbeat)),
             watch_worker: watch_worker.as_ref().map(|(w, _)| w.clone()),
         });
 
         // Start cache invalidation handler if Watch Worker is active
-        if let Some((_, rx)) = watch_worker {
+        if let Some((_, rx)) = watch_worker.clone() {
             let client_clone = client.clone();
             tokio::spawn(async move {
                 client_clone.handle_cache_invalidation(rx).await;
             });
         }
 
+        if !client.options.read_only && !client.options.no_background_jobs {
+            let client_clone = client.clone();
+            tokio::spawn(async move {
+                if let Err(err) = client_clone.start_default_session().await {
+                    warn!("MetaClient: failed to auto-start session: {err}");
+                }
+            });
+        }
+
         client
     }
 
+    /// Returns the current root inode honoured by the client. This mirrors
+    /// `baseMeta.root` which may differ from the physical root after `chroot`.
+    pub fn root(&self) -> i64 {
+        self.root.load(Ordering::SeqCst)
+    }
+
+    /// Returns the client options used when constructing this instance.
+    #[allow(dead_code)]
+    pub fn options(&self) -> &MetaClientOptions {
+        &self.options
+    }
+
+    /// Returns a clone of the underlying raw `MetaStore` handle.
+    /// Update the logical root inode. All subsequent metadata lookups treat
+    /// `ROOT_INODE` as an alias for `inode`.
+    #[allow(dead_code)]
+    pub fn chroot(&self, inode: i64) {
+        self.root.store(inode, Ordering::SeqCst);
+    }
+
+    fn check_root(&self, inode: i64) -> i64 {
+        match inode {
+            0 => ROOT_INODE,
+            ROOT_INODE => self.root(),
+            _ => inode,
+        }
+    }
+
+    fn ensure_writable(&self) -> Result<(), MetaError> {
+        if self.options.read_only {
+            Err(MetaError::NotSupported(
+                "metadata client configured read-only".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_background_jobs(&self) -> Result<(), MetaError> {
+        if self.options.no_background_jobs {
+            Err(MetaError::NotSupported(
+                "background jobs disabled".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn mark_umounting(&self) {
+        self.umounting.store(true, Ordering::SeqCst);
+    }
+
+    fn clear_umounting(&self) {
+        self.umounting.store(false, Ordering::SeqCst);
+    }
+
+    fn is_umounting(&self) -> bool {
+        self.umounting.load(Ordering::SeqCst)
+    }
+    /// Starts a background heartbeat session with the underlying store.
+    ///
+    /// Callers provide an opaque payload understood by the backend; the client
+    /// will register or update the session and then begin periodic heartbeats.
+    #[allow(dead_code)]
+    pub async fn start_session(
+        &self,
+        payload: Vec<u8>,
+        update_existing: bool,
+    ) -> Result<(), MetaError> {
+        if self.options.read_only {
+            info!("MetaClient: read-only mode, skipping session start");
+            return Ok(());
+        }
+        self.ensure_background_jobs()?;
+        self.clear_umounting();
+        self.session_manager
+            .start(self.store.clone(), payload, update_existing)
+            .await
+    }
+
+    /// Builds a default session payload and starts the heartbeat task.
+    #[allow(dead_code)]
+    pub async fn start_default_session(&self) -> Result<(), MetaError> {
+        let payload = self.build_session_payload()?;
+        self.start_session(payload, true).await
+    }
+
+    /// Stops the background heartbeat session if it was previously started.
+    #[allow(dead_code)]
+    pub async fn shutdown_session(&self) {
+        self.mark_umounting();
+        self.session_manager.shutdown().await;
+    }
+
+    /// Finds and removes stale sessions using store-provided helpers.
+    ///
+    /// Returns the number of sessions successfully cleaned. Failures are
+    /// logged and skipped to keep the maintenance loop best-effort.
+    #[allow(dead_code)]
+    pub async fn cleanup_stale_sessions(&self, limit: Option<usize>) -> Result<usize, MetaError> {
+        self.ensure_background_jobs()?;
+
+        let stale_sessions = self.store.find_stale_sessions(limit).await?;
+        let mut cleaned = 0usize;
+
+        for session in stale_sessions {
+            match self.store.clean_stale_session(session.id).await {
+                Ok(()) => cleaned += 1,
+                Err(err) => {
+                    warn!(
+                        "MetaClient: failed to clean stale session {}: {err}",
+                        session.id
+                    );
+                }
+            }
+        }
+
+        Ok(cleaned)
+    }
+
+    #[allow(dead_code)]
+    fn build_session_payload(&self) -> Result<Vec<u8>, MetaError> {
+        let host_name = get_hostname()
+            .map_err(MetaError::from)?
+            .into_string()
+            .unwrap_or_else(|_| "unknown-host".to_string());
+        let ip_addrs = Self::collect_local_ip_addrs()?;
+
+        let payload = SessionInfoPayload {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            host_name,
+            ip_addrs,
+            mount_point: self.options.mount_point.clone(),
+            mount_time: Utc::now(),
+            process_id: process::id(),
+        };
+
+        serde_json::to_vec(&payload).map_err(MetaError::from)
+    }
+
+    #[allow(dead_code)]
+    fn collect_local_ip_addrs() -> Result<Vec<String>, MetaError> {
+        let interfaces = get_if_addrs().map_err(MetaError::from)?;
+        let mut addrs = HashSet::new();
+
+        for iface in interfaces {
+            let ip = iface.ip();
+            if !ip.is_loopback() {
+                addrs.insert(ip.to_string());
+            }
+        }
+
+        let mut addrs: Vec<String> = addrs.into_iter().collect();
+        addrs.sort();
+        Ok(addrs)
+    }
     /// Handle cache invalidation events from Watch Worker
     ///
     /// This runs in a background task and processes events from etcd Watch Worker
@@ -1046,10 +380,12 @@ impl MetaClient {
         info!("Cache invalidation handler started");
 
         while let Some(event) = rx.recv().await {
+            if self.is_umounting() {
+                break;
+            }
             match event {
                 CacheInvalidationEvent::InvalidateInode(ino) => {
-                    self.inode_cache.ttl_manager.invalidate(&ino).await;
-                    self.inode_cache.entries.remove(&ino);
+                    self.inode_cache.invalidate_inode(ino).await;
 
                     if let Some(paths_entry) = self.inode_to_paths.get(&ino) {
                         for path in paths_entry.value() {
@@ -1110,6 +446,7 @@ impl MetaClient {
     ///
     /// * `parent_ino` - The parent directory inode that was modified
     async fn invalidate_parent_path(&self, parent_ino: i64) {
+        let parent_ino = self.check_root(parent_ino);
         // Step 1: Get all paths that resolve to this parent inode (O(1))
         if let Some(entry) = self.inode_to_paths.get(&parent_ino) {
             let paths = entry.value().clone();
@@ -1169,8 +506,9 @@ impl MetaClient {
     pub async fn resolve_path(&self, path: &str) -> Result<i64, MetaError> {
         info!("MetaClient: Resolving path: {}", path);
 
+        let root = self.root();
         if path == "/" {
-            return Ok(self.store.root_ino());
+            return Ok(root);
         }
 
         if let Some(ino) = self.path_cache.get(path).await {
@@ -1180,7 +518,7 @@ impl MetaClient {
 
         info!("MetaClient: Path cache MISS for '{}'", path);
 
-        let mut current_ino = self.store.root_ino();
+        let mut current_ino = root;
         let segments: Vec<&str> = path
             .trim_start_matches('/')
             .split('/')
@@ -1225,20 +563,21 @@ impl MetaClient {
     /// * `Ok(None)` - If the inode doesn't exist
     /// * `Err(MetaError)` - On storage errors
     async fn cached_stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
-        info!("MetaClient: stat request for inode {}", ino);
+        let inode = self.check_root(ino);
+        info!("MetaClient: stat request for inode {}", inode);
 
-        if let Some(attr) = self.inode_cache.get_attr(ino).await {
-            info!("MetaClient: Inode cache HIT for inode {}", ino);
+        if let Some(attr) = self.inode_cache.get_attr(inode).await {
+            info!("MetaClient: Inode cache HIT for inode {}", inode);
             return Ok(Some(attr));
         }
 
-        info!("MetaClient: Inode cache MISS for inode {}", ino);
+        info!("MetaClient: Inode cache MISS for inode {}", inode);
 
-        let attr = self.store.stat(ino).await?;
+        let attr = self.store.stat(inode).await?;
 
         if let Some(ref a) = attr {
-            info!("MetaClient: Caching attr for inode {}", ino);
-            self.inode_cache.insert_node(ino, a.clone(), None).await;
+            info!("MetaClient: Caching attr for inode {}", inode);
+            self.inode_cache.insert_node(inode, a.clone(), None).await;
         }
 
         Ok(attr)
@@ -1259,6 +598,7 @@ impl MetaClient {
     /// * `Ok(None)` - If no entry with the given name exists in the parent
     /// * `Err(MetaError)` - On storage errors
     async fn cached_lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
+        let parent = self.check_root(parent);
         info!("MetaClient: lookup request for ({}, '{}')", parent, name);
 
         if let Some(ino) = self.inode_cache.lookup(parent, name).await {
@@ -1284,14 +624,55 @@ impl MetaClient {
             self.inode_cache
                 .add_child(parent, name.to_string(), ino)
                 .await;
+            Ok(result)
+        } else if self.options.case_insensitive {
+            self.resolve_case(parent, name).await
+        } else {
+            Ok(None)
         }
+    }
 
-        Ok(result)
+    async fn resolve_case(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
+        let entries = self.store.readdir(parent).await?;
+        for entry in entries {
+            if entry.name.eq_ignore_ascii_case(name) {
+                if let Ok(Some(attr)) = self.store.stat(entry.ino).await {
+                    self.inode_cache
+                        .insert_node(entry.ino, attr, Some(parent))
+                        .await;
+                }
+                self.inode_cache
+                    .add_child(parent, entry.name.clone(), entry.ino)
+                    .await;
+                return Ok(Some(entry.ino));
+            }
+        }
+        Ok(None)
     }
 }
 
 #[async_trait]
-impl MetaStore for MetaClient {
+impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
+    fn name(&self) -> &'static str {
+        self.store.name()
+    }
+
+    fn root_ino(&self) -> i64 {
+        self.root()
+    }
+
+    fn chroot(&self, inode: i64) {
+        MetaClient::chroot(self, inode);
+    }
+
+    async fn initialize(&self) -> Result<(), MetaError> {
+        self.store.initialize().await
+    }
+
+    async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
+        self.store.stat_fs().await
+    }
+
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         self.cached_stat(ino).await
     }
@@ -1316,42 +697,43 @@ impl MetaStore for MetaClient {
     }
 
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError> {
-        info!("MetaClient: readdir request for inode {}", ino);
+        let inode = self.check_root(ino);
+        info!("MetaClient: readdir request for inode {}", inode);
 
-        if let Some(entries) = self.inode_cache.readdir(ino).await {
+        if let Some(entries) = self.inode_cache.readdir(inode).await {
             info!(
                 "MetaClient: Inode cache HIT for readdir inode {} ({} entries)",
-                ino,
+                inode,
                 entries.len()
             );
             return Ok(entries);
         }
 
-        info!("MetaClient: Inode cache MISS for readdir inode {}", ino);
+        info!("MetaClient: Inode cache MISS for readdir inode {}", inode);
 
-        let entries = self.store.readdir(ino).await?;
+        let entries = self.store.readdir(inode).await?;
 
         info!(
             "MetaClient: Caching readdir result for inode {} ({} entries)",
-            ino,
+            inode,
             entries.len()
         );
 
         // Ensure parent directory node is in cache before loading children
         self.inode_cache
-            .ensure_node_in_cache(ino, &self.store, None)
+            .ensure_node_in_cache(inode, &*self.store, None)
             .await?;
 
         // Load all children from database into cache, replacing any stale data
         let children_data: Vec<(String, i64)> =
             entries.iter().map(|e| (e.name.clone(), e.ino)).collect();
-        self.inode_cache.load_children(ino, children_data).await;
+        self.inode_cache.load_children(inode, children_data).await;
 
         // Also cache each child's attributes
         for entry in &entries {
             if let Ok(Some(attr)) = self.store.stat(entry.ino).await {
                 self.inode_cache
-                    .insert_node(entry.ino, attr, Some(ino))
+                    .insert_node(entry.ino, attr, Some(inode))
                     .await;
             }
         }
@@ -1360,6 +742,8 @@ impl MetaStore for MetaClient {
     }
 
     async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
         info!("MetaClient: mkdir operation for ({}, '{}')", parent, name);
 
         let ino = self.store.mkdir(parent, name.clone()).await?;
@@ -1383,6 +767,8 @@ impl MetaStore for MetaClient {
     }
 
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
         info!("MetaClient: rmdir operation for ({}, '{}')", parent, name);
 
         self.store.rmdir(parent, name).await?;
@@ -1396,6 +782,8 @@ impl MetaStore for MetaClient {
     }
 
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
         info!(
             "MetaClient: create_file operation for ({}, '{}')",
             parent, name
@@ -1424,7 +812,69 @@ impl MetaStore for MetaClient {
         Ok(ino)
     }
 
+    async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        let parent = self.check_root(parent);
+        info!(
+            "MetaClient: link operation for inode {} into ({}, '{}')",
+            inode, parent, name
+        );
+
+        let attr = self.store.link(inode, parent, name).await?;
+
+        self.inode_cache
+            .ensure_node_in_cache(parent, &self.store, None)
+            .await?;
+
+        self.inode_cache
+            .insert_node(inode, attr.clone(), Some(parent))
+            .await;
+        self.inode_cache
+            .add_child(parent, name.to_string(), inode)
+            .await;
+
+        self.invalidate_parent_path(parent).await;
+
+        Ok(attr)
+    }
+
+    async fn symlink(
+        &self,
+        parent: i64,
+        name: &str,
+        target: &str,
+    ) -> Result<(i64, FileAttr), MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
+        info!(
+            "MetaClient: symlink operation for ({}, '{}') -> '{}'",
+            parent, name, target
+        );
+
+        let (ino, attr) = self.store.symlink(parent, name, target).await?;
+
+        info!("MetaClient: symlink created inode {}, updating cache", ino);
+
+        self.inode_cache
+            .ensure_node_in_cache(parent, &self.store, None)
+            .await?;
+
+        self.inode_cache
+            .insert_node(ino, attr.clone(), Some(parent))
+            .await;
+        self.inode_cache
+            .add_child(parent, name.to_string(), ino)
+            .await;
+
+        self.invalidate_parent_path(parent).await;
+
+        Ok((ino, attr))
+    }
+
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
         info!("MetaClient: unlink operation for ({}, '{}')", parent, name);
 
         self.store.unlink(parent, name).await?;
@@ -1444,6 +894,9 @@ impl MetaStore for MetaClient {
         new_parent: i64,
         new_name: String,
     ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let old_parent = self.check_root(old_parent);
+        let new_parent = self.check_root(new_parent);
         info!(
             "MetaClient: rename operation from ({}, '{}') to ({}, '{}')",
             old_parent, old_name, new_parent, new_name
@@ -1455,7 +908,11 @@ impl MetaStore for MetaClient {
 
         info!("MetaClient: rename completed, updating cache");
 
-        if let Some(child_ino) = self.inode_cache.remove_child(old_parent, old_name).await {
+        if let Some(child_ino) = self
+            .inode_cache
+            .remove_child_but_keep_inode(old_parent, old_name)
+            .await
+        {
             // Ensure new parent node is in cache before adding child
             self.inode_cache
                 .ensure_node_in_cache(new_parent, &self.store, None)
@@ -1480,10 +937,12 @@ impl MetaStore for MetaClient {
     }
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
-        self.store.set_file_size(ino, size).await?;
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        self.store.set_file_size(inode, size).await?;
 
         // Update cached attribute
-        if let Some(node) = self.inode_cache.get_node(ino).await {
+        if let Some(node) = self.inode_cache.get_node(inode).await {
             let mut attr = node.attr.write().await;
             attr.size = size;
         }
@@ -1491,61 +950,85 @@ impl MetaStore for MetaClient {
         Ok(())
     }
 
+    async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        self.store.set_attr(inode, req, flags).await
+    }
+
+    async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
+        let inode = self.check_root(ino);
+        self.store.open(inode, flags).await
+    }
+
+    async fn close(&self, ino: i64) -> Result<(), MetaError> {
+        let inode = self.check_root(ino);
+        self.store.close(inode).await
+    }
+
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
-        if let Some(node) = self.inode_cache.get_node(ino).await
+        let inode = self.check_root(ino);
+        if let Some(node) = self.inode_cache.get_node(inode).await
             && let Some(parent) = node.get_parent().await
         {
             return Ok(Some(parent));
         }
 
-        self.store.get_parent(ino).await
+        self.store.get_parent(inode).await
     }
 
     async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError> {
-        if let Some(parent_ino) = self.get_parent(ino).await?
+        let inode = self.check_root(ino);
+        if let Some(parent_ino) = self.get_parent(inode).await?
             && let Some(parent_node) = self.inode_cache.get_node(parent_ino).await
         {
             let children_lock = parent_node.children.read().await;
             if let Some(children_map) = children_lock.get_map() {
                 for (name, child_ino) in children_map.iter() {
-                    if *child_ino == ino {
+                    if *child_ino == inode {
                         return Ok(Some(name.clone()));
                     }
                 }
             }
         }
 
-        self.store.get_name(ino).await
+        self.store.get_name(inode).await
     }
 
     async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError> {
-        if ino == self.store.root_ino() {
+        let inode = self.check_root(ino);
+        if inode == self.root() {
             return Ok(Some("/".to_string()));
         }
 
-        let node = self.inode_cache.get_node(ino).await;
+        let node = self.inode_cache.get_node(inode).await;
         if node.is_none() {
-            return self.store.get_path(ino).await;
+            return self.store.get_path(inode).await;
         }
 
         let mut path_segments = Vec::new();
-        let mut current_ino = ino;
+        let mut current_ino = inode;
 
-        while current_ino != self.store.root_ino() {
+        while current_ino != self.root() {
             let current_node = self.inode_cache.get_node(current_ino).await;
             if current_node.is_none() {
-                return self.store.get_path(ino).await;
+                return self.store.get_path(inode).await;
             }
 
             let parent_ino = current_node.as_ref().unwrap().get_parent().await;
             if parent_ino.is_none() {
-                return self.store.get_path(ino).await;
+                return self.store.get_path(inode).await;
             }
 
             let parent = parent_ino.unwrap();
             let parent_node_opt = self.inode_cache.get_node(parent).await;
             if parent_node_opt.is_none() {
-                return self.store.get_path(ino).await;
+                return self.store.get_path(inode).await;
             }
 
             let parent_node = parent_node_opt.unwrap();
@@ -1561,7 +1044,7 @@ impl MetaStore for MetaClient {
             }
 
             if found_name.is_none() {
-                return self.store.get_path(ino).await;
+                return self.store.get_path(inode).await;
             }
 
             path_segments.push(found_name.unwrap());
@@ -1572,12 +1055,10 @@ impl MetaStore for MetaClient {
         Ok(Some(format!("/{}", path_segments.join("/"))))
     }
 
-    fn root_ino(&self) -> i64 {
-        self.store.root_ino()
-    }
-
-    async fn initialize(&self) -> Result<(), MetaError> {
-        self.store.initialize().await
+    async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
+        let inode = self.check_root(ino);
+        info!("MetaClient: read_symlink request for inode {}", inode);
+        self.store.read_symlink(inode).await
     }
 
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
@@ -1585,6 +1066,7 @@ impl MetaStore for MetaClient {
     }
 
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
+        self.ensure_writable()?;
         self.store.remove_file_metadata(ino).await
     }
 
@@ -1593,32 +1075,70 @@ impl MetaStore for MetaClient {
     }
 
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
+        self.ensure_writable()?;
         self.store.append_slice(chunk_id, slice).await
     }
 
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
+        self.ensure_writable()?;
         self.store.next_id(key).await
     }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+
+    async fn start_session(
+        &self,
+        payload: Vec<u8>,
+        update_existing: bool,
+    ) -> Result<(), MetaError> {
+        MetaClient::start_session(self, payload, update_existing).await
+    }
+
+    async fn start_default_session(&self) -> Result<(), MetaError> {
+        MetaClient::start_default_session(self).await
+    }
+
+    async fn shutdown_session(&self) -> Result<(), MetaError> {
+        MetaClient::shutdown_session(self).await;
+        Ok(())
+    }
+
+    async fn refresh_session(&self) -> Result<(), MetaError> {
+        self.ensure_background_jobs()?;
+        self.store.refresh_session().await
+    }
+
+    async fn find_stale_sessions(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<Vec<SessionInfo>, MetaError> {
+        self.ensure_background_jobs()?;
+        self.store.find_stale_sessions(limit).await
+    }
+
+    async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
+        self.ensure_background_jobs()?;
+        self.store.clean_stale_session(session_id).await
+    }
+
+    async fn cleanup_stale_sessions(&self, limit: Option<usize>) -> Result<usize, MetaError> {
+        MetaClient::cleanup_stale_sessions(self, limit).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meta::config::{CacheConfig, Config, DatabaseConfig, DatabaseType};
+    use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
     use crate::meta::stores::database_store::DatabaseMetaStore;
     use std::time::Duration;
 
-    async fn create_test_client() -> Arc<MetaClient> {
+    async fn create_test_client() -> Arc<MetaClient<DatabaseMetaStore>> {
         create_test_client_with_capacity(100, 100).await
     }
 
     async fn create_test_client_with_capacity(
         inode_capacity: usize,
         path_capacity: usize,
-    ) -> Arc<MetaClient> {
+    ) -> Arc<MetaClient<DatabaseMetaStore>> {
         let db_path = "sqlite::memory:".to_string();
 
         let config = Config {
@@ -1626,10 +1146,10 @@ mod tests {
                 db_config: DatabaseType::Sqlite { url: db_path },
             },
             cache: CacheConfig::default(),
+            client: ClientOptions::default(),
         };
 
-        let store = DatabaseMetaStore::from_config(config).await.unwrap();
-        let store = Arc::new(store) as Arc<dyn MetaStore + Send + Sync>;
+        let store = Arc::new(DatabaseMetaStore::from_config(config).await.unwrap());
 
         let capacity = CacheCapacity {
             inode: inode_capacity,

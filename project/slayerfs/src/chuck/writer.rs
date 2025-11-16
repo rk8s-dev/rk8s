@@ -54,7 +54,10 @@ mod tests {
     async fn test_writer_cross_blocks() {
         let layout = ChunkLayout::default();
         let store = InMemoryBlockStore::new();
-        let meta = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .unwrap()
+            .store();
         let writer = ChunkWriter::new(layout, 1, &store, &meta);
 
         // Write starting from half a block and spanning one and a half blocks.
@@ -87,7 +90,10 @@ mod tests {
     async fn test_writer_copy_on_write_appends_slice() {
         let layout = ChunkLayout::default();
         let store = InMemoryBlockStore::new();
-        let meta = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .unwrap()
+            .store();
         let writer = ChunkWriter::new(layout, 9, &store, &meta);
 
         let half = (layout.block_size / 2) as usize;
