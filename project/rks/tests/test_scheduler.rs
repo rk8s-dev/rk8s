@@ -119,16 +119,16 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
                 ports: vec![],
                 args: vec![],
                 resources,
-                liveness_probe: None, 
-                readiness_probe: None, 
-                startup_probe: None, 
+                liveness_probe: None,
+                readiness_probe: None,
+                startup_probe: None,
             }],
             init_containers: vec![],
             tolerations: vec![],
         },
         status: PodStatus {
             pod_ip: None,
-            container_statuses: vec![], 
+            container_statuses: vec![],
         },
     }
 }
