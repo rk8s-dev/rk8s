@@ -288,7 +288,7 @@ impl Controller for ReplicaSetController {
                     "ReplicaSetController handling ReplicaSet event: key={}",
                     response.key
                 );
-                // reconcile only when the spec has changed
+                // reconcile on Add events or when the spec has changed
                 let mut should_reconcile = false;
                 match &response.event {
                     WatchEvent::Add { yaml: _ } => {
