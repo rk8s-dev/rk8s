@@ -42,8 +42,15 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 dotenv = "0.15"
 tempfile = "3"
+rand = "0.9.2"
 hostname = "0.3"
 if-addrs = "0.6"
 
 [dev-dependencies]
 mockall = "0.12"
+criterion = { version = "0.5", features = ["html_reports"] }
+pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
+
+[[bench]]
+name = "slayerfs_bench"
+harness = false

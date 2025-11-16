@@ -4,7 +4,7 @@ use crate::vfs::chunk_id_for;
 use crate::vfs::fs::ChunkIoFactory;
 use crate::vfs::inode::Inode;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use super::FileWriter;
 
@@ -15,7 +15,7 @@ where
 {
     inode: Arc<Inode>,
     chunk_io: Arc<ChunkIoFactory<B, M>>,
-    writer: Arc<Mutex<FileWriter<B, M>>>,
+    writer: Arc<RwLock<FileWriter<B, M>>>,
 }
 
 impl<B, M> FileReader<B, M>
@@ -26,7 +26,7 @@ where
     pub fn new(
         inode: Arc<Inode>,
         chunk_io: Arc<ChunkIoFactory<B, M>>,
-        writer: Arc<Mutex<FileWriter<B, M>>>,
+        writer: Arc<RwLock<FileWriter<B, M>>>,
     ) -> Self {
         FileReader {
             inode,
@@ -43,7 +43,7 @@ where
         // Lock the corresponding writer so a concurrent writer can't append a new slice while
         // we are sampling chunk metadata. Without this guard, the per-chunk readers could see
         // a stale slice set and end up reading the wrong data.
-        let writer_guard = self.writer.lock().await;
+        let writer_guard = self.writer.read().await;
 
         let spans: Vec<ChunkSpan> =
             split_file_range_into_chunks(self.chunk_io.layout(), offset, len);

@@ -12,6 +12,7 @@
 //! - Ensure critical write-path updates (blocks + slice_blocks + slices + inode.size)
 //!   are committed atomically.
 //!
+pub mod backoff;
 pub mod client;
 pub mod config;
 pub mod entities;
@@ -25,6 +26,8 @@ pub mod stores;
 // Primary exports
 #[allow(dead_code)]
 pub type MetaHandle<M> = factory::MetaHandle<M>;
+#[allow(unused_imports)]
+pub use factory::create_meta_store_from_url;
 pub use layer::MetaLayer;
 pub use permission::Permission;
 pub use store::MetaStore;

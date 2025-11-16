@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::chuck::store::InMemoryBlockStore;
     use crate::chuck::writer::ChunkWriter;
-    use crate::meta::create_meta_store_from_url;
+    use crate::meta::factory::create_meta_store_from_url;
 
     fn assert_sorted_non_overlapping(ranges: &[(u64, u64)]) {
         for window in ranges.windows(2) {

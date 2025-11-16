@@ -41,7 +41,7 @@ mod mount_tests {
     use crate::chuck::chunk::ChunkLayout;
     use crate::chuck::store::ObjectBlockStore;
     use crate::fuse::mount::mount_vfs_unprivileged;
-    use crate::meta::create_meta_store_from_url;
+    use crate::meta::factory::create_meta_store_from_url;
     use std::fs;
     use std::io::Write;
     use std::time::Duration as StdDuration;
