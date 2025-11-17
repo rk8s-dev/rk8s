@@ -7,4 +7,5 @@ pub use manager::CONTROLLER_MANAGER;
 pub use manager::Controller;
 pub use manager::ControllerManager;
 
+pub mod endpoint_controller;
 pub mod garbage_collector;

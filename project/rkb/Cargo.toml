@@ -9,7 +9,7 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rkb"
 [dependencies]
 libfuse-fs = { path = "../libfuse-fs" }
 # libfuse-fs = "0.1.4"
-rfuse3 = { version = "0.0.4", features = ["tokio-runtime", "unprivileged"] }
+rfuse3 = { version = "0.0.5", features = ["tokio-runtime", "unprivileged"] }
 clap = { version = "4.5.31", features = ["derive"] }
 nix = { version = "0.29.0", features = ["fs", "process", "user", "sched", "mount"] }
 tokio = { version = "1.44.0", features = ["full"] }

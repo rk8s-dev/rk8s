@@ -6,7 +6,7 @@ use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::ObjectBlockStore;
 use crate::chuck::writer::ChunkWriter;
-use crate::meta::create_meta_store_from_url;
+use crate::meta::factory::create_meta_store_from_url;
 use std::convert::TryInto;
 use std::error::Error;
 use std::path::Path;
@@ -22,9 +22,8 @@ pub async fn e2e_localfs_demo<P: AsRef<Path>>(root: P) -> Result<(), Box<dyn Err
     let chunk_id: u64 = 1001;
 
     // 3) Build a lightweight metadata store (in-memory sqlite)
-    let meta = create_meta_store_from_url("sqlite::memory:")
-        .await
-        .map_err(|e| format!("failed to init meta store: {e}"))?;
+    let meta_handle = create_meta_store_from_url("sqlite::memory:").await?;
+    let meta_store = meta_handle.store();
 
     // 4) Prepare data that starts halfway through a block and spans 1.5 blocks
     let half = (layout.block_size / 2) as usize;
@@ -36,7 +35,7 @@ pub async fn e2e_localfs_demo<P: AsRef<Path>>(root: P) -> Result<(), Box<dyn Err
 
     // 5) Write, touching two blocks
     {
-        let writer = ChunkWriter::new(layout, chunk_id, &store, &meta);
+        let writer = ChunkWriter::new(layout, chunk_id, &store, meta_store.as_ref());
         writer
             .write(
                 half.try_into().expect("chunk offset must fit in u32"),
@@ -47,7 +46,7 @@ pub async fn e2e_localfs_demo<P: AsRef<Path>>(root: P) -> Result<(), Box<dyn Err
 
     // 6) Read and verify
     {
-        let mut reader = ChunkReader::new(layout, chunk_id, &store, &meta);
+        let mut reader = ChunkReader::new(layout, chunk_id, &store, meta_store.as_ref());
         reader.prepare_slices().await?;
         let out = reader
             .read(half.try_into().expect("chunk offset must fit in u32"), len)

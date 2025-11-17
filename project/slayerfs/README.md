@@ -70,6 +70,7 @@ More: see `doc/sdk.md` and inline rustdoc.
 ## 📚 Docs
 - Design: `doc/arch.md`
 - SDK: `doc/sdk.md`
+- Benchmarks: `doc/bench.md`
 
 ---
 
@@ -77,5 +78,4 @@ More: see `doc/sdk.md` and inline rustdoc.
 ## 🤝 Contributing
 
 Issues and PRs are welcome to improve architecture, implementation, and docs.
-
 

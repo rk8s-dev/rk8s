@@ -4,7 +4,7 @@ use crate::vfs::fs::ChunkIoFactory;
 use crate::vfs::inode::Inode;
 use dashmap::DashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 mod reader;
 mod writer;
@@ -18,7 +18,7 @@ where
     M: MetaStore,
 {
     pub inode: DashMap<i64, Arc<Inode>>,
-    pub writers: DashMap<i64, Arc<Mutex<FileWriter<B, M>>>>,
+    pub writers: DashMap<i64, Arc<RwLock<FileWriter<B, M>>>>,
     pub readers: DashMap<i64, Arc<FileReader<B, M>>>,
 }
 
@@ -54,7 +54,10 @@ where
             .writers
             .entry(ino)
             .or_insert_with(|| {
-                Arc::new(Mutex::new(FileWriter::new(inode.clone(), chunk_io.clone())))
+                Arc::new(RwLock::new(FileWriter::new(
+                    inode.clone(),
+                    chunk_io.clone(),
+                )))
             })
             .clone();
         self.readers
@@ -66,7 +69,7 @@ where
         self.inode.get(&ino).map(|entry| Arc::clone(entry.value()))
     }
 
-    pub fn writer(&self, ino: i64) -> Option<Arc<Mutex<FileWriter<B, M>>>> {
+    pub fn writer(&self, ino: i64) -> Option<Arc<RwLock<FileWriter<B, M>>>> {
         self.writers
             .get(&ino)
             .map(|entry| Arc::clone(entry.value()))

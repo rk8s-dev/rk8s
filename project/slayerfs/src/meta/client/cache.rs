@@ -2,15 +2,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use dashmap::DashMap;
+use crate::chuck::SliceDesc;
+use crate::meta::entities::etcd::EtcdEntryInfo;
+use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
+use crate::vfs::fs::FileType;
+use dashmap::{DashMap, Entry};
 use moka::future::Cache;
 use moka::notification::RemovalCause;
 use tokio::sync::RwLock;
 use tracing::info;
-
-use crate::meta::entities::etcd::EtcdEntryInfo;
-use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
-use crate::vfs::fs::FileType;
 
 /// Type alias for children map to reduce complexity
 /// BTreeMap provides ordered iteration for consistent ls output
@@ -54,6 +54,8 @@ pub(crate) struct InodeEntry {
     pub(crate) parent: Arc<RwLock<Option<i64>>>,
     /// Directory children with loading state tracking (only used if THIS inode is a directory)
     pub(crate) children: Arc<RwLock<ChildrenState>>,
+    /// Cache slice metadata per chunk index
+    pub(crate) slices: DashMap<u64, Vec<SliceDesc>>,
 }
 
 impl InodeEntry {
@@ -62,6 +64,7 @@ impl InodeEntry {
             attr: Arc::new(RwLock::new(attr)),
             parent: Arc::new(RwLock::new(parent)),
             children: Arc::new(RwLock::new(ChildrenState::NotLoaded)),
+            slices: DashMap::new(),
         }
     }
 
@@ -128,7 +131,7 @@ impl InodeCache {
     pub(crate) async fn ensure_node_in_cache(
         &self,
         ino: i64,
-        store: &Arc<dyn MetaStore + Send + Sync>,
+        store: &dyn MetaStore,
         parent: Option<i64>,
     ) -> Result<bool, MetaError> {
         if self.get_node(ino).await.is_some() {
@@ -180,18 +183,36 @@ impl InodeCache {
             let mut children_lock = parent_node.children.write().await;
             if let Some(children_map) = children_lock.get_map() {
                 let mut map = (**children_map).clone();
-                let child_ino = map.remove(name);
-
-                if let Some(ino) = child_ino {
+                if let Some(child_ino) = map.remove(name) {
                     *children_lock = match &*children_lock {
                         ChildrenState::Complete(_) => ChildrenState::Complete(Arc::new(map)),
                         _ => ChildrenState::Partial(Arc::new(map)),
                     };
 
-                    self.ttl_manager.invalidate(&ino).await;
+                    self.ttl_manager.invalidate(&child_ino).await;
+                    return Some(child_ino);
                 }
+            }
+        }
+        None
+    }
 
-                return child_ino;
+    pub(crate) async fn remove_child_but_keep_inode(
+        &self,
+        parent_ino: i64,
+        name: &str,
+    ) -> Option<i64> {
+        if let Some(parent_node) = self.ttl_manager.get(&parent_ino).await {
+            let mut children_lock = parent_node.children.write().await;
+            if let Some(children_map) = children_lock.get_map() {
+                let mut map = (**children_map).clone();
+                if let Some(child_ino) = map.remove(name) {
+                    *children_lock = match &*children_lock {
+                        ChildrenState::Complete(_) => ChildrenState::Complete(Arc::new(map)),
+                        _ => ChildrenState::Partial(Arc::new(map)),
+                    };
+                    return Some(child_ino);
+                }
             }
         }
         None
@@ -245,6 +266,26 @@ impl InodeCache {
         if let Some(node) = self.ttl_manager.get(&ino).await {
             let new_attr = metadata.to_file_attr(ino);
             *node.attr.write().await = new_attr;
+        }
+    }
+
+    pub(crate) async fn append_slice(&self, inode: i64, chunk_index: u64, desc: SliceDesc) {
+        if let Some(node) = self.ttl_manager.get(&inode).await {
+            node.slices
+                .entry(chunk_index)
+                .and_modify(|slices| slices.push(desc))
+                .or_insert_with(|| vec![desc]);
+        }
+    }
+
+    pub(crate) async fn get_slices(&self, inode: i64, chunk_index: u64) -> Option<Vec<SliceDesc>> {
+        let node = self.ttl_manager.get(&inode).await?;
+
+        // Use entry api to ensure consistency, it will lock the bucket.
+        let entry = node.slices.entry(chunk_index);
+        match entry {
+            Entry::Occupied(entry) => entry.get().clone().into(),
+            Entry::Vacant(_) => None,
         }
     }
 

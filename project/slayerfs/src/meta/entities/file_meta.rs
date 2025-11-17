@@ -22,6 +22,10 @@ pub struct Model {
     /// Whether the file is marked for deletion (for garbage collection)
     #[sea_orm(column_type = "Boolean", default_value = "false")]
     pub deleted: bool,
+
+    /// Optional symbolic link target when this inode represents a symlink
+    #[sea_orm(column_type = "Text", nullable)]
+    pub symlink_target: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -44,6 +48,7 @@ impl Model {
         create_time: i64,
         nlink: i32,
         deleted: bool,
+        symlink_target: Option<String>,
     ) -> Self {
         Self {
             inode,
@@ -54,6 +59,7 @@ impl Model {
             create_time,
             nlink,
             deleted,
+            symlink_target,
         }
     }
 

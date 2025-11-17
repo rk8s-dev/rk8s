@@ -66,7 +66,7 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
         #[cfg(target_os = "macos")]
         crtime: Timestamp::new(0, 0), // Set crtime to 0 for non-macOS platforms
         kind: filetype_from_mode(stat.st_mode),
-        perm: stat.st_mode as u16 & 0o7777,
+        perm: (stat.st_mode & 0o7777) as u16,
         nlink: stat.st_nlink as u32,
         uid: stat.st_uid,
         gid: stat.st_gid,
@@ -78,7 +78,7 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
 }
 
 pub fn filetype_from_mode(st_mode: u32) -> FileType {
-    let st_mode = st_mode & 0xfff000;
+    let st_mode = st_mode & libc::S_IFMT;
     match st_mode {
         libc::S_IFIFO => FileType::NamedPipe,
         libc::S_IFCHR => FileType::CharDevice,

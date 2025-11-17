@@ -12,6 +12,7 @@ use std::time::SystemTime;
 pub enum FileType {
     File,
     Dir,
+    Symlink,
 }
 
 impl From<EntryType> for FileType {
@@ -19,6 +20,7 @@ impl From<EntryType> for FileType {
         match entry_type {
             EntryType::File => FileType::File,
             EntryType::Directory => FileType::Dir,
+            EntryType::Symlink => FileType::Symlink,
         }
     }
 }
@@ -37,6 +39,82 @@ pub struct FileAttr {
     pub mtime: i64,
     pub ctime: i64,
     pub nlink: u32,
+}
+
+/// Bitmask describing which fields should be updated in a `set_attr` call.
+#[derive(Debug, Clone, Copy, Default)]
+#[allow(dead_code)]
+pub struct SetAttrRequest {
+    pub mode: Option<u32>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub size: Option<u64>,
+    pub atime: Option<i64>,
+    pub mtime: Option<i64>,
+    pub ctime: Option<i64>,
+    pub flags: Option<u32>,
+}
+
+bitflags::bitflags! {
+    /// Additional flags that control set-attribute semantics.
+    #[allow(dead_code)]
+    pub struct SetAttrFlags: u32 {
+        const CLEAR_SUID = 0b0001;
+        const CLEAR_SGID = 0b0010;
+        const SET_ATIME_NOW = 0b0100;
+        const SET_MTIME_NOW = 0b1000;
+    }
+}
+
+bitflags::bitflags! {
+    /// POSIX-style open flags translated for the metadata store.
+    #[allow(dead_code)]
+    pub struct OpenFlags: u32 {
+        const RDONLY = 0b0001;
+        const WRONLY = 0b0010;
+        const RDWR   = 0b0011;
+        const APPEND = 0b0100;
+        const TRUNC  = 0b1000;
+        const CREATE = 0b0001_0000;
+    }
+}
+
+/// Describes a single chunk slice returned by the store.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ChunkSlice {
+    pub id: u64,
+    pub offset: u64,
+    pub length: u32,
+    pub chunk_index: u32,
+}
+
+/// Payload used when writing a slice to the store.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ChunkWrite {
+    pub slice: ChunkSlice,
+    pub data_len: u64,
+    pub mtime: i64,
+}
+
+/// Result of a write operation including accounting deltas.
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct WriteOutcome {
+    pub updated_attr: Option<FileAttr>,
+    pub space_delta: i64,
+    pub inode_delta: i64,
+}
+
+/// Snapshot returned by `stat_fs` providing capacity/inode information.
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct StatFsSnapshot {
+    pub total_space: u64,
+    pub available_space: u64,
+    pub used_inodes: u64,
+    pub available_inodes: u64,
 }
 
 /// Directory entry
@@ -202,6 +280,9 @@ pub enum MetaError {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    #[error("continue retry")]
+    ContinueRetry,
+
     #[error("error: max retries exceeded")]
     MaxRetriesExceeded,
 
@@ -244,11 +325,11 @@ pub enum MetaError {
 ///   different hosts should ensure reasonable clock synchronization if they
 ///   participate in shared state.
 ///
+#[async_trait]
+#[auto_impl::auto_impl(&, std::sync::Arc)]
 /// The trait uses `async_trait` to allow async method implementations and
 /// `auto_impl` to conveniently implement the trait for shared references and
 /// `Arc<T>` wrappers.
-#[async_trait]
-#[auto_impl::auto_impl(&, std::sync::Arc)]
 #[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub trait MetaStore: Send + Sync {
@@ -364,6 +445,51 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
+    // ---------- Attribute / handle management (proposed extensions) ----------
+
+    async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        let _ = (ino, req, flags);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
+        let _ = (ino, flags);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn close(&self, ino: i64) -> Result<(), MetaError> {
+        let _ = ino;
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
+        let _ = (ino, parent, name);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn symlink(
+        &self,
+        parent: i64,
+        name: &str,
+        target: &str,
+    ) -> Result<(i64, FileAttr), MetaError> {
+        let _ = (parent, name, target);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
+        let _ = ino;
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
+        Err(MetaError::NotImplemented)
+    }
     // ---------- Garbage collection helpers ----------
 
     async fn delete_sustained_inode(&self, session_id: u64, inode: i64) -> Result<(), MetaError> {

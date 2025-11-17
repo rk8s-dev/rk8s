@@ -39,13 +39,16 @@ async fn main() {
         // Prepare backend
         let layout = ChunkLayout::default();
         let client = ObjectClient::new(LocalFsBackend::new(std::path::Path::new(&data_dir)));
-        let store = ObjectBlockStore::new(client);
 
         // Create meta store using memory SQLite
-        let meta = create_meta_store_from_url("sqlite::memory:")
+        let meta_handle = create_meta_store_from_url("sqlite::memory:")
             .await
             .expect("create meta store");
-        let fs = VFS::new(layout, store, meta).await.expect("create VFS");
+        let meta_store = meta_handle.store();
+        let store = ObjectBlockStore::new(client);
+        let fs = VFS::new(layout, store, meta_store)
+            .await
+            .expect("create VFS");
 
         // Ensure mount point exists
         if let Err(e) = std::fs::create_dir_all(&mount_point) {

@@ -10,6 +10,7 @@ mod protocol;
 mod scheduler;
 mod vault;
 
+use crate::controllers::endpoint_controller::EndpointController;
 use crate::controllers::garbage_collector::GarbageCollector;
 use crate::controllers::{CONTROLLER_MANAGER, ControllerManager, ReplicaSetController};
 use crate::dns::authority::{run_dns_server, setup_iptable};
@@ -169,11 +170,15 @@ async fn register_controllers(
 ) -> anyhow::Result<()> {
     let gc = GarbageCollector::new(xline_store.clone());
     let rs = ReplicaSetController::new(xline_store.clone());
+    let ep = EndpointController::new(xline_store.clone());
     mgr.clone()
         .register(Arc::new(RwLock::new(gc)), workers)
         .await?;
     mgr.clone()
         .register(Arc::new(RwLock::new(rs)), workers)
+        .await?;
+    mgr.clone()
+        .register(Arc::new(RwLock::new(ep)), workers)
         .await?;
     Ok(())
 }

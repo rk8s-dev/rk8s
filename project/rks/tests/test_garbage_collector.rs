@@ -61,6 +61,9 @@ fn pod_with_meta(name: &str, uid: Uuid, owners: Option<Vec<OwnerReference>>) -> 
                 memory: Some("50Mi".to_string()),
             }),
         }),
+        liveness_probe: None,
+        readiness_probe: None,
+        startup_probe: None,
     };
 
     let meta = ObjectMeta {
@@ -126,6 +129,9 @@ fn replicaset_with_meta(name: &str, uid: Uuid, replicas: i32) -> ReplicaSet {
                                 memory: Some("50Mi".to_string()),
                             }),
                         }),
+                        liveness_probe: None,
+                        readiness_probe: None,
+                        startup_probe: None,
                     }],
                     init_containers: vec![],
                     tolerations: vec![],

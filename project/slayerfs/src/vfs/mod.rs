@@ -40,3 +40,16 @@ pub fn chunk_id_for(ino: i64, chunk_index: u64) -> u64 {
             )
         })
 }
+
+/// Extracts the inode number and chunk index from a chunk_id.
+/// This is the inverse operation of `chunk_id_for`.
+///
+/// # Returns
+/// A tuple of (inode, chunk_index) where:
+/// - inode = chunk_id / CHUNK_ID_BASE
+/// - chunk_index = chunk_id % CHUNK_ID_BASE
+pub fn extract_ino_and_chunk_index(chunk_id: u64) -> (i64, u64) {
+    let ino = (chunk_id / CHUNK_ID_BASE) as i64;
+    let chunk_index = chunk_id % CHUNK_ID_BASE;
+    (ino, chunk_index)
+}

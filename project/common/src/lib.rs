@@ -31,6 +31,7 @@ pub struct TypeMeta {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectMeta {
+    #[serde(default)]
     pub name: String,
     #[serde(default = "default_namespace")]
     pub namespace: String,
@@ -43,10 +44,8 @@ pub struct ObjectMeta {
     #[serde(default)]
     pub owner_references: Option<Vec<OwnerReference>>,
     #[serde(default)]
-    #[serde(with = "chrono::serde::ts_seconds_option")]
     pub creation_timestamp: Option<DateTime<Utc>>,
     #[serde(default)]
-    #[serde(with = "chrono::serde::ts_seconds_option")]
     pub deletion_timestamp: Option<DateTime<Utc>>,
     #[serde(default)]
     pub finalizers: Option<Vec<Finalizer>>,
@@ -98,6 +97,7 @@ pub enum ResourceKind {
     Service,
     Deployment,
     ReplicaSet,
+    Endpoint,
     #[default]
     Unknown,
 }
@@ -109,12 +109,12 @@ impl fmt::Display for ResourceKind {
             ResourceKind::Service => "Service",
             ResourceKind::Deployment => "Deployment",
             ResourceKind::ReplicaSet => "ReplicaSet",
+            ResourceKind::Endpoint => "Endpoint",
             ResourceKind::Unknown => "Unknown",
         };
         write!(f, "{}", kind)
     }
 }
-
 impl From<&str> for ResourceKind {
     fn from(input: &str) -> Self {
         match input {
@@ -122,6 +122,7 @@ impl From<&str> for ResourceKind {
             "Service" => ResourceKind::Service,
             "Deployment" => ResourceKind::Deployment,
             "ReplicaSet" => ResourceKind::ReplicaSet,
+            "Endpoint" => ResourceKind::Endpoint,
             _ => ResourceKind::Unknown, // Default to Unknown for unknown kinds
         }
     }
@@ -471,6 +472,12 @@ pub enum RksMessage {
     DeletePod(String),
     ListPod,
 
+    CreateReplicaSet(Box<ReplicaSet>),
+    UpdateReplicaSet(Box<ReplicaSet>),
+    DeleteReplicaSet(String),
+    GetReplicaSet(String),
+    ListReplicaSet,
+
     GetNodeCount,
     RegisterNode(Box<Node>),
     UserRequest(String),
@@ -492,6 +499,8 @@ pub enum RksMessage {
     Error(String),
     NodeCount(usize),
     ListPodRes(Vec<String>),
+    GetReplicaSetRes(Box<ReplicaSet>),
+    ListReplicaSetRes(Vec<ReplicaSet>),
     // (Podname, Podip)
     SetPodip((String, String)),
     Certificate(IssueCertificateResponse),
@@ -506,6 +515,15 @@ impl std::fmt::Debug for RksMessage {
                 write!(f, "RksMessage::DeletePod {{ pod_name: {} }}", pod_name)
             }
             Self::ListPod => f.write_str("RksMessage::ListPod"),
+            Self::CreateReplicaSet(_) => f.write_str("RksMessage::CreateReplicaSet { .. }"),
+            Self::UpdateReplicaSet(_) => f.write_str("RksMessage::UpdateReplicaSet { .. }"),
+            Self::DeleteReplicaSet(name) => {
+                write!(f, "RksMessage::DeleteReplicaSet {{ name: {} }}", name)
+            }
+            Self::GetReplicaSet(name) => {
+                write!(f, "RksMessage::GetReplicaSet {{ name: {} }}", name)
+            }
+            Self::ListReplicaSet => f.write_str("RksMessage::ListReplicaSet"),
             Self::GetNodeCount => f.write_str("RksMessage::GetNodeCount"),
             Self::RegisterNode(_) => f.write_str("RksMessage::RegisterNode { .. }"),
             Self::UserRequest(_) => f.write_str("RksMessage::UserRequest { .. }"),
@@ -533,6 +551,14 @@ impl std::fmt::Debug for RksMessage {
             Self::NodeCount(count) => write!(f, "RksMessage::NodeCount({})", count),
             Self::ListPodRes(pods) => {
                 write!(f, "RksMessage::ListPodRes {{ count: {} }}", pods.len())
+            }
+            Self::GetReplicaSetRes(_) => f.write_str("RksMessage::GetReplicaSetRes { .. }"),
+            Self::ListReplicaSetRes(rss) => {
+                write!(
+                    f,
+                    "RksMessage::ListReplicaSetRes {{ count: {} }}",
+                    rss.len()
+                )
             }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(
@@ -562,12 +588,13 @@ impl Display for RksMessage {
             ),
             Self::DeletePod(pod_name) => write!(f, "Delete pod '{}'", pod_name),
             Self::ListPod => f.write_str("List pods"),
+            Self::CreateReplicaSet(rs) => write!(f, "Create replicaset '{}'", rs.metadata.name),
+            Self::UpdateReplicaSet(rs) => write!(f, "Update replicaset '{}'", rs.metadata.name),
+            Self::DeleteReplicaSet(name) => write!(f, "Delete replicaset '{}'", name),
+            Self::GetReplicaSet(name) => write!(f, "Get replicaset '{}'", name),
+            Self::ListReplicaSet => f.write_str("List replicasets"),
             Self::GetNodeCount => f.write_str("Get node count"),
-            Self::RegisterNode(node) => write!(
-                f,
-                "Register node '{}' (namespace '{}')",
-                node.metadata.name, node.metadata.namespace
-            ),
+            Self::RegisterNode(node) => write!(f, "Register node '{}'", node.metadata.name),
             Self::UserRequest(payload) => write!(f, "User request: {}", payload),
             Self::Heartbeat { node_name, status } => {
                 let ready_state = status
@@ -627,6 +654,30 @@ impl Display for RksMessage {
                     );
                 }
                 write!(f, "List pods response: {}", preview.join(", "))
+            }
+            Self::GetReplicaSetRes(rs) => {
+                write!(f, "Get replicaset '{}' response", rs.metadata.name)
+            }
+            Self::ListReplicaSetRes(rss) => {
+                if rss.is_empty() {
+                    return f.write_str("List replicasets response: no replicasets found");
+                }
+
+                let preview = rss
+                    .iter()
+                    .take(3)
+                    .map(|rs| rs.metadata.name.as_str())
+                    .collect::<Vec<_>>();
+
+                if rss.len() > preview.len() {
+                    return write!(
+                        f,
+                        "List replicasets response: {} (+{} more)",
+                        preview.join(", "),
+                        rss.len() - preview.len()
+                    );
+                }
+                write!(f, "List replicasets response: {}", preview.join(", "))
             }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
@@ -865,8 +916,12 @@ pub struct ExternalInterface {
 pub struct ServiceSpec {
     #[serde(rename = "type", default = "default_service_type")]
     pub service_type: String, // ClusterIP, NodePort, LoadBalancer
+    /// **BREAKING CHANGE**: The `selector` field type changed from `HashMap<String, String>` to `Option<LabelSelector>`.
+    /// This aligns with Kubernetes API semantics and allows for match expressions.
+    /// All code accessing `svc.spec.selector` must be updated to handle `Option<LabelSelector>`.
+    /// See release notes for migration details.
     #[serde(default)]
-    pub selector: HashMap<String, String>,
+    pub selector: Option<LabelSelector>,
     #[serde(default)]
     pub ports: Vec<ServicePort>,
     #[serde(rename = "clusterIP", default)]

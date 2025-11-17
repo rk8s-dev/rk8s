@@ -5093,13 +5093,26 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 request.unique, in_header.nodeid, write_in
             );
 
+            // Special handling for O_DIRECT writes: ensure the buffer is 4096-byte aligned.
+            // Currently we only encounter this case in xfstests.
+            use std::borrow::Cow;
+            const ALIGNMENT: usize = 4096;
+            let mut aligned_buf =
+                aligned_box::AlignedBox::<[u8]>::slice_from_default(ALIGNMENT, data.len()).unwrap();
+            aligned_buf.copy_from_slice(&data);
+            let aligned_data: Cow<[u8]> = if data.as_ptr().align_offset(ALIGNMENT) == 0 {
+                Cow::Borrowed(&data)
+            } else {
+                Cow::Borrowed(&aligned_buf)
+            };
+
             let reply_write = match fs
                 .write(
                     request,
                     in_header.nodeid,
                     write_in.fh,
                     write_in.offset,
-                    &data,
+                    &aligned_data,
                     write_in.write_flags,
                     write_in.flags,
                 )
@@ -5460,9 +5473,21 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 ReplyXAttr::Size(size) => {
                     let getxattr_out = fuse_getxattr_out { size, _padding: 0 };
 
+                    // Found in xfstests.
+                    // FUSE getxattr follows a two-step protocol:
+                    // 1) When size == 0, the kernel is only querying the required buffer size.
+                    //    The filesystem should return success and provide the attribute length.
+                    // 2) When size > 0, the kernel expects the actual attribute data.
+                    //    If the provided buffer is too small (attribute grew), return ERANGE
+                    //    and report the new required size.
+                    let error_code = if getxattr_in.size == 0 {
+                        0
+                    } else {
+                        libc::ERANGE
+                    };
                     let out_header = fuse_out_header {
                         len: (FUSE_OUT_HEADER_SIZE + FUSE_GETXATTR_OUT_SIZE) as u32,
-                        error: libc::ERANGE,
+                        error: error_code,
                         unique: request.unique,
                     };
 
