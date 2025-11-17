@@ -59,6 +59,7 @@ rust_binary(
         "//third-party/rust/crates/tracing/0.1.41:tracing",
         "//third-party/rust/crates/uzers/0.12.1:uzers",
         "//third-party/rust/crates/walkdir/2.5.0:walkdir",
+        ":librkb",
     ],
 )
 

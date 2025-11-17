@@ -4160,7 +4160,7 @@ dependencies = [
 
 [[package]]
 name = "libfuse-fs"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "bitflags 2.9.4",
@@ -4175,7 +4175,7 @@ dependencies = [
  "nix 0.29.0",
  "radix_trie",
  "reqwest",
- "rfuse3 0.0.4",
+ "rfuse3 0.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "serde_json",
  "tempfile",
@@ -6229,6 +6229,29 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trait-make",
+ "which",
+]
+
+[[package]]
+name = "rfuse3"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "848f037ea6f58bf93045c366e6099146b2b227c06646c584b64ed7d4a089ad71"
+dependencies = [
+ "aligned_box",
+ "async-notify",
+ "async-trait",
+ "bincode",
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "libc",
+ "nix 0.29.0",
+ "serde",
+ "slab",
+ "tokio",
+ "tracing",
  "trait-make",
  "which",
 ]
