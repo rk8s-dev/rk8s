@@ -10,7 +10,8 @@ use std::time::Duration;
 use crate::passthrough::PassthroughFs;
 
 /// Type alias for rename2 override function
-type Rename2OverrideFn = Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> RfuseResult<()> + Send + Sync>;
+type Rename2OverrideFn =
+    Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> RfuseResult<()> + Send + Sync>;
 
 #[cfg(test)]
 #[derive(Clone, Debug)]

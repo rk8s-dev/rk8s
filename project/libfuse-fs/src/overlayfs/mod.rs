@@ -50,7 +50,8 @@ pub type Handle = u64;
 
 /// Test-only type for rename2 behavior override hook
 #[cfg(test)]
-type Rename2OverrideFn = Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> rfuse3::Result<()> + Send + Sync>;
+type Rename2OverrideFn =
+    Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> rfuse3::Result<()> + Send + Sync>;
 
 type BoxedLayer = PassthroughFs;
 //type BoxedFileSystem = Box<dyn FileSystem<Inode = Inode, Handle = Handle> + Send + Sync>;
