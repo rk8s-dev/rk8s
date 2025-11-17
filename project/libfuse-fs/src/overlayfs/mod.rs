@@ -48,6 +48,10 @@ use tokio::sync::{Mutex, RwLock};
 pub type Inode = u64;
 pub type Handle = u64;
 
+/// Test-only type for rename2 behavior override hook
+#[cfg(test)]
+type Rename2OverrideFn = Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> rfuse3::Result<()> + Send + Sync>;
+
 type BoxedLayer = PassthroughFs;
 //type BoxedFileSystem = Box<dyn FileSystem<Inode = Inode, Handle = Handle> + Send + Sync>;
 const INODE_ALLOC_BATCH: u64 = 0x1_0000_0000;
@@ -109,7 +113,7 @@ mod rename_exchange_tests {
             do_import: false,
             ..Default::default()
         };
-        let mut ovl = OverlayFs::new(Some(up_arc.clone()), lowers, cfg, 1).unwrap();
+        let ovl = OverlayFs::new(Some(up_arc.clone()), lowers, cfg, 1).unwrap();
 
         // Build minimal overlay tree for test
         let mut root = OverlayInode::new();
@@ -311,7 +315,7 @@ mod rename_exchange_tests {
             .await;
         assert!(res.is_err());
         let err = res.err().unwrap();
-        let ioerr: std::io::Error = err.into();
+        let ioerr: std::io::Error = err;
         let raw = ioerr.raw_os_error();
         assert!(raw == Some(libc::ENOSYS) || raw == Some(libc::EPERM));
     }
@@ -703,8 +707,8 @@ pub struct OverlayFs {
     /// Test-only hook to override underlying rename2 behavior. Tests can set this to simulate
     /// success/failure/ENOSYS without performing actual layer operations. Left None in normal
     /// operation.
-    rename2_override:
-        Option<Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> rfuse3::Result<()> + Send + Sync>>,
+    #[cfg(test)]
+    rename2_override: Option<Rename2OverrideFn>,
 }
 
 // This is a wrapper of one inode in specific layer, It can't impl Clone trait.
@@ -1594,6 +1598,7 @@ impl OverlayFs {
             killpriv_v2: AtomicBool::new(false),
             perfile_dax: AtomicBool::new(false),
             root_inodes: root_inode,
+            #[cfg(test)]
             rename2_override: None,
         })
     }
@@ -1601,12 +1606,7 @@ impl OverlayFs {
     /// Test helper: override the underlying rename2 behavior. Passing `None` restores normal
     /// behavior. This is intended for use only by unit tests.
     #[cfg(test)]
-    pub(crate) fn set_rename2_override(
-        &mut self,
-        cb: Option<
-            Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> rfuse3::Result<()> + Send + Sync>,
-        >,
-    ) {
+    pub(crate) fn set_rename2_override(&mut self, cb: Option<Rename2OverrideFn>) {
         self.rename2_override = cb;
     }
 
@@ -2473,6 +2473,7 @@ impl OverlayFs {
             }
 
             // Perform atomic exchange
+            #[cfg(test)]
             let rename_res: rfuse3::Result<()> = if let Some(cb) = &self.rename2_override {
                 (cb)(req, p_inode, name_str, new_p_inode, new_name_str, flags)
             } else {
@@ -2480,6 +2481,11 @@ impl OverlayFs {
                     .rename2(req, p_inode, name, new_p_inode, new_name, flags)
                     .await
             };
+
+            #[cfg(not(test))]
+            let rename_res: rfuse3::Result<()> = p_layer
+                .rename2(req, p_inode, name, new_p_inode, new_name, flags)
+                .await;
 
             match rename_res {
                 Ok(_) => {
@@ -2564,6 +2570,7 @@ impl OverlayFs {
 
         // Call layer rename
         if flags != 0 {
+            #[cfg(test)]
             let rename_res: rfuse3::Result<()> = if let Some(cb) = &self.rename2_override {
                 (cb)(req, p_inode, name_str, new_p_inode, new_name_str, flags)
             } else {
@@ -2571,6 +2578,11 @@ impl OverlayFs {
                     .rename2(req, p_inode, name, new_p_inode, new_name, flags)
                     .await
             };
+
+            #[cfg(not(test))]
+            let rename_res: rfuse3::Result<()> = p_layer
+                .rename2(req, p_inode, name, new_p_inode, new_name, flags)
+                .await;
 
             match rename_res {
                 Ok(_) => {}

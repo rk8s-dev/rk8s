@@ -9,11 +9,15 @@ use std::time::Duration;
 
 use crate::passthrough::PassthroughFs;
 
+/// Type alias for rename2 override function
+type Rename2OverrideFn = Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> RfuseResult<()> + Send + Sync>;
+
 #[cfg(test)]
 #[derive(Clone, Debug)]
 pub enum RenameBehavior {
     Ok,
     Errno(i32),
+    #[allow(dead_code)]
     DelayOk(Duration),
 }
 
@@ -43,15 +47,14 @@ impl MockLayer {
         Self::new_from_passthrough(Arc::new(fs), b)
     }
 
+    #[allow(dead_code)]
     pub fn set_behavior(&self, b: RenameBehavior) {
         let mut g = self.behavior.lock().unwrap();
         *g = b;
     }
 
     /// Generate closure for rename2_override hook
-    pub fn make_rename2_closure(
-        self: Arc<Self>,
-    ) -> Arc<dyn Fn(Request, u64, &str, u64, &str, u32) -> RfuseResult<()> + Send + Sync> {
+    pub fn make_rename2_closure(self: Arc<Self>) -> Rename2OverrideFn {
         use rfuse3::raw::Filesystem as _;
 
         Arc::new(
