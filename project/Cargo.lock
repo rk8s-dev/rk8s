@@ -6187,6 +6187,27 @@ dependencies = [
 [[package]]
 name = "rfuse3"
 version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e65743fb89df9efbac998a144a9222434754fdc18438270f6e3dcde90a41617"
+dependencies = [
+ "async-notify",
+ "bincode",
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "libc",
+ "nix 0.29.0",
+ "serde",
+ "slab",
+ "tokio",
+ "tracing",
+ "trait-make",
+ "which",
+]
+
+[[package]]
+name = "rfuse3"
+version = "0.0.5"
 dependencies = [
  "aligned_box",
  "async-fs",
@@ -6208,27 +6229,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "trait-make",
- "which",
-]
-
-[[package]]
-name = "rfuse3"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e65743fb89df9efbac998a144a9222434754fdc18438270f6e3dcde90a41617"
-dependencies = [
- "async-notify",
- "bincode",
- "bytes",
- "futures-channel",
- "futures-util",
- "libc",
- "nix 0.29.0",
- "serde",
- "slab",
- "tokio",
- "tracing",
  "trait-make",
  "which",
 ]
@@ -6285,7 +6285,7 @@ dependencies = [
  "rand 0.9.2",
  "rayon",
  "reqwest",
- "rfuse3 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rfuse3 0.0.4",
  "serde",
  "serde_json",
  "sha2",

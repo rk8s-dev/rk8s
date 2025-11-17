@@ -12,7 +12,7 @@ exclude = ["buck"]
 [dependencies]
 uuid = { version = "1.15.1", features = ["v4"] }
 clap = { version = "4.5.32", features = ["derive"] }
-rfuse3 = { version = "0.0.4", path = "../rfuse3", features = ["tokio-runtime", "unprivileged"] }
+rfuse3 = { version = "0.0.4", features = ["tokio-runtime", "unprivileged"] }
 tracing-subscriber = { version = "0.3.19", features = ["json", "env-filter"] }
 tokio = { version = "1.44.0", features = ["full"] }
 reqwest = { version = "0.12.7", features = ["json", "blocking"] }
