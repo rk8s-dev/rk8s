@@ -34,11 +34,12 @@ jobs:
         run: |
           cd project
           cargo test --no-run -p rkl
+          export RKL_TEST_MODE=1
 
           # to avoid exit code equals 0
 
           FAIL=0
-          sudo sh -c '
+          sudo -E sh  -c '
           for t in $(find target/debug/deps/ -type f -executable -name "test_*"); do
               $t || FAIL=1
           done
