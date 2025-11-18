@@ -8,29 +8,46 @@
 
 use crate::chuck::SliceDesc;
 use crate::meta::config::{Config, DatabaseType};
-use crate::meta::store::{DirEntry, FileAttr, FileType, MetaError, MetaStore};
-use crate::meta::{INODE_ID_KEY, SLICE_ID_KEY};
+use crate::meta::store::{DirEntry, FileAttr, FileType, MetaError, MetaStore, SessionInfo};
+use crate::meta::{INODE_ID_KEY, SESSION_ID_KEY, SLICE_ID_KEY};
 use async_trait::async_trait;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use chrono::Utc;
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::path::Path;
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tracing::warn;
 
 const ROOT_INODE: i64 = 1;
 const COUNTER_INODE_KEY: &str = "nextinode";
 const COUNTER_SLICE_KEY: &str = "nextchunk";
+const COUNTER_SESSION_KEY: &str = "nextsession";
 const NODE_KEY_PREFIX: &str = "i";
 const DIR_KEY_PREFIX: &str = "d";
 const CHUNK_KEY_PREFIX: &str = "c";
 const DELETED_SET_KEY: &str = "delslices";
+const ALL_SESSIONS_KEY: &str = "allSessions";
+const SESSION_INFOS_KEY: &str = "sessionInfos";
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
+const SESSION_TIMEOUT_SECS: i64 = 120;
+const SESSION_TIMEOUT_MILLIS: i64 = SESSION_TIMEOUT_SECS * 1000;
 
 /// Minimal Redis-backed meta store.
 pub struct RedisMetaStore {
     conn: ConnectionManager,
     _config: Config,
+    session_state: Mutex<SessionState>,
+}
+
+#[derive(Default)]
+struct SessionState {
+    id: Option<u64>,
+    payload: Option<Vec<u8>>,
 }
 
 impl RedisMetaStore {
@@ -49,6 +66,7 @@ impl RedisMetaStore {
         let store = Self {
             conn,
             _config: config,
+            session_state: Mutex::new(SessionState::default()),
         };
         store.init_root_directory().await?;
         Ok(store)
@@ -91,6 +109,7 @@ impl RedisMetaStore {
         let suffix = match key {
             INODE_ID_KEY => COUNTER_INODE_KEY,
             SLICE_ID_KEY => COUNTER_SLICE_KEY,
+            SESSION_ID_KEY => COUNTER_SESSION_KEY,
             other => {
                 return Err(MetaError::NotSupported(format!(
                     "counter {other} not supported by RedisMetaStore"
@@ -275,6 +294,64 @@ impl RedisMetaStore {
         conn.hset(self.deleted_set_key(), field, 1)
             .await
             .map_err(redis_err)
+    }
+
+    fn current_session_id(&self) -> Option<u64> {
+        self.session_state.lock().unwrap().id
+    }
+
+    fn session_snapshot(&self) -> Option<(u64, Vec<u8>)> {
+        let guard = self.session_state.lock().unwrap();
+        match (guard.id, guard.payload.clone()) {
+            (Some(id), Some(payload)) => Some((id, payload)),
+            _ => None,
+        }
+    }
+
+    fn store_session_state(&self, session_id: u64, payload: Vec<u8>) {
+        let mut guard = self.session_state.lock().unwrap();
+        guard.id = Some(session_id);
+        guard.payload = Some(payload);
+    }
+
+    fn clear_session_state(&self, session_id: u64) {
+        let mut guard = self.session_state.lock().unwrap();
+        if guard.id == Some(session_id) {
+            guard.id = None;
+            guard.payload = None;
+        }
+    }
+
+    async fn allocate_session_id(&self) -> Result<u64, MetaError> {
+        let raw = self.alloc_id(SESSION_ID_KEY).await?;
+        u64::try_from(raw).map_err(|_| MetaError::Internal("session id overflow".to_string()))
+    }
+
+    async fn persist_session(&self, session_id: u64, payload: &[u8]) -> Result<(), MetaError> {
+        let (now_ms, expire_ms) = Self::session_timestamps();
+        let record = StoredSessionDetails::new(session_id, payload, now_ms);
+        let serialized =
+            serde_json::to_string(&record).map_err(|e| MetaError::Internal(e.to_string()))?;
+
+        let mut conn = self.conn.clone();
+        redis::pipe()
+            .cmd("ZADD")
+            .arg(ALL_SESSIONS_KEY)
+            .arg(expire_ms)
+            .arg(session_id.to_string())
+            .cmd("HSET")
+            .arg(SESSION_INFOS_KEY)
+            .arg(session_id.to_string())
+            .arg(serialized)
+            .query_async::<()>(&mut conn)
+            .await
+            .map_err(redis_err)?;
+        Ok(())
+    }
+
+    fn session_timestamps() -> (i64, i64) {
+        let now = Utc::now().timestamp_millis();
+        (now, now + SESSION_TIMEOUT_MILLIS)
     }
 }
 
@@ -516,8 +593,118 @@ impl MetaStore for RedisMetaStore {
         self.alloc_id(key).await
     }
 
+    async fn new_session(&self, payload: &[u8], update: bool) -> Result<(), MetaError> {
+        let session_id = if update {
+            self.current_session_id()
+        } else {
+            None
+        };
+        let session_id = match session_id {
+            Some(id) => id,
+            None => self.allocate_session_id().await?,
+        };
+
+        self.persist_session(session_id, payload).await?;
+        self.store_session_state(session_id, payload.to_vec());
+        Ok(())
+    }
+
+    async fn refresh_session(&self) -> Result<(), MetaError> {
+        let Some((session_id, payload)) = self.session_snapshot() else {
+            return Err(MetaError::Internal(
+                "no active session configured for refresh".to_string(),
+            ));
+        };
+        self.persist_session(session_id, &payload).await
+    }
+
+    async fn find_stale_sessions(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<Vec<SessionInfo>, MetaError> {
+        let now = Utc::now().timestamp_millis();
+        let mut cmd = redis::cmd("ZRANGEBYSCORE");
+        cmd.arg(ALL_SESSIONS_KEY).arg("-inf").arg(now);
+        if let Some(limit) = limit {
+            cmd.arg("LIMIT").arg(0).arg(limit as isize);
+        }
+
+        let mut conn = self.conn.clone();
+        let expired: Vec<String> = cmd.query_async(&mut conn).await.map_err(redis_err)?;
+        if expired.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut sessions = Vec::with_capacity(expired.len());
+        for member in expired {
+            let raw: Option<String> = conn
+                .hget(SESSION_INFOS_KEY, &member)
+                .await
+                .map_err(redis_err)?;
+            let Some(value) = raw else {
+                continue;
+            };
+
+            match serde_json::from_str::<StoredSessionDetails>(&value) {
+                Ok(record) => match record.to_session_info() {
+                    Ok(info) => sessions.push(info),
+                    Err(err) => warn!("Failed to decode session info for {}: {err}", member),
+                },
+                Err(err) => warn!("Invalid session payload for {}: {err}", member),
+            }
+        }
+
+        Ok(sessions)
+    }
+
+    async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
+        let member = session_id.to_string();
+        let mut conn = self.conn.clone();
+        redis::pipe()
+            .cmd("ZREM")
+            .arg(ALL_SESSIONS_KEY)
+            .arg(&member)
+            .cmd("HDEL")
+            .arg(SESSION_INFOS_KEY)
+            .arg(&member)
+            .query_async::<()>(&mut conn)
+            .await
+            .map_err(redis_err)?;
+        self.clear_session_state(session_id);
+        Ok(())
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StoredSessionDetails {
+    session_id: u64,
+    payload_b64: String,
+    updated_at_ms: i64,
+}
+
+impl StoredSessionDetails {
+    fn new(session_id: u64, payload: &[u8], updated_at_ms: i64) -> Self {
+        Self {
+            session_id,
+            payload_b64: B64.encode(payload),
+            updated_at_ms,
+        }
+    }
+
+    fn to_session_info(&self) -> Result<SessionInfo, MetaError> {
+        let payload = B64
+            .decode(self.payload_b64.as_bytes())
+            .map_err(|e| MetaError::Internal(format!("decode session payload: {e}")))?;
+        let updated_at = millis_to_system_time(self.updated_at_ms)?;
+        Ok(SessionInfo {
+            id: self.session_id,
+            info: payload,
+            updated_at,
+        })
     }
 }
 
@@ -626,6 +813,15 @@ impl From<NodeKind> for FileType {
 
 fn current_time() -> i64 {
     Utc::now().timestamp_nanos_opt().unwrap_or(0)
+}
+
+fn millis_to_system_time(ms: i64) -> Result<SystemTime, MetaError> {
+    if ms < 0 {
+        return Err(MetaError::Internal(format!(
+            "invalid session timestamp {ms}"
+        )));
+    }
+    Ok(UNIX_EPOCH + Duration::from_millis(ms as u64))
 }
 
 fn redis_err(err: redis::RedisError) -> MetaError {
