@@ -218,6 +218,7 @@ mockall = "0.13.1"
 scopeguard = "1.2.0"
 serial_test = "3.2.0"
 prost-build = "0.11.9"
+hostname = "0.3"
 
 [profile.release]
 debug = true
