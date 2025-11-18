@@ -42,6 +42,7 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 dotenv = "0.15"
 tempfile = "3"
+redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
 
 [dev-dependencies]
 mockall = "0.12"

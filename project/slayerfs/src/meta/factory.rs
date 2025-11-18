@@ -8,8 +8,7 @@ use std::sync::Arc;
 use crate::meta::client::MetaClient;
 use crate::meta::config::{CacheTtl, Config, DatabaseConfig, DatabaseType};
 use crate::meta::store::{MetaError, MetaStore};
-use crate::meta::stores::DatabaseMetaStore;
-use crate::meta::stores::EtcdMetaStore;
+use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore, RedisMetaStore};
 
 /// Factory for creating MetaStore instances
 pub struct MetaStoreFactory;
@@ -48,6 +47,10 @@ impl MetaStoreFactory {
                 let store = EtcdMetaStore::from_config(config.clone()).await?;
                 (Arc::new(store) as Arc<dyn MetaStore>, "etcd")
             }
+            DatabaseType::Redis { .. } => {
+                let store = RedisMetaStore::from_config(config.clone()).await?;
+                (Arc::new(store) as Arc<dyn MetaStore>, "redis")
+            }
         };
 
         // If cache is disabled, return raw store
@@ -77,6 +80,10 @@ impl MetaStoreFactory {
             }
             DatabaseType::Etcd { .. } => {
                 let store = EtcdMetaStore::from_config(config).await?;
+                Ok(Arc::new(store))
+            }
+            DatabaseType::Redis { .. } => {
+                let store = RedisMetaStore::from_config(config).await?;
                 Ok(Arc::new(store))
             }
         }
@@ -116,6 +123,10 @@ impl MetaStoreFactory {
                 vec![url.to_string()]
             };
             DatabaseType::Etcd { urls }
+        } else if url.starts_with("redis://") {
+            DatabaseType::Redis {
+                url: url.to_string(),
+            }
         } else {
             return Err(MetaError::Config(format!(
                 "Unsupported URL scheme: {}",

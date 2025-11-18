@@ -59,6 +59,10 @@ fn process_config_for_backend(
                     println!("Using etcd distributed backend");
                     Ok(config_content.to_string())
                 }
+                "redis" => {
+                    println!("Using Redis metadata backend");
+                    Ok(config_content.to_string())
+                }
                 _ => Err(format!("Unsupported database type: {}", db_type).into()),
             }
         } else {

@@ -1,0 +1,7 @@
+# Redis backend example configuration
+
+database:
+  type: redis
+  url: "redis://127.0.0.1:6379/0"
+cache:
+  enabled: true

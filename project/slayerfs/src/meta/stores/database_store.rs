@@ -128,6 +128,10 @@ impl DatabaseMetaStore {
                 "Etcd backend not supported by DatabaseMetaStore. Use EtcdMetaStore instead."
                     .to_string(),
             )),
+            DatabaseType::Redis { .. } => Err(MetaError::Config(
+                "Redis backend not supported by DatabaseMetaStore. Use RedisMetaStore instead."
+                    .to_string(),
+            )),
         }
     }
 

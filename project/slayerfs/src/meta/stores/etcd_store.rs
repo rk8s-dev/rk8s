@@ -81,12 +81,14 @@ impl EtcdMetaStore {
                     .map_err(|e| MetaError::Config(format!("Failed to connect to Etcd: {}", e)))?;
                 Ok(client)
             }
-            DatabaseType::Sqlite { .. } | DatabaseType::Postgres { .. } => {
-                Err(MetaError::Config(
-                    "SQL database backend not supported by EtcdMetaStore. Use DatabaseMetaStore instead."
-                        .to_string(),
-                ))
-            }
+            DatabaseType::Sqlite { .. } | DatabaseType::Postgres { .. } => Err(MetaError::Config(
+                "SQL database backend not supported by EtcdMetaStore. Use DatabaseMetaStore instead."
+                    .to_string(),
+            )),
+            DatabaseType::Redis { .. } => Err(MetaError::Config(
+                "Redis backend not supported by EtcdMetaStore. Use RedisMetaStore instead."
+                    .to_string(),
+            )),
         }
     }
 
