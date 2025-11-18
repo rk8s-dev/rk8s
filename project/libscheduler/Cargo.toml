@@ -7,14 +7,14 @@ description = "Scheduler library for rk8s"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libscheduler"
 
 [dependencies]
-common = { path = "../common" }
-libvault = { path = "../libvault" }
-anyhow = "1.0.98"
-bitflags = "2.9.2"
-etcd-client = "0.16.1"
-log = "0.4.27"
-serde = { version = "1.0.219", features = ["derive"] }
-serde_yaml = "0.9.34"
-serial_test = "3.2.0"
-tokio = "1.46.1"
-uuid = "1.17.0"
+common = { workspace = true }
+libvault = { workspace = true }
+anyhow = { workspace = true }
+bitflags = { workspace = true }
+etcd-client = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = { workspace = true }
+serial_test = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }

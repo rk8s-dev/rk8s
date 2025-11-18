@@ -7,29 +7,29 @@ description = "A lite implementation of the OCI Distribution Spec in Rust"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/distribution"
 
 [dependencies]
-anyhow = "1.0.99"
-async-trait = "0.1.86"
-axum = "0.8.1"
-axum-extra = { version = "0.10.1", features = ["typed-header"] }
-bcrypt = "0.17.1"
-clap = { version = "4.5.32", features = ["derive", "env"] }
-chrono = "0.4"
-dotenvy = "0.15.7"
-futures = "0.3.31"
-hex = "0.4.3"
-jsonwebtoken = "9.3.1"
-oci-spec = "0.8.0"
-regex = "1.11.1"
-serde = "1.0.217"
-serde_json = "1.0.138"
-sha2 = "0.10.8"
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "postgres", "macros", "migrate", "chrono", "uuid"]}
-tokio = { version = "1.43.0", features = ["full"] }
-tokio-util = { version = "0.7.13", features = ["io"] }
-thiserror = "2.0.12"
-tower-http = { version = "0.6.6", features = ["trace"] }
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "time", "fmt"] }
-uuid = { version = "1.13.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
-reqwest = { version = "0.12.23", features = ["json"] }
-rand = "0.9.2"
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true, features = ["typed-header"] }
+bcrypt = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+chrono = { workspace = true }
+dotenvy = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+jsonwebtoken = { workspace = true }
+oci-spec = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "sqlite", "postgres", "macros", "migrate", "chrono", "uuid"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["io"] }
+thiserror = { workspace = true }
+tower-http = { workspace = true, features = ["trace"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "time", "fmt"] }
+uuid = { workspace = true, features = ["v4", "fast-rng", "macro-diagnostics"] }
+reqwest = { workspace = true, features = ["json"] }
+rand = { workspace = true }

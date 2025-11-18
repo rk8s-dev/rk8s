@@ -7,40 +7,39 @@ description = "Image builder for rk8s"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rkb"
 
 [dependencies]
-libfuse-fs = { path = "../libfuse-fs" }
-# libfuse-fs = "0.1.4"
-rfuse3 = { version = "0.0.5", features = ["tokio-runtime", "unprivileged"] }
-clap = { version = "4.5.31", features = ["derive"] }
-nix = { version = "0.29.0", features = ["fs", "process", "user", "sched", "mount"] }
-tokio = { version = "1.44.0", features = ["full"] }
-libc = "0.2.171"
-dockerfile-parser = "0.9.0"
-anyhow = "1.0.98"
-tar = "0.4.44"
-flate2 = { version = "1.1.1", features = ["zlib-rs"], default-features = false }
-walkdir = "2.3"
-sha2 = "0.10"
-oci-spec = "0.8.0"
-rand = "0.9.0"
-chrono = "0.4.40"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-once_cell = "1.21.3"
-dirs = "6.0.0"
-oci-client = "0.15.0"
-indicatif = "0.18.0"
-base64 = "0.21"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.145"
-ipc-channel = "0.20.1"
-reqwest = { version = "0.12.23", features = ["json"] }
-axum = "0.8.4"
-confy = { version = "1.0.0" }
-comfy-table = "7.2.1"
-qrcode = "0.14.1"
-async-trait = "0.1.89"
-futures = "0.3.31"
-iterator-ext = "0.2.1"
-tempfile = "3.19.1"
-uzers = "0.12.1"
-rayon = "1.11.0"
+libfuse-fs = { workspace = true }
+rfuse3 = { workspace = true, features = ["tokio-runtime", "unprivileged"] }
+clap = { workspace = true, features = ["derive"] }
+nix = { workspace = true, features = ["fs", "process", "user", "sched", "mount"] }
+tokio = { workspace = true, features = ["full"] }
+libc = { workspace = true }
+dockerfile-parser = { workspace = true }
+anyhow = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true, features = ["zlib-rs"], default-features = false }
+walkdir = { workspace = true }
+sha2 = { workspace = true }
+oci-spec = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+once_cell = { workspace = true }
+dirs = { workspace = true }
+oci-client = { workspace = true }
+indicatif = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+ipc-channel = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+axum = { workspace = true }
+confy = { workspace = true }
+comfy-table = { workspace = true }
+qrcode = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+iterator-ext = { workspace = true }
+tempfile = { workspace = true }
+uzers = { workspace = true }
+rayon = { workspace = true }
