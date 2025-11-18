@@ -567,6 +567,7 @@ impl StoredAttr {
         let (mode, nlink) = match kind {
             FileType::Dir => (0o040755, 2),
             FileType::File => (0o100644, 1),
+            FileType::Symlink => (0o120777, 1),
         };
         Self {
             size: 0,
@@ -600,6 +601,7 @@ impl StoredAttr {
 enum NodeKind {
     File,
     Dir,
+    Symlink,
 }
 
 impl From<FileType> for NodeKind {
@@ -607,6 +609,7 @@ impl From<FileType> for NodeKind {
         match value {
             FileType::File => NodeKind::File,
             FileType::Dir => NodeKind::Dir,
+            FileType::Symlink => NodeKind::Symlink,
         }
     }
 }
@@ -616,6 +619,7 @@ impl From<NodeKind> for FileType {
         match value {
             NodeKind::File => FileType::File,
             NodeKind::Dir => FileType::Dir,
+            NodeKind::Symlink => FileType::Symlink,
         }
     }
 }

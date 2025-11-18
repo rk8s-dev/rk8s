@@ -334,6 +334,7 @@ impl DatabaseType {
             DatabaseType::Sqlite { .. } => "sqlite",
             DatabaseType::Postgres { .. } => "postgres",
             DatabaseType::Etcd { .. } => "etcd",
+            DatabaseType::Redis { .. } => "redis",
         }
     }
 }

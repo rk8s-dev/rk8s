@@ -27,7 +27,7 @@ pub mod stores;
 #[allow(dead_code)]
 pub type MetaHandle<M> = factory::MetaHandle<M>;
 #[allow(unused_imports)]
-pub use factory::create_meta_store_from_url;
+pub use factory::{create_meta_store_from_url, create_redis_meta_store_from_url};
 pub use layer::MetaLayer;
 pub use permission::Permission;
 pub use store::MetaStore;
