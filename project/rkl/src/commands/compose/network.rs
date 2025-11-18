@@ -1,23 +1,24 @@
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::io::Write;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
 use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 use sysinfo::Pid;
 use sysinfo::System;
-use tracing_appender::non_blocking;
-use tracing_subscriber::EnvFilter;
 
 use crate::commands::compose::spec::NetworkDriver::Bridge;
 use crate::commands::compose::spec::NetworkDriver::Host;
 use crate::commands::compose::spec::NetworkDriver::Overlay;
 use crate::dns;
-use crate::dns::run_local_dns;
+use crate::dns::PID_FILE_PATH;
 
 use cni_plugin::ip_range::IpRange;
 use hickory_proto::rr::LowerName;
@@ -25,22 +26,16 @@ use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
 use libipam::config::IPAMConfig;
 use libipam::range_set::RangeSet;
-use nix::unistd::ForkResult;
-use nix::unistd::fork;
-use nix::unistd::getpid;
-use nix::unistd::setsid;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
-use tokio::runtime::Runtime;
-// use tracing_subscriber::prelude::*;
 
 use crate::commands::compose::spec::ComposeSpec;
 use crate::commands::compose::spec::NetworkSpec;
 use crate::commands::compose::spec::ServiceSpec;
 use crate::commands::container::ContainerRunner;
-use crate::dns::authority::DNS_SOCKET_PATH;
+use crate::dns::DNS_SOCKET_PATH;
 use anyhow::Result;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
@@ -257,7 +252,9 @@ impl NetworkManager {
         // allocate the bridge interface
         self.allocate_interface()?;
 
-        self.startup_dns_server()
+        self.startup_dns_server()?;
+
+        Ok(())
     }
 
     /// validate the correctness and initialize  the service_mapping
@@ -388,52 +385,48 @@ impl NetworkManager {
     }
 
     pub fn startup_dns_server(&self) -> Result<()> {
-        let pid_file = "/var/run/rkl_dns.pid";
-        match unsafe { fork().expect("failed to fork dns server child process") } {
-            ForkResult::Parent { child } => {
-                println!("Forked DNS server in child PID: {}", child);
-            }
-            ForkResult::Child => {
-                let child = getpid();
+        // TODO: Due to current test method(Directly run test_runner ./target/debug/deps/... )
+        // We CAN NOT USE #[cfg(test)] to distinct test or product environment 
+        // So here introduce RKL_TEST_MODE env TEMPORAILY.
 
-                let mut file = fs::File::create(pid_file)
-                    .map_err(|e| anyhow!("failed to create rkl's dns pid file: {e}")).unwrap();
-                writeln!(file, "{}", child).map_err(|e| {
-                    anyhow!("failed to write pid {child} to rkl's dns pid file: {e}")
-                }).unwrap();
+        let is_test_mode = env::var("RKL_TEST_MODE").is_ok();
+        let current_exe: PathBuf;
 
-                setsid().expect("Failed to setsid");
+        if is_test_mode {
+            current_exe = env::current_dir()
+                .map_err(|e| anyhow!("failed to get current executable path: {e}"))?
+                .join("target/debug/rkl");
+            println!("{current_exe:?}");
+        } else {
+            // ========== PRODUCTION LOGIC (#[cfg(not(test)])) ==========
+            current_exe = env::current_exe()
+                .map_err(|e| anyhow!("failed to get current executable path: {e}"))?;
+        }
 
+        let child_process = Command::new(&current_exe) // Use the path to the current executable
+            .arg("compose") // First argument: 'compose'
+            .arg("server") // Second argument: 'server'
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| anyhow!("failed to spawn DNS server child process: {e}"))?;
 
-                // Log file is now written to /var/log/rkl/child.log (see below).
-                let log_dir = "/var/log/rkl";
-                if let Err(e) = fs::create_dir_all(log_dir) {
-                    eprintln!("Failed to create log directory {log_dir}: {e}");
-                }
-                let file_appender = tracing_appender::rolling::never(log_dir, "child.log");
-                let (non_blocking, _guard) = non_blocking(file_appender);
+        // thread::sleep(time::Duration::from_secs(1000));
 
-                let _ = tracing_subscriber::fmt()
-                    .with_writer(non_blocking)
-                    .with_env_filter(EnvFilter::new("info"))
-                    .try_init();
+        let child_pid = child_process.id();
+        println!("Spawned DNS server in child PID: {}", child_pid);
 
-                let rt = Runtime::new()
-                    .map_err(|e| anyhow!("failed to init dns server's tokio runtime: {e}"))?;
-                println!("hahahahah");
-                rt.block_on(async {
-                    run_local_dns(Some(53), vec![])
-                        .await
-                        .map_err(|e| anyhow!("failed to run local dns server: {e}"))
-                })?;
-                std::process::exit(0);
-            }
-        };
+        let mut file = fs::File::create(PID_FILE_PATH)
+            .map_err(|e| anyhow!("failed to create rkl's dns pid file: {e}"))?;
+        writeln!(file, "{}", child_pid)
+            .map_err(|e| anyhow!("failed to write pid {child_pid} to rkl's dns pid file: {e}"))?;
+
         Ok(())
     }
 
-    pub fn clean_up(&self) -> Result<()> {
-        let pid_file = "/var/run/rkl_dns.pid";
+    pub fn clean_up() -> Result<()> {
+        let pid_file = PID_FILE_PATH;
         if Path::new(pid_file).exists() {
             if let Ok(pid_str) = fs::read_to_string(pid_file)
                 && let Ok(pid) = pid_str.trim().parse::<u32>()

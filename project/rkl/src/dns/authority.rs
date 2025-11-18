@@ -20,12 +20,10 @@ use hickory_server::{
 };
 use tracing::debug;
 
-use crate::dns::DNSUpdateMessage;
 use crate::dns::UpdateAction::Add;
 use crate::dns::UpdateAction::Delete;
 use crate::dns::UpdateAction::Update;
-
-pub const DNS_SOCKET_PATH: &str = "/var/run/rkl_dns.sock";
+use crate::dns::{DNS_SOCKET_PATH, DNSUpdateMessage};
 
 pub struct LocalAuthority {
     pub origin: LowerName,
@@ -142,7 +140,7 @@ impl LocalAuthority {
             fs::remove_file(DNS_SOCKET_PATH).await?;
         }
         let listener = UnixListener::bind(DNS_SOCKET_PATH)?;
-        debug!("RKL DNS daemon listening on {}", DNS_SOCKET_PATH);
+        println!("RKL DNS daemon listening on {}", DNS_SOCKET_PATH);
         loop {
             let (stream, _) = listener
                 .accept()
@@ -151,7 +149,7 @@ impl LocalAuthority {
             let this = Arc::clone(&self);
             tokio::spawn(async move {
                 if let Err(e) = this.handle_connection(stream).await {
-                    eprintln!("Eroor: {e}");
+                    eprintln!("Error: {e}");
                 }
             });
         }

@@ -18,6 +18,8 @@ use crate::dns::authority::{LocalAuthority, MemStore};
 
 pub const LOCAL_AUTHORITY_DOMAIN: &str = "rkl.internal.";
 pub const LOCAL_NAMESERVER: &str = "172.17.0.1";
+pub const PID_FILE_PATH: &str = "/var/run/rkl_dns.pid";
+pub const DNS_SOCKET_PATH: &str = "/var/run/rkl_dns.sock";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum UpdateAction {
@@ -48,7 +50,6 @@ pub fn parse_service_to_domain(srv_name: &str, domain: Option<&str>) -> String {
 ///
 /// Initialize both local-authority and forward-authority add it to catalog
 pub async fn run_local_dns(port: Option<u16>, domains: Vec<LowerName>) -> anyhow::Result<()> {
-    println!("_DNS server listening on ");
     let port = port.unwrap_or(53);
 
     let root_lowername = LowerName::from(Name::root());
