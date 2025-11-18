@@ -48,7 +48,6 @@ networks:
 #[test]
 #[serial]
 fn test_compose_up_and_down() {
-
     let compose_config = get_compose_config("test-compose-app");
     try_create_compose(compose_config, "test-compose-app");
 
@@ -150,6 +149,7 @@ fn create_compose_helper(compose_config: &str, project_name: &str) -> Result<(),
 }
 
 fn try_create_compose(compose_config: String, project_name: &str) {
+    unsafe { env::set_var("RKL_TEST_MODE", "on") };
     let res = create_compose_helper(&compose_config, project_name);
     if res.is_err() {
         error!(
