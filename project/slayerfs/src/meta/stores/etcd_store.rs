@@ -4,11 +4,12 @@
 
 use crate::chuck::SliceDesc;
 use crate::chuck::slice::key_for_slice;
+use crate::meta::backoff::backoff;
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
 use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
-use crate::meta::{INODE_ID_KEY, Permission};
+use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -19,12 +20,38 @@ use serde_json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+
+/// ID allocation batch size
+/// TODO: make configurable.
+const BATCH_SIZE: i64 = 1000;
+
+/// Local ID allocation pool
+///
+/// This structure maintains a range of pre-allocated IDs from etcd.
+/// Must be protected by a Mutex for thread-safe access, as multiple
+/// async tasks may attempt to allocate IDs concurrently.
+///
+/// The pool allocates BATCH_SIZE IDs from etcd at once and distributes
+/// them locally to reduce network round-trips.
+struct IdPool {
+    /// Next ID to allocate from local pool
+    next: i64,
+    /// End of current pool range (exclusive)
+    end: i64,
+}
 
 /// Etcd-based metadata store
 pub struct EtcdMetaStore {
     client: EtcdClient,
     _config: Config,
+    /// Local inode pool for lazy batch allocation
+    /// Starts empty (0, 0) and fills from etcd on first allocation request
+    inode_pool: Mutex<IdPool>,
+    /// Local slice ID pool for lazy batch allocation
+    /// Starts empty (0, 0) and fills from etcd on first allocation request
+    slice_pool: Mutex<IdPool>,
 }
 #[allow(dead_code)]
 impl EtcdMetaStore {
@@ -52,7 +79,12 @@ impl EtcdMetaStore {
         info!("Backend path: {}", backend_path.display());
 
         let client = Self::create_client(&_config).await?;
-        let store = Self { client, _config };
+        let store = Self {
+            client,
+            _config,
+            inode_pool: Mutex::new(IdPool { next: 0, end: 0 }),
+            slice_pool: Mutex::new(IdPool { next: 0, end: 0 }),
+        };
         store.init_root_directory().await?;
 
         info!("EtcdMetaStore initialized successfully");
@@ -64,7 +96,12 @@ impl EtcdMetaStore {
         info!("Initializing EtcdMetaStore from config");
 
         let client = Self::create_client(&_config).await?;
-        let store = Self { client, _config };
+        let store = Self {
+            client,
+            _config,
+            inode_pool: Mutex::new(IdPool { next: 0, end: 0 }),
+            slice_pool: Mutex::new(IdPool { next: 0, end: 0 }),
+        };
         store.init_root_directory().await?;
 
         info!("EtcdMetaStore initialized successfully");
@@ -269,11 +306,7 @@ impl EtcdMetaStore {
 
         for child_name in sorted_names {
             if let Some(forward_entry) = forward_entries_map.get(child_name.as_str()) {
-                let entry_type = if forward_entry.is_file {
-                    EntryType::File
-                } else {
-                    EntryType::Directory
-                };
+                let entry_type = forward_entry.resolved_entry_type();
 
                 content_list.push(ContentMetaModel {
                     inode: forward_entry.inode,
@@ -309,6 +342,7 @@ impl EtcdMetaStore {
                 entry_info.create_time,
                 entry_info.nlink as i32,
                 entry_info.deleted,
+                entry_info.symlink_target.clone(),
             );
             return Ok(Some(file_meta));
         }
@@ -349,6 +383,7 @@ impl EtcdMetaStore {
             parent_inode,
             entry_name: name.clone(),
             deleted: false,
+            symlink_target: None,
         };
 
         let forward_key = Self::etcd_forward_key(parent_inode, &name);
@@ -357,6 +392,7 @@ impl EtcdMetaStore {
             name: name.clone(),
             inode,
             is_file: false,
+            entry_type: Some(EntryType::Directory),
         };
         let forward_json = serde_json::to_string(&forward_entry)?;
 
@@ -473,6 +509,7 @@ impl EtcdMetaStore {
             parent_inode,
             entry_name: name.clone(),
             deleted: false,
+            symlink_target: None,
         };
 
         let forward_key = Self::etcd_forward_key(parent_inode, &name);
@@ -481,6 +518,7 @@ impl EtcdMetaStore {
             name: name.clone(),
             inode,
             is_file: true,
+            entry_type: Some(EntryType::File),
         };
         let forward_json = serde_json::to_string(&forward_entry)?;
 
@@ -546,53 +584,139 @@ impl EtcdMetaStore {
         }
     }
 
-    /// Generate unique ID using Etcd atomic counter
-    /// Uses compare-and-swap to ensure atomicity in distributed environment
+    /// Generate unique ID using local pool with batch allocation from Etcd
+    /// Allocates 1000 IDs at a time to minimize etcd requests
+    /// Supports multiple ID types (inode, slice, etc.) via different counter_key
     async fn generate_id(&self, counter_key: &str) -> Result<i64, MetaError> {
+        let start = std::time::Instant::now();
+
+        // Select the appropriate pool based on counter_key
+        let pool_mutex = if counter_key == INODE_ID_KEY {
+            &self.inode_pool
+        } else if counter_key == SLICE_ID_KEY {
+            &self.slice_pool
+        } else {
+            return Err(MetaError::Config(format!(
+                "Unknown counter key: {}",
+                counter_key
+            )));
+        };
+
+        // Acquire lock once and hold it through potential etcd allocation
+        // This prevents concurrent threads from all trying to refill simultaneously
+        let mut pool = pool_mutex.lock().await;
+
+        // Fast path: allocate from existing pool
+        if pool.next < pool.end {
+            let id = pool.next;
+            pool.next += 1;
+            let remaining = pool.end - pool.next;
+
+            info!(
+                counter_key = counter_key,
+                allocated_id = id,
+                pool_hit = true,
+                pool_remaining = remaining,
+                "ID allocated from pool (fast path)"
+            );
+
+            return Ok(id);
+        }
+
+        // Slow path: pool exhausted, need to allocate new batch from etcd
+        // Lock is held here, so only one thread per pool will do this
+        info!(
+            counter_key = counter_key,
+            pool_hit = false,
+            "Pool exhausted, allocating new batch from etcd"
+        );
+
         let mut client = self.client.clone();
 
-        // Retry loop for CAS operation
-        // TODO: think about how to keep in sync with remote
         for retry in 0..10 {
             match client.get(counter_key, None).await {
                 Ok(resp) => {
                     let (current_id, mod_revision) = if let Some(kv) = resp.kvs().first() {
-                        let id = String::from_utf8_lossy(kv.value())
-                            .parse::<i64>()
-                            .unwrap_or(1);
+                        let id =
+                            String::from_utf8_lossy(kv.value())
+                                .parse::<i64>()
+                                .map_err(|e| {
+                                    MetaError::Internal(format!(
+                                        "Invalid ID counter value in etcd: {}",
+                                        e
+                                    ))
+                                })?;
                         (id, kv.mod_revision())
                     } else {
-                        // First time initialization
-                        if let Err(e) = client.put(counter_key, "2", None).await {
+                        // First time initialization: allocate [2, 1002)
+                        if let Err(e) = client.put(counter_key, "1002", None).await {
                             error!("Failed to initialize ID counter: {}", e);
                             return Err(MetaError::Config(format!(
                                 "Failed to initialize ID counter: {}",
                                 e
                             )));
                         }
+                        // Allocate first batch [2, 1002), starting at 2 to reserve inode 1 for root directory
+                        pool.next = 3;
+                        pool.end = 1002;
+
+                        let elapsed = start.elapsed();
+                        info!(
+                            counter_key = counter_key,
+                            allocated_id = 2,
+                            batch_size = BATCH_SIZE,
+                            etcd_latency_ms = elapsed.as_millis() as u64,
+                            "ID pool initialized"
+                        );
+
                         return Ok(2);
                     };
 
-                    let next_id = current_id + 1;
-
-                    // Use transaction for atomic compare-and-swap
+                    // Allocate batch from etcd: [current_id, current_id + BATCH_SIZE)
+                    // Return current_id immediately, store [current_id + 1, ...) in pool
+                    let next_etcd_id = current_id
+                        .checked_add(BATCH_SIZE)
+                        .ok_or_else(|| MetaError::Internal("ID counter overflow".to_string()))?;
 
                     let cmp = Compare::mod_revision(counter_key, CompareOp::Equal, mod_revision);
-                    let put_op = TxnOp::put(counter_key, next_id.to_string(), None);
+                    let put_op = TxnOp::put(counter_key, next_etcd_id.to_string(), None);
                     let txn = Txn::new().when([cmp]).and_then([put_op]);
 
                     match client.txn(txn).await {
                         Ok(txn_resp) => {
                             if txn_resp.succeeded() {
-                                // CAS succeeded, return the new ID
-                                return Ok(next_id);
+                                // Successfully allocated batch, update pool and return first ID
+                                pool.next = current_id + 1;
+                                pool.end = next_etcd_id;
+
+                                let elapsed = start.elapsed();
+                                info!(
+                                    counter_key = counter_key,
+                                    allocated_id = current_id,
+                                    batch_size = BATCH_SIZE,
+                                    etcd_latency_ms = elapsed.as_millis() as u64,
+                                    retry_count = retry,
+                                    "ID batch allocated from etcd"
+                                );
+
+                                return Ok(current_id);
                             } else {
-                                // CAS failed, retry
+                                // CAS failed (another client got it), retry
+                                warn!(
+                                    counter_key = counter_key,
+                                    retry_count = retry,
+                                    "CAS conflict detected, retrying"
+                                );
+
                                 if retry < 9 {
+                                    tokio::time::sleep(Duration::from_millis(
+                                        50 * (1 << retry.min(3)),
+                                    ))
+                                    .await;
                                     continue;
                                 } else {
                                     return Err(MetaError::Config(
-                                        "Failed to generate ID after max retries".to_string(),
+                                        "Failed to allocate ID batch after max retries".to_string(),
                                     ));
                                 }
                             }
@@ -600,7 +724,7 @@ impl EtcdMetaStore {
                         Err(e) => {
                             error!("Failed to execute transaction: {}", e);
                             return Err(MetaError::Config(format!(
-                                "Failed to execute ID generation transaction: {}",
+                                "Failed to execute ID allocation transaction: {}",
                                 e
                             )));
                         }
@@ -617,7 +741,7 @@ impl EtcdMetaStore {
         }
 
         Err(MetaError::Config(
-            "Failed to generate ID: max retries exceeded".to_string(),
+            "Failed to allocate ID batch: max retries exceeded".to_string(),
         ))
     }
 
@@ -626,37 +750,47 @@ impl EtcdMetaStore {
         F: Fn(T) -> T,
         T: Serialize + DeserializeOwned + Clone,
     {
-        let mut client = self.client.clone();
+        let client = self.client.clone();
 
-        for _ in 0..10 {
-            let resp = client
-                .get(key, None)
-                .await
-                .map_err(|e| MetaError::Config(format!("Failed to get key: {e}")))?;
+        let f = || {
+            // Cloning client is cheap.
+            let mut client = client.clone();
 
-            let (current, version) = match resp.kvs().first() {
-                Some(kv) => (f(serde_json::from_slice::<T>(kv.value())?), kv.version()),
-                None => (init.clone(), 0),
-            };
-            let current = serde_json::to_string(&current)?;
+            // A clone we cannot avoid :(
+            let init = init.clone();
 
-            let compare = Compare::version(key, CompareOp::Equal, version);
-            let op = TxnOp::put(key, current, None);
-            let txn = Txn::new().when([compare]).and_then([op]);
+            // Capture f by ref to avoid clone.
+            let f = &f;
 
-            match client.txn(txn).await {
-                Ok(txn_resp) if txn_resp.succeeded() => return Ok(()),
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(MetaError::Config(format!(
+            async move {
+                let resp = client
+                    .get(key, None)
+                    .await
+                    .map_err(|e| MetaError::Config(format!("Failed to get key: {e}")))?;
+
+                let (current, version) = match resp.kvs().first() {
+                    Some(kv) => (f(serde_json::from_slice::<T>(kv.value())?), kv.version()),
+                    None => (init, 0),
+                };
+                let current = serde_json::to_string(&current)?;
+
+                let compare = Compare::version(key, CompareOp::Equal, version);
+                let op = TxnOp::put(key, current, None);
+                let txn = Txn::new().when([compare]).and_then([op]);
+
+                match client.txn(txn).await {
+                    Ok(txn_resp) if txn_resp.succeeded() => Ok(()),
+                    Ok(_) => Err(MetaError::ContinueRetry),
+                    Err(e) => Err(MetaError::Config(format!(
                         "Failed to execute transaction: {e}"
-                    )));
+                    ))),
                 }
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        Err(MetaError::MaxRetriesExceeded)
+        };
+
+        backoff(10, f).await
     }
+
     /// Get a clone of the etcd client (for Watch Worker)
     pub fn get_client(&self) -> EtcdClient {
         self.client.clone()
@@ -813,10 +947,20 @@ impl MetaStore for EtcdMetaStore {
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         if let Ok(Some(file_meta)) = self.get_file_meta(ino).await {
             let permission = file_meta.permission();
+            let kind = if file_meta.symlink_target.is_some() {
+                FileType::Symlink
+            } else {
+                FileType::File
+            };
+            let size = if let Some(target) = &file_meta.symlink_target {
+                target.len() as u64
+            } else {
+                file_meta.size as u64
+            };
             return Ok(Some(FileAttr {
                 ino: file_meta.inode,
-                size: file_meta.size as u64,
-                kind: FileType::File,
+                size,
+                kind,
                 mode: permission.mode,
                 uid: permission.uid,
                 gid: permission.gid,
@@ -887,6 +1031,13 @@ impl MetaStore for EtcdMetaStore {
                             return Ok(None);
                         }
                     }
+                    EntryType::Symlink => {
+                        if index == parts.len() - 1 {
+                            return Ok(Some((entry.inode, FileType::Symlink)));
+                        } else {
+                            return Ok(None);
+                        }
+                    }
                 },
                 None => return Ok(None),
             }
@@ -916,6 +1067,7 @@ impl MetaStore for EtcdMetaStore {
             let kind = match content.entry_type {
                 EntryType::File => FileType::File,
                 EntryType::Directory => FileType::Dir,
+                EntryType::Symlink => FileType::Symlink,
             };
             entries.push(DirEntry {
                 name: content.entry_name,
@@ -1021,6 +1173,259 @@ impl MetaStore for EtcdMetaStore {
 
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
         self.create_file_internal(parent, name).await
+    }
+
+    async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
+        if ino == 1 {
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to the root inode".into(),
+            ));
+        }
+
+        let parent_meta = self
+            .get_access_meta(parent)
+            .await?
+            .ok_or(MetaError::ParentNotFound(parent))?;
+        if !parent_meta.permission().is_directory() {
+            return Err(MetaError::NotDirectory(parent));
+        }
+
+        if self.lookup(parent, name).await?.is_some() {
+            return Err(MetaError::AlreadyExists {
+                parent,
+                name: name.to_string(),
+            });
+        }
+
+        let reverse_key = Self::etcd_reverse_key(ino);
+        let mut entry_info = self
+            .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        if !entry_info.is_file {
+            return Err(MetaError::NotSupported(
+                "hard links are only supported for files and symlinks".into(),
+            ));
+        }
+        if entry_info.deleted || entry_info.nlink == 0 {
+            return Err(MetaError::NotFound(ino));
+        }
+
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        entry_info.nlink = entry_info.nlink.saturating_add(1);
+        entry_info.modify_time = now;
+        entry_info.parent_inode = parent;
+        entry_info.entry_name = name.to_string();
+        entry_info.deleted = false;
+
+        let forward_key = Self::etcd_forward_key(parent, name);
+        let entry_type = if entry_info.symlink_target.is_some() {
+            EntryType::Symlink
+        } else {
+            EntryType::File
+        };
+        let forward_entry = EtcdForwardEntry {
+            parent_inode: parent,
+            name: name.to_string(),
+            inode: ino,
+            is_file: true,
+            entry_type: Some(entry_type),
+        };
+
+        let updated_json = serde_json::to_string(&entry_info).map_err(|e| {
+            MetaError::Internal(format!(
+                "Failed to serialize entry info during link operation: {e}"
+            ))
+        })?;
+        let forward_json = serde_json::to_string(&forward_entry).map_err(|e| {
+            MetaError::Internal(format!(
+                "Failed to serialize forward entry during link operation: {e}"
+            ))
+        })?;
+
+        info!(
+            "Creating hard link with atomic transaction: src_inode={}, parent={}, name={}",
+            ino, parent, name
+        );
+
+        let mut client = self.client.clone();
+        let txn = Txn::new()
+            .when([
+                Compare::version(forward_key.clone(), CompareOp::Equal, 0),
+                Compare::version(reverse_key.clone(), CompareOp::Greater, 0),
+            ])
+            .and_then([
+                TxnOp::put(forward_key.clone(), forward_json, None),
+                TxnOp::put(reverse_key.clone(), updated_json, None),
+            ]);
+
+        let resp = client
+            .txn(txn)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Atomic link transaction failed: {e}")))?;
+
+        if !resp.succeeded() {
+            if self.lookup(parent, name).await?.is_some() {
+                return Err(MetaError::AlreadyExists {
+                    parent,
+                    name: name.to_string(),
+                });
+            }
+            if self
+                .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+                .await?
+                .is_none()
+            {
+                return Err(MetaError::NotFound(ino));
+            }
+            return Err(MetaError::Internal(
+                "Atomic link transaction failed unexpected compare".into(),
+            ));
+        }
+
+        let name_for_closure = name.to_string();
+        let ino_for_closure = ino;
+        if let Err(e) = self
+            .update_parent_children(
+                parent,
+                move |children| {
+                    children.insert(name_for_closure.clone(), ino_for_closure);
+                },
+                10,
+            )
+            .await
+        {
+            warn!(
+                "Link succeeded but failed to update parent children map: parent={}, name={}, inode={}, error={}. Forward key created, lookup remains consistent.",
+                parent, name, ino, e
+            );
+        }
+
+        self.stat(ino).await?.ok_or(MetaError::NotFound(ino))
+    }
+
+    async fn symlink(
+        &self,
+        parent: i64,
+        name: &str,
+        target: &str,
+    ) -> Result<(i64, FileAttr), MetaError> {
+        let parent_meta = self
+            .get_access_meta(parent)
+            .await?
+            .ok_or(MetaError::ParentNotFound(parent))?;
+        if !parent_meta.permission().is_directory() {
+            return Err(MetaError::NotDirectory(parent));
+        }
+
+        if self.lookup(parent, name).await?.is_some() {
+            return Err(MetaError::AlreadyExists {
+                parent,
+                name: name.to_string(),
+            });
+        }
+
+        let inode = self.generate_id(INODE_ID_KEY).await?;
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let owner_uid = parent_meta.permission().uid;
+        let owner_gid = parent_meta.permission().gid;
+        let perm = Permission::new(0o120777, owner_uid, owner_gid);
+
+        let entry_info = EtcdEntryInfo {
+            is_file: true,
+            size: Some(target.len() as i64),
+            version: Some(0),
+            permission: perm,
+            access_time: now,
+            modify_time: now,
+            create_time: now,
+            nlink: 1,
+            parent_inode: parent,
+            entry_name: name.to_string(),
+            deleted: false,
+            symlink_target: Some(target.to_string()),
+        };
+
+        let forward_key = Self::etcd_forward_key(parent, name);
+        let forward_entry = EtcdForwardEntry {
+            parent_inode: parent,
+            name: name.to_string(),
+            inode,
+            is_file: true,
+            entry_type: Some(EntryType::Symlink),
+        };
+
+        let reverse_key = Self::etcd_reverse_key(inode);
+        let forward_json = serde_json::to_string(&forward_entry).map_err(|e| {
+            MetaError::Internal(format!("Failed to serialize symlink forward entry: {e}"))
+        })?;
+        let reverse_json = serde_json::to_string(&entry_info).map_err(|e| {
+            MetaError::Internal(format!("Failed to serialize symlink entry info: {e}"))
+        })?;
+
+        info!(
+            "Creating symlink with transaction: parent={}, name={}, target={} -> inode={}",
+            parent, name, target, inode
+        );
+
+        let operations = vec![
+            (forward_key.as_str(), forward_json.as_str()),
+            (reverse_key.as_str(), reverse_json.as_str()),
+        ];
+
+        self.create_entry(&forward_key, &operations, parent, name)
+            .await?;
+
+        let name_for_closure = name.to_string();
+        let inode_for_closure = inode;
+        if let Err(e) = self
+            .update_parent_children(
+                parent,
+                move |children| {
+                    children.insert(name_for_closure.clone(), inode_for_closure);
+                },
+                10,
+            )
+            .await
+        {
+            error!(
+                "Symlink created but failed to update parent children map: parent={}, name={}, inode={}, error={}. Rolling back forward entry.",
+                parent, name, inode, e
+            );
+
+            let rollback_keys = vec![forward_key.as_str(), reverse_key.as_str()];
+            if let Err(rollback_err) = self.delete_entry(&forward_key, &rollback_keys, inode).await
+            {
+                error!(
+                    "Failed to rollback symlink creation after parent update error: inode={}, error={}",
+                    inode, rollback_err
+                );
+            }
+
+            return Err(MetaError::Internal(format!(
+                "Failed to update parent children map: {e}"
+            )));
+        }
+
+        let attr = self.stat(inode).await?.ok_or(MetaError::NotFound(inode))?;
+        Ok((inode, attr))
+    }
+
+    async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
+        let entry_info = self
+            .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        if entry_info.deleted {
+            return Err(MetaError::NotFound(ino));
+        }
+
+        entry_info
+            .symlink_target
+            .ok_or_else(|| MetaError::NotSupported(format!("inode {ino} is not a symbolic link")))
     }
 
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
@@ -1151,6 +1556,7 @@ impl MetaStore for EtcdMetaStore {
 
         let entry_ino = forward_entry.inode;
         let is_file = forward_entry.is_file;
+        let entry_type = forward_entry.entry_type.clone();
 
         let reverse_key = Self::etcd_reverse_key(entry_ino);
         let mut entry_info = self
@@ -1170,6 +1576,7 @@ impl MetaStore for EtcdMetaStore {
             name: new_name.clone(),
             inode: entry_ino,
             is_file,
+            entry_type,
         };
         let new_forward_json = serde_json::to_string(&new_forward_entry)?;
 

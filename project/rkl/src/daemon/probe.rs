@@ -838,10 +838,9 @@ mod tests {
             kind: "Pod".to_string(),
             metadata: ObjectMeta {
                 name: "demo".to_string(),
-                uid: None,
                 namespace: "default".to_string(),
-                labels,
                 annotations: HashMap::new(),
+                ..Default::default()
             },
             spec: PodSpec {
                 node_name: None,

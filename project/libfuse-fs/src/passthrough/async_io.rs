@@ -820,7 +820,7 @@ impl Filesystem for PassthroughFs {
             }
         }
 
-        if set_attr.atime.is_some() && set_attr.mtime.is_some() {
+        if set_attr.atime.is_some() || set_attr.mtime.is_some() {
             // POSIX utime() permission rules:
             // - utime(NULL): requires owner OR write permission
             // - utime(&times): requires owner only
@@ -830,9 +830,6 @@ impl Filesystem for PassthroughFs {
             // - If both nsec == 0 and timestamp is in the past: likely utime(&times)
             // - Otherwise: likely utime(NULL) which gets current time with nsec precision
 
-            let atime_ts = set_attr.atime.unwrap();
-            let mtime_ts = set_attr.mtime.unwrap();
-
             // SAFETY: libc::time with null pointer is a read-only syscall that always
             // succeeds and doesn't modify memory.
             let now = unsafe { libc::time(std::ptr::null_mut()) };
@@ -840,8 +837,14 @@ impl Filesystem for PassthroughFs {
             // Heuristic: utime(&times) typically sets whole seconds (both nsec=0) to past times.
             // utime(NULL) sets current time which usually has non-zero nsec.
             // Both timestamps and both conditions must be satisfied to avoid false positives.
-            let is_utime_times = (atime_ts.nsec == 0 && mtime_ts.nsec == 0)
-                && (atime_ts.sec < now && mtime_ts.sec < now);
+            let is_utime_times =
+                if let (Some(atime_ts), Some(mtime_ts)) = (set_attr.atime, set_attr.mtime) {
+                    (atime_ts.nsec == 0 && mtime_ts.nsec == 0)
+                        && (atime_ts.sec < now && mtime_ts.sec < now)
+                } else {
+                    // If one is None, it's likely a specific update, treat as requiring ownership.
+                    true
+                };
 
             let st = stat_fd(&file, None)?;
             let uid = self.cfg.mapping.get_uid(req.uid);
@@ -878,10 +881,14 @@ impl Filesystem for PassthroughFs {
                     tv_nsec: libc::UTIME_OMIT,
                 },
             ];
-            tvs[0].tv_sec = atime_ts.sec;
-            tvs[0].tv_nsec = atime_ts.nsec as i64;
-            tvs[1].tv_sec = mtime_ts.sec;
-            tvs[1].tv_nsec = mtime_ts.nsec as i64;
+            if let Some(atime_ts) = set_attr.atime {
+                tvs[0].tv_sec = atime_ts.sec;
+                tvs[0].tv_nsec = atime_ts.nsec as i64;
+            }
+            if let Some(mtime_ts) = set_attr.mtime {
+                tvs[1].tv_sec = mtime_ts.sec;
+                tvs[1].tv_nsec = mtime_ts.nsec as i64;
+            }
 
             // Safe because this doesn't modify any memory and we check the return value.
             let res = match data {
@@ -897,7 +904,16 @@ impl Filesystem for PassthroughFs {
             }
         }
 
-        self.getattr(req, inode, fh, 0).await
+        // After any successful modification, re-stat the file to get fresh attributes.
+        // Use `do_getattr` which correctly handles ID mapping.
+        let (new_stat, _attr_timeout) = self.do_getattr(inode, fh).await?;
+        // Crucially, return a ReplyAttr with a zero TTL.
+        // This tells the kernel to invalidate its attribute cache for this inode immediately.
+        // Subsequent `stat()` calls from clients will trigger a fresh `getattr` request.
+        Ok(ReplyAttr {
+            ttl: Duration::new(0, 0),
+            attr: convert_stat64_to_file_attr(new_stat),
+        })
     }
 
     /// read symbolic link.
@@ -1134,28 +1150,60 @@ impl Filesystem for PassthroughFs {
                 }
             }
             None => {
-                let ret = unsafe {
-                    pread(
-                        raw_fd as c_int,
-                        buf.as_mut_ptr() as *mut libc::c_void,
-                        size as size_t,
-                        offset as off_t,
-                    )
-                };
-                if ret >= 0 {
-                    let bytes_read = ret as usize;
-                    if bytes_read < size as usize {
-                        buf.truncate(bytes_read); // Adjust the buffer size
+                if offset > i64::MAX as u64 {
+                    error!("read error: offset too large: {}", offset);
+                    return Err(Errno::from(libc::EOVERFLOW));
+                }
+                const ALIGN: usize = 4096;
+                let open_flags = data.get_flags().await;
+                let ret = if (open_flags as i32 & libc::O_DIRECT) != 0 {
+                    let mut aligned_buf = unsafe {
+                        let layout = std::alloc::Layout::from_size_align(size as _, ALIGN).unwrap();
+                        let ptr = std::alloc::alloc(layout);
+                        if ptr.is_null() {
+                            return Err(io::Error::from_raw_os_error(libc::ENOMEM).into());
+                        }
+                        Vec::from_raw_parts(ptr, size as _, size as _)
+                    };
+                    let ret = unsafe {
+                        pread(
+                            raw_fd as c_int,
+                            aligned_buf.as_mut_ptr() as *mut libc::c_void,
+                            size as size_t,
+                            offset as off_t,
+                        )
+                    };
+
+                    if ret >= 0 {
+                        let bytes_read = ret as usize;
+                        buf.as_mut_slice()[..bytes_read]
+                            .copy_from_slice(&aligned_buf[..bytes_read]);
                     }
+                    ret
                 } else {
+                    unsafe {
+                        pread(
+                            raw_fd as c_int,
+                            buf.as_mut_ptr() as *mut libc::c_void,
+                            size as size_t,
+                            offset as off_t,
+                        )
+                    }
+                };
+                if ret < 0 {
                     let e = io::Error::last_os_error();
-                    // if e.raw_os_error() == Some(libc::EINVAL) {
-                    //     // Handle EINVAL for sparse files by returning zeroed data
-                    //     buf.clear();
-                    // } else {
                     error!("read error: {e:?}");
-                    return Err(Errno::from(e.raw_os_error().unwrap_or(-1)));
-                    // }
+                    error!(
+                        "pread raw_fd={}, pointer={:p}, size={}, offset={}",
+                        raw_fd,
+                        buf.as_mut_ptr(),
+                        size,
+                        offset
+                    );
+                    return Err(e.into());
+                } else {
+                    let bytes_read = ret as usize;
+                    buf.truncate(bytes_read);
                 }
             }
         }
@@ -1185,10 +1233,8 @@ impl Filesystem for PassthroughFs {
     ) -> Result<ReplyWrite> {
         let handle_data = self.get_data(fh, inode, libc::O_RDWR).await?;
         let file = &handle_data.file;
-        let raw_fd = {
-            let _guard = handle_data.lock.lock().await;
-            handle_data.borrow_fd().as_raw_fd()
-        };
+        let _guard = handle_data.lock.lock().await;
+        let raw_fd = handle_data.borrow_fd().as_raw_fd();
 
         let res = if self.cfg.use_mmap {
             self.write_to_mmap(inode, offset, data, file).await.ok()
@@ -1200,19 +1246,11 @@ impl Filesystem for PassthroughFs {
             Some(ret) => ret as isize,
             None => {
                 let size = data.len();
-
+                if offset > i64::MAX as u64 {
+                    error!("write error: offset too large: {}", offset);
+                    return Err(Errno::from(libc::EOVERFLOW));
+                }
                 self.check_fd_flags(&handle_data, raw_fd, flags).await?;
-                // // Debug for O_DIRECT alignment issues
-                // if (flags & libc::O_DIRECT as u32) != 0 {
-                //     let block_size = 512;
-                //     debug!(
-                //         "Alignment check (block_size={}): offset_ok={}, len_ok={}, addr_ok={}",
-                //         block_size,
-                //         offset % block_size as u64 == 0,
-                //         size % block_size == 0,
-                //         (data.as_ptr() as usize) % block_size == 0
-                //     );
-                // }
                 let ret = unsafe {
                     libc::pwrite(
                         raw_fd as c_int,
@@ -1226,6 +1264,13 @@ impl Filesystem for PassthroughFs {
                 } else {
                     let e = io::Error::last_os_error();
                     error!("write error: {e:?}");
+                    error!(
+                        "pwrite raw_fd={}, pointer={:p}, size={}, offset={}",
+                        raw_fd,
+                        data.as_ptr(),
+                        size,
+                        offset
+                    );
                     return Err(Errno::from(e.raw_os_error().unwrap_or(-1)));
                 }
             }

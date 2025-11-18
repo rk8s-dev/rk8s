@@ -25,5 +25,4 @@ rust_library(
     edition = "2018",
     rustc_flags = ["@$(location :cpufeatures-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.177:libc"],
 )

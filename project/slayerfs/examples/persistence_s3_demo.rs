@@ -208,6 +208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let meta = MetaStoreFactory::create_from_config(config)
             .await
             .map_err(|e| format!("Failed to initialize metadata storage: {}", e))?;
+        let meta_store = meta.store();
 
         let mut s3_config = S3Config {
             bucket: bucket.clone(),
@@ -226,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let block_store = ObjectBlockStore::new(object_client);
 
         let layout = ChunkLayout::default();
-        let fs = VFS::new(layout, block_store, meta)
+        let fs = VFS::new(layout, block_store, meta_store)
             .await
             .map_err(|e| format!("Failed to create VFS: {}", e))?;
 

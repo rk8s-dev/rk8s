@@ -139,6 +139,93 @@ You can delete a pod by:
 sudo project/target/debug/rkl pod delete podname --cluster 10.20.173.26:50051
 ```
 **`podname`** must be replaced with the actual name of the pod you want to delete (for example, `test-pod1` ).
+### 7.Manage ReplicaSets
+
+RKS supports ReplicaSet controllers to maintain a stable set of replica Pods running at any given time.
+
+#### 7.1 Create a ReplicaSet
+
+Here is an example of replicaset.yaml:
+
+```yaml
+apiVersion: v1
+kind: ReplicaSet
+metadata:
+  name: nginx-rs
+  namespace: default
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        app: nginx
+        tier: frontend
+        bundle: ./rk8s/project/test/bundles/pause
+    spec:
+      containers:
+        - name: nginx
+          image: ./rk8s/project/test/bundles/busybox
+          args:
+            - "sleep"
+            - "3600"
+          ports:
+            - containerPort: 80
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+```
+
+Create the ReplicaSet:
+
+```bash
+sudo project/target/debug/rkl rs create replicaset.yaml --cluster 10.20.173.26:50051
+```
+
+#### 7.2 List ReplicaSets
+
+```bash
+sudo project/target/debug/rkl rs list --cluster 10.20.173.26:50051
+```
+
+The output shows:
+
+```
+NAME       DESIRED   CURRENT   READY   AGE
+nginx-rs   3         3         3       2m30s
+```
+
+#### 7.3 Get ReplicaSet details
+
+```bash
+sudo project/target/debug/rkl rs get nginx-rs --cluster 10.20.173.26:50051
+```
+
+This command outputs the complete YAML definition of the ReplicaSet, including its current status.
+
+#### 7.4 Update a ReplicaSet
+
+You can update the ReplicaSet by modifying the YAML file (e.g., changing `replicas` from 3 to 5) and applying the changes:
+
+```bash
+sudo project/target/debug/rkl rs apply replicaset.yaml --cluster 10.20.173.26:50051
+```
+
+The ReplicaSet controller will automatically create or delete Pods to match the desired replica count.
+
+#### 7.5 Delete a ReplicaSet
+
+```bash
+sudo project/target/debug/rkl rs delete nginx-rs --cluster 10.20.173.26:50051
+```
+
+**Note:** Deleting a ReplicaSet will also delete all Pods managed by it (cascading deletion with Background policy).
 ## Notes
 After restarting Xline, you need to clean up the existing CNI network bridge to avoid conflicts.  
 Run the following commands on the host:

@@ -29,7 +29,6 @@ rust_library(
     rustc_flags = ["@$(location :libcgroups-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//project/libnetwork:liblibnetwork",
         "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset",
         "//third-party/rust/crates/nix/0.29.0:nix",
         "//third-party/rust/crates/oci-spec/0.8.3:oci-spec",

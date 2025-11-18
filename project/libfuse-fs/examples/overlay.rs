@@ -111,16 +111,18 @@ async fn main() -> Result<(), std::io::Error> {
 
     set_log(&args);
 
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open("/tmp/overlayfs.log")?;
-    use std::os::unix::io::AsRawFd;
-    unsafe {
-        libc::dup2(file.as_raw_fd(), libc::STDOUT_FILENO);
-        libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO);
-    }
+    // This is commented out because some testcase(fsstress) may output huge logs, exhausting disk space.
+    // Uncomment this when we need to debug.
+    // let file = std::fs::OpenOptions::new()
+    //     .create(true)
+    //     .write(true)
+    //     .truncate(true)
+    //     .open("/tmp/overlayfs.log")?;
+    // use std::os::unix::io::AsRawFd;
+    // unsafe {
+    //     libc::dup2(file.as_raw_fd(), libc::STDOUT_FILENO);
+    //     libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO);
+    // }
     let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
         name: Some(args.name),
         mountpoint: args.mountpoint,

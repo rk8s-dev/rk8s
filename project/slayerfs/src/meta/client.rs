@@ -5,21 +5,76 @@ mod session;
 
 use crate::chuck::SliceDesc;
 use crate::meta::config::{CacheCapacity, CacheTtl};
-use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
+use crate::meta::layer::MetaLayer;
+use crate::meta::store::{
+    DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SessionInfo, SetAttrFlags, SetAttrRequest,
+    StatFsSnapshot,
+};
 use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker, WatchConfig};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use dashmap::DashMap;
+use if_addrs::get_if_addrs;
 use moka::future::Cache;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
+use std::{collections::HashSet, process};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{info, warn};
 
+use crate::vfs::extract_ino_and_chunk_index;
 use cache::InodeCache;
+use chrono::{DateTime, Utc};
+use hostname::get as get_hostname;
 use path_trie::PathTrie;
+use serde::Serialize;
 use session::SessionManager;
 
+const ROOT_INODE: i64 = 1;
+
+#[derive(Serialize)]
+struct SessionInfoPayload {
+    version: String,
+    host_name: String,
+    ip_addrs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mount_point: Option<String>,
+    mount_time: DateTime<Utc>,
+    process_id: u32,
+}
+
+/// Configuration options for `MetaClient` that correspond to the core metadata
+/// behaviours implemented by the Go `baseMeta`. Only a minimal subset of
+/// fields is supported for now; additional knobs can be added as the Rust
+/// client gains feature parity.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct MetaClientOptions {
+    /// Optional mount point string used for diagnostics and session payloads.
+    pub mount_point: Option<String>,
+    /// Interval used by the background session heartbeat task.
+    pub session_heartbeat: Duration,
+    /// When true, metadata mutating operations return `MetaError::NotSupported`.
+    pub read_only: bool,
+    /// Disable background maintenance tasks (reserved for future use).
+    pub no_background_jobs: bool,
+    /// When true, lookups fall back to case-insensitive matching similar to
+    /// JuiceFS `CaseInsensi`.
+    pub case_insensitive: bool,
+}
+
+impl Default for MetaClientOptions {
+    fn default() -> Self {
+        Self {
+            mount_point: None,
+            session_heartbeat: DEFAULT_SESSION_HEARTBEAT,
+            read_only: false,
+            no_background_jobs: false,
+            case_insensitive: false,
+        }
+    }
+}
 const DEFAULT_SESSION_HEARTBEAT: Duration = Duration::from_secs(30);
 
 /// Metadata client with intelligent caching
@@ -28,8 +83,13 @@ const DEFAULT_SESSION_HEARTBEAT: Duration = Duration::from_secs(30);
 /// - Inode attributes (file metadata)
 /// - Directory children (directory listings)
 /// - Path-to-inode mappings (path resolution)
-pub struct MetaClient {
-    store: Arc<dyn MetaStore + Send + Sync>,
+pub struct MetaClient<T: MetaStore> {
+    store: Arc<T>,
+    options: MetaClientOptions,
+    root: AtomicI64,
+    #[allow(dead_code)]
+    session_id: AtomicU64,
+    umounting: AtomicBool,
     inode_cache: InodeCache,
     /// it's absolute path.
     /// Used for quick lookups and invalidation
@@ -53,7 +113,7 @@ pub struct MetaClient {
     watch_worker: Option<Arc<EtcdWatchWorker>>,
 }
 
-impl MetaClient {
+impl<T: MetaStore + 'static> MetaClient<T> {
     /// Creates a new MetaClient with cache configuration.
     ///
     /// # Arguments
@@ -65,14 +125,23 @@ impl MetaClient {
     /// # Returns
     ///
     /// A new `MetaClient` instance with initialized caches
-    pub fn new(
-        store: Arc<dyn MetaStore + Send + Sync>,
+    #[allow(dead_code)]
+    pub fn new(store: Arc<T>, capacity: CacheCapacity, ttl: CacheTtl) -> Arc<Self> {
+        Self::with_options(store, capacity, ttl, MetaClientOptions::default())
+    }
+
+    /// Creates a new `MetaClient` with cache configuration and additional
+    /// behavioural options ported from the JuiceFS `baseMeta` implementation.
+    pub fn with_options(
+        store: Arc<T>,
         capacity: CacheCapacity,
         ttl: CacheTtl,
+        options: MetaClientOptions,
     ) -> Arc<Self> {
         // Detect if this is an etcd backend and start Watch Worker
-        let watch_worker = if let Some(etcd_store) = store.as_any().downcast_ref::<EtcdMetaStore>()
-        {
+        let watch_worker = if options.no_background_jobs {
+            None
+        } else if let Some(etcd_store) = store.as_any().downcast_ref::<EtcdMetaStore>() {
             let client = etcd_store.get_client();
 
             // Create Watch Worker configuration
@@ -102,9 +171,16 @@ impl MetaClient {
             None
         };
 
+        let root_ino = store.root_ino();
+        let session_heartbeat = options.session_heartbeat;
+
         // Create MetaClient
         let client = Arc::new(Self {
             store,
+            options,
+            root: AtomicI64::new(root_ino),
+            session_id: AtomicU64::new(0),
+            umounting: AtomicBool::new(false),
             inode_cache: InodeCache::new(capacity.inode as u64, ttl.inode_ttl),
             path_cache: Cache::builder()
                 .max_capacity(capacity.path as u64)
@@ -112,21 +188,89 @@ impl MetaClient {
                 .build(),
             path_trie: Arc::new(PathTrie::new()),
             inode_to_paths: Arc::new(DashMap::new()),
-            session_manager: Arc::new(SessionManager::new(DEFAULT_SESSION_HEARTBEAT)),
+            session_manager: Arc::new(SessionManager::new(session_heartbeat)),
             watch_worker: watch_worker.as_ref().map(|(w, _)| w.clone()),
         });
 
         // Start cache invalidation handler if Watch Worker is active
-        if let Some((_, rx)) = watch_worker {
+        if let Some((_, rx)) = watch_worker.clone() {
             let client_clone = client.clone();
             tokio::spawn(async move {
                 client_clone.handle_cache_invalidation(rx).await;
             });
         }
 
+        if !client.options.read_only && !client.options.no_background_jobs {
+            let client_clone = client.clone();
+            tokio::spawn(async move {
+                if let Err(err) = client_clone.start_default_session().await {
+                    warn!("MetaClient: failed to auto-start session: {err}");
+                }
+            });
+        }
+
         client
     }
 
+    /// Returns the current root inode honoured by the client. This mirrors
+    /// `baseMeta.root` which may differ from the physical root after `chroot`.
+    pub fn root(&self) -> i64 {
+        self.root.load(Ordering::SeqCst)
+    }
+
+    /// Returns the client options used when constructing this instance.
+    #[allow(dead_code)]
+    pub fn options(&self) -> &MetaClientOptions {
+        &self.options
+    }
+
+    /// Returns a clone of the underlying raw `MetaStore` handle.
+    /// Update the logical root inode. All subsequent metadata lookups treat
+    /// `ROOT_INODE` as an alias for `inode`.
+    #[allow(dead_code)]
+    pub fn chroot(&self, inode: i64) {
+        self.root.store(inode, Ordering::SeqCst);
+    }
+
+    fn check_root(&self, inode: i64) -> i64 {
+        match inode {
+            0 => ROOT_INODE,
+            ROOT_INODE => self.root(),
+            _ => inode,
+        }
+    }
+
+    fn ensure_writable(&self) -> Result<(), MetaError> {
+        if self.options.read_only {
+            Err(MetaError::NotSupported(
+                "metadata client configured read-only".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_background_jobs(&self) -> Result<(), MetaError> {
+        if self.options.no_background_jobs {
+            Err(MetaError::NotSupported(
+                "background jobs disabled".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn mark_umounting(&self) {
+        self.umounting.store(true, Ordering::SeqCst);
+    }
+
+    fn clear_umounting(&self) {
+        self.umounting.store(false, Ordering::SeqCst);
+    }
+
+    fn is_umounting(&self) -> bool {
+        self.umounting.load(Ordering::SeqCst)
+    }
     /// Starts a background heartbeat session with the underlying store.
     ///
     /// Callers provide an opaque payload understood by the backend; the client
@@ -137,17 +281,93 @@ impl MetaClient {
         payload: Vec<u8>,
         update_existing: bool,
     ) -> Result<(), MetaError> {
+        if self.options.read_only {
+            info!("MetaClient: read-only mode, skipping session start");
+            return Ok(());
+        }
+        self.ensure_background_jobs()?;
+        self.clear_umounting();
         self.session_manager
             .start(self.store.clone(), payload, update_existing)
             .await
     }
 
+    /// Builds a default session payload and starts the heartbeat task.
+    #[allow(dead_code)]
+    pub async fn start_default_session(&self) -> Result<(), MetaError> {
+        let payload = self.build_session_payload()?;
+        self.start_session(payload, true).await
+    }
+
     /// Stops the background heartbeat session if it was previously started.
     #[allow(dead_code)]
     pub async fn shutdown_session(&self) {
+        self.mark_umounting();
         self.session_manager.shutdown().await;
     }
 
+    /// Finds and removes stale sessions using store-provided helpers.
+    ///
+    /// Returns the number of sessions successfully cleaned. Failures are
+    /// logged and skipped to keep the maintenance loop best-effort.
+    #[allow(dead_code)]
+    pub async fn cleanup_stale_sessions(&self, limit: Option<usize>) -> Result<usize, MetaError> {
+        self.ensure_background_jobs()?;
+
+        let stale_sessions = self.store.find_stale_sessions(limit).await?;
+        let mut cleaned = 0usize;
+
+        for session in stale_sessions {
+            match self.store.clean_stale_session(session.id).await {
+                Ok(()) => cleaned += 1,
+                Err(err) => {
+                    warn!(
+                        "MetaClient: failed to clean stale session {}: {err}",
+                        session.id
+                    );
+                }
+            }
+        }
+
+        Ok(cleaned)
+    }
+
+    #[allow(dead_code)]
+    fn build_session_payload(&self) -> Result<Vec<u8>, MetaError> {
+        let host_name = get_hostname()
+            .map_err(MetaError::from)?
+            .into_string()
+            .unwrap_or_else(|_| "unknown-host".to_string());
+        let ip_addrs = Self::collect_local_ip_addrs()?;
+
+        let payload = SessionInfoPayload {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            host_name,
+            ip_addrs,
+            mount_point: self.options.mount_point.clone(),
+            mount_time: Utc::now(),
+            process_id: process::id(),
+        };
+
+        serde_json::to_vec(&payload).map_err(MetaError::from)
+    }
+
+    #[allow(dead_code)]
+    fn collect_local_ip_addrs() -> Result<Vec<String>, MetaError> {
+        let interfaces = get_if_addrs().map_err(MetaError::from)?;
+        let mut addrs = HashSet::new();
+
+        for iface in interfaces {
+            let ip = iface.ip();
+            if !ip.is_loopback() {
+                addrs.insert(ip.to_string());
+            }
+        }
+
+        let mut addrs: Vec<String> = addrs.into_iter().collect();
+        addrs.sort();
+        Ok(addrs)
+    }
     /// Handle cache invalidation events from Watch Worker
     ///
     /// This runs in a background task and processes events from etcd Watch Worker
@@ -161,6 +381,9 @@ impl MetaClient {
         info!("Cache invalidation handler started");
 
         while let Some(event) = rx.recv().await {
+            if self.is_umounting() {
+                break;
+            }
             match event {
                 CacheInvalidationEvent::InvalidateInode(ino) => {
                     self.inode_cache.invalidate_inode(ino).await;
@@ -224,6 +447,7 @@ impl MetaClient {
     ///
     /// * `parent_ino` - The parent directory inode that was modified
     async fn invalidate_parent_path(&self, parent_ino: i64) {
+        let parent_ino = self.check_root(parent_ino);
         // Step 1: Get all paths that resolve to this parent inode (O(1))
         if let Some(entry) = self.inode_to_paths.get(&parent_ino) {
             let paths = entry.value().clone();
@@ -283,8 +507,9 @@ impl MetaClient {
     pub async fn resolve_path(&self, path: &str) -> Result<i64, MetaError> {
         info!("MetaClient: Resolving path: {}", path);
 
+        let root = self.root();
         if path == "/" {
-            return Ok(self.store.root_ino());
+            return Ok(root);
         }
 
         if let Some(ino) = self.path_cache.get(path).await {
@@ -294,7 +519,7 @@ impl MetaClient {
 
         info!("MetaClient: Path cache MISS for '{}'", path);
 
-        let mut current_ino = self.store.root_ino();
+        let mut current_ino = root;
         let segments: Vec<&str> = path
             .trim_start_matches('/')
             .split('/')
@@ -339,20 +564,21 @@ impl MetaClient {
     /// * `Ok(None)` - If the inode doesn't exist
     /// * `Err(MetaError)` - On storage errors
     async fn cached_stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
-        info!("MetaClient: stat request for inode {}", ino);
+        let inode = self.check_root(ino);
+        info!("MetaClient: stat request for inode {}", inode);
 
-        if let Some(attr) = self.inode_cache.get_attr(ino).await {
-            info!("MetaClient: Inode cache HIT for inode {}", ino);
+        if let Some(attr) = self.inode_cache.get_attr(inode).await {
+            info!("MetaClient: Inode cache HIT for inode {}", inode);
             return Ok(Some(attr));
         }
 
-        info!("MetaClient: Inode cache MISS for inode {}", ino);
+        info!("MetaClient: Inode cache MISS for inode {}", inode);
 
-        let attr = self.store.stat(ino).await?;
+        let attr = self.store.stat(inode).await?;
 
         if let Some(ref a) = attr {
-            info!("MetaClient: Caching attr for inode {}", ino);
-            self.inode_cache.insert_node(ino, a.clone(), None).await;
+            info!("MetaClient: Caching attr for inode {}", inode);
+            self.inode_cache.insert_node(inode, a.clone(), None).await;
         }
 
         Ok(attr)
@@ -373,6 +599,7 @@ impl MetaClient {
     /// * `Ok(None)` - If no entry with the given name exists in the parent
     /// * `Err(MetaError)` - On storage errors
     async fn cached_lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
+        let parent = self.check_root(parent);
         info!("MetaClient: lookup request for ({}, '{}')", parent, name);
 
         if let Some(ino) = self.inode_cache.lookup(parent, name).await {
@@ -398,14 +625,56 @@ impl MetaClient {
             self.inode_cache
                 .add_child(parent, name.to_string(), ino)
                 .await;
+            Ok(result)
+        } else if self.options.case_insensitive {
+            self.resolve_case(parent, name).await
+        } else {
+            Ok(None)
         }
+    }
 
-        Ok(result)
+    async fn resolve_case(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
+        let entries = self.store.readdir(parent).await?;
+        for entry in entries {
+            if entry.name.eq_ignore_ascii_case(name) {
+                if let Ok(Some(attr)) = self.store.stat(entry.ino).await {
+                    self.inode_cache
+                        .insert_node(entry.ino, attr, Some(parent))
+                        .await;
+                }
+                self.inode_cache
+                    .add_child(parent, entry.name.clone(), entry.ino)
+                    .await;
+                return Ok(Some(entry.ino));
+            }
+        }
+        Ok(None)
     }
 }
 
 #[async_trait]
-impl MetaStore for MetaClient {
+#[allow(dead_code)]
+impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
+    fn name(&self) -> &'static str {
+        self.store.name()
+    }
+
+    fn root_ino(&self) -> i64 {
+        self.root()
+    }
+
+    fn chroot(&self, inode: i64) {
+        MetaClient::chroot(self, inode);
+    }
+
+    async fn initialize(&self) -> Result<(), MetaError> {
+        self.store.initialize().await
+    }
+
+    async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
+        self.store.stat_fs().await
+    }
+
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         self.cached_stat(ino).await
     }
@@ -430,42 +699,43 @@ impl MetaStore for MetaClient {
     }
 
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError> {
-        info!("MetaClient: readdir request for inode {}", ino);
+        let inode = self.check_root(ino);
+        info!("MetaClient: readdir request for inode {}", inode);
 
-        if let Some(entries) = self.inode_cache.readdir(ino).await {
+        if let Some(entries) = self.inode_cache.readdir(inode).await {
             info!(
                 "MetaClient: Inode cache HIT for readdir inode {} ({} entries)",
-                ino,
+                inode,
                 entries.len()
             );
             return Ok(entries);
         }
 
-        info!("MetaClient: Inode cache MISS for readdir inode {}", ino);
+        info!("MetaClient: Inode cache MISS for readdir inode {}", inode);
 
-        let entries = self.store.readdir(ino).await?;
+        let entries = self.store.readdir(inode).await?;
 
         info!(
             "MetaClient: Caching readdir result for inode {} ({} entries)",
-            ino,
+            inode,
             entries.len()
         );
 
         // Ensure parent directory node is in cache before loading children
         self.inode_cache
-            .ensure_node_in_cache(ino, &self.store, None)
+            .ensure_node_in_cache(inode, &*self.store, None)
             .await?;
 
         // Load all children from database into cache, replacing any stale data
         let children_data: Vec<(String, i64)> =
             entries.iter().map(|e| (e.name.clone(), e.ino)).collect();
-        self.inode_cache.load_children(ino, children_data).await;
+        self.inode_cache.load_children(inode, children_data).await;
 
         // Also cache each child's attributes
         for entry in &entries {
             if let Ok(Some(attr)) = self.store.stat(entry.ino).await {
                 self.inode_cache
-                    .insert_node(entry.ino, attr, Some(ino))
+                    .insert_node(entry.ino, attr, Some(inode))
                     .await;
             }
         }
@@ -474,6 +744,8 @@ impl MetaStore for MetaClient {
     }
 
     async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
         info!("MetaClient: mkdir operation for ({}, '{}')", parent, name);
 
         let ino = self.store.mkdir(parent, name.clone()).await?;
@@ -497,6 +769,8 @@ impl MetaStore for MetaClient {
     }
 
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
         info!("MetaClient: rmdir operation for ({}, '{}')", parent, name);
 
         self.store.rmdir(parent, name).await?;
@@ -510,6 +784,8 @@ impl MetaStore for MetaClient {
     }
 
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
         info!(
             "MetaClient: create_file operation for ({}, '{}')",
             parent, name
@@ -538,7 +814,69 @@ impl MetaStore for MetaClient {
         Ok(ino)
     }
 
+    async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        let parent = self.check_root(parent);
+        info!(
+            "MetaClient: link operation for inode {} into ({}, '{}')",
+            inode, parent, name
+        );
+
+        let attr = self.store.link(inode, parent, name).await?;
+
+        self.inode_cache
+            .ensure_node_in_cache(parent, &self.store, None)
+            .await?;
+
+        self.inode_cache
+            .insert_node(inode, attr.clone(), Some(parent))
+            .await;
+        self.inode_cache
+            .add_child(parent, name.to_string(), inode)
+            .await;
+
+        self.invalidate_parent_path(parent).await;
+
+        Ok(attr)
+    }
+
+    async fn symlink(
+        &self,
+        parent: i64,
+        name: &str,
+        target: &str,
+    ) -> Result<(i64, FileAttr), MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
+        info!(
+            "MetaClient: symlink operation for ({}, '{}') -> '{}'",
+            parent, name, target
+        );
+
+        let (ino, attr) = self.store.symlink(parent, name, target).await?;
+
+        info!("MetaClient: symlink created inode {}, updating cache", ino);
+
+        self.inode_cache
+            .ensure_node_in_cache(parent, &self.store, None)
+            .await?;
+
+        self.inode_cache
+            .insert_node(ino, attr.clone(), Some(parent))
+            .await;
+        self.inode_cache
+            .add_child(parent, name.to_string(), ino)
+            .await;
+
+        self.invalidate_parent_path(parent).await;
+
+        Ok((ino, attr))
+    }
+
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let parent = self.check_root(parent);
         info!("MetaClient: unlink operation for ({}, '{}')", parent, name);
 
         self.store.unlink(parent, name).await?;
@@ -558,6 +896,9 @@ impl MetaStore for MetaClient {
         new_parent: i64,
         new_name: String,
     ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let old_parent = self.check_root(old_parent);
+        let new_parent = self.check_root(new_parent);
         info!(
             "MetaClient: rename operation from ({}, '{}') to ({}, '{}')",
             old_parent, old_name, new_parent, new_name
@@ -569,7 +910,11 @@ impl MetaStore for MetaClient {
 
         info!("MetaClient: rename completed, updating cache");
 
-        if let Some(child_ino) = self.inode_cache.remove_child(old_parent, old_name).await {
+        if let Some(child_ino) = self
+            .inode_cache
+            .remove_child_but_keep_inode(old_parent, old_name)
+            .await
+        {
             // Ensure new parent node is in cache before adding child
             self.inode_cache
                 .ensure_node_in_cache(new_parent, &self.store, None)
@@ -594,10 +939,12 @@ impl MetaStore for MetaClient {
     }
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
-        self.store.set_file_size(ino, size).await?;
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        self.store.set_file_size(inode, size).await?;
 
         // Update cached attribute
-        if let Some(node) = self.inode_cache.get_node(ino).await {
+        if let Some(node) = self.inode_cache.get_node(inode).await {
             let mut attr = node.attr.write().await;
             attr.size = size;
         }
@@ -605,61 +952,85 @@ impl MetaStore for MetaClient {
         Ok(())
     }
 
+    async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        self.store.set_attr(inode, req, flags).await
+    }
+
+    async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
+        let inode = self.check_root(ino);
+        self.store.open(inode, flags).await
+    }
+
+    async fn close(&self, ino: i64) -> Result<(), MetaError> {
+        let inode = self.check_root(ino);
+        self.store.close(inode).await
+    }
+
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
-        if let Some(node) = self.inode_cache.get_node(ino).await
+        let inode = self.check_root(ino);
+        if let Some(node) = self.inode_cache.get_node(inode).await
             && let Some(parent) = node.get_parent().await
         {
             return Ok(Some(parent));
         }
 
-        self.store.get_parent(ino).await
+        self.store.get_parent(inode).await
     }
 
     async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError> {
-        if let Some(parent_ino) = self.get_parent(ino).await?
+        let inode = self.check_root(ino);
+        if let Some(parent_ino) = self.get_parent(inode).await?
             && let Some(parent_node) = self.inode_cache.get_node(parent_ino).await
         {
             let children_lock = parent_node.children.read().await;
             if let Some(children_map) = children_lock.get_map() {
                 for (name, child_ino) in children_map.iter() {
-                    if *child_ino == ino {
+                    if *child_ino == inode {
                         return Ok(Some(name.clone()));
                     }
                 }
             }
         }
 
-        self.store.get_name(ino).await
+        self.store.get_name(inode).await
     }
 
     async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError> {
-        if ino == self.store.root_ino() {
+        let inode = self.check_root(ino);
+        if inode == self.root() {
             return Ok(Some("/".to_string()));
         }
 
-        let node = self.inode_cache.get_node(ino).await;
+        let node = self.inode_cache.get_node(inode).await;
         if node.is_none() {
-            return self.store.get_path(ino).await;
+            return self.store.get_path(inode).await;
         }
 
         let mut path_segments = Vec::new();
-        let mut current_ino = ino;
+        let mut current_ino = inode;
 
-        while current_ino != self.store.root_ino() {
+        while current_ino != self.root() {
             let current_node = self.inode_cache.get_node(current_ino).await;
             if current_node.is_none() {
-                return self.store.get_path(ino).await;
+                return self.store.get_path(inode).await;
             }
 
             let parent_ino = current_node.as_ref().unwrap().get_parent().await;
             if parent_ino.is_none() {
-                return self.store.get_path(ino).await;
+                return self.store.get_path(inode).await;
             }
 
             let parent = parent_ino.unwrap();
             let parent_node_opt = self.inode_cache.get_node(parent).await;
             if parent_node_opt.is_none() {
-                return self.store.get_path(ino).await;
+                return self.store.get_path(inode).await;
             }
 
             let parent_node = parent_node_opt.unwrap();
@@ -675,7 +1046,7 @@ impl MetaStore for MetaClient {
             }
 
             if found_name.is_none() {
-                return self.store.get_path(ino).await;
+                return self.store.get_path(inode).await;
             }
 
             path_segments.push(found_name.unwrap());
@@ -686,12 +1057,10 @@ impl MetaStore for MetaClient {
         Ok(Some(format!("/{}", path_segments.join("/"))))
     }
 
-    fn root_ino(&self) -> i64 {
-        self.store.root_ino()
-    }
-
-    async fn initialize(&self) -> Result<(), MetaError> {
-        self.store.initialize().await
+    async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
+        let inode = self.check_root(ino);
+        info!("MetaClient: read_symlink request for inode {}", inode);
+        self.store.read_symlink(inode).await
     }
 
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
@@ -699,40 +1068,90 @@ impl MetaStore for MetaClient {
     }
 
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
+        self.ensure_writable()?;
         self.store.remove_file_metadata(ino).await
     }
 
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
+        let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        if let Some(slices) = self.inode_cache.get_slices(inode, chunk_index).await {
+            return Ok(slices);
+        }
         self.store.get_slices(chunk_id).await
     }
 
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
-        self.store.append_slice(chunk_id, slice).await
+        self.ensure_writable()?;
+
+        let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        self.store.append_slice(chunk_id, slice).await?;
+        self.inode_cache
+            .append_slice(inode, chunk_index, slice)
+            .await;
+        Ok(())
     }
 
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
+        self.ensure_writable()?;
         self.store.next_id(key).await
     }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+
+    async fn start_session(
+        &self,
+        payload: Vec<u8>,
+        update_existing: bool,
+    ) -> Result<(), MetaError> {
+        MetaClient::start_session(self, payload, update_existing).await
+    }
+
+    async fn start_default_session(&self) -> Result<(), MetaError> {
+        MetaClient::start_default_session(self).await
+    }
+
+    async fn shutdown_session(&self) -> Result<(), MetaError> {
+        MetaClient::shutdown_session(self).await;
+        Ok(())
+    }
+
+    async fn refresh_session(&self) -> Result<(), MetaError> {
+        self.ensure_background_jobs()?;
+        self.store.refresh_session().await
+    }
+
+    async fn find_stale_sessions(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<Vec<SessionInfo>, MetaError> {
+        self.ensure_background_jobs()?;
+        self.store.find_stale_sessions(limit).await
+    }
+
+    async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
+        self.ensure_background_jobs()?;
+        self.store.clean_stale_session(session_id).await
+    }
+
+    async fn cleanup_stale_sessions(&self, limit: Option<usize>) -> Result<usize, MetaError> {
+        MetaClient::cleanup_stale_sessions(self, limit).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meta::config::{CacheConfig, Config, DatabaseConfig, DatabaseType};
+    use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
     use crate::meta::stores::database_store::DatabaseMetaStore;
+    use crate::vfs::chunk_id_for;
     use std::time::Duration;
 
-    async fn create_test_client() -> Arc<MetaClient> {
+    async fn create_test_client() -> Arc<MetaClient<DatabaseMetaStore>> {
         create_test_client_with_capacity(100, 100).await
     }
 
     async fn create_test_client_with_capacity(
         inode_capacity: usize,
         path_capacity: usize,
-    ) -> Arc<MetaClient> {
+    ) -> Arc<MetaClient<DatabaseMetaStore>> {
         let db_path = "sqlite::memory:".to_string();
 
         let config = Config {
@@ -740,10 +1159,10 @@ mod tests {
                 db_config: DatabaseType::Sqlite { url: db_path },
             },
             cache: CacheConfig::default(),
+            client: ClientOptions::default(),
         };
 
-        let store = DatabaseMetaStore::from_config(config).await.unwrap();
-        let store = Arc::new(store) as Arc<dyn MetaStore + Send + Sync>;
+        let store = Arc::new(DatabaseMetaStore::from_config(config).await.unwrap());
 
         let capacity = CacheCapacity {
             inode: inode_capacity,
@@ -1063,6 +1482,38 @@ mod tests {
             path, "/dir2/moved_file.txt",
             "get_path should return new path"
         );
+    }
+
+    #[tokio::test]
+    async fn test_slice_operations() {
+        let client = create_test_client().await;
+
+        let ino = client.create_file(1, "text".to_string()).await.unwrap();
+        let chunk_id = chunk_id_for(ino, 1);
+
+        let test_slices = (1..=10)
+            .map(|e| SliceDesc {
+                slice_id: e,
+                chunk_id,
+                offset: 0,
+                length: 100,
+            })
+            .collect::<Vec<_>>();
+
+        for desc in test_slices.iter().copied() {
+            client.append_slice(chunk_id, desc).await.unwrap();
+        }
+
+        let from_method = client.get_slices(chunk_id).await.unwrap();
+        assert_eq!(test_slices, from_method);
+
+        let (ino, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        let from_cached = client
+            .inode_cache
+            .get_slices(ino, chunk_index)
+            .await
+            .unwrap();
+        assert_eq!(test_slices, from_cached);
     }
 
     /// Test scenario: Complex sequence of mixed operations

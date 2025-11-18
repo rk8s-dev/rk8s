@@ -78,6 +78,7 @@ rust_binary(
         "//third-party/rust/crates/tracing-subscriber/0.3.20:tracing-subscriber",
         "//third-party/rust/crates/tracing/0.1.41:tracing",
         "//third-party/rust/crates/uuid/1.18.1:uuid",
+        ":librkl",
     ],
 )
 

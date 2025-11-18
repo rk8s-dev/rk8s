@@ -8,6 +8,7 @@ use slayerfs::cadapter::s3::{S3Backend, S3Config};
 use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::ObjectBlockStore;
 use slayerfs::meta::create_meta_store_from_url;
+use slayerfs::vfs::fs::VFS;
 use slayerfs::vfs::sdk::Client;
 use std::error::Error;
 
@@ -44,21 +45,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Create object client
     let object_client = ObjectClient::new(s3_backend);
 
-    // Create block store using S3 backend
-    let block_store = ObjectBlockStore::new(object_client);
-
     // Create chunk layout (default 64MB chunks, 4MB blocks)
     let layout = ChunkLayout::default();
 
     // Create memory metadata store (for demo purposes)
-    let meta_store = create_meta_store_from_url("sqlite::memory:")
+    let meta_handle = create_meta_store_from_url("sqlite::memory:")
         .await
         .expect("create meta store");
 
     // Create VFS client
-    let mut client = Client::new(layout, block_store, meta_store)
+    let store = ObjectBlockStore::new(object_client);
+    let meta_store = meta_handle.store();
+    let vfs = VFS::new(layout, store, meta_store)
         .await
         .expect("create vfs fail.");
+    let mut client = Client::from_vfs(vfs);
 
     // Test basic operations
     println!("Testing basic S3 operations...");
@@ -122,6 +123,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             match entry.kind {
                 slayerfs::vfs::fs::FileType::Dir => "directory",
                 slayerfs::vfs::fs::FileType::File => "file",
+                slayerfs::vfs::fs::FileType::Symlink => "symlink",
             }
         );
     }

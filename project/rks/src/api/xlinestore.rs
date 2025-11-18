@@ -232,6 +232,48 @@ impl XlineStore {
         Ok((items, rev))
     }
 
+    /// Take a snapshot of all services and return them with the current revision.
+    pub async fn services_snapshot_with_rev(&self) -> Result<(Vec<(String, String)>, i64)> {
+        let key_prefix = "/registry/services/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key_prefix.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+        let rev = resp.header().map(|h| h.revision()).unwrap_or(0);
+        let items: Vec<(String, String)> = resp
+            .kvs()
+            .iter()
+            .map(|kv| {
+                (
+                    String::from_utf8_lossy(kv.key()).replace("/registry/services/", ""),
+                    String::from_utf8_lossy(kv.value()).to_string(),
+                )
+            })
+            .collect();
+        Ok((items, rev))
+    }
+
+    /// Take a snapshot of all endpoints and return them with the current revision.
+    pub async fn endpoints_snapshot_with_rev(&self) -> Result<(Vec<(String, String)>, i64)> {
+        let key_prefix = "/registry/endpoints/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key_prefix.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+        let rev = resp.header().map(|h| h.revision()).unwrap_or(0);
+        let items: Vec<(String, String)> = resp
+            .kvs()
+            .iter()
+            .map(|kv| {
+                (
+                    String::from_utf8_lossy(kv.key()).replace("/registry/endpoints/", ""),
+                    String::from_utf8_lossy(kv.value()).to_string(),
+                )
+            })
+            .collect();
+        Ok((items, rev))
+    }
+
     /// Create a watch on all pods with prefix `/registry/pods/`, starting from a given revision.
     pub async fn watch_pods(&self, start_rev: i64) -> Result<(Watcher, WatchStream)> {
         let key_prefix = "/registry/pods/".to_string();
@@ -353,6 +395,24 @@ impl XlineStore {
         Ok(())
     }
 
+    pub async fn get_endpoint_yaml(&self, endpoint_name: &str) -> Result<Option<String>> {
+        let key = format!("/registry/endpoints/{endpoint_name}");
+        let mut client = self.client.write().await;
+        let resp = client.get(key, None).await?;
+        Ok(resp
+            .kvs()
+            .first()
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string()))
+    }
+
+    /// Delete an endpoint entry from xline.
+    pub async fn delete_endpoint(&self, endpoint_name: &str) -> Result<()> {
+        let key = format!("/registry/endpoints/{endpoint_name}");
+        let mut client = self.client.write().await;
+        client.delete(key, None).await?;
+        Ok(())
+    }
+
     /// Get a service YAML definition from xline.
     pub async fn get_service_yaml(&self, service_name: &str) -> Result<Option<String>> {
         let key = format!("/registry/services/{service_name}");
@@ -376,12 +436,10 @@ impl XlineStore {
 
     /// Delete a service from xline.
     pub async fn delete_service(&self, service_name: &str) -> Result<()> {
-        self.delete_object(
-            ResourceKind::Service,
-            service_name,
-            DeletePropagationPolicy::Background,
-        )
-        .await
+        let key = format!("/registry/services/{service_name}");
+        let mut client = self.client.write().await;
+        client.delete(key, None).await?;
+        Ok(())
     }
 
     /// Create a watch on all pods with prefix `/registry/services/`, starting from a given revision.
@@ -531,6 +589,7 @@ impl XlineStore {
             // TODO
             ResourceKind::Deployment => todo!(),
             ResourceKind::ReplicaSet => self.get_replicaset_yaml(name).await,
+            ResourceKind::Endpoint => self.get_endpoint_yaml(name).await,
             ResourceKind::Unknown => Ok(None),
         }
     }
@@ -547,6 +606,7 @@ impl XlineStore {
             // TODO
             ResourceKind::Deployment => todo!(),
             ResourceKind::ReplicaSet => self.insert_replicaset_yaml(name, yaml).await,
+            ResourceKind::Endpoint => self.insert_endpoint_yaml(name, yaml).await,
             ResourceKind::Unknown => Ok(()),
         }
     }
@@ -562,6 +622,7 @@ impl XlineStore {
             ResourceKind::Service => format!("/registry/services/{name}"),
             ResourceKind::Deployment => format!("/registry/deployments/{name}"),
             ResourceKind::ReplicaSet => format!("/registry/replicasets/{name}"),
+            ResourceKind::Endpoint => format!("/registry/endpoints/{name}"),
             ResourceKind::Unknown => return Ok(()),
         };
         let yaml = self.get_object_yaml(kind, name).await?;

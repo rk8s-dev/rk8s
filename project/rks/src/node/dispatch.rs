@@ -73,6 +73,73 @@ pub async fn dispatch_user(
             );
             conn.send_msg(&RksMessage::ListPodRes(pods)).await?;
         }
+        RksMessage::CreateReplicaSet(mut rs) => {
+            let name = rs.metadata.name.clone();
+            // Set creation_timestamp if not already set
+            if rs.metadata.creation_timestamp.is_none() {
+                rs.metadata.creation_timestamp = Some(Utc::now());
+            }
+            let yaml = serde_yaml::to_string(&*rs)?;
+            xline_store.insert_replicaset_yaml(&name, &yaml).await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "created ReplicaSet {name}"
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::UpdateReplicaSet(rs) => {
+            let name = rs.metadata.name.clone();
+            let yaml = serde_yaml::to_string(&*rs)?;
+            xline_store.insert_replicaset_yaml(&name, &yaml).await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "updated ReplicaSet {name}"
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::DeleteReplicaSet(name) => {
+            // now just use delete_object with Background policy
+            xline_store
+                .delete_object(
+                    common::ResourceKind::ReplicaSet,
+                    &name,
+                    common::DeletePropagationPolicy::Background,
+                )
+                .await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "marked ReplicaSet {} for deletion (background policy)",
+                name
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::GetReplicaSet(name) => {
+            if let Some(yaml) = xline_store.get_replicaset_yaml(&name).await? {
+                let rs: common::ReplicaSet = serde_yaml::from_str(&yaml)?;
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved ReplicaSet {name}"
+                );
+                conn.send_msg(&RksMessage::GetReplicaSetRes(Box::new(rs)))
+                    .await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!("ReplicaSet {} not found", name)))
+                    .await?;
+            }
+        }
+
+        RksMessage::ListReplicaSet => {
+            let rss = xline_store.list_replicasets().await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "list current replicasets: {} items",
+                rss.len()
+            );
+            conn.send_msg(&RksMessage::ListReplicaSetRes(rss)).await?;
+        }
 
         RksMessage::GetNodeCount => {
             info!(

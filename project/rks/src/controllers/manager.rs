@@ -459,7 +459,8 @@ impl ControllerManager {
                         }
 
                         // start watch from snapshot revision and broadcast events to controllers who need to watch pods.
-                        match store_p.watch_pods(rev).await {
+                        // start watch from rev+1 to avoid re-emitting snapshot items as watch events
+                        match store_p.watch_pods(rev + 1).await {
                             Ok((_watcher, mut stream)) => {
                                 // reset backoff on successful watch
                                 backoff_ms = 100;
@@ -556,6 +557,249 @@ impl ControllerManager {
             }
         });
 
+        // services informer with reconnect loop
+        let mgr_s = self.clone();
+        let store_s = store.clone();
+        tokio::spawn(async move {
+            let mut backoff_ms = 100u64;
+            loop {
+                match store_s.services_snapshot_with_rev().await {
+                    Ok((items, rev)) => {
+                        // broadcast snapshot items to controllers who need to watch services.
+                        for (name, yaml) in items.into_iter() {
+                            let senders = mgr_s.get_senders_by_kind(ResourceKind::Service).await;
+                            for sender in senders {
+                                let _ = sender
+                                    .send(ResourceWatchResponse {
+                                        kind: ResourceKind::Service,
+                                        key: name.clone(),
+                                        event: WatchEvent::Add { yaml: yaml.clone() },
+                                    })
+                                    .await;
+                            }
+                        }
+
+                        // start watch from snapshot revision and broadcast events
+                        // use rev+1 to prevent duplicate Add for snapshot entries
+                        match store_s.watch_services(rev + 1).await {
+                            Ok((_watcher, mut stream)) => {
+                                backoff_ms = 100; // reset backoff
+                                loop {
+                                    match stream.message().await {
+                                        Ok(Some(resp)) => {
+                                            for ev in resp.events() {
+                                                if let Some(kv) = ev.kv() {
+                                                    let key = String::from_utf8_lossy(kv.key())
+                                                        .replace("/registry/services/", "");
+                                                    let event_opt = match ev.event_type() {
+                                                        etcd_client::EventType::Put => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Update {
+                                                                    old_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            prev_kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                    new_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                })
+                                                            } else {
+                                                                Some(WatchEvent::Add {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            }
+                                                        }
+                                                        etcd_client::EventType::Delete => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Delete {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        prev_kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            } else {
+                                                                log::warn!(
+                                                                    "service watch delete event missing prev_kv for key {}",
+                                                                    key
+                                                                );
+                                                                None
+                                                            }
+                                                        }
+                                                    };
+                                                    let Some(event) = event_opt else {
+                                                        continue;
+                                                    };
+                                                    let senders = mgr_s
+                                                        .get_senders_by_kind(ResourceKind::Service)
+                                                        .await;
+                                                    for sender in senders {
+                                                        let _ = sender
+                                                            .send(ResourceWatchResponse {
+                                                                kind: ResourceKind::Service,
+                                                                key: key.clone(),
+                                                                event: event.clone(),
+                                                            })
+                                                            .await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            log::info!(
+                                                "service watch stream closed, will reconnect"
+                                            );
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            log::error!(
+                                                "service watch error: {:?}, will reconnect",
+                                                e
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("failed to start service watch: {:?}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("failed to snapshot services: {:?}", e);
+                    }
+                }
+                sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(30_000);
+            }
+        });
+
+        // endpoints informer with reconnect loop
+        let mgr_ep = self.clone();
+        let store_ep = store.clone();
+        tokio::spawn(async move {
+            let mut backoff_ms = 100u64;
+            loop {
+                match store_ep.endpoints_snapshot_with_rev().await {
+                    Ok((items, rev)) => {
+                        for (name, yaml) in items.into_iter() {
+                            let senders = mgr_ep.get_senders_by_kind(ResourceKind::Endpoint).await;
+                            for sender in senders {
+                                let _ = sender
+                                    .send(ResourceWatchResponse {
+                                        kind: ResourceKind::Endpoint,
+                                        key: name.clone(),
+                                        event: WatchEvent::Add { yaml: yaml.clone() },
+                                    })
+                                    .await;
+                            }
+                        }
+                        // rev+1 to avoid duplicate Add after snapshot
+                        match store_ep.watch_endpoints(rev + 1).await {
+                            Ok((_watcher, mut stream)) => {
+                                backoff_ms = 100;
+                                loop {
+                                    match stream.message().await {
+                                        Ok(Some(resp)) => {
+                                            for ev in resp.events() {
+                                                if let Some(kv) = ev.kv() {
+                                                    let key = String::from_utf8_lossy(kv.key())
+                                                        .replace("/registry/endpoints/", "");
+                                                    let event_opt = match ev.event_type() {
+                                                        etcd_client::EventType::Put => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Update {
+                                                                    old_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            prev_kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                    new_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                })
+                                                            } else {
+                                                                Some(WatchEvent::Add {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            }
+                                                        }
+                                                        etcd_client::EventType::Delete => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Delete {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        prev_kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            } else {
+                                                                log::warn!(
+                                                                    "endpoints watch delete event missing prev_kv for key {}",
+                                                                    key
+                                                                );
+                                                                None
+                                                            }
+                                                        }
+                                                    };
+                                                    let Some(event) = event_opt else {
+                                                        continue;
+                                                    };
+                                                    let senders = mgr_ep
+                                                        .get_senders_by_kind(ResourceKind::Endpoint)
+                                                        .await;
+                                                    for sender in senders {
+                                                        let _ = sender
+                                                            .send(ResourceWatchResponse {
+                                                                kind: ResourceKind::Endpoint,
+                                                                key: key.clone(),
+                                                                event: event.clone(),
+                                                            })
+                                                            .await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            log::info!(
+                                                "endpoints watch stream closed, will reconnect"
+                                            );
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            log::error!(
+                                                "endpoints watch error: {:?}, will reconnect",
+                                                e
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("failed to start endpoints watch: {:?}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("failed to snapshot endpoints: {:?}", e);
+                    }
+                }
+                sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(30_000);
+            }
+        });
+
         // replicasets informer with reconnect loop (use snapshot_with_rev to obtain a starting revision)
         let mgr_rs = self.clone();
         let store_rs = store.clone();
@@ -582,7 +826,8 @@ impl ControllerManager {
                         }
 
                         // start watch from snapshot revision and broadcast events to controllers who need to watch replicasets.
-                        match store_rs.watch_replicasets(rev).await {
+                        // rev+1 to skip snapshot duplication
+                        match store_rs.watch_replicasets(rev + 1).await {
                             Ok((_watcher, mut stream)) => {
                                 backoff_ms = 100;
                                 loop {

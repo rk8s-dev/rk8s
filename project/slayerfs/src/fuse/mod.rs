@@ -18,6 +18,7 @@ use crate::chuck::store::BlockStore;
 use crate::meta::MetaStore;
 use crate::vfs::fs::{FileAttr as VfsFileAttr, FileType as VfsFileType, VFS};
 use bytes::Bytes;
+use rfuse3::Errno;
 use rfuse3::Result as FuseResult;
 use rfuse3::raw::Request;
 use rfuse3::raw::reply::{
@@ -26,10 +27,9 @@ use rfuse3::raw::reply::{
 };
 use std::ffi::{OsStr, OsString};
 use std::num::NonZeroU32;
-use std::pin::Pin;
 use std::time::{Duration, SystemTime};
 
-use futures_util::stream::{self, Stream};
+use futures_util::stream::{self, BoxStream};
 use rfuse3::raw::Filesystem;
 use rfuse3::{FileType as FuseFileType, SetAttr, Timestamp};
 #[cfg(all(test, target_os = "linux"))]
@@ -40,7 +40,7 @@ mod mount_tests {
     use crate::chuck::chunk::ChunkLayout;
     use crate::chuck::store::ObjectBlockStore;
     use crate::fuse::mount::mount_vfs_unprivileged;
-    use crate::meta::create_meta_store_from_url;
+    use crate::meta::factory::create_meta_store_from_url;
     use std::fs;
     use std::io::Write;
     use std::time::Duration as StdDuration;
@@ -56,13 +56,14 @@ mod mount_tests {
         let layout = ChunkLayout::default();
         let tmp_data = tempfile::tempdir().expect("tmp data");
         let client = ObjectClient::new(LocalFsBackend::new(tmp_data.path()));
-        let store = ObjectBlockStore::new(client);
-
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .expect("create meta store");
+        let store = ObjectBlockStore::new(client);
 
-        let fs = VFS::new(layout, store, meta).await.expect("create VFS");
+        let fs = VFS::new(layout, store, meta.store().clone())
+            .await
+            .expect("create VFS");
 
         // Prepare the mount point
         let mnt = tempfile::tempdir().expect("tmp mount");
@@ -109,23 +110,12 @@ mod mount_tests {
         }
     }
 }
+#[allow(refining_impl_trait_reachable)]
 impl<S, M> Filesystem for VFS<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    // GAT: directory entry stream (readdir)
-    type DirEntryStream<'a>
-        = Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntry>> + Send + 'a>>
-    where
-        Self: 'a;
-
-    // GAT: directory entry plus stream (readdirplus)
-    type DirEntryPlusStream<'a>
-        = Pin<Box<dyn Stream<Item = FuseResult<DirectoryEntryPlus>> + Send + 'a>>
-    where
-        Self: 'a;
-
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
         // Use a conservative max write size (1 MiB). Tune per backend or make configurable.
         let max_write = NonZeroU32::new(1024 * 1024).unwrap();
@@ -196,6 +186,23 @@ where
             .map_err(|_| libc::EIO)?;
         Ok(ReplyData {
             data: Bytes::from(data),
+        })
+    }
+
+    async fn readlink(&self, _req: Request, ino: u64) -> FuseResult<ReplyData> {
+        let target = self.readlink_ino(ino as i64).await.map_err(|e| -> Errno {
+            let code = match e.as_str() {
+                "not found" => libc::ENOENT,
+                "not a symlink" => libc::EINVAL,
+                "not supported" => libc::ENOSYS,
+                _ if e.contains("not supported") => libc::ENOSYS,
+                _ => libc::EIO,
+            };
+            code.into()
+        })?;
+
+        Ok(ReplyData {
+            data: Bytes::copy_from_slice(target.as_bytes()),
         })
     }
 
@@ -270,7 +277,7 @@ where
         ino: u64,
         _fh: u64,
         offset: i64,
-    ) -> FuseResult<ReplyDirectory<Self::DirEntryStream<'a>>> {
+    ) -> FuseResult<ReplyDirectory<BoxStream<'a, FuseResult<DirectoryEntry>>>> {
         let entries = match self.readdir_ino(ino as i64).await {
             None => {
                 if self.stat_ino(ino as i64).await.is_some() {
@@ -317,8 +324,8 @@ where
             all[start..].to_vec()
         };
         let stream_iter = stream::iter(slice.into_iter().map(Ok));
-        let boxed: Self::DirEntryStream<'a> = Box::pin(stream_iter);
-        Ok(ReplyDirectory::<Self::DirEntryStream<'a>> { entries: boxed })
+        let boxed: BoxStream<'a, FuseResult<DirectoryEntry>> = Box::pin(stream_iter);
+        Ok(ReplyDirectory { entries: boxed })
     }
 
     // Directory read with attributes (lookup + readdir), returning DirectoryEntryPlus
@@ -329,7 +336,7 @@ where
         _fh: u64,
         offset: u64,
         _lock_owner: u64,
-    ) -> FuseResult<ReplyDirectoryPlus<Self::DirEntryPlusStream<'a>>> {
+    ) -> FuseResult<ReplyDirectoryPlus<BoxStream<'a, FuseResult<DirectoryEntryPlus>>>> {
         let entries = match self.readdir_ino(ino as i64).await {
             None => {
                 if self.stat_ino(ino as i64).await.is_some() {
@@ -401,7 +408,7 @@ where
             all[start..].to_vec()
         };
         let stream_iter = stream::iter(slice.into_iter().map(Ok));
-        let boxed: Self::DirEntryPlusStream<'a> = Box::pin(stream_iter);
+        let boxed: BoxStream<'a, FuseResult<DirectoryEntryPlus>> = Box::pin(stream_iter);
         Ok(ReplyDirectoryPlus { entries: boxed })
     }
 
@@ -504,6 +511,137 @@ where
             generation: 0,
             fh: 0,
             flags: 0,
+        })
+    }
+
+    async fn link(
+        &self,
+        req: Request,
+        ino: u64,
+        new_parent: u64,
+        new_name: &OsStr,
+    ) -> FuseResult<ReplyEntry> {
+        let Some(existing_attr) = self.stat_ino(ino as i64).await else {
+            return Err(libc::ENOENT.into());
+        };
+        if matches!(existing_attr.kind, VfsFileType::Dir) {
+            return Err(libc::EISDIR.into());
+        }
+
+        let Some(parent_attr) = self.stat_ino(new_parent as i64).await else {
+            return Err(libc::ENOENT.into());
+        };
+        if !matches!(parent_attr.kind, VfsFileType::Dir) {
+            return Err(libc::ENOTDIR.into());
+        }
+
+        let new_name_str = new_name.to_string_lossy();
+
+        if self
+            .child_of(new_parent as i64, new_name_str.as_ref())
+            .await
+            .is_some()
+        {
+            return Err(libc::EEXIST.into());
+        }
+
+        let Some(mut parent_path) = self.path_of(new_parent as i64).await else {
+            return Err(libc::ENOENT.into());
+        };
+        if parent_path != "/" {
+            parent_path.push('/');
+        }
+        if new_name_str.is_empty() {
+            return Err(libc::EINVAL.into());
+        }
+        parent_path.push_str(new_name_str.as_ref());
+
+        let Some(existing_path) = self.path_of(ino as i64).await else {
+            return Err(libc::ENOENT.into());
+        };
+
+        let attr = VFS::link(self, &existing_path, &parent_path)
+            .await
+            .map_err(|e| -> Errno {
+                let code = match e.as_str() {
+                    "not found" => libc::ENOENT,
+                    "parent not found" => libc::ENOENT,
+                    "not a directory" => libc::ENOTDIR,
+                    "already exists" => libc::EEXIST,
+                    "is a directory" => libc::EISDIR,
+                    "invalid name" => libc::EINVAL,
+                    "invalid path" => libc::ENOENT,
+                    "not supported" => libc::ENOSYS,
+                    _ if e.contains("not supported") => libc::ENOSYS,
+                    _ => libc::EIO,
+                };
+                code.into()
+            })?;
+
+        let fuse_attr = vfs_to_fuse_attr(&attr, &req);
+        Ok(ReplyEntry {
+            ttl: Duration::from_secs(1),
+            attr: fuse_attr,
+            generation: 0,
+        })
+    }
+
+    async fn symlink(
+        &self,
+        req: Request,
+        parent: u64,
+        name: &OsStr,
+        link: &OsStr,
+    ) -> FuseResult<ReplyEntry> {
+        let name = name.to_string_lossy();
+        if name.is_empty() {
+            return Err(libc::EINVAL.into());
+        }
+
+        let Some(pattr) = self.stat_ino(parent as i64).await else {
+            return Err(libc::ENOENT.into());
+        };
+        if !matches!(pattr.kind, VfsFileType::Dir) {
+            return Err(libc::ENOTDIR.into());
+        }
+
+        if self.child_of(parent as i64, name.as_ref()).await.is_some() {
+            return Err(libc::EEXIST.into());
+        }
+
+        let Some(mut parent_path) = self.path_of(parent as i64).await else {
+            return Err(libc::ENOENT.into());
+        };
+        if parent_path != "/" {
+            parent_path.push('/');
+        }
+        parent_path.push_str(&name);
+
+        let target = link.to_string_lossy();
+
+        let (_ino, vattr) = self
+            .create_symlink(&parent_path, target.as_ref())
+            .await
+            .map_err(|e| -> Errno {
+                let code = match e.as_str() {
+                    "invalid path" => libc::ENOENT,
+                    "invalid name" => libc::EINVAL,
+                    "parent not found" => libc::ENOENT,
+                    "not a directory" => libc::ENOTDIR,
+                    "already exists" => libc::EEXIST,
+                    "not supported" => libc::ENOSYS,
+                    _ if e.contains("not supported") => libc::ENOSYS,
+                    _ => libc::EIO,
+                };
+                code.into()
+            })?;
+
+        let attr = vfs_to_fuse_attr(&vattr, &req);
+
+        Ok(ReplyEntry {
+            ttl: Duration::from_secs(1),
+            attr,
+            generation: 0,
         })
     }
 
@@ -709,6 +847,7 @@ fn vfs_kind_to_fuse(k: VfsFileType) -> FuseFileType {
     match k {
         VfsFileType::Dir => FuseFileType::Directory,
         VfsFileType::File => FuseFileType::RegularFile,
+        VfsFileType::Symlink => FuseFileType::Symlink,
     }
 }
 
@@ -718,6 +857,7 @@ fn vfs_to_fuse_attr(v: &VfsFileAttr, req: &Request) -> rfuse3::raw::reply::FileA
     let perm = match v.kind {
         VfsFileType::Dir => 0o755,
         VfsFileType::File => 0o644,
+        VfsFileType::Symlink => 0o777,
     } as u16;
     // blocks fields expressed in 512B units
     let blocks = v.size.div_ceil(512);
@@ -732,7 +872,7 @@ fn vfs_to_fuse_attr(v: &VfsFileAttr, req: &Request) -> rfuse3::raw::reply::FileA
         crtime: now,
         kind: vfs_kind_to_fuse(v.kind),
         perm,
-        nlink: 1,
+        nlink: v.nlink,
         uid: req.uid,
         gid: req.gid,
         rdev: 0,

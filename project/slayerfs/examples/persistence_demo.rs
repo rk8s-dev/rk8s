@@ -152,15 +152,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let meta = MetaStoreFactory::create_from_config(config)
             .await
             .map_err(|e| format!("Failed to initialize metadata storage: {}", e))?;
+        let meta_store = meta.store();
 
-        let fs = VFS::new(layout, store, meta.clone())
+        let fs = VFS::new(layout, store, meta_store.clone())
             .await
             .expect("create VFS");
 
         println!("Starting garbage collector...");
 
         let gc_handle = tokio::spawn({
-            let meta_store = meta.clone();
+            let meta_store = meta_store.clone();
             let object_client = client.clone();
             async move {
                 use slayerfs::daemon::worker::start_gc;

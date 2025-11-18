@@ -9,7 +9,7 @@ use tokio::time::{Instant, sleep};
 
 use common::{
     ContainerSpec, LabelSelector, ObjectMeta, PodSpec, PodTask, PodTemplateSpec, ReplicaSet,
-    ReplicaSetSpec,
+    ReplicaSetSpec, ResourceKind,
 };
 use rks::api::xlinestore::XlineStore;
 use rks::controllers::{ControllerManager, ReplicaSetController};
@@ -92,6 +92,9 @@ fn make_test_replicaset(name: &str, replicas: i32) -> ReplicaSet {
                         ports: Vec::new(),
                         args: Vec::new(),
                         resources: None,
+                        liveness_probe: None,
+                        readiness_probe: None,
+                        startup_probe: None,
                     }],
                     init_containers: Vec::new(),
                     tolerations: Vec::new(),
@@ -418,5 +421,110 @@ async fn test_two_replicasets_independent() -> Result<()> {
 
     assert_eq!(pods_a.len(), 2, "RS A should manage 2 pods");
     assert_eq!(pods_b.len(), 1, "RS B should manage 1 pod");
+    Ok(())
+}
+
+/// Ensures that a ReplicaSet adopts orphan pods matching its selector by adding ownerReferences.
+#[serial]
+#[tokio::test]
+async fn test_replicaset_adopts_orphan_pods() -> Result<()> {
+    let (store, _mgr, _rs_ctrl) = setup_store_and_manager().await?;
+
+    // Create 2 orphan pods with matching labels (no ownerReference)
+    let mut orphan_labels = HashMap::new();
+    orphan_labels.insert("app".to_string(), "test-adopt".to_string());
+
+    for i in 1..=2 {
+        let pod = PodTask {
+            api_version: "v1".to_string(),
+            kind: "Pod".to_string(),
+            metadata: ObjectMeta {
+                name: format!("test-rs-adopt-orphan-{}", i),
+                namespace: "default".to_string(),
+                labels: orphan_labels.clone(),
+                annotations: HashMap::new(),
+                owner_references: None, // No owner - this is an orphan pod
+                ..Default::default()
+            },
+            spec: PodSpec {
+                node_name: None,
+                containers: vec![ContainerSpec {
+                    name: "c".to_string(),
+                    image: "busybox:latest".to_string(),
+                    ports: Vec::new(),
+                    args: Vec::new(),
+                    resources: None,
+                    liveness_probe: None,
+                    readiness_probe: None,
+                    startup_probe: None,
+                }],
+                init_containers: Vec::new(),
+                tolerations: Vec::new(),
+            },
+            status: Default::default(),
+        };
+        let yaml = serde_yaml::to_string(&pod)?;
+        store.insert_pod_yaml(&pod.metadata.name, &yaml).await?;
+    }
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Create a ReplicaSet with replicas=3 and matching selector
+    let mut rs = make_test_replicaset("test-rs-adopt", 3);
+    rs.spec.selector.match_labels.clear();
+    rs.spec
+        .selector
+        .match_labels
+        .insert("app".to_string(), "test-adopt".to_string());
+    rs.spec.template.metadata.labels.clear();
+    rs.spec
+        .template
+        .metadata
+        .labels
+        .insert("app".to_string(), "test-adopt".to_string());
+
+    let yaml = serde_yaml::to_string(&rs)?;
+    store
+        .insert_replicaset_yaml(&rs.metadata.name, &yaml)
+        .await?;
+
+    // Wait for reconcile to adopt orphans and create 1 new pod
+    let matching =
+        wait_for_pod_prefix_count(&store, "test-rs-adopt", 3, Duration::from_secs(15)).await?;
+
+    // Verify that orphan pods now have ownerReferences
+    let mut adopted_count = 0;
+    let mut created_count = 0;
+
+    for pod in &matching {
+        if pod.metadata.name.contains("orphan") {
+            // This was an orphan pod, should now have ownerReference
+            assert!(
+                pod.metadata.owner_references.is_some(),
+                "Orphan pod {} should have ownerReference after adoption",
+                pod.metadata.name
+            );
+
+            let owners = pod.metadata.owner_references.as_ref().unwrap();
+            assert_eq!(owners.len(), 1, "Should have exactly one owner");
+            assert_eq!(owners[0].kind, ResourceKind::ReplicaSet);
+            assert_eq!(owners[0].name, "test-rs-adopt");
+            assert!(owners[0].controller);
+
+            adopted_count += 1;
+        } else {
+            // This is a newly created pod by RS
+            created_count += 1;
+        }
+    }
+
+    // cleanup
+    let _ = store.delete_replicaset(&rs.metadata.name).await;
+    let _ = cleanup_pods_by_prefix(&store, "test-rs-adopt").await;
+
+    assert_eq!(adopted_count, 2, "Should have adopted 2 orphan pods");
+    assert_eq!(created_count, 1, "Should have created 1 new pod");
+    assert_eq!(matching.len(), 3, "Total should be 3 pods");
+
     Ok(())
 }

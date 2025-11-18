@@ -150,31 +150,24 @@ pub async fn run_once(
     tokio::spawn(async move {
         loop {
             time::sleep(Duration::from_secs(5)).await;
-            match generate_node(&heartbeat_iface).await {
-                Ok(node) => {
-                    let mut status = node.status;
-                    status.conditions = vec![
-                        ready_condition(),
-                        memory_condition(0.9),
-                        disk_condition(0.9),
-                        pid_condition(0.9),
-                        network_condition(),
-                    ];
-
-                    let hb = RksMessage::Heartbeat {
-                        node_name: node_name.clone(),
-                        status,
-                    };
-
-                    if let Err(e) = hb_conn.send_msg(&hb).await {
-                        error!("[worker heartbeat] send failed: {e}");
-                    } else {
-                        info!("[worker] heartbeat sent");
-                    }
-                }
+            // Generate fresh status but reuse the same node identity
+            let status = match generate_node_status(&heartbeat_iface).await {
+                Ok(status) => status,
                 Err(e) => {
-                    error!("[worker heartbeat] generate_node failed: {e}");
+                    error!("[worker heartbeat] generate_node_status failed: {e}");
+                    continue;
                 }
+            };
+
+            let hb = RksMessage::Heartbeat {
+                node_name: node_name.clone(),
+                status,
+            };
+
+            if let Err(e) = hb_conn.send_msg(&hb).await {
+                error!("[worker heartbeat] send failed: {e}");
+            } else {
+                info!("[worker] heartbeat sent");
             }
         }
     });
@@ -424,6 +417,57 @@ async fn handle_network_config(
 
     info!("[worker] Network configuration processed successfully");
     Ok(())
+}
+
+/// Generate NodeStatus for heartbeat
+pub async fn generate_node_status(ext_iface: &ExternalInterface) -> Result<NodeStatus> {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    // hostname
+    let hostname = gethostname().to_string_lossy().into_owned();
+
+    // IP addr
+    let mut addresses = vec![];
+
+    if let Some(ip) = ext_iface.iface_addr {
+        addresses.push(NodeAddress {
+            address_type: "InternalIP".to_string(),
+            address: ip.to_string(),
+        });
+    }
+    addresses.push(NodeAddress {
+        address_type: "Hostname".to_string(),
+        address: hostname,
+    });
+
+    // CPU / memory
+    let total_cpu = sys.cpus().len().to_string();
+    let total_mem = format!("{}Mi", sys.total_memory() / 1024);
+
+    let mut capacity = HashMap::new();
+    capacity.insert("cpu".to_string(), total_cpu.clone());
+    capacity.insert("memory".to_string(), total_mem.clone());
+    capacity.insert("pods".to_string(), "110".to_string());
+
+    let mut allocatable = capacity.clone();
+    allocatable.insert("cpu".to_string(), (sys.cpus().len() - 1).to_string());
+
+    // conditions - include all condition types
+    let conditions = vec![
+        ready_condition(),
+        memory_condition(0.9),
+        disk_condition(0.9),
+        pid_condition(0.9),
+        network_condition(),
+    ];
+
+    Ok(NodeStatus {
+        capacity,
+        allocatable,
+        addresses,
+        conditions,
+    })
 }
 
 pub async fn generate_node(ext_iface: &ExternalInterface) -> Result<Node> {
