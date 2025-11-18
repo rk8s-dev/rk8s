@@ -1,7 +1,7 @@
 mod cache;
 mod path_trie;
 #[allow(dead_code)]
-mod session;
+pub mod session;
 
 use crate::chuck::SliceDesc;
 use crate::meta::config::{CacheCapacity, CacheTtl};
@@ -28,6 +28,7 @@ use cache::InodeCache;
 use chrono::{DateTime, Utc};
 use hostname::get as get_hostname;
 use path_trie::PathTrie;
+use sea_orm::prelude::Uuid;
 use serde::Serialize;
 use session::SessionManager;
 
@@ -35,6 +36,8 @@ const ROOT_INODE: i64 = 1;
 
 #[derive(Serialize)]
 struct SessionInfoPayload {
+    /// Session UUID for unique identification
+    session_uuid: String,
     version: String,
     host_name: String,
     ip_addrs: Vec<String>,
@@ -42,6 +45,8 @@ struct SessionInfoPayload {
     mount_point: Option<String>,
     mount_time: DateTime<Utc>,
     process_id: u32,
+    /// Session creation timestamp
+    created_at: DateTime<Utc>,
 }
 
 /// Configuration options for `MetaClient` that correspond to the core metadata
@@ -340,13 +345,18 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             .unwrap_or_else(|_| "unknown-host".to_string());
         let ip_addrs = Self::collect_local_ip_addrs()?;
 
+        // Generate a UUID for this session
+        let session_uuid = Uuid::new_v4().to_string();
+
         let payload = SessionInfoPayload {
+            session_uuid,
             version: env!("CARGO_PKG_VERSION").to_string(),
             host_name,
             ip_addrs,
             mount_point: self.options.mount_point.clone(),
             mount_time: Utc::now(),
             process_id: process::id(),
+            created_at: Utc::now(),
         };
 
         serde_json::to_vec(&payload).map_err(MetaError::from)
@@ -1118,6 +1128,14 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.refresh_session().await
     }
 
+    async fn refresh_session_by_id(
+        &self,
+        session_id: &crate::meta::client::session::SessionId,
+    ) -> Result<(), MetaError> {
+        self.ensure_background_jobs()?;
+        self.store.refresh_session_by_id(session_id).await
+    }
+
     async fn find_stale_sessions(
         &self,
         limit: Option<usize>,
@@ -1129,6 +1147,14 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
     async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
         self.ensure_background_jobs()?;
         self.store.clean_stale_session(session_id).await
+    }
+
+    async fn clean_session_by_id(
+        &self,
+        session_id: &crate::meta::client::session::SessionId,
+    ) -> Result<(), MetaError> {
+        self.ensure_background_jobs()?;
+        self.store.clean_session_by_id(session_id).await
     }
 
     async fn cleanup_stale_sessions(&self, limit: Option<usize>) -> Result<usize, MetaError> {

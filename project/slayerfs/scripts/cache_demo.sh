@@ -2,7 +2,7 @@
 # Simple script to demonstrate SlayerFS cache hits
 set -e
 
-CONFIG_FILE="sqlite.yml"
+CONFIG_FILE="slayerfs-sqlite.yml"
 LOG_FILE="cache_hits.log"
 
 echo "=== SlayerFS Cache Hit Demo ==="

@@ -4,6 +4,7 @@
 use crate::chuck::SliceDesc;
 use crate::meta::entities::content_meta::EntryType;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
 
@@ -188,7 +189,7 @@ pub struct VolumeStat {
 ///   record was last refreshed. The session manager relies on this value to
 ///   detect stale sessions; therefore implementations should update it when
 ///   a heartbeat/refresh operation succeeds.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct SessionInfo {
     pub id: u64,
@@ -432,6 +433,17 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
+    /// Refresh session by client identifier (hostname + process_id)
+    /// This provides more precise session management than the generic refresh_session
+    async fn refresh_session_by_id(
+        &self,
+        session_id: &crate::meta::client::session::SessionId,
+    ) -> Result<(), MetaError> {
+        let _ = session_id;
+        // Default implementation falls back to the original method
+        self.refresh_session().await
+    }
+
     async fn find_stale_sessions(
         &self,
         limit: Option<usize>,
@@ -441,6 +453,15 @@ pub trait MetaStore: Send + Sync {
     }
 
     async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
+        let _ = session_id;
+        Err(MetaError::NotImplemented)
+    }
+
+    /// Clean up session by SessionId (hostname + process_id)
+    async fn clean_session_by_id(
+        &self,
+        session_id: &crate::meta::client::session::SessionId,
+    ) -> Result<(), MetaError> {
         let _ = session_id;
         Err(MetaError::NotImplemented)
     }

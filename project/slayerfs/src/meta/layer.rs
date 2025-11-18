@@ -82,10 +82,22 @@ pub trait MetaLayer: Send + Sync {
     async fn start_default_session(&self) -> Result<(), MetaError>;
     async fn shutdown_session(&self) -> Result<(), MetaError>;
     async fn refresh_session(&self) -> Result<(), MetaError>;
+    /// Refresh session by client identifier (hostname + process_id)
+    async fn refresh_session_by_id(
+        &self,
+        session_id: &crate::meta::client::session::SessionId,
+    ) -> Result<(), MetaError>;
     async fn find_stale_sessions(
         &self,
         limit: Option<usize>,
     ) -> Result<Vec<SessionInfo>, MetaError>;
     async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError>;
+
+    /// Clean up session by SessionId (hostname + process_id)
+    async fn clean_session_by_id(
+        &self,
+        session_id: &crate::meta::client::session::SessionId,
+    ) -> Result<(), MetaError>;
+
     async fn cleanup_stale_sessions(&self, limit: Option<usize>) -> Result<usize, MetaError>;
 }

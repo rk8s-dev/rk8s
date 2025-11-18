@@ -1,130 +1,365 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use sea_orm::prelude::Uuid;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tracing::{debug, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::meta::store::{MetaError, MetaStore};
 
+/// Client session identifier information
+///
+/// Uses UUID for globally unique identification instead of hostname+PID combination
+/// to avoid conflicts when processes restart or multiple processes have same hostname+PID
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionId {
+    pub uuid: Uuid,
+    pub hostname: String,
+    pub process_id: u32,
+    pub created_at: std::time::SystemTime,
+}
+
+impl SessionId {
+    /// Extract session identifier from payload, supporting both new UUID format and legacy format
+    pub fn from_payload(payload: &[u8]) -> Result<Self, serde_json::Error> {
+        let info: serde_json::Value = serde_json::from_slice(payload)?;
+
+        // Try to extract UUID from payload first (new format)
+        if let Some(uuid_str) = info.get("session_uuid").and_then(|v| v.as_str())
+            && let Ok(uuid) = Uuid::parse_str(uuid_str)
+        {
+            let hostname = info
+                .get("host_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let process_id = info
+                .get("process_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(std::process::id() as u64) as u32;
+
+            return Ok(Self {
+                uuid,
+                hostname,
+                process_id,
+                created_at: std::time::SystemTime::now(),
+            });
+        }
+
+        // Fallback: create new session with current UUID (for backward compatibility)
+        Ok(Self::current())
+    }
+
+    /// Create session identifier for current process with new UUID
+    pub fn current() -> Self {
+        Self {
+            uuid: Uuid::new_v4(),
+            hostname: hostname::get()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "unknown".to_string()),
+            process_id: std::process::id(),
+            created_at: std::time::SystemTime::now(),
+        }
+    }
+
+    /// Create session identifier with specific UUID (for recovery/reconnect scenarios)
+    pub fn with_uuid(uuid: Uuid) -> Self {
+        Self {
+            uuid,
+            hostname: hostname::get()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "unknown".to_string()),
+            process_id: std::process::id(),
+            created_at: std::time::SystemTime::now(),
+        }
+    }
+
+    /// Format as session key using UUID as primary identifier
+    pub fn to_key(&self) -> String {
+        format!("session:{}", self.uuid)
+    }
+
+    /// Get legacy-style key for backward compatibility
+    pub fn to_legacy_key(&self) -> String {
+        format!("session:{}:{}", self.hostname, self.process_id)
+    }
+}
+
+/// Session configuration options
+#[derive(Debug, Clone)]
+pub struct SessionConfig {
+    /// Interval between heartbeat updates
+    pub heartbeat_interval: Duration,
+    /// Session timeout threshold for stale detection
+    pub timeout_threshold: Duration,
+    /// Maximum retry attempts for session recovery
+    pub max_recovery_attempts: u32,
+    /// Whether to enable automatic session recovery
+    pub enable_recovery: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            heartbeat_interval: Duration::from_secs(30),
+            timeout_threshold: Duration::from_secs(300), // 5 minutes
+            max_recovery_attempts: 3,
+            enable_recovery: true,
+        }
+    }
+}
+
+/// Session state for atomic operations
+struct SessionState {
+    /// Current session identifier
+    session_id: Option<SessionId>,
+    /// Heartbeat task handle
+    task_handle: Option<JoinHandle<()>>,
+    /// Shutdown signal sender
+    shutdown_sender: Option<oneshot::Sender<()>>,
+    /// Whether session is currently running
+    running: bool,
+    /// Store reference for session operations
+    store: Option<Arc<dyn MetaStore + Send + Sync>>,
+    /// Number of consecutive heartbeat failures
+    consecutive_failures: u32,
+}
+
+impl std::fmt::Debug for SessionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionState")
+            .field("session_id", &self.session_id)
+            .field("task_handle", &self.task_handle.is_some())
+            .field("shutdown_sender", &self.shutdown_sender.is_some())
+            .field("running", &self.running)
+            .field("store", &self.store.is_some())
+            .field("consecutive_failures", &self.consecutive_failures)
+            .finish()
+    }
+}
+
 /// Manages client session lifecycle (register, heartbeat, cleanup).
+///
+/// Improved version with:
+/// - Single mutex to prevent race conditions
+/// - Better error handling and state consistency
+/// - Configurable timeout and retry policies
+/// - UUID-based session identification
 #[allow(dead_code)]
-pub(crate) struct SessionManager {
-    heartbeat_interval: Duration,
-    handle: Mutex<Option<JoinHandle<()>>>,
-    shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
-    /// true when a session is active or being started. Used to prevent
-    /// concurrent start() calls from racing.
-    running: AtomicBool,
+pub struct SessionManager {
+    config: SessionConfig,
+    state: Mutex<SessionState>,
 }
 
 #[allow(dead_code)]
 impl SessionManager {
-    pub(crate) fn new(heartbeat_interval: Duration) -> Self {
-        Self {
+    pub fn new(heartbeat_interval: Duration) -> Self {
+        Self::with_config(SessionConfig {
             heartbeat_interval,
-            handle: Mutex::new(None),
-            shutdown_tx: Mutex::new(None),
-            running: AtomicBool::new(false),
+            ..Default::default()
+        })
+    }
+
+    pub fn with_config(config: SessionConfig) -> Self {
+        Self {
+            config,
+            state: Mutex::new(SessionState {
+                session_id: None,
+                task_handle: None,
+                shutdown_sender: None,
+                running: false,
+                store: None,
+                consecutive_failures: 0,
+            }),
         }
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn start(
+    pub async fn start(
         &self,
         store: Arc<dyn MetaStore + Send + Sync>,
         payload: Vec<u8>,
         update_existing: bool,
     ) -> Result<(), MetaError> {
-        // Prevent concurrent starts: set `running` to true if and only if
-        // there is no active session. We keep the flag set for the whole
-        // lifetime of the session and clear it on failure or shutdown. This
-        // avoids the TOCTOU where two concurrent `start()` callers both pass
-        // the empty-handle check and spawn duplicate heartbeat tasks.
-        if self
-            .running
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            debug!("SessionManager already running or starting - skip start");
+        let mut state = self.state.lock().await;
+
+        // Prevent concurrent starts using single mutex
+        if state.running {
+            debug!("SessionManager already running - skip start");
             return Ok(());
         }
 
-        // Register or update the session before spawning the heartbeat loop.
-        // If registration fails we must clear `running` so subsequent
-        // attempts are allowed.
-        if let Err(err) = store.new_session(&payload, update_existing).await {
-            self.running.store(false, Ordering::SeqCst);
-            return Err(err);
-        }
+        // Extract session identifier from payload for heartbeat refresh
+        let session_id = match SessionId::from_payload(&payload) {
+            Ok(id) => id,
+            Err(err) => {
+                warn!(
+                    "Failed to parse session ID from payload: {}, using current",
+                    err
+                );
+                SessionId::current()
+            }
+        };
 
-        // Create the shutdown channel and prepare the heartbeat task, but
-        // don't store them into the manager fields until we hold both locks.
-        // This prevents a race where `shutdown()` could send the shutdown
-        // signal before the new handle is stored, leaving the spawned task
-        // unnotified.
+        // Register or update the session before spawning the heartbeat loop
+        // If registration fails, we return error without changing state
+        store.new_session(&payload, update_existing).await?;
+
+        // Mark as running only after successful registration
+        state.running = true;
+        state.session_id = Some(session_id.clone());
+        state.store = Some(store.clone());
+        state.consecutive_failures = 0;
+
+        // Create shutdown channel and heartbeat task
         let (tx, mut rx) = oneshot::channel();
-        let interval = self.heartbeat_interval;
+        let config = self.config.clone();
         let store_clone = store.clone();
+        let session_id_clone = session_id.clone();
+        let payload_clone = payload.clone();
 
         let handle = tokio::spawn(async move {
+            let mut consecutive_failures = 0u32;
+
             loop {
                 tokio::select! {
                     _ = &mut rx => {
                         debug!("SessionManager heartbeat loop shutting down");
                         break;
                     }
-                    _ = sleep(interval) => {
-                        if let Err(err) = store_clone.refresh_session().await {
-                            warn!("Refresh session failed: {err}");
+                    _ = sleep(config.heartbeat_interval) => {
+                        // Attempt to refresh the session
+                        match store_clone.refresh_session_by_id(&session_id_clone).await {
+                            Ok(()) => {
+                                debug!("Session refreshed successfully");
+                                consecutive_failures = 0;
+                            }
+                            Err(err) => {
+                                consecutive_failures += 1;
+                                warn!("Session refresh failed (attempt {}/{}): {}",
+                                      consecutive_failures, config.max_recovery_attempts, err);
+
+                                // Try recovery if enabled and within retry limit
+                                if config.enable_recovery && consecutive_failures <= config.max_recovery_attempts {
+                                    info!("Attempting session recovery...");
+                                    if let Err(recovery_err) = store_clone.new_session(&payload_clone, true).await {
+                                        error!("Session recovery failed: {}", recovery_err);
+                                    } else {
+                                        info!("Session recovered successfully");
+                                        consecutive_failures = 0; // Reset on successful recovery
+                                    }
+                                } else if consecutive_failures > config.max_recovery_attempts {
+                                    error!("Session heartbeat failed after {} attempts, stopping",
+                                           consecutive_failures);
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             }
         });
 
-        // Acquire both locks in a fixed order (shutdown_tx then handle) and
-        // keep them held until the manager fields are updated. Holding the
-        // locks prevents a concurrent `shutdown()` from sending the signal
-        // before we've stored the newly created sender/handle.
-        let mut shutdown_guard = self.shutdown_tx.lock().await;
-        let mut handle_guard = self.handle.lock().await;
-        *handle_guard = Some(handle);
-        *shutdown_guard = Some(tx);
+        // Store task handle and shutdown sender
+        state.task_handle = Some(handle);
+        state.shutdown_sender = Some(tx);
 
+        info!(
+            "Session started successfully with UUID: {}",
+            session_id.uuid
+        );
         Ok(())
     }
 
     #[allow(dead_code)]
     pub(crate) async fn shutdown(&self) {
-        // Acquire locks in the same order (`shutdown_tx` then `handle`) to
-        // avoid deadlocks. Hold the locks while taking and signaling so a
-        // concurrent `start()` cannot race to replace the fields between
-        // these operations.
-        let mut shutdown_guard = self.shutdown_tx.lock().await;
-        let mut handle_guard = self.handle.lock().await;
+        let mut state = self.state.lock().await;
 
-        if let Some(tx) = shutdown_guard.take() {
-            // It's ok if the receiver was already dropped.
+        if !state.running {
+            debug!("SessionManager not running - nothing to shutdown");
+            return;
+        }
+
+        // Send shutdown signal
+        if let Some(tx) = state.shutdown_sender.take() {
+            // It's ok if the receiver was already dropped
             let _ = tx.send(());
         }
 
-        if let Some(handle) = handle_guard.take() {
-            // Drop locks before awaiting the join to avoid holding locks
-            // across an await point which could cause deadlocks if the
-            // spawned task tries to call back into this manager. We already
-            // removed the handles from the manager so the task will observe
-            // the shutdown signal and exit.
-            drop(shutdown_guard);
-            drop(handle_guard);
+        // Take the task handle and await its completion
+        if let Some(handle) = state.task_handle.take() {
+            // Drop the state lock before awaiting to avoid deadlock
+            let session_id = state.session_id.clone();
+            let store = state.store.clone();
+
+            // Mark as not running before dropping the lock
+            state.running = false;
+
+            drop(state);
+
+            // Await the heartbeat task completion
             if let Err(err) = handle.await {
-                warn!("Failed to join session heartbeat task: {err}");
+                warn!("Failed to join session heartbeat task: {}", err);
             }
 
-            // Allow future start() calls.
-            self.running.store(false, Ordering::SeqCst);
+            // Clean up session data from store
+            if let (Some(session_id), Some(store)) = (session_id, store) {
+                debug!(
+                    "Cleaning up session {} during shutdown",
+                    session_id.to_key()
+                );
+                if let Err(err) = store.clean_session_by_id(&session_id).await {
+                    warn!(
+                        "Failed to clean up session {}: {}",
+                        session_id.to_key(),
+                        err
+                    );
+                } else {
+                    info!("Successfully cleaned up session {}", session_id.to_key());
+                }
+            }
+        } else {
+            // No task handle, just mark as not running
+            state.running = false;
+            state.session_id = None;
+            state.store = None;
+            state.consecutive_failures = 0;
         }
     }
+
+    /// Get current session status
+    #[allow(dead_code)]
+    pub async fn get_status(&self) -> SessionStatus {
+        let state = self.state.lock().await;
+        SessionStatus {
+            running: state.running,
+            session_id: state.session_id.clone(),
+            consecutive_failures: state.consecutive_failures,
+        }
+    }
+
+    /// Force session cleanup without shutting down the heartbeat task
+    #[allow(dead_code)]
+    pub async fn cleanup_session(&self) -> Result<(), MetaError> {
+        let state = self.state.lock().await;
+        if let (Some(session_id), Some(store)) = (&state.session_id, &state.store) {
+            store.clean_session_by_id(session_id).await?;
+            Ok(())
+        } else {
+            Err(MetaError::Internal(
+                "No active session to cleanup".to_string(),
+            ))
+        }
+    }
+}
+
+/// Session status information
+#[derive(Debug, Clone)]
+pub struct SessionStatus {
+    pub running: bool,
+    pub session_id: Option<SessionId>,
+    pub consecutive_failures: u32,
 }

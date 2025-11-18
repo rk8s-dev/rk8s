@@ -4,17 +4,19 @@
 
 use crate::chuck::SliceDesc;
 use crate::meta::config::{Config, DatabaseType};
+use crate::meta::entities::session_meta::{self, Entity as SessionMeta};
 use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
 use crate::meta::entities::*;
 use crate::meta::store::{
     DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
-use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
+use crate::meta::{INODE_ID_KEY, Permission, SESSION_ID_KEY, SLICE_ID_KEY};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
 use log::info;
+use sea_orm::prelude::Uuid;
 use sea_orm::*;
 use sea_query::Index;
 use std::path::Path;
@@ -26,6 +28,7 @@ pub struct DatabaseMetaStore {
     _config: Config,
     next_inode: AtomicU64,
     next_slice: AtomicU64,
+    next_session: AtomicU64,
 }
 
 impl DatabaseMetaStore {
@@ -44,11 +47,13 @@ impl DatabaseMetaStore {
 
         let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
         let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
+        let next_session = AtomicU64::new(Self::init_next_session(&db).await?);
         let store = Self {
             db,
             _config,
             next_inode,
             next_slice,
+            next_session,
         };
         store.init_root_directory().await?;
 
@@ -66,11 +71,13 @@ impl DatabaseMetaStore {
 
         let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
         let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
+        let next_session = AtomicU64::new(Self::init_next_session(&db).await?);
         let store = Self {
             db,
             _config,
             next_inode,
             next_slice,
+            next_session,
         };
         store.init_root_directory().await?;
 
@@ -113,6 +120,22 @@ impl DatabaseMetaStore {
         Ok(max_slice + 1)
     }
 
+    /// Initialize next session ID counter
+    async fn init_next_session(db: &DatabaseConnection) -> Result<u64, MetaError> {
+        let max_session = SessionMeta::find()
+            .order_by_desc(session_meta::Column::Id)
+            .one(db)
+            .await
+            .map_err(MetaError::Database)?
+            .map(|r| r.id)
+            .unwrap_or(0);
+
+        // Start session IDs from 1 to avoid confusion with 0 as "no session"
+        let next = if max_session == 0 { 1 } else { max_session + 1 };
+        info!("Initialized next session counter to: {}", next);
+        Ok(next)
+    }
+
     /// Create database connection
     async fn create_connection(config: &Config) -> Result<DatabaseConnection, MetaError> {
         match &config.database.db_config {
@@ -151,6 +174,10 @@ impl DatabaseMetaStore {
                 .to_owned(),
             schema
                 .create_table_from_entity(FileMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(SessionMeta)
                 .if_not_exists()
                 .to_owned(),
             schema
@@ -1390,11 +1417,280 @@ impl MetaStore for DatabaseMetaStore {
         match key {
             SLICE_ID_KEY => Ok(self.next_slice.fetch_add(1, Ordering::SeqCst) as i64),
             INODE_ID_KEY => Ok(self.next_inode.fetch_add(1, Ordering::SeqCst) as i64),
+            SESSION_ID_KEY => Ok(self.next_session.fetch_add(1, Ordering::SeqCst) as i64),
             other => Err(MetaError::NotSupported(format!(
                 "next_id not supported for key {other}"
             ))),
         }
     }
+
+    // ---------- Session lifecycle implementation ----------
+
+    async fn new_session(&self, payload: &[u8], update: bool) -> Result<(), MetaError> {
+        // Parse the payload to extract client information
+        let session_info = match serde_json::from_slice::<serde_json::Value>(payload) {
+            Ok(info) => info,
+            Err(_) => {
+                // If parsing fails, create a minimal session info
+                serde_json::json!({
+                    "session_uuid": Uuid::new_v4().to_string(),
+                    "version": "unknown",
+                    "process_id": std::process::id(),
+                })
+            }
+        };
+
+        let session_uuid = session_info
+            .get("session_uuid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+        let hostname = session_info
+            .get("host_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let process_id = session_info
+            .get("process_id")
+            .and_then(|v| v.as_i64())
+            .map(|i| i as i32);
+
+        let mount_point = session_info
+            .get("mount_point")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        if update {
+            // For update mode, try to find an existing session by UUID first
+            let existing_session = SessionMeta::find()
+                .filter(session_meta::Column::SessionUuid.eq(&session_uuid))
+                .filter(session_meta::Column::Stale.eq(false))
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            if let Some(session) = existing_session {
+                // Update existing session
+                let session_id = session.id;
+                let mut active_model: session_meta::ActiveModel = session.into();
+                active_model.payload = Set(payload.to_vec());
+                active_model.updated_at = Set(Utc::now().timestamp_millis());
+                active_model.stale = Set(false);
+                if let Some(mp) = mount_point {
+                    active_model.mount_point = Set(Some(mp));
+                }
+
+                active_model
+                    .update(&self.db)
+                    .await
+                    .map_err(MetaError::Database)?;
+
+                info!("Updated existing session: {}", session_id);
+                return Ok(());
+            }
+        }
+
+        // Create new session
+        let session_id = self.next_id(SESSION_ID_KEY).await? as u64;
+        let session_model = session_meta::ActiveModel {
+            id: Set(session_id),
+            session_uuid: Set(session_uuid),
+            payload: Set(payload.to_vec()),
+            created_at: Set(Utc::now().timestamp_millis()),
+            updated_at: Set(Utc::now().timestamp_millis()),
+            stale: Set(false),
+            hostname: Set(hostname),
+            process_id: Set(process_id),
+            mount_point: Set(mount_point),
+        };
+
+        session_model
+            .insert(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        info!("Created new session: {}", session_id);
+        Ok(())
+    }
+
+    async fn refresh_session(&self) -> Result<(), MetaError> {
+        // Default implementation: update the most recently updated session
+        // This maintains backward compatibility
+        let session = SessionMeta::find()
+            .filter(session_meta::Column::Stale.eq(false))
+            .order_by_desc(session_meta::Column::UpdatedAt)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if let Some(session) = session {
+            let session_id = session.id;
+            let mut active_model: session_meta::ActiveModel = session.into();
+            active_model.updated_at = Set(Utc::now().timestamp_millis());
+            active_model.stale = Set(false);
+
+            active_model
+                .update(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            info!("Refreshed session: {}", session_id);
+        } else {
+            return Err(MetaError::NotFound(0));
+        }
+
+        Ok(())
+    }
+
+    async fn refresh_session_by_id(
+        &self,
+        session_id: &crate::meta::client::session::SessionId,
+    ) -> Result<(), MetaError> {
+        // For database, try to find the session by UUID first, fallback to hostname+pid for backward compatibility
+        let session = SessionMeta::find()
+            .filter(session_meta::Column::SessionUuid.eq(session_id.uuid.to_string()))
+            .filter(session_meta::Column::Stale.eq(false))
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let session = if let Some(s) = session {
+            s
+        } else {
+            // Fallback to legacy hostname+pid lookup
+            SessionMeta::find()
+                .filter(session_meta::Column::Hostname.eq(&session_id.hostname))
+                .filter(session_meta::Column::ProcessId.eq(session_id.process_id as i32))
+                .filter(session_meta::Column::Stale.eq(false))
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?
+                .ok_or_else(|| MetaError::NotFound(0))?
+        };
+
+        let session_id_num = session.id;
+        let mut active_model: session_meta::ActiveModel = session.into();
+        active_model.updated_at = Set(Utc::now().timestamp_millis());
+        active_model.stale = Set(false);
+
+        active_model
+            .update(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        info!(
+            "Refreshed database session: {} -> {}:{}",
+            session_id_num, session_id.hostname, session_id.process_id
+        );
+
+        Ok(())
+    }
+
+    async fn find_stale_sessions(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<Vec<crate::meta::store::SessionInfo>, MetaError> {
+        use crate::meta::store::SessionInfo;
+        use std::time::SystemTime;
+
+        // Consider sessions stale if not updated for more than 5 minutes (300,000 ms)
+        let stale_threshold = Utc::now().timestamp_millis() - 300_000;
+
+        let mut query = SessionMeta::find()
+            .filter(session_meta::Column::UpdatedAt.lt(stale_threshold))
+            .filter(session_meta::Column::Stale.eq(false))
+            .order_by_asc(session_meta::Column::UpdatedAt);
+
+        if let Some(limit) = limit {
+            query = query.limit(limit as u64);
+        }
+
+        let sessions = query.all(&self.db).await.map_err(MetaError::Database)?;
+
+        let result: Vec<SessionInfo> = sessions
+            .into_iter()
+            .map(|s| SessionInfo {
+                id: s.id,
+                info: s.payload,
+                updated_at: SystemTime::UNIX_EPOCH
+                    + std::time::Duration::from_millis(s.updated_at as u64),
+            })
+            .collect();
+
+        Ok(result)
+    }
+
+    async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
+        let session = SessionMeta::find_by_id(session_id)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if let Some(session) = session {
+            // Mark as stale instead of deleting to allow for audit trail
+            let mut active_model: session_meta::ActiveModel = session.into();
+            active_model.stale = Set(true);
+
+            active_model
+                .update(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            info!("Marked session {} as stale", session_id);
+        } else {
+            return Err(MetaError::NotFound(session_id as i64));
+        }
+
+        Ok(())
+    }
+
+    async fn clean_session_by_id(
+        &self,
+        session_id: &crate::meta::client::session::SessionId,
+    ) -> Result<(), MetaError> {
+        use crate::meta::entities::session_meta;
+
+        // Find session by UUID first, fallback to hostname+pid for backward compatibility
+        let session = SessionMeta::find()
+            .filter(session_meta::Column::SessionUuid.eq(session_id.uuid.to_string()))
+            .filter(session_meta::Column::Stale.eq(false))
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let session = if let Some(s) = session {
+            s
+        } else {
+            // Fallback to legacy hostname+pid lookup
+            SessionMeta::find()
+                .filter(session_meta::Column::Hostname.eq(&session_id.hostname))
+                .filter(session_meta::Column::ProcessId.eq(session_id.process_id as i32))
+                .filter(session_meta::Column::Stale.eq(false))
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?
+                .ok_or_else(|| MetaError::NotFound(0))?
+        };
+
+        // Mark the session as stale
+        let mut active_model: session_meta::ActiveModel = session.into();
+        active_model.stale = Set(true);
+        active_model.updated_at = Set(Utc::now().timestamp());
+
+        active_model
+            .update(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        info!(
+            "Marked session {}:{} as stale",
+            session_id.hostname, session_id.process_id
+        );
+
+        Ok(())
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
