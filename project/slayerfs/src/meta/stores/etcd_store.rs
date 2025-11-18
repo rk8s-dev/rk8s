@@ -9,7 +9,8 @@ use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
 use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
-use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
+use crate::meta::stores::pool::IdPool;
+use crate::meta::{INODE_ID_KEY, Permission};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -19,40 +20,21 @@ use serde::de::DeserializeOwned;
 use serde_json;
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Duration;
-use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 /// ID allocation batch size
 /// TODO: make configurable.
 const BATCH_SIZE: i64 = 1000;
-
-/// Local ID allocation pool
-///
-/// This structure maintains a range of pre-allocated IDs from etcd.
-/// Must be protected by a Mutex for thread-safe access, as multiple
-/// async tasks may attempt to allocate IDs concurrently.
-///
-/// The pool allocates BATCH_SIZE IDs from etcd at once and distributes
-/// them locally to reduce network round-trips.
-struct IdPool {
-    /// Next ID to allocate from local pool
-    next: i64,
-    /// End of current pool range (exclusive)
-    end: i64,
-}
+const FIRST_ALLOCATED_ID: i64 = 2;
 
 /// Etcd-based metadata store
 pub struct EtcdMetaStore {
     client: EtcdClient,
     _config: Config,
-    /// Local inode pool for lazy batch allocation
-    /// Starts empty (0, 0) and fills from etcd on first allocation request
-    inode_pool: Mutex<IdPool>,
-    /// Local slice ID pool for lazy batch allocation
-    /// Starts empty (0, 0) and fills from etcd on first allocation request
-    slice_pool: Mutex<IdPool>,
+    /// Local ID pools keyed by counter key (inode, slice, etc.)
+    id_pools: IdPool,
 }
+
 #[allow(dead_code)]
 impl EtcdMetaStore {
     /// Etcd helper method: generate forward index key (parent_inode, name)
@@ -82,8 +64,7 @@ impl EtcdMetaStore {
         let store = Self {
             client,
             _config,
-            inode_pool: Mutex::new(IdPool { next: 0, end: 0 }),
-            slice_pool: Mutex::new(IdPool { next: 0, end: 0 }),
+            id_pools: IdPool::default(),
         };
         store.init_root_directory().await?;
 
@@ -99,8 +80,7 @@ impl EtcdMetaStore {
         let store = Self {
             client,
             _config,
-            inode_pool: Mutex::new(IdPool { next: 0, end: 0 }),
-            slice_pool: Mutex::new(IdPool { next: 0, end: 0 }),
+            id_pools: IdPool::default(),
         };
         store.init_root_directory().await?;
 
@@ -590,165 +570,73 @@ impl EtcdMetaStore {
     async fn generate_id(&self, counter_key: &str) -> Result<i64, MetaError> {
         let start = std::time::Instant::now();
 
-        // Select the appropriate pool based on counter_key
-        let pool_mutex = if counter_key == INODE_ID_KEY {
-            &self.inode_pool
-        } else if counter_key == SLICE_ID_KEY {
-            &self.slice_pool
-        } else {
-            return Err(MetaError::Config(format!(
-                "Unknown counter key: {}",
-                counter_key
-            )));
-        };
-
-        // Acquire lock once and hold it through potential etcd allocation
-        // This prevents concurrent threads from all trying to refill simultaneously
-        let mut pool = pool_mutex.lock().await;
-
-        // Fast path: allocate from existing pool
-        if pool.next < pool.end {
-            let id = pool.next;
-            pool.next += 1;
-            let remaining = pool.end - pool.next;
-
-            info!(
-                counter_key = counter_key,
-                allocated_id = id,
-                pool_hit = true,
-                pool_remaining = remaining,
-                "ID allocated from pool (fast path)"
-            );
-
+        if let Some(id) = self.id_pools.try_alloc(counter_key).await {
             return Ok(id);
         }
 
         // Slow path: pool exhausted, need to allocate new batch from etcd
-        // Lock is held here, so only one thread per pool will do this
         info!(
             counter_key = counter_key,
             pool_hit = false,
             "Pool exhausted, allocating new batch from etcd"
         );
 
-        let mut client = self.client.clone();
-
-        for retry in 0..10 {
-            match client.get(counter_key, None).await {
-                Ok(resp) => {
-                    let (current_id, mod_revision) = if let Some(kv) = resp.kvs().first() {
-                        let id =
-                            String::from_utf8_lossy(kv.value())
-                                .parse::<i64>()
-                                .map_err(|e| {
-                                    MetaError::Internal(format!(
-                                        "Invalid ID counter value in etcd: {}",
-                                        e
-                                    ))
-                                })?;
-                        (id, kv.mod_revision())
-                    } else {
-                        // First time initialization: allocate [2, 1002)
-                        if let Err(e) = client.put(counter_key, "1002", None).await {
-                            error!("Failed to initialize ID counter: {}", e);
-                            return Err(MetaError::Config(format!(
-                                "Failed to initialize ID counter: {}",
-                                e
-                            )));
-                        }
-                        // Allocate first batch [2, 1002), starting at 2 to reserve inode 1 for root directory
-                        pool.next = 3;
-                        pool.end = 1002;
-
-                        let elapsed = start.elapsed();
-                        info!(
-                            counter_key = counter_key,
-                            allocated_id = 2,
-                            batch_size = BATCH_SIZE,
-                            etcd_latency_ms = elapsed.as_millis() as u64,
-                            "ID pool initialized"
-                        );
-
-                        return Ok(2);
-                    };
-
-                    // Allocate batch from etcd: [current_id, current_id + BATCH_SIZE)
-                    // Return current_id immediately, store [current_id + 1, ...) in pool
+        let (allocated_id, next_start, pool_end) = self
+            .atomic_update(
+                counter_key,
+                |current_id: i64| {
                     let next_etcd_id = current_id
                         .checked_add(BATCH_SIZE)
                         .ok_or_else(|| MetaError::Internal("ID counter overflow".to_string()))?;
+                    Ok((next_etcd_id, (current_id, current_id + 1, next_etcd_id)))
+                },
+                || {
+                    let next_etcd_id = FIRST_ALLOCATED_ID
+                        .checked_add(BATCH_SIZE)
+                        .ok_or_else(|| MetaError::Internal("ID counter overflow".to_string()))?;
+                    Ok((
+                        next_etcd_id,
+                        (FIRST_ALLOCATED_ID, FIRST_ALLOCATED_ID + 1, next_etcd_id),
+                    ))
+                },
+                10,
+            )
+            .await?;
 
-                    let cmp = Compare::mod_revision(counter_key, CompareOp::Equal, mod_revision);
-                    let put_op = TxnOp::put(counter_key, next_etcd_id.to_string(), None);
-                    let txn = Txn::new().when([cmp]).and_then([put_op]);
+        self.id_pools
+            .update(counter_key, next_start, pool_end)
+            .await;
 
-                    match client.txn(txn).await {
-                        Ok(txn_resp) => {
-                            if txn_resp.succeeded() {
-                                // Successfully allocated batch, update pool and return first ID
-                                pool.next = current_id + 1;
-                                pool.end = next_etcd_id;
+        let elapsed = start.elapsed();
+        info!(
+            counter_key = counter_key,
+            allocated_id = allocated_id,
+            batch_size = BATCH_SIZE,
+            pool_remaining = next_start - pool_end,
+            etcd_latency_ms = elapsed.as_millis() as u64,
+            "ID batch allocated from etcd"
+        );
 
-                                let elapsed = start.elapsed();
-                                info!(
-                                    counter_key = counter_key,
-                                    allocated_id = current_id,
-                                    batch_size = BATCH_SIZE,
-                                    etcd_latency_ms = elapsed.as_millis() as u64,
-                                    retry_count = retry,
-                                    "ID batch allocated from etcd"
-                                );
-
-                                return Ok(current_id);
-                            } else {
-                                // CAS failed (another client got it), retry
-                                warn!(
-                                    counter_key = counter_key,
-                                    retry_count = retry,
-                                    "CAS conflict detected, retrying"
-                                );
-
-                                if retry < 9 {
-                                    tokio::time::sleep(Duration::from_millis(
-                                        50 * (1 << retry.min(3)),
-                                    ))
-                                    .await;
-                                    continue;
-                                } else {
-                                    return Err(MetaError::Config(
-                                        "Failed to allocate ID batch after max retries".to_string(),
-                                    ));
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to execute transaction: {}", e);
-                            return Err(MetaError::Config(format!(
-                                "Failed to execute ID allocation transaction: {}",
-                                e
-                            )));
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to get ID counter: {}", e);
-                    return Err(MetaError::Config(format!(
-                        "Failed to get ID counter: {}",
-                        e
-                    )));
-                }
-            }
-        }
-
-        Err(MetaError::Config(
-            "Failed to allocate ID batch: max retries exceeded".to_string(),
-        ))
+        Ok(allocated_id)
     }
 
-    async fn atomic_update<F, T>(&self, key: &str, f: F, init: T) -> Result<(), MetaError>
+    /// Optimistic concurrency helper for etcd keys.
+    ///
+    /// `f` runs when the key exists and returns the new persisted value plus a payload `R` derived
+    /// from the old state. `init` lazily provides the same tuple when the key is absent to avoid a
+    /// separate create path. Both closures can error so domain-level failures propagate cleanly.
+    /// Retries use exponential backoff on compare failures.
+    async fn atomic_update<F, I, T, R>(
+        &self,
+        key: &str,
+        f: F,
+        init: I,
+        max_retries: u64,
+    ) -> Result<R, MetaError>
     where
-        F: Fn(T) -> T,
-        T: Serialize + DeserializeOwned + Clone,
+        F: Fn(T) -> Result<(T, R), MetaError>,
+        I: Fn() -> Result<(T, R), MetaError>,
+        T: Serialize + DeserializeOwned,
     {
         let client = self.client.clone();
 
@@ -756,11 +644,9 @@ impl EtcdMetaStore {
             // Cloning client is cheap.
             let mut client = client.clone();
 
-            // A clone we cannot avoid :(
-            let init = init.clone();
-
             // Capture f by ref to avoid clone.
             let f = &f;
+            let init = &init;
 
             async move {
                 let resp = client
@@ -768,27 +654,41 @@ impl EtcdMetaStore {
                     .await
                     .map_err(|e| MetaError::Config(format!("Failed to get key: {e}")))?;
 
-                let (current, version) = match resp.kvs().first() {
-                    Some(kv) => (f(serde_json::from_slice::<T>(kv.value())?), kv.version()),
-                    None => (init, 0),
+                let (updated, ret, mod_revision) = match resp.kvs().first() {
+                    Some(kv) => {
+                        let current = serde_json::from_slice::<T>(kv.value())?;
+                        let (value, r) = f(current)?;
+                        (value, r, kv.mod_revision())
+                    }
+                    None => {
+                        let (value, r) = init()?;
+                        // When a key doesn't exist, there is no mod_revision. However, the version of a non-existent key
+                        // is 0. So the following `compare` use `Compare::version`.
+                        (value, r, 0)
+                    }
                 };
-                let current = serde_json::to_string(&current)?;
+                let current = serde_json::to_string(&updated)?;
 
-                let compare = Compare::version(key, CompareOp::Equal, version);
-                let op = TxnOp::put(key, current, None);
-                let txn = Txn::new().when([compare]).and_then([op]);
+                let compare = if mod_revision == 0 {
+                    Compare::version(key, CompareOp::Equal, 0)
+                } else {
+                    Compare::mod_revision(key, CompareOp::Equal, mod_revision)
+                };
+                let txn = Txn::new()
+                    .when([compare])
+                    .and_then([TxnOp::put(key, current, None)]);
 
                 match client.txn(txn).await {
-                    Ok(txn_resp) if txn_resp.succeeded() => Ok(()),
+                    Ok(txn_resp) if txn_resp.succeeded() => Ok(ret),
                     Ok(_) => Err(MetaError::ContinueRetry),
-                    Err(e) => Err(MetaError::Config(format!(
+                    Err(e) => Err(MetaError::Internal(format!(
                         "Failed to execute transaction: {e}"
                     ))),
                 }
             }
         };
 
-        backoff(10, f).await
+        backoff(max_retries, f).await
     }
 
     /// Get a clone of the etcd client (for Watch Worker)
@@ -880,65 +780,24 @@ impl EtcdMetaStore {
         max_retries: usize,
     ) -> Result<(), MetaError> {
         let key = Self::etcd_children_key(parent_ino);
-        let mut client = self.client.clone();
 
-        for retry in 0..max_retries {
-            let resp = client.get(key.clone(), None).await.map_err(|e| {
-                MetaError::Internal(format!("Failed to get parent children: {}", e))
-            })?;
-
-            let (mut children_map, mod_revision) = if let Some(kv) = resp.kvs().first() {
-                let children: EtcdDirChildren = serde_json::from_slice(kv.value())
-                    .map_err(|e| MetaError::Internal(format!("Failed to parse children: {}", e)))?;
-                (children.children.clone(), kv.mod_revision())
-            } else {
-                (HashMap::new(), 0)
-            };
-
-            updater(&mut children_map);
-
-            let new_children = EtcdDirChildren::new(parent_ino, children_map);
-            let new_json = serde_json::to_string(&new_children)
-                .map_err(|e| MetaError::Internal(format!("Failed to serialize children: {}", e)))?;
-
-            let txn = if mod_revision == 0 {
-                Txn::new()
-                    .when([Compare::version(key.clone(), CompareOp::Equal, 0)])
-                    .and_then([TxnOp::put(key.clone(), new_json, None)])
-            } else {
-                Txn::new()
-                    .when([Compare::mod_revision(
-                        key.clone(),
-                        CompareOp::Equal,
-                        mod_revision,
-                    )])
-                    .and_then([TxnOp::put(key.clone(), new_json, None)])
-            };
-
-            let txn_resp = client.txn(txn).await.map_err(|e| {
-                MetaError::Internal(format!("Update children transaction failed: {}", e))
-            })?;
-
-            if txn_resp.succeeded() {
-                return Ok(());
-            } else if retry < max_retries - 1 {
-                info!(
-                    "Concurrent update detected for parent {}, retrying ({}/{})",
-                    parent_ino,
-                    retry + 1,
-                    max_retries
-                );
-                continue;
-            } else {
-                return Err(MetaError::Internal(format!(
-                    "Failed to update parent {} children after {} retries",
-                    parent_ino, max_retries
-                )));
-            }
-        }
-        Err(MetaError::Internal(
-            "Update parent children failed: unreachable".to_string(),
-        ))
+        self.atomic_update(
+            &key,
+            |dir: EtcdDirChildren| {
+                let mut children = dir.children;
+                updater(&mut children);
+                Ok((EtcdDirChildren::new(parent_ino, children), ()))
+            },
+            || {
+                let mut children = HashMap::new();
+                updater(&mut children);
+                Ok((EtcdDirChildren::new(parent_ino, children), ()))
+            },
+            max_retries as u64,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| MetaError::Internal(format!("Update parent children failed: {e}")))
     }
 }
 
@@ -1712,71 +1571,24 @@ impl MetaStore for EtcdMetaStore {
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
-        let mut client = self.client.clone();
+        self.atomic_update(
+            &reverse_key,
+            |mut entry_info: EtcdEntryInfo| {
+                if !entry_info.is_file {
+                    return Err(MetaError::Internal(
+                        "Cannot set size for directory".to_string(),
+                    ));
+                }
 
-        // Use optimistic locking to prevent lost updates
-        for retry in 0..10 {
-            let resp = client
-                .get(reverse_key.clone(), None)
-                .await
-                .map_err(|e| MetaError::Internal(format!("Failed to get file metadata: {}", e)))?;
-
-            let (mut entry_info, mod_revision) = if let Some(kv) = resp.kvs().first() {
-                let info: EtcdEntryInfo = serde_json::from_slice(kv.value())
-                    .map_err(|e| MetaError::Internal(format!("Failed to parse metadata: {}", e)))?;
-                (info, kv.mod_revision())
-            } else {
-                return Err(MetaError::NotFound(ino));
-            };
-
-            if !entry_info.is_file {
-                return Err(MetaError::Internal(
-                    "Cannot set size for directory".to_string(),
-                ));
-            }
-
-            entry_info.size = Some(size as i64);
-            entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-
-            let updated_json = serde_json::to_string(&entry_info).map_err(|e| {
-                MetaError::Internal(format!("Failed to serialize entry info: {}", e))
-            })?;
-
-            // Use CAS to ensure atomicity
-            let txn = Txn::new()
-                .when([Compare::mod_revision(
-                    reverse_key.clone(),
-                    CompareOp::Equal,
-                    mod_revision,
-                )])
-                .and_then([TxnOp::put(reverse_key.clone(), updated_json, None)]);
-
-            let txn_resp = client
-                .txn(txn)
-                .await
-                .map_err(|e| MetaError::Internal(format!("Failed to update file size: {}", e)))?;
-
-            if txn_resp.succeeded() {
-                return Ok(());
-            } else if retry < 9 {
-                info!(
-                    "Concurrent update detected for inode {}, retrying ({}/10)",
-                    ino,
-                    retry + 1
-                );
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                continue;
-            } else {
-                return Err(MetaError::Internal(format!(
-                    "Failed to update file size after 10 retries (inode: {})",
-                    ino
-                )));
-            }
-        }
-
-        Err(MetaError::Internal(
-            "set_file_size: unreachable".to_string(),
-        ))
+                entry_info.size = Some(size as i64);
+                entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                Ok((entry_info, ()))
+            },
+            || Err(MetaError::NotFound(ino)),
+            10,
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
@@ -1918,15 +1730,19 @@ impl MetaStore for EtcdMetaStore {
 
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         let key = key_for_slice(chunk_id);
+
+        // Note that `slice` is `Copy`.
         self.atomic_update(
             &key,
             |mut source: Vec<SliceDesc>| {
                 source.push(slice);
-                source
+                Ok((source, ()))
             },
-            vec![slice],
+            || Ok((vec![slice], ())),
+            10,
         )
         .await
+        .map(|_| ())
     }
 
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
@@ -1934,5 +1750,167 @@ impl MetaStore for EtcdMetaStore {
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chuck::SliceDesc;
+    use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+    use crate::meta::entities::etcd::{EtcdDirChildren, EtcdEntryInfo};
+    use crate::meta::{INODE_ID_KEY, Permission};
+    use std::sync::Arc;
+
+    fn test_config() -> Config {
+        Config {
+            database: DatabaseConfig {
+                db_config: DatabaseType::Etcd {
+                    urls: vec!["http://127.0.0.1:2379".to_string()],
+                },
+            },
+            cache: CacheConfig::default(),
+            client: ClientOptions::default(),
+        }
+    }
+
+    async fn new_store() -> EtcdMetaStore {
+        EtcdMetaStore::from_config(test_config())
+            .await
+            .expect("connect etcd on 2379")
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn atomic_update_creates_and_updates_children_map() {
+        let store = new_store().await;
+        let parent = 4242;
+
+        store
+            .update_parent_children(
+                parent,
+                |m| {
+                    m.insert("child1".into(), 1001);
+                },
+                5,
+            )
+            .await
+            .unwrap();
+
+        store
+            .update_parent_children(
+                parent,
+                |m| {
+                    m.insert("child2".into(), 1002);
+                },
+                5,
+            )
+            .await
+            .unwrap();
+
+        let key = EtcdMetaStore::etcd_children_key(parent);
+        let children = store
+            .etcd_get_json::<EtcdDirChildren>(&key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(children.children.get("child1"), Some(&1001));
+        assert_eq!(children.children.get("child2"), Some(&1002));
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn set_file_size_updates_mod_time() {
+        let store = new_store().await;
+        let inode = store.generate_id(INODE_ID_KEY).await.unwrap();
+        let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        let entry = EtcdEntryInfo {
+            is_file: true,
+            size: Some(0),
+            version: Some(0),
+            access_time: now,
+            modify_time: now,
+            create_time: now,
+            permission: Permission::new(0o644, 0, 0),
+            nlink: 1,
+            parent_inode: 1,
+            entry_name: format!("testfile-{inode}"),
+            deleted: false,
+            symlink_target: None,
+        };
+        let reverse_key = EtcdMetaStore::etcd_reverse_key(inode);
+        store.etcd_put_json(&reverse_key, &entry).await.unwrap();
+
+        store.set_file_size(inode, 1234).await.unwrap();
+        let updated: EtcdEntryInfo = store.etcd_get_json(&reverse_key).await.unwrap().unwrap();
+        assert_eq!(updated.size, Some(1234));
+        assert!(updated.modify_time >= now);
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn append_slice_initializes_and_appends() {
+        let store = new_store().await;
+        let chunk_id = 7;
+        let s1 = SliceDesc {
+            slice_id: 1,
+            chunk_id,
+            offset: 0,
+            length: 10,
+        };
+        let s2 = SliceDesc {
+            slice_id: 2,
+            chunk_id,
+            offset: 10,
+            length: 5,
+        };
+
+        store.append_slice(chunk_id, s1).await.unwrap();
+        store.append_slice(chunk_id, s2).await.unwrap();
+
+        let slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(slices.len(), 2);
+        assert!(slices.contains(&s1));
+        assert!(slices.contains(&s2));
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn generate_id_is_concurrent_safe() {
+        use std::collections::HashSet;
+        let store = Arc::new(new_store().await);
+        let key = format!(
+            "slayerfs:test_concurrent:{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap(),
+        );
+
+        let ids_per_task = 1000;
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let store = Arc::clone(&store);
+            let key = key.clone();
+            handles.push(tokio::spawn(async move {
+                let mut ids = Vec::with_capacity(ids_per_task);
+                for _ in 0..ids_per_task {
+                    ids.push(store.generate_id(&key).await.expect("generate id"));
+                }
+                ids
+            }));
+        }
+
+        let mut ids = Vec::with_capacity(ids_per_task * 4);
+        for handle in handles {
+            ids.extend(handle.await.expect("join"));
+        }
+
+        let unique: HashSet<_> = ids.iter().cloned().collect();
+        assert_eq!(unique.len(), ids_per_task * 4);
+
+        let mut unique = unique.into_iter().collect::<Vec<_>>();
+        unique.sort();
+
+        let should = (2..=4001).into_iter().collect::<Vec<_>>();
+        assert_eq!(unique, should);
     }
 }

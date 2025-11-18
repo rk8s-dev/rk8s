@@ -12,9 +12,6 @@ exclude = ["BUCK"]
 authors = ["rk8s-dev team"]
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rfuse3"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-
 [features]
 default = ["tokio-runtime", "unprivileged"]
 tokio-runtime = ["dep:tokio"]
@@ -33,44 +30,27 @@ unprivileged = ["nix/socket", "dep:which"]
 async-fs = { version = "2.1.1", optional = true }
 async-global-executor = { version = "2.4.1", optional = true }
 async-lock = { version = "3.3.0", optional = true }
-async-notify = "0.3"
+async-notify = { workspace = true }
 async-io = { version = "2.3.1", optional = true }
 async-process = { version = "2.1.0", optional = true }
-bincode = "1.3.3"
-bytes = "1.10.1"
-futures-channel = { version = "0.3.30", features = ["sink"] }
-futures-util = { version = "0.3.30", features = ["sink"] }
-libc = "0.2.171"
-nix = { version = "0.29.0", features = [
-  "signal",
-  "user",
-  "fs",
-  "socket",
-  "sched",
-  "mount",
-  "mman",
-  "resource",
-  "dir",
-  "term",
-  "hostname",
-  "process",
-] }
-serde = { version = "1.0", features = ["derive"] }
-slab = "0.4.9"
-tracing = { version = "0.1.41", features = ["attributes"] }
-trait-make = "0.1"
-async-trait = "0.1.89"
-which = { version = "4.4.2", optional = true }
+bincode = { workspace = true }
+bytes = { workspace = true }
+futures-channel = { workspace = true, features = ["sink"] }
+futures-util = { workspace = true, features = ["sink"] }
+libc = { workspace = true }
+nix = { workspace = true, features = ["signal", "user", "fs", "socket", "sched", "mount", "mman", "resource", "dir", "term", "hostname", "process"] }
+serde = { workspace = true, features = ["derive"] }
+slab = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
+trait-make = { workspace = true }
+async-trait = { workspace = true }
+which = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["full"], optional = true }
 aligned_box = "0.3.0"
 
-[dependencies.tokio]
-version = "1.36"
-features = ["full"]
-optional = true
-
 [dev-dependencies]
-clap = { version = "4.4", features = ["derive"] }
-tracing-subscriber = "0.3"
+clap = { workspace = true, features = ["derive"] }
+tracing-subscriber = { workspace = true }
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

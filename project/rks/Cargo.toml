@@ -7,57 +7,56 @@ description = "Cluster scheduler and dispatcher for the RK8s container orchestra
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rks"
 
 [dependencies]
-common = { path = "../common" }
-libcni = { path = "../libcni" }
-libscheduler = { path = "../libscheduler" }
-libnetwork = { path = "../libnetwork", version = "0.1.0" }
-tokio = { version = "1.44", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-clap = { version = "4.5.32", features = ["derive"] }
-quinn = { version = "0.11.8" }
-rustls = "0.23"
-serde_yaml = "0.9"
-bincode = "1.3.3"
-futures = "0.3.31"
-anyhow = "1.0.98"
-rcgen = "0.12.1"
-etcd-client = { version = "0.16.1", features = ["tls"] }
-ipnetwork = "0.17"
-serde_json = "1.0.107"
-chrono = { version = "0.4.41", features = ["serde"] }
-log = "0.4.26"
-lazy_static = "1.5.0"
-regex = "1.11.1"
-context = "3.0.0"
-async-trait = "0.1.88"
-thiserror = "2.0.12"
-native-tls = "0.2.14"
-tonic = "0.13.1"
-rand = "0.9.0"
-netlink-packet-route = "0.22.0"
-rtnetlink = "0.16.0"
-nix = { version = "0.29.0", features = ["net"] }
-dotenvy = "0.15.0"
-tempfile = "3.20.0"
+common = { workspace = true }
+libcni = { workspace = true }
+libscheduler = { workspace = true }
+libnetwork = { workspace = true }
+libvault = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive"] }
+quinn = { workspace = true }
+rustls = { workspace = true }
+serde_yaml = { workspace = true }
+bincode = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+rcgen = { workspace = true }
+etcd-client = { workspace = true }
+ipnetwork = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+log = { workspace = true }
+lazy_static = { workspace = true }
+regex = { workspace = true }
+context = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+native-tls = { workspace = true }
+tonic = "=0.14.2"
+rand = { workspace = true }
+netlink-packet-route = { workspace = true }
+rtnetlink = { workspace = true }
+nix = { workspace = true, features = ["net"] }
+dotenvy = { workspace = true }
+tempfile = { workspace = true }
 tokio-util = "0.7.0"
-env_logger = "0.11.0"
-once_cell = "1.21.0"
-futures-util = "0.3"
-time = "0.3"
-hickory-server = { version = "0.25.2", features = ["resolver"] }
-hickory-proto = "0.25.2"
-hickory-resolver = "0.25.2"
-libvault = { path = "../libvault" }
-derive_more = { version = "2.0.0", features = ["deref", "deref_mut"] }
-rustls-pemfile = "2.2.0"
+env_logger = { workspace = true }
+once_cell = { workspace = true }
+futures-util = { workspace = true }
+time = { workspace = true }
+hickory-server = { workspace = true, features = ["resolver"] }
+hickory-proto = { workspace = true }
+hickory-resolver = { workspace = true }
+iptables = { workspace = true }
+axum = { workspace = true }
+humantime = { workspace = true }
 base64 = "0.20.0"
-humantime = "2.3.0"
-either = "1.15.0"
-axum = "0.8.6"
-reqwest = "0.12.24"
-iptables = "0.6"
-uuid = { version = "1.18.1", features = ["serde", "v4"] }
-lru = "0.16.2"
+reqwest = { workspace = true }
+either = { workspace = true }
+tokio-stream = { workspace = true }
+uuid = { workspace = true }
+lru = { workspace = true }
 
 [dev-dependencies]
-serial_test = "3.2.0"
+serial_test = { workspace = true }

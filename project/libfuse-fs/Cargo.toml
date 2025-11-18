@@ -10,28 +10,28 @@ license = "MIT OR Apache-2.0"
 exclude = ["buck"]
 
 [dependencies]
-uuid = { version = "1.15.1", features = ["v4"] }
-clap = { version = "4.5.32", features = ["derive"] }
-rfuse3 = { version = "0.0.5", features = ["tokio-runtime", "unprivileged"] }
-tracing-subscriber = { version = "0.3.19", features = ["json", "env-filter"] }
-tokio = { version = "1.44.0", features = ["full"] }
-reqwest = { version = "0.12.7", features = ["json", "blocking"] }
-serde = { version = "1.0.210", features = ["derive"] }
-radix_trie = "0.2.1"
-futures = "0.3.31"
-libc = "0.2.171"
-serde_json = "1.0.128"
-vm-memory = "0.16.1"
-bytes = "1.10.1"
-futures-util = "0.3.31"
-vmm-sys-util = "0.12.1"
-bitflags = "2.9.0"
-nix = "0.29.0"
-moka = { version = "0.12.11", features = ["future"] }
-memmap2 = "0.9.7"
-tracing = "0.1.41"
-itertools = "0.14.0"
-async-trait = "0.1.89"
+uuid = { workspace = true, features = ["v4"] }
+clap = { workspace = true, features = ["derive"] }
+rfuse3 = { version = "0.0.5", path = "../rfuse3", features = ["tokio-runtime", "unprivileged"] }
+tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
+tokio = { workspace = true, features = ["full"] }
+reqwest = { workspace = true, features = ["json", "blocking"] }
+serde = { workspace = true, features = ["derive"] }
+radix_trie = { workspace = true }
+futures = { workspace = true }
+libc = { workspace = true }
+serde_json = { workspace = true }
+vm-memory = { workspace = true }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+vmm-sys-util = { workspace = true }
+bitflags = { workspace = true }
+nix = { workspace = true }
+moka = { workspace = true, features = ["future"] }
+memmap2 = { workspace = true }
+tracing = { workspace = true }
+itertools = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.19.1"
+tempfile = { workspace = true }
