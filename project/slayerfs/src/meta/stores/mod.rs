@@ -9,6 +9,7 @@ pub mod database_store;
 pub mod etcd_store;
 pub mod etcd_watch;
 pub mod redis_store;
+pub mod pool;
 
 // Re-export main types for convenience
 pub use database_store::DatabaseMetaStore;

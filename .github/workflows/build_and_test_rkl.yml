@@ -19,6 +19,7 @@ jobs:
 
       - name: Setup test environment
         run: |
+          
           buck2 build //project/libbridge:libbridge
           buck2 build //project/libipam:libipam
           buck2 build //project/libnetwork:libnetwork
@@ -32,18 +33,21 @@ jobs:
 
       - name: Run tests
         run: |
+          sudo sh -c 'lsof -i :53'
           cd project
           cargo test --no-run -p rkl
 
           # to avoid exit code equals 0
 
           FAIL=0
-          sudo sh -c '
+          sudo -E sh  -c '
           for t in $(find target/debug/deps/ -type f -executable -name "test_*"); do
               $t || FAIL=1
           done
           exit $FAIL
           '
+
+          sudo sh -c 'lsof -i :53'
       
       - name: clean up
         run: |

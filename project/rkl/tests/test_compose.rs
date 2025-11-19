@@ -110,8 +110,6 @@ fn test_compose_duplicate_project() {
     let res = create_compose_helper(&compose_config, "test-duplicate");
     assert!(res.is_ok());
 
-    // Cleanup
-
     compose_execute(ComposeCommand::Down(DownArgs {
         project_name: Some("test-duplicate".to_string()),
         compose_yaml: None,
@@ -129,11 +127,16 @@ fn create_compose_helper(compose_config: &str, project_name: &str) -> Result<(),
     file.write_all(compose_config.as_bytes())?;
 
     // Clean up existing compose project
+
     let path_str = format!("/run/youki/compose/{project_name}");
     let compose_dir = Path::new(&path_str);
     if compose_dir.exists() {
         info!("project {project_name} already exists, deleting it to create a new one");
-        std::fs::remove_dir_all(compose_dir)?;
+        compose_execute(ComposeCommand::Down(DownArgs {
+            project_name: Some(project_name.to_string()),
+            compose_yaml: None,
+        }))
+        .unwrap();
     }
 
     compose_execute(ComposeCommand::Up(UpArgs {
@@ -146,6 +149,7 @@ fn create_compose_helper(compose_config: &str, project_name: &str) -> Result<(),
 }
 
 fn try_create_compose(compose_config: String, project_name: &str) {
+    unsafe { env::set_var("RKL_TEST_MODE", "on") };
     let res = create_compose_helper(&compose_config, project_name);
     if res.is_err() {
         error!(
