@@ -387,7 +387,7 @@ impl NetworkManager {
     pub fn startup_dns_server(&self) -> Result<()> {
         // TODO: Due to current test method(Directly run test_runner ./target/debug/deps/... )
         // We CAN NOT USE #[cfg(test)] to distinct test or product environment
-        // So here introduce RKL_TEST_MODE env TEMPORAILY.
+        // So here introduce RKL_TEST_MODE env TEMPORARILY.
 
         let is_test_mode = env::var("RKL_TEST_MODE").is_ok();
         let current_exe: PathBuf;
