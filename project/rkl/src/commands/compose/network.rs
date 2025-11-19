@@ -1,23 +1,41 @@
 use std::collections::HashMap;
+use std::env;
 use std::fs;
+use std::io::Write;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
+use std::str::FromStr;
+use std::thread;
+use std::time::Duration;
+use sysinfo::Pid;
+use sysinfo::System;
 
 use crate::commands::compose::spec::NetworkDriver::Bridge;
 use crate::commands::compose::spec::NetworkDriver::Host;
 use crate::commands::compose::spec::NetworkDriver::Overlay;
+use crate::dns;
+use crate::dns::PID_FILE_PATH;
 
 use cni_plugin::ip_range::IpRange;
+use hickory_proto::rr::LowerName;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
 use libipam::config::IPAMConfig;
 use libipam::range_set::RangeSet;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufReader;
+use tokio::net::UnixStream;
 
 use crate::commands::compose::spec::ComposeSpec;
 use crate::commands::compose::spec::NetworkSpec;
 use crate::commands::compose::spec::ServiceSpec;
-use anyhow::Ok;
+use crate::commands::container::ContainerRunner;
+use crate::dns::DNS_SOCKET_PATH;
 use anyhow::Result;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
@@ -29,6 +47,7 @@ pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
 pub const BRIDGE_CONF: &str = "rkl-standalone-bridge.conf";
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CliNetworkConfig {
     /// default is 1.0.0
     #[serde(default)]
@@ -118,8 +137,9 @@ impl CliNetworkConfig {
 impl Default for CliNetworkConfig {
     fn default() -> Self {
         // Default subnet-addr for rkl container management
-        let subnet_addr = Ipv4Addr::new(10, 10, 0, 0);
-        let getway_addr = Ipv4Addr::new(10, 10, 2, 1);
+        // 172.17.0.0/16
+        let subnet_addr = Ipv4Addr::new(172, 17, 0, 0);
+        let getway_addr = Ipv4Addr::new(172, 17, 0, 1);
 
         let ip_range = IpRange {
             subnet: ipnetwork::IpNetwork::V4(Ipv4Network::new(subnet_addr, 16).unwrap()),
@@ -193,8 +213,8 @@ impl NetworkManager {
             )
         })?;
 
-        let subnet_addr = Ipv4Addr::new(10, 20, 0, 0);
-        let gateway_addr = Ipv4Addr::new(10, 20, 0, 1);
+        let subnet_addr = Ipv4Addr::new(172, 17, 0, 0);
+        let gateway_addr = Ipv4Addr::new(172, 17, 0, 1);
 
         let conf = CliNetworkConfig::from_subnet_gateway(
             network_name,
@@ -213,7 +233,6 @@ impl NetworkManager {
             fs::create_dir_all(parent)?;
         }
 
-        // write it to
         fs::write(conf_path, serde_json::to_string_pretty(&conf_value)?)?;
 
         Ok(())
@@ -231,7 +250,11 @@ impl NetworkManager {
         self.validate(spec)?;
 
         // allocate the bridge interface
-        self.allocate_interface()
+        self.allocate_interface()?;
+
+        self.startup_dns_server()?;
+
+        Ok(())
     }
 
     /// validate the correctness and initialize  the service_mapping
@@ -309,4 +332,165 @@ impl NetworkManager {
         }
         Ok(())
     }
+
+    async fn add_dns_record(&self, srv_name: &str, ip: Ipv4Addr) -> Result<()> {
+        let mut stream = connect_dns_socket_with_retry(5, 200).await?;
+
+        let domain = dns::parse_service_to_domain(srv_name, None);
+
+        let msg = dns::DNSUpdateMessage {
+            action: dns::UpdateAction::Add,
+            name: LowerName::from_str(&domain).unwrap(),
+            ip,
+        };
+
+        let msg_byte = serde_json::to_vec(&msg).unwrap();
+
+        stream.write_all(&msg_byte).await?;
+        stream.write_all(b"\n").await?;
+
+        let mut buf = String::new();
+        let mut reader = BufReader::new(&mut stream);
+        reader.read_line(&mut buf).await?;
+        let buf = buf.trim(); // get rid of the "\n" in  "ok\n" 
+
+        if buf != "ok" {
+            return Err(anyhow!(
+                "fail to add {srv_name}'s dns record, got DNS Server response: {buf}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// This function act as a hook func, doese network-related stuff after container started
+    /// Currently, it will do the following things:
+    ///
+    /// 1. Put the Container's IP to Local daemon dns server(use sock)
+    ///
+    pub(crate) fn after_container_started(
+        &self,
+        srv_name: &str,
+        runner: ContainerRunner,
+    ) -> Result<()> {
+        let container_ip = runner
+            .ip()
+            .ok_or_else(|| anyhow!("[container {}]Empty IP address", runner.id()))?;
+        if let IpAddr::V4(ip) = container_ip {
+            block_on(async move { self.add_dns_record(srv_name, ip).await })?;
+        } else {
+            return Err(anyhow!("Unsupported ipv6 type"));
+        }
+
+        Ok(())
+    }
+
+    pub fn startup_dns_server(&self) -> Result<()> {
+        // TODO: Due to current test method(Directly run test_runner ./target/debug/deps/... )
+        // We CAN NOT USE #[cfg(test)] to distinct test or product environment
+        // So here introduce RKL_TEST_MODE env TEMPORARILY.
+
+        let is_test_mode = env::var("RKL_TEST_MODE").is_ok();
+        let current_exe: PathBuf;
+
+        if is_test_mode {
+            current_exe = env::current_dir()
+                .map_err(|e| anyhow!("failed to get current executable path: {e}"))?
+                .join("target/debug/rkl");
+            println!("{current_exe:?}");
+        } else {
+            // ========== PRODUCTION LOGIC (#[cfg(not(test)])) ==========
+            current_exe = env::current_exe()
+                .map_err(|e| anyhow!("failed to get current executable path: {e}"))?;
+        }
+
+        let child_process = Command::new(&current_exe) // Use the path to the current executable
+            .arg("compose") // First argument: 'compose'
+            .arg("server") // Second argument: 'server'
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| anyhow!("failed to spawn DNS server child process: {e}"))?;
+
+        // thread::sleep(time::Duration::from_secs(1000));
+
+        let child_pid = child_process.id();
+        println!("Spawned DNS server in child PID: {}", child_pid);
+
+        let mut file = fs::File::create(PID_FILE_PATH)
+            .map_err(|e| anyhow!("failed to create rkl's dns pid file: {e}"))?;
+        writeln!(file, "{}", child_pid)
+            .map_err(|e| anyhow!("failed to write pid {child_pid} to rkl's dns pid file: {e}"))?;
+
+        Ok(())
+    }
+
+    pub fn clean_up() -> Result<()> {
+        let pid_file = PID_FILE_PATH;
+        if Path::new(pid_file).exists() {
+            if let Ok(pid_str) = fs::read_to_string(pid_file)
+                && let Ok(pid) = pid_str.trim().parse::<u32>()
+            {
+                let mut sys = System::new_all();
+                sys.refresh_processes();
+                if let Some(proc) = sys.process(Pid::from_u32(pid)) {
+                    println!("KILL PID: {}", pid);
+                    let _ = proc.kill();
+                    thread::sleep(Duration::from_secs(3));
+                }
+            }
+            let _ = fs::remove_file(pid_file);
+        }
+
+        Ok(())
+    }
+}
+
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref RUNTIME: tokio::runtime::Runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime for network manager.");
+}
+
+fn block_on<F, T>(f: F) -> T
+where
+    F: Future<Output = T>,
+{
+    RUNTIME.block_on(f)
+}
+
+#[allow(unused)]
+fn spawn<F, T>(f: F) -> tokio::task::JoinHandle<T>
+where
+    F: Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    RUNTIME.spawn(f)
+}
+
+pub async fn connect_dns_socket_with_retry(retries: usize, delay_ms: u64) -> Result<UnixStream> {
+    for attempt in 1..=retries {
+        match UnixStream::connect(DNS_SOCKET_PATH).await {
+            Ok(stream) => return Ok(stream),
+            Err(e) => {
+                if attempt == retries {
+                    return Err(anyhow!(
+                        "Fatal error: failed to connect local DNS SOCKET after {} attempts: {e}",
+                        retries
+                    ));
+                } else {
+                    eprintln!(
+                        "Attempt {}/{} failed to connect DNS socket: {}. Retrying in {} ms...",
+                        attempt, retries, e, delay_ms
+                    );
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+    }
+
+    unreachable!()
 }

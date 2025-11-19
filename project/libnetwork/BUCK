@@ -37,6 +37,7 @@ rust_binary(
         "//third-party/rust/crates/serde_json/1.0.145:serde_json",
         "//third-party/rust/crates/serde_yaml/0.9.34+deprecated:serde_yaml",
         "//third-party/rust/crates/tokio/1.47.1:tokio",
+        ":liblibnetwork",
     ],
 )
 

@@ -5,10 +5,10 @@ load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
     name = "rfuse3-vendor",
-    urls = ["https://static.crates.io/crates/rfuse3/rfuse3-0.0.4.crate"],
-    sha256 = "5e65743fb89df9efbac998a144a9222434754fdc18438270f6e3dcde90a41617",
+    urls = ["https://static.crates.io/crates/rfuse3/rfuse3-0.0.5.crate"],
+    sha256 = "848f037ea6f58bf93045c366e6099146b2b227c06646c584b64ed7d4a089ad71",
     type = "tar.gz",
-    strip_prefix = "rfuse3-0.0.4",
+    strip_prefix = "rfuse3-0.0.5",
     out = "vendor",
 )
 
@@ -31,7 +31,9 @@ rust_library(
     rustc_flags = ["@$(location :rfuse3-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
+        "//third-party/rust/crates/aligned_box/0.3.0:aligned_box",
         "//third-party/rust/crates/async-notify/0.3.0:async-notify",
+        "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/bincode/1.3.3:bincode",
         "//third-party/rust/crates/bytes/1.10.1:bytes",
         "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",

@@ -7,6 +7,7 @@ mod bundle;
 mod commands;
 mod cri;
 mod daemon;
+mod dns;
 mod network;
 mod quic;
 mod rootpath;

@@ -6,6 +6,7 @@ pub mod network;
 mod rootpath;
 pub mod task;
 //mod status_access;
+mod dns;
 mod quic;
 
 // re-export selected public API

@@ -3,12 +3,15 @@ name: rks-xline
 services:
   rks:
     container_name: rks
-    image: ./rks-bundle
+    image: rks
     command: [
-      "/bin/sh",
-      "-c",
-      "sleep 10 && rks start --config /usr/src/rks-config.yaml" # wait for xline to startup
-    ]
+        "/bin/sh",
+        "-c",
+        "echo 'nameserver 172.17.0.1' > /etc/resolv.conf && \
+        echo 'search rkl.internal' >> /etc/resolv.conf && \
+        sleep 10 && \
+        rks start --config /usr/src/rks-config.yaml",
+      ]
     ports:
       - "50051:50051"
     networks:

@@ -1,6 +1,5 @@
 use crate::test_common::get_pod_config;
 use anyhow::anyhow;
-//use rkl::task::PodTask;
 use common::{ContainerRes, PodTask, Resource};
 use rkl::commands::pod::standalone::create_pod;
 use rkl::commands::pod::standalone::delete_pod;

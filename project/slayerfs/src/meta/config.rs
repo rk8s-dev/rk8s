@@ -41,6 +41,8 @@ pub enum DatabaseType {
     Postgres { url: String },
     #[serde(rename = "etcd")]
     Etcd { urls: Vec<String> },
+    #[serde(rename = "redis")]
+    Redis { url: String },
 }
 
 fn default_sqlite_url() -> String {
@@ -95,6 +97,7 @@ impl DatabaseConfig {
             DatabaseType::Sqlite { .. } => "sqlite",
             DatabaseType::Postgres { .. } => "postgres",
             DatabaseType::Etcd { .. } => "etcd",
+            DatabaseType::Redis { .. } => "redis",
         }
     }
 }
@@ -199,6 +202,7 @@ impl CacheTtl {
             "sqlite" => Self::for_sqlite(),
             "postgres" => Self::for_postgres(),
             "etcd" => Self::for_etcd(),
+            "redis" => Self::for_redis(),
             _ => Self::for_sqlite(),
         }
     }
@@ -224,6 +228,14 @@ impl CacheTtl {
         Self {
             inode_ttl: Duration::from_millis(100),
             path_ttl: Duration::from_millis(100),
+        }
+    }
+
+    /// Redis backend defaults (similar to PostgreSQL latency expectations)
+    pub fn for_redis() -> Self {
+        Self {
+            inode_ttl: Duration::from_millis(500),
+            path_ttl: Duration::from_millis(500),
         }
     }
 
@@ -322,6 +334,7 @@ impl DatabaseType {
             DatabaseType::Sqlite { .. } => "sqlite",
             DatabaseType::Postgres { .. } => "postgres",
             DatabaseType::Etcd { .. } => "etcd",
+            DatabaseType::Redis { .. } => "redis",
         }
     }
 }

@@ -48,6 +48,11 @@
   - 多实例间保持元数据一致性
   - 面向高可用部署优化
 
+#### RedisMetaStore（高性能 KV 存储后端）
+
+- **技术栈**：使用 `redis` 异步连接管理器，复用 Redis 的单线程原子语义（`INCR`、Lua/事务）保证一致性
+- **键空间规划**：采用与 JuiceFS 类似的命名约定，`i{ino}` 存储 inode JSON、`d{ino}` 维护目录子项、`c{ino}_{chunk_idx}` 记录切片列表、`nextinode`/`nextchunk` 负责全局 ID、`delslices` 存待清理记录
+
 ### 数据模型与实体
 
 - **实体模型**：基于 SeaORM 宏生成类型安全 ORM 实体
@@ -197,6 +202,23 @@ cache:
   ttl:
     inode_ttl: 10.0       # 10 seconds for inode metadata
     path_ttl: 10.0        # 10 seconds for path resolution
+```
+
+本机运行 Redis 示例：
+
+```sh
+# 使用 Redis 持久化存储元数据
+cargo run --example persistence_demo -- -c redis.yml -s /tmp/redisdata -m /tmp/mount
+```
+
+redis.yml
+
+```yml
+database:
+  type: redis
+  url: "redis://127.0.0.1:6379/0"
+cache:
+  enabled: true
 ```
 
  目前，本地数据库模式下，在挂载后的文件夹中，可以正常操作文件夹，包括重命名，删除，读写文件之类的操作。

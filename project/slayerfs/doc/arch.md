@@ -12,7 +12,7 @@ This document describes an MVP for a Rust-based distributed filesystem (in the s
 MVP feature checklist (must-have)
 ---------------------------------
 - FUSE mount and basic filesystem operations (open/read/write/create/unlink/rename/truncate/stat/readdir)
-- Metadata backend: Postgres (production) / SQLite (single-node development)
+- Metadata backend: Postgres (production) / SQLite (single-node development) / Redis (KV mode)
 - Write path: in-memory buffer -> slice -> chunk (64 MiB) -> block (default 4 MiB) -> concurrent upload to rustfs
 - Read path: locate blocks via metadata, prefer local cache; on cache miss read from rustfs and fill cache
 - Client session registration and heartbeat (used for crash recovery / cleanup)
@@ -55,8 +55,8 @@ flowchart TD
 	end
 
 	subgraph Meta["MetaClient"]
-		MetaClient["Meta client (SQLx)"]
-		DB["Postgres / SQLite"]
+		MetaClient["Meta client (SQLx / Redis)"]
+		DB["Postgres / SQLite / Redis / Etcd"]
 	end
 
 	subgraph Data["Data layer"]

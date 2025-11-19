@@ -17,6 +17,7 @@ use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use clap::Subcommand;
 use common::ContainerSpec;
+use json::JsonValue;
 use libcontainer::{
     container::{Container, ContainerStatus, State, state},
     error::LibcontainerError,
@@ -25,11 +26,11 @@ use liboci_cli::{Create, Delete, List, Start};
 use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, RootBuilder, Spec, get_default_namespaces};
 use oci_spec::runtime::{Mount as OciMount, MountBuilder};
-use std::fmt::Write as fmtWrite;
 use std::{
     env,
     io::{self, BufWriter},
 };
+use std::{fmt::Write as fmtWrite, net::IpAddr};
 use std::{
     fs::{self, File},
     io::Read,
@@ -97,9 +98,17 @@ pub struct ContainerRunner {
     root_path: PathBuf,
     container_id: String,
     volumes: Option<Vec<String>>,
+    ip: Option<IpAddr>,
 }
 
 impl ContainerRunner {
+    pub fn ip(&self) -> Option<IpAddr> {
+        self.ip
+    }
+    pub fn id(&self) -> String {
+        self.container_id.clone()
+    }
+
     // for now just for compose
     pub fn from_spec(mut spec: ContainerSpec, root_path: Option<PathBuf>) -> Result<Self> {
         let container_id = spec.name.clone();
@@ -123,6 +132,7 @@ impl ContainerRunner {
                 None => rootpath::determine(None)?,
             },
             volumes: None,
+            ip: None,
         })
     }
 
@@ -154,6 +164,7 @@ impl ContainerRunner {
             config: None,
             container_id,
             volumes,
+            ip: None,
         })
     }
 
@@ -177,6 +188,7 @@ impl ContainerRunner {
                 None => rootpath::determine(None)?,
             },
             volumes: None,
+            ip: None,
         })
     }
 
@@ -405,7 +417,7 @@ impl ContainerRunner {
         Ok(CreateContainerResponse { container_id })
     }
 
-    pub fn setup_container_network(&self) -> Result<()> {
+    pub fn setup_container_network(&self) -> Result<JsonValue> {
         // single container status
         if self.determine_single_status() {
             setup_network_conf()?;
@@ -422,8 +434,7 @@ impl ContainerRunner {
             format!("{container_pid}"),
             format!("/proc/{container_pid}/ns/net"),
         )
-        .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))?;
-        Ok(())
+        .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))
     }
 
     pub fn load_container(&self) -> Result<Container, LibcontainerError> {
@@ -439,7 +450,8 @@ impl ContainerRunner {
             return self.create();
         }
         // setup the network
-        self.setup_container_network()?;
+        let setup_result = self.setup_container_network()?;
+        self.retrieve_container_ip(setup_result)?;
 
         match id {
             None => {
@@ -466,7 +478,44 @@ impl ContainerRunner {
         }
     }
 
-    // due to the compose manager reuse the container manager to uun container
+    pub fn retrieve_container_ip(&mut self, setup_result: JsonValue) -> Result<()> {
+        // Currently save container's ip as Ipv4 and collect the first IP(A container can have multiple IP addrs)
+        let ips = setup_result["ips"].clone();
+        if !ips.is_array() {
+            return Err(anyhow!("CNI result missing 'ips' array"));
+        };
+        if ips.is_empty() {
+            return Err(anyhow!(
+                "CNI returned no IP addresses for container {}",
+                self.container_id
+            ));
+        }
+        let binding = ips[0]["address"].clone();
+        let ip_with_cidr = binding.as_str().ok_or_else(|| anyhow!(
+                "[container {}] CNI result missing valid IP address string at ['ips'][0]['address']: {binding:?}",
+                self.container_id
+            ))?;
+        debug!(
+            "[container {}] Get container's ip_with_cidr: {ip_with_cidr}",
+            self.container_id
+        );
+        let ip_str = ip_with_cidr.split('/').next().unwrap_or(ip_with_cidr);
+        let ip_addr: IpAddr = ip_str
+            .parse()
+            .map_err(|_| anyhow!("invalid IP address: {ip_with_cidr}"))?;
+        self.ip = match ip_addr {
+            IpAddr::V4(ipv4) => Some(IpAddr::V4(ipv4)),
+            _ => {
+                return Err(anyhow!(
+                    "[container {}] only IPv4 addresses are supported, got: {ip_with_cidr}",
+                    self.container_id
+                ));
+            }
+        };
+        Ok(())
+    }
+
+    // due to the compose manager reusing the container manager to run container
     // so we can determine the mode by find "compose" in the root_path
     pub fn determine_single_status(&self) -> bool {
         !self.root_path.parent().unwrap().ends_with("compose")

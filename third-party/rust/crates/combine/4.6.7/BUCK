@@ -27,12 +27,23 @@ rust_library(
         "alloc",
         "bytes",
         "default",
+        "futures-core-03",
+        "pin-project-lite",
         "std",
+        "tokio",
+        "tokio-dep",
+        "tokio-util",
     ],
     rustc_flags = ["@$(location :combine-manifest[env_flags])"],
+    named_deps = {
+        "futures_core_03": "//third-party/rust/crates/futures-core/0.3.31:futures-core",
+        "tokio_dep": "//third-party/rust/crates/tokio/1.47.1:tokio",
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.10.1:bytes",
         "//third-party/rust/crates/memchr/2.7.6:memchr",
+        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/tokio-util/0.7.16:tokio-util",
     ],
 )
