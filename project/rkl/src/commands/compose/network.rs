@@ -452,8 +452,7 @@ lazy_static! {
     static ref RUNTIME: tokio::runtime::Runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .unwrap();
-}
+        .expect("Failed to create tokio runtime for network manager. \
 fn block_on<F, T>(f: F) -> T
 where
     F: Future<Output = T>,
