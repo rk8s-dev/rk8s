@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sea_orm::prelude::Uuid;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
@@ -27,26 +27,32 @@ impl SessionId {
         let info: serde_json::Value = serde_json::from_slice(payload)?;
 
         // Try to extract UUID from payload first (new format)
-        if let Some(uuid_str) = info.get("session_uuid").and_then(|v| v.as_str())
-            && let Ok(uuid) = Uuid::parse_str(uuid_str)
-        {
-            let hostname = info
-                .get("host_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string();
-
-            let process_id = info
-                .get("process_id")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(std::process::id() as u64) as u32;
-
-            return Ok(Self {
-                uuid,
-                hostname,
-                process_id,
-                created_at: std::time::SystemTime::now(),
-            });
+        if let Some(uuid_str) = info.get("session_uuid").and_then(|v| v.as_str()) {
+            match Uuid::parse_str(uuid_str) {
+                Ok(uuid) => {
+                    let hostname = info
+                        .get("host_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let process_id =
+                        info.get("process_id")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(std::process::id() as u64) as u32;
+                    return Ok(Self {
+                        uuid,
+                        hostname,
+                        process_id,
+                        created_at: std::time::SystemTime::now(),
+                    });
+                }
+                Err(e) => {
+                    warn!(
+                        "Malformed session_uuid in payload: '{}', error: {}. Falling back to new session UUID.",
+                        uuid_str, e
+                    );
+                }
+            }
         }
 
         // Fallback: create new session with current UUID (for backward compatibility)
@@ -120,6 +126,8 @@ struct SessionState {
     task_handle: Option<JoinHandle<()>>,
     /// Shutdown signal sender
     shutdown_sender: Option<oneshot::Sender<()>>,
+    /// Watch channel to monitor heartbeat task status
+    heartbeat_status_watcher: Option<watch::Receiver<bool>>,
     /// Whether session is currently running
     running: bool,
     /// Store reference for session operations
@@ -134,6 +142,10 @@ impl std::fmt::Debug for SessionState {
             .field("session_id", &self.session_id)
             .field("task_handle", &self.task_handle.is_some())
             .field("shutdown_sender", &self.shutdown_sender.is_some())
+            .field(
+                "heartbeat_status_watcher",
+                &self.heartbeat_status_watcher.is_some(),
+            )
             .field("running", &self.running)
             .field("store", &self.store.is_some())
             .field("consecutive_failures", &self.consecutive_failures)
@@ -170,6 +182,7 @@ impl SessionManager {
                 session_id: None,
                 task_handle: None,
                 shutdown_sender: None,
+                heartbeat_status_watcher: None,
                 running: false,
                 store: None,
                 consecutive_failures: 0,
@@ -216,6 +229,7 @@ impl SessionManager {
 
         // Create shutdown channel and heartbeat task
         let (tx, mut rx) = oneshot::channel();
+        let (status_tx, status_rx) = watch::channel(true); // true = heartbeat is running
         let config = self.config.clone();
         let store_clone = store.clone();
         let session_id_clone = session_id.clone();
@@ -254,6 +268,8 @@ impl SessionManager {
                                 } else if consecutive_failures > config.max_recovery_attempts {
                                     error!("Session heartbeat failed after {} attempts, stopping",
                                            consecutive_failures);
+                                    // Notify SessionManager that heartbeat has failed permanently
+                                    let _ = status_tx.send(false);
                                     break;
                                 }
                             }
@@ -266,6 +282,7 @@ impl SessionManager {
         // Store task handle and shutdown sender
         state.task_handle = Some(handle);
         state.shutdown_sender = Some(tx);
+        state.heartbeat_status_watcher = Some(status_rx);
 
         info!(
             "Session started successfully with UUID: {}",
@@ -327,15 +344,34 @@ impl SessionManager {
             state.session_id = None;
             state.store = None;
             state.consecutive_failures = 0;
+            state.heartbeat_status_watcher = None;
         }
     }
 
     /// Get current session status
     #[allow(dead_code)]
     pub async fn get_status(&self) -> SessionStatus {
-        let state = self.state.lock().await;
+        let mut state = self.state.lock().await;
+
+        // Check heartbeat status through the watcher if available
+        let heartbeat_active = if let Some(ref mut watcher) = state.heartbeat_status_watcher {
+            // Check if heartbeat task has reported failure
+            watcher
+                .has_changed()
+                .map(|_| *watcher.borrow())
+                .unwrap_or(state.running)
+        } else {
+            state.running
+        };
+
+        // Update running state based on heartbeat status
+        if !heartbeat_active && state.running {
+            state.running = false;
+            state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+        }
+
         SessionStatus {
-            running: state.running,
+            running: heartbeat_active,
             session_id: state.session_id.clone(),
             consecutive_failures: state.consecutive_failures,
         }
@@ -354,6 +390,7 @@ impl SessionManager {
                 state.session_id = None;
                 state.store = None;
                 state.consecutive_failures = 0;
+                state.heartbeat_status_watcher = None;
                 (session_id, store)
             } else {
                 return Err(MetaError::Internal(
