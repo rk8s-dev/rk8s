@@ -1653,7 +1653,6 @@ impl MetaStore for DatabaseMetaStore {
         &self,
         session_id: &crate::meta::client::session::SessionId,
     ) -> Result<(), MetaError> {
-
         // Find session by UUID first, fallback to hostname+pid for backward compatibility
         let session = SessionMeta::find()
             .filter(session_meta::Column::SessionUuid.eq(session_id.uuid.to_string()))
