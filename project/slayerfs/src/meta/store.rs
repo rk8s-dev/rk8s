@@ -298,7 +298,10 @@ pub enum MetaError {
 
     #[error("Config error: {0}")]
     Config(String),
-
+    
+    #[error("Session not found")]
+    SessionNotFound,
+    
     #[error("error: {0}")]
     Anyhow(#[from] anyhow::Error),
 }

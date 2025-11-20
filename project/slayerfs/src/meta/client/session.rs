@@ -275,7 +275,7 @@ impl SessionManager {
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn shutdown(&self) {
+    pub async fn shutdown(&self) {
         let mut state = self.state.lock().await;
 
         if !state.running {
@@ -344,15 +344,25 @@ impl SessionManager {
     /// Force session cleanup without shutting down the heartbeat task
     #[allow(dead_code)]
     pub async fn cleanup_session(&self) -> Result<(), MetaError> {
-        let state = self.state.lock().await;
-        if let (Some(session_id), Some(store)) = (&state.session_id, &state.store) {
-            store.clean_session_by_id(session_id).await?;
-            Ok(())
-        } else {
-            Err(MetaError::Internal(
-                "No active session to cleanup".to_string(),
-            ))
-        }
+        // Acquire lock and extract session info
+               let (session_id, store) = {
+                   let mut state = self.state.lock().await;
+                   if let (Some(session_id), Some(store)) = (state.session_id.clone(), state.store.clone()) {
+                       // Mark as not running and clear session state
+                       state.running = false;
+                       state.session_id = None;
+                       state.store = None;
+                       state.consecutive_failures = 0;
+                       (session_id, store)
+                   } else {
+                       return Err(MetaError::Internal(
+                           "No active session to cleanup".to_string(),
+                       ));
+                   }
+               };
+               // Perform cleanup outside the lock
+               store.clean_session_by_id(&session_id).await?;
+               Ok(())
     }
 }
 

@@ -8,7 +8,7 @@ use crate::meta::backoff::backoff;
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
-use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore, SessionInfo};
+use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
 use crate::meta::stores::pool::IdPool;
 use crate::meta::{INODE_ID_KEY, Permission, SESSION_ID_KEY};
 use crate::vfs::fs::FileType;
@@ -2016,7 +2016,6 @@ impl MetaStore for EtcdMetaStore {
 
     async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
         // Find the session key by ID
-        // Find the session key by ID
         let session_key = if let Some(session_key) = self
             .etcd_get_json::<String>(&format!("session_id:{}", session_id))
             .await?
@@ -2039,8 +2038,17 @@ impl MetaStore for EtcdMetaStore {
         let session_key = session_id.to_key();
 
         // Get session ID from the session data first
-        if let Some(session_data) = self.etcd_get_json::<SessionInfo>(&session_key).await? {
-            self.clean_session_data(&session_key, session_data.id).await
+        if let Some(session_data) = self
+            .etcd_get_json::<serde_json::Value>(&session_key)
+            .await?
+        {
+            // Extract the "id" field from the JSON object
+            if let Some(id) = session_data.get("id").and_then(|v| v.as_u64()) {
+                self.clean_session_data(&session_key, id).await
+            } else {
+                // "id" field missing or not a u64; treat as not found or return error
+                Err(MetaError::SessionNotFound)
+            }
         } else {
             // Session not found, nothing to clean
             Ok(())

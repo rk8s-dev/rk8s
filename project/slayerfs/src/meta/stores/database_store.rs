@@ -1653,7 +1653,6 @@ impl MetaStore for DatabaseMetaStore {
         &self,
         session_id: &crate::meta::client::session::SessionId,
     ) -> Result<(), MetaError> {
-        use crate::meta::entities::session_meta;
 
         // Find session by UUID first, fallback to hostname+pid for backward compatibility
         let session = SessionMeta::find()
@@ -1680,7 +1679,7 @@ impl MetaStore for DatabaseMetaStore {
         // Mark the session as stale
         let mut active_model: session_meta::ActiveModel = session.into();
         active_model.stale = Set(true);
-        active_model.updated_at = Set(Utc::now().timestamp());
+        active_model.updated_at = Set(Utc::now().timestamp_millis());
 
         active_model
             .update(&self.db)
