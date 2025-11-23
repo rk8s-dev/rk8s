@@ -1,5 +1,6 @@
+pub mod deployment;
 pub mod replicaset;
-
+pub use deployment::DeploymentController;
 pub use replicaset::ReplicaSetController;
 pub mod manager;
 

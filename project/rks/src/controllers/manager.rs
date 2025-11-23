@@ -929,7 +929,132 @@ impl ControllerManager {
                 backoff_ms = (backoff_ms * 2).min(30_000);
             }
         });
+        // deployments informer with reconnect loop
+        let mgr_deploy = self.clone();
+        let store_deploy = store.clone();
+        tokio::spawn(async move {
+            let mut backoff_ms = 100u64;
+            loop {
+                match store_deploy.deployments_snapshot_with_rev().await {
+                    Ok((items, rev)) => {
+                        for (name, _yaml) in items.into_iter() {
+                            let senders = mgr_deploy
+                                .get_senders_by_kind(ResourceKind::Deployment)
+                                .await;
+                            for sender in senders {
+                                let _ = sender
+                                    .send(ResourceWatchResponse {
+                                        kind: ResourceKind::Deployment,
+                                        key: name.clone(),
+                                        event: WatchEvent::Add {
+                                            yaml: _yaml.clone(),
+                                        },
+                                    })
+                                    .await;
+                            }
+                        }
 
+                        // Start watch from rev+1 to skip snapshot duplication
+                        match store_deploy.watch_deployments(rev + 1).await {
+                            Ok((_watcher, mut stream)) => {
+                                backoff_ms = 100;
+                                loop {
+                                    match stream.message().await {
+                                        Ok(Some(resp)) => {
+                                            for ev in resp.events() {
+                                                if let Some(kv) = ev.kv() {
+                                                    let key = String::from_utf8_lossy(kv.key())
+                                                        .replace("/registry/deployments/", "");
+                                                    let event_opt = match ev.event_type() {
+                                                        etcd_client::EventType::Put => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Update {
+                                                                    old_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            prev_kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                    new_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                })
+                                                            } else {
+                                                                Some(WatchEvent::Add {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            }
+                                                        }
+                                                        etcd_client::EventType::Delete => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Delete {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        prev_kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            } else {
+                                                                log::warn!(
+                                                                    "watch delete event missing prev_kv for key {}",
+                                                                    key
+                                                                );
+                                                                None
+                                                            }
+                                                        }
+                                                    };
+                                                    let Some(event) = event_opt else {
+                                                        continue;
+                                                    };
+                                                    let senders = mgr_deploy
+                                                        .get_senders_by_kind(
+                                                            ResourceKind::Deployment,
+                                                        )
+                                                        .await;
+                                                    for sender in senders {
+                                                        let _ = sender
+                                                            .send(ResourceWatchResponse {
+                                                                kind: ResourceKind::Deployment,
+                                                                key: key.clone(),
+                                                                event: event.clone(),
+                                                            })
+                                                            .await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            log::info!(
+                                                "deployment watch stream closed, will reconnect"
+                                            );
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            log::error!(
+                                                "deployment watch error: {:?}, will reconnect",
+                                                e
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("failed to start deployment watch: {:?}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("failed to snapshot deployments: {:?}", e);
+                    }
+                }
+                sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(30_000);
+            }
+        });
         Ok(())
     }
 

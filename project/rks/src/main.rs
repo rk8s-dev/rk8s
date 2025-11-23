@@ -12,7 +12,9 @@ mod vault;
 
 use crate::controllers::endpoint_controller::EndpointController;
 use crate::controllers::garbage_collector::GarbageCollector;
-use crate::controllers::{CONTROLLER_MANAGER, ControllerManager, ReplicaSetController};
+use crate::controllers::{
+    CONTROLLER_MANAGER, ControllerManager, DeploymentController, ReplicaSetController,
+};
 use crate::dns::authority::{run_dns_server, setup_dns_nftable};
 use crate::network::init;
 use crate::network::manager::LocalManager;
@@ -171,6 +173,7 @@ async fn register_controllers(
     let gc = GarbageCollector::new(xline_store.clone());
     let rs = ReplicaSetController::new(xline_store.clone());
     let ep = EndpointController::new(xline_store.clone());
+    let deploy = DeploymentController::new(xline_store.clone());
     mgr.clone()
         .register(Arc::new(RwLock::new(gc)), workers)
         .await?;
@@ -179,6 +182,9 @@ async fn register_controllers(
         .await?;
     mgr.clone()
         .register(Arc::new(RwLock::new(ep)), workers)
+        .await?;
+    mgr.clone()
+        .register(Arc::new(RwLock::new(deploy)), workers)
         .await?;
     Ok(())
 }

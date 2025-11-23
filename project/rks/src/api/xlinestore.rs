@@ -581,13 +581,104 @@ impl XlineStore {
         let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
         Ok((watcher, stream))
     }
+    /// Get all deployments as a snapshot with the current revision
+    pub async fn deployments_snapshot_with_rev(&self) -> Result<(Vec<(String, String)>, i64)> {
+        let prefix = "/registry/deployments/";
+        let opts = Some(GetOptions::new().with_prefix());
+        let mut client = self.client.write().await;
+        let resp = client.get(prefix, opts).await?;
+
+        let mut items = Vec::new();
+        let rev = resp.header().unwrap().revision();
+
+        for kv in resp.kvs() {
+            let key = String::from_utf8_lossy(kv.key()).replace("/registry/deployments/", "");
+            let yaml = String::from_utf8_lossy(kv.value()).to_string();
+            items.push((key, yaml));
+        }
+
+        Ok((items, rev))
+    }
+
+    /// Watch deployments starting from a specific revision
+    pub async fn watch_deployments(&self, start_rev: i64) -> Result<(Watcher, WatchStream)> {
+        let key_prefix = "/registry/deployments/".to_string();
+        let opts = WatchOptions::new()
+            .with_prefix()
+            .with_prev_key()
+            .with_start_revision(start_rev);
+        let mut client = self.client.write().await;
+        let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
+        Ok((watcher, stream))
+    }
+
+    /// Insert a deployment YAML definition into xline.
+    pub async fn insert_deployment_yaml(&self, deploy_name: &str, deploy_yaml: &str) -> Result<()> {
+        let key = format!("/registry/deployments/{deploy_name}");
+        let mut client = self.client.write().await;
+        client
+            .put(key, deploy_yaml, Some(PutOptions::new()))
+            .await?;
+        Ok(())
+    }
+
+    /// Get a deployment YAML definition from xline.
+    pub async fn get_deployment_yaml(&self, deploy_name: &str) -> Result<Option<String>> {
+        let key = format!("/registry/deployments/{deploy_name}");
+        let mut client = self.client.write().await;
+        let resp = client.get(key, None).await?;
+        Ok(resp
+            .kvs()
+            .first()
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string()))
+    }
+
+    /// Get a deployment object from xline.
+    pub async fn get_deployment(&self, deploy_name: &str) -> Result<Option<Deployment>> {
+        if let Some(yaml) = self.get_deployment_yaml(deploy_name).await? {
+            let deployment: Deployment = serde_yaml::from_str(&yaml)?;
+            Ok(Some(deployment))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// List all deployments (deserialize values).
+    pub async fn list_deployments(&self) -> Result<Vec<Deployment>> {
+        let key = "/registry/deployments/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+
+        let deployments: Vec<Deployment> = resp
+            .kvs()
+            .iter()
+            .filter_map(|kv| {
+                let yaml_str = String::from_utf8_lossy(kv.value());
+                serde_yaml::from_str::<Deployment>(&yaml_str).ok()
+            })
+            .collect();
+
+        Ok(deployments)
+    }
+
+    /// Delete a deployment from xline.
+    pub async fn delete_deployment(&self, deploy_name: &str) -> Result<()> {
+        self.delete_object(
+            ResourceKind::Deployment,
+            deploy_name,
+            DeletePropagationPolicy::Background,
+        )
+        .await
+    }
 
     pub async fn get_object_yaml(&self, kind: ResourceKind, name: &str) -> Result<Option<String>> {
         match kind {
             ResourceKind::Pod => self.get_pod_yaml(name).await,
             ResourceKind::Service => self.get_service_yaml(name).await,
             // TODO
-            ResourceKind::Deployment => todo!(),
+            ResourceKind::Deployment => self.get_deployment_yaml(name).await,
             ResourceKind::ReplicaSet => self.get_replicaset_yaml(name).await,
             ResourceKind::Endpoint => self.get_endpoint_yaml(name).await,
             ResourceKind::Unknown => Ok(None),
@@ -604,7 +695,7 @@ impl XlineStore {
             ResourceKind::Pod => self.insert_pod_yaml(name, yaml).await,
             ResourceKind::Service => self.insert_service_yaml(name, yaml).await,
             // TODO
-            ResourceKind::Deployment => todo!(),
+            ResourceKind::Deployment => self.insert_deployment_yaml(name, yaml).await,
             ResourceKind::ReplicaSet => self.insert_replicaset_yaml(name, yaml).await,
             ResourceKind::Endpoint => self.insert_endpoint_yaml(name, yaml).await,
             ResourceKind::Unknown => Ok(()),

@@ -1066,3 +1066,45 @@ pub struct Endpoint {
     #[serde(default)]
     pub subsets: Vec<EndpointSubset>,
 }
+
+/// The field of deployment is almost same with replicaset
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentSpec {
+    #[serde(default = "default_replicas")]
+    pub replicas: i32,
+    pub selector: LabelSelector,
+    pub template: PodTemplateSpec,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentStatus {
+    #[serde(default)]
+    pub replicas: i32,
+    // Total number of pods using the desired pod template.
+    #[serde(default)]
+    pub updated_replicas: i32,
+    #[serde(default)]
+    pub ready_replicas: i32,
+    // Total number of available pods, which is ready for at least minReadySeconds.
+    #[serde(default)]
+    pub available_replicas: i32,
+    #[serde(default)]
+    pub unavailable_replicas: i32,
+    // Collision count for hash collision resolution
+    #[serde(default)]
+    pub collision_count: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Deployment {
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+    #[serde(rename = "kind")]
+    pub kind: String,
+    pub metadata: ObjectMeta,
+    pub spec: DeploymentSpec,
+    #[serde(default)]
+    pub status: DeploymentStatus,
+}
