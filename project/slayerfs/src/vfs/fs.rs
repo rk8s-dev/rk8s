@@ -785,7 +785,11 @@ where
         Ok(())
     }
 
-    /// Rename files or directories. The destination must not exist; parent directories are created as needed.
+    /// Rename files or directories.
+    ///
+    /// Implements POSIX rename semantics: if the destination exists, it will be replaced,
+    /// subject to appropriate checks (e.g., file/directory type compatibility, non-empty directories).
+    /// Parent directories are created as needed.
     pub async fn rename(&self, old: &str, new: &str) -> Result<(), MetaError> {
         let old = Self::norm_path(old);
         let new = Self::norm_path(new);
