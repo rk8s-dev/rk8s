@@ -855,7 +855,7 @@ where
                 self.core.meta_layer.rmdir(new_dir_ino, &new_name).await?;
             } else {
                 if src_attr.kind == FileType::Dir {
-                    return Err(MetaError::NotDirectory(new_dir_ino));
+                    return Err(MetaError::NotDirectory(dest_ino));
                 }
                 // dest is a file or symlink: unlink it to allow replace
                 self.core.meta_layer.unlink(new_dir_ino, &new_name).await?;
