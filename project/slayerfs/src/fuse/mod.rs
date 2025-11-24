@@ -16,6 +16,7 @@ pub mod adapter;
 pub mod mount;
 use crate::chuck::store::BlockStore;
 use crate::meta::MetaStore;
+use crate::meta::store::MetaError;
 use crate::vfs::fs::{FileAttr as VfsFileAttr, FileType as VfsFileType, VFS};
 use bytes::Bytes;
 use rfuse3::Errno;
@@ -760,14 +761,12 @@ where
             newp.push('/');
         }
         newp.push_str(&new_name);
-        VFS::rename(self, &oldp, &newp)
-            .await
-            .map_err(|e| match e.as_str() {
-                "target exists" => libc::EEXIST.into(),
-                "directory not empty" => libc::ENOTEMPTY.into(),
-                "not a directory" => libc::ENOTDIR.into(),
-                _ => libc::EIO.into(),
-            })
+        VFS::rename(self, &oldp, &newp).await.map_err(|e| match e {
+            MetaError::AlreadyExists { .. } => libc::EEXIST.into(),
+            MetaError::DirectoryNotEmpty(_) => libc::ENOTEMPTY.into(),
+            MetaError::NotDirectory(_) => libc::ENOTDIR.into(),
+            _ => libc::EIO.into(),
+        })
     }
 
     // ===== Resource release & sync: stateless implementation, return success =====

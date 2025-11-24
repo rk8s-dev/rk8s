@@ -786,7 +786,7 @@ where
     }
 
     /// Rename files or directories. The destination must not exist; parent directories are created as needed.
-    pub async fn rename(&self, old: &str, new: &str) -> Result<(), String> {
+    pub async fn rename(&self, old: &str, new: &str) -> Result<(), MetaError> {
         let old = Self::norm_path(old);
         let new = Self::norm_path(new);
         let (old_dir, old_name) = Self::split_dir_file(&old);
@@ -799,9 +799,8 @@ where
             self.core
                 .meta_layer
                 .lookup_path(&old_dir)
-                .await
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "parent not found".to_string())?
+                .await?
+                .ok_or(MetaError::ParentNotFound(0))?
                 .0
         };
 
@@ -809,17 +808,15 @@ where
             .core
             .meta_layer
             .lookup(old_parent_ino, &old_name)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "not found".to_string())?;
+            .await?
+            .ok_or(MetaError::NotFound(old_parent_ino))?;
 
         let src_attr = self
             .core
             .meta_layer
             .stat(src_ino)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "not found".to_string())?;
+            .await?
+            .ok_or(MetaError::NotFound(src_ino))?;
 
         // If destination exists, apply replace semantics:
         // - If dest is file/symlink: unlink it
@@ -833,57 +830,45 @@ where
                 self.core
                     .meta_layer
                     .lookup_path(&new_dir)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| "parent not found".to_string())?
+                    .await?
+                    .ok_or(MetaError::ParentNotFound(0))?
                     .0
             };
 
             if dest_kind == FileType::Dir {
                 // source must be directory
                 if src_attr.kind != FileType::Dir {
-                    return Err("not a directory".into());
+                    return Err(MetaError::NotDirectory(dest_ino));
                 }
 
                 // ensure destination dir is empty
-                let children = self
-                    .core
-                    .meta_layer
-                    .readdir(dest_ino)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                let children = self.core.meta_layer.readdir(dest_ino).await?;
                 if !children.is_empty() {
-                    return Err("directory not empty".into());
+                    return Err(MetaError::DirectoryNotEmpty(dest_ino));
                 }
 
                 // remove the empty destination directory
-                self.core
-                    .meta_layer
-                    .rmdir(new_dir_ino, &new_name)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                self.core.meta_layer.rmdir(new_dir_ino, &new_name).await?;
             } else {
                 if src_attr.kind == FileType::Dir {
-                    return Err("not a directory".into());
+                    return Err(MetaError::NotDirectory(new_dir_ino));
                 }
                 // dest is a file or symlink: unlink it to allow replace
-                self.core
-                    .meta_layer
-                    .unlink(new_dir_ino, &new_name)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                self.core.meta_layer.unlink(new_dir_ino, &new_name).await?;
             }
         }
 
         // Ensure destination parent exists (create as needed)
-        let new_dir_ino = self.mkdir_p(&new_dir).await?;
+        let new_dir_ino = self
+            .mkdir_p(&new_dir)
+            .await
+            .map_err(|_| MetaError::ParentNotFound(0))?;
 
         // Perform rename
         self.core
             .meta_layer
             .rename(old_parent_ino, &old_name, new_dir_ino, new_name)
-            .await
-            .map_err(|e| e.to_string())?;
+            .await?;
 
         self.state.modified.touch(old_parent_ino).await;
         self.state.modified.touch(new_dir_ino).await;
