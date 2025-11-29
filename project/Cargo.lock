@@ -1569,6 +1569,7 @@ dependencies = [
  "bincode",
  "bytes",
  "chrono",
+ "dirs",
  "etcd-client",
  "ipnetwork",
  "libcni",
@@ -1577,6 +1578,9 @@ dependencies = [
  "quinn",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.17",
+ "toml",
  "uuid",
 ]
 

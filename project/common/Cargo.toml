@@ -25,3 +25,7 @@ log = { workspace = true }
 libvault = { workspace = true }
 uuid = { version = "1", features = ["v4", "serde"] }
 etcd-client = { workspace = true }
+serde_yaml = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+dirs = { workspace = true }

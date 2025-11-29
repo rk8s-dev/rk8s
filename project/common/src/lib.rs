@@ -15,6 +15,7 @@ pub mod _private {
     pub use log::error;
 }
 
+pub mod config;
 pub mod lease;
 pub mod quic;
 
