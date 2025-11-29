@@ -46,7 +46,7 @@ impl FileFormat {
             FileFormat::Yaml => serde_yaml::to_string(config).map_err(ConfigError::YamlSerialize),
             FileFormat::Toml => toml::to_string_pretty(config).map_err(ConfigError::TomlSerialize),
             FileFormat::Json => {
-                serde_json::to_string_pretty(config).map_err(ConfigError::JsonParse)
+                serde_json::to_string_pretty(config).map_err(ConfigError::JsonSerialize)
             }
         }
     }

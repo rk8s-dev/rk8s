@@ -65,4 +65,8 @@ pub enum ConfigError {
     /// Serialization error for TOML.
     #[error("failed to serialize config to TOML: {0}")]
     TomlSerialize(#[source] toml::ser::Error),
+
+    /// Serialization error for JSON.
+    #[error("failed to serialize config to JSON: {0}")]
+    JsonSerialize(#[source] serde_json::Error),
 }
