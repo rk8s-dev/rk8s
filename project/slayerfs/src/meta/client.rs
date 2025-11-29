@@ -723,7 +723,9 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         info!("MetaClient: Inode cache MISS for readdir inode {}", inode);
 
-        let entries = self.store.readdir(inode).await?;
+        let mut entries = self.store.readdir(inode).await?;
+        // Sort once before caching so readops always return stable ordering by name.
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
 
         info!(
             "MetaClient: Caching readdir result for inode {} ({} entries)",

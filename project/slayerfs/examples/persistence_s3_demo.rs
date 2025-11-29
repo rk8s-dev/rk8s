@@ -5,6 +5,7 @@ use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::ObjectBlockStore;
 use slayerfs::fuse::mount::mount_vfs_unprivileged;
 use slayerfs::meta::factory::MetaStoreFactory;
+use slayerfs::meta::stores::DatabaseMetaStore;
 use slayerfs::vfs::fs::VFS;
 use std::path::PathBuf;
 use tokio::signal;
@@ -205,7 +206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let config = slayerfs::meta::config::Config::from_file(&target_config_path)
             .map_err(|e| format!("Failed to load config file: {}", e))?;
-        let meta = MetaStoreFactory::create_from_config(config)
+        let meta = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config)
             .await
             .map_err(|e| format!("Failed to initialize metadata storage: {}", e))?;
         let meta_store = meta.store();

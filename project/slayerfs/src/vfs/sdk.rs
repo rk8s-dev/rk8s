@@ -86,7 +86,7 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
     }
 
     pub async fn rename(&self, old: &str, new: &str) -> Result<(), String> {
-        self.fs.rename(old, new).await
+        self.fs.rename(old, new).await.map_err(|e| e.to_string())
     }
 
     pub async fn truncate(&self, path: &str, size: u64) -> Result<(), String> {

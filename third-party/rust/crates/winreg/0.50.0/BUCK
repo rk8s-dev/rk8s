@@ -19,6 +19,7 @@ cargo_manifest(
 
 rust_library(
     name = "winreg",
+    compatible_with = ["prelude//os:windows"],
     srcs = [":winreg-vendor"],
     crate = "winreg",
     crate_root = "vendor/src/lib.rs",

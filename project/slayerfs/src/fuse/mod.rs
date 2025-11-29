@@ -16,6 +16,7 @@ pub mod adapter;
 pub mod mount;
 use crate::chuck::store::BlockStore;
 use crate::meta::MetaStore;
+use crate::meta::store::MetaError;
 use crate::vfs::fs::{FileAttr as VfsFileAttr, FileType as VfsFileType, VFS};
 use bytes::Bytes;
 use rfuse3::Errno;
@@ -745,15 +746,6 @@ where
             return Err(libc::ENOTDIR.into());
         }
 
-        // Ensure destination does not already exist
-        if self
-            .child_of(new_parent as i64, new_name.as_ref())
-            .await
-            .is_some()
-        {
-            return Err(libc::EEXIST.into());
-        }
-
         // Build full paths and perform the rename
         let Some(mut oldp) = self.path_of(parent as i64).await else {
             return Err(libc::ENOENT.into());
@@ -769,12 +761,11 @@ where
             newp.push('/');
         }
         newp.push_str(&new_name);
-        VFS::rename(self, &oldp, &newp).await.map_err(|e| {
-            let code = match e.as_str() {
-                "target exists" => libc::EEXIST,
-                _ => libc::EIO,
-            };
-            code.into()
+        VFS::rename(self, &oldp, &newp).await.map_err(|e| match e {
+            MetaError::AlreadyExists { .. } => libc::EEXIST.into(),
+            MetaError::DirectoryNotEmpty(_) => libc::ENOTEMPTY.into(),
+            MetaError::NotDirectory(_) => libc::ENOTDIR.into(),
+            _ => libc::EIO.into(),
         })
     }
 
