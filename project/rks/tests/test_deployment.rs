@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
 
-/// Use argo test -p rks --test test-deployment -- --test-threads=1
+/// Use cargo test -p rks --test test-deployment -- --test-threads=1
 
 /// Test the basic creation of a Deployment and its reconciliation to create a ReplicaSet and Pods
 #[tokio::test]
@@ -326,7 +326,7 @@ async fn test_deployment_hash_collision() -> Result<()> {
 
     println!("=== Step 1: Create deployment ===");
     let deployment = create_test_deployment("collision-test-deploy", 2);
-    
+
     // Calculate what the expected RS name would be (collision_count = 0)
     let template_yaml = serde_yaml::to_string(&deployment.spec.template.spec)?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -335,14 +335,17 @@ async fn test_deployment_hash_collision() -> Result<()> {
     let hash = hasher.finish();
     let hash_str: String = format!("{:x}", hash).chars().take(10).collect();
     let expected_rs_name = format!("collision-test-deploy-{}", hash_str);
-    
-    println!("Expected ReplicaSet name (collision_count=0): {}", expected_rs_name);
-    
+
+    println!(
+        "Expected ReplicaSet name (collision_count=0): {}",
+        expected_rs_name
+    );
+
     println!("\n=== Step 2: Create a BLOCKING ReplicaSet with same name (no owner) ===");
     // Create a "blocking" ReplicaSet with the expected name but simulate it was created by
     // a different deployment (use a fake UID to represent a different owner)
     let fake_owner_uid = uuid::Uuid::new_v4(); // Different from our deployment
-    
+
     let blocking_rs = ReplicaSet {
         api_version: "v1".to_string(),
         kind: "ReplicaSet".to_string(),
@@ -410,85 +413,110 @@ async fn test_deployment_hash_collision() -> Result<()> {
         },
         status: ReplicaSetStatus::default(),
     };
-    
+
     let blocking_rs_yaml = serde_yaml::to_string(&blocking_rs)?;
-    store.insert_replicaset_yaml(&expected_rs_name, &blocking_rs_yaml).await?;
-    println!("Created blocking ReplicaSet: {} (owned by fake UID: {})", expected_rs_name, fake_owner_uid);
-    
+    store
+        .insert_replicaset_yaml(&expected_rs_name, &blocking_rs_yaml)
+        .await?;
+    println!(
+        "Created blocking ReplicaSet: {} (owned by fake UID: {})",
+        expected_rs_name, fake_owner_uid
+    );
+
     // Verify it exists
     let verify_rs = store.get_replicaset_yaml(&expected_rs_name).await?;
-    assert!(verify_rs.is_some(), "Blocking RS should exist before starting controllers");
+    assert!(
+        verify_rs.is_some(),
+        "Blocking RS should exist before starting controllers"
+    );
     println!("Verified blocking ReplicaSet exists in etcd");
-    
+
     println!("\n=== Step 3: Setup controllers WITHOUT GC (watch starts) ===");
     let _manager = setup_test_manager_with_gc(store.clone(), false).await?;
     println!("Controllers started and watching (GC disabled to preserve blocking RS)");
-    
+
     println!("\n=== Step 4: Create our deployment (should detect collision) ===");
     let yaml = serde_yaml::to_string(&deployment)?;
-    store.insert_deployment_yaml("collision-test-deploy", &yaml).await?;
+    store
+        .insert_deployment_yaml("collision-test-deploy", &yaml)
+        .await?;
     println!("Created deployment: collision-test-deploy");
-    
+
     // Wait for reconciliation
     println!("\n=== Step 5: Wait for controller to detect collision ===");
     sleep(Duration::from_secs(5)).await;
-    
+
     // Check if collision_count was incremented
-    let updated_deployment = store.get_deployment("collision-test-deploy").await?
+    let updated_deployment = store
+        .get_deployment("collision-test-deploy")
+        .await?
         .expect("Deployment should exist");
-    
+
     println!("\n=== Step 6: Verify collision_count incremented ===");
-    println!("collision_count: {}", updated_deployment.status.collision_count);
+    println!(
+        "collision_count: {}",
+        updated_deployment.status.collision_count
+    );
     assert!(
         updated_deployment.status.collision_count >= 1,
         "collision_count should be incremented when hash collision detected"
     );
-    println!("✓ Collision detection working! collision_count = {}", updated_deployment.status.collision_count);
-    
+    println!(
+        "Collision detection working! collision_count = {}",
+        updated_deployment.status.collision_count
+    );
+
     // Verify the blocking RS still exists and is unchanged
-    let blocking_rs_after = store.get_replicaset_yaml(&expected_rs_name).await?
+    let blocking_rs_after = store
+        .get_replicaset_yaml(&expected_rs_name)
+        .await?
         .expect("Blocking RS should still exist");
     let blocking_rs_after: ReplicaSet = serde_yaml::from_str(&blocking_rs_after)?;
     assert_eq!(
-        blocking_rs_after.metadata.owner_references.as_ref().unwrap()[0].uid,
+        blocking_rs_after
+            .metadata
+            .owner_references
+            .as_ref()
+            .unwrap()[0]
+            .uid,
         fake_owner_uid,
         "Blocking RS should still be owned by fake deployment (not overwritten)"
     );
-    println!("✓ Blocking ReplicaSet unchanged");
-    
+    println!("Blocking ReplicaSet unchanged");
+
     println!("\n=== Step 7: Remove blocking RS and verify retry creates new RS ===");
     store.delete_replicaset(&expected_rs_name).await?;
     println!("Deleted blocking ReplicaSet");
-    
+
     // Trigger reconciliation again by updating deployment
     let yaml = serde_yaml::to_string(&updated_deployment)?;
-    store.insert_deployment_yaml("collision-test-deploy", &yaml).await?;
-    
+    store
+        .insert_deployment_yaml("collision-test-deploy", &yaml)
+        .await?;
+
     sleep(Duration::from_secs(5)).await;
-    
+
     // Now check if a new RS was created with incremented hash
     let owned_rs = get_owned_replicasets(&store, "collision-test-deploy").await?;
-    
+
     println!("\n=== Step 8: Verify new RS created with different name ===");
-    assert!(!owned_rs.is_empty(), "Should have created a new ReplicaSet after collision resolved");
-    
+    assert!(
+        !owned_rs.is_empty(),
+        "Should have created a new ReplicaSet after collision resolved"
+    );
+
     let new_rs_name = &owned_rs[0].metadata.name;
     println!("New ReplicaSet created: {}", new_rs_name);
     assert_ne!(
         new_rs_name, &expected_rs_name,
         "New RS should have different name due to collision_count"
     );
-    println!("✓ New ReplicaSet has different name (collision resolved)");
-    
+    println!("New ReplicaSet has different name (collision resolved)");
+
     // Cleanup
     println!("\n=== Cleanup ===");
-    cleanup_deployment_test(
-        &store,
-        &["collision-test-deploy"],
-        &owned_rs,
-    )
-    .await?;
-    
+    cleanup_deployment_test(&store, &["collision-test-deploy"], &owned_rs).await?;
+
     Ok(())
 }
 
@@ -498,7 +526,10 @@ async fn setup_test_manager(store: Arc<XlineStore>) -> Result<Arc<ControllerMana
 }
 
 /// Setup test environment with optional GC
-async fn setup_test_manager_with_gc(store: Arc<XlineStore>, enable_gc: bool) -> Result<Arc<ControllerManager>> {
+async fn setup_test_manager_with_gc(
+    store: Arc<XlineStore>,
+    enable_gc: bool,
+) -> Result<Arc<ControllerManager>> {
     let manager = Arc::new(ControllerManager::new());
 
     // Register GarbageCollector for cascading deletion (optional)
@@ -590,7 +621,9 @@ async fn cleanup_deployment_test(
         if let Some(owner_refs) = &pod.metadata.owner_references {
             for owner_ref in owner_refs {
                 if owner_ref.kind == ResourceKind::ReplicaSet
-                    && replicasets.iter().any(|rs| rs.metadata.uid == owner_ref.uid)
+                    && replicasets
+                        .iter()
+                        .any(|rs| rs.metadata.uid == owner_ref.uid)
                 {
                     match store.delete_pod(&pod.metadata.name).await {
                         Ok(_) => println!("Deleted Pod: {}", pod.metadata.name),
@@ -696,10 +729,10 @@ async fn test_deployment_rolling_update_basic() -> Result<()> {
     // Create deployment with v1 image
     let mut deployment = create_test_deployment("test-rolling", 4);
     deployment.spec.template.spec.containers[0].image = "nginx:v1".to_string();
-    
+
     let yaml = serde_yaml::to_string(&deployment)?;
     store.insert_deployment_yaml("test-rolling", &yaml).await?;
-    
+
     println!("Created deployment with nginx:v1");
     sleep(Duration::from_secs(3)).await;
 
@@ -713,23 +746,23 @@ async fn test_deployment_rolling_update_basic() -> Result<()> {
     deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
     let yaml = serde_yaml::to_string(&deployment)?;
     store.insert_deployment_yaml("test-rolling", &yaml).await?;
-    
+
     println!("Updated deployment to nginx:v2, starting rolling update...");
-    
+
     // Wait for rolling update to progress
     sleep(Duration::from_secs(5)).await;
 
     // Verify new ReplicaSet was created
     let owned_rs = get_owned_replicasets(&store, "test-rolling").await?;
     assert!(owned_rs.len() >= 1, "Should have at least 1 ReplicaSet");
-    
+
     // Find new RS (different from old one)
     let new_rs = owned_rs.iter().find(|rs| rs.metadata.name != old_rs_name);
-    
+
     if let Some(new_rs) = new_rs {
         println!("New RS created: {}", new_rs.metadata.name);
         println!("New RS replicas: {}", new_rs.spec.replicas);
-        
+
         // Verify template changed
         let new_image = &new_rs.spec.template.spec.containers[0].image;
         assert!(new_image.contains("v2"), "New RS should use v2 image");
@@ -738,11 +771,20 @@ async fn test_deployment_rolling_update_basic() -> Result<()> {
     }
 
     // Verify deployment status reflects update
-    let updated_deployment = store.get_deployment("test-rolling").await?.expect("Deployment exists");
+    let updated_deployment = store
+        .get_deployment("test-rolling")
+        .await?
+        .expect("Deployment exists");
     println!("Deployment status:");
     println!("   Total replicas: {}", updated_deployment.status.replicas);
-    println!("   Updated replicas: {}", updated_deployment.status.updated_replicas);
-    println!("   Observed generation: {:?}", updated_deployment.status.observed_generation);
+    println!(
+        "   Updated replicas: {}",
+        updated_deployment.status.updated_replicas
+    );
+    println!(
+        "   Observed generation: {:?}",
+        updated_deployment.status.observed_generation
+    );
 
     cleanup_deployment_test(&store, &["test-rolling"], &owned_rs).await?;
     Ok(())
@@ -757,10 +799,10 @@ async fn test_deployment_roll_over() -> Result<()> {
     // Create deployment with v1
     let mut deployment = create_test_deployment("test-rollover", 6);
     deployment.spec.template.spec.containers[0].image = "nginx:v1".to_string();
-    
+
     let yaml = serde_yaml::to_string(&deployment)?;
     store.insert_deployment_yaml("test-rollover", &yaml).await?;
-    
+
     println!("Created deployment with nginx:v1");
     sleep(Duration::from_secs(2)).await;
 
@@ -769,9 +811,9 @@ async fn test_deployment_roll_over() -> Result<()> {
     let yaml = serde_yaml::to_string(&deployment)?;
     store.insert_deployment_yaml("test-rollover", &yaml).await?;
     println!("Updated to v2");
-    
+
     sleep(Duration::from_millis(500)).await; // Short delay
-    
+
     deployment.spec.template.spec.containers[0].image = "nginx:v3".to_string();
     let yaml = serde_yaml::to_string(&deployment)?;
     store.insert_deployment_yaml("test-rollover", &yaml).await?;
@@ -784,18 +826,19 @@ async fn test_deployment_roll_over() -> Result<()> {
     println!("Total ReplicaSets after Roll Over: {}", owned_rs.len());
 
     // Find the RS with v3 image (should be the new one)
-    let v3_rs = owned_rs.iter().find(|rs| {
-        rs.spec.template.spec.containers[0].image.contains("v3")
-    });
+    let v3_rs = owned_rs
+        .iter()
+        .find(|rs| rs.spec.template.spec.containers[0].image.contains("v3"));
 
     assert!(v3_rs.is_some(), "Should have RS with v3 image");
     println!("Found v3 ReplicaSet: {}", v3_rs.unwrap().metadata.name);
 
     // All non-v3 RSs should be scaling down or at 0
-    let old_rss: Vec<_> = owned_rs.iter()
+    let old_rss: Vec<_> = owned_rs
+        .iter()
         .filter(|rs| !rs.spec.template.spec.containers[0].image.contains("v3"))
         .collect();
-    
+
     println!("Old ReplicaSets (v1, v2):");
     for rs in &old_rss {
         println!("   {} - replicas: {}", rs.metadata.name, rs.spec.replicas);
@@ -820,33 +863,37 @@ async fn test_deployment_max_surge_zero() -> Result<()> {
             max_unavailable: IntOrPercentage::String("25%".to_string()),
         },
     };
-    
+
     let yaml = serde_yaml::to_string(&deployment)?;
-    store.insert_deployment_yaml("test-surge-zero", &yaml).await?;
-    
+    store
+        .insert_deployment_yaml("test-surge-zero", &yaml)
+        .await?;
+
     println!("Created deployment with maxSurge=0");
     sleep(Duration::from_secs(2)).await;
 
     // Update image
     deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
     let yaml = serde_yaml::to_string(&deployment)?;
-    store.insert_deployment_yaml("test-surge-zero", &yaml).await?;
+    store
+        .insert_deployment_yaml("test-surge-zero", &yaml)
+        .await?;
     println!("Updated to v2 with maxSurge=0");
 
     sleep(Duration::from_secs(4)).await;
 
     let owned_rs = get_owned_replicasets(&store, "test-surge-zero").await?;
     let total_replicas: i32 = owned_rs.iter().map(|rs| rs.spec.replicas).sum();
-    
+
     println!("Total replicas across all RSs: {}", total_replicas);
-    
+
     // With maxSurge=0, total should never exceed desired (4)
     assert!(
         total_replicas <= 4,
         "Total replicas {} should not exceed desired 4 when maxSurge=0",
         total_replicas
     );
-    
+
     println!("Verified maxSurge=0: total replicas <= desired");
 
     cleanup_deployment_test(&store, &["test-surge-zero"], &owned_rs).await?;
@@ -868,33 +915,37 @@ async fn test_deployment_max_unavailable_zero() -> Result<()> {
             max_unavailable: IntOrPercentage::Int(0),
         },
     };
-    
+
     let yaml = serde_yaml::to_string(&deployment)?;
-    store.insert_deployment_yaml("test-unavailable-zero", &yaml).await?;
-    
+    store
+        .insert_deployment_yaml("test-unavailable-zero", &yaml)
+        .await?;
+
     println!("Created deployment with maxUnavailable=0");
     sleep(Duration::from_secs(2)).await;
 
     // Update image
     deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
     let yaml = serde_yaml::to_string(&deployment)?;
-    store.insert_deployment_yaml("test-unavailable-zero", &yaml).await?;
+    store
+        .insert_deployment_yaml("test-unavailable-zero", &yaml)
+        .await?;
     println!("Updated to v2 with maxUnavailable=0");
 
     sleep(Duration::from_secs(4)).await;
 
     let owned_rs = get_owned_replicasets(&store, "test-unavailable-zero").await?;
     let total_replicas: i32 = owned_rs.iter().map(|rs| rs.spec.replicas).sum();
-    
+
     println!("Total replicas across all RSs: {}", total_replicas);
-    
+
     // With maxUnavailable=0 and maxSurge=25%, should scale up first
     // Total can be up to 4 + 1 = 5
     assert!(
         total_replicas >= 4,
         "Should maintain at least desired replicas when maxUnavailable=0"
     );
-    
+
     println!("Verified maxUnavailable=0: maintained minimum replicas");
 
     cleanup_deployment_test(&store, &["test-unavailable-zero"], &owned_rs).await?;

@@ -2,12 +2,12 @@ use crate::api::xlinestore::XlineStore;
 use crate::controllers::manager::{Controller, ResourceWatchResponse, WatchEvent};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use chrono::Utc;
 use common::*;
 use log::{debug, error, info};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use chrono::Utc;
 
 pub struct DeploymentController {
     store: Arc<XlineStore>,
@@ -54,17 +54,20 @@ impl DeploymentController {
         // Execute update strategy
         match &deployment.spec.strategy {
             DeploymentStrategy::Recreate => {
-                self.recreate_update(&deployment, &new_rs_opt, &old_rss).await?
+                self.recreate_update(&deployment, &new_rs_opt, &old_rss)
+                    .await?
             }
             DeploymentStrategy::RollingUpdate { rolling_update } => {
-                self.rolling_update(&deployment, &new_rs_opt, &old_rss, rolling_update).await?
+                self.rolling_update(&deployment, &new_rs_opt, &old_rss, rolling_update)
+                    .await?
             }
         }
 
         // Check progress deadline
         self.check_progress_deadline(&deployment).await?;
         // Clean old ReplicaSets beyond revision history limit
-        self.clean_old_replicasets(&deployment, &new_rs_opt, &old_rss).await?;
+        self.clean_old_replicasets(&deployment, &new_rs_opt, &old_rss)
+            .await?;
         // Update deployment status
         self.update_deployment_status(&deployment).await?;
         // Update observed_generation
@@ -149,35 +152,36 @@ impl DeploymentController {
         let template_hash = self.generate_hash(&deployment.spec.template, collision_count);
         let rs_name = format!("{}-{}", deploy_name, template_hash);
 
-        let existing_rs_yaml = self.store.get_replicaset_yaml(&rs_name).await?;    
+        let existing_rs_yaml = self.store.get_replicaset_yaml(&rs_name).await?;
         if let Some(existing_yaml) = existing_rs_yaml {
             let existing_rs: ReplicaSet = serde_yaml::from_str(&existing_yaml)?;
 
             // Check if it's owned by this deployment
-            if let Some(owner_refs) = &existing_rs.metadata.owner_references {
-                if owner_refs.iter().any(|owner| {
+            if let Some(owner_refs) = &existing_rs.metadata.owner_references
+                && owner_refs.iter().any(|owner| {
                     owner.kind == ResourceKind::Deployment && owner.uid == deployment.metadata.uid
-                }) {
-                    // Already exists and owned by us, check if template matches
-                    if self.replicaset_matches_deployment(&existing_rs, deployment) {
-                        info!(
-                            "ReplicaSet {} already exists for deployment {}",
-                            rs_name, deploy_name
-                        );
-                        return Ok(existing_rs);
-                    } else {
-                        // Hash collision: increment collision_count and retry
-                        info!(
-                            "Hash collision detected for {}, incrementing collision_count",
-                            rs_name
-                        );
-                        self.increment_collision_count(deployment).await?;
-                        return Err(anyhow!(
-                            "Hash collision detected, collision_count incremented, will retry on next reconcile"
-                        ));
-                    }
+                })
+            {
+                // Already exists and owned by us, check if template matches
+                if self.replicaset_matches_deployment(&existing_rs, deployment) {
+                    info!(
+                        "ReplicaSet {} already exists for deployment {}",
+                        rs_name, deploy_name
+                    );
+                    return Ok(existing_rs);
+                } else {
+                    // Hash collision: increment collision_count and retry
+                    info!(
+                        "Hash collision detected for {}, incrementing collision_count",
+                        rs_name
+                    );
+                    self.increment_collision_count(deployment).await?;
+                    return Err(anyhow!(
+                        "Hash collision detected, collision_count incremented, will retry on next reconcile"
+                    ));
                 }
             }
+
             // If RS exists but not owned by this deployment, it's an unexpected state
             info!(
                 "ReplicaSet {} exists but not owned by deployment {}, incrementing collision_count",
@@ -265,7 +269,7 @@ impl DeploymentController {
         // Scale down all old ReplicaSets to 0
         for old_rs in old_rss {
             if old_rs.spec.replicas > 0 {
-                self.scale_replicaset(&old_rs, 0).await?;
+                self.scale_replicaset(old_rs, 0).await?;
             }
         }
 
@@ -283,7 +287,8 @@ impl DeploymentController {
 
         // Scale up new ReplicaSet to desired replicas
         if new_rs.spec.replicas != deployment.spec.replicas {
-            self.scale_replicaset(&new_rs, deployment.spec.replicas).await?;
+            self.scale_replicaset(&new_rs, deployment.spec.replicas)
+                .await?;
         }
 
         Ok(())
@@ -331,7 +336,7 @@ impl DeploymentController {
             total, available, max_total, min_available
         );
 
-        // Scale up new RS 
+        // Scale up new RS
         let mut scaled_up = false;
         if new_rs.spec.replicas < desired {
             let can_scale_up = (max_total - total).max(0);
@@ -352,12 +357,12 @@ impl DeploymentController {
             }
         }
 
-        // Scale down old RSs 
+        // Scale down old RSs
         if !old_rss.is_empty() {
-            // Recalculate state 
+            // Recalculate state
             let all_rss_updated = self.get_all_replicasets_for_deployment(deployment).await?;
             let (total_updated, available_updated, _) = self.calculate_replica(&all_rss_updated);
-            
+
             // Determine how many old pods can be scaled down
             // based on both available and total constraints (min)
             let delete_num1 = if available_updated > min_available {
@@ -365,29 +370,28 @@ impl DeploymentController {
             } else {
                 0
             };
-            
+
             let delete_num2 = if total_updated > desired {
                 total_updated - desired
             } else {
                 0
             };
-            
+
             let delete_num = delete_num1.min(delete_num2);
-            
+
             if delete_num > 0 {
                 info!(
                     "Scaling down old RSs: total={}, available={}, min_available={}, delete_num={}",
                     total_updated, available_updated, min_available, delete_num
                 );
-                self.scale_down_old_replicasets(old_rss, delete_num)
-                    .await?;
-                
+                self.scale_down_old_replicasets(old_rss, delete_num).await?;
+
                 // If we couldn't scale up earlier due to maxSurge=0, try again after scaling down
                 if !scaled_up && max_surge == 0 && new_rs.spec.replicas < desired {
                     let all_rss_final = self.get_all_replicasets_for_deployment(deployment).await?;
                     let (total_final, _, _) = self.calculate_replica(&all_rss_final);
                     let can_scale_up_now = (max_total - total_final).max(0);
-                    
+
                     if can_scale_up_now > 0 {
                         let new_replicas = (new_rs.spec.replicas + can_scale_up_now).min(desired);
                         info!(
@@ -404,7 +408,10 @@ impl DeploymentController {
     }
 
     /// Get all ReplicaSets owned by this deployment
-    async fn get_all_replicasets_for_deployment(&self, deployment: &Deployment) -> Result<Vec<ReplicaSet>> {
+    async fn get_all_replicasets_for_deployment(
+        &self,
+        deployment: &Deployment,
+    ) -> Result<Vec<ReplicaSet>> {
         let all_rs = self.store.list_replicasets().await?;
         let owned_rs: Vec<ReplicaSet> = all_rs
             .into_iter()
@@ -465,10 +472,8 @@ impl DeploymentController {
         old_rss: &[ReplicaSet],
         scale_down_count: i32,
     ) -> Result<()> {
-        let mut active_old: Vec<&ReplicaSet> = old_rss
-            .iter()
-            .filter(|rs| rs.spec.replicas > 0)
-            .collect();
+        let mut active_old: Vec<&ReplicaSet> =
+            old_rss.iter().filter(|rs| rs.spec.replicas > 0).collect();
 
         if active_old.is_empty() {
             return Ok(());
@@ -495,7 +500,6 @@ impl DeploymentController {
 
     /// Check if deployment has exceeded progress deadline
     async fn check_progress_deadline(&self, deployment: &Deployment) -> Result<()> {
-
         let deadline_seconds = deployment.spec.progress_deadline_seconds;
 
         // Find the last Progressing condition
@@ -504,33 +508,34 @@ impl DeploymentController {
             .conditions
             .iter()
             .find(|c| c.condition_type == "Progressing")
+            && progressing_cond.status == "True"
         {
-            if progressing_cond.status == "True" {
-                // Parse last transition time
-                if let Ok(last_time) = chrono::DateTime::parse_from_rfc3339(&progressing_cond.last_transition_time) {
-                    let elapsed = Utc::now().signed_duration_since(last_time.with_timezone(&Utc));
-                    
-                    if elapsed.num_seconds() > deadline_seconds {
-                        info!(
-                            "Deployment {} exceeded progress deadline ({}s)",
-                            deployment.metadata.name, deadline_seconds
-                        );
-                        self.update_condition(
-                            deployment,
-                            DeploymentCondition {
-                                condition_type: "Progressing".to_string(),
-                                status: "False".to_string(),
-                                reason: Some("ProgressDeadlineExceeded".to_string()),
-                                message: Some(format!(
-                                    "ReplicaSet update exceeded {}s",
-                                    deadline_seconds
-                                )),
-                                last_transition_time: Utc::now().to_rfc3339(),
-                                last_update_time: Some(Utc::now().to_rfc3339()),
-                            },
-                        )
-                        .await?;
-                    }
+            // Parse last transition time
+            if let Ok(last_time) =
+                chrono::DateTime::parse_from_rfc3339(&progressing_cond.last_transition_time)
+            {
+                let elapsed = Utc::now().signed_duration_since(last_time.with_timezone(&Utc));
+
+                if elapsed.num_seconds() > deadline_seconds {
+                    info!(
+                        "Deployment {} exceeded progress deadline ({}s)",
+                        deployment.metadata.name, deadline_seconds
+                    );
+                    self.update_condition(
+                        deployment,
+                        DeploymentCondition {
+                            condition_type: "Progressing".to_string(),
+                            status: "False".to_string(),
+                            reason: Some("ProgressDeadlineExceeded".to_string()),
+                            message: Some(format!(
+                                "ReplicaSet update exceeded {}s",
+                                deadline_seconds
+                            )),
+                            last_transition_time: Utc::now().to_rfc3339(),
+                            last_update_time: Some(Utc::now().to_rfc3339()),
+                        },
+                    )
+                    .await?;
                 }
             }
         }
@@ -584,10 +589,8 @@ impl DeploymentController {
         let limit = deployment.spec.revision_history_limit;
 
         // Keep RSs with replicas > 0
-        let mut zero_replicas: Vec<&ReplicaSet> = old_rss
-            .iter()
-            .filter(|rs| rs.spec.replicas == 0)
-            .collect();
+        let mut zero_replicas: Vec<&ReplicaSet> =
+            old_rss.iter().filter(|rs| rs.spec.replicas == 0).collect();
 
         if zero_replicas.len() as i32 <= limit {
             return Ok(());
@@ -753,9 +756,11 @@ impl Controller for DeploymentController {
                         let old_deploy: Deployment = serde_yaml::from_str(old_yaml)?;
                         let new_deploy: Deployment = serde_yaml::from_str(new_yaml)?;
                         // Only reconcile if spec changed (ignore status-only updates)
-                        let old_spec_yaml = serde_yaml::to_string(&old_deploy.spec).unwrap_or_default();
-                        let new_spec_yaml = serde_yaml::to_string(&new_deploy.spec).unwrap_or_default();
-                        
+                        let old_spec_yaml =
+                            serde_yaml::to_string(&old_deploy.spec).unwrap_or_default();
+                        let new_spec_yaml =
+                            serde_yaml::to_string(&new_deploy.spec).unwrap_or_default();
+
                         if old_spec_yaml != new_spec_yaml {
                             // Spec changed, increment generation
                             self.increment_generation(&new_deploy).await?;

@@ -32,7 +32,6 @@ spec:
             - "3600"
           ports:
             - containerPort: 80
-              protocol: TCP
           resources:
             limits:
               cpu: "500m"

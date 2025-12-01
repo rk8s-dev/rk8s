@@ -1076,7 +1076,7 @@ pub struct Endpoint {
 #[serde(untagged)]
 pub enum IntOrPercentage {
     Int(i32),
-    String(String), 
+    String(String),
 }
 
 impl IntOrPercentage {
