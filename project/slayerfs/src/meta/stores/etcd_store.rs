@@ -2217,7 +2217,7 @@ mod tests {
         let mut unique = unique.into_iter().collect::<Vec<_>>();
         unique.sort();
 
-        let should = (2..=4001).into_iter().collect::<Vec<_>>();
+        let should = (2..=4001).collect::<Vec<_>>();
         assert_eq!(unique, should);
     }
 }

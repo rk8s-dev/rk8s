@@ -13,7 +13,7 @@
 //! - Offer concurrency-safe APIs for reader/writer paths.
 //!
 //! Submodules:
-//! - `handles`: file handle and descriptor management
+//! - `handles`: file and directory handle management
 //! - `cache`: caching helpers and policies
 pub mod cache;
 pub mod demo;

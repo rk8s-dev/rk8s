@@ -11,7 +11,7 @@ use crate::meta::config::{
 };
 use crate::meta::layer::MetaLayer;
 use crate::meta::store::{MetaError, MetaStore};
-use crate::meta::stores::{DatabaseMetaStore, RedisMetaStore};
+use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore, RedisMetaStore};
 
 /// Combined handles for raw stores and cached meta layers.
 #[allow(dead_code)]
@@ -163,6 +163,58 @@ impl MetaStoreFactory<RedisMetaStore> {
     }
 }
 
+impl MetaStoreFactory<EtcdMetaStore> {
+    #[allow(dead_code)]
+    pub async fn create_from_config(
+        config: Config,
+    ) -> Result<MetaHandle<EtcdMetaStore>, MetaError> {
+        let store = Self::create_store(&config).await?;
+        let layer = Self::create_layer(&store, &config).await?;
+        Ok(MetaHandle { store, layer })
+    }
+
+    /// Create the raw MetaStore
+    #[allow(dead_code)]
+    async fn create_store(config: &Config) -> Result<Arc<EtcdMetaStore>, MetaError> {
+        EtcdMetaStore::from_config(config.clone())
+            .await
+            .map(Arc::new)
+    }
+
+    /// Create the MetaClient layer
+    #[allow(dead_code)]
+    async fn create_layer(
+        store: &Arc<EtcdMetaStore>,
+        config: &Config,
+    ) -> Result<Arc<MetaClient<EtcdMetaStore>>, MetaError> {
+        let ttl = if config.cache.ttl.is_zero() {
+            CacheTtl::for_backend(config.database.db_config.backend_type())
+        } else {
+            config.cache.ttl.clone()
+        };
+
+        let client_options = MetaClientOptions {
+            read_only: config.client.read_only,
+            no_background_jobs: config.client.no_background_jobs,
+            case_insensitive: config.client.case_insensitive,
+            session_heartbeat: config
+                .client
+                .session_heartbeat
+                .unwrap_or_else(|| MetaClientOptions::default().session_heartbeat),
+            ..MetaClientOptions::default()
+        };
+
+        let client = MetaClient::with_options(
+            Arc::clone(store),
+            config.cache.capacity.clone(),
+            ttl,
+            client_options,
+        );
+
+        client.initialize().await?;
+        Ok(client)
+    }
+}
 /// Convenience function to create MetaStore from path
 #[allow(dead_code)]
 pub async fn create_meta_store(

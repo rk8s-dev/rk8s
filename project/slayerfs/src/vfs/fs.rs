@@ -17,13 +17,14 @@ use tokio::sync::Mutex;
 
 // Re-export types from meta::store for convenience
 pub use crate::meta::store::{DirEntry, FileAttr, FileType};
-use crate::vfs::handles::{FileHandle, HandleFlags};
+use crate::vfs::handles::{DirHandle, FileHandle, HandleFlags};
 use crate::vfs::inode::Inode;
 use crate::vfs::io::FileRegistry;
 
 struct HandleRegistry {
     handles: DashMap<i64, Vec<FileHandle>>,
     handle_ino: DashMap<u64, i64>,
+    dir_handles: DashMap<u64, Arc<DirHandle>>,
     next_fh: AtomicU64,
 }
 
@@ -32,6 +33,7 @@ impl HandleRegistry {
         Self {
             handles: DashMap::new(),
             handle_ino: DashMap::new(),
+            dir_handles: DashMap::new(),
             next_fh: AtomicU64::new(1),
         }
     }
@@ -56,6 +58,7 @@ impl HandleRegistry {
             if empty {
                 self.handles.remove(&ino);
             }
+            tracing::info!("release file handle: fh={}, ino={}", fh, ino);
             Some(handle)
         } else {
             None
@@ -73,6 +76,22 @@ impl HandleRegistry {
             .get(&ino)
             .map(|entry| entry.iter().map(|h| h.fh).collect())
             .unwrap_or_default()
+    }
+
+    async fn allocate_dir(&self, handle: DirHandle) -> u64 {
+        let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
+        self.dir_handles.insert(fh, Arc::new(handle));
+        fh
+    }
+
+    async fn release_dir(&self, fh: u64) -> Option<Arc<DirHandle>> {
+        self.dir_handles.remove(&fh).map(|(_, handle)| handle)
+    }
+
+    async fn get_dir(&self, fh: u64) -> Option<Arc<DirHandle>> {
+        self.dir_handles
+            .get(&fh)
+            .map(|entry| Arc::clone(entry.value()))
     }
 }
 
@@ -343,15 +362,56 @@ where
     pub async fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
         let meta_entries = self.core.meta_layer.readdir(ino).await.ok()?;
 
-        let entries: Vec<DirEntry> = meta_entries
-            .into_iter()
-            .map(|e| DirEntry {
-                name: e.name,
-                ino: e.ino,
-                kind: e.kind,
-            })
-            .collect();
-        Some(entries)
+        Some(meta_entries)
+    }
+
+    /// Open a directory handle for reading. Returns the file handle ID.
+    /// This pre-loads all directory entries to support efficient pagination.
+    pub async fn opendir_handle(&self, ino: i64) -> Result<u64, MetaError> {
+        // Verify directory exists
+        let attr = self
+            .core
+            .meta_layer
+            .stat(ino)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        if attr.kind != FileType::Dir {
+            return Err(MetaError::NotDirectory(ino));
+        }
+
+        // Load all directory entries
+        let entries = self.core.meta_layer.readdir(ino).await?;
+
+        // Create handle
+        let handle = DirHandle::new(ino, entries);
+        let fh = self.state.handles.allocate_dir(handle).await;
+
+        Ok(fh)
+    }
+
+    /// Close a directory handle
+    pub async fn closedir_handle(&self, fh: u64) -> Result<(), MetaError> {
+        let handle = self
+            .state
+            .handles
+            .release_dir(fh)
+            .await
+            .ok_or(MetaError::InvalidHandle(fh))?;
+
+        tracing::info!(
+            "release dir handle: fh={}, ino={}, entries={}",
+            fh,
+            handle.ino,
+            handle.entries.len()
+        );
+        Ok(())
+    }
+
+    /// Read directory entries by handle with pagination
+    pub async fn readdir_by_handle(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
+        let handle = self.state.handles.get_dir(fh).await?;
+        Some(handle.get_entries(offset))
     }
 
     /// Normalize a path by stripping redundant separators and ensuring it starts with `/`.
