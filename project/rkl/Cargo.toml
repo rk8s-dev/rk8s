@@ -22,7 +22,7 @@ libipam = { workspace = true }
 libcgroups = { workspace = true }
 libcontainer = { workspace = true }
 libvault = { workspace = true }
-clap = { version = "4.5", features = ["derive", "env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 tracing = { workspace = true, features = ["attributes"] }
 tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "full"] }
