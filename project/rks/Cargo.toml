@@ -51,7 +51,7 @@ hickory-resolver = { workspace = true }
 nftables = { workspace = true }
 axum = { workspace = true }
 humantime = { workspace = true }
-base64 = "0.20.0"
+base64 = { workspace = true }
 reqwest = { workspace = true }
 either = { workspace = true }
 tokio-stream = { workspace = true }

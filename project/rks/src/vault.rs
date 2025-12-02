@@ -4,6 +4,8 @@ use crate::protocol::config::{
 use anyhow::Context;
 use common::IssueCertificateRequest;
 use libvault::RustyVault;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use libvault::core::SealConfig;
 use libvault::modules::ResponseExt;
 use libvault::modules::auth::AuthModule;
@@ -148,9 +150,9 @@ impl Vault {
 
         let keys = secrets
             .iter()
-            .map(|&e| base64::encode(e))
+            .map(|&e| BASE64.encode(e))
             .collect::<Vec<_>>();
-
+        
         let keys_path = folder.join("keys.json");
         let keys_json = serde_json::to_string_pretty(&json!({
             "keys": keys,
@@ -387,7 +389,7 @@ async fn extract_keys(path: &Path) -> anyhow::Result<Vec<Vec<u8>>> {
         .map(|v| {
             v.iter()
                 .map(|e| e.as_str().map(|e| e.as_bytes()).unwrap())
-                .map(|e| base64::decode(e).unwrap())
+                .map(|e| BASE64.decode(e).unwrap())
                 .collect::<Vec<_>>()
         })
         .with_context(|| "keys.json doesn't contain a key named with `keys`")
