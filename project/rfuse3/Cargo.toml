@@ -27,12 +27,12 @@ file-lock = []
 unprivileged = ["nix/socket", "dep:which"]
 
 [dependencies]
-async-fs = { version = "2.1.1", optional = true }
-async-global-executor = { version = "2.4.1", optional = true }
-async-lock = { version = "3.3.0", optional = true }
+async-fs = { workspace = true, optional = true }
+async-global-executor = { workspace = true, optional = true }
+async-lock = { workspace = true, optional = true }
 async-notify = { workspace = true }
-async-io = { version = "2.3.1", optional = true }
-async-process = { version = "2.1.0", optional = true }
+async-io = { workspace = true, optional = true }
+async-process = { workspace = true, optional = true }
 bincode = { workspace = true }
 bytes = { workspace = true }
 futures-channel = { workspace = true, features = ["sink"] }

@@ -61,7 +61,7 @@ tracing = { workspace = true }
 builder-pattern = { workspace = true }
 x509-parser = { workspace = true }
 rustls-webpki = { workspace = true }
-tonic = "0.14.2"
+tonic = { workspace = true }
 openssl = { workspace = true, optional = true }
 openssl-sys = { workspace = true, optional = true }
 
