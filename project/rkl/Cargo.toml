@@ -73,11 +73,11 @@ async-trait = { workspace = true }
 hickory-client = { workspace = true }
 
 protobuf = { workspace = true }
-prost = "0.13.5"
-prost-types = "0.12.6"
-tonic = "0.13"
+prost = { workspace = true }
+prost-types = { workspace = true }
+tonic =  "0.13"
 tonic-build = "0.13"
-prost-build = "0.13.5"
+prost-build = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
