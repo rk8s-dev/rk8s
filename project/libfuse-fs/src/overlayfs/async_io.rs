@@ -1020,6 +1020,34 @@ impl Filesystem for OverlayFs {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn copy_file_range(
+        &self,
+        req: Request,
+        _inode_in: Inode,
+        fh_in: u64,
+        offset_in: u64,
+        _inode_out: Inode,
+        fh_out: u64,
+        offset_out: u64,
+        length: u64,
+        flags: u64,
+    ) -> Result<ReplyCopyFileRange> {
+        let (src_layer, src_inode, src_handle) = self.find_real_info_from_handle(fh_in).await?;
+        let (dst_layer, dst_inode, dst_handle) = self.find_real_info_from_handle(fh_out).await?;
+
+        if !Arc::ptr_eq(&src_layer, &dst_layer) {
+            return Err(Error::from_raw_os_error(libc::EXDEV).into());
+        }
+
+        src_layer
+            .copy_file_range(
+                req, src_inode, src_handle, offset_in, dst_inode, dst_handle, offset_out, length,
+                flags,
+            )
+            .await
+    }
+
     async fn interrupt(&self, _req: Request, _unique: u64) -> Result<()> {
         Ok(())
     }
