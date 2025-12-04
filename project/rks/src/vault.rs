@@ -2,10 +2,10 @@ use crate::protocol::config::{
     config_ref, ip_or_dns, local_alt_names_and_ip_sans, to_alt_names_and_ip_sans,
 };
 use anyhow::Context;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use common::IssueCertificateRequest;
 use libvault::RustyVault;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
 use libvault::core::SealConfig;
 use libvault::modules::ResponseExt;
 use libvault::modules::auth::AuthModule;
@@ -147,12 +147,10 @@ impl Vault {
         secrets: &[&[u8]],
     ) -> anyhow::Result<()> {
         let folder = folder.as_ref();
-
         let keys = secrets
             .iter()
             .map(|&e| BASE64.encode(e))
             .collect::<Vec<_>>();
-        
         let keys_path = folder.join("keys.json");
         let keys_json = serde_json::to_string_pretty(&json!({
             "keys": keys,
