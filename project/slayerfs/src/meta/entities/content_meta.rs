@@ -13,6 +13,9 @@ pub enum EntryType {
 
     #[sea_orm(num_value = 2)]
     Symlink,
+
+    #[sea_orm(num_value = 3)]
+    Hardlink,
 }
 
 /// Content metadata model

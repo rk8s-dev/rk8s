@@ -16,6 +16,7 @@ pub enum FileType {
     File,
     Dir,
     Symlink,
+    Hardlink,
 }
 
 impl From<EntryType> for FileType {
@@ -24,6 +25,7 @@ impl From<EntryType> for FileType {
             EntryType::File => FileType::File,
             EntryType::Directory => FileType::Dir,
             EntryType::Symlink => FileType::Symlink,
+            EntryType::Hardlink => FileType::Hardlink,
         }
     }
 }
