@@ -58,6 +58,6 @@ rust_library(
         "//third-party/rust/crates/tower-layer/0.3.3:tower-layer",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
         "//third-party/rust/crates/tower/0.5.2:tower",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
     ],
 )

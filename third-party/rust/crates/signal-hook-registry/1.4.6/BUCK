@@ -25,5 +25,5 @@ rust_library(
     edition = "2015",
     rustc_flags = ["@$(location :signal-hook-registry-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.177:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.178:libc"],
 )

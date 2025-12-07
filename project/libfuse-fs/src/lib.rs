@@ -6,7 +6,7 @@ pub mod overlayfs;
 pub mod passthrough;
 mod server;
 pub mod unionfs;
-mod util;
+pub mod util;
 
 // Test utilities (only compiled during tests)
 #[cfg(test)]

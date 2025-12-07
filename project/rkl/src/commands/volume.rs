@@ -8,7 +8,6 @@ use std::{
 use anyhow::anyhow;
 use anyhow::{Ok, Result};
 use clap::{ArgAction, Subcommand};
-use libcontainer::container::State;
 use rand::RngCore;
 use serde::Deserialize;
 use serde::Serialize;
@@ -297,13 +296,7 @@ impl VolumeManager {
             if metadata.is_dir() {
                 // TODO: Hard code "compose", which means there is no container can be named as "compose"
                 if entry.file_name().to_str().unwrap() != "compose" {
-                    let content = fs::read_to_string(entry.path().join("state.json"))?;
-                    let container_state: State = serde_json::from_str(&content)?;
-                    if let Some(volumes) = container_state.volumes
-                        && volumes.contains(&name.to_string())
-                    {
-                        return Ok(true);
-                    }
+                    let _content = fs::read_to_string(entry.path().join("state.json"))?;
                 }
             }
         }

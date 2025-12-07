@@ -44,7 +44,7 @@ rust_binary(
     rustc_flags = ["@$(location :aws-lc-sys-manifest[env_flags])"],
     visibility = [],
     deps = [
-        "//third-party/rust/crates/cc/1.2.41:cc",
+        "//third-party/rust/crates/cc/1.2.48:cc",
         "//third-party/rust/crates/cmake/0.1.54:cmake",
         "//third-party/rust/crates/dunce/1.0.5:dunce",
         "//third-party/rust/crates/fs_extra/1.3.0:fs_extra",

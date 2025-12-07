@@ -73,6 +73,10 @@ pub(crate) struct OverlayInode {
     pub real_inodes: Mutex<Vec<Arc<RealInode>>>,
     // Inode number.
     pub inode: u64,
+    // Path and name of this overlay entry. Each hard link is represented by its own
+    // OverlayInode, so these fields always describe that specific path, even if multiple
+    // OverlayInodes reference the same host inode via RealInode. Use path_mapping in
+    // InodeStore for accurate path-to-inode lookups across all paths.
     pub path: RwLock<String>,
     pub name: RwLock<String>,
     pub lookups: AtomicU64,
@@ -1793,6 +1797,7 @@ impl OverlayFs {
         Ok(final_handle)
     }
 
+    /// Shared implementation for rename/rename2 handling all flag combinations.
     async fn do_rename(
         &self,
         req: Request,
@@ -1800,9 +1805,19 @@ impl OverlayFs {
         name: &OsStr,
         new_parent: Inode,
         new_name: &OsStr,
+        flags: u32,
     ) -> Result<()> {
         let name_str = name.to_str().unwrap();
         let new_name_str = new_name.to_str().unwrap();
+
+        // Validate flags combinations
+        let has_noreplace = (flags & libc::RENAME_NOREPLACE) != 0;
+        let has_exchange = (flags & libc::RENAME_EXCHANGE) != 0;
+        let has_whiteout = (flags & libc::RENAME_WHITEOUT) != 0;
+
+        if has_exchange && (has_noreplace || has_whiteout) {
+            return Err(Error::from_raw_os_error(libc::EINVAL));
+        }
 
         let parent_node = self.lookup_node(req, parent, "").await?;
         let new_parent_node = self.lookup_node(req, new_parent, "").await?;
@@ -1810,19 +1825,103 @@ impl OverlayFs {
         let dest_node_opt = self
             .lookup_node_ignore_enoent(req, new_parent, new_name_str)
             .await?;
-        // trace!("parent_node: {}, new_parent_node: {}, src_node: {}, dest_node_opt: {:?}", parent_node.inode, new_parent_node.inode, src_node.inode, dest_node_opt.as_ref().map(|n| n.inode));
 
-        if let Some(dest_node) = &dest_node_opt {
+        // RENAME_NOREPLACE: fail if dest exists
+        if has_noreplace
+            && let Some(ref dest_node) = dest_node_opt
+            && !dest_node.whiteout.load(Ordering::Relaxed)
+        {
+            return Err(Error::from_raw_os_error(libc::EEXIST));
+        }
+
+        // RENAME_EXCHANGE: atomic swap
+        if has_exchange {
+            if dest_node_opt.is_none() {
+                return Err(Error::from_raw_os_error(libc::ENOENT));
+            }
+
+            let dest_node = dest_node_opt.unwrap();
+
+            // Type check: both dir or both non-dir
             let src_is_dir = src_node.is_dir(req).await?;
             let dest_is_dir = dest_node.is_dir(req).await?;
             if src_is_dir != dest_is_dir {
                 return Err(Error::from_raw_os_error(libc::EISDIR));
             }
-            if dest_is_dir {
-                self.copy_directory_up(req, dest_node.clone()).await?;
-                let (count, _) = dest_node.count_entries_and_whiteout(req).await?;
-                if count > 0 {
-                    return Err(Error::from_raw_os_error(libc::ENOTEMPTY));
+
+            // Copy-up to upper layer
+            let pnode = self.copy_node_up(req, parent_node).await?;
+            let new_pnode = self.copy_node_up(req, new_parent_node).await?;
+            let s_node = self.copy_node_up(req, src_node).await?;
+            let d_node = self.copy_node_up(req, dest_node).await?;
+
+            let (p_layer, _, p_inode) = pnode.first_layer_inode().await;
+            let (new_p_layer, _, new_p_inode) = new_pnode.first_layer_inode().await;
+
+            // Ensure same layer
+            if !Arc::ptr_eq(&p_layer, &new_p_layer) {
+                return Err(Error::from_raw_os_error(libc::ENOSYS));
+            }
+
+            // Perform atomic exchange
+            match p_layer
+                .rename2(req, p_inode, name, new_p_inode, new_name, flags)
+                .await
+            {
+                Ok(_) => {
+                    // Sync overlay metadata
+                    self.atomic_exchange_metadata(
+                        pnode,
+                        new_pnode,
+                        s_node,
+                        d_node,
+                        name_str,
+                        new_name_str,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Err(e) => {
+                    let io_err: std::io::Error = e.into();
+                    if io_err.raw_os_error() == Some(libc::ENOSYS) {
+                        return Err(Error::from_raw_os_error(libc::ENOSYS));
+                    } else {
+                        return Err(io_err);
+                    }
+                }
+            }
+        }
+
+        if let Some(dest_node) = &dest_node_opt {
+            if dest_node.whiteout.load(Ordering::Relaxed) {
+                let new_pnode_for_whiteout =
+                    self.copy_node_up(req, new_parent_node.clone()).await?;
+
+                // Delete whiteout file
+                if dest_node.in_upper_layer().await {
+                    let (dest_layer, _, dest_parent_inode) =
+                        new_pnode_for_whiteout.first_layer_inode().await;
+                    dest_layer
+                        .delete_whiteout(req, dest_parent_inode, new_name)
+                        .await?;
+                }
+
+                // Remove from overlay
+                let path = dest_node.path.read().await.clone();
+                new_parent_node.remove_child(new_name_str).await;
+                self.remove_inode(dest_node.inode, Some(path)).await;
+            } else {
+                let src_is_dir = src_node.is_dir(req).await?;
+                let dest_is_dir = dest_node.is_dir(req).await?;
+                if src_is_dir != dest_is_dir {
+                    return Err(Error::from_raw_os_error(libc::EISDIR));
+                }
+                if dest_is_dir {
+                    self.copy_directory_up(req, dest_node.clone()).await?;
+                    let (count, _) = dest_node.count_entries_and_whiteout(req).await?;
+                    if count > 0 {
+                        return Err(Error::from_raw_os_error(libc::ENOTEMPTY));
+                    }
                 }
             }
         }
@@ -1831,39 +1930,162 @@ impl OverlayFs {
         let new_pnode = self.copy_node_up(req, new_parent_node).await?;
         let s_node = self.copy_node_up(req, src_node).await?;
 
-        let need_whiteout = !s_node.upper_layer_only().await;
+        // Check if whiteout needed: last hardlink on file in lower
+        let current_nlinks = {
+            let inode_store = self.inodes.read().await;
+            inode_store.get_nlinks(&s_node.inode).unwrap_or(0)
+        };
+
+        let need_whiteout = if has_whiteout {
+            true
+        } else if !s_node.upper_layer_only().await {
+            current_nlinks <= 1
+        } else {
+            false
+        };
 
         let (p_layer, _, p_inode) = pnode.first_layer_inode().await;
         let (new_p_layer, _, new_p_inode) = new_pnode.first_layer_inode().await;
         assert!(Arc::ptr_eq(&p_layer, &new_p_layer));
 
-        p_layer
-            .rename(req, p_inode, name, new_p_inode, new_name)
-            .await?;
+        // Call layer rename
+        if flags != 0 {
+            match p_layer
+                .rename2(req, p_inode, name, new_p_inode, new_name, flags)
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    let io_err: std::io::Error = e.into();
+                    if io_err.raw_os_error() == Some(libc::ENOSYS) {
+                        return Err(Error::from_raw_os_error(libc::ENOSYS));
+                    }
+                    return Err(io_err);
+                }
+            }
+        } else {
+            p_layer
+                .rename(req, p_inode, name, new_p_inode, new_name)
+                .await?;
+        }
 
-        // Handle the replaced destination node (if any).
-        if let Some(dest_node) = dest_node_opt {
+        // Update overlay after successful rename
+        if let Some(dest_node) = dest_node_opt
+            && !dest_node.whiteout.load(Ordering::Relaxed)
+        {
             let path = dest_node.path.read().await.clone();
             self.remove_inode(dest_node.inode, Some(path)).await;
         }
 
-        // Update the moved source node's state.
+        // Update src location (RENAME_WHITEOUT creates marker)
+        if has_whiteout {
+            // Remove src and create whiteout
+            pnode.remove_child(name_str).await;
+            let old_src_path = s_node.path.read().await.clone();
+            let _ = self.remove_inode(s_node.inode, Some(old_src_path)).await;
 
-        // Remove from old parent.
-        pnode.remove_child(name_str).await;
-        self.remove_inode(s_node.inode, s_node.path.read().await.clone().into())
+            // Create whiteout
+            let white_entry = p_layer.create_whiteout(req, p_inode, name).await?;
+
+            let white_path = format!("{}/{}", pnode.path.read().await, name_str);
+            let white_ino = {
+                let mut inode_store = self.inodes.write().await;
+                inode_store.alloc_inode(&white_path)?
+            };
+
+            let white_real = RealInode {
+                layer: p_layer.clone(),
+                in_upper_layer: true,
+                inode: white_entry.attr.ino,
+                whiteout: true,
+                opaque: false,
+                stat: Some(ReplyAttr {
+                    ttl: white_entry.ttl,
+                    attr: white_entry.attr,
+                }),
+            };
+
+            let white_ovi = OverlayInode::new_from_real_inode(
+                name_str,
+                white_ino,
+                white_path.clone(),
+                white_real,
+            )
             .await;
-        let new_path = format!("{}/{}", new_pnode.path.read().await, new_name_str);
-        *s_node.path.write().await = new_path;
+            let white_arc = Arc::new(white_ovi);
+            pnode.insert_child(name_str, white_arc.clone()).await;
+            self.insert_inode(white_arc.inode, white_arc).await;
+
+            // Insert moved node at dest
+            let new_path = format!("{}/{}", new_pnode.path.read().await, new_name_str);
+            *s_node.path.write().await = new_path;
+            *s_node.name.write().await = new_name_str.to_string();
+            *s_node.parent.lock().await = Arc::downgrade(&new_pnode);
+            new_pnode.insert_child(new_name_str, s_node.clone()).await;
+            self.insert_inode(s_node.inode, s_node).await;
+        } else {
+            // Normal rename
+            pnode.remove_child(name_str).await;
+            self.remove_inode(s_node.inode, s_node.path.read().await.clone().into())
+                .await;
+
+            let new_path = format!("{}/{}", new_pnode.path.read().await, new_name_str);
+            *s_node.path.write().await = new_path;
+            *s_node.name.write().await = new_name_str.to_string();
+            *s_node.parent.lock().await = Arc::downgrade(&new_pnode);
+            new_pnode.insert_child(new_name_str, s_node.clone()).await;
+            self.insert_inode(s_node.inode, s_node).await;
+
+            // Create whiteout if needed
+            if need_whiteout {
+                p_layer.create_whiteout(req, p_inode, name).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Atomically swap overlay metadata for RENAME_EXCHANGE.
+    pub(crate) async fn atomic_exchange_metadata(
+        &self,
+        pnode: Arc<OverlayInode>,
+        new_pnode: Arc<OverlayInode>,
+        s_node: Arc<OverlayInode>,
+        d_node: Arc<OverlayInode>,
+        name_str: &str,
+        new_name_str: &str,
+    ) -> Result<()> {
+        // Remove old path mappings
+        let old_src_path = s_node.path.read().await.clone();
+        let old_dst_path = d_node.path.read().await.clone();
+
+        let _ = self
+            .remove_inode(s_node.inode, Some(old_src_path.clone()))
+            .await;
+        let _ = self
+            .remove_inode(d_node.inode, Some(old_dst_path.clone()))
+            .await;
+
+        pnode.remove_child(name_str).await;
+        new_pnode.remove_child(new_name_str).await;
+
+        // Swap paths, names, and parents
+        let src_new_path = format!("{}/{}", new_pnode.path.read().await, new_name_str);
+        let dst_new_path = format!("{}/{}", pnode.path.read().await, name_str);
+
+        *s_node.path.write().await = src_new_path;
         *s_node.name.write().await = new_name_str.to_string();
         *s_node.parent.lock().await = Arc::downgrade(&new_pnode);
-        new_pnode.insert_child(new_name_str, s_node.clone()).await;
-        self.insert_inode(s_node.inode, s_node).await;
 
-        // Create whiteout at the old location if necessary.
-        if need_whiteout {
-            p_layer.create_whiteout(req, p_inode, name).await?;
-        }
+        *d_node.path.write().await = dst_new_path;
+        *d_node.name.write().await = name_str.to_string();
+        *d_node.parent.lock().await = Arc::downgrade(&pnode);
+
+        // Re-insert with new paths
+        new_pnode.insert_child(new_name_str, s_node.clone()).await;
+        pnode.insert_child(name_str, d_node.clone()).await;
+        self.insert_inode(s_node.inode, s_node).await;
+        self.insert_inode(d_node.inode, d_node).await;
 
         Ok(())
     }

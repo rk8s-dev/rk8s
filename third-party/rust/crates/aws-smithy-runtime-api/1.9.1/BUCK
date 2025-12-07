@@ -43,7 +43,7 @@ rust_library(
         "//third-party/rust/crates/bytes/1.10.1:bytes",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/tokio/1.48.0:tokio",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],
 )

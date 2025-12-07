@@ -55,7 +55,7 @@ rust_binary(
     ],
     rustc_flags = ["@$(location :blake3-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.41:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.48:cc"],
 )
 
 buildscript_run(

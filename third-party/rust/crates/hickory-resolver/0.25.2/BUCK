@@ -44,6 +44,6 @@ rust_library(
         "//third-party/rust/crates/smallvec/1.15.1:smallvec",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
         "//third-party/rust/crates/tokio/1.48.0:tokio",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
     ],
 )

@@ -15,6 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 
 use common::PodTask;
+use libcontainer::syscall::syscall::create_syscall;
 
 pub mod cluster;
 pub mod standalone;
@@ -206,7 +207,7 @@ pub fn run_pod_from_taskrunner(mut task_runner: TaskRunner) -> Result<PodRunResu
         .map(|c| c.name.clone())
         .collect();
 
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     let pod_info = PodInfo {
         pod_sandbox_id: pod_sandbox_id.clone(),
         container_names: container_names.clone(),

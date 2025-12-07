@@ -4,9 +4,7 @@ use crate::{
         compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
         container::config::ContainerConfigBuilder,
         create, delete, exec, list, load_container, start,
-        utils::{
-            ImageType, determine_image, get_bundle_from_image_ref, handle_oci_image, parse_key_val,
-        },
+        utils::{ImageType, determine_image, handle_oci_image, parse_key_val},
         volume::{VolumeManager, VolumePattern, string_to_pattern},
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
@@ -18,6 +16,7 @@ use chrono::{DateTime, Local};
 use clap::Subcommand;
 use common::ContainerSpec;
 use json::JsonValue;
+use libcontainer::syscall::syscall::create_syscall;
 use libcontainer::{
     container::{Container, ContainerStatus, State, state},
     error::LibcontainerError,
@@ -114,12 +113,9 @@ impl ContainerRunner {
         let container_id = spec.name.clone();
 
         // image pull/push support
-        let builder = handle_image_typ(&spec)?;
+        let (builder, bundle_path) = handle_image_typ(&spec)?;
         if builder.is_some() {
-            spec.image = get_bundle_from_image_ref(spec.image)?
-                .to_str()
-                .unwrap_or_default()
-                .to_string();
+            spec.image = bundle_path;
         }
 
         Ok(ContainerRunner {
@@ -129,7 +125,7 @@ impl ContainerRunner {
             container_id,
             root_path: match root_path {
                 Some(p) => p,
-                None => rootpath::determine(None)?,
+                None => rootpath::determine(None, &*create_syscall())?,
             },
             volumes: None,
             ip: None,
@@ -147,16 +143,13 @@ impl ContainerRunner {
         let mut container_spec: ContainerSpec = serde_yaml::from_str(&content)?;
 
         // image pull/push support
-        let builder = handle_image_typ(&container_spec)?;
+        let (builder, bundle_path) = handle_image_typ(&container_spec)?;
         if builder.is_some() {
-            container_spec.image = get_bundle_from_image_ref(container_spec.image)?
-                .to_str()
-                .unwrap_or_default()
-                .to_string();
+            container_spec.image = bundle_path;
         }
 
         let container_id = container_spec.name.clone();
-        let root_path = rootpath::determine(None)?;
+        let root_path = rootpath::determine(None, &*create_syscall())?;
         Ok(ContainerRunner {
             spec: container_spec,
             config_builder: builder.unwrap_or_default(),
@@ -185,7 +178,7 @@ impl ContainerRunner {
             container_id: container_id.to_string(),
             root_path: match root_path {
                 Some(path) => path,
-                None => rootpath::determine(None)?,
+                None => rootpath::determine(None, &*create_syscall())?,
             },
             volumes: None,
             ip: None,
@@ -395,24 +388,7 @@ impl ContainerRunner {
         // Compose: self.volumes parameter is passed by the cli parameter, so when this container is from compose
         // self.volumes is None, this persist logic will not execute.
         // However, to persist the compose-project's volume usage, /run/youki/<compose>/<compose-project>/metadata.json will be used.
-        // TODO: wrapper this persist logic to one util function
-        if let Some(volumes_name) = &self.volumes {
-            let state_path = self.root_path.join(format!("{}/state.json", container_id));
-            if !state_path.exists() {
-                return Err(anyhow!(
-                    "[container {container_id} rootpath: {state_path:?}] There is no state.json in root_path after creating container"
-                ));
-            }
-            let mut state = load_container(self.root_path.clone(), &container_id)
-                .unwrap()
-                .state;
-            state.volumes = Some(volumes_name.clone());
-            let state_json = serde_json::to_string_pretty(&state).unwrap();
-
-            debug!("[container {container_id}] update state: {state_json}");
-
-            fs::write(state_path, state_json)?;
-        }
+        // TODO: wrapper this persist logic to one util function (Can not use container's origin state)
 
         Ok(CreateContainerResponse { container_id })
     }
@@ -437,6 +413,7 @@ impl ContainerRunner {
         .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn load_container(&self) -> Result<Container, LibcontainerError> {
         Container::load(self.root_path.clone().join(&self.container_id))
     }
@@ -603,14 +580,14 @@ pub fn is_container_exist(id: &str, root_path: &PathBuf) -> Result<()> {
 
 /// command state
 pub fn state_container(id: &str) -> Result<()> {
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     debug!("ROOT PATH: {}", root_path.to_str().unwrap_or_default());
     print_status(id.to_owned(), root_path)
 }
 
 /// command delete
 pub fn delete_container(id: &str) -> Result<()> {
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     is_container_exist(id, &root_path)?;
     let delete_args = Delete {
         container_id: id.to_string(),
@@ -664,7 +641,7 @@ pub fn list_container(quiet: Option<bool>, format: Option<String>) -> Result<()>
             format: format.unwrap_or("default".to_owned()),
             quiet: quiet.unwrap_or(false),
         },
-        rootpath::determine(None)?,
+        rootpath::determine(None, &*create_syscall())?,
     )?;
     Ok(())
 }
@@ -676,7 +653,7 @@ pub fn exec_container(args: ExecContainer, root_path: Option<PathBuf>) -> Result
         args,
         match root_path {
             Some(path) => path,
-            None => rootpath::determine(None)?,
+            None => rootpath::determine(None, &*create_syscall())?,
         },
     )?;
     Ok(exit_code)
@@ -749,11 +726,15 @@ pub fn setup_network_conf() -> Result<()> {
     Ok(())
 }
 
-pub fn handle_image_typ(container_spec: &ContainerSpec) -> Result<Option<ContainerConfigBuilder>> {
-    // TODO: MVP
-    // check if the image path
+// This function will return 2 args:
+// If using image ref, return (ConfigBuilder, BundlePath)
+// If This container is using local bundle path, return (None, "")
+pub fn handle_image_typ(
+    container_spec: &ContainerSpec,
+) -> Result<(Option<ContainerConfigBuilder>, String)> {
     if let ImageType::OCIImage = determine_image(&container_spec.image)? {
-        let image_config = handle_oci_image(&container_spec.image, container_spec.name.clone())?;
+        let (image_config, bundle_path) =
+            handle_oci_image(&container_spec.image, container_spec.name.clone())?;
         // handle image_config
         let mut builder = ContainerConfigBuilder::default();
         if let Some(config) = image_config.config() {
@@ -765,9 +746,9 @@ pub fn handle_image_typ(container_spec: &ContainerSpec) -> Result<Option<Contain
             builder.work_dir(config.working_dir());
             // builder.users(config.user());
         }
-        return Ok(Some(builder));
+        return Ok((Some(builder), bundle_path));
     }
-    Ok(None)
+    Ok((None, "".to_string()))
 }
 
 pub fn container_execute(cmd: ContainerCommand) -> Result<()> {

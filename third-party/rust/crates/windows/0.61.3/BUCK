@@ -19,7 +19,6 @@ cargo_manifest(
 
 rust_library(
     name = "windows",
-    compatible_with = ["prelude//os:windows"],
     srcs = [":windows-vendor"],
     crate = "windows",
     crate_root = "vendor/src/lib.rs",

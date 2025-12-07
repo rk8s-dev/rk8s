@@ -33,7 +33,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anyhow/1.0.100:anyhow",
-        "//third-party/rust/crates/libc/0.2.177:libc",
+        "//third-party/rust/crates/libc/0.2.178:libc",
         "//third-party/rust/crates/protobuf/3.2.0:protobuf",
     ],
 )

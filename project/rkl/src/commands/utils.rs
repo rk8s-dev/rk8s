@@ -11,6 +11,7 @@ use tracing::debug;
 use crate::bundle;
 
 const RKL_IMAGE_REGISTRY: &str = "/var/lib/rkl/registry";
+const RKL_BUNDLE_STORE: &str = "/var/lib/rkl/bundle";
 
 pub enum ImageType {
     Bundle,
@@ -23,6 +24,7 @@ pub enum UtilsError {
     InvalidImagePath,
 }
 
+#[allow(unused)]
 pub fn get_manifest_from_image_ref(image_ref: impl AsRef<str>) -> Result<String> {
     let (manifest_path, _) = rkb::pull::pull_or_get_image(image_ref, None::<&str>)
         .map_err(|e| anyhow!("failed to pull image: {e}"))?;
@@ -33,6 +35,7 @@ pub fn get_manifest_from_image_ref(image_ref: impl AsRef<str>) -> Result<String>
         .with_context(|| anyhow!("failed to get manifest hash"))
 }
 
+#[allow(unused)]
 pub fn get_bundle_from_image_ref(image_ref: impl AsRef<str>) -> Result<PathBuf> {
     let manifest_hash = get_manifest_from_image_ref(image_ref)?;
     Ok(PathBuf::from(format!(
@@ -59,31 +62,34 @@ pub fn get_bundle_from_path<P: AsRef<Path>>(image_path: P) -> Result<PathBuf> {
         "{RKL_IMAGE_REGISTRY}/{image_manifest_hash}"
     )))
 }
+fn generate_unique_bundle_path() -> String {
+    let container_hash = uuid::Uuid::new_v4().to_string();
+    format!("{RKL_BUNDLE_STORE}/{container_hash}")
+}
 
 /// pull image from rkb's implementation
-pub fn handle_oci_image(image_ref: impl AsRef<str>, _name: String) -> Result<ImageConfiguration> {
+pub fn handle_oci_image(
+    image_ref: impl AsRef<str>,
+    _name: String,
+) -> Result<(ImageConfiguration, String)> {
     let (manifest_path, layers) = rkb::pull::pull_or_get_image(image_ref, None::<&str>)
         .map_err(|e| anyhow!("failed to pull image: {e}"))?;
 
     debug!("get manifest_path: {manifest_path:?}");
     debug!("layers: {layers:?}");
 
-    let manifest_hash = manifest_path
-        .file_name()
-        .map(|str| str.to_str().unwrap_or("unknown").to_string())
-        .with_context(|| anyhow!("failed to get manifest hash"))?;
+    let bundle_path = generate_unique_bundle_path();
 
-    let bundle_path = format!("{RKL_IMAGE_REGISTRY}/{manifest_hash}");
     let config = get_image_config(&manifest_path)?;
 
     if PathBuf::from(&bundle_path).exists() {
-        return Ok(config);
+        return Ok((config, "".to_string()));
     }
 
     tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(bundle::mount_and_copy_bundle(bundle_path, &layers))?;
-    Ok(config)
+        .block_on(bundle::mount_and_copy_bundle(bundle_path.clone(), &layers))?;
+    Ok((config, bundle_path))
 }
 
 pub fn get_image_config(manifest_path: impl AsRef<Path>) -> Result<ImageConfiguration> {

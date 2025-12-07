@@ -1,10 +1,8 @@
 [workspace]
 members = [
     "distribution", 
-    "libbridge",
-    "libcgroups", 
+    "libbridge", 
     "libcni",
-    "libcontainer", 
     "libnetwork",
     "libfuse-fs", 
     "rfuse3", 
@@ -25,9 +23,7 @@ resolver = "2"
 common = { path = "common" }
 distribution = { path = "distribution" }
 libbridge = { path = "libbridge" }
-libcgroups = { path = "libcgroups", default-features = false }
 libcni = { path = "libcni" }
-libcontainer = { path = "libcontainer" }
 libfuse-fs = { path = "libfuse-fs" }
 libipam = { path = "libipam" }
 libnetwork = { path = "libnetwork" }
@@ -38,6 +34,8 @@ rkl = { path = "rkl" }
 rks = { path = "rks" }
 rfuse3 = { version = "0.0.3", features = ["tokio-runtime","unprivileged"]}
 slayerfs = { path = "slayerfs" }
+libcgroups = { version = "0.5.7", default-features = false }
+libcontainer = "0.5.7"
 tonic-build = "=0.7.2"
 anyhow = "1.0.100"
 async-recursion = "1.0"

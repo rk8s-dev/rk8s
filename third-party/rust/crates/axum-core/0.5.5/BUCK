@@ -37,6 +37,6 @@ rust_library(
         "//third-party/rust/crates/sync_wrapper/1.0.2:sync_wrapper",
         "//third-party/rust/crates/tower-layer/0.3.3:tower-layer",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
     ],
 )

@@ -33,7 +33,7 @@ rust_library(
     rustc_flags = ["@$(location :uzers-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.177:libc",
+        "//third-party/rust/crates/libc/0.2.178:libc",
         "//third-party/rust/crates/log/0.4.28:log",
     ],
 )

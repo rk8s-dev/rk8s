@@ -36,6 +36,7 @@ rust_library(
         "mman",
         "mount",
         "net",
+        "personality",
         "process",
         "resource",
         "sched",
@@ -53,7 +54,7 @@ rust_library(
     deps = [
         "//third-party/rust/crates/bitflags/2.9.4:bitflags",
         "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
-        "//third-party/rust/crates/libc/0.2.177:libc",
+        "//third-party/rust/crates/libc/0.2.178:libc",
         "//third-party/rust/crates/memoffset/0.9.1:memoffset",
     ],
 )
@@ -74,6 +75,7 @@ rust_binary(
         "mman",
         "mount",
         "net",
+        "personality",
         "process",
         "resource",
         "sched",
@@ -103,6 +105,7 @@ buildscript_run(
         "mman",
         "mount",
         "net",
+        "personality",
         "process",
         "resource",
         "sched",

@@ -19,7 +19,7 @@ pub async fn init() {
 async fn handle_container_request(
     Path(container_id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let path = rootpath::determine(None);
+    let path = rootpath::determine(None, &*create_syscall());
     match path {
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

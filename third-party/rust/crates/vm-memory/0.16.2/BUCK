@@ -27,7 +27,7 @@ rust_library(
     rustc_flags = ["@$(location :vm-memory-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.177:libc",
+        "//third-party/rust/crates/libc/0.2.178:libc",
         "//third-party/rust/crates/thiserror/1.0.69:thiserror",
     ],
 )

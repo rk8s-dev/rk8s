@@ -9,6 +9,7 @@ use std::{
 use anyhow::{Ok, Result, anyhow};
 use clap::Subcommand;
 use libcontainer::container::State;
+use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Delete, List};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
@@ -102,7 +103,7 @@ pub struct ComposeManager {
 
 impl ComposeManager {
     fn new(project_name: String) -> Result<Self> {
-        let root_path = rootpath::determine(None)?;
+        let root_path = rootpath::determine(None, &*create_syscall())?;
 
         // /root_path/compose/compose_id to store the state of current compose application
         let root_path = Path::new(&root_path).join("compose").join(&project_name);
@@ -139,7 +140,7 @@ impl ComposeManager {
     }
 
     fn get_root_path_by_name(&self, project_name: String) -> Result<PathBuf> {
-        let root_path = rootpath::determine(None)?;
+        let root_path = rootpath::determine(None, &*create_syscall())?;
         let new_path = Path::new(&root_path).join("compose").join(project_name);
         Ok(new_path)
     }

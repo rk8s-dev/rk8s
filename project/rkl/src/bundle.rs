@@ -204,7 +204,7 @@ async fn extract_tar_gz<P: AsRef<Path>>(tar_gz_path: P, extract_dir: P) -> anyho
 #[allow(unused)]
 pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     bundle_path: P,
-    layers: &Vec<PathBuf>,
+    layers: &[PathBuf],
 ) -> anyhow::Result<()> {
     // mount_point -> /var/lib/rkl/<container-id>
     // low_dir -> image_path
@@ -304,11 +304,11 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
         .await
         .with_context(|| format!("Failed to remove merged directory: {merged_dir:?}"))?;
 
-    for layer in layers {
-        fs::remove_dir_all(layer)
-            .await
-            .with_context(|| format!("Failed to remove layer directory: {layer:?}"))?;
-    }
+    // for layer in layers {
+    //     fs::remove_dir_all(layer)
+    //         .await
+    //         .with_context(|| format!("Failed to remove layer directory: {layer:?}"))?;
+    // }
 
     let mut entries = fs::read_dir(bundle_path)
         .await

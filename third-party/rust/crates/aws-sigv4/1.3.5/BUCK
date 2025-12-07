@@ -54,7 +54,7 @@ rust_library(
         "//third-party/rust/crates/sha2/0.10.9:sha2",
         "//third-party/rust/crates/subtle/2.6.1:subtle",
         "//third-party/rust/crates/time/0.3.44:time",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],
 )

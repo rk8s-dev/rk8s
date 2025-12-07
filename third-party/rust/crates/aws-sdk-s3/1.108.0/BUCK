@@ -60,7 +60,7 @@ rust_library(
         "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding",
         "//third-party/rust/crates/regex-lite/0.1.8:regex-lite",
         "//third-party/rust/crates/sha2/0.10.9:sha2",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
         "//third-party/rust/crates/url/2.5.7:url",
     ],
 )

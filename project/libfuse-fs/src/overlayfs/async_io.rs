@@ -263,7 +263,22 @@ impl Filesystem for OverlayFs {
         new_parent: Inode,
         new_name: &OsStr,
     ) -> Result<()> {
-        self.do_rename(req, parent, name, new_parent, new_name)
+        self.do_rename(req, parent, name, new_parent, new_name, 0)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// rename a file or directory with flags (rename2 syscall).
+    async fn rename2(
+        &self,
+        req: Request,
+        parent: Inode,
+        name: &OsStr,
+        new_parent: Inode,
+        new_name: &OsStr,
+        flags: u32,
+    ) -> Result<()> {
+        self.do_rename(req, parent, name, new_parent, new_name, flags)
             .await
             .map_err(|e| e.into())
     }
@@ -450,59 +465,6 @@ impl Filesystem for OverlayFs {
         }
     }
 
-    /// Copy a range of data from one file to another. This can improve performance because it
-    /// reduces data copying: normally, data will be copied from FUSE server to kernel, then to
-    /// user-space, then to kernel, and finally sent back to FUSE server. By implementing this
-    /// method, data will only be copied internally within the FUSE server.
-    #[allow(clippy::too_many_arguments)]
-    async fn copy_file_range(
-        &self,
-        req: Request,
-        inode_in: Inode,
-        fh_in: u64,
-        offset_in: u64,
-        inode_out: Inode,
-        fh_out: u64,
-        offset_out: u64,
-        length: u64,
-        flags: u64,
-    ) -> Result<ReplyCopyFileRange> {
-        // Get handle data for source file
-        let data_in = self.get_data(req, Some(fh_in), inode_in, 0).await?;
-        let handle_in = match data_in.real_handle {
-            None => return Err(Error::from_raw_os_error(libc::ENOENT).into()),
-            Some(ref hd) => hd,
-        };
-
-        // Get handle data for destination file
-        let data_out = self.get_data(req, Some(fh_out), inode_out, 0).await?;
-        let handle_out = match data_out.real_handle {
-            None => return Err(Error::from_raw_os_error(libc::ENOENT).into()),
-            Some(ref hd) => hd,
-        };
-
-        // Both files must be on the same layer for copy_file_range to work
-        if !Arc::ptr_eq(&handle_in.layer, &handle_out.layer) {
-            // Different layers - return EXDEV to trigger fallback to read/write
-            return Err(Error::from_raw_os_error(libc::EXDEV).into());
-        }
-
-        // Delegate to the underlying PassthroughFs layer
-        handle_in
-            .layer
-            .copy_file_range(
-                req,
-                handle_in.inode,
-                handle_in.handle.load(Ordering::Relaxed),
-                offset_in,
-                handle_out.inode,
-                handle_out.handle.load(Ordering::Relaxed),
-                offset_out,
-                length,
-                flags,
-            )
-            .await
-    }
     /// get filesystem statistics.
     async fn statfs(&self, req: Request, inode: Inode) -> Result<ReplyStatFs> {
         self.do_statvfs(req, inode).await.map_err(|e| e.into())
@@ -1056,6 +1018,34 @@ impl Filesystem for OverlayFs {
                 .lseek(req, real_inode, real_handle, offset, whence)
                 .await
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn copy_file_range(
+        &self,
+        req: Request,
+        _inode_in: Inode,
+        fh_in: u64,
+        offset_in: u64,
+        _inode_out: Inode,
+        fh_out: u64,
+        offset_out: u64,
+        length: u64,
+        flags: u64,
+    ) -> Result<ReplyCopyFileRange> {
+        let (src_layer, src_inode, src_handle) = self.find_real_info_from_handle(fh_in).await?;
+        let (dst_layer, dst_inode, dst_handle) = self.find_real_info_from_handle(fh_out).await?;
+
+        if !Arc::ptr_eq(&src_layer, &dst_layer) {
+            return Err(Error::from_raw_os_error(libc::EXDEV).into());
+        }
+
+        src_layer
+            .copy_file_range(
+                req, src_inode, src_handle, offset_in, dst_inode, dst_handle, offset_out, length,
+                flags,
+            )
+            .await
     }
 
     async fn interrupt(&self, _req: Request, _unique: u64) -> Result<()> {

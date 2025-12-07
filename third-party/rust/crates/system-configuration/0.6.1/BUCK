@@ -19,7 +19,6 @@ cargo_manifest(
 
 rust_library(
     name = "system-configuration",
-    compatible_with = ["prelude//os:macos"],
     srcs = [":system-configuration-vendor"],
     crate = "system_configuration",
     crate_root = "vendor/src/lib.rs",

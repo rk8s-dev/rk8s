@@ -8,9 +8,10 @@ use liboci_cli::{Delete, Start, State};
 use tracing::{error, info};
 
 use crate::daemon::probe::collect_container_statuses;
+use libcontainer::syscall::syscall::create_syscall;
 
 pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
     let container = load_container(root_path.clone(), pod_name)
         .map_err(|e| anyhow!("Failed to load container {}: {}", pod_name, e))?;
@@ -25,7 +26,7 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
             container_id: container_name.clone(),
             force: true,
         };
-        let root_path = rootpath::determine(None)?;
+        let root_path = rootpath::determine(None, &*create_syscall())?;
         if let Err(delete_err) = delete(delete_args, root_path.clone()) {
             error!(
                 "Failed to delete container {}: {}",
@@ -41,7 +42,7 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
         container_id: pod_info.pod_sandbox_id.clone(),
         force: true,
     };
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     if let Err(delete_err) = delete(delete_args, root_path.clone()) {
         error!(
             "Failed to delete PodSandbox {}: {}",
@@ -105,7 +106,7 @@ pub fn create_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
         );
     }
 
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     let pod_info = PodInfo {
         pod_sandbox_id,
         container_names: container_ids,
@@ -117,7 +118,7 @@ pub fn create_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
 }
 
 pub fn start_pod(pod_name: &str) -> Result<(), anyhow::Error> {
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
 
     if pod_info.container_names.is_empty() {
@@ -138,7 +139,7 @@ pub fn start_pod(pod_name: &str) -> Result<(), anyhow::Error> {
 }
 
 pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     let pod_info = PodInfo::load(&root_path, pod_name)?;
 
     info!("Pod: {pod_name}");
@@ -200,7 +201,7 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
 }
 
 pub fn exec_pod(args: ExecPod) -> Result<i32> {
-    let root_path = rootpath::determine(None)?;
+    let root_path = rootpath::determine(None, &*create_syscall())?;
     let pod_info_path = root_path.join("pods").join(&args.pod_name);
     if !pod_info_path.exists() {
         return Err(anyhow::anyhow!("Pod {} not found", args.pod_name));

@@ -26,5 +26,5 @@ rust_library(
     features = ["all"],
     rustc_flags = ["@$(location :socket2-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.177:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.178:libc"],
 )

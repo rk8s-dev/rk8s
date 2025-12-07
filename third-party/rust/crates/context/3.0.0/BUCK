@@ -31,7 +31,7 @@ rust_library(
         "@$(location :context-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.177:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.178:libc"],
 )
 
 rust_binary(
@@ -42,7 +42,7 @@ rust_binary(
     edition = "2015",
     rustc_flags = ["@$(location :context-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.41:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.48:cc"],
 )
 
 buildscript_run(

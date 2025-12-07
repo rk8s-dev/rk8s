@@ -26,7 +26,7 @@ rust_library(
     rustc_flags = ["@$(location :dirs-sys-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.177:libc",
+        "//third-party/rust/crates/libc/0.2.178:libc",
         "//third-party/rust/crates/option-ext/0.2.0:option-ext",
     ],
 )

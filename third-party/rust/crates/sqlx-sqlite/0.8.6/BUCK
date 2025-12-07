@@ -53,7 +53,7 @@ rust_library(
         "//third-party/rust/crates/sqlx-core/0.8.6:sqlx-core",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
         "//third-party/rust/crates/time/0.3.44:time",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
         "//third-party/rust/crates/url/2.5.7:url",
         "//third-party/rust/crates/uuid/1.18.1:uuid",
     ],

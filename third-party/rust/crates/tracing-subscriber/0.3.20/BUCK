@@ -58,9 +58,9 @@ rust_library(
         "//third-party/rust/crates/smallvec/1.15.1:smallvec",
         "//third-party/rust/crates/thread_local/1.1.9:thread_local",
         "//third-party/rust/crates/time/0.3.44:time",
-        "//third-party/rust/crates/tracing-core/0.1.34:tracing-core",
+        "//third-party/rust/crates/tracing-core/0.1.35:tracing-core",
         "//third-party/rust/crates/tracing-log/0.2.0:tracing-log",
         "//third-party/rust/crates/tracing-serde/0.2.0:tracing-serde",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
     ],
 )

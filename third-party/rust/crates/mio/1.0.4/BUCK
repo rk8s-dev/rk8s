@@ -30,5 +30,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :mio-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.177:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.178:libc"],
 )

@@ -40,6 +40,6 @@ rust_library(
         "//third-party/rust/crates/fastrand/2.3.0:fastrand",
         "//third-party/rust/crates/http/0.2.12:http",
         "//third-party/rust/crates/regex-lite/0.1.8:regex-lite",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
     ],
 )

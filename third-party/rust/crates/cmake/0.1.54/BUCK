@@ -25,5 +25,5 @@ rust_library(
     edition = "2021",
     rustc_flags = ["@$(location :cmake-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/cc/1.2.41:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.48:cc"],
 )

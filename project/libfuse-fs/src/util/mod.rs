@@ -1,3 +1,4 @@
+pub mod bind_mount;
 pub mod mapping;
 pub mod open_options;
 

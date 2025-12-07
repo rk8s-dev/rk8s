@@ -50,6 +50,6 @@ rust_library(
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/pin-utils/0.1.0:pin-utils",
         "//third-party/rust/crates/tokio/1.48.0:tokio",
-        "//third-party/rust/crates/tracing/0.1.41:tracing",
+        "//third-party/rust/crates/tracing/0.1.43:tracing",
     ],
 )

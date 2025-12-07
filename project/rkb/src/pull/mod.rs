@@ -4,15 +4,20 @@ mod media;
 
 use crate::config::auth::AuthConfig;
 use crate::pull::layer::pull_layers;
-use crate::rt::block_on;
 use crate::storage::{parse_image_ref, write_manifest};
 use anyhow::Context;
+use anyhow::anyhow;
 use clap::Parser;
 use oci_client::client::ClientConfig;
 use oci_client::manifest::OciManifest;
 use oci_client::secrets::RegistryAuth;
 use oci_client::{Client, client};
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::thread;
+use tokio::runtime::{Handle, Runtime};
+
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 #[derive(Parser, Debug)]
 pub struct PullArgs {
@@ -73,7 +78,7 @@ pub fn pull_or_get_image(
     let client = Client::new(client_config);
 
     let image_ref = parse_image_ref(url, image_ref, None::<String>)?;
-    block_on(async move {
+    let do_pull = async move {
         let (manifest, digest) = client
             .pull_manifest(&image_ref, &auth_method)
             .await
@@ -86,5 +91,21 @@ pub fn pull_or_get_image(
 
         let manifest_path = write_manifest(&image_ref, &manifest, &digest).await?;
         Ok((manifest_path, layers))
-    })?
+    };
+    match Handle::try_current() {
+        Ok(handle) => {
+            let pull_or_get = thread::spawn(move || handle.block_on(do_pull));
+            pull_or_get.join().map_err(|_| anyhow!("thread panicked"))?
+        }
+        Err(_) => {
+            let rt = RUNTIME.get_or_init(|| {
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to build tokio runtime")
+            });
+
+            rt.block_on(do_pull)
+        }
+    }
 }

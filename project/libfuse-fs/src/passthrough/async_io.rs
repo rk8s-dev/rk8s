@@ -1882,7 +1882,48 @@ impl Filesystem for PassthroughFs {
         let new_inode = self.inode_map.get(new_parent).await?;
         let old_file = old_inode.get_file()?;
         let new_file = new_inode.get_file()?;
-        //TODO: Switch to libc::renameat2 -> libc::renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
+
+        // Check if new_name exists and is a whiteout file.
+        // This is important for RENAME_NOREPLACE: whiteout should not be treated as existing file.
+        let is_whiteout_at_dest = if (flags & libc::RENAME_NOREPLACE) != 0 {
+            let mut st = std::mem::MaybeUninit::<libc::stat>::uninit();
+            let res = unsafe {
+                // SAFETY: new_file is a valid fd and newname is a valid C string.
+                libc::fstatat(
+                    new_file.as_raw_fd(),
+                    newname.as_ptr(),
+                    st.as_mut_ptr(),
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            };
+
+            if res == 0 {
+                // If file exists, check if it's a whiteout file.
+                let st = unsafe {
+                    // SAFETY: fstatat initialised `st` on success above.
+                    st.assume_init()
+                };
+                (st.st_mode & libc::S_IFMT) == libc::S_IFCHR && st.st_rdev == 0
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // It's a whiteout file, delete it before rename so RENAME_NOREPLACE works correctly.
+        if is_whiteout_at_dest {
+            // SAFETY: new_file/newname remain valid; unlinkat only touches kernel state.
+            let unlink_res = unsafe { libc::unlinkat(new_file.as_raw_fd(), newname.as_ptr(), 0) };
+            if unlink_res < 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+        }
+
+        // SAFETY: renameat2 is safe because:
+        // - old_file and new_file are valid file descriptors from do_open
+        // - oldname and newname are valid CString pointers (paths from FUSE cannot contain null bytes)
+        // - flags is validated by the kernel (RENAME_EXCHANGE, RENAME_NOREPLACE, RENAME_WHITEOUT)
         let res = unsafe {
             libc::renameat2(
                 old_file.as_raw_fd(),
