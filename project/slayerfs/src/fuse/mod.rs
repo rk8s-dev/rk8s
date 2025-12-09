@@ -1121,6 +1121,7 @@ fn vfs_kind_to_fuse(k: VfsFileType) -> FuseFileType {
         VfsFileType::Dir => FuseFileType::Directory,
         VfsFileType::File => FuseFileType::RegularFile,
         VfsFileType::Symlink => FuseFileType::Symlink,
+        VfsFileType::Hardlink => FuseFileType::RegularFile,
     }
 }
 
