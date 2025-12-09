@@ -887,6 +887,7 @@ impl StoredAttr {
             FileType::Dir => (0o040755, 2),
             FileType::File => (0o100644, 1),
             FileType::Symlink => (0o120777, 1),
+            FileType::Hardlink => (0o100644, 1),
         };
         Self {
             size: 0,
@@ -929,6 +930,7 @@ impl From<FileType> for NodeKind {
             FileType::File => NodeKind::File,
             FileType::Dir => NodeKind::Dir,
             FileType::Symlink => NodeKind::Symlink,
+            FileType::Hardlink => NodeKind::File,
         }
     }
 }

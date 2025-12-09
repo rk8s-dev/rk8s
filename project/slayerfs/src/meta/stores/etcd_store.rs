@@ -1039,6 +1039,13 @@ impl MetaStore for EtcdMetaStore {
                             return Ok(None);
                         }
                     }
+                    EntryType::Hardlink => {
+                        if index == parts.len() - 1 {
+                            return Ok(Some((entry.inode, FileType::Hardlink)));
+                        } else {
+                            return Ok(None);
+                        }
+                    }
                 },
                 None => return Ok(None),
             }
@@ -1069,6 +1076,7 @@ impl MetaStore for EtcdMetaStore {
                 EntryType::File => FileType::File,
                 EntryType::Directory => FileType::Dir,
                 EntryType::Symlink => FileType::Symlink,
+                EntryType::Hardlink => FileType::Hardlink,
             };
             entries.push(DirEntry {
                 name: content.entry_name,
