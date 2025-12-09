@@ -447,10 +447,12 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
     }
 
-    /// Resolves a file path to its corresponding inode number.
+    /// Resolves a file path to its corresponding inode number (**lstat semantics**).
     ///
     /// This method walks through the path components from root to leaf,
     /// utilizing both inode cache and path cache for performance optimization.
+    /// When encountering a symlink in an intermediate path component,
+    /// it follows the symlink to resolve the target path.
     ///
     /// # Arguments
     ///
@@ -458,10 +460,31 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// # Returns
     ///
-    /// * `Ok(i64)` - The inode number of the file/directory
+    /// * `Ok(i64)` - The inode number of the file/directory/symlink
     /// * `Err(MetaError::NotFound)` - If any component in the path doesn't exist
     /// * `Err(MetaError::...)` - Other metadata errors
+    // * TODO: Cycle detection is not implemented. Circular symlinks may loop.
+    // * TODO: A maximum symlink depth limit (e.g., POSIX SYMLOOP_MAX)
+    //   should be added to prevent infinite loops.
     pub async fn resolve_path(&self, path: &str) -> Result<i64, MetaError> {
+        self.resolve_path_impl(path, false).await
+    }
+    /// Resolves a file path to its corresponding inode number (**stat semantics**).
+    ///
+    /// This method is similar to [`resolve_path`], but follows all symlinks
+    /// including the final path component.
+    #[allow(dead_code)]
+    pub async fn resolve_path_follow(&self, path: &str) -> Result<i64, MetaError> {
+        self.resolve_path_impl(path, true).await
+    }
+
+    /// Internal implementation of path resolution with configurable symlink behavior.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The absolute path to resolve
+    /// * `follow_final` - If true, follow lstat semantics, false for stat semantics
+    async fn resolve_path_impl(&self, path: &str, follow_final: bool) -> Result<i64, MetaError> {
         info!("MetaClient: Resolving path: {}", path);
 
         let root = self.root();
@@ -476,35 +499,87 @@ impl<T: MetaStore + 'static> MetaClient<T> {
 
         info!("MetaClient: Path cache MISS for '{}'", path);
 
-        let mut current_ino = root;
-        let segments: Vec<&str> = path
-            .trim_start_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
+        let mut current_path = path.to_string();
+        // TODO: Add max iteration limit to prevent infinite symlink loops
+        loop {
+            let segments: Vec<&str> = current_path
+                .trim_start_matches('/')
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .collect();
 
-        for seg in segments {
-            let child_ino = self
-                .cached_lookup(current_ino, seg)
-                .await?
-                .ok_or_else(|| MetaError::NotFound(current_ino))?;
+            let segment_count = segments.len();
+            let mut current_ino = root;
+            let mut symlink_encountered = false;
 
-            current_ino = child_ino;
+            for (idx, seg) in segments.iter().enumerate() {
+                let child_ino = self
+                    .cached_lookup(current_ino, seg)
+                    .await?
+                    .ok_or_else(|| MetaError::NotFound(current_ino))?;
+
+                let is_tail = idx == segment_count - 1;
+                let should_follow = !is_tail || follow_final;
+
+                // Follow symlinks based on position and follow_final flag
+                if should_follow
+                    && let Ok(Some(attr)) = self.cached_stat(child_ino).await
+                    && attr.kind == FileType::Symlink
+                {
+                    info!(
+                        "MetaClient: Following symlink at segment {} (inode {})",
+                        seg, child_ino
+                    );
+
+                    let target = self.store.read_symlink(child_ino).await?;
+                    let remaining = segments[idx + 1..].join("/");
+
+                    // Resolve absolute vs relative target
+                    // TODO: Cycle detection not implemented
+                    let resolved_target = if target.starts_with('/') {
+                        target
+                    } else {
+                        let parent_path = self
+                            .get_path(current_ino)
+                            .await?
+                            .unwrap_or_else(|| "/".to_string());
+                        if parent_path == "/" {
+                            format!("/{}", target)
+                        } else {
+                            format!("{}/{}", parent_path, target)
+                        }
+                    };
+
+                    current_path = if remaining.is_empty() {
+                        resolved_target
+                    } else {
+                        format!("{}/{}", resolved_target, remaining)
+                    };
+
+                    symlink_encountered = true;
+                    break;
+                }
+
+                current_ino = child_ino;
+            }
+
+            // If no symlink was encountered, we're done
+            if !symlink_encountered {
+                // Cache the resolved path in both caches
+                self.path_cache.insert(path.to_string(), current_ino).await;
+
+                // Store in trie for efficient prefix-based invalidation
+                self.path_trie.insert(path, current_ino).await;
+
+                // Maintain reverse index: inode -> paths
+                self.inode_to_paths
+                    .entry(current_ino)
+                    .or_default()
+                    .push(path.to_string());
+
+                return Ok(current_ino);
+            }
         }
-
-        // Cache the resolved path in both caches
-        self.path_cache.insert(path.to_string(), current_ino).await;
-
-        // Store in trie for efficient prefix-based invalidation
-        self.path_trie.insert(path, current_ino).await;
-
-        // Maintain reverse index: inode -> paths
-        self.inode_to_paths
-            .entry(current_ino)
-            .or_default()
-            .push(path.to_string());
-
-        Ok(current_ino)
     }
 
     /// Retrieves file attributes (metadata) for a given inode with caching.
