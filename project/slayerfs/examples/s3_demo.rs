@@ -124,6 +124,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 slayerfs::vfs::fs::FileType::Dir => "directory",
                 slayerfs::vfs::fs::FileType::File => "file",
                 slayerfs::vfs::fs::FileType::Symlink => "symlink",
+                slayerfs::vfs::fs::FileType::Hardlink => "hardlink",
             }
         );
     }
