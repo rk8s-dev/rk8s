@@ -483,7 +483,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// # Arguments
     ///
     /// * `path` - The absolute path to resolve
-    /// * `follow_final` - If true, follow lstat semantics, false for stat semantics
+    /// * `follow_final` - If true, follow stat semantics, false for lstat semantics
     async fn resolve_path_impl(&self, path: &str, follow_final: bool) -> Result<i64, MetaError> {
         info!("MetaClient: Resolving path: {}", path);
 
@@ -493,8 +493,24 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
 
         if let Some(ino) = self.path_cache.get(path).await {
-            info!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
-            return Ok(ino);
+            if !follow_final {
+                info!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
+                return Ok(ino);
+            }
+
+            match self.cached_stat(ino).await {
+                Ok(Some(attr)) if attr.kind == FileType::Symlink => {
+                    info!(
+                        "MetaClient: Path cache HIT for '{}' -> symlink inode {}, need to follow",
+                        path, ino
+                    );
+                }
+
+                _ => {
+                    info!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
+                    return Ok(ino);
+                }
+            }
         }
 
         info!("MetaClient: Path cache MISS for '{}'", path);
