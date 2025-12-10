@@ -9,7 +9,7 @@ Features:
 - Easy-to-use API for custom filesystem development
 
 
-### Try
+## Try
 ```bash
 # run OverlayFS demo
 cargo run --example overlay -- -o lowerdir=/usr:/bin,upperdir=/tmp/ovl_upper,workdir=/tmp/ovl_work overlay_test /tmp/ovl_mnt
@@ -159,5 +159,8 @@ pub trait Layer: Filesystem {
   - You prefer a simpler, more maintainable codebase
   - Basic overlay functionality suffices for your needs
 
-### Contributing
+## Contributing
 All commits must be signed (`git commit -s`) and GPG signed (`-S`) per project policy.
+
+## Changelog
+See the [CHANGELOG](./CHANGELOG.md) for version history.
