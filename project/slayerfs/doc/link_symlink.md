@@ -25,7 +25,8 @@ SlayerFS supports two types of links as defined by POSIX:
 | `symlink(parent, name, target)` | Create a new symlink at `parent/name` pointing to `target` |
 | `readlink(path)` | Return the target path stored in the symlink |
 | `unlink(path)` | Remove the symlink entry (does not affect the target) |
-| `stat(path)` | Return attributes of the symlink itself (not the target) |
+| `lstat(path)` | Return attributes of the symlink itself (not the target) |
+| `stat(path)` | Return attributes of the target (symlink is followed) |
 
 ### Path Resolution
 
@@ -85,8 +86,8 @@ vfs.unlink("/links/my_symlink").await?;
 
 1. **Creating a hard link**: `nlink` is incremented.
 2. **Unlinking**: `nlink` is decremented.
-   - If `nlink > 1`: The file remains accessible via other links.
-   - If `nlink == 1`: The underlying file data is marked for deletion.
+   - If `nlink > 0`: The file remains accessible via remaining links.
+   - If `nlink == 0`: The underlying file data is marked for deletion.
 
 ### Example
 
@@ -120,12 +121,13 @@ The metadata layer uses the following entry types:
 
 | `EntryType` | `FileType` | Description |
 |-------------|------------|-------------|
-| `File` | `File` | Regular file |
+| `File` | `File` | Regular file (including hard links) |
 | `Directory` | `Dir` | Directory |
 | `Symlink` | `Symlink` | Symbolic link |
-| `Hardlink` | `Hardlink` | Hard link entry (shares inode with target) |
 
-Note: In FUSE layer, both `File` and `Hardlink` are mapped to `FuseFileType::RegularFile` since hard links are semantically regular files.
+**Note:** Hard links are stored as additional directory entries pointing to the same inode as an existing file. They are represented as `EntryType::File` and `FileType::File` (not as a separate type), and are indistinguishable from regular files in POSIX. The `nlink` count tracks the number of directory entries (links) to the inode.
+
+In FUSE layer, files are mapped to `FuseFileType::RegularFile`.
 
 ## Limitations and TODOs
 
