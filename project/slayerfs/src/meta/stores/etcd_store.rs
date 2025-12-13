@@ -5,22 +5,26 @@
 use crate::chuck::SliceDesc;
 use crate::chuck::slice::key_for_slice;
 use crate::meta::backoff::backoff;
+use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
-use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
+use crate::meta::store::{
+    DirEntry, FileAttr, LockName, MetaError, MetaStore, SetAttrFlags, SetAttrRequest,
+};
 use crate::meta::stores::pool::IdPool;
-use crate::meta::{INODE_ID_KEY, Permission, SESSION_ID_KEY};
+use crate::meta::{INODE_ID_KEY, Permission};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
-use chrono::Utc;
-use etcd_client::{Client as EtcdClient, Compare, CompareOp, Txn, TxnOp};
+use chrono::{Duration, Utc};
+use etcd_client::{Client as EtcdClient, Compare, CompareOp, GetOptions, Txn, TxnOp};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 /// ID allocation batch size
 /// TODO: make configurable.
@@ -50,6 +54,26 @@ impl EtcdMetaStore {
     /// Etcd helper method: generate directory children key
     fn etcd_children_key(inode: i64) -> String {
         format!("c:{}", inode)
+    }
+
+    fn etcd_session_key(session_id: Option<Uuid>) -> String {
+        match session_id {
+            Some(id) => format!("session:{}", id),
+            None => "session:".to_string(),
+        }
+    }
+
+    fn etcd_session_info_key(session_id: Option<Uuid>) -> String {
+        match session_id {
+            Some(id) => format!("session_info:{}", id),
+            None => "session_info:".to_string(),
+        }
+    }
+
+    fn get_session_id_from_session_key(session_key: &str) -> Option<Uuid> {
+        session_key
+            .strip_prefix("session:")
+            .and_then(|s| Uuid::parse_str(s).ok())
     }
 
     /// Create or open an etcd metadata store
@@ -333,10 +357,12 @@ impl EtcdMetaStore {
 
     /// Create a new directory
     async fn create_directory(&self, parent_inode: i64, name: String) -> Result<i64, MetaError> {
-        // Step 1: Verify parent exists
-        if self.get_access_meta(parent_inode).await?.is_none() {
+        // Step 1: Verify parent exists and get its metadata
+        let parent_meta = self.get_access_meta(parent_inode).await?;
+        if parent_meta.is_none() {
             return Err(MetaError::ParentNotFound(parent_inode));
         }
+        let parent_meta = parent_meta.unwrap();
 
         if let Some(contents) = self.get_content_meta(parent_inode).await? {
             for content in contents {
@@ -352,7 +378,24 @@ impl EtcdMetaStore {
         let inode = self.generate_id(INODE_ID_KEY).await?;
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let dir_permission = Permission::new(0o40755, 0, 0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = &parent_meta.permission;
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        // Directories inherit setgid bit from parent
+        let mode = if parent_has_setgid {
+            0o42755 // Directory with setgid bit
+        } else {
+            0o40755 // Regular directory
+        };
+
+        let dir_permission = Permission::new(mode, 0, gid);
         let entry_info = EtcdEntryInfo {
             is_file: false,
             size: None,
@@ -459,10 +502,12 @@ impl EtcdMetaStore {
         parent_inode: i64,
         name: String,
     ) -> Result<i64, MetaError> {
-        // Step 1: Verify parent exists
-        if self.get_access_meta(parent_inode).await?.is_none() {
+        // Step 1: Verify parent exists and get its metadata
+        let parent_meta = self.get_access_meta(parent_inode).await?;
+        if parent_meta.is_none() {
             return Err(MetaError::ParentNotFound(parent_inode));
         }
+        let parent_meta = parent_meta.unwrap();
 
         if let Some(contents) = self.get_content_meta(parent_inode).await? {
             for content in contents {
@@ -478,7 +523,17 @@ impl EtcdMetaStore {
         let inode = self.generate_id(INODE_ID_KEY).await?;
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let file_permission = Permission::new(0o644, 0, 0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = &parent_meta.permission;
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        let file_permission = Permission::new(0o100644, 0, gid);
         let entry_info = EtcdEntryInfo {
             is_file: true,
             size: Some(0),
@@ -801,85 +856,90 @@ impl EtcdMetaStore {
         .map(|_| ())
         .map_err(|e| MetaError::Internal(format!("Update parent children failed: {e}")))
     }
+    /// Update mtime and ctime for a directory inode
+    async fn update_directory_timestamps(&self, ino: i64, now: i64) -> Result<(), MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
 
-    /// Helper method to clean session data
-    async fn clean_session_data(
-        &self,
-        session_key: &str,
-        session_id: u64,
-    ) -> Result<(), MetaError> {
-        // Get session data for logging
-        if let Some(session_data) = self.etcd_get_json::<serde_json::Value>(session_key).await? {
-            info!("Cleaning etcd session: {} -> {}", session_key, session_id);
-
-            // TODO: Implement comprehensive cleanup similar to JuiceFS:
-            // - Release any locks held by this session
-            // - Clean up sustained inodes
-            // - Remove temporary resources
-
-            // Mark session as stale instead of immediate deletion
-            // This allows for recovery and audit trails
-            let mut updated_data = session_data.clone();
-            updated_data["stale"] = serde_json::Value::Bool(true);
-            updated_data["updated_at"] =
-                serde_json::Value::Number(serde_json::Number::from(Utc::now().timestamp_millis()));
-
-            self.etcd_put_json(session_key, &updated_data).await?;
-
-            // Optional: Remove session_id mapping after marking stale
+        // Retry loop for optimistic locking using etcd's mod_revision
+        let max_retries = 10;
+        for retry in 0..max_retries {
             let mut client = self.client.clone();
-            if let Err(e) = client
-                .delete(format!("session_id:{}", session_id), None)
-                .await
-            {
-                warn!(
-                    "Failed to remove session_id mapping for {}: {}",
-                    session_id, e
-                );
+
+            // Get current directory info with revision for CAS
+            let get_resp = client.get(reverse_key.as_str(), None).await.map_err(|e| {
+                MetaError::Internal(format!(
+                    "Failed to get directory key {}: {}",
+                    reverse_key, e
+                ))
+            })?;
+
+            let kv = get_resp.kvs().first().ok_or(MetaError::NotFound(ino))?;
+            let mod_revision = kv.mod_revision();
+
+            let mut entry_info: EtcdEntryInfo =
+                serde_json::from_slice(kv.value()).map_err(|e| {
+                    MetaError::Internal(format!(
+                        "Failed to deserialize directory entry info: {}",
+                        e
+                    ))
+                })?;
+
+            // Ensure this is a directory
+            if entry_info.is_file {
+                return Err(MetaError::Internal(format!(
+                    "Cannot update directory timestamps for file {}",
+                    ino
+                )));
             }
 
-            info!("Successfully marked etcd session {} as stale", session_id);
-            Ok(())
-        } else {
-            Err(MetaError::NotFound(session_id as i64))
+            // Update timestamps
+            entry_info.modify_time = now;
+            entry_info.create_time = now; // ctime should also be updated
+
+            // Attempt atomic update using mod_revision for precise CAS
+            let txn = Txn::new()
+                .when(vec![Compare::mod_revision(
+                    reverse_key.as_bytes(),
+                    CompareOp::Equal,
+                    mod_revision,
+                )])
+                .and_then(vec![TxnOp::put(
+                    reverse_key.as_bytes(),
+                    serde_json::to_vec(&entry_info).map_err(|e| {
+                        MetaError::Internal(format!(
+                            "Failed to serialize directory entry info: {}",
+                            e
+                        ))
+                    })?,
+                    None,
+                )]);
+
+            match client.txn(txn).await {
+                Ok(resp) if resp.succeeded() => {
+                    return Ok(());
+                }
+                Ok(_resp) => {
+                    // Transaction failed due to CAS conflict
+                    if retry >= max_retries - 1 {
+                        return Err(MetaError::Internal(format!(
+                            "Failed to update directory timestamps for {} after {} retries",
+                            ino, max_retries
+                        )));
+                    }
+                    // Continue to next retry
+                    tokio::time::sleep(std::time::Duration::from_millis(10 * (retry + 1) as u64))
+                        .await;
+                }
+                Err(e) => {
+                    return Err(MetaError::Internal(format!(
+                        "Failed to update directory timestamps for {}: {}",
+                        ino, e
+                    )));
+                }
+            }
         }
-    }
 
-    /// Helper method to find session key by scanning when session_id mapping is not available
-    async fn find_session_key_by_scan(&self, session_id: u64) -> Result<String, MetaError> {
-        let mut client = self.client.clone();
-
-        // Get all session keys
-        let resp = client
-            .get(
-                "session:".to_string(),
-                Some(etcd_client::GetOptions::new().with_prefix()),
-            )
-            .await
-            .map_err(|e| MetaError::Internal(format!("Failed to scan sessions: {}", e)))?;
-
-        for kv in resp.kvs() {
-            let key_str = String::from_utf8_lossy(kv.key());
-
-            // Skip session_id mapping keys
-            if key_str.starts_with("session_id:") {
-                continue;
-            }
-
-            if let Ok(session_data) = serde_json::from_slice::<serde_json::Value>(kv.value())
-                && let Some(stored_id) = session_data.get("id").and_then(|v| v.as_u64())
-                && stored_id == session_id
-            {
-                // Found the session, return the key
-                info!(
-                    "Found etcd session key by scan: {} -> {}",
-                    key_str, session_id
-                );
-                return Ok(key_str.to_string());
-            }
-        }
-
-        Err(MetaError::NotFound(session_id as i64))
+        Ok(())
     }
 }
 
@@ -1156,6 +1216,7 @@ impl MetaStore for EtcdMetaStore {
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         entry_info.nlink = entry_info.nlink.saturating_add(1);
         entry_info.modify_time = now;
+        entry_info.create_time = now; // Update ctime when creating hard link
         entry_info.parent_inode = parent;
         entry_info.entry_name = name.to_string();
         entry_info.deleted = false;
@@ -1643,6 +1704,25 @@ impl MetaStore for EtcdMetaStore {
             }
         }
 
+        // Update parent directory timestamps
+        let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Update old parent directory timestamps
+        if let Err(e) = self.update_directory_timestamps(old_parent, now).await {
+            warn!(
+                "Rename succeeded but failed to update old parent directory timestamps: old_parent={}, error={}",
+                old_parent, e
+            );
+        }
+
+        // Update new parent directory timestamps
+        if let Err(e) = self.update_directory_timestamps(new_parent, now).await {
+            warn!(
+                "Rename succeeded but failed to update new parent directory timestamps: new_parent={}, error={}",
+                new_parent, e
+            );
+        }
+
         info!(
             "Rename completed successfully: {} -> {}, inode={}",
             old_name, new_name, entry_ino
@@ -1833,226 +1913,298 @@ impl MetaStore for EtcdMetaStore {
 
     // ---------- Session lifecycle implementation ----------
 
-    async fn new_session(&self, payload: &[u8], update: bool) -> Result<(), MetaError> {
-        // Parse the payload to extract client information
-        let session_info = match serde_json::from_slice::<serde_json::Value>(payload) {
-            Ok(info) => info,
-            Err(_) => {
-                // If parsing fails, create a minimal session info
-                serde_json::json!({
-                    "version": "unknown",
-                    "process_id": std::process::id(),
-                })
-            }
+    async fn new_session(&self, session_info: SessionInfo) -> Result<Session, MetaError> {
+        let session_id = Uuid::now_v7();
+        let session_key = Self::etcd_session_key(Some(session_id));
+        let session_info_key = Self::etcd_session_info_key(Some(session_id));
+        let expire = (Utc::now() + Duration::minutes(5)).timestamp_millis();
+        let session = Session {
+            session_id,
+            session_info: session_info.clone(),
+            expire,
         };
 
-        let hostname = session_info
-            .get("host_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+        self.etcd_put_json(session_key, &expire).await?;
+        self.etcd_put_json(session_info_key, &session_info).await?;
 
-        let process_id = session_info
-            .get("process_id")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-
-        let session_key = format!("session:{}:{}", hostname, process_id);
-
-        if update {
-            // Try to get existing session
-            if let Some(mut session_data) = self
-                .etcd_get_json::<serde_json::Value>(&session_key)
-                .await?
-            {
-                // Update existing session
-                session_data["payload"] = serde_json::to_value(payload).unwrap_or_default();
-                session_data["updated_at"] = serde_json::Value::Number(serde_json::Number::from(
-                    Utc::now().timestamp_millis(),
-                ));
-                session_data["stale"] = serde_json::Value::Bool(false);
-
-                self.etcd_put_json(&session_key, &session_data).await?;
-                info!("Updated existing etcd session: {}", session_key);
-                return Ok(());
-            }
-        }
-
-        // Create new session
-        let session_id = self.next_id(SESSION_ID_KEY).await? as u64;
-
-        let session_data = serde_json::json!({
-            "id": session_id,
-            "payload": serde_json::to_value(payload).unwrap_or_default(),
-            "created_at": Utc::now().timestamp_millis(),
-            "updated_at": Utc::now().timestamp_millis(),
-            "stale": false,
-            "hostname": hostname,
-            "process_id": process_id,
-        });
-
-        // Store both by session_id and by hostname:pid for lookup
-        self.etcd_put_json(&session_key, &session_data).await?;
-        self.etcd_put_json(&format!("session_id:{}", session_id), &session_key)
-            .await?;
-
-        info!(
-            "Created new etcd session: {} -> {}",
-            session_key, session_id
-        );
-        Ok(())
+        Ok(session)
     }
 
-    async fn refresh_session(&self) -> Result<(), MetaError> {
-        // Default implementation: try to refresh current process session
-        let session_id = crate::meta::client::session::SessionId::current();
-        self.refresh_session_by_id(&session_id).await
-    }
+    async fn refresh_session(&self, session_id: Uuid) -> Result<(), MetaError> {
+        let session_key = Self::etcd_session_key(Some(session_id));
+        let new_expire = (Utc::now() + Duration::minutes(5)).timestamp_millis();
 
-    async fn refresh_session_by_id(
-        &self,
-        session_id: &crate::meta::client::session::SessionId,
-    ) -> Result<(), MetaError> {
-        // For etcd, we refresh the specific session identified by hostname:process_id
-        let session_key = session_id.to_key();
-
-        // Try to get and update the existing session
-        if let Some(mut session_data) = self
-            .etcd_get_json::<serde_json::Value>(&session_key)
-            .await?
-        {
-            // Update the session timestamp and mark as not stale
-            session_data["updated_at"] =
-                serde_json::Value::Number(serde_json::Number::from(Utc::now().timestamp_millis()));
-            session_data["stale"] = serde_json::Value::Bool(false);
-
-            self.etcd_put_json(&session_key, &session_data).await?;
-
-            if let Some(session_id_num) = session_data.get("id").and_then(|v| v.as_u64()) {
-                info!(
-                    "Refreshed etcd session: {} -> {}",
-                    session_key, session_id_num
-                );
-            } else {
-                info!("Refreshed etcd session: {}", session_key);
-            }
-        } else {
-            // Session not found, client needs to create one first
-            return Err(MetaError::NotFound(0));
-        }
+        self.atomic_update(
+            &session_key,
+            |_| Ok((new_expire, session_id)),
+            || Ok((new_expire, session_id)),
+            3,
+        )
+        .await?;
 
         Ok(())
     }
 
-    async fn find_stale_sessions(
-        &self,
-        limit: Option<usize>,
-    ) -> Result<Vec<crate::meta::store::SessionInfo>, MetaError> {
-        use crate::meta::store::SessionInfo;
-
-        // Consider sessions stale if not updated for more than 5 minutes (300,000 ms)
-        let stale_threshold = Utc::now().timestamp_millis() - 300_000;
-
+    async fn shutdown_session(&self, session_id: Uuid) -> Result<(), MetaError> {
+        let session_key = Self::etcd_session_key(Some(session_id));
+        let session_info_key = Self::etcd_session_info_key(Some(session_id));
         let mut client = self.client.clone();
+        let txn = Txn::new().and_then(vec![
+            TxnOp::delete(session_key, None),
+            TxnOp::delete(session_info_key, None),
+        ]);
+        client
+            .txn(txn)
+            .await
+            .map_err(|err| MetaError::Internal(format!("Error shutting down session: {}", err)))?;
+        Ok(())
+    }
 
-        // Get all session keys (prefix: "session:")
+    async fn cleanup_sessions(&self) -> Result<(), MetaError> {
+        let mut client = self.client.clone();
         let resp = client
             .get(
-                "session:".to_string(),
-                Some(etcd_client::GetOptions::new().with_prefix()),
+                Self::etcd_session_key(None),
+                Some(GetOptions::new().with_prefix()),
             )
             .await
-            .map_err(|e| MetaError::Internal(format!("Failed to scan sessions: {}", e)))?;
+            .map_err(|err| MetaError::Internal(format!("Error getting keys: {}", err)))?;
+        let sessions = resp.kvs();
+        for session in sessions {
+            let session_key = session.key_str().map_err(|err| {
+                MetaError::Internal(format!("Error deserializing key to string:{}", err))
+            })?;
 
-        let mut stale_sessions = Vec::new();
+            let session_id = Self::get_session_id_from_session_key(session_key).ok_or(
+                MetaError::Internal(format!("Error parse session id from key: {}", session_key)),
+            )?;
+            let session_value = session.value_str().map_err(|err| {
+                MetaError::Internal(format!("Error deserializing value to string:{}", err))
+            })?;
+            let session_value: i64 = serde_json::from_str(session_value).map_err(|err| {
+                MetaError::Internal(format!("Error deserializing value to JSON:{}", err))
+            })?;
 
-        for kv in resp.kvs() {
-            let key_str = String::from_utf8_lossy(kv.key());
+            if session_value < Utc::now().timestamp_millis() {
+                self.shutdown_session(session_id).await?;
+            }
+        }
+        Ok(())
+    }
+    async fn get_lock(&self, lock_name: LockName) -> bool {
+        let result = self
+            .atomic_update::<_, _, i64, bool>(
+                &lock_name.to_string(),
+                |old| {
+                    let now = Utc::now().timestamp_millis();
+                    if now > old + Duration::seconds(7).num_milliseconds() {
+                        Ok((now, true))
+                    } else {
+                        Ok((old, false))
+                    }
+                },
+                || {
+                    let now = Utc::now().timestamp_millis();
+                    Ok((now, true))
+                },
+                3,
+            )
+            .await;
 
-            // Skip session_id mapping keys, only process actual session data
-            if key_str.starts_with("session_id:") {
-                continue;
+        match result {
+            Ok(flag) => flag,
+            Err(err) => {
+                error!("Error getting lock: {}", err);
+                false
+            }
+        }
+    }
+
+    async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
+        let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Retry loop for optimistic locking using etcd's mod_revision
+        let max_retries = 10;
+        for retry in 0..max_retries {
+            let mut client = self.client.clone();
+
+            // Get current entry info with revision for CAS
+            let get_resp = client.get(reverse_key.as_str(), None).await.map_err(|e| {
+                MetaError::Internal(format!("Failed to get key {}: {}", reverse_key, e))
+            })?;
+
+            let kv = get_resp.kvs().first().ok_or(MetaError::NotFound(ino))?;
+            let mod_revision = kv.mod_revision();
+
+            let mut entry_info: EtcdEntryInfo =
+                serde_json::from_slice(kv.value()).map_err(|e| {
+                    MetaError::Internal(format!("Failed to deserialize entry info: {}", e))
+                })?;
+
+            let mut ctime_update = false;
+
+            // Apply permission changes
+            if let Some(mode) = req.mode {
+                entry_info.permission.chmod(mode);
+                ctime_update = true;
             }
 
-            if let Ok(session_data) = serde_json::from_slice::<serde_json::Value>(kv.value()) {
-                // Check if session is not stale yet
-                if let Some(stale) = session_data.get("stale").and_then(|v| v.as_bool())
-                    && stale
-                {
-                    continue; // Already stale, skip
+            if let Some(uid) = req.uid {
+                let gid = req.gid.unwrap_or(entry_info.permission.gid);
+                entry_info.permission.chown(uid, gid);
+                ctime_update = true;
+            }
+
+            if req.uid.is_none()
+                && let Some(gid) = req.gid
+            {
+                entry_info.permission.chown(entry_info.permission.uid, gid);
+                ctime_update = true;
+            }
+
+            // Clear suid/sgid flags
+            if flags.contains(SetAttrFlags::CLEAR_SUID) {
+                entry_info.permission.mode &= !0o4000;
+                ctime_update = true;
+            }
+            if flags.contains(SetAttrFlags::CLEAR_SGID) {
+                entry_info.permission.mode &= !0o2000;
+                ctime_update = true;
+            }
+
+            // Apply size changes (files only)
+            if entry_info.is_file
+                && let Some(size_req) = req.size
+            {
+                let new_size = size_req as i64;
+                if entry_info.size != Some(new_size) {
+                    entry_info.size = Some(new_size);
+                    entry_info.modify_time = now;
                 }
+                ctime_update = true;
+            }
 
-                // Get updated_at timestamp
-                if let Some(updated_at) = session_data.get("updated_at").and_then(|v| v.as_i64())
-                    && updated_at < stale_threshold
-                {
-                    // Session is stale
-                    let session_id = session_data.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            // Apply time changes
+            if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
+                entry_info.access_time = now;
+                ctime_update = true;
+            } else if let Some(atime) = req.atime {
+                entry_info.access_time = atime;
+                ctime_update = true;
+            }
 
-                    // Convert session data to info bytes
-                    let info = serde_json::to_vec(&session_data).unwrap_or_default();
+            if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
+                entry_info.modify_time = now;
+                ctime_update = true;
+            } else if let Some(mtime) = req.mtime {
+                entry_info.modify_time = mtime;
+                ctime_update = true;
+            }
 
-                    // Convert timestamp to SystemTime
-                    let updated_system_time = std::time::SystemTime::UNIX_EPOCH
-                        .checked_add(std::time::Duration::from_millis(updated_at as u64))
-                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            if let Some(ctime) = req.ctime {
+                entry_info.create_time = ctime;
+            } else if ctime_update {
+                entry_info.create_time = now;
+            }
 
-                    stale_sessions.push(SessionInfo {
-                        id: session_id,
-                        info,
-                        updated_at: updated_system_time,
+            // Attempt atomic update using mod_revision for precise CAS
+            let txn = Txn::new()
+                .when(vec![Compare::mod_revision(
+                    reverse_key.as_bytes(),
+                    CompareOp::Equal,
+                    mod_revision,
+                )])
+                .and_then(vec![TxnOp::put(
+                    reverse_key.as_bytes(),
+                    serde_json::to_vec(&entry_info).map_err(|e| {
+                        MetaError::Internal(format!("Failed to serialize entry info: {}", e))
+                    })?,
+                    None,
+                )]);
+
+            match client.txn(txn).await {
+                Ok(resp) if resp.succeeded() => {
+                    // Success - convert to FileAttr and return
+                    let kind = if entry_info.symlink_target.is_some() {
+                        FileType::Symlink
+                    } else if entry_info.is_file {
+                        FileType::File
+                    } else {
+                        FileType::Dir
+                    };
+
+                    let size = if let Some(target) = &entry_info.symlink_target {
+                        target.len() as u64
+                    } else if entry_info.is_file {
+                        entry_info.size.unwrap_or(0).max(0) as u64
+                    } else {
+                        4096
+                    };
+
+                    return Ok(FileAttr {
+                        ino,
+                        size,
+                        kind,
+                        mode: entry_info.permission.mode,
+                        uid: entry_info.permission.uid,
+                        gid: entry_info.permission.gid,
+                        atime: entry_info.access_time,
+                        mtime: entry_info.modify_time,
+                        ctime: entry_info.create_time,
+                        nlink: entry_info.nlink,
                     });
                 }
+                Ok(_) => {
+                    // Transaction failed (CAS conflict), retry
+                    if retry < max_retries - 1 {
+                        warn!(
+                            "CAS conflict updating attributes for inode {} (retry {}/{})",
+                            ino,
+                            retry + 1,
+                            max_retries
+                        );
+                        // Exponential backoff
+                        tokio::time::sleep(tokio::time::Duration::from_millis(5 * (1 << retry)))
+                            .await;
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    if retry < max_retries - 1 {
+                        warn!(
+                            "Failed to update attributes for inode {} (retry {}/{}): {}",
+                            ino,
+                            retry + 1,
+                            max_retries,
+                            e
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_millis(5 * (1 << retry)))
+                            .await;
+                        continue;
+                    } else {
+                        error!(
+                            "Failed to update attributes for inode {} after {} retries: {}",
+                            ino, max_retries, e
+                        );
+                        return Err(MetaError::Internal(format!(
+                            "Failed to update attributes: {}",
+                            e
+                        )));
+                    }
+                }
             }
         }
 
-        // Apply limit if specified
-        if let Some(limit) = limit {
-            stale_sessions.truncate(limit);
-        }
-
-        info!("Found {} stale etcd sessions", stale_sessions.len());
-        Ok(stale_sessions)
-    }
-
-    async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
-        // Find the session key by ID
-        let session_key = if let Some(session_key) = self
-            .etcd_get_json::<String>(&format!("session_id:{}", session_id))
-            .await?
-        {
-            session_key
-        } else {
-            // Try to find session by scanning if session_id mapping is not available
-            let session_key = self.find_session_key_by_scan(session_id).await?;
-            return self.clean_session_data(&session_key, session_id).await;
-        };
-
-        // Clean session data
-        self.clean_session_data(&session_key, session_id).await
-    }
-
-    async fn clean_session_by_id(
-        &self,
-        session_id: &crate::meta::client::session::SessionId,
-    ) -> Result<(), MetaError> {
-        let session_key = session_id.to_key();
-
-        // Get session ID from the session data first
-        if let Some(session_data) = self
-            .etcd_get_json::<serde_json::Value>(&session_key)
-            .await?
-        {
-            // Extract the "id" field from the JSON object
-            if let Some(id) = session_data.get("id").and_then(|v| v.as_u64()) {
-                self.clean_session_data(&session_key, id).await
-            } else {
-                // "id" field missing or not a u64; treat as not found or return error
-                Err(MetaError::SessionNotFound)
-            }
-        } else {
-            // Session not found, nothing to clean
-            Ok(())
-        }
+        Err(MetaError::Internal(format!(
+            "Failed to update attributes for inode {} after {} retries (CAS conflicts)",
+            ino, max_retries
+        )))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

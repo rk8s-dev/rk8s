@@ -6,7 +6,7 @@
 mod async_io;
 pub mod config;
 mod inode_store;
-mod layer;
+pub mod layer;
 mod utils;
 
 //mod tempfile;
@@ -22,7 +22,7 @@ use futures::StreamExt as _;
 use rfuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyEntry, ReplyOpen, ReplyStatFs,
 };
-use rfuse3::raw::{DirectoryPlusStream, DirectoryStream, Request, Session};
+use rfuse3::raw::{Request, Session};
 use std::sync::{Arc, Weak};
 use tracing::debug;
 use tracing::error;
@@ -118,6 +118,9 @@ struct HandleData {
     node: Arc<OverlayInode>,
     //offset: libc::off_t,
     real_handle: Option<RealHandle>,
+    // Cache the directory entries for stable readdir offsets.
+    // The snapshot contains all necessary info to avoid re-accessing childrens map.
+    dir_snapshot: Mutex<Option<Vec<DirectoryEntryPlus>>>,
 }
 
 // RealInode is a wrapper of one inode in specific layer.
@@ -168,7 +171,10 @@ impl RealInode {
             Ok(v1) => Ok(Some(v1)),
             Err(e) => match e.raw_os_error() {
                 Some(raw_error) => {
-                    if raw_error == libc::ENOENT || raw_error == libc::ENAMETOOLONG {
+                    if raw_error == libc::ENOENT
+                        || raw_error == libc::ENAMETOOLONG
+                        || raw_error == libc::ESTALE
+                    {
                         return Ok(None);
                     }
                     Err(e)
@@ -718,7 +724,7 @@ impl OverlayInode {
     ///    directory within the parent's upper-layer representation.
     ///
     /// Crucially, it preserves the original directory's ownership (UID/GID) and permissions
-    /// by using [`do_getattr_helper`][crate::unionfs::layer::Layer::do_getattr_helper] and
+    /// by using [`getattr_with_mapping`][crate::unionfs::layer::Layer::getattr_with_mapping] and
     /// [`mkdir_with_context`][crate::unionfs::layer::Layer::mkdir_with_context] with [`OperationContext`][crate::context::OperationContext].
     pub async fn create_upper_dir(
         self: Arc<Self>,
@@ -732,7 +738,9 @@ impl OverlayInode {
         // both rely on the same underlying `stat` system call; they only differ in
         // whether the resulting `uid` and `gid` are mapped.
         let (self_layer, _, self_inode) = self.first_layer_inode().await;
-        let re = self_layer.do_getattr_helper(self_inode, None).await?;
+        let re = self_layer
+            .getattr_with_mapping(self_inode, None, false)
+            .await?;
         let st = ReplyAttr {
             ttl: re.1,
             attr: convert_stat64_to_file_attr(re.0),
@@ -1331,61 +1339,30 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-    ) -> Result<DirectoryStream<'a>> {
-        // lookup the directory
-        let ovl_inode = match self.handles.lock().await.get(&handle) {
-            Some(dir) => dir.node.clone(),
-            None => {
-                // Try to get data with inode.
-                let node = self.lookup_node(ctx, inode, ".").await?;
+    ) -> Result<
+        impl futures_util::stream::Stream<Item = std::result::Result<DirectoryEntry, Errno>> + Send + 'a,
+    > {
+        let snapshot = self.get_or_create_dir_snapshot(ctx, inode, handle).await?;
 
-                let st = node.stat64(ctx).await?;
-                if !utils::is_dir(&st.attr.kind) {
-                    return Err(Error::from_raw_os_error(libc::ENOTDIR));
-                }
-
-                node.clone()
-            }
-        };
-        self.load_directory(ctx, &ovl_inode).await?;
-        let mut childrens = Vec::new();
-        //add myself as "."
-        childrens.push((".".to_string(), ovl_inode.clone()));
-
-        //add parent
-        let parent_node = match ovl_inode.parent.lock().await.upgrade() {
-            Some(p) => p.clone(),
-            None => self.root_node().await,
-        };
-        childrens.push(("..".to_string(), parent_node));
-
-        for (name, child) in ovl_inode.childrens.lock().await.iter() {
-            // skip whiteout node
-            if child.whiteout.load(Ordering::Relaxed) {
-                continue;
-            }
-            childrens.push((name.clone(), child.clone()));
-        }
-
-        if offset >= childrens.len() as u64 {
-            let empty: Vec<std::result::Result<DirectoryEntry, Errno>> = Vec::new();
-            return Ok(Box::pin(iter(empty.into_iter())) as DirectoryStream<'a>);
-        }
-        let mut d: Vec<std::result::Result<DirectoryEntry, Errno>> = Vec::new();
-
-        for (index, (name, child)) in (0_u64..).zip(childrens.into_iter()) {
-            // make struct DireEntry and Entry
-            let st = child.stat64(ctx).await?;
-            let dir_entry = DirectoryEntry {
-                inode: child.inode,
-                kind: st.attr.kind,
-                name: name.into(),
-                offset: (index + 1) as i64,
+        let entries: Vec<std::result::Result<DirectoryEntry, Errno>> =
+            if offset < snapshot.len() as u64 {
+                snapshot
+                    .iter()
+                    .skip(offset as usize)
+                    .map(|entry| {
+                        Ok(DirectoryEntry {
+                            inode: entry.inode,
+                            kind: entry.kind,
+                            name: entry.name.clone(),
+                            offset: entry.offset,
+                        })
+                    })
+                    .collect()
+            } else {
+                vec![]
             };
-            d.push(Ok(dir_entry));
-        }
 
-        Ok(Box::pin(iter(d.into_iter())) as DirectoryStream<'a>)
+        Ok(iter(entries))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1395,77 +1372,127 @@ impl OverlayFs {
         inode: Inode,
         handle: u64,
         offset: u64,
-    ) -> Result<DirectoryPlusStream<'a>> {
-        // lookup the directory
-        let ovl_inode = match self.handles.lock().await.get(&handle) {
-            Some(dir) => {
-                trace!(
-                    "do_readdirplus: handle {} found, inode {}",
-                    handle, dir.node.inode
-                );
-                dir.node.clone()
-            }
-            None => {
-                trace!("do_readdirplus: handle {handle} not found, lookup inode {inode}");
-                // Try to get data with inode.
-                let node = self.lookup_node(ctx, inode, ".").await?;
+    ) -> Result<
+        impl futures_util::stream::Stream<Item = std::result::Result<DirectoryEntryPlus, Errno>>
+        + Send
+        + 'a,
+    > {
+        let snapshot = self.get_or_create_dir_snapshot(ctx, inode, handle).await?;
 
+        let mut entries = Vec::new();
+        if offset < snapshot.len() as u64 {
+            for entry in snapshot.iter().skip(offset as usize) {
+                // Increment lookup count for readdirplus as we are handing out a reference to the kernel.
+                // We must do this here, not in snapshot creation, and we must NOT decrement it in HandleData drop.
+                // The kernel will send a FORGET request when it's done with the entry.
+                if let Some(node) = self.get_all_inode(entry.inode).await {
+                    node.lookups.fetch_add(1, Ordering::Relaxed);
+                }
+                entries.push(Ok(entry.clone()));
+            }
+        }
+
+        Ok(iter(entries))
+    }
+
+    async fn get_or_create_dir_snapshot(
+        &self,
+        ctx: Request,
+        inode: Inode,
+        handle: u64,
+    ) -> Result<Vec<DirectoryEntryPlus>> {
+        let handle_data = match self.handles.lock().await.get(&handle) {
+            Some(hd) if hd.node.inode == inode => hd.clone(),
+            _ => {
+                // Fallback for cases without a valid handle (e.g. no-opendir)
+                let node = self.lookup_node(ctx, inode, ".").await?;
                 let st = node.stat64(ctx).await?;
                 if !utils::is_dir(&st.attr.kind) {
                     return Err(Error::from_raw_os_error(libc::ENOTDIR));
                 }
-
-                node.clone()
+                // Create a temporary HandleData for this call only.
+                Arc::new(HandleData {
+                    node,
+                    real_handle: None,
+                    dir_snapshot: Mutex::new(None),
+                })
             }
         };
-        self.load_directory(ctx, &ovl_inode).await?;
 
-        let mut childrens = Vec::new();
-        //add myself as "."
-        childrens.push((".".to_string(), ovl_inode.clone()));
+        // Optimistic check
+        if let Some(snapshot) = handle_data.dir_snapshot.lock().await.as_ref() {
+            return Ok(snapshot.clone());
+        }
 
-        //add parent
+        // Snapshot doesn't exist, create it.
+        let ovl_inode = &handle_data.node;
+        self.load_directory(ctx, ovl_inode).await?;
+
+        let mut entries = Vec::new();
+
+        // 1. Add "." entry
+        let mut st_self = ovl_inode.stat64(ctx).await?;
+        st_self.attr.ino = ovl_inode.inode;
+        entries.push(DirectoryEntryPlus {
+            inode: ovl_inode.inode,
+            generation: 0,
+            kind: st_self.attr.kind,
+            name: ".".into(),
+            offset: 1,
+            attr: st_self.attr,
+            entry_ttl: st_self.ttl,
+            attr_ttl: st_self.ttl,
+        });
+
+        // 2. Add ".." entry
         let parent_node = match ovl_inode.parent.lock().await.upgrade() {
-            Some(p) => p.clone(),
+            Some(node) => node,
             None => self.root_node().await,
         };
-        childrens.push(("..".to_string(), parent_node));
+        let mut st_parent = parent_node.stat64(ctx).await?;
+        st_parent.attr.ino = parent_node.inode;
+        entries.push(DirectoryEntryPlus {
+            inode: parent_node.inode,
+            generation: 0,
+            kind: st_parent.attr.kind,
+            name: "..".into(),
+            offset: 2,
+            attr: st_parent.attr,
+            entry_ttl: st_parent.ttl,
+            attr_ttl: st_parent.ttl,
+        });
 
-        for (name, child) in ovl_inode.childrens.lock().await.iter() {
-            // skip whiteout node
+        // 3. Add children entries
+        let children = ovl_inode.childrens.lock().await;
+        for (name, child) in children.iter() {
             if child.whiteout.load(Ordering::Relaxed) {
                 continue;
             }
-            childrens.push((name.clone(), child.clone()));
+            let mut st_child = child.stat64(ctx).await?;
+            st_child.attr.ino = child.inode;
+            entries.push(DirectoryEntryPlus {
+                inode: child.inode,
+                generation: 0,
+                kind: st_child.attr.kind,
+                name: name.clone().into(),
+                offset: (entries.len() + 1) as i64,
+                attr: st_child.attr,
+                entry_ttl: st_child.ttl,
+                attr_ttl: st_child.ttl,
+            });
         }
+        drop(children);
 
-        if offset >= childrens.len() as u64 {
-            let empty: Vec<std::result::Result<DirectoryEntryPlus, Errno>> = Vec::new();
-            return Ok(Box::pin(iter(empty.into_iter())) as DirectoryPlusStream<'a>);
+        let mut snapshot_guard = handle_data.dir_snapshot.lock().await;
+        if snapshot_guard.is_none() {
+            // We won the race, install our prepared snapshot.
+            *snapshot_guard = Some(entries.clone());
+            Ok(entries)
+        } else {
+            // Another thread won the race while we were preparing.
+            // Discard our work and use the existing snapshot.
+            Ok(snapshot_guard.as_ref().unwrap().clone())
         }
-        let mut d: Vec<std::result::Result<DirectoryEntryPlus, Errno>> = Vec::new();
-
-        for (index, (name, child)) in (0_u64..).zip(childrens.into_iter()) {
-            if index >= offset {
-                // make struct DireEntry and Entry
-                let mut st = child.stat64(ctx).await?;
-                child.lookups.fetch_add(1, Ordering::Relaxed);
-                st.attr.ino = child.inode;
-                let dir_entry = DirectoryEntryPlus {
-                    inode: child.inode,
-                    generation: 0,
-                    kind: st.attr.kind,
-                    name: name.into(),
-                    offset: (index + 1) as i64,
-                    attr: st.attr,
-                    entry_ttl: st.ttl,
-                    attr_ttl: st.ttl,
-                };
-                d.push(Ok(dir_entry));
-            }
-        }
-
-        Ok(Box::pin(iter(d.into_iter())) as DirectoryPlusStream<'a>)
     }
 
     async fn do_mkdir(
@@ -1782,6 +1809,7 @@ impl OverlayFs {
                             inode: real_ino.lock().await.unwrap(),
                             handle: AtomicU64::new(hd),
                         }),
+                        dir_snapshot: Mutex::new(None),
                     };
                     self.handles
                         .lock()
@@ -2074,7 +2102,9 @@ impl OverlayFs {
         // both rely on the same underlying `stat` system call; they only differ in
         // whether the resulting `uid` and `gid` are mapped.
         let (self_layer, _, self_inode) = node.first_layer_inode().await;
-        let re = self_layer.do_getattr_helper(self_inode, None).await?;
+        let re = self_layer
+            .getattr_with_mapping(self_inode, None, false)
+            .await?;
         let st = ReplyAttr {
             ttl: re.1,
             attr: convert_stat64_to_file_attr(re.0),
@@ -2165,7 +2195,9 @@ impl OverlayFs {
         // both rely on the same underlying `stat` system call; they only differ in
         // whether the resulting `uid` and `gid` are mapped.
         let (lower_layer, _, lower_inode) = node.first_layer_inode().await;
-        let re = lower_layer.do_getattr_helper(lower_inode, None).await?;
+        let re = lower_layer
+            .getattr_with_mapping(lower_inode, None, false)
+            .await?;
         let st = ReplyAttr {
             ttl: re.1,
             attr: convert_stat64_to_file_attr(re.0),
@@ -2691,6 +2723,7 @@ impl OverlayFs {
                     inode,
                     handle: AtomicU64::new(0),
                 }),
+                dir_snapshot: Mutex::new(None),
             };
             return Ok(Arc::new(handle_data));
         }

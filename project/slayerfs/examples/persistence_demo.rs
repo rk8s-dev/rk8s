@@ -12,6 +12,8 @@ use slayerfs::vfs::fs::VFS;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::signal;
+#[cfg(target_os = "linux")]
+use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
@@ -228,16 +230,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("Press Ctrl+C to exit and unmount filesystem...");
 
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                println!("\nUnmounting filesystem...");
-
-                handle.unmount().await?;
-                println!("Filesystem unmounted");
-                gc_handle.abort();
-                let _ = gc_handle.await;
+        // Wait for either SIGINT (Ctrl+C) or SIGTERM (e.g. external umount/kill)
+        #[cfg(target_os = "linux")]
+        let reason = {
+            let mut sigterm = unix_signal(SignalKind::terminate())?;
+            tokio::select! {
+                _ = signal::ctrl_c() => "SIGINT/Ctrl+C",
+                _ = sigterm.recv() => "SIGTERM",
             }
-        }
+        };
+
+        #[cfg(not(target_os = "linux"))]
+        let reason = {
+            signal::ctrl_c().await?;
+            "SIGINT/Ctrl+C"
+        };
+
+        println!("\nUnmounting filesystem ({reason})...");
+
+        handle.unmount().await?;
+        println!("Filesystem unmounted");
+
+        // Stop GC task
+        gc_handle.abort();
+        let _ = gc_handle.await;
 
         Ok(())
     }

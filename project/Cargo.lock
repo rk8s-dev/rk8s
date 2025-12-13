@@ -4049,7 +4049,7 @@ dependencies = [
 
 [[package]]
 name = "libfuse-fs"
-version = "0.1.6"
+version = "0.1.9"
 dependencies = [
  "async-trait",
  "bitflags 2.9.4",
@@ -7176,6 +7176,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

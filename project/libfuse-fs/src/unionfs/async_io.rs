@@ -9,12 +9,19 @@ use std::io::ErrorKind;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::Mutex;
 use tracing::info;
 use tracing::trace;
 
 impl Filesystem for OverlayFs {
     /// initialize filesystem. Called before any other filesystem method.
-    async fn init(&self, _req: Request) -> Result<ReplyInit> {
+    async fn init(&self, req: Request) -> Result<ReplyInit> {
+        for layer in self.lower_layers.iter() {
+            layer.init(req).await?;
+        }
+        if let Some(upper) = &self.upper_layer {
+            upper.init(req).await?;
+        }
         if self.config.do_import {
             self.import().await?;
         }
@@ -358,15 +365,22 @@ impl Filesystem for OverlayFs {
                 inode,
                 handle: AtomicU64::new(h.fh),
             }),
+            dir_snapshot: Mutex::new(None),
         };
 
         self.handles.lock().await.insert(hd, Arc::new(handle_data));
 
-        trace!("OPEN: returning handle: {hd}");
+        let mut opts = OpenOptions::empty();
+        match self.config.cache_policy {
+            CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
+            CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
+            _ => {}
+        }
+        // trace!("OPEN: returning handle: {hd}");
 
         Ok(ReplyOpen {
             fh: hd,
-            flags: flags as u32,
+            flags: opts.bits(),
         })
     }
 
@@ -437,6 +451,60 @@ impl Filesystem for OverlayFs {
                     .await
             }
         }
+    }
+
+    /// Copy a range of data from one file to another. This can improve performance because it
+    /// reduces data copying: normally, data will be copied from FUSE server to kernel, then to
+    /// user-space, then to kernel, and finally sent back to FUSE server. By implementing this
+    /// method, data will only be copied internally within the FUSE server.
+    #[allow(clippy::too_many_arguments)]
+    async fn copy_file_range(
+        &self,
+        req: Request,
+        inode_in: Inode,
+        fh_in: u64,
+        offset_in: u64,
+        inode_out: Inode,
+        fh_out: u64,
+        offset_out: u64,
+        length: u64,
+        flags: u64,
+    ) -> Result<ReplyCopyFileRange> {
+        // Get handle data for source file
+        let data_in = self.get_data(req, Some(fh_in), inode_in, 0).await?;
+        let handle_in = match data_in.real_handle {
+            None => return Err(Error::from_raw_os_error(libc::ENOENT).into()),
+            Some(ref hd) => hd,
+        };
+
+        // Get handle data for destination file
+        let data_out = self.get_data(req, Some(fh_out), inode_out, 0).await?;
+        let handle_out = match data_out.real_handle {
+            None => return Err(Error::from_raw_os_error(libc::ENOENT).into()),
+            Some(ref hd) => hd,
+        };
+
+        // Both files must be on the same layer for copy_file_range to work
+        if !Arc::ptr_eq(&handle_in.layer, &handle_out.layer) {
+            // Different layers - return EXDEV to trigger fallback to read/write
+            return Err(Error::from_raw_os_error(libc::EXDEV).into());
+        }
+
+        // Delegate to the underlying PassthroughFs layer
+        handle_in
+            .layer
+            .copy_file_range(
+                req,
+                handle_in.inode,
+                handle_in.handle.load(Ordering::Relaxed),
+                offset_in,
+                handle_out.inode,
+                handle_out.handle.load(Ordering::Relaxed),
+                offset_out,
+                length,
+                flags,
+            )
+            .await
     }
 
     /// get filesystem statistics.
@@ -666,6 +734,7 @@ impl Filesystem for OverlayFs {
                     inode: real_inode,
                     handle: AtomicU64::new(reply.fh),
                 }),
+                dir_snapshot: Mutex::new(None),
             }),
         );
 
@@ -833,8 +902,8 @@ impl Filesystem for OverlayFs {
         let mut opts = OpenOptions::empty();
         match self.config.cache_policy {
             CachePolicy::Never => opts |= OpenOptions::DIRECT_IO,
-            CachePolicy::Auto => opts |= OpenOptions::DIRECT_IO,
             CachePolicy::Always => opts |= OpenOptions::KEEP_CACHE,
+            _ => {}
         }
 
         Ok(ReplyCreated {

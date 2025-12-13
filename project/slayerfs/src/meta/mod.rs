@@ -34,4 +34,3 @@ pub use store::MetaStore;
 
 pub const INODE_ID_KEY: &str = "slayerfs:next_inode_id";
 pub const SLICE_ID_KEY: &str = "slayerfs:next_slice_id";
-pub const SESSION_ID_KEY: &str = "slayerfs:next_session_id";

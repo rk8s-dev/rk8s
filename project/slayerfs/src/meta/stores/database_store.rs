@@ -3,18 +3,19 @@
 //! Supports SQLite and PostgreSQL backends via SeaORM
 
 use crate::chuck::SliceDesc;
+use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::session_meta::{self, Entity as SessionMeta};
 use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
 use crate::meta::entities::*;
 use crate::meta::store::{
-    DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
+    DirEntry, FileAttr, LockName, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
-use crate::meta::{INODE_ID_KEY, Permission, SESSION_ID_KEY, SLICE_ID_KEY};
+use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use log::info;
 use sea_orm::prelude::Uuid;
 use sea_orm::*;
@@ -28,7 +29,6 @@ pub struct DatabaseMetaStore {
     _config: Config,
     next_inode: AtomicU64,
     next_slice: AtomicU64,
-    next_session: AtomicU64,
 }
 
 impl DatabaseMetaStore {
@@ -47,13 +47,11 @@ impl DatabaseMetaStore {
 
         let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
         let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
-        let next_session = AtomicU64::new(Self::init_next_session(&db).await?);
         let store = Self {
             db,
             _config,
             next_inode,
             next_slice,
-            next_session,
         };
         store.init_root_directory().await?;
 
@@ -71,13 +69,11 @@ impl DatabaseMetaStore {
 
         let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
         let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
-        let next_session = AtomicU64::new(Self::init_next_session(&db).await?);
         let store = Self {
             db,
             _config,
             next_inode,
             next_slice,
-            next_session,
         };
         store.init_root_directory().await?;
 
@@ -118,22 +114,6 @@ impl DatabaseMetaStore {
             .unwrap_or(0);
 
         Ok(max_slice + 1)
-    }
-
-    /// Initialize next session ID counter
-    async fn init_next_session(db: &DatabaseConnection) -> Result<u64, MetaError> {
-        let max_session = SessionMeta::find()
-            .order_by_desc(session_meta::Column::Id)
-            .one(db)
-            .await
-            .map_err(MetaError::Database)?
-            .map(|r| r.id)
-            .unwrap_or(0);
-
-        // Start session IDs from 1 to avoid confusion with 0 as "no session"
-        let next = if max_session == 0 { 1 } else { max_session + 1 };
-        info!("Initialized next session counter to: {}", next);
-        Ok(next)
     }
 
     /// Create database connection
@@ -282,15 +262,16 @@ impl DatabaseMetaStore {
         // Start transaction
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        if AccessMeta::find_by_id(parent_inode)
+        let parent_meta = AccessMeta::find_by_id(parent_inode)
             .one(&txn)
             .await
-            .map_err(MetaError::Database)?
-            .is_none()
-        {
+            .map_err(MetaError::Database)?;
+
+        if parent_meta.is_none() {
             txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::ParentNotFound(parent_inode));
         }
+        let parent_meta = parent_meta.unwrap();
 
         // Check if entry already exists
         let existing = ContentMeta::find()
@@ -311,7 +292,24 @@ impl DatabaseMetaStore {
         let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let dir_permission = Permission::new(0o40755, 0, 0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = parent_meta.permission();
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        // Directories inherit setgid bit from parent
+        let mode = if parent_has_setgid {
+            0o42755 // Directory with setgid bit
+        } else {
+            0o40755 // Regular directory
+        };
+
+        let dir_permission = Permission::new(mode, 0, gid);
         let access_meta = access_meta::ActiveModel {
             inode: Set(inode),
             permission: Set(dir_permission),
@@ -365,15 +363,16 @@ impl DatabaseMetaStore {
         // Start transaction
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        if AccessMeta::find_by_id(parent_inode)
+        let parent_meta = AccessMeta::find_by_id(parent_inode)
             .one(&txn)
             .await
-            .map_err(MetaError::Database)?
-            .is_none()
-        {
+            .map_err(MetaError::Database)?;
+
+        if parent_meta.is_none() {
             txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::ParentNotFound(parent_inode));
         }
+        let parent_meta = parent_meta.unwrap();
 
         // Check if entry already exists
         let existing = ContentMeta::find()
@@ -394,7 +393,22 @@ impl DatabaseMetaStore {
         let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let file_permission = Permission::new(0o644, 0, 0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = parent_meta.permission();
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        // Per POSIX semantics: when a directory has the setgid bit set, newly created
+        // entries inside inherit the directory's group (gid), but regular files
+        // do NOT inherit the setgid bit itself. Only newly created directories
+        // should carry the setgid bit. We therefore inherit `gid` from the parent
+        // but intentionally do not set the setgid bit on the file mode.
+        let file_permission = Permission::new(0o100644, 0, gid);
         let file_meta = file_meta::ActiveModel {
             inode: Set(inode),
             size: Set(0),
@@ -447,6 +461,66 @@ impl DatabaseMetaStore {
 
     fn now_nanos() -> i64 {
         Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    }
+
+    async fn get_lock_internal(&self, lock_name: LockName) -> anyhow::Result<bool> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let lock_name_str = lock_name.to_string();
+        let lock_ = LocksMeta::find()
+            .filter(locks_meta::Column::LockName.eq(lock_name_str.clone()))
+            .one(&txn)
+            .await?;
+
+        let current_time = Utc::now();
+        let flag: bool;
+        match lock_ {
+            Some(lock) => {
+                let mut lock = lock.into_active_model();
+
+                let last_updated = match &lock.last_updated {
+                    ActiveValue::Set(val) | ActiveValue::Unchanged(val) => *val,
+                    ActiveValue::NotSet => {
+                        return Err(anyhow::anyhow!("Lock last_updated field is not set"));
+                    }
+                };
+
+                if last_updated < current_time - Duration::seconds(7) {
+                    lock.last_updated = ActiveValue::Set(current_time);
+                    lock.update(&txn).await?;
+                    flag = true;
+                } else {
+                    flag = false;
+                }
+            }
+            None => {
+                let lock = locks_meta::ActiveModel {
+                    lock_name: ActiveValue::Set(lock_name_str),
+                    last_updated: ActiveValue::Set(current_time),
+                };
+                lock.insert(&txn).await?;
+                flag = true;
+            }
+        };
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(flag)
+    }
+
+    async fn shutdown_session_internal<C: ConnectionTrait>(
+        &self,
+        session_id: Uuid,
+        conn: &C,
+    ) -> Result<(), MetaError> {
+        let session = SessionMeta::find()
+            .filter(session_meta::Column::SessionId.eq(session_id))
+            .one(conn)
+            .await?;
+        let session = match session {
+            Some(s) => s.into_active_model(),
+            None => return Err(MetaError::SessionNotFound(session_id)),
+        };
+        session.delete(conn).await.map_err(MetaError::Database)?;
+        Ok(())
     }
 }
 
@@ -976,7 +1050,7 @@ impl MetaStore for DatabaseMetaStore {
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
-        // Update old parent mtime
+        // Update old parent mtime and ctime
         let mut old_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(old_parent)
             .one(&txn)
             .await
@@ -984,12 +1058,13 @@ impl MetaStore for DatabaseMetaStore {
             .ok_or(MetaError::ParentNotFound(old_parent))?
             .into();
         old_parent_meta.modify_time = Set(now);
+        old_parent_meta.create_time = Set(now);
         old_parent_meta
             .update(&txn)
             .await
             .map_err(MetaError::Database)?;
 
-        // Update new parent mtime (if different)
+        // Update new parent mtime and ctime (if different)
         if old_parent != new_parent {
             let mut new_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(new_parent)
                 .one(&txn)
@@ -998,6 +1073,7 @@ impl MetaStore for DatabaseMetaStore {
                 .ok_or(MetaError::NotFound(new_parent))?
                 .into();
             new_parent_meta.modify_time = Set(now);
+            new_parent_meta.create_time = Set(now);
             new_parent_meta
                 .update(&txn)
                 .await
@@ -1046,12 +1122,16 @@ impl MetaStore for DatabaseMetaStore {
     ) -> Result<FileAttr, MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        if let Some(mut file) = FileMeta::find_by_id(ino)
+        if let Some(file) = FileMeta::find_by_id(ino)
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
         {
             let mut permission = file.permission().clone();
+            let mut size = file.size;
+            let mut access_time = file.access_time;
+            let mut modify_time = file.modify_time;
+            let mut create_time = file.create_time;
             let mut ctime_update = false;
             let now = Self::now_nanos();
 
@@ -1082,45 +1162,70 @@ impl MetaStore for DatabaseMetaStore {
                 ctime_update = true;
             }
 
-            file.permission = permission;
-
-            if let Some(size) = req.size {
-                let new_size = size as i64;
-                if file.size != new_size {
-                    file.size = new_size;
-                    file.modify_time = now;
+            if let Some(size_req) = req.size {
+                let new_size = size_req as i64;
+                if size != new_size {
+                    size = new_size;
+                    modify_time = now;
                 }
                 ctime_update = true;
             }
 
             if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
-                file.access_time = now;
+                access_time = now;
+                ctime_update = true;
             } else if let Some(atime) = req.atime {
-                file.access_time = atime;
+                access_time = atime;
+                ctime_update = true;
             }
 
             if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
-                file.modify_time = now;
+                modify_time = now;
                 ctime_update = true;
             } else if let Some(mtime) = req.mtime {
-                file.modify_time = mtime;
+                modify_time = mtime;
                 ctime_update = true;
             }
 
             if let Some(ctime) = req.ctime {
-                file.create_time = ctime;
+                create_time = ctime;
             } else if ctime_update {
-                file.create_time = now;
+                create_time = now;
             }
 
-            let active: file_meta::ActiveModel = file.into();
+            let kind = if file.symlink_target.is_some() {
+                FileType::Symlink
+            } else {
+                FileType::File
+            };
+            let nlink = file.nlink;
+            let symlink_len = file.symlink_target.as_ref().map(|t| t.len() as u64);
+
+            let mut active: file_meta::ActiveModel = file.into();
+            active.permission = Set(permission.clone());
+            active.size = Set(size);
+            active.access_time = Set(access_time);
+            active.modify_time = Set(modify_time);
+            active.create_time = Set(create_time);
             active.update(&txn).await.map_err(MetaError::Database)?;
 
             txn.commit().await.map_err(MetaError::Database)?;
-            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+            let out = FileAttr {
+                ino,
+                size: symlink_len.unwrap_or(size as u64),
+                kind,
+                mode: permission.mode,
+                uid: permission.uid,
+                gid: permission.gid,
+                atime: access_time,
+                mtime: modify_time,
+                ctime: create_time,
+                nlink: nlink as u32,
+            };
+            return Ok(out);
         }
 
-        if let Some(mut dir) = AccessMeta::find_by_id(ino)
+        if let Some(dir) = AccessMeta::find_by_id(ino)
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
@@ -1128,6 +1233,9 @@ impl MetaStore for DatabaseMetaStore {
             let mut permission = dir.permission().clone();
             let mut ctime_update = false;
             let now = Self::now_nanos();
+            let mut access_time = dir.access_time;
+            let mut modify_time = dir.modify_time;
+            let mut create_time = dir.create_time;
 
             if let Some(mode) = req.mode {
                 permission.chmod(mode);
@@ -1156,29 +1264,33 @@ impl MetaStore for DatabaseMetaStore {
                 ctime_update = true;
             }
 
-            dir.permission = permission;
-
             if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
-                dir.access_time = now;
+                access_time = now;
+                ctime_update = true;
             } else if let Some(atime) = req.atime {
-                dir.access_time = atime;
+                access_time = atime;
+                ctime_update = true;
             }
 
             if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
-                dir.modify_time = now;
+                modify_time = now;
                 ctime_update = true;
             } else if let Some(mtime) = req.mtime {
-                dir.modify_time = mtime;
+                modify_time = mtime;
                 ctime_update = true;
             }
 
             if let Some(ctime) = req.ctime {
-                dir.create_time = ctime;
+                create_time = ctime;
             } else if ctime_update {
-                dir.create_time = now;
+                create_time = now;
             }
 
-            let active: access_meta::ActiveModel = dir.into();
+            let mut active: access_meta::ActiveModel = dir.into();
+            active.permission = Set(permission);
+            active.access_time = Set(access_time);
+            active.modify_time = Set(modify_time);
+            active.create_time = Set(create_time);
             active.update(&txn).await.map_err(MetaError::Database)?;
 
             txn.commit().await.map_err(MetaError::Database)?;
@@ -1267,10 +1379,27 @@ impl MetaStore for DatabaseMetaStore {
         {
             dir.access_time = Self::now_nanos();
             let active: access_meta::ActiveModel = dir.into();
+            let out_perm = active.permission.clone().unwrap();
+            let out_atime = active.access_time.clone().unwrap();
+            let out_mtime = active.modify_time.clone().unwrap();
+            let out_ctime = active.create_time.clone().unwrap();
+            let out_nlink = active.nlink.clone().unwrap();
             active.update(&txn).await.map_err(MetaError::Database)?;
 
             txn.commit().await.map_err(MetaError::Database)?;
-            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+            let out = FileAttr {
+                ino,
+                size: 4096,
+                kind: FileType::Dir,
+                mode: out_perm.mode,
+                uid: out_perm.uid,
+                gid: out_perm.gid,
+                atime: out_atime,
+                mtime: out_mtime,
+                ctime: out_ctime,
+                nlink: out_nlink as u32,
+            };
+            return Ok(out);
         }
 
         txn.rollback().await.map_err(MetaError::Database)?;
@@ -1421,7 +1550,6 @@ impl MetaStore for DatabaseMetaStore {
         match key {
             SLICE_ID_KEY => Ok(self.next_slice.fetch_add(1, Ordering::SeqCst) as i64),
             INODE_ID_KEY => Ok(self.next_inode.fetch_add(1, Ordering::SeqCst) as i64),
-            SESSION_ID_KEY => Ok(self.next_session.fetch_add(1, Ordering::SeqCst) as i64),
             other => Err(MetaError::NotSupported(format!(
                 "next_id not supported for key {other}"
             ))),
@@ -1430,267 +1558,69 @@ impl MetaStore for DatabaseMetaStore {
 
     // ---------- Session lifecycle implementation ----------
 
-    async fn new_session(&self, payload: &[u8], update: bool) -> Result<(), MetaError> {
-        // Parse the payload to extract client information
-        let session_info = match serde_json::from_slice::<serde_json::Value>(payload) {
-            Ok(info) => info,
-            Err(_) => {
-                // If parsing fails, create a minimal session info
-                serde_json::json!({
-                    "session_uuid": Uuid::new_v4().to_string(),
-                    "version": "unknown",
-                    "process_id": std::process::id(),
-                })
-            }
+    async fn new_session(&self, session_info: SessionInfo) -> Result<Session, MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let session_id = Uuid::now_v7();
+        let expire = (Utc::now() + Duration::minutes(5)).timestamp_millis();
+        let payload = serde_json::to_vec(&session_info).map_err(MetaError::Serialization)?;
+        let session = session_meta::ActiveModel {
+            session_id: Set(session_id),
+            session_info: Set(payload),
+            expire: Set(expire),
         };
-
-        let session_uuid = session_info
-            .get("session_uuid")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-        let hostname = session_info
-            .get("host_name")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let process_id = session_info
-            .get("process_id")
-            .and_then(|v| v.as_i64())
-            .map(|i| i as i32);
-
-        let mount_point = session_info
-            .get("mount_point")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        if update {
-            // For update mode, try to find an existing session by UUID first
-            let existing_session = SessionMeta::find()
-                .filter(session_meta::Column::SessionUuid.eq(&session_uuid))
-                .filter(session_meta::Column::Stale.eq(false))
-                .one(&self.db)
-                .await
-                .map_err(MetaError::Database)?;
-
-            if let Some(session) = existing_session {
-                // Update existing session
-                let session_id = session.id;
-                let mut active_model: session_meta::ActiveModel = session.into();
-                active_model.payload = Set(payload.to_vec());
-                active_model.updated_at = Set(Utc::now().timestamp_millis());
-                active_model.stale = Set(false);
-                if let Some(mp) = mount_point {
-                    active_model.mount_point = Set(Some(mp));
-                }
-
-                active_model
-                    .update(&self.db)
-                    .await
-                    .map_err(MetaError::Database)?;
-
-                info!("Updated existing session: {}", session_id);
-                return Ok(());
-            }
+        if let Err(e) = session.insert(&self.db).await {
+            let _ = txn.rollback().await;
+            return Err(MetaError::Database(e));
         }
-
-        // Create new session
-        let session_id = self.next_id(SESSION_ID_KEY).await? as u64;
-        let session_model = session_meta::ActiveModel {
-            id: Set(session_id),
-            session_uuid: Set(session_uuid),
-            payload: Set(payload.to_vec()),
-            created_at: Set(Utc::now().timestamp_millis()),
-            updated_at: Set(Utc::now().timestamp_millis()),
-            stale: Set(false),
-            hostname: Set(hostname),
-            process_id: Set(process_id),
-            mount_point: Set(mount_point),
-        };
-
-        session_model
-            .insert(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
-
-        info!("Created new session: {}", session_id);
-        Ok(())
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(Session {
+            session_id,
+            expire,
+            session_info,
+        })
     }
 
-    async fn refresh_session(&self) -> Result<(), MetaError> {
-        // Default implementation: update the most recently updated session
-        // This maintains backward compatibility
+    async fn refresh_session(&self, session_id: Uuid) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let expire = (Utc::now() + Duration::minutes(5)).timestamp_millis();
         let session = SessionMeta::find()
-            .filter(session_meta::Column::Stale.eq(false))
-            .order_by_desc(session_meta::Column::UpdatedAt)
-            .one(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
-
-        if let Some(session) = session {
-            let session_id = session.id;
-            let mut active_model: session_meta::ActiveModel = session.into();
-            active_model.updated_at = Set(Utc::now().timestamp_millis());
-            active_model.stale = Set(false);
-
-            active_model
-                .update(&self.db)
-                .await
-                .map_err(MetaError::Database)?;
-
-            info!("Refreshed session: {}", session_id);
-        } else {
-            return Err(MetaError::NotFound(0));
-        }
-
-        Ok(())
-    }
-
-    async fn refresh_session_by_id(
-        &self,
-        session_id: &crate::meta::client::session::SessionId,
-    ) -> Result<(), MetaError> {
-        // For database, try to find the session by UUID first, fallback to hostname+pid for backward compatibility
-        let session = SessionMeta::find()
-            .filter(session_meta::Column::SessionUuid.eq(session_id.uuid.to_string()))
-            .filter(session_meta::Column::Stale.eq(false))
-            .one(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
-
-        let session = if let Some(s) = session {
-            s
-        } else {
-            // Fallback to legacy hostname+pid lookup
-            SessionMeta::find()
-                .filter(session_meta::Column::Hostname.eq(&session_id.hostname))
-                .filter(session_meta::Column::ProcessId.eq(session_id.process_id as i32))
-                .filter(session_meta::Column::Stale.eq(false))
-                .one(&self.db)
-                .await
-                .map_err(MetaError::Database)?
-                .ok_or_else(|| MetaError::NotFound(0))?
+            .filter(session_meta::Column::SessionId.eq(session_id))
+            .one(&txn)
+            .await?;
+        let mut session = match session {
+            Some(s) => s.into_active_model(),
+            None => return Err(MetaError::SessionNotFound(session_id)),
         };
-
-        let session_id_num = session.id;
-        let mut active_model: session_meta::ActiveModel = session.into();
-        active_model.updated_at = Set(Utc::now().timestamp_millis());
-        active_model.stale = Set(false);
-
-        active_model
-            .update(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
-
-        info!(
-            "Refreshed database session: {} -> {}:{}",
-            session_id_num, session_id.hostname, session_id.process_id
-        );
-
+        session.expire = Set(expire);
+        session.update(&txn).await.map_err(MetaError::Database)?;
+        txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
     }
 
-    async fn find_stale_sessions(
-        &self,
-        limit: Option<usize>,
-    ) -> Result<Vec<crate::meta::store::SessionInfo>, MetaError> {
-        use crate::meta::store::SessionInfo;
-        use std::time::SystemTime;
+    async fn shutdown_session(&self, session_id: Uuid) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        self.shutdown_session_internal(session_id, &txn).await?;
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
 
-        // Consider sessions stale if not updated for more than 5 minutes (300,000 ms)
-        let stale_threshold = Utc::now().timestamp_millis() - 300_000;
-
-        let mut query = SessionMeta::find()
-            .filter(session_meta::Column::UpdatedAt.lt(stale_threshold))
-            .filter(session_meta::Column::Stale.eq(false))
-            .order_by_asc(session_meta::Column::UpdatedAt);
-
-        if let Some(limit) = limit {
-            query = query.limit(limit as u64);
+    async fn cleanup_sessions(&self) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let sessions = SessionMeta::find()
+            .filter(session_meta::Column::Expire.lt(Utc::now().timestamp_millis()))
+            .all(&txn)
+            .await?;
+        for session in sessions {
+            let session_id = session.session_id;
+            self.shutdown_session_internal(session_id, &txn).await?;
         }
 
-        let sessions = query.all(&self.db).await.map_err(MetaError::Database)?;
-
-        let result: Vec<SessionInfo> = sessions
-            .into_iter()
-            .map(|s| SessionInfo {
-                id: s.id,
-                info: s.payload,
-                updated_at: SystemTime::UNIX_EPOCH
-                    + std::time::Duration::from_millis(s.updated_at as u64),
-            })
-            .collect();
-
-        Ok(result)
-    }
-
-    async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
-        let session = SessionMeta::find_by_id(session_id)
-            .one(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
-
-        if let Some(session) = session {
-            // Mark as stale instead of deleting to allow for audit trail
-            let mut active_model: session_meta::ActiveModel = session.into();
-            active_model.stale = Set(true);
-
-            active_model
-                .update(&self.db)
-                .await
-                .map_err(MetaError::Database)?;
-
-            info!("Marked session {} as stale", session_id);
-        } else {
-            return Err(MetaError::NotFound(session_id as i64));
-        }
-
+        txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
     }
 
-    async fn clean_session_by_id(
-        &self,
-        session_id: &crate::meta::client::session::SessionId,
-    ) -> Result<(), MetaError> {
-        // Find session by UUID first, fallback to hostname+pid for backward compatibility
-        let session = SessionMeta::find()
-            .filter(session_meta::Column::SessionUuid.eq(session_id.uuid.to_string()))
-            .filter(session_meta::Column::Stale.eq(false))
-            .one(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
-
-        let session = if let Some(s) = session {
-            s
-        } else {
-            // Fallback to legacy hostname+pid lookup
-            SessionMeta::find()
-                .filter(session_meta::Column::Hostname.eq(&session_id.hostname))
-                .filter(session_meta::Column::ProcessId.eq(session_id.process_id as i32))
-                .filter(session_meta::Column::Stale.eq(false))
-                .one(&self.db)
-                .await
-                .map_err(MetaError::Database)?
-                .ok_or_else(|| MetaError::NotFound(0))?
-        };
-
-        // Mark the session as stale
-        let mut active_model: session_meta::ActiveModel = session.into();
-        active_model.stale = Set(true);
-        active_model.updated_at = Set(Utc::now().timestamp_millis());
-
-        active_model
-            .update(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
-
-        info!(
-            "Marked session {}:{} as stale",
-            session_id.hostname, session_id.process_id
-        );
-
-        Ok(())
+    async fn get_lock(&self, lock_name: LockName) -> bool {
+        self.get_lock_internal(lock_name).await.unwrap_or_default()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

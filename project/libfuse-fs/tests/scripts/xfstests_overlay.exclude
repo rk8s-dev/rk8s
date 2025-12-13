@@ -1,6 +1,7 @@
 # Exclude list for tests that we know are broken
 
 generic/020 # ENOSPC, suppose to be FUSE compatibility issue.
+generic/089 # dir_snapshot conflicts with rename 
 generic/099 # Suppose to be FUSE compatibility issue.
 generic/126 # Set default_permissions=true to pass
 generic/375 # Suppose to be FUSE compatibility issue, about posix acl support
@@ -8,5 +9,6 @@ generic/444 # Suppose to be FUSE compatibility issue, about posix acl support
 generic/467 # Suppose to be FUSE compatibility issue: 'open_by_handle'
 generic/477 # Suppose to be FUSE compatibility issue: 'open_by_handle'
 generic/633 # Suppose to be FUSE compatibility issue.
+generic/650 # don't do this on 96-core machine
 generic/697 # Suppose to be FUSE compatibility issue.
 generic/736

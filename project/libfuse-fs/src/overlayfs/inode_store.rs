@@ -156,11 +156,6 @@ impl InodeStore {
         self.next_inode = next_inode;
         self.inode_limit = limit_inode;
     }
-
-    /// Get the current number of hard links (paths) for an inode
-    pub(crate) fn get_nlinks(&self, inode: &Inode) -> Option<u64> {
-        self.nlinks.get(inode).map(|n| n.load(Ordering::Relaxed))
-    }
 }
 
 #[cfg(test)]

@@ -17,7 +17,11 @@ use crate::vfs::fs::VFS;
 fn default_mount_options() -> MountOptions {
     let mut mo = MountOptions::default();
     mo.fs_name("slayerfs");
-    // Keep defaults conservative: no allow_other, require empty mountpoint.
+    // Enable kernel-side permission checking (recommended for most filesystems)
+    mo.default_permissions(true);
+    // Allow other users to access the filesystem (required for multi-user scenarios and xfstests)
+    // Note: Requires 'user_allow_other' in /etc/fuse.conf for non-root mounts
+    mo.allow_other(true);
     mo
 }
 

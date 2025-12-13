@@ -2,11 +2,13 @@
 //!
 //! Defines unified interface for filesystem metadata operations
 use crate::chuck::SliceDesc;
+use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::entities::content_meta::EntryType;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::time::SystemTime;
+use uuid::Uuid;
 
 /// File type enumeration
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,34 +171,6 @@ pub struct VolumeStat {
     pub inode_count: i64,
 }
 
-/// Session descriptor returned by session queries.
-///
-/// A `SessionInfo` represents a lightweight record describing a single
-/// metadata client's session registration in the metadata backend. Sessions
-/// are used by the metadata service to track active clients, enable safe
-/// garbage-collection of transient state (for example, delayed deletes),
-/// and to coordinate cross-process maintenance tasks.
-///
-/// Fields:
-/// - `id`: opaque session identifier issued by the backend. Implementations
-///   should ensure uniqueness within the metadata service lifetime and may
-///   reuse identifiers after long-term cleanup.
-/// - `info`: optional payload provided by the client at registration time.
-///   Typical content is serialized client metadata (for example, mount
-///   options, pid, hostname) but the bytes are intentionally uninterpreted
-///   by the store interface.
-/// - `updated_at`: wall-clock timestamp (system time) when the session
-///   record was last refreshed. The session manager relies on this value to
-///   detect stale sessions; therefore implementations should update it when
-///   a heartbeat/refresh operation succeeds.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[allow(dead_code)]
-pub struct SessionInfo {
-    pub id: u64,
-    pub info: Vec<u8>,
-    pub updated_at: SystemTime,
-}
-
 /// ACL rule placeholder (to be fleshed out once ACL storage lands)
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
@@ -228,6 +202,17 @@ pub struct DumpRecord {
 #[allow(dead_code)]
 pub struct LoadOption {
     pub allow_conflicts: bool,
+}
+
+pub enum LockName {
+    CleanupSessionsLock,
+}
+impl fmt::Display for LockName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            LockName::CleanupSessionsLock => write!(f, "CleanupSessionsLock"),
+        }
+    }
 }
 
 /// Visitor trait for streaming APIs (dump/scan).
@@ -299,8 +284,8 @@ pub enum MetaError {
     #[error("Config error: {0}")]
     Config(String),
 
-    #[error("Session not found")]
-    SessionNotFound,
+    #[error("Session not found: {0}")]
+    SessionNotFound(Uuid),
 
     #[error("Invalid handle: {0}")]
     InvalidHandle(u64),
@@ -430,46 +415,28 @@ pub trait MetaStore: Send + Sync {
 
     // ---------- Session lifecycle ----------
 
-    async fn new_session(&self, payload: &[u8], update: bool) -> Result<(), MetaError> {
-        let _ = (payload, update);
+    async fn new_session(&self, session_info: SessionInfo) -> Result<Session, MetaError> {
+        let _ = session_info;
         Err(MetaError::NotImplemented)
     }
 
-    async fn refresh_session(&self) -> Result<(), MetaError> {
-        Err(MetaError::NotImplemented)
-    }
-
-    /// Refresh session by client identifier (hostname + process_id)
-    /// This provides more precise session management than the generic refresh_session
-    async fn refresh_session_by_id(
-        &self,
-        session_id: &crate::meta::client::session::SessionId,
-    ) -> Result<(), MetaError> {
-        let _ = session_id;
-        // Default implementation falls back to the original method
-        self.refresh_session().await
-    }
-
-    async fn find_stale_sessions(
-        &self,
-        limit: Option<usize>,
-    ) -> Result<Vec<SessionInfo>, MetaError> {
-        let _ = limit;
-        Err(MetaError::NotImplemented)
-    }
-
-    async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
+    async fn refresh_session(&self, session_id: Uuid) -> Result<(), MetaError> {
         let _ = session_id;
         Err(MetaError::NotImplemented)
     }
 
-    /// Clean up session by SessionId (hostname + process_id)
-    async fn clean_session_by_id(
-        &self,
-        session_id: &crate::meta::client::session::SessionId,
-    ) -> Result<(), MetaError> {
+    async fn shutdown_session(&self, session_id: Uuid) -> Result<(), MetaError> {
         let _ = session_id;
         Err(MetaError::NotImplemented)
+    }
+
+    async fn cleanup_sessions(&self) -> Result<(), MetaError> {
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn get_lock(&self, lock_name: LockName) -> bool {
+        let _ = lock_name;
+        true
     }
 
     // ---------- Attribute / handle management (proposed extensions) ----------

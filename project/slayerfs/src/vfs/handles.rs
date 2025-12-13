@@ -1,5 +1,6 @@
 //! File and directory handle management
 
+use crate::meta::store::FileAttr;
 use crate::vfs::fs::DirEntry;
 use std::time::Instant;
 
@@ -10,15 +11,19 @@ pub const MAX_READDIR_ENTRIES: usize = 50;
 #[allow(dead_code)]
 pub struct FileHandle {
     pub fh: u64,
+    pub ino: i64,
+    pub attr: FileAttr,
     pub opened_at: Instant,
     pub last_offset: u64,
     pub flags: HandleFlags,
 }
 
 impl FileHandle {
-    pub fn new(fh: u64, flags: HandleFlags) -> Self {
+    pub fn new(fh: u64, ino: i64, attr: FileAttr, flags: HandleFlags) -> Self {
         Self {
             fh,
+            ino,
+            attr,
             opened_at: Instant::now(),
             last_offset: 0,
             flags,
@@ -29,8 +34,8 @@ impl FileHandle {
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct HandleFlags {
-    read: bool,
-    write: bool,
+    pub read: bool,
+    pub write: bool,
 }
 
 impl HandleFlags {

@@ -7,7 +7,7 @@ use crate::chuck::SliceDesc;
 use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::layer::MetaLayer;
 use crate::meta::store::{
-    DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SessionInfo, SetAttrFlags, SetAttrRequest,
+    DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
 use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker, WatchConfig};
@@ -17,7 +17,7 @@ use dashmap::DashMap;
 use if_addrs::get_if_addrs;
 use moka::future::Cache;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 use std::{collections::HashSet, process};
 use tokio::sync::{Mutex, mpsc};
@@ -25,29 +25,12 @@ use tracing::{info, warn};
 
 use crate::vfs::extract_ino_and_chunk_index;
 use cache::InodeCache;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use hostname::get as get_hostname;
 use path_trie::PathTrie;
-use sea_orm::prelude::Uuid;
-use serde::Serialize;
-use session::SessionManager;
+use session::{SessionInfo, SessionManager};
 
 const ROOT_INODE: i64 = 1;
-
-#[derive(Serialize)]
-struct SessionInfoPayload {
-    /// Session UUID for unique identification
-    session_uuid: String,
-    version: String,
-    host_name: String,
-    ip_addrs: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mount_point: Option<String>,
-    mount_time: DateTime<Utc>,
-    process_id: u32,
-    /// Session creation timestamp
-    created_at: DateTime<Utc>,
-}
 
 /// Configuration options for `MetaClient` that correspond to the core metadata
 /// behaviours implemented by the Go `baseMeta`. Only a minimal subset of
@@ -93,7 +76,6 @@ pub struct MetaClient<T: MetaStore> {
     options: MetaClientOptions,
     root: AtomicI64,
     #[allow(dead_code)]
-    session_id: AtomicU64,
     umounting: AtomicBool,
     inode_cache: InodeCache,
     /// it's absolute path.
@@ -109,7 +91,7 @@ pub struct MetaClient<T: MetaStore> {
 
     /// Manages background session heartbeats when enabled by callers.
     #[allow(dead_code)]
-    session_manager: Arc<SessionManager>,
+    session_manager: Arc<SessionManager<T>>,
 
     /// Watch Worker for etcd cache invalidation (for now only used for etcd).
     /// TODO: Now that we use the watch worker to invalidate cache in real-time,
@@ -177,14 +159,12 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         };
 
         let root_ino = store.root_ino();
-        let session_heartbeat = options.session_heartbeat;
 
         // Create MetaClient
         let client = Arc::new(Self {
-            store,
+            store: store.clone(),
             options,
             root: AtomicI64::new(root_ino),
-            session_id: AtomicU64::new(0),
             umounting: AtomicBool::new(false),
             inode_cache: InodeCache::new(capacity.inode as u64, ttl.inode_ttl),
             path_cache: Cache::builder()
@@ -193,7 +173,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                 .build(),
             path_trie: Arc::new(PathTrie::new()),
             inode_to_paths: Arc::new(DashMap::new()),
-            session_manager: Arc::new(SessionManager::new(session_heartbeat)),
+            session_manager: Arc::new(SessionManager::new(store.clone())),
             watch_worker: watch_worker.as_ref().map(|(w, _)| w.clone()),
         });
 
@@ -278,30 +258,25 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     }
     /// Starts a background heartbeat session with the underlying store.
     ///
-    /// Callers provide an opaque payload understood by the backend; the client
-    /// will register or update the session and then begin periodic heartbeats.
+    /// Callers provide a `SessionInfo` struct containing session parameters understood by the backend;
+    /// the client will register or update the session and then begin periodic heartbeats.
     #[allow(dead_code)]
-    pub async fn start_session(
-        &self,
-        payload: Vec<u8>,
-        update_existing: bool,
-    ) -> Result<(), MetaError> {
+    pub async fn start_session(&self, session_info: SessionInfo) -> Result<(), MetaError> {
         if self.options.read_only {
             info!("MetaClient: read-only mode, skipping session start");
             return Ok(());
         }
         self.ensure_background_jobs()?;
         self.clear_umounting();
-        self.session_manager
-            .start(self.store.clone(), payload, update_existing)
-            .await
+        let session_manager = self.session_manager.clone();
+        session_manager.start(session_info).await
     }
 
     /// Builds a default session payload and starts the heartbeat task.
     #[allow(dead_code)]
     pub async fn start_default_session(&self) -> Result<(), MetaError> {
         let payload = self.build_session_payload()?;
-        self.start_session(payload, true).await
+        self.start_session(payload).await
     }
 
     /// Stops the background heartbeat session if it was previously started.
@@ -316,40 +291,14 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// Returns the number of sessions successfully cleaned. Failures are
     /// logged and skipped to keep the maintenance loop best-effort.
     #[allow(dead_code)]
-    pub async fn cleanup_stale_sessions(&self, limit: Option<usize>) -> Result<usize, MetaError> {
-        self.ensure_background_jobs()?;
-
-        let stale_sessions = self.store.find_stale_sessions(limit).await?;
-        let mut cleaned = 0usize;
-
-        for session in stale_sessions {
-            match self.store.clean_stale_session(session.id).await {
-                Ok(()) => cleaned += 1,
-                Err(err) => {
-                    warn!(
-                        "MetaClient: failed to clean stale session {}: {err}",
-                        session.id
-                    );
-                }
-            }
-        }
-
-        Ok(cleaned)
-    }
-
-    #[allow(dead_code)]
-    fn build_session_payload(&self) -> Result<Vec<u8>, MetaError> {
+    fn build_session_payload(&self) -> Result<SessionInfo, MetaError> {
         let host_name = get_hostname()
             .map_err(MetaError::from)?
             .into_string()
             .unwrap_or_else(|_| "unknown-host".to_string());
         let ip_addrs = Self::collect_local_ip_addrs()?;
 
-        // Generate a UUID for this session
-        let session_uuid = Uuid::new_v4().to_string();
-
-        let payload = SessionInfoPayload {
-            session_uuid,
+        Ok(SessionInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
             host_name,
             ip_addrs,
@@ -357,9 +306,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             mount_time: Utc::now(),
             process_id: process::id(),
             created_at: Utc::now(),
-        };
-
-        serde_json::to_vec(&payload).map_err(MetaError::from)
+        })
     }
 
     #[allow(dead_code)]
@@ -947,6 +894,12 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             self.invalidate_parent_path(new_parent).await;
         }
 
+        // Invalidate parent directory stat caches since their mtime/ctime changed
+        self.inode_cache.invalidate_inode(old_parent).await;
+        if old_parent != new_parent {
+            self.inode_cache.invalidate_inode(new_parent).await;
+        }
+
         Ok(())
     }
 
@@ -963,28 +916,6 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         Ok(())
     }
-
-    async fn set_attr(
-        &self,
-        ino: i64,
-        req: &SetAttrRequest,
-        flags: SetAttrFlags,
-    ) -> Result<FileAttr, MetaError> {
-        self.ensure_writable()?;
-        let inode = self.check_root(ino);
-        self.store.set_attr(inode, req, flags).await
-    }
-
-    async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
-        let inode = self.check_root(ino);
-        self.store.open(inode, flags).await
-    }
-
-    async fn close(&self, ino: i64) -> Result<(), MetaError> {
-        let inode = self.check_root(ino);
-        self.store.close(inode).await
-    }
-
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
         let inode = self.check_root(ino);
         if let Some(node) = self.inode_cache.get_node(inode).await
@@ -1075,6 +1006,31 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.read_symlink(inode).await
     }
 
+    async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        let attr = self.store.set_attr(inode, req, flags).await?;
+        self.inode_cache
+            .insert_node(inode, attr.clone(), None)
+            .await;
+        Ok(attr)
+    }
+
+    async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
+        let inode = self.check_root(ino);
+        self.store.open(inode, flags).await
+    }
+
+    async fn close(&self, ino: i64) -> Result<(), MetaError> {
+        let inode = self.check_root(ino);
+        self.store.close(inode).await
+    }
+
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
         self.store.get_deleted_files().await
     }
@@ -1108,59 +1064,13 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.next_id(key).await
     }
 
-    async fn start_session(
-        &self,
-        payload: Vec<u8>,
-        update_existing: bool,
-    ) -> Result<(), MetaError> {
-        MetaClient::start_session(self, payload, update_existing).await
-    }
-
-    async fn start_default_session(&self) -> Result<(), MetaError> {
-        MetaClient::start_default_session(self).await
+    async fn start_session(&self, session_info: SessionInfo) -> Result<(), MetaError> {
+        MetaClient::start_session(self, session_info).await
     }
 
     async fn shutdown_session(&self) -> Result<(), MetaError> {
         MetaClient::shutdown_session(self).await;
         Ok(())
-    }
-
-    async fn refresh_session(&self) -> Result<(), MetaError> {
-        self.ensure_background_jobs()?;
-        self.store.refresh_session().await
-    }
-
-    async fn refresh_session_by_id(
-        &self,
-        session_id: &crate::meta::client::session::SessionId,
-    ) -> Result<(), MetaError> {
-        self.ensure_background_jobs()?;
-        self.store.refresh_session_by_id(session_id).await
-    }
-
-    async fn find_stale_sessions(
-        &self,
-        limit: Option<usize>,
-    ) -> Result<Vec<SessionInfo>, MetaError> {
-        self.ensure_background_jobs()?;
-        self.store.find_stale_sessions(limit).await
-    }
-
-    async fn clean_stale_session(&self, session_id: u64) -> Result<(), MetaError> {
-        self.ensure_background_jobs()?;
-        self.store.clean_stale_session(session_id).await
-    }
-
-    async fn clean_session_by_id(
-        &self,
-        session_id: &crate::meta::client::session::SessionId,
-    ) -> Result<(), MetaError> {
-        self.ensure_background_jobs()?;
-        self.store.clean_session_by_id(session_id).await
-    }
-
-    async fn cleanup_stale_sessions(&self, limit: Option<usize>) -> Result<usize, MetaError> {
-        MetaClient::cleanup_stale_sessions(self, limit).await
     }
 }
 

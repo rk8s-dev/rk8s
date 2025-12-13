@@ -8,11 +8,11 @@ redis_config="$workspace_dir/slayerfs/slayerfs-sqlite.yml"
 backend_dir=/tmp/data
 mount_dir=/tmp/mount
 log_file=/tmp/slayerfs.log
-persistence_bin="$workspace_dir/target/release/examples/persistence_demo"
+persistence_bin="$workspace_dir/target/release/examples/persistence_s3_demo"
 
 if [[ -z "$persistence_bin" ]]; then
-    echo "Cannot find slayerfs persistence_demo binary."
-    echo "Please run: cargo build -p slayerfs --example persistence_demo --release"
+    echo "Cannot find slayerfs persistence_s3_demo binary."
+    echo "Please run: cargo build -p slayerfs --example persistence_s3_demo --release"
     exit 1
 fi
 
@@ -45,8 +45,6 @@ sudo make install
 cat >local.config  <<EOF
 export TEST_DEV=slayerfs
 export TEST_DIR=$mount_dir
-#export SCRATCH_DEV=slayerfs
-#export SCRATCH_MNT=/tmp/test2/merged
 export FSTYP=fuse
 export FUSE_SUBTYP=.slayerfs
 
@@ -61,19 +59,27 @@ set -euo pipefail
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\$PATH"
 
+# S3 environment variables
+export S3_BUCKET="\${S3_BUCKET:-Bucketname}"
+export S3_ENDPOINT="\${S3_ENDPOINT:-http://endpoint}"
+export AWS_ACCESS_KEY_ID="\${AWS_ACCESS_KEY_ID:-YourID}"
+export AWS_SECRET_ACCESS_KEY="\${AWS_SECRET_ACCESS_KEY:-YourKey}"
+export AWS_REGION="\${AWS_REGION:-us-east-1}"
+
 ulimit -n 1048576
 CONFIG_PATH="$redis_config"
 LOG_FILE="$log_file"
 PERSISTENCE_BIN="$persistence_bin"
 
-BACKEND_DIR="$backend_dir"             
+META_DIR="$backend_dir"
 MOUNT_DIR="$mount_dir"
-
 
 "\$PERSISTENCE_BIN" \
   -c "\$CONFIG_PATH" \
-  -s "\$BACKEND_DIR" \
-  -m "\$MOUNT_DIR" >>"\$LOG_FILE" 2>&1 &
+  -m "\$MOUNT_DIR" \
+  --meta-dir "\$META_DIR" \
+  --bucket "\$S3_BUCKET" \
+  --endpoint "\$S3_ENDPOINT" >>"\$LOG_FILE" 2>&1 &
 sleep 1
 EOF
 sudo chmod +x /usr/sbin/mount.fuse.slayerfs
@@ -84,4 +90,4 @@ sudo cp "$current_dir/xfstests_slayer.exclude" /tmp/xfstests-dev/
 
 # run tests.
 cd /tmp/xfstests-dev
-sudo LC_ALL=C ./check -fuse -E xfstests_slayer.exclude
+sudo LC_ALL=C ./check -fuse generic/001

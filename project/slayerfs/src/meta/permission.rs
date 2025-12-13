@@ -140,7 +140,7 @@ impl Permission {
     }
     pub fn chmod(&mut self, new_mode: u32) {
         let file_type = self.file_type_bits();
-        self.mode = file_type | (new_mode & 0o777);
+        self.mode = file_type | (new_mode & 0o7777);
     }
     pub fn chown(&mut self, new_uid: u32, new_gid: u32) {
         self.uid = new_uid;
