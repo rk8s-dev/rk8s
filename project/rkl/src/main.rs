@@ -14,12 +14,12 @@ mod rootpath;
 mod task;
 
 use commands::{
-    compose::ComposeCommand, container::ContainerCommand, pod::PodCommand,
-    replicaset::ReplicaSetCommand,
+    compose::ComposeCommand, container::ContainerCommand, deployment::DeploymentCommand,
+    pod::PodCommand, replicaset::ReplicaSetCommand,
 };
 use commands::{
-    compose::compose_execute, container::container_execute, pod::pod_execute,
-    replicaset::replicaset_execute,
+    compose::compose_execute, container::container_execute, deployment::deployment_execute,
+    pod::pod_execute, replicaset::replicaset_execute,
 };
 use tracing::error;
 
@@ -45,6 +45,7 @@ impl Cli {
             Workload::Compose(cmd) => compose_execute(cmd),
             Workload::Volume(cmd) => volume_execute(cmd),
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
+            Workload::Deployment(cmd) => deployment_execute(cmd),
         }
     }
 }
@@ -68,6 +69,9 @@ enum Workload {
     Volume(VolumeCommand),
     #[command(subcommand, about = "Manage ReplicaSets", alias = "rs")]
     Replicaset(ReplicaSetCommand),
+
+    #[command(subcommand, about = "Manage Deployments", alias = "deploy")]
+    Deployment(DeploymentCommand),
 }
 
 fn main() -> Result<(), anyhow::Error> {

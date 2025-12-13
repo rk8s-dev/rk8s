@@ -30,6 +30,7 @@ use tracing::info;
 
 pub mod compose;
 pub mod container;
+pub mod deployment;
 pub mod pod;
 pub mod replicaset;
 pub mod utils;

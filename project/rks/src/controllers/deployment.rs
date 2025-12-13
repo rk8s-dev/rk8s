@@ -5,9 +5,13 @@ use async_trait::async_trait;
 use chrono::Utc;
 use common::*;
 use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+
+const REVISION_ANNOTATION: &str = "deployment.rk8s.io/revision";
+const REVISION_HISTORY_ANNOTATION: &str = "deployment.rk8s.io/revision-history";
 
 pub struct DeploymentController {
     store: Arc<XlineStore>,
@@ -95,6 +99,146 @@ impl DeploymentController {
         }
     }
 
+    fn get_rs_revision(&self, rs: &ReplicaSet) -> i64 {
+        rs.metadata
+            .annotations
+            .get(REVISION_ANNOTATION)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    }
+
+    fn get_deployment_revision(&self, deployment: &Deployment) -> i64 {
+        deployment
+            .metadata
+            .annotations
+            .get(REVISION_ANNOTATION)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    }
+
+    fn get_rs_revision_history(&self, rs: &ReplicaSet) -> Vec<i64> {
+        rs.metadata
+            .annotations
+            .get(REVISION_HISTORY_ANNOTATION)
+            .and_then(|v| serde_json::from_str(v).ok())
+            .unwrap_or_default()
+    }
+
+    fn get_max_revision(&self, rss: &[ReplicaSet]) -> i64 {
+        rss.iter()
+            .map(|rs| self.get_rs_revision(rs))
+            .max()
+            .unwrap_or(0)
+    }
+
+    async fn set_deployment_revision(&self, deployment: &Deployment, revision: i64) -> Result<()> {
+        let deploy_name = &deployment.metadata.name;
+        let yaml = self
+            .store
+            .get_deployment_yaml(deploy_name)
+            .await?
+            .ok_or_else(|| anyhow!("Deployment {} not found", deploy_name))?;
+
+        let mut deploy: Deployment = serde_yaml::from_str(&yaml)?;
+        deploy
+            .metadata
+            .annotations
+            .insert(REVISION_ANNOTATION.to_string(), revision.to_string());
+
+        let updated_yaml = serde_yaml::to_string(&deploy)?;
+        self.store
+            .insert_deployment_yaml(deploy_name, &updated_yaml)
+            .await?;
+
+        info!(
+            "Updated Deployment {} revision to {}",
+            deploy_name, revision
+        );
+        Ok(())
+    }
+
+    /// Update the revision on a ReplicaSet, pushing old revision to history
+    async fn set_rs_revision(&self, rs: &ReplicaSet, new_revision: i64) -> Result<ReplicaSet> {
+        let rs_name = &rs.metadata.name;
+        let old_revision = self.get_rs_revision(rs);
+
+        let yaml = self
+            .store
+            .get_replicaset_yaml(rs_name)
+            .await?
+            .ok_or_else(|| anyhow!("ReplicaSet {} not found", rs_name))?;
+
+        let mut updated_rs: ReplicaSet = serde_yaml::from_str(&yaml)?;
+
+        if old_revision > 0 && old_revision != new_revision {
+            let mut history = self.get_rs_revision_history(rs);
+            if !history.contains(&old_revision) {
+                history.push(old_revision);
+            }
+            updated_rs.metadata.annotations.insert(
+                REVISION_HISTORY_ANNOTATION.to_string(),
+                serde_json::to_string(&history).unwrap_or_default(),
+            );
+        }
+
+        updated_rs
+            .metadata
+            .annotations
+            .insert(REVISION_ANNOTATION.to_string(), new_revision.to_string());
+
+        let updated_yaml = serde_yaml::to_string(&updated_rs)?;
+        self.store
+            .insert_replicaset_yaml(rs_name, &updated_yaml)
+            .await?;
+
+        info!(
+            "Updated ReplicaSet {} revision from {} to {}",
+            rs_name, old_revision, new_revision
+        );
+        Ok(updated_rs)
+    }
+
+    /// Sync revision when an existing RS is reused (rollback or template switch).
+    /// Only bumps revision if this RS is not already the current active one.
+    async fn sync_revision_for_reused_rs(
+        &self,
+        deployment: &Deployment,
+        reused_rs: &ReplicaSet,
+        owned_rs: &[ReplicaSet],
+    ) -> Result<(ReplicaSet, bool)> {
+        let rs_revision = self.get_rs_revision(reused_rs);
+        let deployment_revision = self.get_deployment_revision(deployment);
+
+        // If RS is already active, skip update (stable state)
+        if rs_revision == deployment_revision && deployment_revision > 0 {
+            debug!(
+                "RS {} is already active with revision={}, no update needed",
+                reused_rs.metadata.name, rs_revision
+            );
+            return Ok((reused_rs.clone(), false));
+        }
+
+        // RS is being (re)activated, bump revision
+        let max_revision = self.get_max_revision(owned_rs);
+        let new_revision = max_revision + 1;
+
+        let updated_rs = self.set_rs_revision(reused_rs, new_revision).await?;
+
+        // Update Deployment revision
+        self.set_deployment_revision(deployment, new_revision)
+            .await?;
+
+        info!(
+            "Reactivated RS {} for deployment {}: revision {} -> {} (was at {})",
+            reused_rs.metadata.name,
+            deployment.metadata.name,
+            rs_revision,
+            new_revision,
+            deployment_revision
+        );
+        Ok((updated_rs, true))
+    }
+
     async fn get_or_create_replicaset(
         &self,
         deployment: &Deployment,
@@ -104,11 +248,15 @@ impl DeploymentController {
         for rs in owned_rs {
             if self.replicaset_matches_deployment(rs, deployment) {
                 info!("Found existing ReplicaSet: {}", rs.metadata.name);
-                return Ok(rs.clone());
+                // Sync revision for the reused RS (only bumps if not already active)
+                let (synced_rs, _changed) = self
+                    .sync_revision_for_reused_rs(deployment, rs, owned_rs)
+                    .await?;
+                return Ok(synced_rs);
             }
         }
 
-        // Create new ReplicaSet
+        // Create new ReplicaSet (revision is set inside create_replicaset)
         info!(
             "Creating new ReplicaSet for deployment: {}",
             deployment.metadata.name
@@ -200,6 +348,15 @@ impl DeploymentController {
             ..Default::default()
         };
 
+        // Calculate new revision: max(all RS revisions) + 1
+        let owned_rs = self.get_all_replicasets_for_deployment(deployment).await?;
+        let new_revision = self.get_max_revision(&owned_rs) + 1;
+
+        // Set revision annotation (new RS starts with empty history)
+        rs_metadata
+            .annotations
+            .insert(REVISION_ANNOTATION.to_string(), new_revision.to_string());
+
         // Set owner reference to enable garbage collection
         rs_metadata.owner_references = Some(vec![OwnerReference {
             api_version: deployment.api_version.clone(),
@@ -233,9 +390,13 @@ impl DeploymentController {
             .insert_replicaset_yaml(&rs_name, &rs_yaml)
             .await?;
 
+        // Update Deployment revision
+        self.set_deployment_revision(deployment, new_revision)
+            .await?;
+
         info!(
-            "Created ReplicaSet {} for deployment {}",
-            rs_name, deploy_name
+            "Created ReplicaSet {} for deployment {} with revision {}",
+            rs_name, deploy_name, new_revision
         );
         Ok(rs)
     }
@@ -726,6 +887,147 @@ impl DeploymentController {
 
         Ok(())
     }
+
+    /// api to rollback deployment to a specific revision
+    /// Rollback to a specific revision, or previous revision if target_revision is 0
+    pub async fn rollback_to_revision(
+        &self,
+        deployment_name: &str,
+        target_revision: i64,
+    ) -> Result<()> {
+        let yaml = self
+            .store
+            .get_deployment_yaml(deployment_name)
+            .await?
+            .ok_or_else(|| anyhow!("Deployment {} not found", deployment_name))?;
+        let deployment: Deployment = serde_yaml::from_str(&yaml)?;
+
+        let owned_rs = self.get_all_replicasets_for_deployment(&deployment).await?;
+        if owned_rs.is_empty() {
+            return Err(anyhow!(
+                "No ReplicaSets found for deployment {}",
+                deployment_name
+            ));
+        }
+
+        let current_revision = self.get_deployment_revision(&deployment);
+        let target = if target_revision == 0 {
+            self.find_previous_revision(&owned_rs, current_revision)?
+        } else {
+            target_revision
+        };
+
+        info!(
+            "Rolling back deployment {} from revision {} to {}",
+            deployment_name, current_revision, target
+        );
+
+        let target_rs = self
+            .find_rs_for_revision(&owned_rs, target)
+            .ok_or_else(|| anyhow!("No ReplicaSet found for revision {}", target))?;
+
+        // Check if already at target
+        if self.replicaset_matches_deployment(&target_rs, &deployment) {
+            let rs_revision = self.get_rs_revision(&target_rs);
+            if rs_revision == current_revision {
+                info!(
+                    "Deployment {} is already at revision {}",
+                    deployment_name, current_revision
+                );
+                return Ok(());
+            }
+        }
+
+        // Copy target RS's template back to Deployment
+        let mut updated_deploy = deployment.clone();
+        updated_deploy.spec.template = target_rs.spec.template.clone();
+
+        let updated_yaml = serde_yaml::to_string(&updated_deploy)?;
+        self.store
+            .insert_deployment_yaml(deployment_name, &updated_yaml)
+            .await?;
+
+        info!(
+            "Initiated rollback of {} to revision {} (RS: {})",
+            deployment_name, target, target_rs.metadata.name
+        );
+
+        self.reconcile_by_name(deployment_name).await?;
+        Ok(())
+    }
+
+    fn find_previous_revision(&self, rss: &[ReplicaSet], current: i64) -> Result<i64> {
+        let mut revisions: Vec<i64> = rss
+            .iter()
+            .map(|rs| self.get_rs_revision(rs))
+            .filter(|&r| r > 0 && r < current)
+            .collect();
+
+        revisions.sort_by(|a, b| b.cmp(a));
+        revisions
+            .first()
+            .copied()
+            .ok_or_else(|| anyhow!("No previous revision available for rollback"))
+    }
+
+    fn find_rs_for_revision(&self, rss: &[ReplicaSet], revision: i64) -> Option<ReplicaSet> {
+        rss.iter()
+            .find(|rs| self.get_rs_revision(rs) == revision)
+            .cloned()
+    }
+
+    pub async fn get_deployment_revision_history(
+        &self,
+        deployment_name: &str,
+    ) -> Result<Vec<RevisionInfo>> {
+        let yaml = self
+            .store
+            .get_deployment_yaml(deployment_name)
+            .await?
+            .ok_or_else(|| anyhow!("Deployment {} not found", deployment_name))?;
+        let deployment: Deployment = serde_yaml::from_str(&yaml)?;
+
+        let owned_rs = self.get_all_replicasets_for_deployment(&deployment).await?;
+        let current_revision = self.get_deployment_revision(&deployment);
+
+        let mut history: Vec<RevisionInfo> = owned_rs
+            .iter()
+            .map(|rs| {
+                let rs_revision = self.get_rs_revision(rs);
+                RevisionInfo {
+                    revision: rs_revision,
+                    revision_history: self.get_rs_revision_history(rs),
+                    replicaset_name: rs.metadata.name.clone(),
+                    created_at: rs.metadata.creation_timestamp.map(|dt| dt.to_rfc3339()),
+                    replicas: rs.spec.replicas,
+                    image: self.extract_primary_image(&rs.spec.template),
+                    is_current: rs_revision == current_revision
+                        && self.replicaset_matches_deployment(rs, &deployment),
+                }
+            })
+            .collect();
+
+        // Sort by revision descending
+        history.sort_by_key(|h| std::cmp::Reverse(h.revision));
+        Ok(history)
+    }
+
+    /// Extract the primary container image from a pod template
+    fn extract_primary_image(&self, template: &PodTemplateSpec) -> Option<String> {
+        template.spec.containers.first().map(|c| c.image.clone())
+    }
+}
+
+/// Information about a deployment revision for rollback history
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevisionInfo {
+    pub revision: i64,
+    pub revision_history: Vec<i64>,
+    pub replicaset_name: String,
+    pub created_at: Option<String>,
+    pub replicas: i32,
+    pub image: Option<String>,
+    pub is_current: bool,
 }
 
 #[async_trait]

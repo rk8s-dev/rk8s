@@ -951,3 +951,348 @@ async fn test_deployment_max_unavailable_zero() -> Result<()> {
     cleanup_deployment_test(&store, &["test-unavailable-zero"], &owned_rs).await?;
     Ok(())
 }
+
+// ==================== Revision and Rollback Tests ====================
+
+const REVISION_ANNOTATION: &str = "deployment.rk8s.io/revision";
+const REVISION_HISTORY_ANNOTATION: &str = "deployment.rk8s.io/revision-history";
+
+/// Helper to get revision from RS annotation
+fn get_rs_revision(rs: &ReplicaSet) -> i64 {
+    rs.metadata
+        .annotations
+        .get(REVISION_ANNOTATION)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
+/// Helper to get revision from Deployment annotation
+fn get_deployment_revision(deployment: &Deployment) -> i64 {
+    deployment
+        .metadata
+        .annotations
+        .get(REVISION_ANNOTATION)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
+/// Helper to get revision history from RS annotation
+fn get_rs_revision_history(rs: &ReplicaSet) -> Vec<i64> {
+    rs.metadata
+        .annotations
+        .get(REVISION_HISTORY_ANNOTATION)
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_default()
+}
+
+/// Test that creating a new deployment sets revision=1
+#[tokio::test]
+async fn test_deployment_revision_initial() -> Result<()> {
+    let store = create_test_store().await?;
+    let _manager = setup_test_manager(store.clone()).await?;
+
+    // Create deployment
+    let deployment = create_test_deployment("test-rev-init", 2);
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rev-init", &yaml).await?;
+
+    println!("Created deployment: test-rev-init");
+    sleep(Duration::from_secs(2)).await;
+
+    // Check Deployment revision
+    let deploy_yaml = store.get_deployment_yaml("test-rev-init").await?.unwrap();
+    let deploy: Deployment = serde_yaml::from_str(&deploy_yaml)?;
+    let deploy_rev = get_deployment_revision(&deploy);
+    println!("Deployment revision: {}", deploy_rev);
+    assert_eq!(deploy_rev, 1, "Initial deployment should have revision=1");
+
+    // Check RS revision
+    let owned_rs = get_owned_replicasets(&store, "test-rev-init").await?;
+    assert!(!owned_rs.is_empty(), "Should have at least one RS");
+    let rs_rev = get_rs_revision(&owned_rs[0]);
+    println!("RS revision: {}", rs_rev);
+    assert_eq!(rs_rev, 1, "Initial RS should have revision=1");
+
+    // RS history should be empty for new RS
+    let history = get_rs_revision_history(&owned_rs[0]);
+    println!("RS revision history: {:?}", history);
+    assert!(history.is_empty(), "New RS should have empty revision history");
+
+    cleanup_deployment_test(&store, &["test-rev-init"], &owned_rs).await?;
+    Ok(())
+}
+
+/// Test that updating deployment increments revision
+#[tokio::test]
+async fn test_deployment_revision_increment() -> Result<()> {
+    let store = create_test_store().await?;
+    let _manager = setup_test_manager(store.clone()).await?;
+
+    // Create deployment with v1
+    let mut deployment = create_test_deployment("test-rev-inc", 2);
+    deployment.spec.template.spec.containers[0].image = "nginx:v1".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rev-inc", &yaml).await?;
+
+    println!("Created deployment with v1");
+    sleep(Duration::from_secs(2)).await;
+
+    // Verify revision=1
+    let deploy_yaml = store.get_deployment_yaml("test-rev-inc").await?.unwrap();
+    let deploy: Deployment = serde_yaml::from_str(&deploy_yaml)?;
+    assert_eq!(get_deployment_revision(&deploy), 1);
+
+    // Update to v2
+    deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rev-inc", &yaml).await?;
+
+    println!("Updated to v2");
+    sleep(Duration::from_secs(2)).await;
+
+    // Verify revision=2
+    let deploy_yaml = store.get_deployment_yaml("test-rev-inc").await?.unwrap();
+    let deploy: Deployment = serde_yaml::from_str(&deploy_yaml)?;
+    let rev = get_deployment_revision(&deploy);
+    println!("Deployment revision after update: {}", rev);
+    assert_eq!(rev, 2, "Revision should be 2 after update");
+
+    // Verify RS
+    let owned_rs = get_owned_replicasets(&store, "test-rev-inc").await?;
+    let new_rs: Vec<_> = owned_rs.iter().filter(|rs| get_rs_revision(rs) == 2).collect();
+    assert!(!new_rs.is_empty(), "Should have RS with revision=2");
+    println!("Found RS with revision=2: {}", new_rs[0].metadata.name);
+
+    cleanup_deployment_test(&store, &["test-rev-inc"], &owned_rs).await?;
+    Ok(())
+}
+
+/// Test rollback to previous revision
+#[tokio::test]
+async fn test_deployment_rollback_to_previous() -> Result<()> {
+    let store = create_test_store().await?;
+    let _manager = setup_test_manager(store.clone()).await?;
+
+    // Create deployment with v1
+    let mut deployment = create_test_deployment("test-rollback", 2);
+    deployment.spec.template.spec.containers[0].image = "nginx:v1".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rollback", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    println!("Created deployment with v1 (revision=1)");
+
+    // Update to v2
+    deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rollback", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    println!("Updated to v2 (revision=2)");
+
+    // Verify we're at revision=2
+    let deploy_yaml = store.get_deployment_yaml("test-rollback").await?.unwrap();
+    let deploy: Deployment = serde_yaml::from_str(&deploy_yaml)?;
+    assert_eq!(get_deployment_revision(&deploy), 2);
+
+    // Create controller and rollback
+    let controller = DeploymentController::new(store.clone());
+    controller.rollback_to_revision("test-rollback", 0).await?;
+
+    println!("Initiated rollback to previous revision");
+    sleep(Duration::from_secs(2)).await;
+
+    // Verify revision=3 (rollback creates new revision)
+    let deploy_yaml = store.get_deployment_yaml("test-rollback").await?.unwrap();
+    let deploy: Deployment = serde_yaml::from_str(&deploy_yaml)?;
+    let rev = get_deployment_revision(&deploy);
+    println!("Deployment revision after rollback: {}", rev);
+    assert_eq!(rev, 3, "Rollback should create revision=3");
+
+    // Verify template is back to v1
+    assert_eq!(
+        deploy.spec.template.spec.containers[0].image,
+        "nginx:v1",
+        "Should be back to v1 image"
+    );
+    println!("Verified: image is nginx:v1");
+
+    // Check RS-v1 now has revision=3 with history=["1"]
+    let owned_rs = get_owned_replicasets(&store, "test-rollback").await?;
+    let current_rs: Vec<_> = owned_rs.iter().filter(|rs| get_rs_revision(rs) == 3).collect();
+    assert!(!current_rs.is_empty(), "Should have RS with revision=3");
+    
+    let history = get_rs_revision_history(current_rs[0]);
+    println!("Reused RS history: {:?}", history);
+    assert!(history.contains(&1), "History should contain 1");
+
+    cleanup_deployment_test(&store, &["test-rollback"], &owned_rs).await?;
+    Ok(())
+}
+
+/// Test rollback to specific revision
+#[tokio::test]
+async fn test_deployment_rollback_to_specific_revision() -> Result<()> {
+    let store = create_test_store().await?;
+    let _manager = setup_test_manager(store.clone()).await?;
+
+    // Create deployment: v1 -> v2 -> v3
+    let mut deployment = create_test_deployment("test-rollback-spec", 2);
+    
+    // v1
+    deployment.spec.template.spec.containers[0].image = "nginx:v1".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rollback-spec", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+    println!("Created v1 (revision=1)");
+
+    // v2
+    deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rollback-spec", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+    println!("Updated to v2 (revision=2)");
+
+    // v3
+    deployment.spec.template.spec.containers[0].image = "nginx:v3".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rollback-spec", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+    println!("Updated to v3 (revision=3)");
+
+    // Rollback to revision=1 (v1)
+    let controller = DeploymentController::new(store.clone());
+    controller.rollback_to_revision("test-rollback-spec", 1).await?;
+
+    println!("Rolling back to revision=1");
+    sleep(Duration::from_secs(2)).await;
+
+    // Verify
+    let deploy_yaml = store.get_deployment_yaml("test-rollback-spec").await?.unwrap();
+    let deploy: Deployment = serde_yaml::from_str(&deploy_yaml)?;
+    
+    let rev = get_deployment_revision(&deploy);
+    println!("Deployment revision after rollback: {}", rev);
+    assert_eq!(rev, 4, "Rollback should create revision=4");
+
+    assert_eq!(
+        deploy.spec.template.spec.containers[0].image,
+        "nginx:v1",
+        "Should be back to v1 image"
+    );
+    println!("Verified: image is nginx:v1");
+
+    let owned_rs = get_owned_replicasets(&store, "test-rollback-spec").await?;
+    cleanup_deployment_test(&store, &["test-rollback-spec"], &owned_rs).await?;
+    Ok(())
+}
+
+/// Test revision history is preserved when RS is reused
+#[tokio::test]
+async fn test_deployment_revision_history_accumulation() -> Result<()> {
+    let store = create_test_store().await?;
+    let _manager = setup_test_manager(store.clone()).await?;
+
+    let mut deployment = create_test_deployment("test-rev-hist", 2);
+    let controller = DeploymentController::new(store.clone());
+
+    // v1
+    deployment.spec.template.spec.containers[0].image = "nginx:v1".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rev-hist", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+    println!("v1 (revision=1)");
+
+    // v2
+    deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rev-hist", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+    println!("v2 (revision=2)");
+
+    // Rollback to v1 -> revision=3
+    controller.rollback_to_revision("test-rev-hist", 0).await?;
+    sleep(Duration::from_secs(2)).await;
+    println!("Rollback to v1 (revision=3)");
+
+    // v2 again -> revision=4
+    deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-rev-hist", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+    println!("Back to v2 (revision=4)");
+
+    // Rollback to v1 -> revision=5
+    controller.rollback_to_revision("test-rev-hist", 0).await?;
+    sleep(Duration::from_secs(2)).await;
+    println!("Rollback to v1 again (revision=5)");
+
+    // Check RS history
+    let owned_rs = get_owned_replicasets(&store, "test-rev-hist").await?;
+    
+    // Find the v1 RS (currently active with revision=5)
+    let v1_rs: Vec<_> = owned_rs
+        .iter()
+        .filter(|rs| rs.spec.template.spec.containers[0].image == "nginx:v1")
+        .collect();
+    
+    assert!(!v1_rs.is_empty(), "Should have v1 RS");
+    let history = get_rs_revision_history(v1_rs[0]);
+    println!("v1 RS history: {:?}", history);
+    
+    // History should contain [1, 3] (previous times it held a revision)
+    assert!(history.contains(&1), "History should contain 1");
+    assert!(history.contains(&3), "History should contain 3");
+
+    cleanup_deployment_test(&store, &["test-rev-hist"], &owned_rs).await?;
+    Ok(())
+}
+
+/// Test get_deployment_revision_history returns correct info
+#[tokio::test]
+async fn test_deployment_get_revision_history() -> Result<()> {
+    let store = create_test_store().await?;
+    let _manager = setup_test_manager(store.clone()).await?;
+
+    let mut deployment = create_test_deployment("test-get-hist", 2);
+    let controller = DeploymentController::new(store.clone());
+
+    // Create v1, v2, v3
+    deployment.spec.template.spec.containers[0].image = "nginx:v1".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-get-hist", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-get-hist", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    deployment.spec.template.spec.containers[0].image = "nginx:v3".to_string();
+    let yaml = serde_yaml::to_string(&deployment)?;
+    store.insert_deployment_yaml("test-get-hist", &yaml).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    // Get history
+    let history = controller.get_deployment_revision_history("test-get-hist").await?;
+
+    println!("Revision history:");
+    for info in &history {
+        println!(
+            "  revision={}, rs={}, image={:?}, is_current={}",
+            info.revision, info.replicaset_name, info.image, info.is_current
+        );
+    }
+
+    assert_eq!(history.len(), 3, "Should have 3 revisions");
+    
+    // The current one should be revision=3
+    let current: Vec<_> = history.iter().filter(|h| h.is_current).collect();
+    assert_eq!(current.len(), 1, "Should have exactly one current revision");
+    assert_eq!(current[0].revision, 3);
+    assert_eq!(current[0].image, Some("nginx:v3".to_string()));
+
+    let owned_rs = get_owned_replicasets(&store, "test-get-hist").await?;
+    cleanup_deployment_test(&store, &["test-get-hist"], &owned_rs).await?;
+    Ok(())
+}

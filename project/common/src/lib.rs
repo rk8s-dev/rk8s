@@ -481,6 +481,15 @@ pub enum RksMessage {
     GetReplicaSet(String),
     ListReplicaSet,
 
+    // Deployment operations
+    CreateDeployment(Box<Deployment>),
+    UpdateDeployment(Box<Deployment>),
+    DeleteDeployment(String),
+    GetDeployment(String),
+    ListDeployment,
+    RollbackDeployment { name: String, revision: i64 },
+    GetDeploymentHistory(String),
+
     GetNodeCount,
     RegisterNode(Box<Node>),
     UserRequest(String),
@@ -504,6 +513,10 @@ pub enum RksMessage {
     ListPodRes(Vec<String>),
     GetReplicaSetRes(Box<ReplicaSet>),
     ListReplicaSetRes(Vec<ReplicaSet>),
+    // Deployment responses
+    GetDeploymentRes(Box<Deployment>),
+    ListDeploymentRes(Vec<Deployment>),
+    DeploymentHistoryRes(Vec<DeploymentRevisionInfo>),
     // (Podname, Podip)
     SetPodip((String, String)),
     Certificate(IssueCertificateResponse),
@@ -527,6 +540,21 @@ impl std::fmt::Debug for RksMessage {
                 write!(f, "RksMessage::GetReplicaSet {{ name: {} }}", name)
             }
             Self::ListReplicaSet => f.write_str("RksMessage::ListReplicaSet"),
+            Self::CreateDeployment(_) => f.write_str("RksMessage::CreateDeployment { .. }"),
+            Self::UpdateDeployment(_) => f.write_str("RksMessage::UpdateDeployment { .. }"),
+            Self::DeleteDeployment(name) => {
+                write!(f, "RksMessage::DeleteDeployment {{ name: {} }}", name)
+            }
+            Self::GetDeployment(name) => {
+                write!(f, "RksMessage::GetDeployment {{ name: {} }}", name)
+            }
+            Self::ListDeployment => f.write_str("RksMessage::ListDeployment"),
+            Self::RollbackDeployment { name, revision } => {
+                write!(f, "RksMessage::RollbackDeployment {{ name: {}, revision: {} }}", name, revision)
+            }
+            Self::GetDeploymentHistory(name) => {
+                write!(f, "RksMessage::GetDeploymentHistory {{ name: {} }}", name)
+            }
             Self::GetNodeCount => f.write_str("RksMessage::GetNodeCount"),
             Self::RegisterNode(_) => f.write_str("RksMessage::RegisterNode { .. }"),
             Self::UserRequest(_) => f.write_str("RksMessage::UserRequest { .. }"),
@@ -563,6 +591,13 @@ impl std::fmt::Debug for RksMessage {
                     rss.len()
                 )
             }
+            Self::GetDeploymentRes(_) => f.write_str("RksMessage::GetDeploymentRes { .. }"),
+            Self::ListDeploymentRes(deps) => {
+                write!(f, "RksMessage::ListDeploymentRes {{ count: {} }}", deps.len())
+            }
+            Self::DeploymentHistoryRes(history) => {
+                write!(f, "RksMessage::DeploymentHistoryRes {{ count: {} }}", history.len())
+            }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(
                     f,
@@ -596,6 +631,19 @@ impl Display for RksMessage {
             Self::DeleteReplicaSet(name) => write!(f, "Delete replicaset '{}'", name),
             Self::GetReplicaSet(name) => write!(f, "Get replicaset '{}'", name),
             Self::ListReplicaSet => f.write_str("List replicasets"),
+            Self::CreateDeployment(d) => write!(f, "Create deployment '{}'", d.metadata.name),
+            Self::UpdateDeployment(d) => write!(f, "Update deployment '{}'", d.metadata.name),
+            Self::DeleteDeployment(name) => write!(f, "Delete deployment '{}'", name),
+            Self::GetDeployment(name) => write!(f, "Get deployment '{}'", name),
+            Self::ListDeployment => f.write_str("List deployments"),
+            Self::RollbackDeployment { name, revision } => {
+                if *revision == 0 {
+                    write!(f, "Rollback deployment '{}' to previous revision", name)
+                } else {
+                    write!(f, "Rollback deployment '{}' to revision {}", name, revision)
+                }
+            }
+            Self::GetDeploymentHistory(name) => write!(f, "Get deployment '{}' revision history", name),
             Self::GetNodeCount => f.write_str("Get node count"),
             Self::RegisterNode(node) => write!(f, "Register node '{}'", node.metadata.name),
             Self::UserRequest(payload) => write!(f, "User request: {}", payload),
@@ -682,12 +730,40 @@ impl Display for RksMessage {
                 }
                 write!(f, "List replicasets response: {}", preview.join(", "))
             }
+            Self::GetDeploymentRes(d) => {
+                write!(f, "Get deployment '{}' response", d.metadata.name)
+            }
+            Self::ListDeploymentRes(deps) => {
+                if deps.is_empty() {
+                    return f.write_str("List deployments response: no deployments found");
+                }
+                let preview = deps.iter().take(3).map(|d| d.metadata.name.as_str()).collect::<Vec<_>>();
+                if deps.len() > preview.len() {
+                    return write!(f, "List deployments response: {} (+{} more)", preview.join(", "), deps.len() - preview.len());
+                }
+                write!(f, "List deployments response: {}", preview.join(", "))
+            }
+            Self::DeploymentHistoryRes(history) => {
+                write!(f, "Deployment history response: {} revision(s)", history.len())
+            }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
             }
             Self::Certificate(_) => f.write_str("Certificate response received"),
         }
     }
+}
+
+/// Deployment revision information for rollback history
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeploymentRevisionInfo {
+    pub revision: i64,
+    pub revision_history: Vec<i64>,
+    pub replicaset_name: String,
+    pub created_at: Option<String>,
+    pub replicas: i32,
+    pub image: Option<String>,
+    pub is_current: bool,
 }
 
 /// Node spec
@@ -1132,7 +1208,7 @@ impl Default for RollingUpdateStrategy {
 pub enum DeploymentStrategy {
     Recreate,
     RollingUpdate {
-        #[serde(flatten)]
+        #[serde(rename = "rollingUpdate", default)]
         rolling_update: RollingUpdateStrategy,
     },
 }
