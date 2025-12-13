@@ -9,6 +9,7 @@
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
+use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{DirEntry, FileAttr, FileType, LockName, MetaError, MetaStore};
 use crate::meta::{INODE_ID_KEY, SESSION_ID_KEY, SLICE_ID_KEY};
 use async_trait::async_trait;
@@ -644,6 +645,36 @@ impl MetaStore for RedisMetaStore {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    // returns the current lock owner for a range on a file.
+    async fn get_plock(
+        &self,
+        inode: i64,
+        range: FileLockRange,
+        query: FileLockQuery,
+    ) -> Result<FileLockInfo, MetaError> {
+        let _ = (inode, query, range);
+        Err(MetaError::NotImplemented)
+    }
+
+    // sets a file range lock on given file.
+    async fn set_plock(
+        &self,
+        inode: i64,
+        owner: u64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), MetaError> {
+        let _ = (inode, owner, lock_type, pid, block, range);
+        Err(MetaError::NotImplemented)
+    }
+
+    fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
+        let _ = sid;
+        Err(MetaError::NotImplemented)
     }
 }
 

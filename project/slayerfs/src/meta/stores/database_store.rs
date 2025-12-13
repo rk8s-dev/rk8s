@@ -7,12 +7,15 @@ use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::session_meta::{self, Entity as SessionMeta};
 use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
-use crate::meta::entities::*;
+use crate::meta::file_lock::{
+    FileLockInfo, FileLockQuery, FileLockRange, FileLockType, PlockRecord,
+};
 use crate::meta::store::{
     DirEntry, FileAttr, LockName, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
+use crate::meta::{entities::*, file_lock};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -21,11 +24,13 @@ use sea_orm::prelude::Uuid;
 use sea_orm::*;
 use sea_query::Index;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Database-based metadata store
 pub struct DatabaseMetaStore {
     db: DatabaseConnection,
+    sid: OnceLock<Uuid>,
     _config: Config,
     next_inode: AtomicU64,
     next_slice: AtomicU64,
@@ -49,6 +54,7 @@ impl DatabaseMetaStore {
         let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
         let store = Self {
             db,
+            sid: OnceLock::new(),
             _config,
             next_inode,
             next_slice,
@@ -71,6 +77,7 @@ impl DatabaseMetaStore {
         let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
         let store = Self {
             db,
+            sid: OnceLock::new(),
             _config,
             next_inode,
             next_slice,
@@ -168,6 +175,14 @@ impl DatabaseMetaStore {
                 .create_table_from_entity(SliceMeta)
                 .if_not_exists()
                 .to_owned(),
+            schema
+                .create_table_from_entity(LocksMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(PlockMeta)
+                .if_not_exists()
+                .to_owned(),
         ];
 
         for (i, stmt) in stmts.iter().enumerate() {
@@ -255,6 +270,18 @@ impl DatabaseMetaStore {
             .one(&self.db)
             .await
             .map_err(MetaError::Database)
+    }
+
+    /// Check file is existing
+    async fn file_is_existing(&self, inode: i64) -> Result<bool, MetaError> {
+        let existing = FileMeta::find_by_id(inode)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+        match existing {
+            Some(_) => Ok(true),
+            None => Ok(true),
+        }
     }
 
     /// Create a new directory
@@ -1537,5 +1564,158 @@ impl MetaStore for DatabaseMetaStore {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    // returns the current lock owner for a range on a file.
+    async fn get_plock(
+        &self,
+        inode: i64,
+        range: FileLockRange,
+        query: FileLockQuery,
+    ) -> Result<FileLockInfo, MetaError> {
+        if !self.file_is_existing(inode).await? {
+            return Err(MetaError::NotFound(inode));
+        };
+
+        // Find all locks that overlap with the requested range
+        let locks = plock_meta::Entity::find()
+            .filter(plock_meta::Column::Inode.eq(inode))
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Deserialize and check each lock for overlap and compatibility
+        for lock in locks {
+            let records: Vec<PlockRecord> =
+                serde_json::from_slice(&lock.records).map_err(MetaError::Serialization)?;
+            match file_lock::get_plock(range, query, lock.owner, records).await {
+                Some(info) => return Ok(info),
+                None => (),
+            }
+        }
+
+        // No conflicting locks found
+        Ok(FileLockInfo::unlocked())
+    }
+
+    // sets a file range lock on given file.
+    async fn set_plock(
+        &self,
+        inode: i64,
+        owner: u64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), MetaError> {
+        if !self.file_is_existing(inode).await? {
+            return Err(MetaError::NotFound(inode));
+        };
+        // Start a transaction for atomic lock operation
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        // First check if there are any conflicting locks
+        let existing_locks = plock_meta::Entity::find()
+            .filter(plock_meta::Column::Inode.eq(inode))
+            .all(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Check for conflicts
+        for lock in &existing_locks {
+            let records: Vec<PlockRecord> =
+                serde_json::from_slice(&lock.records).map_err(MetaError::Serialization)?;
+            let conflict =
+                file_lock::check_conflicts(owner, block, lock_type, range, lock.owner, records)
+                    .await;
+            if conflict {
+                let _ = txn.rollback();
+                return Err(MetaError::LockConflict {
+                    inode,
+                    owner,
+                    range,
+                });
+            }
+        }
+
+        // Check if we already have a lock entry for this owner/inode
+        let existing_owner_lock = existing_locks.iter().find(|lock| {
+            lock.owner == owner as i64 && lock.sid == *self.sid.get().unwrap_or(&Uuid::nil())
+        });
+
+        if let Some(existing) = existing_owner_lock {
+            // Update existing lock record
+            let mut records: Vec<PlockRecord> =
+                serde_json::from_slice(&existing.records).map_err(MetaError::Serialization)?;
+
+            // Check if we're unlocking
+            if lock_type == FileLockType::UnLock {
+                // Remove any locks that match the range
+                records.retain(|record| !record.lock_range.overlaps(&range) || record.pid != pid);
+            } else {
+                // Add or update the lock
+                let new_record = PlockRecord {
+                    lock_type,
+                    pid,
+                    lock_range: range,
+                };
+
+                // Check if we already have a lock for this range and pid
+                let mut found = false;
+                for record in &mut records {
+                    if record.lock_range.overlaps(&range) && record.pid == pid {
+                        record.lock_type = lock_type;
+                        record.lock_range = range;
+                        found = true;
+                        break;
+                    }
+                }
+
+                if !found {
+                    records.push(new_record);
+                }
+            }
+
+            // Serialize updated records
+            let serialized = serde_json::to_vec(&records).map_err(MetaError::Serialization)?;
+
+            // Update database
+            let mut active_lock = existing.clone().into_active_model();
+            active_lock.records = Set(serialized);
+            active_lock
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else {
+            // Create new lock entry
+            let records = vec![PlockRecord {
+                lock_type,
+                pid,
+                lock_range: range,
+            }];
+
+            let serialized = serde_json::to_vec(&records).map_err(MetaError::Serialization)?;
+
+            let new_lock = plock_meta::ActiveModel {
+                id: NotSet,
+                inode: Set(inode),
+                sid: Set(*self.sid.get().unwrap_or(&Uuid::nil())),
+                owner: Set(owner as i64),
+                records: Set(serialized),
+            };
+
+            new_lock.insert(&txn).await.map_err(MetaError::Database)?;
+        }
+
+        // Commit the transaction
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(())
+    }
+
+    fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
+        self.sid
+            .set(sid)
+            .map_err(|_| MetaError::Internal("sid has been seted".to_string()))
     }
 }
