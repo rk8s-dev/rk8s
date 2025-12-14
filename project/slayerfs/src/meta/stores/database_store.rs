@@ -23,9 +23,18 @@ use log::info;
 use sea_orm::prelude::Uuid;
 use sea_orm::*;
 use sea_query::Index;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tracing::Instrument;
+
+#[derive(Eq, Hash, PartialEq)]
+struct PlockHashMapKey {
+    pub sid: Uuid,
+    pub owner: i64,
+}
 
 /// Database-based metadata store
 pub struct DatabaseMetaStore {
@@ -514,6 +523,159 @@ impl DatabaseMetaStore {
         };
         session.delete(conn).await.map_err(MetaError::Database)?;
         Ok(())
+    }
+    async fn try_set_plock(
+        &self,
+        inode: i64,
+        owner: i64,
+        new_lock: &PlockRecord,
+        lock_type: FileLockType,
+        range: FileLockRange,
+    ) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        // chech file is existing
+        let exists = self.file_is_existing(inode).await?;
+        if !exists {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotFound(inode));
+        }
+
+        let sid = self
+            .sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+
+        match lock_type {
+            FileLockType::UnLock => {
+                // unlock file
+                let row = PlockMeta::find()
+                    .filter(plock_meta::Column::Inode.eq(inode))
+                    .filter(plock_meta::Column::Owner.eq(owner))
+                    .filter(plock_meta::Column::Sid.eq(*sid))
+                    .one(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+
+                match row {
+                    Some(plock) => {
+                        let records: Vec<PlockRecord> =
+                            serde_json::from_slice(&plock.records).unwrap_or_default();
+
+                        if records.len() == 0 {
+                            txn.commit().await.map_err(MetaError::Database)?;
+                            return Ok(());
+                        }
+
+                        let new_records = PlockRecord::update_locks(records, new_lock.clone());
+                        let new_records_bytes = serde_json::to_vec(&new_records).map_err(|e| {
+                            MetaError::Internal(format!(
+                                "error to serialization Vec<PlockRecord>: {e}"
+                            ))
+                        })?;
+
+                        let mut active_model = plock_meta::ActiveModel {
+                            inode: Set(inode),
+                            sid: Set(*sid),
+                            owner: Set(owner),
+                            ..Default::default()
+                        };
+
+                        if new_records.len() == 0 {
+                            let _ = PlockMeta::delete(active_model)
+                                .exec(&txn)
+                                .await
+                                .map_err(MetaError::Database)?;
+                        } else {
+                            active_model.records = Set(new_records_bytes);
+                            active_model
+                                .insert(&txn)
+                                .await
+                                .map_err(MetaError::Database)?;
+                        }
+                    }
+                    None => {
+                        txn.commit().await.map_err(MetaError::Database)?;
+                        return Ok(());
+                    }
+                }
+
+                txn.commit().await.map_err(MetaError::Database)?;
+                Ok(())
+            }
+            _ => {
+                let ps = PlockMeta::find()
+                    .filter(plock_meta::Column::Inode.eq(inode))
+                    .all(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+
+                let mut locks = HashMap::new();
+                for item in ps {
+                    let key = PlockHashMapKey {
+                        sid: item.sid,
+                        owner: item.owner,
+                    };
+                    locks.insert(key, item.records);
+                }
+
+                let lkey = PlockHashMapKey { sid: *sid, owner };
+
+                // check conflict
+                let mut conflict_found = false;
+                for (k, d) in &locks {
+                    if *k == lkey {
+                        continue;
+                    }
+
+                    let ls: Vec<PlockRecord> = serde_json::from_slice(&d).unwrap_or_default();
+                    for l in ls {
+                        if (lock_type == FileLockType::WriteLock
+                            || l.lock_type == FileLockType::WriteLock)
+                            && range.end >= l.lock_range.start
+                            && range.start <= l.lock_range.end
+                        {
+                            conflict_found = true;
+                            break;
+                        }
+                    }
+                    if conflict_found {
+                        break;
+                    }
+                }
+
+                if conflict_found {
+                    txn.rollback().await.map_err(MetaError::Database)?;
+                    return Err(MetaError::LockConflict {
+                        inode,
+                        owner,
+                        range,
+                    });
+                }
+
+                let ls =
+                    serde_json::from_slice(locks.get(&lkey).unwrap_or(&vec![])).unwrap_or_default();
+                let ls = PlockRecord::update_locks(ls, new_lock.clone());
+
+                let records = serde_json::to_vec(&ls).map_err(|e| {
+                    MetaError::Internal(format!("error to serialization Vec<PlockRecord>: {e}"))
+                })?;
+
+                // lock records changed update
+                if locks.get(&lkey).map(|r| r != &records).unwrap_or(true) {
+                    let plock = plock_meta::ActiveModel {
+                        sid: Set(*sid),
+                        owner: Set(owner),
+                        inode: Set(inode),
+                        records: Set(records),
+                    };
+                    plock.save(&txn).await.map_err(MetaError::Database)?;
+                }
+
+                txn.commit().await.map_err(MetaError::Database)?;
+                Ok(())
+            }
+        }
     }
 }
 
@@ -1570,147 +1732,81 @@ impl MetaStore for DatabaseMetaStore {
     async fn get_plock(
         &self,
         inode: i64,
-        range: FileLockRange,
-        query: FileLockQuery,
+        query: &FileLockQuery,
     ) -> Result<FileLockInfo, MetaError> {
-        if !self.file_is_existing(inode).await? {
-            return Err(MetaError::NotFound(inode));
-        };
-
-        // Find all locks that overlap with the requested range
-        let locks = plock_meta::Entity::find()
+        let rows = PlockMeta::find()
             .filter(plock_meta::Column::Inode.eq(inode))
             .all(&self.db)
             .await
             .map_err(MetaError::Database)?;
 
-        // Deserialize and check each lock for overlap and compatibility
-        for lock in locks {
-            let records: Vec<PlockRecord> =
-                serde_json::from_slice(&lock.records).map_err(MetaError::Serialization)?;
-            match file_lock::get_plock(range, query, lock.owner, records).await {
-                Some(info) => return Ok(info),
-                None => (),
+        for row in rows {
+            let locks: Vec<PlockRecord> = serde_json::from_slice(&row.records).unwrap_or_default();
+
+            for lock in locks {
+                if (lock.lock_type == FileLockType::WriteLock
+                    || query.lock_type == FileLockType::WriteLock)
+                    && lock.lock_range.overlaps(&query.range)
+                {
+                    let sid = self
+                        .sid
+                        .get()
+                        .ok_or(MetaError::Internal("sid not seted".to_string()))?;
+
+                    if *sid == row.sid {
+                        return Ok(FileLockInfo {
+                            lock_type: lock.lock_type,
+                            range: lock.lock_range,
+                            pid: lock.pid,
+                        });
+                    } else {
+                        return Ok(FileLockInfo {
+                            lock_type: lock.lock_type,
+                            range: lock.lock_range,
+                            pid: 0,
+                        });
+                    }
+                }
             }
         }
 
-        // No conflicting locks found
-        Ok(FileLockInfo::unlocked())
+        Ok(FileLockInfo {
+            lock_type: FileLockType::UnLock,
+            range: FileLockRange { start: 0, end: 0 },
+            pid: 0,
+        })
     }
 
     // sets a file range lock on given file.
     async fn set_plock(
         &self,
         inode: i64,
-        owner: u64,
+        owner: i64,
         block: bool,
         lock_type: FileLockType,
         range: FileLockRange,
         pid: u32,
     ) -> Result<(), MetaError> {
-        if !self.file_is_existing(inode).await? {
-            return Err(MetaError::NotFound(inode));
-        };
-        // Start a transaction for atomic lock operation
-        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let new_lock = PlockRecord::new(lock_type, pid, range.start, range.end);
 
-        // First check if there are any conflicting locks
-        let existing_locks = plock_meta::Entity::find()
-            .filter(plock_meta::Column::Inode.eq(inode))
-            .all(&txn)
-            .await
-            .map_err(MetaError::Database)?;
+        loop {
+            let result = self
+                .try_set_plock(inode, owner, &new_lock, lock_type, range)
+                .await;
 
-        // Check for conflicts
-        for lock in &existing_locks {
-            let records: Vec<PlockRecord> =
-                serde_json::from_slice(&lock.records).map_err(MetaError::Serialization)?;
-            let conflict =
-                file_lock::check_conflicts(owner, block, lock_type, range, lock.owner, records)
-                    .await;
-            if conflict {
-                let _ = txn.rollback();
-                return Err(MetaError::LockConflict {
-                    inode,
-                    owner,
-                    range,
-                });
-            }
-        }
-
-        // Check if we already have a lock entry for this owner/inode
-        let existing_owner_lock = existing_locks.iter().find(|lock| {
-            lock.owner == owner as i64 && lock.sid == *self.sid.get().unwrap_or(&Uuid::nil())
-        });
-
-        if let Some(existing) = existing_owner_lock {
-            // Update existing lock record
-            let mut records: Vec<PlockRecord> =
-                serde_json::from_slice(&existing.records).map_err(MetaError::Serialization)?;
-
-            // Check if we're unlocking
-            if lock_type == FileLockType::UnLock {
-                // Remove any locks that match the range
-                records.retain(|record| !record.lock_range.overlaps(&range) || record.pid != pid);
-            } else {
-                // Add or update the lock
-                let new_record = PlockRecord {
-                    lock_type,
-                    pid,
-                    lock_range: range,
-                };
-
-                // Check if we already have a lock for this range and pid
-                let mut found = false;
-                for record in &mut records {
-                    if record.lock_range.overlaps(&range) && record.pid == pid {
-                        record.lock_type = lock_type;
-                        record.lock_range = range;
-                        found = true;
-                        break;
+            match result {
+                Ok(()) => return Ok(()),
+                Err(MetaError::LockConflict { .. }) if block => {
+                    if lock_type == FileLockType::WriteLock {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                    } else {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                     }
+                    continue;
                 }
-
-                if !found {
-                    records.push(new_record);
-                }
+                Err(e) => return Err(e),
             }
-
-            // Serialize updated records
-            let serialized = serde_json::to_vec(&records).map_err(MetaError::Serialization)?;
-
-            // Update database
-            let mut active_lock = existing.clone().into_active_model();
-            active_lock.records = Set(serialized);
-            active_lock
-                .update(&txn)
-                .await
-                .map_err(MetaError::Database)?;
-        } else {
-            // Create new lock entry
-            let records = vec![PlockRecord {
-                lock_type,
-                pid,
-                lock_range: range,
-            }];
-
-            let serialized = serde_json::to_vec(&records).map_err(MetaError::Serialization)?;
-
-            let new_lock = plock_meta::ActiveModel {
-                id: NotSet,
-                inode: Set(inode),
-                sid: Set(*self.sid.get().unwrap_or(&Uuid::nil())),
-                owner: Set(owner as i64),
-                records: Set(serialized),
-            };
-
-            new_lock.insert(&txn).await.map_err(MetaError::Database)?;
         }
-
-        // Commit the transaction
-        txn.commit().await.map_err(MetaError::Database)?;
-
-        Ok(())
     }
 
     fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {

@@ -291,7 +291,7 @@ pub enum MetaError {
     #[error("Lock conflict on inode {inode} for owner {owner}, range: {range:?}")]
     LockConflict {
         inode: i64,
-        owner: u64,
+        owner: i64,
         range: FileLockRange,
     },
 
@@ -756,25 +756,23 @@ pub trait MetaStore: Send + Sync {
         );
         Err(MetaError::NotImplemented)
     }
-
     // ---------- File lock ----------
 
-    // returns the current lock owner for a range on a file.
+    /// Gets lock information for a given file region.
     async fn get_plock(
         &self,
         inode: i64,
-        range: FileLockRange,
-        query: FileLockQuery,
+        query: &FileLockQuery,
     ) -> Result<FileLockInfo, MetaError> {
-        let _ = (inode, query, range);
+        let _ = (inode, query);
         Err(MetaError::NotImplemented)
     }
 
-    // sets a file range lock on given file.
+    /// Sets or clears a file segment lock (non-blocking).
     async fn set_plock(
         &self,
         inode: i64,
-        owner: u64,
+        owner: i64,
         block: bool,
         lock_type: FileLockType,
         range: FileLockRange,

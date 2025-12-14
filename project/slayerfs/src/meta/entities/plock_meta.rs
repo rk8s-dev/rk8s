@@ -5,12 +5,10 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "plock")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i64,
-    #[sea_orm(unique)]
     pub inode: i64,
-    #[sea_orm(unique)]
+    #[sea_orm(primary_key)]
     pub sid: Uuid,
-    #[sea_orm(unique)]
+    #[sea_orm(primary_key)]
     pub owner: i64,
     pub records: Vec<u8>,
 }

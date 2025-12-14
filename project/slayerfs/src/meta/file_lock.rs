@@ -1,8 +1,13 @@
+use std::collections::HashMap;
+
 use sea_orm::{
     TryGetError, Value,
     sea_query::{self, ValueTypeErr},
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::meta::entities::{PlockMeta, plock_meta};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u32)]
@@ -70,11 +75,115 @@ impl sea_query::ValueType for FileLockType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlockRecord {
     pub lock_type: FileLockType,
     pub pid: u32,
     pub lock_range: FileLockRange,
+}
+
+impl PlockRecord {
+    pub fn new(lock_type: FileLockType, pid: u32, start: u64, end: u64) -> Self {
+        return Self {
+            lock_type,
+            pid,
+            lock_range: FileLockRange { start, end },
+        };
+    }
+
+    pub async fn is_conflict(&self, locks: Vec<PlockRecord>) -> bool {
+        for lock in locks {
+            if self.lock_range.overlaps(&lock.lock_range) {
+                match (self.lock_type, lock.lock_type) {
+                    (FileLockType::ReadLock, FileLockType::ReadLock) => {}
+                    _ => return true,
+                }
+            }
+        }
+
+        false
+    }
+
+    pub fn update_locks(mut ls: Vec<PlockRecord>, nl: PlockRecord) -> Vec<PlockRecord> {
+        let mut i = 0;
+        let mut nl = nl;
+        let mut new_records = Vec::new(); // records need to insert
+
+        while i < ls.len() && nl.lock_range.end > nl.lock_range.start {
+            let l = ls[i];
+
+            match () {
+                _ if l.lock_range.end < nl.lock_range.start => {
+                    // skip
+                }
+                _ if l.lock_range.start < nl.lock_range.start => {
+                    // split the current lock
+                    let mut left = ls[i];
+                    left.lock_range.end = nl.lock_range.start;
+
+                    let middle = PlockRecord::new(
+                        nl.lock_type,
+                        nl.pid,
+                        nl.lock_range.start,
+                        l.lock_range.end,
+                    );
+                    new_records.push((i + 1, middle));
+
+                    ls[i] = left;
+                    nl.lock_range.start = l.lock_range.end;
+                    i += 1;
+                }
+                _ if l.lock_range.end < nl.lock_range.end => {
+                    // Shrink the current lock range
+                    ls[i].lock_type = nl.lock_type;
+                    ls[i].lock_range.start = nl.lock_range.start;
+                    nl.lock_range.start = l.lock_range.end;
+                } // Insert new lock and adjust next lock
+                _ if l.lock_range.start < nl.lock_range.end => {
+                    new_records.push((i, nl));
+                    nl.lock_range.start = nl.lock_range.end;
+                }
+                _ => {
+                    // Insert new lock
+                    new_records.push((i, nl));
+                    nl.lock_range.start = nl.lock_range.end;
+                }
+            }
+
+            i += 1;
+        }
+
+        // Insert from back to front to avoid index shifting issues
+        for (pos, record) in new_records.into_iter().rev() {
+            ls.insert(pos, record);
+        }
+        if nl.lock_range.start < nl.lock_range.end {
+            ls.push(PlockRecord::new(
+                nl.lock_type,
+                nl.pid,
+                nl.lock_range.start,
+                nl.lock_range.end,
+            ));
+        }
+
+        // Cleanup and merge
+        ls.retain(|r| r.lock_type != FileLockType::UnLock && r.lock_range.start < r.lock_range.end);
+
+        let mut result: Vec<PlockRecord> = Vec::new();
+        for record in ls {
+            if let Some(last) = result.last_mut() {
+                if last.lock_type == record.lock_type
+                    && last.lock_range.end == record.lock_range.start
+                {
+                    last.lock_range.end = record.lock_range.end;
+                    continue;
+                }
+            }
+            result.push(record);
+        }
+
+        result
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, Eq, PartialEq, Hash)]
@@ -114,84 +223,4 @@ impl FileLockInfo {
             pid: 0,
         }
     }
-}
-
-pub async fn get_plock(
-    range: FileLockRange,
-    query: FileLockQuery,
-    lock_owner: i64,
-    records: Vec<PlockRecord>,
-) -> Option<FileLockInfo> {
-    for record in records {
-        // Check if this lock overlaps with the requested range
-        if record.lock_range.overlaps(&range) {
-            // Check if the lock conflicts with the query
-            // Same owner can access its own locks
-            if lock_owner == query.owner as i64 {
-                return Some(FileLockInfo {
-                    lock_type: record.lock_type,
-                    range: record.lock_range,
-                    pid: record.pid,
-                });
-            }
-
-            // Check compatibility based on lock types
-            match (record.lock_type, query.lock_type) {
-                (FileLockType::ReadLock, FileLockType::ReadLock) => {
-                    // Read locks are compatible
-                    continue;
-                }
-                (FileLockType::UnLock, _) => {
-                    // Unlocked region
-                    continue;
-                }
-                _ => {
-                    // Conflict detected
-                    return Some(FileLockInfo {
-                        lock_type: record.lock_type,
-                        range: record.lock_range,
-                        pid: record.pid,
-                    });
-                }
-            }
-        }
-    }
-    None
-}
-
-pub async fn check_conflicts(
-    owner: u64,
-    block: bool,
-    lock_type: FileLockType,
-    range: FileLockRange,
-    lock_owner: i64,
-    records: Vec<PlockRecord>,
-) -> bool {
-    for record in records {
-        if record.lock_range.overlaps(&range) {
-            // skip if same owner (allow re-locking or upgrading)
-            if lock_owner == owner as i64 {
-                continue;
-            }
-
-            // check lock compatibility
-            match (record.lock_type, lock_type) {
-                (FileLockType::ReadLock, FileLockType::ReadLock) => {
-                    // read locks are compatible
-                    continue;
-                }
-                _ => {
-                    // conflict detected
-                    if !block {
-                        return true;
-                    }
-
-                    // for blocking locks, we would implement retry logic here
-                    // for now, just return conflict error
-                    return true;
-                }
-            }
-        }
-    }
-    false
 }

@@ -1891,10 +1891,9 @@ impl MetaStore for EtcdMetaStore {
     async fn get_plock(
         &self,
         inode: i64,
-        range: FileLockRange,
-        query: FileLockQuery,
+        query: &FileLockQuery,
     ) -> Result<FileLockInfo, MetaError> {
-        let _ = (inode, query, range);
+        let _ = (inode, query);
         Err(MetaError::NotImplemented)
     }
 
@@ -1902,7 +1901,7 @@ impl MetaStore for EtcdMetaStore {
     async fn set_plock(
         &self,
         inode: i64,
-        owner: u64,
+        owner: i64,
         block: bool,
         lock_type: FileLockType,
         range: FileLockRange,
