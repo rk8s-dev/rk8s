@@ -27,6 +27,6 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset",
-        "//third-party/rust/crates/indexmap/2.11.4:indexmap",
+        "//third-party/rust/crates/indexmap/2.12.1:indexmap",
     ],
 )

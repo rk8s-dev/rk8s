@@ -31,7 +31,7 @@ rust_library(
     rustc_flags = ["@$(location :spki-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64ct/1.8.0:base64ct",
+        "//third-party/rust/crates/base64ct/1.8.1:base64ct",
         "//third-party/rust/crates/der/0.7.10:der",
     ],
 )

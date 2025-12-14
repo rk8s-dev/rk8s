@@ -29,7 +29,7 @@ rust_library(
         "//third-party/rust/crates/async-io/1.13.0:async-io",
         "//third-party/rust/crates/async-lock/2.8.0:async-lock",
         "//third-party/rust/crates/async-signal/0.2.13:async-signal",
-        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
         "//third-party/rust/crates/event-listener/3.1.0:event-listener",
         "//third-party/rust/crates/futures-lite/1.13.0:futures-lite",
         "//third-party/rust/crates/rustix/0.38.44:rustix",

@@ -31,10 +31,10 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/ahash/0.8.12:ahash",
-        "//third-party/rust/crates/indexmap/2.11.4:indexmap",
+        "//third-party/rust/crates/indexmap/2.12.1:indexmap",
         "//third-party/rust/crates/is-terminal/0.4.17:is-terminal",
         "//third-party/rust/crates/itoa/1.0.15:itoa",
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/num-format/0.4.4:num-format",
         "//third-party/rust/crates/once_cell/1.21.3:once_cell",
         "//third-party/rust/crates/quick-xml/0.26.0:quick-xml",

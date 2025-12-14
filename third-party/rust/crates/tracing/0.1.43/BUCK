@@ -33,7 +33,7 @@ rust_library(
     rustc_flags = ["@$(location :tracing-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/tracing-attributes/0.1.31:tracing-attributes",
         "//third-party/rust/crates/tracing-core/0.1.35:tracing-core",

@@ -26,7 +26,7 @@ rust_library(
     rustc_flags = ["@$(location :dashmap-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
         "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils",
         "//third-party/rust/crates/hashbrown/0.14.5:hashbrown",
         "//third-party/rust/crates/lock_api/0.4.14:lock_api",

@@ -29,5 +29,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :encoding_rs-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/cfg-if/1.0.3:cfg-if"],
+    deps = ["//third-party/rust/crates/cfg-if/1.0.4:cfg-if"],
 )

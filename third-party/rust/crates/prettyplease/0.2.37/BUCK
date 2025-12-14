@@ -26,15 +26,14 @@ rust_library(
     env = {
         "OUT_DIR": "$(location :prettyplease-build-script-run[out_dir])",
     },
-    features = ["verbatim"],
     rustc_flags = [
         "@$(location :prettyplease-build-script-run[rustc_flags])",
         "@$(location :prettyplease-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
-        "//third-party/rust/crates/syn/2.0.106:syn",
+        "//third-party/rust/crates/proc-macro2/1.0.103:proc-macro2",
+        "//third-party/rust/crates/syn/2.0.111:syn",
     ],
 )
 
@@ -44,7 +43,6 @@ rust_binary(
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    features = ["verbatim"],
     rustc_flags = ["@$(location :prettyplease-manifest[env_flags])"],
     visibility = [],
 )
@@ -54,7 +52,6 @@ buildscript_run(
     package_name = "prettyplease",
     buildscript_rule = ":prettyplease-build-script-build",
     env_srcs = [":prettyplease-manifest[env_dict]"],
-    features = ["verbatim"],
     version = "0.2.37",
     manifest_dir = ":prettyplease-vendor",
     visibility = ["PUBLIC"],

@@ -27,7 +27,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/either/1.15.0:either",
-        "//third-party/rust/crates/home/0.5.11:home",
+        "//third-party/rust/crates/home/0.5.12:home",
         "//third-party/rust/crates/rustix/0.38.44:rustix",
     ],
 )

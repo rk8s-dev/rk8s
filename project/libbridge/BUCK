@@ -30,7 +30,7 @@ rust_binary(
         "//third-party/rust/crates/cni-plugin/0.2.1:cni-plugin",
         "//third-party/rust/crates/futures/0.3.31:futures",
         "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork",
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/macaddr/1.0.1:macaddr",
         "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route",
         "//third-party/rust/crates/nftables/0.6.3:nftables",

@@ -34,7 +34,7 @@ rust_library(
     deps = [
         "//third-party/rust/crates/base64/0.22.1:base64",
         "//third-party/rust/crates/blowfish/0.9.1:blowfish",
-        "//third-party/rust/crates/getrandom/0.3.3:getrandom",
+        "//third-party/rust/crates/getrandom/0.3.4:getrandom",
         "//third-party/rust/crates/subtle/2.6.1:subtle",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],

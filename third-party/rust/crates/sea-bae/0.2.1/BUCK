@@ -29,8 +29,8 @@ rust_library(
     deps = [
         "//third-party/rust/crates/heck/0.4.1:heck",
         "//third-party/rust/crates/proc-macro-error2/2.0.1:proc-macro-error2",
-        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.41:quote",
-        "//third-party/rust/crates/syn/2.0.106:syn",
+        "//third-party/rust/crates/proc-macro2/1.0.103:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.42:quote",
+        "//third-party/rust/crates/syn/2.0.111:syn",
     ],
 )

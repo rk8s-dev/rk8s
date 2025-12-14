@@ -28,6 +28,8 @@ rust_library(
         "Wdk_Foundation",
         "Wdk_Storage",
         "Wdk_Storage_FileSystem",
+        "Wdk_System",
+        "Wdk_System_IO",
         "Win32",
         "Win32_Foundation",
         "Win32_Globalization",

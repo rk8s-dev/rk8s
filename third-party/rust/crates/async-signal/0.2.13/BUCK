@@ -27,10 +27,10 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-io/2.6.0:async-io",
-        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",
         "//third-party/rust/crates/futures-io/0.3.31:futures-io",
         "//third-party/rust/crates/rustix/1.1.2:rustix",
-        "//third-party/rust/crates/signal-hook-registry/1.4.6:signal-hook-registry",
+        "//third-party/rust/crates/signal-hook-registry/1.4.7:signal-hook-registry",
     ],
 )

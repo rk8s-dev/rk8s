@@ -39,7 +39,7 @@ rust_library(
     deps = [
         "//third-party/rust/crates/block-buffer/0.10.4:block-buffer",
         "//third-party/rust/crates/const-oid/0.9.6:const-oid",
-        "//third-party/rust/crates/crypto-common/0.1.6:crypto-common",
+        "//third-party/rust/crates/crypto-common/0.1.7:crypto-common",
         "//third-party/rust/crates/subtle/2.6.1:subtle",
     ],
 )

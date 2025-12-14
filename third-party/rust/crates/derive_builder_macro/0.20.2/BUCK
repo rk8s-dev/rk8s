@@ -29,6 +29,6 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/derive_builder_core/0.20.2:derive_builder_core",
-        "//third-party/rust/crates/syn/2.0.106:syn",
+        "//third-party/rust/crates/syn/2.0.111:syn",
     ],
 )

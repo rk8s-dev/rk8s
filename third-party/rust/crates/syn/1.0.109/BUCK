@@ -44,9 +44,9 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/proc-macro2/1.0.101:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.41:quote",
-        "//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident",
+        "//third-party/rust/crates/proc-macro2/1.0.103:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.42:quote",
+        "//third-party/rust/crates/unicode-ident/1.0.22:unicode-ident",
     ],
 )
 

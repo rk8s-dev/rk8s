@@ -35,6 +35,6 @@ rust_library(
         "//third-party/rust/crates/kstring/2.0.2:kstring",
         "//third-party/rust/crates/ryu/1.0.20:ryu",
         "//third-party/rust/crates/serde/1.0.228:serde",
-        "//third-party/rust/crates/unicode-ident/1.0.19:unicode-ident",
+        "//third-party/rust/crates/unicode-ident/1.0.22:unicode-ident",
     ],
 )
