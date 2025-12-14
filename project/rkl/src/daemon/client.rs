@@ -178,7 +178,7 @@ pub async fn run_once(
             Ok(mut recv) => {
                 let mut buf = vec![0u8; 4096];
                 match recv.read(&mut buf).await {
-                    Ok(Some(n)) => match bincode::deserialize::<RksMessage>(&buf[..n]) {
+                    Ok(Some(n)) => match serde_json::from_slice::<RksMessage>(&buf[..n]) {
                         Ok(RksMessage::Ack) => {
                             info!("[worker] got register Ack");
                         }

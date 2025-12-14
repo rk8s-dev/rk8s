@@ -147,7 +147,7 @@ pub trait RecvStreamExt {
 #[async_trait::async_trait]
 impl SendStreamExt for SendStream {
     async fn send_msg(&mut self, msg: &RksMessage) -> anyhow::Result<usize> {
-        let msg = bincode::serialize(msg)?;
+        let msg = serde_json::to_vec(msg)?;
         self.write_all(&msg)
             .await
             .with_context(|| "Failed to send a rks message")?;
@@ -165,7 +165,7 @@ impl RecvStreamExt for RecvStream {
             buf.extend_from_slice(&chunk[..n]);
         }
 
-        bincode::deserialize::<RksMessage>(&buf)
+        serde_json::from_slice::<RksMessage>(&buf)
             .with_context(|| "Failed to deserialize rks message")
     }
 }

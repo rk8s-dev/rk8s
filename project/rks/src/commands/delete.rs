@@ -2,6 +2,7 @@
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use clap::builder::Str;
+use common::quic::SendStreamExt;
 use common::{PodTask, RksMessage};
 use log::info;
 use quinn::Connection;
@@ -21,10 +22,8 @@ pub async fn watch_delete(
         );
 
         let msg = RksMessage::DeletePod(pod_name.clone());
-        let data = bincode::serialize(&msg)?;
         if let Ok(mut stream) = conn.open_uni().await {
-            stream.write_all(&data).await?;
-            stream.finish()?;
+            stream.send_msg(&msg).await?;
             info!(
                 target: "rks::node::watch_pods",
                 "sent delete pod to worker {node_id}"
@@ -46,10 +45,8 @@ pub async fn user_delete(
     );
 
     let response = RksMessage::Ack;
-    let data = bincode::serialize(&response)?;
     if let Ok(mut stream) = conn.open_uni().await {
-        stream.write_all(&data).await?;
-        stream.finish()?;
+        stream.send_msg(&response).await?;
     }
     Ok(())
 }

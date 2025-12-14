@@ -344,6 +344,20 @@ impl ControllerManager {
                     opt = rx.recv() => {
                         match opt {
                             Some(resp) => {
+                                // Check if already in-flight before processing
+                                {
+                                    let mut inflight_map = manager_clone.inflight.write().await;
+                                    if let Some(set) = inflight_map.get_mut(&name_clone) {
+                                        if set.contains(&resp.key) {
+                                            log::debug!(
+                                                "Skipping duplicate event for {} (already in-flight)",
+                                                resp.key
+                                            );
+                                            continue;
+                                        }
+                                        set.insert(resp.key.clone());
+                                    }
+                                }
 
                                 // need to acquire a permit from the semaphore
                                 let permit = semaphore.clone().acquire_owned().await.unwrap();

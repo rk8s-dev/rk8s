@@ -2,6 +2,7 @@
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
 use clap::builder::Str;
+use common::quic::SendStreamExt;
 use common::{PodTask, RksMessage};
 use log::{error, info};
 use quinn::Connection;
@@ -19,10 +20,8 @@ pub async fn watch_create(pod_yaml: String, conn: &Connection, node_id: &str) ->
         );
 
         let msg = RksMessage::CreatePod(Box::new(pod_task));
-        let data = bincode::serialize(&msg)?;
         if let Ok(mut stream) = conn.open_uni().await {
-            stream.write_all(&data).await?;
-            stream.finish()?;
+            stream.send_msg(&msg).await?;
         }
     }
     Ok(())
@@ -42,10 +41,8 @@ pub async fn user_create(
         );
 
         let response = RksMessage::Error(format!("Pod {} already exists", pod_task.metadata.name));
-        let data = bincode::serialize(&response)?;
         if let Ok(mut stream) = conn.open_uni().await {
-            stream.write_all(&data).await?;
-            stream.finish()?;
+            stream.send_msg(&response).await?;
         }
         return Ok(());
     }
@@ -59,10 +56,8 @@ pub async fn user_create(
                 "failed to serialize pod task: {e}"
             );
             let response = RksMessage::Error(format!("Serialization error: {e}"));
-            let data = bincode::serialize(&response).unwrap_or_else(|_| vec![]);
             if let Ok(mut stream) = conn.open_uni().await {
-                stream.write_all(&data).await?;
-                stream.finish()?;
+                let _ = stream.send_msg(&response).await;
             }
             return Ok(());
         }
@@ -80,10 +75,8 @@ pub async fn user_create(
 
     // Send ACK to user
     let response = RksMessage::Ack;
-    let data = bincode::serialize(&response)?;
     if let Ok(mut stream) = conn.open_uni().await {
-        stream.write_all(&data).await?;
-        stream.finish()?;
+        stream.send_msg(&response).await?;
     }
 
     Ok(())

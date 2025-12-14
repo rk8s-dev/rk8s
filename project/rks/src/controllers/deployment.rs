@@ -727,6 +727,13 @@ impl DeploymentController {
             .iter_mut()
             .find(|c| c.condition_type == new_condition.condition_type)
         {
+            // Check if condition actually changed
+            if existing.status == new_condition.status
+                && existing.reason == new_condition.reason
+                && existing.message == new_condition.message
+            {
+                return Ok(());
+            }
             *existing = new_condition;
         } else {
             deploy.status.conditions.push(new_condition);
@@ -857,6 +864,18 @@ impl DeploymentController {
             }
         }
 
+        let unavailable_replicas = (deployment.spec.replicas - available_replicas).max(0);
+
+        // Check if status actually changed
+        if deployment.status.replicas == total_replicas
+            && deployment.status.ready_replicas == ready_replicas
+            && deployment.status.available_replicas == available_replicas
+            && deployment.status.updated_replicas == updated_replicas
+            && deployment.status.unavailable_replicas == unavailable_replicas
+        {
+            return Ok(());
+        }
+
         // Update deployment status
         let yaml = self
             .store
@@ -869,7 +888,7 @@ impl DeploymentController {
         deploy.status.ready_replicas = ready_replicas;
         deploy.status.available_replicas = available_replicas;
         deploy.status.updated_replicas = updated_replicas;
-        deploy.status.unavailable_replicas = (deployment.spec.replicas - available_replicas).max(0);
+        deploy.status.unavailable_replicas = unavailable_replicas;
 
         let updated_yaml = serde_yaml::to_string(&deploy)?;
         self.store
@@ -1057,17 +1076,11 @@ impl Controller for DeploymentController {
                     WatchEvent::Update { old_yaml, new_yaml } => {
                         let old_deploy: Deployment = serde_yaml::from_str(old_yaml)?;
                         let new_deploy: Deployment = serde_yaml::from_str(new_yaml)?;
-                        // Only reconcile if spec changed (ignore status-only updates)
-                        let old_spec_yaml =
-                            serde_yaml::to_string(&old_deploy.spec).unwrap_or_default();
-                        let new_spec_yaml =
-                            serde_yaml::to_string(&new_deploy.spec).unwrap_or_default();
 
-                        if old_spec_yaml != new_spec_yaml {
-                            // Spec changed, increment generation
+                        if old_deploy.spec != new_deploy.spec {
                             self.increment_generation(&new_deploy).await?;
                             should_reconcile = true;
-                        }
+                        } 
                     }
                     WatchEvent::Delete { .. } => {}
                 }
@@ -1078,23 +1091,18 @@ impl Controller for DeploymentController {
                 }
             }
             ResourceKind::ReplicaSet => {
-                debug!(
-                    "DeploymentController handling ReplicaSet event: key={}",
-                    response.key
-                );
-
                 // When ReplicaSet status changes, update parent Deployment status
                 match &response.event {
                     WatchEvent::Update { old_yaml, new_yaml } => {
                         let old_rs: ReplicaSet = serde_yaml::from_str(old_yaml)?;
                         let new_rs: ReplicaSet = serde_yaml::from_str(new_yaml)?;
 
-                        // Only update if status changed (compare using YAML serialization)
-                        let old_status_yaml =
-                            serde_yaml::to_string(&old_rs.status).unwrap_or_default();
-                        let new_status_yaml =
-                            serde_yaml::to_string(&new_rs.status).unwrap_or_default();
-                        if old_status_yaml != new_status_yaml
+                        let status_changed = old_rs.status.replicas != new_rs.status.replicas
+                            || old_rs.status.ready_replicas != new_rs.status.ready_replicas
+                            || old_rs.status.available_replicas != new_rs.status.available_replicas
+                            || old_rs.status.fully_labeled_replicas != new_rs.status.fully_labeled_replicas;
+
+                        if status_changed
                             && let Err(e) = self.update_deployment_for_replicaset(&new_rs).await
                         {
                             error!(
@@ -1136,7 +1144,10 @@ impl DeploymentController {
         let old_gen = deploy.metadata.generation.unwrap_or(0);
         deploy.metadata.generation = Some(old_gen + 1);
 
+        debug!("Original YAML spec hash: {:?}", serde_yaml::to_string(&deploy.spec).unwrap().len());
         let updated_yaml = serde_yaml::to_string(&deploy)?;
+        let test_deploy: Deployment = serde_yaml::from_str(&updated_yaml)?;
+        debug!("Re-serialized YAML spec hash: {:?}", serde_yaml::to_string(&test_deploy.spec).unwrap().len());
         self.store
             .insert_deployment_yaml(deploy_name, &updated_yaml)
             .await?;
@@ -1152,7 +1163,6 @@ impl DeploymentController {
 
     /// Update deployment status when ReplicaSet changes
     async fn update_deployment_for_replicaset(&self, rs: &ReplicaSet) -> Result<()> {
-        // Find the owning Deployment
         if let Some(owner_refs) = &rs.metadata.owner_references {
             for owner_ref in owner_refs {
                 if owner_ref.kind == ResourceKind::Deployment && owner_ref.controller {
@@ -1161,10 +1171,15 @@ impl DeploymentController {
                     if let Some(yaml) = self.store.get_deployment_yaml(deployment_name).await? {
                         let deployment: Deployment = serde_yaml::from_str(&yaml)?;
                         self.update_deployment_status(&deployment).await?;
-                        debug!(
-                            "Updated status for deployment {} due to ReplicaSet {} change",
-                            deployment_name, rs.metadata.name
-                        );
+                        
+                        // Check if rolling update is in progress
+                        let needs_reconcile = deployment.status.replicas != deployment.spec.replicas
+                            || deployment.status.updated_replicas != deployment.spec.replicas
+                            || deployment.status.available_replicas != deployment.spec.replicas;
+                        
+                        if needs_reconcile {
+                            self.reconcile_by_name(deployment_name).await?;
+                        }
                     }
                     break;
                 }
