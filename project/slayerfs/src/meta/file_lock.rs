@@ -184,6 +184,52 @@ impl PlockRecord {
 
         result
     }
+
+    pub fn check_confilct(
+        lock_type: &FileLockType,
+        range: &FileLockRange,
+        ls: &Vec<PlockRecord>,
+    ) -> bool {
+        for l in ls {
+            if (*lock_type == FileLockType::WriteLock || l.lock_type == FileLockType::WriteLock)
+                && range.end >= l.lock_range.start
+                && range.start <= l.lock_range.end
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    pub fn get_plock(
+        locks: &Vec<PlockRecord>,
+        query: &FileLockQuery,
+        self_sid: &Uuid,
+        lock_sid: &Uuid,
+    ) -> Option<FileLockInfo> {
+        for lock in locks {
+            if (lock.lock_type == FileLockType::WriteLock
+                || query.lock_type == FileLockType::WriteLock)
+                && lock.lock_range.overlaps(&query.range)
+            {
+                if *self_sid == *lock_sid {
+                    return Some(FileLockInfo {
+                        lock_type: lock.lock_type,
+                        range: lock.lock_range,
+                        pid: lock.pid,
+                    });
+                } else {
+                    return Some(FileLockInfo {
+                        lock_type: lock.lock_type,
+                        range: lock.lock_range,
+                        pid: 0,
+                    });
+                }
+            }
+        }
+        return None;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, Eq, PartialEq, Hash)]

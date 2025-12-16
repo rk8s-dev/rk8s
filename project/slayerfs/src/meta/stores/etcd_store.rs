@@ -9,7 +9,9 @@ use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
-use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
+use crate::meta::file_lock::{
+    FileLockInfo, FileLockQuery, FileLockRange, FileLockType, PlockRecord,
+};
 use crate::meta::store::{DirEntry, FileAttr, LockName, MetaError, MetaStore};
 use crate::meta::stores::pool::IdPool;
 use crate::meta::{INODE_ID_KEY, Permission};
@@ -22,6 +24,7 @@ use serde::de::DeserializeOwned;
 use serde_json;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -36,6 +39,7 @@ pub struct EtcdMetaStore {
     _config: Config,
     /// Local ID pools keyed by counter key (inode, slice, etc.)
     id_pools: IdPool,
+    sid: OnceLock<Uuid>,
 }
 
 #[allow(dead_code)]
@@ -75,6 +79,10 @@ impl EtcdMetaStore {
             .and_then(|s| Uuid::parse_str(s).ok())
     }
 
+    fn etcd_plock_key(inode: i64) -> String {
+        format!("p:{inode}")
+    }
+
     /// Create or open an etcd metadata store
     pub async fn new(backend_path: &Path) -> Result<Self, MetaError> {
         let _config =
@@ -88,6 +96,7 @@ impl EtcdMetaStore {
             client,
             _config,
             id_pools: IdPool::default(),
+            sid: OnceLock::new(),
         };
         store.init_root_directory().await?;
 
@@ -104,6 +113,7 @@ impl EtcdMetaStore {
             client,
             _config,
             id_pools: IdPool::default(),
+            sid: OnceLock::new(),
         };
         store.init_root_directory().await?;
 
@@ -823,6 +833,154 @@ impl EtcdMetaStore {
         .await
         .map(|_| ())
         .map_err(|e| MetaError::Internal(format!("Update parent children failed: {e}")))
+    }
+
+    /// Check file is existing
+    async fn file_is_existing(&self, inode: i64) -> Result<bool, MetaError> {
+        let key = Self::etcd_reverse_key(inode);
+
+        let entry_info: Option<EtcdEntryInfo> = self.etcd_get_json(&key).await?;
+        match entry_info {
+            Some(entry) => {
+                return Ok(entry.is_file);
+            }
+            None => Ok(false),
+        }
+    }
+
+    async fn try_set_plock(
+        &self,
+        inode: i64,
+        owner: i64,
+        new_lock: &PlockRecord,
+        lock_type: FileLockType,
+        range: FileLockRange,
+    ) -> Result<(), MetaError> {
+        let key = Self::etcd_plock_key(inode);
+        let sid = self
+            .sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+
+        match lock_type {
+            FileLockType::UnLock => {
+                // Unlock file
+                self.atomic_update(
+                    &key,
+                    |mut plocks: Vec<EtcdPlock>| {
+                        // Find the lock record for this owner and sid
+                        let pos = plocks
+                            .iter()
+                            .position(|p| p.sid == *sid && p.owner == owner);
+
+                        if let Some(pos) = pos {
+                            let plock = &mut plocks[pos];
+                            let records: Vec<PlockRecord> = plock.records.clone();
+                            if records.is_empty() {
+                                // Remove this plock entry if no records
+                                plocks.remove(pos);
+                                return Ok((plocks, ()));
+                            }
+
+                            // Update locks with new unlock request
+                            let new_records = PlockRecord::update_locks(records, new_lock.clone());
+
+                            if new_records.is_empty() {
+                                // Remove this plock entry if no records after update
+                                plocks.remove(pos);
+                                return Ok((plocks, ()));
+                            }
+
+                            // Update the records
+                            plock.records = new_records;
+                        }
+
+                        Ok((plocks, ()))
+                    },
+                    || Ok((vec![], ())), // No existing locks, nothing to unlock
+                    10,
+                )
+                .await
+            }
+            _ => {
+                // Lock request (ReadLock or WriteLock)
+                self.atomic_update(
+                    &key,
+                    |mut plocks: Vec<EtcdPlock>| {
+                        // Build a hashmap of locks for easier lookup
+                        let mut locks = HashMap::new();
+                        for item in &plocks {
+                            let key = (item.sid, item.owner);
+                            locks.insert(key, item.records.clone());
+                        }
+
+                        let lkey = (*sid, owner);
+
+                        // Check for conflicts with other owners/sessions
+                        let mut conflict_found = false;
+                        for ((sid, _owner), records_vec) in &locks {
+                            if (*sid, owner) == lkey {
+                                continue;
+                            }
+
+                            let ls: Vec<PlockRecord> = records_vec.clone(); // EtcdPlock already stores Vec<PlockRecord>
+                            conflict_found = PlockRecord::check_confilct(&lock_type, &range, &ls);
+                            if conflict_found {
+                                break;
+                            }
+                        }
+
+                        if conflict_found {
+                            return Err(MetaError::LockConflict {
+                                inode,
+                                owner,
+                                range,
+                            });
+                        }
+
+                        // Get existing locks for this owner/session
+                        let ls = locks.get(&lkey).cloned().unwrap_or_default();
+
+                        // Update locks with new request
+                        let ls = PlockRecord::update_locks(ls, new_lock.clone());
+
+                        // Check if we need to update the record
+                        if locks.get(&lkey).map(|r| r != &ls).unwrap_or(true) {
+                            // Find existing plock entry and update it, or add new one
+                            if let Some(plock) = plocks
+                                .iter_mut()
+                                .find(|p| p.sid == *sid && p.owner == owner)
+                            {
+                                plock.records = ls;
+                            } else {
+                                let new_plock = EtcdPlock {
+                                    sid: *sid,
+                                    owner,
+                                    records: ls,
+                                };
+                                plocks.push(new_plock);
+                            }
+                        }
+
+                        Ok((plocks, ()))
+                    },
+                    || {
+                        // No existing locks, create new one
+                        let ls = PlockRecord::update_locks(vec![], new_lock.clone());
+
+                        let new_plock = EtcdPlock {
+                            sid: *sid,
+                            owner,
+                            records: ls,
+                        };
+
+                        Ok((vec![new_plock], ()))
+                    },
+                    10,
+                )
+                .await
+            }
+        }
     }
 }
 
@@ -1893,8 +2051,27 @@ impl MetaStore for EtcdMetaStore {
         inode: i64,
         query: &FileLockQuery,
     ) -> Result<FileLockInfo, MetaError> {
-        let _ = (inode, query);
-        Err(MetaError::NotImplemented)
+        let key = Self::etcd_plock_key(inode);
+        let sid = self
+            .sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+
+        let plocks: Vec<EtcdPlock> = self.etcd_get_json(&key).await?.unwrap_or_default();
+
+        for plock in plocks {
+            let locks = &plock.records;
+            match PlockRecord::get_plock(locks, query, sid, &plock.sid) {
+                Some(v) => return Ok(v),
+                None => {}
+            }
+        }
+
+        Ok(FileLockInfo {
+            lock_type: FileLockType::UnLock,
+            range: FileLockRange { start: 0, end: 0 },
+            pid: 0,
+        })
     }
 
     // sets a file range lock on given file.
@@ -1907,12 +2084,32 @@ impl MetaStore for EtcdMetaStore {
         range: FileLockRange,
         pid: u32,
     ) -> Result<(), MetaError> {
-        let _ = (inode, owner, lock_type, pid, block, range);
-        Err(MetaError::NotImplemented)
+        let new_lock = PlockRecord::new(lock_type, pid, range.start, range.end);
+
+        loop {
+            let result = self
+                .try_set_plock(inode, owner, &new_lock, lock_type, range)
+                .await;
+
+            match result {
+                Ok(()) => return Ok(()),
+                Err(MetaError::LockConflict { .. }) if block => {
+                    if lock_type == FileLockType::WriteLock {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                    } else {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                    }
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
+
     fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
-        let _ = sid;
-        Err(MetaError::NotImplemented)
+        self.sid
+            .set(sid)
+            .map_err(|_| MetaError::Internal("sid has been seted".to_string()))
     }
 }
 

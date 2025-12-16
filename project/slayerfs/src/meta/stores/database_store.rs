@@ -7,6 +7,7 @@ use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::session_meta::{self, Entity as SessionMeta};
 use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
+use crate::meta::entities::*;
 use crate::meta::file_lock::{
     FileLockInfo, FileLockQuery, FileLockRange, FileLockType, PlockRecord,
 };
@@ -15,7 +16,6 @@ use crate::meta::store::{
     StatFsSnapshot,
 };
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
-use crate::meta::{entities::*, file_lock};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -28,7 +28,6 @@ use std::hash::Hash;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tracing::Instrument;
 
 #[derive(Eq, Hash, PartialEq)]
 struct PlockHashMapKey {
@@ -289,7 +288,7 @@ impl DatabaseMetaStore {
             .map_err(MetaError::Database)?;
         match existing {
             Some(_) => Ok(true),
-            None => Ok(true),
+            None => Ok(false),
         }
     }
 
@@ -629,16 +628,7 @@ impl DatabaseMetaStore {
                     }
 
                     let ls: Vec<PlockRecord> = serde_json::from_slice(&d).unwrap_or_default();
-                    for l in ls {
-                        if (lock_type == FileLockType::WriteLock
-                            || l.lock_type == FileLockType::WriteLock)
-                            && range.end >= l.lock_range.start
-                            && range.start <= l.lock_range.end
-                        {
-                            conflict_found = true;
-                            break;
-                        }
-                    }
+                    conflict_found = PlockRecord::check_confilct(&lock_type, &range, &ls);
                     if conflict_found {
                         break;
                     }
@@ -1739,34 +1729,16 @@ impl MetaStore for DatabaseMetaStore {
             .all(&self.db)
             .await
             .map_err(MetaError::Database)?;
+        let sid = self
+            .sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
 
         for row in rows {
             let locks: Vec<PlockRecord> = serde_json::from_slice(&row.records).unwrap_or_default();
-
-            for lock in locks {
-                if (lock.lock_type == FileLockType::WriteLock
-                    || query.lock_type == FileLockType::WriteLock)
-                    && lock.lock_range.overlaps(&query.range)
-                {
-                    let sid = self
-                        .sid
-                        .get()
-                        .ok_or(MetaError::Internal("sid not seted".to_string()))?;
-
-                    if *sid == row.sid {
-                        return Ok(FileLockInfo {
-                            lock_type: lock.lock_type,
-                            range: lock.lock_range,
-                            pid: lock.pid,
-                        });
-                    } else {
-                        return Ok(FileLockInfo {
-                            lock_type: lock.lock_type,
-                            range: lock.lock_range,
-                            pid: 0,
-                        });
-                    }
-                }
+            match PlockRecord::get_plock(&locks, &query, sid, &row.sid) {
+                Some(v) => return Ok(v),
+                None => {}
             }
         }
 
