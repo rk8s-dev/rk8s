@@ -5,12 +5,14 @@ pub mod session;
 
 use crate::chuck::SliceDesc;
 use crate::meta::config::{CacheCapacity, CacheTtl};
+use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::layer::MetaLayer;
 use crate::meta::store::{
     DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
 use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker, WatchConfig};
+use uuid::Uuid;
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -284,6 +286,18 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     pub async fn shutdown_session(&self) {
         self.mark_umounting();
         self.session_manager.shutdown().await;
+    }
+
+    /// Get the current session ID if a session is active.
+    #[allow(dead_code)]
+    pub async fn session_id(&self) -> Option<Uuid> {
+        *self.session_manager.session_id.read().await
+    }
+
+    /// Get the current process ID.
+    #[allow(dead_code)]
+    pub fn process_id(&self) -> u32 {
+        std::process::id()
     }
 
     /// Finds and removes stale sessions using store-provided helpers.
@@ -1062,6 +1076,22 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
     async fn shutdown_session(&self) -> Result<(), MetaError> {
         MetaClient::shutdown_session(self).await;
         Ok(())
+    }
+
+    async fn get_plock(&self, inode: i64, query: &FileLockQuery) -> Result<FileLockInfo, MetaError> {
+        self.store.get_plock(inode, query).await
+    }
+
+    async fn set_plock(
+        &self,
+        inode: i64,
+        owner: i64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), MetaError> {
+        self.store.set_plock(inode, owner, block, lock_type, range, pid).await
     }
 }
 

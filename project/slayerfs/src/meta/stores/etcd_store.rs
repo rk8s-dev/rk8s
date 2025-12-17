@@ -841,9 +841,7 @@ impl EtcdMetaStore {
 
         let entry_info: Option<EtcdEntryInfo> = self.etcd_get_json(&key).await?;
         match entry_info {
-            Some(entry) => {
-                return Ok(entry.is_file);
-            }
+            Some(entry) => Ok(entry.is_file),
             None => Ok(false),
         }
     }
@@ -883,7 +881,7 @@ impl EtcdMetaStore {
                             }
 
                             // Update locks with new unlock request
-                            let new_records = PlockRecord::update_locks(records, new_lock.clone());
+                            let new_records = PlockRecord::update_locks(records, *new_lock);
 
                             if new_records.is_empty() {
                                 // Remove this plock entry if no records after update
@@ -933,7 +931,7 @@ impl EtcdMetaStore {
                         if conflict_found {
                             return Err(MetaError::LockConflict {
                                 inode,
-                                owner: owner.try_into().unwrap(),
+                                owner,
                                 range,
                             });
                         }
@@ -942,7 +940,7 @@ impl EtcdMetaStore {
                         let ls = locks.get(&lkey).cloned().unwrap_or_default();
 
                         // Update locks with new request
-                        let ls = PlockRecord::update_locks(ls, new_lock.clone());
+                        let ls = PlockRecord::update_locks(ls, *new_lock);
 
                         // Check if we need to update the record
                         if locks.get(&lkey).map(|r| r != &ls).unwrap_or(true) {
@@ -955,7 +953,7 @@ impl EtcdMetaStore {
                             } else {
                                 let new_plock = EtcdPlock {
                                     sid: *sid,
-                                    owner: owner.try_into().unwrap(),
+                                    owner,
                                     records: ls,
                                 };
                                 plocks.push(new_plock);
@@ -966,11 +964,11 @@ impl EtcdMetaStore {
                     },
                     || {
                         // No existing locks, create new one
-                        let ls = PlockRecord::update_locks(vec![], new_lock.clone());
+                        let ls = PlockRecord::update_locks(vec![], *new_lock);
 
                         let new_plock = EtcdPlock {
                             sid: *sid,
-                            owner: owner.try_into().unwrap(),
+                            owner,
                             records: ls,
                         };
 
@@ -2061,9 +2059,8 @@ impl MetaStore for EtcdMetaStore {
 
         for plock in plocks {
             let locks = &plock.records;
-            match PlockRecord::get_plock(locks, query, sid, &plock.sid) {
-                Some(v) => return Ok(v),
-                None => {}
+            if let Some(v) = PlockRecord::get_plock(locks, query, sid, &plock.sid) {
+                return Ok(v);
             }
         }
 
@@ -2088,19 +2085,13 @@ impl MetaStore for EtcdMetaStore {
 
         loop {
             let result = self
-                .try_set_plock(
-                    inode,
-                    owner.try_into().unwrap(),
-                    &new_lock,
-                    lock_type,
-                    range,
-                )
+                .try_set_plock(inode, owner, &new_lock, lock_type, range)
                 .await;
 
             match result {
                 Ok(()) => return Ok(()),
                 Err(MetaError::LockConflict { .. }) if block => {
-                    if lock_type == FileLockType::WriteLock {
+                    if lock_type == FileLockType::Write {
                         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                     } else {
                         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -2168,19 +2159,9 @@ mod tests {
         store
     }
 
-    /// Create multiple test stores for testing multiple sessions
-    async fn create_test_stores(count: usize) -> Vec<EtcdMetaStore> {
-        let mut stores = Vec::with_capacity(count);
-        for _ in 0..count {
-            stores.push(new_test_store().await);
-        }
-        stores
-    }
-
     /// Helper struct to manage multiple test sessions
     struct TestSessionManager {
         stores: Vec<EtcdMetaStore>,
-        session_ids: Vec<Uuid>,
     }
 
     use std::sync::LazyLock;
@@ -2234,18 +2215,11 @@ mod tests {
                 time::sleep(time::Duration::from_millis(5)).await;
             }
 
-            Self {
-                stores,
-                session_ids,
-            }
+            Self { stores }
         }
 
         fn get_store(&self, index: usize) -> &EtcdMetaStore {
             &self.stores[index]
-        }
-
-        fn get_session_id(&self, index: usize) -> Uuid {
-            self.session_ids[index]
         }
     }
 
@@ -2271,7 +2245,7 @@ mod tests {
                 file_ino,
                 owner,
                 false,
-                FileLockType::ReadLock,
+                FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -2280,8 +2254,8 @@ mod tests {
 
         // Verify lock exists
         let query = FileLockQuery {
-            owner: owner,
-            lock_type: FileLockType::ReadLock,
+            owner,
+            lock_type: FileLockType::Read,
             range: FileLockRange { start: 0, end: 100 },
         };
 
@@ -2311,7 +2285,7 @@ mod tests {
                 file_ino,
                 owner1,
                 false,
-                FileLockType::ReadLock,
+                FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -2325,7 +2299,7 @@ mod tests {
                 file_ino,
                 owner2,
                 false,
-                FileLockType::ReadLock,
+                FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
                 5678,
             )
@@ -2335,18 +2309,18 @@ mod tests {
         // Verify both locks exist by querying each session
         let query1 = FileLockQuery {
             owner: owner1,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let query2 = FileLockQuery {
             owner: owner2,
-            lock_type: FileLockType::ReadLock,
+            lock_type: FileLockType::Read,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
-        assert_eq!(lock_info1.lock_type, FileLockType::ReadLock);
+        assert_eq!(lock_info1.lock_type, FileLockType::Read);
         assert_eq!(lock_info1.range.start, 0);
         assert_eq!(lock_info1.range.end, 100);
         assert_eq!(lock_info1.pid, 1234);
@@ -2377,7 +2351,7 @@ mod tests {
                 file_ino,
                 owner1 as i64,
                 false,
-                FileLockType::ReadLock,
+                FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -2391,7 +2365,7 @@ mod tests {
                 file_ino,
                 owner2 as i64,
                 false, // non-blocking
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 50,
                     end: 150,
@@ -2437,7 +2411,7 @@ mod tests {
                 file_ino,
                 owner,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -2447,12 +2421,12 @@ mod tests {
         // Verify lock exists
         let query = FileLockQuery {
             owner: owner,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let lock_info = store.get_plock(file_ino, &query).await.unwrap();
-        assert_eq!(lock_info.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info.lock_type, FileLockType::Write);
 
         // Release lock
         store
@@ -2494,7 +2468,7 @@ mod tests {
                 file_ino,
                 owner1 as i64,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -2508,7 +2482,7 @@ mod tests {
                 file_ino,
                 owner2 as i64,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 200,
                     end: 300,
@@ -2521,13 +2495,13 @@ mod tests {
         // Verify both locks exist
         let query1 = FileLockQuery {
             owner: owner1,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let query2 = FileLockQuery {
             owner: owner2,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange {
                 start: 200,
                 end: 300,
@@ -2535,13 +2509,13 @@ mod tests {
         };
 
         let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
-        assert_eq!(lock_info1.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info1.lock_type, FileLockType::Write);
         assert_eq!(lock_info1.range.start, 0);
         assert_eq!(lock_info1.range.end, 100);
         assert_eq!(lock_info1.pid, 1234);
 
         let lock_info2 = store2.get_plock(file_ino, &query2).await.unwrap();
-        assert_eq!(lock_info2.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info2.lock_type, FileLockType::Write);
         assert_eq!(lock_info2.range.start, 200);
         assert_eq!(lock_info2.range.end, 300);
         assert_eq!(lock_info2.pid, 5678);
@@ -2572,7 +2546,7 @@ mod tests {
                     file_ino,
                     owner1,
                     false,
-                    FileLockType::WriteLock,
+                    FileLockType::Write,
                     FileLockRange { start: 0, end: 100 },
                     1111,
                 )
@@ -2588,7 +2562,7 @@ mod tests {
                     file_ino,
                     owner2 as i64,
                     false,
-                    FileLockType::ReadLock,
+                    FileLockType::Read,
                     FileLockRange {
                         start: 200,
                         end: 300,
@@ -2607,7 +2581,7 @@ mod tests {
                     file_ino,
                     owner3 as i64,
                     false,
-                    FileLockType::WriteLock,
+                    FileLockType::Write,
                     FileLockRange {
                         start: 50,
                         end: 150,
@@ -2627,13 +2601,13 @@ mod tests {
         // Verify successful locks exist
         let query1 = FileLockQuery {
             owner: owner1,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let query2 = FileLockQuery {
             owner: owner2,
-            lock_type: FileLockType::ReadLock,
+            lock_type: FileLockType::Read,
             range: FileLockRange {
                 start: 200,
                 end: 300,
@@ -2644,7 +2618,7 @@ mod tests {
         {
             let store1 = session_mgr.get_store(0);
             let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
-            assert_eq!(lock_info1.lock_type, FileLockType::WriteLock);
+            assert_eq!(lock_info1.lock_type, FileLockType::Write);
         }
 
         {
@@ -2675,7 +2649,7 @@ mod tests {
                 file_ino,
                 owner1 as i64,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 0,
                     end: 1000,
@@ -2692,7 +2666,7 @@ mod tests {
                 file_ino,
                 2002, // different owner
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 500,
                     end: 600,
@@ -2730,7 +2704,7 @@ mod tests {
                 file_ino,
                 2002,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 500,
                     end: 600,
@@ -2743,7 +2717,7 @@ mod tests {
         // Verify the lock exists
         let query = FileLockQuery {
             owner: 2002,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange {
                 start: 500,
                 end: 600,
@@ -2751,7 +2725,7 @@ mod tests {
         };
 
         let lock_info = store2.get_plock(file_ino, &query).await.unwrap();
-        assert_eq!(lock_info.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info.lock_type, FileLockType::Write);
         assert_eq!(lock_info.pid, 5555);
     }
 }

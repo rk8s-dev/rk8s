@@ -8,16 +8,16 @@ use uuid::Uuid;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u32)]
 pub enum FileLockType {
-    ReadLock = libc::F_RDLCK as u32,
-    WriteLock = libc::F_WRLCK as u32,
+    Read = libc::F_RDLCK as u32,
+    Write = libc::F_WRLCK as u32,
     UnLock = libc::F_UNLCK as u32,
 }
 
 impl FileLockType {
     pub fn from_u32(value: u32) -> Option<Self> {
         match value {
-            x if x == Self::ReadLock as u32 => Some(Self::ReadLock),
-            x if x == Self::WriteLock as u32 => Some(Self::WriteLock),
+            x if x == Self::Read as u32 => Some(Self::Read),
+            x if x == Self::Write as u32 => Some(Self::Write),
             x if x == Self::UnLock as u32 => Some(Self::UnLock),
             _ => None,
         }
@@ -31,8 +31,8 @@ impl FileLockType {
 impl std::convert::From<FileLockType> for sea_orm::Value {
     fn from(value: FileLockType) -> Self {
         match value {
-            FileLockType::ReadLock => Value::Unsigned(Some(FileLockType::ReadLock as u32)),
-            FileLockType::WriteLock => Value::Unsigned(Some(FileLockType::WriteLock as u32)),
+            FileLockType::Read => Value::Unsigned(Some(FileLockType::Read as u32)),
+            FileLockType::Write => Value::Unsigned(Some(FileLockType::Write as u32)),
             FileLockType::UnLock => Value::Unsigned(Some(FileLockType::UnLock as u32)),
         }
     }
@@ -80,24 +80,11 @@ pub struct PlockRecord {
 
 impl PlockRecord {
     pub fn new(lock_type: FileLockType, pid: u32, start: u64, end: u64) -> Self {
-        return Self {
+        Self {
             lock_type,
             pid,
             lock_range: FileLockRange { start, end },
-        };
-    }
-
-    pub async fn is_conflict(&self, locks: Vec<PlockRecord>) -> bool {
-        for lock in locks {
-            if self.lock_range.overlaps(&lock.lock_range) {
-                match (self.lock_type, lock.lock_type) {
-                    (FileLockType::ReadLock, FileLockType::ReadLock) => {}
-                    _ => return true,
-                }
-            }
         }
-
-        false
     }
 
     pub fn update_locks(mut ls: Vec<PlockRecord>, nl: PlockRecord) -> Vec<PlockRecord> {
@@ -181,13 +168,12 @@ impl PlockRecord {
 
         let mut result: Vec<PlockRecord> = Vec::new();
         for record in ls {
-            if let Some(last) = result.last_mut() {
-                if last.lock_type == record.lock_type
-                    && last.lock_range.end == record.lock_range.start
-                {
-                    last.lock_range.end = record.lock_range.end;
-                    continue;
-                }
+            if let Some(last) = result.last_mut()
+                && last.lock_type == record.lock_type
+                && last.lock_range.end == record.lock_range.start
+            {
+                last.lock_range.end = record.lock_range.end;
+                continue;
             }
             result.push(record);
         }
@@ -201,7 +187,7 @@ impl PlockRecord {
         ls: &Vec<PlockRecord>,
     ) -> bool {
         for l in ls {
-            if (*lock_type == FileLockType::WriteLock || l.lock_type == FileLockType::WriteLock)
+            if (*lock_type == FileLockType::Write || l.lock_type == FileLockType::Write)
                 && range.end >= l.lock_range.start
                 && range.start <= l.lock_range.end
             {
@@ -209,7 +195,7 @@ impl PlockRecord {
             }
         }
 
-        return false;
+        false
     }
 
     pub fn get_plock(
@@ -220,11 +206,10 @@ impl PlockRecord {
     ) -> Option<FileLockInfo> {
         for lock in locks {
             if lock.lock_range.overlaps(&query.range) {
-                let conflict = match (lock.lock_type, query.lock_type) {
-                    (FileLockType::ReadLock, FileLockType::ReadLock) => false,
-                    _ => true,
-                };
-
+                let conflict = !matches!(
+                    (lock.lock_type, query.lock_type),
+                    (FileLockType::Read, FileLockType::Read)
+                );
                 if conflict {
                     return Some(FileLockInfo {
                         lock_type: lock.lock_type,
@@ -234,7 +219,7 @@ impl PlockRecord {
                 }
             }
         }
-        return None;
+        None
     }
 }
 
@@ -245,10 +230,6 @@ pub struct FileLockRange {
 }
 
 impl FileLockRange {
-    pub fn new(start: u64, end: u64) -> Self {
-        Self { start, end }
-    }
-
     pub fn overlaps(&self, other: &Self) -> bool {
         self.end >= other.start && self.start <= other.end
     }
@@ -265,14 +246,4 @@ pub struct FileLockInfo {
     pub lock_type: FileLockType,
     pub range: FileLockRange,
     pub pid: u32,
-}
-
-impl FileLockInfo {
-    pub fn unlocked() -> Self {
-        Self {
-            lock_type: FileLockType::UnLock,
-            range: FileLockRange::default(),
-            pid: 0,
-        }
-    }
 }

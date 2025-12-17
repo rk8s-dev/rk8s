@@ -40,13 +40,6 @@ const PLOCK_PREFIX: &str = "plock";
 const LOCKS_KEY: &str = "locks";
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RedisPlockEntry {
-    sid: Uuid,
-    owner: i64,
-    records: Vec<PlockRecord>,
-}
-
 /// Minimal Redis-backed meta store.
 pub struct RedisMetaStore {
     conn: ConnectionManager,
@@ -322,7 +315,7 @@ impl RedisMetaStore {
             .sid
             .get()
             .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
-        let field = self.plock_field(&sid, owner);
+        let field = self.plock_field(sid, owner);
 
         // Check if file exists
         if self.get_node(inode).await?.is_none() {
@@ -399,13 +392,13 @@ impl RedisMetaStore {
                 if conflict_found {
                     return Err(MetaError::LockConflict {
                         inode,
-                        owner: owner.try_into().unwrap(),
+                        owner,
                         range,
                     });
                 }
 
                 // Update locks
-                let new_records = PlockRecord::update_locks(current_records, new_lock.clone());
+                let new_records = PlockRecord::update_locks(current_records, new_lock);
                 let new_json = serde_json::to_string(&new_records)
                     .map_err(|e| MetaError::Internal(format!("Serialization error: {e}")))?;
 
@@ -795,7 +788,7 @@ impl MetaStore for RedisMetaStore {
         let records_json: Result<String, _> = conn.hget(&plock_key, &current_field).await;
         if let Ok(records_json) = records_json {
             let records: Vec<PlockRecord> = serde_json::from_str(&records_json).unwrap_or_default();
-            if let Some(v) = PlockRecord::get_plock(&records, query, &sid, &sid) {
+            if let Some(v) = PlockRecord::get_plock(&records, query, sid, sid) {
                 return Ok(v);
             }
         }
@@ -823,9 +816,8 @@ impl MetaStore for RedisMetaStore {
             let records_json: String = conn.hget(&plock_key, &field).await.map_err(redis_err)?;
             let records: Vec<PlockRecord> = serde_json::from_str(&records_json).unwrap_or_default();
 
-            match PlockRecord::get_plock(&records, query, &sid, &lock_sid) {
-                Some(v) => return Ok(v),
-                None => {}
+            if let Some(v) = PlockRecord::get_plock(&records, query, sid, &lock_sid) {
+                return Ok(v);
             }
         }
 
@@ -850,13 +842,13 @@ impl MetaStore for RedisMetaStore {
 
         loop {
             let result = self
-                .try_set_plock(inode, owner.try_into().unwrap(), new_lock, lock_type, range)
+                .try_set_plock(inode, owner, new_lock, lock_type, range)
                 .await;
 
             match result {
                 Ok(()) => return Ok(()),
                 Err(MetaError::LockConflict { .. }) if block => {
-                    if lock_type == FileLockType::WriteLock {
+                    if lock_type == FileLockType::Write {
                         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                     } else {
                         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -1045,19 +1037,9 @@ mod tests {
         store
     }
 
-    /// Create multiple test stores for testing multiple sessions
-    async fn create_test_stores(count: usize) -> Vec<RedisMetaStore> {
-        let mut stores = Vec::with_capacity(count);
-        for _ in 0..count {
-            stores.push(new_test_store().await);
-        }
-        stores
-    }
-
     /// Helper struct to manage multiple test sessions
     struct TestSessionManager {
         stores: Vec<RedisMetaStore>,
-        session_ids: Vec<Uuid>,
     }
 
     use std::sync::LazyLock;
@@ -1111,18 +1093,11 @@ mod tests {
                 time::sleep(time::Duration::from_millis(5)).await;
             }
 
-            Self {
-                stores,
-                session_ids,
-            }
+            Self { stores }
         }
 
         fn get_store(&self, index: usize) -> &RedisMetaStore {
             &self.stores[index]
-        }
-
-        fn get_session_id(&self, index: usize) -> Uuid {
-            self.session_ids[index]
         }
     }
 
@@ -1148,7 +1123,7 @@ mod tests {
                 file_ino,
                 owner,
                 false,
-                FileLockType::ReadLock,
+                FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -1158,7 +1133,7 @@ mod tests {
         // Verify lock exists
         let query = FileLockQuery {
             owner: owner,
-            lock_type: FileLockType::ReadLock,
+            lock_type: FileLockType::Read,
             range: FileLockRange { start: 0, end: 100 },
         };
 
@@ -1188,7 +1163,7 @@ mod tests {
                 file_ino,
                 owner1,
                 false,
-                FileLockType::ReadLock,
+                FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -1202,7 +1177,7 @@ mod tests {
                 file_ino,
                 owner2,
                 false,
-                FileLockType::ReadLock,
+                FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
                 5678,
             )
@@ -1212,18 +1187,18 @@ mod tests {
         // Verify both locks exist by querying each session
         let query1 = FileLockQuery {
             owner: owner1,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let query2 = FileLockQuery {
             owner: owner2,
-            lock_type: FileLockType::ReadLock,
+            lock_type: FileLockType::Read,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
-        assert_eq!(lock_info1.lock_type, FileLockType::ReadLock);
+        assert_eq!(lock_info1.lock_type, FileLockType::Read);
         assert_eq!(lock_info1.range.start, 0);
         assert_eq!(lock_info1.range.end, 100);
         assert_eq!(lock_info1.pid, 1234);
@@ -1254,7 +1229,7 @@ mod tests {
                 file_ino,
                 owner1 as i64,
                 false,
-                FileLockType::ReadLock,
+                FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -1268,7 +1243,7 @@ mod tests {
                 file_ino,
                 owner2 as i64,
                 false, // non-blocking
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 50,
                     end: 150,
@@ -1314,7 +1289,7 @@ mod tests {
                 file_ino,
                 owner,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -1324,12 +1299,12 @@ mod tests {
         // Verify lock exists
         let query = FileLockQuery {
             owner: owner,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let lock_info = store.get_plock(file_ino, &query).await.unwrap();
-        assert_eq!(lock_info.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info.lock_type, FileLockType::Write);
 
         // Release lock
         store
@@ -1371,7 +1346,7 @@ mod tests {
                 file_ino,
                 owner1 as i64,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange { start: 0, end: 100 },
                 1234,
             )
@@ -1385,7 +1360,7 @@ mod tests {
                 file_ino,
                 owner2 as i64,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 200,
                     end: 300,
@@ -1398,13 +1373,13 @@ mod tests {
         // Verify both locks exist
         let query1 = FileLockQuery {
             owner: owner1,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let query2 = FileLockQuery {
             owner: owner2,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange {
                 start: 200,
                 end: 300,
@@ -1412,13 +1387,13 @@ mod tests {
         };
 
         let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
-        assert_eq!(lock_info1.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info1.lock_type, FileLockType::Write);
         assert_eq!(lock_info1.range.start, 0);
         assert_eq!(lock_info1.range.end, 100);
         assert_eq!(lock_info1.pid, 1234);
 
         let lock_info2 = store2.get_plock(file_ino, &query2).await.unwrap();
-        assert_eq!(lock_info2.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info2.lock_type, FileLockType::Write);
         assert_eq!(lock_info2.range.start, 200);
         assert_eq!(lock_info2.range.end, 300);
         assert_eq!(lock_info2.pid, 5678);
@@ -1449,7 +1424,7 @@ mod tests {
                     file_ino,
                     owner1,
                     false,
-                    FileLockType::WriteLock,
+                    FileLockType::Write,
                     FileLockRange { start: 0, end: 100 },
                     1111,
                 )
@@ -1465,7 +1440,7 @@ mod tests {
                     file_ino,
                     owner2 as i64,
                     false,
-                    FileLockType::ReadLock,
+                    FileLockType::Read,
                     FileLockRange {
                         start: 200,
                         end: 300,
@@ -1484,7 +1459,7 @@ mod tests {
                     file_ino,
                     owner3 as i64,
                     false,
-                    FileLockType::WriteLock,
+                    FileLockType::Write,
                     FileLockRange {
                         start: 50,
                         end: 150,
@@ -1504,13 +1479,13 @@ mod tests {
         // Verify successful locks exist
         let query1 = FileLockQuery {
             owner: owner1,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
 
         let query2 = FileLockQuery {
             owner: owner2,
-            lock_type: FileLockType::ReadLock,
+            lock_type: FileLockType::Read,
             range: FileLockRange {
                 start: 200,
                 end: 300,
@@ -1521,7 +1496,7 @@ mod tests {
         {
             let store1 = session_mgr.get_store(0);
             let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
-            assert_eq!(lock_info1.lock_type, FileLockType::WriteLock);
+            assert_eq!(lock_info1.lock_type, FileLockType::Write);
         }
 
         {
@@ -1552,7 +1527,7 @@ mod tests {
                 file_ino,
                 owner1 as i64,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 0,
                     end: 1000,
@@ -1569,7 +1544,7 @@ mod tests {
                 file_ino,
                 2002, // different owner
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 500,
                     end: 600,
@@ -1607,7 +1582,7 @@ mod tests {
                 file_ino,
                 2002,
                 false,
-                FileLockType::WriteLock,
+                FileLockType::Write,
                 FileLockRange {
                     start: 500,
                     end: 600,
@@ -1620,7 +1595,7 @@ mod tests {
         // Verify the lock exists
         let query = FileLockQuery {
             owner: 2002,
-            lock_type: FileLockType::WriteLock,
+            lock_type: FileLockType::Write,
             range: FileLockRange {
                 start: 500,
                 end: 600,
@@ -1628,7 +1603,7 @@ mod tests {
         };
 
         let lock_info = store2.get_plock(file_ino, &query).await.unwrap();
-        assert_eq!(lock_info.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info.lock_type, FileLockType::Write);
         assert_eq!(lock_info.pid, 5555);
     }
 }

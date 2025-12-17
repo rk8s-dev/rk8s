@@ -22,6 +22,7 @@ rust_library(
     edition = "2021",
     features = [
         "default",
+        "file-lock",
         "tokio-runtime",
         "unprivileged",
     ],
