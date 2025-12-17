@@ -26,5 +26,5 @@ rust_library(
     features = ["alloc"],
     rustc_flags = ["@$(location :pem-rfc7468-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/base64ct/1.8.0:base64ct"],
+    deps = ["//third-party/rust/crates/base64ct/1.8.1:base64ct"],
 )

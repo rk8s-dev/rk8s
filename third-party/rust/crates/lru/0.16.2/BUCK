@@ -29,5 +29,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :lru-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/hashbrown/0.16.0:hashbrown"],
+    deps = ["//third-party/rust/crates/hashbrown/0.16.1:hashbrown"],
 )

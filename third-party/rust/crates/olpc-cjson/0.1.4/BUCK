@@ -28,6 +28,6 @@ rust_library(
     deps = [
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.145:serde_json",
-        "//third-party/rust/crates/unicode-normalization/0.1.24:unicode-normalization",
+        "//third-party/rust/crates/unicode-normalization/0.1.25:unicode-normalization",
     ],
 )

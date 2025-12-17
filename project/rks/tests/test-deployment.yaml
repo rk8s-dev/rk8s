@@ -11,6 +11,12 @@ spec:
     matchLabels:
       app: nginx
       tier: frontend
+  strategy:
+    type: RollingUpdate
+    maxSurge: 25%
+    maxUnavailable: 25%
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
   template:
     metadata:
       labels:

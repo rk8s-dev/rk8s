@@ -31,7 +31,7 @@ rust_library(
     rustc_flags = ["@$(location :snafu-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/doc-comment/0.3.3:doc-comment",
+        "//third-party/rust/crates/doc-comment/0.3.4:doc-comment",
         "//third-party/rust/crates/snafu-derive/0.6.10:snafu-derive",
     ],
 )

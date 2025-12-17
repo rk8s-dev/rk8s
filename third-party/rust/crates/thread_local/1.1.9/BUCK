@@ -25,5 +25,5 @@ rust_library(
     edition = "2021",
     rustc_flags = ["@$(location :thread_local-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/cfg-if/1.0.3:cfg-if"],
+    deps = ["//third-party/rust/crates/cfg-if/1.0.4:cfg-if"],
 )

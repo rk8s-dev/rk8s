@@ -49,6 +49,8 @@ pub struct ObjectMeta {
     pub deletion_timestamp: Option<DateTime<Utc>>,
     #[serde(default)]
     pub finalizers: Option<Vec<Finalizer>>,
+    #[serde(default)]
+    pub generation: Option<i64>,
 }
 
 impl Default for ObjectMeta {
@@ -63,6 +65,7 @@ impl Default for ObjectMeta {
             creation_timestamp: Some(Utc::now()),
             deletion_timestamp: None,
             finalizers: None,
+            generation: Some(0),
         }
     }
 }
@@ -1067,6 +1070,105 @@ pub struct Endpoint {
     pub subsets: Vec<EndpointSubset>,
 }
 
+/// Support absolute values or percentages
+/// rkl needs to check positive value and percentage format
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum IntOrPercentage {
+    Int(i32),
+    String(String),
+}
+
+impl IntOrPercentage {
+    /// Resolves the value based on the total. For percentages, returns ceil(total * percent / 100).
+    pub fn resolve(&self, total: i32) -> i32 {
+        match self {
+            IntOrPercentage::Int(n) => *n,
+            IntOrPercentage::String(s) => {
+                if let Some(percent_str) = s.strip_suffix('%') {
+                    let percent: f64 = percent_str.parse().unwrap();
+                    ((total as f64 * percent / 100.0).ceil() as i32).max(0)
+                } else {
+                    s.parse().unwrap()
+                }
+            }
+        }
+    }
+}
+
+/// According to k8s default value, use 25%
+fn default_max_surge() -> IntOrPercentage {
+    IntOrPercentage::String("25%".to_string())
+}
+
+fn default_max_unavailable() -> IntOrPercentage {
+    IntOrPercentage::String("25%".to_string())
+}
+
+/// Rolling update strategy parameters
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RollingUpdateStrategy {
+    // this parameter means the max number of pods that can be created over the desired number of pods
+    #[serde(default = "default_max_surge")]
+    pub max_surge: IntOrPercentage,
+    // this parameter means the max number of pods that can be unavailable during the update process
+    #[serde(default = "default_max_unavailable")]
+    pub max_unavailable: IntOrPercentage,
+}
+
+impl Default for RollingUpdateStrategy {
+    fn default() -> Self {
+        Self {
+            max_surge: default_max_surge(),
+            max_unavailable: default_max_unavailable(),
+        }
+    }
+}
+
+/// Deployment update strategy
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum DeploymentStrategy {
+    Recreate,
+    RollingUpdate {
+        #[serde(flatten)]
+        rolling_update: RollingUpdateStrategy,
+    },
+}
+
+fn default_deployment_strategy() -> DeploymentStrategy {
+    DeploymentStrategy::RollingUpdate {
+        rolling_update: RollingUpdateStrategy::default(),
+    }
+}
+
+fn default_progress_deadline() -> i64 {
+    600
+}
+
+fn default_revision_history_limit() -> i32 {
+    10
+}
+
+/// Deployment condition
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentCondition {
+    // "Progressing" | "Available" | "ReplicaFailure" ...
+    #[serde(rename = "type")]
+    pub condition_type: String,
+    // "True" | "False" | "Unknown"
+    pub status: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    pub last_transition_time: String,
+    #[serde(default)]
+    pub last_update_time: Option<String>,
+}
+
 /// The field of deployment is almost same with replicaset
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1075,6 +1177,12 @@ pub struct DeploymentSpec {
     pub replicas: i32,
     pub selector: LabelSelector,
     pub template: PodTemplateSpec,
+    #[serde(default = "default_deployment_strategy")]
+    pub strategy: DeploymentStrategy,
+    #[serde(default = "default_progress_deadline")]
+    pub progress_deadline_seconds: i64,
+    #[serde(default = "default_revision_history_limit")]
+    pub revision_history_limit: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -1095,6 +1203,10 @@ pub struct DeploymentStatus {
     // Collision count for hash collision resolution
     #[serde(default)]
     pub collision_count: i32,
+    #[serde(default)]
+    pub observed_generation: Option<i64>,
+    #[serde(default)]
+    pub conditions: Vec<DeploymentCondition>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

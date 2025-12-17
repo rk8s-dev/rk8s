@@ -27,7 +27,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/unicode-bidi/0.3.18:unicode-bidi",
-        "//third-party/rust/crates/unicode-normalization/0.1.24:unicode-normalization",
-        "//third-party/rust/crates/unicode-properties/0.1.3:unicode-properties",
+        "//third-party/rust/crates/unicode-normalization/0.1.25:unicode-normalization",
+        "//third-party/rust/crates/unicode-properties/0.1.4:unicode-properties",
     ],
 )

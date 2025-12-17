@@ -28,7 +28,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/darling_core/0.21.3:darling_core",
-        "//third-party/rust/crates/quote/1.0.41:quote",
-        "//third-party/rust/crates/syn/2.0.106:syn",
+        "//third-party/rust/crates/quote/1.0.42:quote",
+        "//third-party/rust/crates/syn/2.0.111:syn",
     ],
 )

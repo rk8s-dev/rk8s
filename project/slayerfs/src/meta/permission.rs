@@ -6,11 +6,19 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 
 bitflags! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        Serialize,
+        Deserialize
+    )]
     pub struct AclFlags: u8 {
-        const READ    = 0b001;
-        const WRITE   = 0b010;
-        const EXECUTE = 0b100;
+        const READ  = 0b001;
+        const WRITE = 0b010;
+        const EXEC  = 0b100;
     }
 }
 
@@ -136,11 +144,11 @@ impl Permission {
         self.check_access(uid, gids, AclFlags::WRITE, 0o200, 0o020, 0o002)
     }
     pub fn can_execute(&self, uid: u32, gids: &[u32]) -> bool {
-        self.check_access(uid, gids, AclFlags::EXECUTE, 0o100, 0o010, 0o001)
+        self.check_access(uid, gids, AclFlags::EXEC, 0o100, 0o010, 0o001)
     }
     pub fn chmod(&mut self, new_mode: u32) {
         let file_type = self.file_type_bits();
-        self.mode = file_type | (new_mode & 0o777);
+        self.mode = file_type | (new_mode & 0o7777);
     }
     pub fn chown(&mut self, new_uid: u32, new_gid: u32) {
         self.uid = new_uid;

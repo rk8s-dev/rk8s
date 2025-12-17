@@ -28,7 +28,7 @@ rust_library(
     deps = [
         "//third-party/rust/crates/anyhow/1.0.100:anyhow",
         "//third-party/rust/crates/indexmap/1.9.3:indexmap",
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/protobuf-support/3.2.0:protobuf-support",
         "//third-party/rust/crates/protobuf/3.2.0:protobuf",
         "//third-party/rust/crates/tempfile/3.23.0:tempfile",

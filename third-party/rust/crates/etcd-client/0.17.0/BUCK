@@ -33,7 +33,7 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/http/1.3.1:http",
+        "//third-party/rust/crates/http/1.4.0:http",
         "//third-party/rust/crates/prost/0.14.1:prost",
         "//third-party/rust/crates/tokio-stream/0.1.17:tokio-stream",
         "//third-party/rust/crates/tokio/1.48.0:tokio",

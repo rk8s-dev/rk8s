@@ -41,7 +41,7 @@ rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/ring/0.17.14:ring",
         "//third-party/rust/crates/sct/0.7.1:sct",
     ],

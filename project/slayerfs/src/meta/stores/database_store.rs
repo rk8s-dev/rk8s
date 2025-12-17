@@ -306,15 +306,16 @@ impl DatabaseMetaStore {
         // Start transaction
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        if AccessMeta::find_by_id(parent_inode)
+        let parent_meta = AccessMeta::find_by_id(parent_inode)
             .one(&txn)
             .await
-            .map_err(MetaError::Database)?
-            .is_none()
-        {
+            .map_err(MetaError::Database)?;
+
+        if parent_meta.is_none() {
             txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::ParentNotFound(parent_inode));
         }
+        let parent_meta = parent_meta.unwrap();
 
         // Check if entry already exists
         let existing = ContentMeta::find()
@@ -335,7 +336,24 @@ impl DatabaseMetaStore {
         let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let dir_permission = Permission::new(0o40755, 0, 0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = parent_meta.permission();
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        // Directories inherit setgid bit from parent
+        let mode = if parent_has_setgid {
+            0o42755 // Directory with setgid bit
+        } else {
+            0o40755 // Regular directory
+        };
+
+        let dir_permission = Permission::new(mode, 0, gid);
         let access_meta = access_meta::ActiveModel {
             inode: Set(inode),
             permission: Set(dir_permission),
@@ -389,15 +407,16 @@ impl DatabaseMetaStore {
         // Start transaction
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        if AccessMeta::find_by_id(parent_inode)
+        let parent_meta = AccessMeta::find_by_id(parent_inode)
             .one(&txn)
             .await
-            .map_err(MetaError::Database)?
-            .is_none()
-        {
+            .map_err(MetaError::Database)?;
+
+        if parent_meta.is_none() {
             txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::ParentNotFound(parent_inode));
         }
+        let parent_meta = parent_meta.unwrap();
 
         // Check if entry already exists
         let existing = ContentMeta::find()
@@ -418,7 +437,22 @@ impl DatabaseMetaStore {
         let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let file_permission = Permission::new(0o644, 0, 0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = parent_meta.permission();
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        // Per POSIX semantics: when a directory has the setgid bit set, newly created
+        // entries inside inherit the directory's group (gid), but regular files
+        // do NOT inherit the setgid bit itself. Only newly created directories
+        // should carry the setgid bit. We therefore inherit `gid` from the parent
+        // but intentionally do not set the setgid bit on the file mode.
+        let file_permission = Permission::new(0o100644, 0, gid);
         let file_meta = file_meta::ActiveModel {
             inode: Set(inode),
             size: Set(0),
@@ -1216,7 +1250,7 @@ impl MetaStore for DatabaseMetaStore {
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
-        // Update old parent mtime
+        // Update old parent mtime and ctime
         let mut old_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(old_parent)
             .one(&txn)
             .await
@@ -1224,12 +1258,13 @@ impl MetaStore for DatabaseMetaStore {
             .ok_or(MetaError::ParentNotFound(old_parent))?
             .into();
         old_parent_meta.modify_time = Set(now);
+        old_parent_meta.create_time = Set(now);
         old_parent_meta
             .update(&txn)
             .await
             .map_err(MetaError::Database)?;
 
-        // Update new parent mtime (if different)
+        // Update new parent mtime and ctime (if different)
         if old_parent != new_parent {
             let mut new_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(new_parent)
                 .one(&txn)
@@ -1238,6 +1273,7 @@ impl MetaStore for DatabaseMetaStore {
                 .ok_or(MetaError::NotFound(new_parent))?
                 .into();
             new_parent_meta.modify_time = Set(now);
+            new_parent_meta.create_time = Set(now);
             new_parent_meta
                 .update(&txn)
                 .await
@@ -1286,12 +1322,16 @@ impl MetaStore for DatabaseMetaStore {
     ) -> Result<FileAttr, MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        if let Some(mut file) = FileMeta::find_by_id(ino)
+        if let Some(file) = FileMeta::find_by_id(ino)
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
         {
             let mut permission = file.permission().clone();
+            let mut size = file.size;
+            let mut access_time = file.access_time;
+            let mut modify_time = file.modify_time;
+            let mut create_time = file.create_time;
             let mut ctime_update = false;
             let now = Self::now_nanos();
 
@@ -1322,45 +1362,70 @@ impl MetaStore for DatabaseMetaStore {
                 ctime_update = true;
             }
 
-            file.permission = permission;
-
-            if let Some(size) = req.size {
-                let new_size = size as i64;
-                if file.size != new_size {
-                    file.size = new_size;
-                    file.modify_time = now;
+            if let Some(size_req) = req.size {
+                let new_size = size_req as i64;
+                if size != new_size {
+                    size = new_size;
+                    modify_time = now;
                 }
                 ctime_update = true;
             }
 
             if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
-                file.access_time = now;
+                access_time = now;
+                ctime_update = true;
             } else if let Some(atime) = req.atime {
-                file.access_time = atime;
+                access_time = atime;
+                ctime_update = true;
             }
 
             if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
-                file.modify_time = now;
+                modify_time = now;
                 ctime_update = true;
             } else if let Some(mtime) = req.mtime {
-                file.modify_time = mtime;
+                modify_time = mtime;
                 ctime_update = true;
             }
 
             if let Some(ctime) = req.ctime {
-                file.create_time = ctime;
+                create_time = ctime;
             } else if ctime_update {
-                file.create_time = now;
+                create_time = now;
             }
 
-            let active: file_meta::ActiveModel = file.into();
+            let kind = if file.symlink_target.is_some() {
+                FileType::Symlink
+            } else {
+                FileType::File
+            };
+            let nlink = file.nlink;
+            let symlink_len = file.symlink_target.as_ref().map(|t| t.len() as u64);
+
+            let mut active: file_meta::ActiveModel = file.into();
+            active.permission = Set(permission.clone());
+            active.size = Set(size);
+            active.access_time = Set(access_time);
+            active.modify_time = Set(modify_time);
+            active.create_time = Set(create_time);
             active.update(&txn).await.map_err(MetaError::Database)?;
 
             txn.commit().await.map_err(MetaError::Database)?;
-            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+            let out = FileAttr {
+                ino,
+                size: symlink_len.unwrap_or(size as u64),
+                kind,
+                mode: permission.mode,
+                uid: permission.uid,
+                gid: permission.gid,
+                atime: access_time,
+                mtime: modify_time,
+                ctime: create_time,
+                nlink: nlink as u32,
+            };
+            return Ok(out);
         }
 
-        if let Some(mut dir) = AccessMeta::find_by_id(ino)
+        if let Some(dir) = AccessMeta::find_by_id(ino)
             .one(&txn)
             .await
             .map_err(MetaError::Database)?
@@ -1368,6 +1433,9 @@ impl MetaStore for DatabaseMetaStore {
             let mut permission = dir.permission().clone();
             let mut ctime_update = false;
             let now = Self::now_nanos();
+            let mut access_time = dir.access_time;
+            let mut modify_time = dir.modify_time;
+            let mut create_time = dir.create_time;
 
             if let Some(mode) = req.mode {
                 permission.chmod(mode);
@@ -1396,29 +1464,33 @@ impl MetaStore for DatabaseMetaStore {
                 ctime_update = true;
             }
 
-            dir.permission = permission;
-
             if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
-                dir.access_time = now;
+                access_time = now;
+                ctime_update = true;
             } else if let Some(atime) = req.atime {
-                dir.access_time = atime;
+                access_time = atime;
+                ctime_update = true;
             }
 
             if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
-                dir.modify_time = now;
+                modify_time = now;
                 ctime_update = true;
             } else if let Some(mtime) = req.mtime {
-                dir.modify_time = mtime;
+                modify_time = mtime;
                 ctime_update = true;
             }
 
             if let Some(ctime) = req.ctime {
-                dir.create_time = ctime;
+                create_time = ctime;
             } else if ctime_update {
-                dir.create_time = now;
+                create_time = now;
             }
 
-            let active: access_meta::ActiveModel = dir.into();
+            let mut active: access_meta::ActiveModel = dir.into();
+            active.permission = Set(permission);
+            active.access_time = Set(access_time);
+            active.modify_time = Set(modify_time);
+            active.create_time = Set(create_time);
             active.update(&txn).await.map_err(MetaError::Database)?;
 
             txn.commit().await.map_err(MetaError::Database)?;
@@ -1507,10 +1579,27 @@ impl MetaStore for DatabaseMetaStore {
         {
             dir.access_time = Self::now_nanos();
             let active: access_meta::ActiveModel = dir.into();
+            let out_perm = active.permission.clone().unwrap();
+            let out_atime = active.access_time.clone().unwrap();
+            let out_mtime = active.modify_time.clone().unwrap();
+            let out_ctime = active.create_time.clone().unwrap();
+            let out_nlink = active.nlink.clone().unwrap();
             active.update(&txn).await.map_err(MetaError::Database)?;
 
             txn.commit().await.map_err(MetaError::Database)?;
-            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+            let out = FileAttr {
+                ino,
+                size: 4096,
+                kind: FileType::Dir,
+                mode: out_perm.mode,
+                uid: out_perm.uid,
+                gid: out_perm.gid,
+                atime: out_atime,
+                mtime: out_mtime,
+                ctime: out_ctime,
+                nlink: out_nlink as u32,
+            };
+            return Ok(out);
         }
 
         txn.rollback().await.map_err(MetaError::Database)?;
@@ -1721,7 +1810,6 @@ impl MetaStore for DatabaseMetaStore {
             .filter(session_meta::Column::Expire.lt(Utc::now().timestamp_millis()))
             .all(&txn)
             .await?;
-
         for session in sessions {
             let session_id = session.session_id;
             self.shutdown_session_internal(session_id, &txn).await?;

@@ -216,16 +216,20 @@ pub trait Layer: ObjectSafeFilesystem {
         Err(Error::from_raw_os_error(libc::ENOSYS).into())
     }
 
-    /// Retrieve host-side metadata bypassing ID mapping.
-    /// This is used internally by overlay operations to get raw stat information.
-    async fn do_getattr_helper(
+    /// Retrieve metadata with optional ID mapping control.
+    ///
+    /// - `mapping: true`: Returns attributes as seen inside the container (mapped).
+    /// - `mapping: false`: Returns raw attributes on the host filesystem (unmapped).
+    async fn getattr_with_mapping(
         &self,
         _inode: Inode,
         _handle: Option<u64>,
+        _mapping: bool,
     ) -> std::io::Result<(libc::stat64, Duration)> {
         Err(std::io::Error::from_raw_os_error(libc::ENOSYS))
     }
 }
+
 #[async_trait]
 impl Layer for PassthroughFs {
     fn root_inode(&self) -> Inode {
@@ -293,12 +297,13 @@ impl Layer for PassthroughFs {
         .await
     }
 
-    async fn do_getattr_helper(
+    async fn getattr_with_mapping(
         &self,
         inode: Inode,
         handle: Option<u64>,
+        mapping: bool,
     ) -> std::io::Result<(libc::stat64, Duration)> {
-        PassthroughFs::do_getattr_helper(self, inode, handle).await
+        PassthroughFs::do_getattr_inner(self, inode, handle, mapping).await
     }
 }
 pub(crate) fn is_dir(st: &FileAttr) -> bool {

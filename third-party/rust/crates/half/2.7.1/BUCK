@@ -26,7 +26,7 @@ rust_library(
     rustc_flags = ["@$(location :half-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
-        "//third-party/rust/crates/zerocopy/0.8.27:zerocopy",
+        "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
+        "//third-party/rust/crates/zerocopy/0.8.31:zerocopy",
     ],
 )

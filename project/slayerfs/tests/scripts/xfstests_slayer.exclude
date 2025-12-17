@@ -1,0 +1,7 @@
+# Exclude list for xfstests that slayerfs cannot pass
+# These tests require features not supported by FUSE or slayerfs
+
+generic/426 # File handle operations: open_by_handle_at() returns ESTALE
+generic/467 # File handle operations: open_by_handle_at() 
+generic/477 # File handle operations: open_by_handle_at()
+generic/633 # Device files (mknod with S_IFCHR/S_IFBLK): not supported by object storage filesystem

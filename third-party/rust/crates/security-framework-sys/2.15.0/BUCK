@@ -27,8 +27,6 @@ rust_library(
         "OSX_10_10",
         "OSX_10_11",
         "OSX_10_12",
-        "OSX_10_13",
-        "OSX_10_14",
         "OSX_10_9",
         "default",
     ],

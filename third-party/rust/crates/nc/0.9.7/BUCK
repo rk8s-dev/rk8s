@@ -49,7 +49,7 @@ rust_binary(
     ],
     rustc_flags = ["@$(location :nc-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.48:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.49:cc"],
 )
 
 buildscript_run(

@@ -32,6 +32,6 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/adler2/2.0.1:adler2",
-        "//third-party/rust/crates/simd-adler32/0.3.7:simd-adler32",
+        "//third-party/rust/crates/simd-adler32/0.3.8:simd-adler32",
     ],
 )

@@ -8,6 +8,7 @@ use crate::meta::client::{MetaClient, MetaClientOptions};
 use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::MetaError;
+use crate::meta::store::{SetAttrFlags, SetAttrRequest};
 use crate::meta::{MetaLayer, MetaStore};
 use dashmap::{DashMap, Entry};
 use std::collections::HashMap;
@@ -39,12 +40,12 @@ impl HandleRegistry {
         }
     }
 
-    async fn allocate(&self, ino: i64, flags: HandleFlags) -> u64 {
+    async fn allocate(&self, ino: i64, attr: FileAttr, flags: HandleFlags) -> u64 {
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
         self.handles
             .entry(ino)
             .or_default()
-            .push(FileHandle::new(fh, flags));
+            .push(FileHandle::new(fh, ino, attr, flags));
         self.handle_ino.insert(fh, ino);
         fh
     }
@@ -59,7 +60,6 @@ impl HandleRegistry {
             if empty {
                 self.handles.remove(&ino);
             }
-            tracing::info!("release file handle: fh={}, ino={}", fh, ino);
             Some(handle)
         } else {
             None
@@ -77,6 +77,34 @@ impl HandleRegistry {
             .get(&ino)
             .map(|entry| entry.iter().map(|h| h.fh).collect())
             .unwrap_or_default()
+    }
+
+    async fn attr_for(&self, fh: u64) -> Option<FileAttr> {
+        let ino = *self.handle_ino.get(&fh)?.value();
+        let entry = self.handles.get(&ino)?;
+        entry.iter().find(|h| h.fh == fh).map(|h| h.attr.clone())
+    }
+
+    async fn attr_for_inode(&self, ino: i64) -> Option<FileAttr> {
+        self.handles
+            .get(&ino)
+            .and_then(|entry| entry.iter().next().map(|h| h.attr.clone()))
+    }
+
+    async fn update_attr_for_inode(&self, ino: i64, attr: &FileAttr) {
+        if let Some(mut entry) = self.handles.get_mut(&ino) {
+            for handle in entry.iter_mut() {
+                handle.attr = attr.clone();
+            }
+        }
+    }
+
+    /// Check if any handle for this inode was opened for writing
+    async fn has_write_handle(&self, ino: i64) -> bool {
+        self.handles
+            .get(&ino)
+            .map(|entry| entry.iter().any(|h| h.flags.write))
+            .unwrap_or(false)
     }
 
     async fn allocate_dir(&self, handle: DirHandle) -> u64 {
@@ -359,60 +387,81 @@ where
         self.core.meta_layer.stat(ino).await.ok().flatten()
     }
 
+    /// Update atime (access time) for an inode to current time
+    pub async fn update_atime(&self, ino: i64) -> Result<(), String> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("time error: {}", e))?
+            .as_nanos() as i64;
+
+        let req = SetAttrRequest {
+            atime: Some(now),
+            ..Default::default()
+        };
+
+        self.core
+            .meta_layer
+            .set_attr(ino, &req, SetAttrFlags::empty())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Update handle cache if exists
+        if let Some(mut attr) = self.state.handles.attr_for_inode(ino).await {
+            attr.atime = now;
+            self.state.handles.update_attr_for_inode(ino, &attr).await;
+        }
+
+        Ok(())
+    }
+
+    /// Update mtime and ctime for an inode to current time
+    /// This is called during flush/fsync to handle mmap writes where the kernel
+    /// doesn't call the write() callback
+    pub async fn update_mtime_ctime(&self, ino: i64) -> Result<(), String> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("time error: {}", e))?
+            .as_nanos() as i64;
+
+        let req = SetAttrRequest {
+            mtime: Some(now),
+            ctime: Some(now),
+            ..Default::default()
+        };
+
+        self.core
+            .meta_layer
+            .set_attr(ino, &req, SetAttrFlags::empty())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Update handle cache if exists
+        if let Some(mut attr) = self.state.handles.attr_for_inode(ino).await {
+            attr.mtime = now;
+            attr.ctime = now;
+            self.state.handles.update_attr_for_inode(ino, &attr).await;
+        }
+
+        Ok(())
+    }
+
     /// List directory entries by inode
     pub async fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
         let meta_entries = self.core.meta_layer.readdir(ino).await.ok()?;
 
-        Some(meta_entries)
-    }
-
-    /// Open a directory handle for reading. Returns the file handle ID.
-    /// This pre-loads all directory entries to support efficient pagination.
-    pub async fn opendir_handle(&self, ino: i64) -> Result<u64, MetaError> {
-        // Verify directory exists
-        let attr = self
-            .core
-            .meta_layer
-            .stat(ino)
-            .await?
-            .ok_or(MetaError::NotFound(ino))?;
-
-        if attr.kind != FileType::Dir {
-            return Err(MetaError::NotDirectory(ino));
-        }
-
-        // Load all directory entries
-        let entries = self.core.meta_layer.readdir(ino).await?;
-
-        // Create handle
-        let handle = DirHandle::new(ino, entries);
-        let fh = self.state.handles.allocate_dir(handle).await;
-
-        Ok(fh)
-    }
-
-    /// Close a directory handle
-    pub async fn closedir_handle(&self, fh: u64) -> Result<(), MetaError> {
-        let handle = self
-            .state
-            .handles
-            .release_dir(fh)
-            .await
-            .ok_or(MetaError::InvalidHandle(fh))?;
-
-        tracing::info!(
-            "release dir handle: fh={}, ino={}, entries={}",
-            fh,
-            handle.ino,
-            handle.entries.len()
-        );
-        Ok(())
-    }
-
-    /// Read directory entries by handle with pagination
-    pub async fn readdir_by_handle(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
-        let handle = self.state.handles.get_dir(fh).await?;
-        Some(handle.get_entries(offset))
+        let entries: Vec<DirEntry> = meta_entries
+            .into_iter()
+            .map(|e| DirEntry {
+                name: e.name,
+                ino: e.ino,
+                kind: e.kind,
+            })
+            .collect();
+        Some(entries)
     }
 
     /// Normalize a path by stripping redundant separators and ensuring it starts with `/`.
@@ -964,6 +1013,26 @@ where
         Ok(())
     }
 
+    pub async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        let attr = self.core.meta_layer.set_attr(ino, req, flags).await?;
+
+        if let Some(size) = req.size
+            && let Some(inode) = self.state.files.inode(ino)
+        {
+            inode.update_size(size);
+        }
+
+        self.state.modified.touch(ino).await;
+        self.state.handles.update_attr_for_inode(ino, &attr).await;
+
+        Ok(attr)
+    }
+
     /// Write data by file offset. Internally splits the range into per-chunk writes.
     /// Writes each affected chunk fragment. Updates the file size at the end only if the write extends the file.
     pub async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
@@ -1031,10 +1100,10 @@ where
     }
 
     /// Allocate a per-file handle, returning the opaque fh id.
-    pub async fn open_handle(&self, ino: i64, read: bool, write: bool) -> u64 {
+    pub async fn open_handle(&self, ino: i64, attr: FileAttr, read: bool, write: bool) -> u64 {
         self.state
             .handles
-            .allocate(ino, HandleFlags::new(read, write))
+            .allocate(ino, attr, HandleFlags::new(read, write))
             .await
     }
 
@@ -1046,6 +1115,55 @@ where
             .await
             .map(|_| ())
             .ok_or_else(|| "invalid handle".into())
+    }
+
+    /// Open a directory handle for reading. Returns the file handle ID.
+    /// This pre-loads all directory entries to support efficient pagination.
+    pub async fn opendir_handle(&self, ino: i64) -> Result<u64, MetaError> {
+        // Verify directory exists
+        let attr = self
+            .core
+            .meta_layer
+            .stat(ino)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        if attr.kind != FileType::Dir {
+            return Err(MetaError::NotDirectory(ino));
+        }
+
+        // Load all directory entries
+        let entries = self.core.meta_layer.readdir(ino).await?;
+
+        // Create handle
+        let handle = DirHandle::new(ino, entries);
+        let fh = self.state.handles.allocate_dir(handle).await;
+
+        Ok(fh)
+    }
+
+    /// Close a directory handle
+    pub async fn closedir_handle(&self, fh: u64) -> Result<(), MetaError> {
+        let handle = self
+            .state
+            .handles
+            .release_dir(fh)
+            .await
+            .ok_or(MetaError::InvalidHandle(fh))?;
+
+        tracing::info!(
+            "release dir handle: fh={}, ino={}, entries={}",
+            fh,
+            handle.ino,
+            handle.entries.len()
+        );
+        Ok(())
+    }
+
+    /// Read directory entries by handle with pagination
+    pub async fn readdir_by_handle(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
+        let handle = self.state.handles.get_dir(fh).await?;
+        Some(handle.get_entries(offset))
     }
 
     /// Update cached information about a handle (e.g. last observed offset).
@@ -1061,6 +1179,14 @@ where
     /// List all open handles for an inode.
     pub async fn handles_for(&self, ino: i64) -> Vec<u64> {
         self.state.handles.handles_for(ino).await
+    }
+
+    pub async fn handle_attr(&self, fh: u64) -> Option<FileAttr> {
+        self.state.handles.attr_for(fh).await
+    }
+
+    pub async fn handle_attr_by_ino(&self, ino: i64) -> Option<FileAttr> {
+        self.state.handles.attr_for_inode(ino).await
     }
 
     /// Check whether a file has been modified since a given point in time.
@@ -1092,7 +1218,10 @@ where
         range: FileLockRange,
         pid: u32,
     ) -> Result<(), MetaError> {
-        self.core.meta_layer.set_plock(inode, owner, block, lock_type, range, pid).await
+        self.core
+            .meta_layer
+            .set_plock(inode, owner, block, lock_type, range, pid)
+            .await
     }
 
     /// Get file lock information by path.
@@ -1102,11 +1231,16 @@ where
         query: &FileLockQuery,
     ) -> Result<FileLockInfo, String> {
         let path = Self::norm_path(path);
-        let (inode, _) = self.core.meta_layer.lookup_path(&path)
+        let (inode, _) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "not found".to_string())?;
-        self.core.meta_layer.get_plock(inode, query)
+        self.core
+            .meta_layer
+            .get_plock(inode, query)
             .await
             .map_err(|e| e.to_string())
     }
@@ -1122,13 +1256,33 @@ where
         pid: u32,
     ) -> Result<(), String> {
         let path = Self::norm_path(path);
-        let (inode, _) = self.core.meta_layer.lookup_path(&path)
+        let (inode, _) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "not found".to_string())?;
-        self.core.meta_layer.set_plock(inode, owner, block, lock_type, range, pid)
+        self.core
+            .meta_layer
+            .set_plock(inode, owner, block, lock_type, range, pid)
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// Update timestamps on flush/fsync for files that may have been modified via mmap.
+    /// This is necessary because the kernel doesn't call write() for mmap writes.
+    /// We only update if the file was opened for writing.
+    pub async fn update_timestamps_on_flush(&self, ino: i64) -> Result<(), String> {
+        // Check if any handle for this inode was opened for writing
+        let has_write_handle = self.state.handles.has_write_handle(ino).await;
+
+        if has_write_handle {
+            // File was opened for writing, update mtime/ctime to handle potential mmap writes
+            self.update_mtime_ctime(ino).await?;
+        }
+
+        Ok(())
     }
 
     async fn ensure_inode_registered(&self, ino: i64) -> Result<Arc<Inode>, String> {

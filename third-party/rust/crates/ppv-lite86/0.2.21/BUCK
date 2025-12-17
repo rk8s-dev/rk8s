@@ -29,5 +29,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :ppv-lite86-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/zerocopy/0.8.27:zerocopy"],
+    deps = ["//third-party/rust/crates/zerocopy/0.8.31:zerocopy"],
 )

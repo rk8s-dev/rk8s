@@ -908,6 +908,12 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             self.invalidate_parent_path(new_parent).await;
         }
 
+        // Invalidate parent directory stat caches since their mtime/ctime changed
+        self.inode_cache.invalidate_inode(old_parent).await;
+        if old_parent != new_parent {
+            self.inode_cache.invalidate_inode(new_parent).await;
+        }
+
         Ok(())
     }
 
@@ -924,7 +930,6 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         Ok(())
     }
-
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
         let inode = self.check_root(ino);
         if let Some(node) = self.inode_cache.get_node(inode).await
@@ -1023,7 +1028,11 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
     ) -> Result<FileAttr, MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);
-        self.store.set_attr(inode, req, flags).await
+        let attr = self.store.set_attr(inode, req, flags).await?;
+        self.inode_cache
+            .insert_node(inode, attr.clone(), None)
+            .await;
+        Ok(attr)
     }
 
     async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {

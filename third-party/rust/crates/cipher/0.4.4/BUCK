@@ -26,7 +26,7 @@ rust_library(
     rustc_flags = ["@$(location :cipher-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/crypto-common/0.1.6:crypto-common",
+        "//third-party/rust/crates/crypto-common/0.1.7:crypto-common",
         "//third-party/rust/crates/inout/0.1.4:inout",
     ],
 )

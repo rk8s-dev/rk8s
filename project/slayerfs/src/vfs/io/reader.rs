@@ -41,6 +41,19 @@ where
             return Ok(Vec::new());
         }
 
+        // Check file size and adjust read length if necessary
+        let file_size = self.inode.file_size();
+        if offset >= file_size {
+            // Reading beyond EOF returns empty data
+            return Ok(Vec::new());
+        }
+
+        // Clamp the read length to not exceed file size
+        let actual_len = std::cmp::min(len, (file_size - offset) as usize);
+        if actual_len == 0 {
+            return Ok(Vec::new());
+        }
+
         // Lock the corresponding writer so a concurrent writer can't append a new slice while
         // we are sampling chunk metadata. Without this guard, the per-chunk readers could see
         // a stale slice set and end up reading the wrong data.
@@ -51,7 +64,7 @@ where
             layout.chunk_index_of(offset),
             u32::try_from(layout.within_chunk_offset(offset))
                 .expect("chunk offset must fit within u32 for spans"),
-            u32::try_from(len).expect("read length must fit within u32 for spans"),
+            u32::try_from(actual_len).expect("read length must fit within u32 for spans"),
         );
         let spans: Vec<ChunkSpan> = chunk_span
             .split_into::<ChunkTag>(layout.chunk_size, layout.chunk_size, false)

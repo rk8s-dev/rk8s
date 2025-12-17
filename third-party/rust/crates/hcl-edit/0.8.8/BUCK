@@ -32,6 +32,6 @@ rust_library(
     deps = [
         "//third-party/rust/crates/fnv/1.0.7:fnv",
         "//third-party/rust/crates/hcl-primitives/0.1.11:hcl-primitives",
-        "//third-party/rust/crates/winnow/0.7.13:winnow",
+        "//third-party/rust/crates/winnow/0.7.14:winnow",
     ],
 )

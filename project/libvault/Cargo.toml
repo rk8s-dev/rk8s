@@ -17,7 +17,7 @@ serde_json = { workspace = true }
 serde_bytes = { workspace = true }
 serde_yaml = { workspace = true }
 go-defer = { workspace = true }
-rand = "0.8.5"
+rand = { workspace = true }
 derivative = { workspace = true }
 enum-map = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
@@ -61,7 +61,7 @@ tracing = { workspace = true }
 builder-pattern = { workspace = true }
 x509-parser = { workspace = true }
 rustls-webpki = { workspace = true }
-tonic = "0.14.2"
+tonic = { workspace = true }
 openssl = { workspace = true, optional = true }
 openssl-sys = { workspace = true, optional = true }
 

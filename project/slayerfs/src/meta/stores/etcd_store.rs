@@ -12,7 +12,9 @@ use crate::meta::entities::*;
 use crate::meta::file_lock::{
     FileLockInfo, FileLockQuery, FileLockRange, FileLockType, PlockRecord,
 };
-use crate::meta::store::{DirEntry, FileAttr, LockName, MetaError, MetaStore};
+use crate::meta::store::{
+    DirEntry, FileAttr, LockName, MetaError, MetaStore, SetAttrFlags, SetAttrRequest,
+};
 use crate::meta::stores::pool::IdPool;
 use crate::meta::{INODE_ID_KEY, Permission};
 use crate::vfs::fs::FileType;
@@ -366,10 +368,12 @@ impl EtcdMetaStore {
 
     /// Create a new directory
     async fn create_directory(&self, parent_inode: i64, name: String) -> Result<i64, MetaError> {
-        // Step 1: Verify parent exists
-        if self.get_access_meta(parent_inode).await?.is_none() {
+        // Step 1: Verify parent exists and get its metadata
+        let parent_meta = self.get_access_meta(parent_inode).await?;
+        if parent_meta.is_none() {
             return Err(MetaError::ParentNotFound(parent_inode));
         }
+        let parent_meta = parent_meta.unwrap();
 
         if let Some(contents) = self.get_content_meta(parent_inode).await? {
             for content in contents {
@@ -385,7 +389,24 @@ impl EtcdMetaStore {
         let inode = self.generate_id(INODE_ID_KEY).await?;
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let dir_permission = Permission::new(0o40755, 0, 0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = &parent_meta.permission;
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        // Directories inherit setgid bit from parent
+        let mode = if parent_has_setgid {
+            0o42755 // Directory with setgid bit
+        } else {
+            0o40755 // Regular directory
+        };
+
+        let dir_permission = Permission::new(mode, 0, gid);
         let entry_info = EtcdEntryInfo {
             is_file: false,
             size: None,
@@ -492,10 +513,12 @@ impl EtcdMetaStore {
         parent_inode: i64,
         name: String,
     ) -> Result<i64, MetaError> {
-        // Step 1: Verify parent exists
-        if self.get_access_meta(parent_inode).await?.is_none() {
+        // Step 1: Verify parent exists and get its metadata
+        let parent_meta = self.get_access_meta(parent_inode).await?;
+        if parent_meta.is_none() {
             return Err(MetaError::ParentNotFound(parent_inode));
         }
+        let parent_meta = parent_meta.unwrap();
 
         if let Some(contents) = self.get_content_meta(parent_inode).await? {
             for content in contents {
@@ -511,7 +534,17 @@ impl EtcdMetaStore {
         let inode = self.generate_id(INODE_ID_KEY).await?;
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let file_permission = Permission::new(0o644, 0, 0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = &parent_meta.permission;
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        let file_permission = Permission::new(0o100644, 0, gid);
         let entry_info = EtcdEntryInfo {
             is_file: true,
             size: Some(0),
@@ -980,6 +1013,92 @@ impl EtcdMetaStore {
             }
         }
     }
+
+    /// Update mtime and ctime for a directory inode
+    async fn update_directory_timestamps(&self, ino: i64, now: i64) -> Result<(), MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
+
+        // Retry loop for optimistic locking using etcd's mod_revision
+        let max_retries = 10;
+        for retry in 0..max_retries {
+            let mut client = self.client.clone();
+
+            // Get current directory info with revision for CAS
+            let get_resp = client.get(reverse_key.as_str(), None).await.map_err(|e| {
+                MetaError::Internal(format!(
+                    "Failed to get directory key {}: {}",
+                    reverse_key, e
+                ))
+            })?;
+
+            let kv = get_resp.kvs().first().ok_or(MetaError::NotFound(ino))?;
+            let mod_revision = kv.mod_revision();
+
+            let mut entry_info: EtcdEntryInfo =
+                serde_json::from_slice(kv.value()).map_err(|e| {
+                    MetaError::Internal(format!(
+                        "Failed to deserialize directory entry info: {}",
+                        e
+                    ))
+                })?;
+
+            // Ensure this is a directory
+            if entry_info.is_file {
+                return Err(MetaError::Internal(format!(
+                    "Cannot update directory timestamps for file {}",
+                    ino
+                )));
+            }
+
+            // Update timestamps
+            entry_info.modify_time = now;
+            entry_info.create_time = now; // ctime should also be updated
+
+            // Attempt atomic update using mod_revision for precise CAS
+            let txn = Txn::new()
+                .when(vec![Compare::mod_revision(
+                    reverse_key.as_bytes(),
+                    CompareOp::Equal,
+                    mod_revision,
+                )])
+                .and_then(vec![TxnOp::put(
+                    reverse_key.as_bytes(),
+                    serde_json::to_vec(&entry_info).map_err(|e| {
+                        MetaError::Internal(format!(
+                            "Failed to serialize directory entry info: {}",
+                            e
+                        ))
+                    })?,
+                    None,
+                )]);
+
+            match client.txn(txn).await {
+                Ok(resp) if resp.succeeded() => {
+                    return Ok(());
+                }
+                Ok(_resp) => {
+                    // Transaction failed due to CAS conflict
+                    if retry >= max_retries - 1 {
+                        return Err(MetaError::Internal(format!(
+                            "Failed to update directory timestamps for {} after {} retries",
+                            ino, max_retries
+                        )));
+                    }
+                    // Continue to next retry
+                    tokio::time::sleep(std::time::Duration::from_millis(10 * (retry + 1) as u64))
+                        .await;
+                }
+                Err(e) => {
+                    return Err(MetaError::Internal(format!(
+                        "Failed to update directory timestamps for {}: {}",
+                        ino, e
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1255,6 +1374,7 @@ impl MetaStore for EtcdMetaStore {
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         entry_info.nlink = entry_info.nlink.saturating_add(1);
         entry_info.modify_time = now;
+        entry_info.create_time = now; // Update ctime when creating hard link
         entry_info.parent_inode = parent;
         entry_info.entry_name = name.to_string();
         entry_info.deleted = false;
@@ -1742,6 +1862,25 @@ impl MetaStore for EtcdMetaStore {
             }
         }
 
+        // Update parent directory timestamps
+        let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Update old parent directory timestamps
+        if let Err(e) = self.update_directory_timestamps(old_parent, now).await {
+            warn!(
+                "Rename succeeded but failed to update old parent directory timestamps: old_parent={}, error={}",
+                old_parent, e
+            );
+        }
+
+        // Update new parent directory timestamps
+        if let Err(e) = self.update_directory_timestamps(new_parent, now).await {
+            warn!(
+                "Rename succeeded but failed to update new parent directory timestamps: new_parent={}, error={}",
+                new_parent, e
+            );
+        }
+
         info!(
             "Rename completed successfully: {} -> {}, inode={}",
             old_name, new_name, entry_ino
@@ -2037,6 +2176,193 @@ impl MetaStore for EtcdMetaStore {
                 false
             }
         }
+    }
+
+    async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
+        let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Retry loop for optimistic locking using etcd's mod_revision
+        let max_retries = 10;
+        for retry in 0..max_retries {
+            let mut client = self.client.clone();
+
+            // Get current entry info with revision for CAS
+            let get_resp = client.get(reverse_key.as_str(), None).await.map_err(|e| {
+                MetaError::Internal(format!("Failed to get key {}: {}", reverse_key, e))
+            })?;
+
+            let kv = get_resp.kvs().first().ok_or(MetaError::NotFound(ino))?;
+            let mod_revision = kv.mod_revision();
+
+            let mut entry_info: EtcdEntryInfo =
+                serde_json::from_slice(kv.value()).map_err(|e| {
+                    MetaError::Internal(format!("Failed to deserialize entry info: {}", e))
+                })?;
+
+            let mut ctime_update = false;
+
+            // Apply permission changes
+            if let Some(mode) = req.mode {
+                entry_info.permission.chmod(mode);
+                ctime_update = true;
+            }
+
+            if let Some(uid) = req.uid {
+                let gid = req.gid.unwrap_or(entry_info.permission.gid);
+                entry_info.permission.chown(uid, gid);
+                ctime_update = true;
+            }
+
+            if req.uid.is_none()
+                && let Some(gid) = req.gid
+            {
+                entry_info.permission.chown(entry_info.permission.uid, gid);
+                ctime_update = true;
+            }
+
+            // Clear suid/sgid flags
+            if flags.contains(SetAttrFlags::CLEAR_SUID) {
+                entry_info.permission.mode &= !0o4000;
+                ctime_update = true;
+            }
+            if flags.contains(SetAttrFlags::CLEAR_SGID) {
+                entry_info.permission.mode &= !0o2000;
+                ctime_update = true;
+            }
+
+            // Apply size changes (files only)
+            if entry_info.is_file
+                && let Some(size_req) = req.size
+            {
+                let new_size = size_req as i64;
+                if entry_info.size != Some(new_size) {
+                    entry_info.size = Some(new_size);
+                    entry_info.modify_time = now;
+                }
+                ctime_update = true;
+            }
+
+            // Apply time changes
+            if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
+                entry_info.access_time = now;
+                ctime_update = true;
+            } else if let Some(atime) = req.atime {
+                entry_info.access_time = atime;
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
+                entry_info.modify_time = now;
+                ctime_update = true;
+            } else if let Some(mtime) = req.mtime {
+                entry_info.modify_time = mtime;
+                ctime_update = true;
+            }
+
+            if let Some(ctime) = req.ctime {
+                entry_info.create_time = ctime;
+            } else if ctime_update {
+                entry_info.create_time = now;
+            }
+
+            // Attempt atomic update using mod_revision for precise CAS
+            let txn = Txn::new()
+                .when(vec![Compare::mod_revision(
+                    reverse_key.as_bytes(),
+                    CompareOp::Equal,
+                    mod_revision,
+                )])
+                .and_then(vec![TxnOp::put(
+                    reverse_key.as_bytes(),
+                    serde_json::to_vec(&entry_info).map_err(|e| {
+                        MetaError::Internal(format!("Failed to serialize entry info: {}", e))
+                    })?,
+                    None,
+                )]);
+
+            match client.txn(txn).await {
+                Ok(resp) if resp.succeeded() => {
+                    // Success - convert to FileAttr and return
+                    let kind = if entry_info.symlink_target.is_some() {
+                        FileType::Symlink
+                    } else if entry_info.is_file {
+                        FileType::File
+                    } else {
+                        FileType::Dir
+                    };
+
+                    let size = if let Some(target) = &entry_info.symlink_target {
+                        target.len() as u64
+                    } else if entry_info.is_file {
+                        entry_info.size.unwrap_or(0).max(0) as u64
+                    } else {
+                        4096
+                    };
+
+                    return Ok(FileAttr {
+                        ino,
+                        size,
+                        kind,
+                        mode: entry_info.permission.mode,
+                        uid: entry_info.permission.uid,
+                        gid: entry_info.permission.gid,
+                        atime: entry_info.access_time,
+                        mtime: entry_info.modify_time,
+                        ctime: entry_info.create_time,
+                        nlink: entry_info.nlink,
+                    });
+                }
+                Ok(_) => {
+                    // Transaction failed (CAS conflict), retry
+                    if retry < max_retries - 1 {
+                        warn!(
+                            "CAS conflict updating attributes for inode {} (retry {}/{})",
+                            ino,
+                            retry + 1,
+                            max_retries
+                        );
+                        // Exponential backoff
+                        tokio::time::sleep(tokio::time::Duration::from_millis(5 * (1 << retry)))
+                            .await;
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    if retry < max_retries - 1 {
+                        warn!(
+                            "Failed to update attributes for inode {} (retry {}/{}): {}",
+                            ino,
+                            retry + 1,
+                            max_retries,
+                            e
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_millis(5 * (1 << retry)))
+                            .await;
+                        continue;
+                    } else {
+                        error!(
+                            "Failed to update attributes for inode {} after {} retries: {}",
+                            ino, max_retries, e
+                        );
+                        return Err(MetaError::Internal(format!(
+                            "Failed to update attributes: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+        }
+
+        Err(MetaError::Internal(format!(
+            "Failed to update attributes for inode {} after {} retries (CAS conflicts)",
+            ino, max_retries
+        )))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

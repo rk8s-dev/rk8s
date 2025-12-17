@@ -69,17 +69,19 @@ PERSISTENCE_BIN="$persistence_bin"
 BACKEND_DIR="$backend_dir"             
 MOUNT_DIR="$mount_dir"
 
-mkdir -p "\$BACKEND_DIR" "\$MOUNT_DIR"
 
 "\$PERSISTENCE_BIN" \
   -c "\$CONFIG_PATH" \
   -s "\$BACKEND_DIR" \
   -m "\$MOUNT_DIR" >>"\$LOG_FILE" 2>&1 &
-
+sleep 1
 EOF
 sudo chmod +x /usr/sbin/mount.fuse.slayerfs
 
 echo "====> Start to run xfstests."
+# Copy exclude list
+sudo cp "$current_dir/xfstests_slayer.exclude" /tmp/xfstests-dev/
+
 # run tests.
 cd /tmp/xfstests-dev
-# sudo LC_ALL=C ./check -fuse
+sudo LC_ALL=C ./check -fuse -E xfstests_slayer.exclude

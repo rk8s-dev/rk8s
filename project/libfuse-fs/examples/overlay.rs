@@ -94,6 +94,7 @@ fn parse_args() -> Result<Args, std::io::Error> {
     Ok(cmd_args)
 }
 
+#[allow(unused)]
 fn set_log(args: &Args) {
     let log_level = match args.log_level.as_str() {
         "error" | "warn" | "info" | "debug" | "trace" => args.log_level.as_str(),
@@ -109,7 +110,7 @@ fn set_log(args: &Args) {
 async fn main() -> Result<(), std::io::Error> {
     let args = parse_args()?;
 
-    set_log(&args);
+    // set_log(&args);
 
     // This is commented out because some testcase(fsstress) may output huge logs, exhausting disk space.
     // Uncomment this when we need to debug.

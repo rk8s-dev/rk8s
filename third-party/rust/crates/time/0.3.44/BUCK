@@ -36,7 +36,7 @@ rust_library(
     rustc_flags = ["@$(location :time-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/deranged/0.5.4:deranged",
+        "//third-party/rust/crates/deranged/0.5.5:deranged",
         "//third-party/rust/crates/itoa/1.0.15:itoa",
         "//third-party/rust/crates/num-conv/0.1.0:num-conv",
         "//third-party/rust/crates/powerfmt/0.2.0:powerfmt",

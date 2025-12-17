@@ -23,5 +23,5 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 log = { workspace = true }
 libvault = { workspace = true }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { workspace = true, features = ["v4", "serde"] }
 etcd-client = { workspace = true }

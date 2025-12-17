@@ -26,7 +26,7 @@ rust_library(
     rustc_flags = ["@$(location :system-configuration-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/bitflags/2.10.0:bitflags",
         "//third-party/rust/crates/core-foundation/0.9.4:core-foundation",
         "//third-party/rust/crates/system-configuration-sys/0.6.0:system-configuration-sys",
     ],
