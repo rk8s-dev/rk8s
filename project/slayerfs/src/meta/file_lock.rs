@@ -1,13 +1,9 @@
-use std::collections::HashMap;
-
 use sea_orm::{
     TryGetError, Value,
     sea_query::{self, ValueTypeErr},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use crate::meta::entities::{PlockMeta, plock_meta};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u32)]
@@ -133,20 +129,34 @@ impl PlockRecord {
                     nl.lock_range.start = l.lock_range.end;
                     i += 1;
                 }
-                _ if l.lock_range.end < nl.lock_range.end => {
-                    // Shrink the current lock range
-                    ls[i].lock_type = nl.lock_type;
-                    ls[i].lock_range.start = nl.lock_range.start;
+                _ if l.lock_range.end > nl.lock_range.end
+                    && l.lock_range.start >= nl.lock_range.start =>
+                {
+                    // Exact or partial overlap from the right - shrink the current lock
+                    ls[i].lock_range.start = nl.lock_range.end;
                     nl.lock_range.start = l.lock_range.end;
-                } // Insert new lock and adjust next lock
-                _ if l.lock_range.start < nl.lock_range.end => {
-                    new_records.push((i, nl));
-                    nl.lock_range.start = nl.lock_range.end;
+                }
+                _ if l.lock_range.start < nl.lock_range.start
+                    && l.lock_range.end > nl.lock_range.end =>
+                {
+                    // Unlock range is inside current lock - split into two locks
+                    let mut left_part = ls[i];
+                    left_part.lock_range.end = nl.lock_range.start;
+
+                    let right_part =
+                        PlockRecord::new(l.lock_type, l.pid, nl.lock_range.end, l.lock_range.end);
+
+                    ls[i] = left_part;
+                    new_records.push((i + 1, right_part));
+                    i += 1;
                 }
                 _ => {
-                    // Insert new lock
-                    new_records.push((i, nl));
-                    nl.lock_range.start = nl.lock_range.end;
+                    // Exact match or unlock covers the current lock
+                    // Remove this lock completely
+                    ls.remove(i);
+                    nl.lock_range.start = l.lock_range.end;
+                    // Don't increment i since we want to process the next element (which shifted to current position)
+                    continue; // Skip the i += 1 at the end of this iteration
                 }
             }
 
@@ -209,21 +219,17 @@ impl PlockRecord {
         lock_sid: &Uuid,
     ) -> Option<FileLockInfo> {
         for lock in locks {
-            if (lock.lock_type == FileLockType::WriteLock
-                || query.lock_type == FileLockType::WriteLock)
-                && lock.lock_range.overlaps(&query.range)
-            {
-                if *self_sid == *lock_sid {
+            if lock.lock_range.overlaps(&query.range) {
+                let conflict = match (lock.lock_type, query.lock_type) {
+                    (FileLockType::ReadLock, FileLockType::ReadLock) => false,
+                    _ => true,
+                };
+
+                if conflict {
                     return Some(FileLockInfo {
                         lock_type: lock.lock_type,
                         range: lock.lock_range,
-                        pid: lock.pid,
-                    });
-                } else {
-                    return Some(FileLockInfo {
-                        lock_type: lock.lock_type,
-                        range: lock.lock_range,
-                        pid: 0,
+                        pid: if self_sid == lock_sid { lock.pid } else { 0 },
                     });
                 }
             }
@@ -249,7 +255,7 @@ impl FileLockRange {
 }
 #[derive(Debug, Clone, Copy)]
 pub struct FileLockQuery {
-    pub owner: u64,
+    pub owner: i64,
     pub lock_type: FileLockType,
     pub range: FileLockRange,
 }

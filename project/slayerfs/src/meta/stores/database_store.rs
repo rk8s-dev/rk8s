@@ -18,7 +18,7 @@ use crate::meta::store::{
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
-use chrono::{Duration, Utc};
+use chrono::{Duration as ChronoDuration, Utc};
 use log::info;
 use sea_orm::prelude::Uuid;
 use sea_orm::*;
@@ -28,6 +28,7 @@ use std::hash::Hash;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 #[derive(Eq, Hash, PartialEq)]
 struct PlockHashMapKey {
@@ -136,7 +137,11 @@ impl DatabaseMetaStore {
         match &config.database.db_config {
             DatabaseType::Sqlite { url } => {
                 info!("Connecting to SQLite: {}", url);
-                let opts = ConnectOptions::new(url.clone());
+                let mut opts = ConnectOptions::new(url.clone());
+                opts.max_connections(1)
+                    .min_connections(1)
+                    .connect_timeout(Duration::from_secs(30))
+                    .idle_timeout(Duration::from_secs(30));
                 let db = Database::connect(opts).await?;
                 Ok(db)
             }
@@ -195,10 +200,20 @@ impl DatabaseMetaStore {
 
         for (i, stmt) in stmts.iter().enumerate() {
             let sql = builder.build(stmt);
-            db.execute(sql).await.map_err(|e| {
-                eprintln!("Failed to execute statement {}: {}", i + 1, e);
-                MetaError::Database(e)
-            })?;
+            match db.execute(sql).await {
+                Ok(_) => info!("Statement {} executed successfully", i + 1),
+                Err(e) => {
+                    if e.to_string().contains("duplicate key") {
+                        info!(
+                            "Table already exists for statement {}, skipping: {}",
+                            i + 1,
+                            e
+                        );
+                        continue;
+                    }
+                    return Err(MetaError::Database(e));
+                }
+            }
         }
 
         let index_stmt = Index::create()
@@ -209,10 +224,16 @@ impl DatabaseMetaStore {
             .to_owned();
 
         let index_sql = builder.build(&index_stmt);
-        db.execute(index_sql).await.map_err(|e| {
-            eprintln!("Failed to create index idx_content_meta_inode: {}", e);
-            MetaError::Database(e)
-        })?;
+        match db.execute(index_sql).await {
+            Ok(_) => info!("Index created successfully"),
+            Err(e) => {
+                if e.to_string().contains("already exists") {
+                    info!("Index already exists, skipping: {}", e);
+                } else {
+                    return Err(MetaError::Database(e));
+                }
+            }
+        }
 
         info!("Database schema initialized successfully");
         Ok(())
@@ -485,7 +506,7 @@ impl DatabaseMetaStore {
                     }
                 };
 
-                if last_updated < current_time - Duration::seconds(7) {
+                if last_updated < current_time - ChronoDuration::seconds(7) {
                     lock.last_updated = ActiveValue::Set(current_time);
                     lock.update(&txn).await?;
                     flag = true;
@@ -533,9 +554,12 @@ impl DatabaseMetaStore {
     ) -> Result<(), MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
-        // chech file is existing
-        let exists = self.file_is_existing(inode).await?;
-        if !exists {
+        // check file is existing using the same transaction
+        let exists = FileMeta::find_by_id(inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+        if exists.is_none() {
             txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::NotFound(inode));
         }
@@ -562,38 +586,42 @@ impl DatabaseMetaStore {
                             serde_json::from_slice(&plock.records).unwrap_or_default();
 
                         if records.len() == 0 {
+                            // No locks to unlock, transaction is complete
                             txn.commit().await.map_err(MetaError::Database)?;
                             return Ok(());
                         }
 
-                        let new_records = PlockRecord::update_locks(records, new_lock.clone());
-                        let new_records_bytes = serde_json::to_vec(&new_records).map_err(|e| {
-                            MetaError::Internal(format!(
-                                "error to serialization Vec<PlockRecord>: {e}"
-                            ))
-                        })?;
-
-                        let mut active_model = plock_meta::ActiveModel {
-                            inode: Set(inode),
-                            sid: Set(*sid),
-                            owner: Set(owner),
-                            ..Default::default()
-                        };
+                        let new_records =
+                            PlockRecord::update_locks(records.clone(), new_lock.clone());
 
                         if new_records.len() == 0 {
-                            let _ = PlockMeta::delete(active_model)
-                                .exec(&txn)
+                            // No more locks for this (inode, sid, owner) combination, delete the record
+                            let delete_model = plock_meta::ActiveModel {
+                                inode: Set(plock.inode),
+                                sid: Set(plock.sid),
+                                owner: Set(plock.owner),
+                                ..Default::default()
+                            };
+                            let _ = delete_model
+                                .delete(&txn)
                                 .await
                                 .map_err(MetaError::Database)?;
                         } else {
+                            // Update the existing record with new lock list
+                            let new_records_bytes =
+                                serde_json::to_vec(&new_records).map_err(|e| {
+                                    MetaError::Internal(format!(
+                                        "error to serialization Vec<PlockRecord>: {e}"
+                                    ))
+                                })?;
+
+                            let mut active_model: plock_meta::ActiveModel = plock.into();
                             active_model.records = Set(new_records_bytes);
-                            active_model
-                                .insert(&txn)
-                                .await
-                                .map_err(MetaError::Database)?;
+                            active_model.save(&txn).await.map_err(MetaError::Database)?;
                         }
                     }
                     None => {
+                        // No existing lock record found
                         txn.commit().await.map_err(MetaError::Database)?;
                         return Ok(());
                     }
@@ -613,7 +641,7 @@ impl DatabaseMetaStore {
                 for item in ps {
                     let key = PlockHashMapKey {
                         sid: item.sid,
-                        owner: item.owner,
+                        owner: item.owner.try_into().unwrap(),
                     };
                     locks.insert(key, item.records);
                 }
@@ -638,7 +666,7 @@ impl DatabaseMetaStore {
                     txn.rollback().await.map_err(MetaError::Database)?;
                     return Err(MetaError::LockConflict {
                         inode,
-                        owner,
+                        owner: owner.try_into().unwrap(),
                         range,
                     });
                 }
@@ -651,7 +679,7 @@ impl DatabaseMetaStore {
                     MetaError::Internal(format!("error to serialization Vec<PlockRecord>: {e}"))
                 })?;
 
-                // lock records changed update
+                // lock records changed update or insert
                 if locks.get(&lkey).map(|r| r != &records).unwrap_or(true) {
                     let plock = plock_meta::ActiveModel {
                         sid: Set(*sid),
@@ -659,7 +687,13 @@ impl DatabaseMetaStore {
                         inode: Set(inode),
                         records: Set(records),
                     };
-                    plock.save(&txn).await.map_err(MetaError::Database)?;
+
+                    // Check if this is a new record or an update
+                    if locks.contains_key(&lkey) {
+                        plock.save(&txn).await.map_err(MetaError::Database)?;
+                    } else {
+                        plock.insert(&txn).await.map_err(MetaError::Database)?;
+                    }
                 }
 
                 txn.commit().await.map_err(MetaError::Database)?;
@@ -1651,7 +1685,7 @@ impl MetaStore for DatabaseMetaStore {
     async fn new_session(&self, session_info: SessionInfo) -> Result<Session, MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
         let session_id = Uuid::now_v7();
-        let expire = (Utc::now() + Duration::minutes(5)).timestamp_millis();
+        let expire = (Utc::now() + ChronoDuration::minutes(5)).timestamp_millis();
         let payload = serde_json::to_vec(&session_info).map_err(MetaError::Serialization)?;
         let session = session_meta::ActiveModel {
             session_id: Set(session_id),
@@ -1672,7 +1706,7 @@ impl MetaStore for DatabaseMetaStore {
 
     async fn refresh_session(&self, session_id: Uuid) -> Result<(), MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
-        let expire = (Utc::now() + Duration::minutes(5)).timestamp_millis();
+        let expire = (Utc::now() + ChronoDuration::minutes(5)).timestamp_millis();
         let session = SessionMeta::find()
             .filter(session_meta::Column::SessionId.eq(session_id))
             .one(&txn)
@@ -1724,19 +1758,24 @@ impl MetaStore for DatabaseMetaStore {
         inode: i64,
         query: &FileLockQuery,
     ) -> Result<FileLockInfo, MetaError> {
-        let rows = PlockMeta::find()
-            .filter(plock_meta::Column::Inode.eq(inode))
-            .all(&self.db)
-            .await
-            .map_err(MetaError::Database)?;
         let sid = self
             .sid
             .get()
             .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
 
-        for row in rows {
+        // Query specific owner and session
+        let row = PlockMeta::find()
+            .filter(plock_meta::Column::Inode.eq(inode))
+            .filter(plock_meta::Column::Owner.eq(query.owner as i64))
+            .filter(plock_meta::Column::Sid.eq(*sid))
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if let Some(row) = row {
             let locks: Vec<PlockRecord> = serde_json::from_slice(&row.records).unwrap_or_default();
-            match PlockRecord::get_plock(&locks, &query, sid, &row.sid) {
+
+            match PlockRecord::get_plock(&locks, query, sid, &row.sid) {
                 Some(v) => return Ok(v),
                 None => {}
             }
@@ -1763,7 +1802,13 @@ impl MetaStore for DatabaseMetaStore {
 
         loop {
             let result = self
-                .try_set_plock(inode, owner, &new_lock, lock_type, range)
+                .try_set_plock(
+                    inode,
+                    owner.try_into().unwrap(),
+                    &new_lock,
+                    lock_type,
+                    range,
+                )
                 .await;
 
             match result {
@@ -1785,5 +1830,641 @@ impl MetaStore for DatabaseMetaStore {
         self.sid
             .set(sid)
             .map_err(|_| MetaError::Internal("sid has been seted".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meta::config::{CacheConfig, ClientOptions, DatabaseConfig};
+    use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
+    use tokio::time;
+
+    fn test_config() -> Config {
+        Config {
+            database: DatabaseConfig {
+                db_config: DatabaseType::Sqlite {
+                    url: "sqlite:file::memory:".to_string(),
+                },
+            },
+            cache: CacheConfig::default(),
+            client: ClientOptions::default(),
+        }
+    }
+
+    /// Configuration for shared database testing (multi-session)
+    fn shared_db_config() -> Config {
+        Config {
+            database: DatabaseConfig {
+                db_config: DatabaseType::Sqlite {
+                    url: "postgres://slayerfs:slayerfs@127.0.0.1:5432/database".to_string(),
+                },
+            },
+            cache: CacheConfig::default(),
+            client: ClientOptions::default(),
+        }
+    }
+
+    async fn new_test_store() -> DatabaseMetaStore {
+        DatabaseMetaStore::from_config(test_config())
+            .await
+            .expect("Failed to create test database store")
+    }
+
+    /// Create a new test store with pre-configured session ID
+    async fn new_test_store_with_session(session_id: Uuid) -> DatabaseMetaStore {
+        let store = new_test_store().await;
+        store.set_sid(session_id).expect("Failed to set session ID");
+        store
+    }
+
+    /// Create multiple test stores for testing multiple sessions
+    async fn create_test_stores(count: usize) -> Vec<DatabaseMetaStore> {
+        let mut stores = Vec::with_capacity(count);
+        for _ in 0..count {
+            stores.push(new_test_store().await);
+        }
+        stores
+    }
+
+    /// Helper struct to manage multiple test sessions
+    struct TestSessionManager {
+        stores: Vec<DatabaseMetaStore>,
+        session_ids: Vec<Uuid>,
+    }
+
+    use std::sync::LazyLock;
+    use tokio::sync::Mutex;
+
+    // 静态初始化，确保只执行一次
+    static SHARED_DB_INIT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    impl TestSessionManager {
+        async fn new(session_count: usize) -> Self {
+            // 获取锁，确保串行初始化
+            let _guard = SHARED_DB_INIT.lock().await;
+
+            use std::env;
+            // Clean up existing shared test database
+            let temp_dir = env::temp_dir();
+            let db_path = temp_dir.join("slayerfs_shared_test.db");
+
+            // 只在第一次初始化时清理
+            static FIRST_INIT: std::sync::Once = std::sync::Once::new();
+            FIRST_INIT.call_once(|| {
+                let _ = std::fs::remove_file(&db_path);
+            });
+
+            let mut stores = Vec::with_capacity(session_count);
+            let mut session_ids = Vec::with_capacity(session_count);
+
+            // 创建第一个 store（会初始化数据库）
+            let config = shared_db_config();
+            let first_store = DatabaseMetaStore::from_config(config.clone())
+                .await
+                .expect("Failed to create shared test database store");
+
+            let first_session_id = Uuid::now_v7();
+            first_store
+                .set_sid(first_session_id)
+                .expect("Failed to set session ID");
+
+            stores.push(first_store);
+            session_ids.push(first_session_id);
+
+            // 后续的 store 复用已初始化的数据库
+            for _ in 1..session_count {
+                let store = DatabaseMetaStore::from_config(config.clone())
+                    .await
+                    .expect("Failed to create shared test database store");
+
+                let session_id = Uuid::now_v7();
+                store.set_sid(session_id).expect("Failed to set session ID");
+
+                stores.push(store);
+                session_ids.push(session_id);
+
+                time::sleep(time::Duration::from_millis(5)).await;
+            }
+
+            Self {
+                stores,
+                session_ids,
+            }
+        }
+
+        fn get_store(&self, index: usize) -> &DatabaseMetaStore {
+            &self.stores[index]
+        }
+
+        fn get_session_id(&self, index: usize) -> Uuid {
+            self.session_ids[index]
+        }
+    }
+
+    #[tokio::test]
+    async fn test_basic_read_lock() {
+        let store = new_test_store().await;
+        let session_id = Uuid::now_v7();
+        let owner: u64 = 1001;
+
+        // Set session
+        store.set_sid(session_id).unwrap();
+
+        // Create a file first
+        let parent = store.root_ino();
+        let file_ino = store
+            .create_file(parent, "test_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // Acquire read lock
+        store
+            .set_plock(
+                file_ino,
+                owner as i64,
+                false,
+                FileLockType::ReadLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Verify lock exists
+        let query = FileLockQuery {
+            owner: owner as i64,
+            lock_type: FileLockType::ReadLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let lock_info = store.get_plock(file_ino, &query).await.unwrap();
+        assert_eq!(lock_info.lock_type, FileLockType::UnLock);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_read_locks() {
+        // Create session manager with 2 sessions
+        let session_mgr = TestSessionManager::new(2).await;
+
+        let owner1: i64 = 1001;
+        let owner2: i64 = 1002;
+
+        // Create a file first using the first session
+        let store1 = session_mgr.get_store(0);
+        let parent = store1.root_ino();
+        let file_ino = store1
+            .create_file(parent, "test_multiple_read_locks_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // First session acquires read lock
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::ReadLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Second session should be able to acquire read lock on same range
+        let store2 = session_mgr.get_store(1);
+        store2
+            .set_plock(
+                file_ino,
+                owner2 as i64,
+                false,
+                FileLockType::ReadLock,
+                FileLockRange { start: 0, end: 100 },
+                5678,
+            )
+            .await
+            .unwrap();
+
+        // Verify both locks exist by querying each session
+        let query1 = FileLockQuery {
+            owner: owner1,
+            lock_type: FileLockType::ReadLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let query2 = FileLockQuery {
+            owner: owner2,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
+        assert_eq!(lock_info1.lock_type, FileLockType::UnLock);
+
+        let lock_info2 = store2.get_plock(file_ino, &query2).await.unwrap();
+        assert_eq!(lock_info2.lock_type, FileLockType::ReadLock);
+        assert_eq!(lock_info2.range.start, 0);
+        assert_eq!(lock_info2.range.end, 100);
+        assert_eq!(lock_info2.pid, 5678);
+    }
+
+    #[tokio::test]
+    async fn test_write_lock_conflict() {
+        // Create session manager with 2 sessions
+        let session_mgr = TestSessionManager::new(2).await;
+
+        let owner1: u64 = 1001;
+        let owner2: u64 = 1002;
+
+        // Create a file first using the first session
+        let store1 = session_mgr.get_store(0);
+        let parent = store1.root_ino();
+        let file_ino = store1
+            .create_file(parent, "test_write_lock_conflict_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // First session acquires read lock
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::ReadLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Second session should not be able to acquire write lock on overlapping range
+        let store2 = session_mgr.get_store(1);
+        let result = store2
+            .set_plock(
+                file_ino,
+                owner2 as i64,
+                false, // non-blocking
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 50,
+                    end: 150,
+                }, // Overlapping range
+                5678,
+            )
+            .await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::LockConflict {
+                inode: err_inode,
+                owner: err_owner,
+                range: err_range,
+            } => {
+                assert_eq!(err_inode, file_ino);
+                assert_eq!(err_owner, owner2 as i64);
+                assert_eq!(err_range.start, 50);
+                assert_eq!(err_range.end, 150);
+            }
+            _ => panic!("Expected LockConflict error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lock_release() {
+        let session_id = Uuid::now_v7();
+        let owner = 1001;
+
+        // Create a store with pre-configured session
+        let store = new_test_store_with_session(session_id).await;
+
+        // Create a file first
+        let parent = store.root_ino();
+        let file_ino = store
+            .create_file(parent, "test_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // Acquire lock
+        store
+            .set_plock(
+                file_ino,
+                owner,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Verify lock exists
+        let query = FileLockQuery {
+            owner: owner as i64,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let lock_info = store.get_plock(file_ino, &query).await.unwrap();
+        assert_eq!(lock_info.lock_type, FileLockType::WriteLock);
+
+        // Release lock
+        store
+            .set_plock(
+                file_ino,
+                owner,
+                false,
+                FileLockType::UnLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Verify lock is released
+        let lock_info = store.get_plock(file_ino, &query).await.unwrap();
+        assert_eq!(lock_info.lock_type, FileLockType::UnLock);
+    }
+
+    #[tokio::test]
+    async fn test_non_overlapping_locks() {
+        // Create session manager with 2 sessions
+        let session_mgr = TestSessionManager::new(2).await;
+
+        let owner1: i64 = 1001;
+        let owner2: i64 = 1002;
+
+        // Create a file first using the first session
+        let store1 = session_mgr.get_store(0);
+        let parent = store1.root_ino();
+        let file_ino = store1
+            .create_file(parent, "test_none_overlapping_locks_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // First session acquires lock on range 0-100
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Second session should be able to acquire lock on non-overlapping range 200-300
+        let store2 = session_mgr.get_store(1);
+        store2
+            .set_plock(
+                file_ino,
+                owner2 as i64,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 200,
+                    end: 300,
+                },
+                5678,
+            )
+            .await
+            .unwrap();
+
+        // Verify both locks exist
+        let query1 = FileLockQuery {
+            owner: owner1,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let query2 = FileLockQuery {
+            owner: owner2,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange {
+                start: 200,
+                end: 300,
+            },
+        };
+
+        let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
+        assert_eq!(lock_info1.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info1.range.start, 0);
+        assert_eq!(lock_info1.range.end, 100);
+        assert_eq!(lock_info1.pid, 1234);
+
+        let lock_info2 = store2.get_plock(file_ino, &query2).await.unwrap();
+        assert_eq!(lock_info2.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info2.range.start, 200);
+        assert_eq!(lock_info2.range.end, 300);
+        assert_eq!(lock_info2.pid, 5678);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_read_write_locks() {
+        // Test multiple sessions acquiring different types of locks
+        let session_mgr = TestSessionManager::new(3).await;
+
+        // Create a file
+        let store0 = session_mgr.get_store(0);
+        let parent = store0.root_ino();
+        let file_ino = store0
+            .create_file(parent, "concurrent_test.txt".to_string())
+            .await
+            .unwrap();
+
+        let owner1: i64 = 1001;
+        let owner2: i64 = 1002;
+        let owner3: i64 = 1003;
+
+        // Session 1: Acquire write lock on range 0-100
+        {
+            let store1 = session_mgr.get_store(0);
+            store1
+                .set_plock(
+                    file_ino,
+                    owner1 as i64,
+                    false,
+                    FileLockType::WriteLock,
+                    FileLockRange { start: 0, end: 100 },
+                    1111,
+                )
+                .await
+                .expect("Failed to acquire write lock");
+        }
+
+        // Session 2: Acquire read lock on range 200-300 (should succeed)
+        {
+            let store2 = session_mgr.get_store(1);
+            store2
+                .set_plock(
+                    file_ino,
+                    owner2 as i64,
+                    false,
+                    FileLockType::ReadLock,
+                    FileLockRange {
+                        start: 200,
+                        end: 300,
+                    },
+                    2222,
+                )
+                .await
+                .expect("Failed to acquire read lock");
+        }
+
+        // Session 3: Try to acquire write lock on overlapping range 50-150 (should fail)
+        {
+            let store3 = session_mgr.get_store(2);
+            let result = store3
+                .set_plock(
+                    file_ino,
+                    owner3 as i64,
+                    false,
+                    FileLockType::WriteLock,
+                    FileLockRange {
+                        start: 50,
+                        end: 150,
+                    },
+                    3333,
+                )
+                .await;
+
+            // Verify it fails with LockConflict
+            assert!(result.is_err());
+            match result.unwrap_err() {
+                MetaError::LockConflict { .. } => {}
+                _ => panic!("Expected LockConflict error"),
+            }
+        }
+
+        // Verify successful locks exist
+        let query1 = FileLockQuery {
+            owner: owner1,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let query2 = FileLockQuery {
+            owner: owner2,
+            lock_type: FileLockType::ReadLock,
+            range: FileLockRange {
+                start: 200,
+                end: 300,
+            },
+        };
+
+        // Check locks from different sessions
+        {
+            let store1 = session_mgr.get_store(0);
+            let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
+            assert_eq!(lock_info1.lock_type, FileLockType::WriteLock);
+        }
+
+        {
+            let store2 = session_mgr.get_store(1);
+            let lock_info2 = store2.get_plock(file_ino, &query2).await.unwrap();
+            assert_eq!(lock_info2.lock_type, FileLockType::UnLock);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cross_session_lock_visibility() {
+        // Test that locks set by one session are visible to another session
+        let session_mgr = TestSessionManager::new(2).await;
+
+        let owner1: u64 = 1001;
+
+        // Create a file
+        let store1 = session_mgr.get_store(0);
+        let parent = store1.root_ino();
+        let file_ino = store1
+            .create_file(parent, "visibility_test.txt".to_string())
+            .await
+            .unwrap();
+
+        // Session 1 acquires a write lock
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 0,
+                    end: 1000,
+                },
+                4444,
+            )
+            .await
+            .unwrap();
+
+        // Session 2 should be able to see the lock (and respect it)
+        let store2 = session_mgr.get_store(1);
+        let conflict_result = store2
+            .set_plock(
+                file_ino,
+                2002, // different owner
+                false,
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 500,
+                    end: 600,
+                }, // overlapping range
+                5555,
+            )
+            .await;
+
+        // Should fail due to lock conflict
+        assert!(conflict_result.is_err());
+        match conflict_result.unwrap_err() {
+            MetaError::LockConflict { .. } => {}
+            _ => panic!("Expected LockConflict error"),
+        }
+
+        // Session 1 releases the lock
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::UnLock,
+                FileLockRange {
+                    start: 0,
+                    end: 1000,
+                },
+                4444,
+            )
+            .await
+            .unwrap();
+
+        // Now Session 2 should be able to acquire the lock
+        store2
+            .set_plock(
+                file_ino,
+                2002,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 500,
+                    end: 600,
+                },
+                5555,
+            )
+            .await
+            .unwrap();
+
+        // Verify the lock exists
+        let query = FileLockQuery {
+            owner: 2002,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange {
+                start: 500,
+                end: 600,
+            },
+        };
+
+        let lock_info = store2.get_plock(file_ino, &query).await.unwrap();
+        assert_eq!(lock_info.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info.pid, 5555);
     }
 }

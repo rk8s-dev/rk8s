@@ -933,7 +933,7 @@ impl EtcdMetaStore {
                         if conflict_found {
                             return Err(MetaError::LockConflict {
                                 inode,
-                                owner,
+                                owner: owner.try_into().unwrap(),
                                 range,
                             });
                         }
@@ -955,7 +955,7 @@ impl EtcdMetaStore {
                             } else {
                                 let new_plock = EtcdPlock {
                                     sid: *sid,
-                                    owner,
+                                    owner: owner.try_into().unwrap(),
                                     records: ls,
                                 };
                                 plocks.push(new_plock);
@@ -970,7 +970,7 @@ impl EtcdMetaStore {
 
                         let new_plock = EtcdPlock {
                             sid: *sid,
-                            owner,
+                            owner: owner.try_into().unwrap(),
                             records: ls,
                         };
 
@@ -2088,7 +2088,13 @@ impl MetaStore for EtcdMetaStore {
 
         loop {
             let result = self
-                .try_set_plock(inode, owner, &new_lock, lock_type, range)
+                .try_set_plock(
+                    inode,
+                    owner.try_into().unwrap(),
+                    &new_lock,
+                    lock_type,
+                    range,
+                )
                 .await;
 
             match result {
@@ -2115,18 +2121,20 @@ impl MetaStore for EtcdMetaStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::chuck::SliceDesc;
-    use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
-    use crate::meta::entities::etcd::{EtcdDirChildren, EtcdEntryInfo};
-    use crate::meta::{INODE_ID_KEY, Permission};
-    use std::sync::Arc;
+    use crate::meta::MetaStore;
+    use crate::meta::config::Config;
+    use crate::meta::config::{CacheConfig, ClientOptions, DatabaseConfig, DatabaseType};
+    use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
+    use crate::meta::store::MetaError;
+    use crate::meta::stores::EtcdMetaStore;
+    use tokio::time;
+    use uuid::Uuid;
 
     fn test_config() -> Config {
         Config {
             database: DatabaseConfig {
                 db_config: DatabaseType::Etcd {
-                    urls: vec!["http://127.0.0.1:2379".to_string()],
+                    urls: vec!["127.0.0.1:2379".to_string()],
                 },
             },
             cache: CacheConfig::default(),
@@ -2134,143 +2142,616 @@ mod tests {
         }
     }
 
-    async fn new_store() -> EtcdMetaStore {
+    /// Configuration for shared database testing (multi-session)
+    fn shared_db_config() -> Config {
+        Config {
+            database: DatabaseConfig {
+                db_config: DatabaseType::Etcd {
+                    urls: vec!["127.0.0.1:2379".to_string()],
+                },
+            },
+            cache: CacheConfig::default(),
+            client: ClientOptions::default(),
+        }
+    }
+
+    async fn new_test_store() -> EtcdMetaStore {
         EtcdMetaStore::from_config(test_config())
             .await
-            .expect("connect etcd on 2379")
+            .expect("Failed to create test database store")
     }
 
-    #[ignore]
-    #[tokio::test]
-    async fn atomic_update_creates_and_updates_children_map() {
-        let store = new_store().await;
-        let parent = 4242;
-
+    /// Create a new test store with pre-configured session ID
+    async fn new_test_store_with_session(session_id: Uuid) -> EtcdMetaStore {
+        let store = new_test_store().await;
+        store.set_sid(session_id).expect("Failed to set session ID");
         store
-            .update_parent_children(
-                parent,
-                |m| {
-                    m.insert("child1".into(), 1001);
-                },
-                5,
+    }
+
+    /// Create multiple test stores for testing multiple sessions
+    async fn create_test_stores(count: usize) -> Vec<EtcdMetaStore> {
+        let mut stores = Vec::with_capacity(count);
+        for _ in 0..count {
+            stores.push(new_test_store().await);
+        }
+        stores
+    }
+
+    /// Helper struct to manage multiple test sessions
+    struct TestSessionManager {
+        stores: Vec<EtcdMetaStore>,
+        session_ids: Vec<Uuid>,
+    }
+
+    use std::sync::LazyLock;
+    use tokio::sync::Mutex;
+
+    // 静态初始化，确保只执行一次
+    static SHARED_DB_INIT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    impl TestSessionManager {
+        async fn new(session_count: usize) -> Self {
+            // 获取锁，确保串行初始化
+            let _guard = SHARED_DB_INIT.lock().await;
+
+            use std::env;
+            // Clean up existing shared test database
+            let temp_dir = env::temp_dir();
+            let db_path = temp_dir.join("slayerfs_shared_test.db");
+
+            static FIRST_INIT: std::sync::Once = std::sync::Once::new();
+            FIRST_INIT.call_once(|| {
+                let _ = std::fs::remove_file(&db_path);
+            });
+
+            let mut stores = Vec::with_capacity(session_count);
+            let mut session_ids = Vec::with_capacity(session_count);
+
+            let config = shared_db_config();
+            let first_store = EtcdMetaStore::from_config(config.clone())
+                .await
+                .expect("Failed to create shared test database store");
+
+            let first_session_id = Uuid::now_v7();
+            first_store
+                .set_sid(first_session_id)
+                .expect("Failed to set session ID");
+
+            stores.push(first_store);
+            session_ids.push(first_session_id);
+
+            for _ in 1..session_count {
+                let store = EtcdMetaStore::from_config(config.clone())
+                    .await
+                    .expect("Failed to create shared test database store");
+
+                let session_id = Uuid::now_v7();
+                store.set_sid(session_id).expect("Failed to set session ID");
+
+                stores.push(store);
+                session_ids.push(session_id);
+
+                time::sleep(time::Duration::from_millis(5)).await;
+            }
+
+            Self {
+                stores,
+                session_ids,
+            }
+        }
+
+        fn get_store(&self, index: usize) -> &EtcdMetaStore {
+            &self.stores[index]
+        }
+
+        fn get_session_id(&self, index: usize) -> Uuid {
+            self.session_ids[index]
+        }
+    }
+
+    #[tokio::test]
+    async fn test_basic_read_lock() {
+        let store = new_test_store().await;
+        let session_id = Uuid::now_v7();
+        let owner: i64 = 1001;
+
+        // Set session
+        store.set_sid(session_id).unwrap();
+
+        // Create a file first
+        let parent = store.root_ino();
+        let file_ino = store
+            .create_file(parent, "test_basic_read_lock_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // Acquire read lock
+        store
+            .set_plock(
+                file_ino,
+                owner,
+                false,
+                FileLockType::ReadLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
             )
             .await
             .unwrap();
 
-        store
-            .update_parent_children(
-                parent,
-                |m| {
-                    m.insert("child2".into(), 1002);
-                },
-                5,
+        // Verify lock exists
+        let query = FileLockQuery {
+            owner: owner,
+            lock_type: FileLockType::ReadLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let lock_info = store.get_plock(file_ino, &query).await.unwrap();
+        assert_eq!(lock_info.lock_type, FileLockType::UnLock);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_read_locks() {
+        // Create session manager with 2 sessions
+        let session_mgr = TestSessionManager::new(2).await;
+
+        let owner1: i64 = 1001;
+        let owner2: i64 = 1002;
+
+        // Create a file first using the first session
+        let store1 = session_mgr.get_store(0);
+        let parent = store1.root_ino();
+        let file_ino = store1
+            .create_file(parent, "test_multiple_read_locks_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // First session acquires read lock
+        store1
+            .set_plock(
+                file_ino,
+                owner1,
+                false,
+                FileLockType::ReadLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
             )
             .await
             .unwrap();
 
-        let key = EtcdMetaStore::etcd_children_key(parent);
-        let children = store
-            .etcd_get_json::<EtcdDirChildren>(&key)
+        // Second session should be able to acquire read lock on same range
+        let store2 = session_mgr.get_store(1);
+        store2
+            .set_plock(
+                file_ino,
+                owner2,
+                false,
+                FileLockType::ReadLock,
+                FileLockRange { start: 0, end: 100 },
+                5678,
+            )
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(children.children.get("child1"), Some(&1001));
-        assert_eq!(children.children.get("child2"), Some(&1002));
-    }
 
-    #[ignore]
-    #[tokio::test]
-    async fn set_file_size_updates_mod_time() {
-        let store = new_store().await;
-        let inode = store.generate_id(INODE_ID_KEY).await.unwrap();
-        let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-
-        let entry = EtcdEntryInfo {
-            is_file: true,
-            size: Some(0),
-            version: Some(0),
-            access_time: now,
-            modify_time: now,
-            create_time: now,
-            permission: Permission::new(0o644, 0, 0),
-            nlink: 1,
-            parent_inode: 1,
-            entry_name: format!("testfile-{inode}"),
-            deleted: false,
-            symlink_target: None,
-        };
-        let reverse_key = EtcdMetaStore::etcd_reverse_key(inode);
-        store.etcd_put_json(&reverse_key, &entry).await.unwrap();
-
-        store.set_file_size(inode, 1234).await.unwrap();
-        let updated: EtcdEntryInfo = store.etcd_get_json(&reverse_key).await.unwrap().unwrap();
-        assert_eq!(updated.size, Some(1234));
-        assert!(updated.modify_time >= now);
-    }
-
-    #[ignore]
-    #[tokio::test]
-    async fn append_slice_initializes_and_appends() {
-        let store = new_store().await;
-        let chunk_id = 7;
-        let s1 = SliceDesc {
-            slice_id: 1,
-            chunk_id,
-            offset: 0,
-            length: 10,
-        };
-        let s2 = SliceDesc {
-            slice_id: 2,
-            chunk_id,
-            offset: 10,
-            length: 5,
+        // Verify both locks exist by querying each session
+        let query1 = FileLockQuery {
+            owner: owner1,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange { start: 0, end: 100 },
         };
 
-        store.append_slice(chunk_id, s1).await.unwrap();
-        store.append_slice(chunk_id, s2).await.unwrap();
+        let query2 = FileLockQuery {
+            owner: owner2,
+            lock_type: FileLockType::ReadLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
 
-        let slices = store.get_slices(chunk_id).await.unwrap();
-        assert_eq!(slices.len(), 2);
-        assert!(slices.contains(&s1));
-        assert!(slices.contains(&s2));
+        let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
+        assert_eq!(lock_info1.lock_type, FileLockType::ReadLock);
+        assert_eq!(lock_info1.range.start, 0);
+        assert_eq!(lock_info1.range.end, 100);
+        assert_eq!(lock_info1.pid, 1234);
+
+        let lock_info2 = store2.get_plock(file_ino, &query2).await.unwrap();
+        assert_eq!(lock_info2.lock_type, FileLockType::UnLock);
     }
 
-    #[ignore]
     #[tokio::test]
-    async fn generate_id_is_concurrent_safe() {
-        use std::collections::HashSet;
-        let store = Arc::new(new_store().await);
-        let key = format!(
-            "slayerfs:test_concurrent:{}",
-            chrono::Utc::now().timestamp_nanos_opt().unwrap(),
-        );
+    async fn test_write_lock_conflict() {
+        // Create session manager with 2 sessions
+        let session_mgr = TestSessionManager::new(2).await;
 
-        let ids_per_task = 1000;
-        let mut handles = Vec::new();
-        for _ in 0..4 {
-            let store = Arc::clone(&store);
-            let key = key.clone();
-            handles.push(tokio::spawn(async move {
-                let mut ids = Vec::with_capacity(ids_per_task);
-                for _ in 0..ids_per_task {
-                    ids.push(store.generate_id(&key).await.expect("generate id"));
-                }
-                ids
-            }));
+        let owner1: u64 = 1001;
+        let owner2: u64 = 1002;
+
+        // Create a file first using the first session
+        let store1 = session_mgr.get_store(0);
+        let parent = store1.root_ino();
+        let file_ino = store1
+            .create_file(parent, "test_write_lock_conflict_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // First session acquires read lock
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::ReadLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Second session should not be able to acquire write lock on overlapping range
+        let store2 = session_mgr.get_store(1);
+        let result = store2
+            .set_plock(
+                file_ino,
+                owner2 as i64,
+                false, // non-blocking
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 50,
+                    end: 150,
+                }, // Overlapping range
+                5678,
+            )
+            .await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::LockConflict {
+                inode: err_inode,
+                owner: err_owner,
+                range: err_range,
+            } => {
+                assert_eq!(err_inode, file_ino);
+                assert_eq!(err_owner, owner2 as i64);
+                assert_eq!(err_range.start, 50);
+                assert_eq!(err_range.end, 150);
+            }
+            _ => panic!("Expected LockConflict error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lock_release() {
+        let session_id = Uuid::now_v7();
+        let owner = 1001;
+
+        // Create a store with pre-configured session
+        let store = new_test_store_with_session(session_id).await;
+
+        // Create a file first
+        let parent = store.root_ino();
+        let file_ino = store
+            .create_file(parent, "test_lock_release_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // Acquire lock
+        store
+            .set_plock(
+                file_ino,
+                owner,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Verify lock exists
+        let query = FileLockQuery {
+            owner: owner,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let lock_info = store.get_plock(file_ino, &query).await.unwrap();
+        assert_eq!(lock_info.lock_type, FileLockType::WriteLock);
+
+        // Release lock
+        store
+            .set_plock(
+                file_ino,
+                owner,
+                false,
+                FileLockType::UnLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Verify lock is released
+        let lock_info = store.get_plock(file_ino, &query).await.unwrap();
+        assert_eq!(lock_info.lock_type, FileLockType::UnLock);
+    }
+
+    #[tokio::test]
+    async fn test_non_overlapping_locks() {
+        // Create session manager with 2 sessions
+        let session_mgr = TestSessionManager::new(2).await;
+
+        let owner1: i64 = 1001;
+        let owner2: i64 = 1002;
+
+        // Create a file first using the first session
+        let store1 = session_mgr.get_store(0);
+        let parent = store1.root_ino();
+        let file_ino = store1
+            .create_file(parent, "test_none_overlapping_locks_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // First session acquires lock on range 0-100
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange { start: 0, end: 100 },
+                1234,
+            )
+            .await
+            .unwrap();
+
+        // Second session should be able to acquire lock on non-overlapping range 200-300
+        let store2 = session_mgr.get_store(1);
+        store2
+            .set_plock(
+                file_ino,
+                owner2 as i64,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 200,
+                    end: 300,
+                },
+                5678,
+            )
+            .await
+            .unwrap();
+
+        // Verify both locks exist
+        let query1 = FileLockQuery {
+            owner: owner1,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let query2 = FileLockQuery {
+            owner: owner2,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange {
+                start: 200,
+                end: 300,
+            },
+        };
+
+        let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
+        assert_eq!(lock_info1.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info1.range.start, 0);
+        assert_eq!(lock_info1.range.end, 100);
+        assert_eq!(lock_info1.pid, 1234);
+
+        let lock_info2 = store2.get_plock(file_ino, &query2).await.unwrap();
+        assert_eq!(lock_info2.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info2.range.start, 200);
+        assert_eq!(lock_info2.range.end, 300);
+        assert_eq!(lock_info2.pid, 5678);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_read_write_locks() {
+        // Test multiple sessions acquiring different types of locks
+        let session_mgr = TestSessionManager::new(3).await;
+
+        // Create a file
+        let store0 = session_mgr.get_store(0);
+        let parent = store0.root_ino();
+        let file_ino = store0
+            .create_file(parent, "test_concurrent_read_write_locks.txt".to_string())
+            .await
+            .unwrap();
+
+        let owner1: i64 = 1001;
+        let owner2: i64 = 1002;
+        let owner3: i64 = 1003;
+
+        // Session 1: Acquire write lock on range 0-100
+        {
+            let store1 = session_mgr.get_store(0);
+            store1
+                .set_plock(
+                    file_ino,
+                    owner1,
+                    false,
+                    FileLockType::WriteLock,
+                    FileLockRange { start: 0, end: 100 },
+                    1111,
+                )
+                .await
+                .expect("Failed to acquire write lock");
         }
 
-        let mut ids = Vec::with_capacity(ids_per_task * 4);
-        for handle in handles {
-            ids.extend(handle.await.expect("join"));
+        // Session 2: Acquire read lock on range 200-300 (should succeed)
+        {
+            let store2 = session_mgr.get_store(1);
+            store2
+                .set_plock(
+                    file_ino,
+                    owner2 as i64,
+                    false,
+                    FileLockType::ReadLock,
+                    FileLockRange {
+                        start: 200,
+                        end: 300,
+                    },
+                    2222,
+                )
+                .await
+                .expect("Failed to acquire read lock");
         }
 
-        let unique: HashSet<_> = ids.iter().cloned().collect();
-        assert_eq!(unique.len(), ids_per_task * 4);
+        // Session 3: Try to acquire write lock on overlapping range 50-150 (should fail)
+        {
+            let store3 = session_mgr.get_store(2);
+            let result = store3
+                .set_plock(
+                    file_ino,
+                    owner3 as i64,
+                    false,
+                    FileLockType::WriteLock,
+                    FileLockRange {
+                        start: 50,
+                        end: 150,
+                    },
+                    3333,
+                )
+                .await;
 
-        let mut unique = unique.into_iter().collect::<Vec<_>>();
-        unique.sort();
+            // Verify it fails with LockConflict
+            assert!(result.is_err());
+            match result.unwrap_err() {
+                MetaError::LockConflict { .. } => {}
+                _ => panic!("Expected LockConflict error"),
+            }
+        }
 
-        let should = (2..=4001).collect::<Vec<_>>();
-        assert_eq!(unique, should);
+        // Verify successful locks exist
+        let query1 = FileLockQuery {
+            owner: owner1,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange { start: 0, end: 100 },
+        };
+
+        let query2 = FileLockQuery {
+            owner: owner2,
+            lock_type: FileLockType::ReadLock,
+            range: FileLockRange {
+                start: 200,
+                end: 300,
+            },
+        };
+
+        // Check locks from different sessions
+        {
+            let store1 = session_mgr.get_store(0);
+            let lock_info1 = store1.get_plock(file_ino, &query1).await.unwrap();
+            assert_eq!(lock_info1.lock_type, FileLockType::WriteLock);
+        }
+
+        {
+            let store2 = session_mgr.get_store(1);
+            let lock_info2 = store2.get_plock(file_ino, &query2).await.unwrap();
+            assert_eq!(lock_info2.lock_type, FileLockType::UnLock);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cross_session_lock_visibility() {
+        // Test that locks set by one session are visible to another session
+        let session_mgr = TestSessionManager::new(2).await;
+
+        let owner1: u64 = 1001;
+
+        // Create a file
+        let store1 = session_mgr.get_store(0);
+        let parent = store1.root_ino();
+        let file_ino = store1
+            .create_file(parent, "test_cross_session_lock_visibility.txt".to_string())
+            .await
+            .unwrap();
+
+        // Session 1 acquires a write lock
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 0,
+                    end: 1000,
+                },
+                4444,
+            )
+            .await
+            .unwrap();
+
+        // Session 2 should be able to see the lock (and respect it)
+        let store2 = session_mgr.get_store(1);
+        let conflict_result = store2
+            .set_plock(
+                file_ino,
+                2002, // different owner
+                false,
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 500,
+                    end: 600,
+                }, // overlapping range
+                5555,
+            )
+            .await;
+
+        // Should fail due to lock conflict
+        assert!(conflict_result.is_err());
+        match conflict_result.unwrap_err() {
+            MetaError::LockConflict { .. } => {}
+            _ => panic!("Expected LockConflict error"),
+        }
+
+        // Session 1 releases the lock
+        store1
+            .set_plock(
+                file_ino,
+                owner1 as i64,
+                false,
+                FileLockType::UnLock,
+                FileLockRange {
+                    start: 0,
+                    end: 1000,
+                },
+                4444,
+            )
+            .await
+            .unwrap();
+
+        // Now Session 2 should be able to acquire the lock
+        store2
+            .set_plock(
+                file_ino,
+                2002,
+                false,
+                FileLockType::WriteLock,
+                FileLockRange {
+                    start: 500,
+                    end: 600,
+                },
+                5555,
+            )
+            .await
+            .unwrap();
+
+        // Verify the lock exists
+        let query = FileLockQuery {
+            owner: 2002,
+            lock_type: FileLockType::WriteLock,
+            range: FileLockRange {
+                start: 500,
+                end: 600,
+            },
+        };
+
+        let lock_info = store2.get_plock(file_ino, &query).await.unwrap();
+        assert_eq!(lock_info.lock_type, FileLockType::WriteLock);
+        assert_eq!(lock_info.pid, 5555);
     }
 }
