@@ -66,7 +66,7 @@ CONFIG_PATH="$redis_config"
 LOG_FILE="$log_file"
 PERSISTENCE_BIN="$persistence_bin"
 
-BACKEND_DIR="$backend_dir"             
+BACKEND_DIR="$backend_dir"
 MOUNT_DIR="$mount_dir"
 
 

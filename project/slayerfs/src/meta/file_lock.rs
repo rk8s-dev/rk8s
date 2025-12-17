@@ -45,7 +45,7 @@ impl sea_orm::TryGetable for FileLockType {
     ) -> Result<Self, sea_orm::TryGetError> {
         let val: u32 = res.try_get_by(index)?;
         FileLockType::from_u32(val).ok_or(TryGetError::DbErr(sea_orm::DbErr::Type(
-            "Failed to deserialize FIleLockType".to_string(),
+            "Failed to deserialize FileLockType".to_string(),
         )))
     }
 }
@@ -181,15 +181,15 @@ impl PlockRecord {
         result
     }
 
-    pub fn check_confilct(
+    pub fn check_conflict(
         lock_type: &FileLockType,
         range: &FileLockRange,
         ls: &Vec<PlockRecord>,
     ) -> bool {
         for l in ls {
             if (*lock_type == FileLockType::Write || l.lock_type == FileLockType::Write)
-                && range.end >= l.lock_range.start
-                && range.start <= l.lock_range.end
+                && range.end > l.lock_range.start
+                && range.start < l.lock_range.end
             {
                 return true;
             }
@@ -231,7 +231,7 @@ pub struct FileLockRange {
 
 impl FileLockRange {
     pub fn overlaps(&self, other: &Self) -> bool {
-        self.end >= other.start && self.start <= other.end
+        self.end > other.start && self.start < other.end
     }
 }
 #[derive(Debug, Clone, Copy)]

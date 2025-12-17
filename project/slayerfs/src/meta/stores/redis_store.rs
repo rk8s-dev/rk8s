@@ -355,7 +355,7 @@ impl RedisMetaStore {
         let sid = self
             .sid
             .get()
-            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+            .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
         let field = self.plock_field(sid, owner);
 
         // Check if file exists
@@ -424,7 +424,7 @@ impl RedisMetaStore {
                         serde_json::from_str(&other_records_json).unwrap_or_default();
 
                     conflict_found =
-                        PlockRecord::check_confilct(&lock_type, &range, &other_records);
+                        PlockRecord::check_conflict(&lock_type, &range, &other_records);
                     if conflict_found {
                         break;
                     }
@@ -1057,7 +1057,7 @@ impl MetaStore for RedisMetaStore {
     fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
         self.sid
             .set(sid)
-            .map_err(|_| MetaError::Internal("sid has been seted".to_string()))
+            .map_err(|_| MetaError::Internal("sid already been set".to_string()))
     }
 }
 

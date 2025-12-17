@@ -531,11 +531,7 @@ version = 1
 "registry+https://github.com/rust-lang/crates.io-index#reqwest@0.12.25" = "970e511e0ddc75b68c9cecac67bae0ff1ece7ba7a2c16615f0e9357404c2a3b5"
 "registry+https://github.com/rust-lang/crates.io-index#resolv-conf@0.7.6" = "dcd6a2030b4795ed2fd231d0a8b67ebac2d869e654dcdcaf5c51937d562a01be"
 "registry+https://github.com/rust-lang/crates.io-index#rfc6979@0.3.1" = "9cef3b799f4f4ca18b4dfa4fe0a57a42b26cabaa248ab94b3b161d788ee371ef"
-<<<<<<< HEAD
-"registry+https://github.com/rust-lang/crates.io-index#rfuse3@0.0.3" = "191c7be4bfd58164500f08333d767b8d82c196b1024a8a34dd7926771f0352b6"
-=======
 "registry+https://github.com/rust-lang/crates.io-index#rfuse3@0.0.5" = "4c0f1a76d3e126fc18c0d217672b145507286b6549a83eb55968a4bb0672e005"
->>>>>>> main
 "registry+https://github.com/rust-lang/crates.io-index#rgb@0.8.52" = "8bdf9be2788b697d8404ffdbfa7abe1d7aec9454c0f296aa7cf4d8faf50109e6"
 "registry+https://github.com/rust-lang/crates.io-index#ring@0.17.14" = "c00a1ddcf818020e5271eafeee4039edcc680a66fcf00501f83f28f253a7381f"
 "registry+https://github.com/rust-lang/crates.io-index#rkyv@0.7.45" = "696526e2a115738bd5270d4fc1fceddf70699a2c77bb1a5f03355cdfb6bdc2a6"

@@ -677,7 +677,7 @@ impl DatabaseMetaStore {
                     }
 
                     let ls: Vec<PlockRecord> = serde_json::from_slice(d).unwrap_or_default();
-                    conflict_found = PlockRecord::check_confilct(&lock_type, &range, &ls);
+                    conflict_found = PlockRecord::check_conflict(&lock_type, &range, &ls);
                     if conflict_found {
                         break;
                     }
@@ -1924,7 +1924,7 @@ mod tests {
     fn shared_db_config() -> Config {
         Config {
             database: DatabaseConfig {
-                db_config: DatabaseType::Sqlite {
+                db_config: DatabaseType::Postgres {
                     url: "postgres://slayerfs:slayerfs@127.0.0.1:5432/database".to_string(),
                 },
             },

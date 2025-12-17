@@ -955,7 +955,7 @@ impl EtcdMetaStore {
                             }
 
                             let ls: Vec<PlockRecord> = records_vec.clone(); // EtcdPlock already stores Vec<PlockRecord>
-                            conflict_found = PlockRecord::check_confilct(&lock_type, &range, &ls);
+                            conflict_found = PlockRecord::check_conflict(&lock_type, &range, &ls);
                             if conflict_found {
                                 break;
                             }
