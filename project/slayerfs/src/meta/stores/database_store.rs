@@ -1838,16 +1838,13 @@ impl MetaStore for DatabaseMetaStore {
             .get()
             .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
 
-        // Query specific owner and session
-        let row = PlockMeta::find()
+        let rows = PlockMeta::find()
             .filter(plock_meta::Column::Inode.eq(inode))
-            .filter(plock_meta::Column::Owner.eq(query.owner))
-            .filter(plock_meta::Column::Sid.eq(*sid))
-            .one(&self.db)
+            .all(&self.db)
             .await
             .map_err(MetaError::Database)?;
 
-        if let Some(row) = row {
+        for row in rows {
             let locks: Vec<PlockRecord> = serde_json::from_slice(&row.records).unwrap_or_default();
 
             if let Some(v) = PlockRecord::get_plock(&locks, query, sid, &row.sid) {

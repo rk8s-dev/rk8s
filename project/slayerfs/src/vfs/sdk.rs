@@ -7,9 +7,9 @@
 
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
-use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::MetaStore;
 use crate::meta::factory::create_meta_store_from_url;
+use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::MetaError;
 use crate::vfs::fs::{DirEntry, FileAttr, VFS};
 use std::path::Path;
@@ -113,7 +113,9 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
         range: FileLockRange,
         pid: u32,
     ) -> Result<(), String> {
-        self.fs.set_plock(path, owner, block, lock_type, range, pid).await
+        self.fs
+            .set_plock(path, owner, block, lock_type, range, pid)
+            .await
     }
 }
 

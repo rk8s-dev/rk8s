@@ -83,7 +83,8 @@ pub trait MetaLayer: Send + Sync {
     async fn shutdown_session(&self) -> Result<(), MetaError>;
 
     // ---------- File lock operations ----------
-    async fn get_plock(&self, inode: i64, query: &FileLockQuery) -> Result<FileLockInfo, MetaError>;
+    async fn get_plock(&self, inode: i64, query: &FileLockQuery)
+    -> Result<FileLockInfo, MetaError>;
     async fn set_plock(
         &self,
         inode: i64,

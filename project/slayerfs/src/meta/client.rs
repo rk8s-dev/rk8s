@@ -12,7 +12,6 @@ use crate::meta::store::{
     StatFsSnapshot,
 };
 use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker, WatchConfig};
-use uuid::Uuid;
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -24,6 +23,7 @@ use std::time::Duration;
 use std::{collections::HashSet, process};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{info, warn};
+use uuid::Uuid;
 
 use crate::vfs::extract_ino_and_chunk_index;
 use cache::InodeCache;
@@ -1087,7 +1087,11 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
-    async fn get_plock(&self, inode: i64, query: &FileLockQuery) -> Result<FileLockInfo, MetaError> {
+    async fn get_plock(
+        &self,
+        inode: i64,
+        query: &FileLockQuery,
+    ) -> Result<FileLockInfo, MetaError> {
         self.store.get_plock(inode, query).await
     }
 
@@ -1100,7 +1104,9 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         range: FileLockRange,
         pid: u32,
     ) -> Result<(), MetaError> {
-        self.store.set_plock(inode, owner, block, lock_type, range, pid).await
+        self.store
+            .set_plock(inode, owner, block, lock_type, range, pid)
+            .await
     }
 }
 

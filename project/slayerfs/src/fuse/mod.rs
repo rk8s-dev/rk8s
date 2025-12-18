@@ -1120,7 +1120,7 @@ where
             Ok(()) => Ok(()),
             Err(e) => Err(match e {
                 MetaError::NotFound(_) => libc::ENOENT,
-                MetaError::AlreadyExists { .. } => libc::EAGAIN, // Lock conflict
+                MetaError::LockConflict { .. } => libc::EAGAIN, // Lock conflict
                 MetaError::NotSupported(_) => libc::ENOSYS,
                 _ => libc::EIO,
             }
