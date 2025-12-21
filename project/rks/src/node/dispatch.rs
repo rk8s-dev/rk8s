@@ -2,6 +2,7 @@ use crate::api::xlinestore::XlineStore;
 use crate::commands::{create, delete};
 use chrono::Utc;
 use common::quic::RksConnection;
+use common::*;
 use common::{Node, NodeStatus, PodTask, RksMessage};
 use log::{error, info, warn};
 use std::sync::Arc;
@@ -75,6 +76,15 @@ pub async fn dispatch_user(
         }
         RksMessage::CreateReplicaSet(mut rs) => {
             let name = rs.metadata.name.clone();
+            if xline_store
+                .get_replicaset_yaml(&rs.metadata.name)
+                .await?
+                .is_some()
+            {
+                let err_msg = format!("rs \"{}\" already exists", rs.metadata.name);
+                conn.send_msg(&RksMessage::Error(err_msg)).await?;
+                return Ok(());
+            }
             // Set creation_timestamp if not already set
             if rs.metadata.creation_timestamp.is_none() {
                 rs.metadata.creation_timestamp = Some(Utc::now());
@@ -88,14 +98,24 @@ pub async fn dispatch_user(
             conn.send_msg(&RksMessage::Ack).await?;
         }
 
-        RksMessage::UpdateReplicaSet(rs) => {
-            let name = rs.metadata.name.clone();
-            let yaml = serde_yaml::to_string(&*rs)?;
-            xline_store.insert_replicaset_yaml(&name, &yaml).await?;
-            info!(
-                target: "rks::node::user_dispatch",
-                "updated ReplicaSet {name}"
-            );
+        RksMessage::UpdateReplicaSet(incoming_rs) => {
+            let name = incoming_rs.metadata.name.clone();
+            if let Some(existing_yaml) = xline_store.get_replicaset_yaml(&name).await? {
+                let mut final_rs: common::ReplicaSet = serde_yaml::from_str(&existing_yaml)?;
+                if final_rs.spec != incoming_rs.spec {
+                    let current_gen = final_rs.metadata.generation.unwrap_or(0);
+                    final_rs.metadata.generation = Some(current_gen + 1);
+                    final_rs.spec = incoming_rs.spec.clone();
+
+                    info!(target: "rks::node::user_dispatch", "ReplicaSet {} spec updated, add generation", name);
+                }
+                let yaml = serde_yaml::to_string(&final_rs)?;
+                xline_store.insert_replicaset_yaml(&name, &yaml).await?;
+                info!(target: "rks::node::user_dispatch", "updated ReplicaSet {name} (preserved state)");
+            } else {
+                let yaml = serde_yaml::to_string(&*incoming_rs)?;
+                xline_store.insert_replicaset_yaml(&name, &yaml).await?;
+            }
             conn.send_msg(&RksMessage::Ack).await?;
         }
 
@@ -143,6 +163,15 @@ pub async fn dispatch_user(
 
         // Deployment operations
         RksMessage::CreateDeployment(mut deploy) => {
+            if xline_store
+                .get_deployment_yaml(&deploy.metadata.name)
+                .await?
+                .is_some()
+            {
+                let err_msg = format!("deployment \"{}\" already exists", deploy.metadata.name);
+                conn.send_msg(&RksMessage::Error(err_msg)).await?;
+                return Ok(());
+            }
             let name = deploy.metadata.name.clone();
             if deploy.metadata.creation_timestamp.is_none() {
                 deploy.metadata.creation_timestamp = Some(Utc::now());
@@ -155,15 +184,27 @@ pub async fn dispatch_user(
             );
             conn.send_msg(&RksMessage::Ack).await?;
         }
-
-        RksMessage::UpdateDeployment(deploy) => {
-            let name = deploy.metadata.name.clone();
-            let yaml = serde_yaml::to_string(&*deploy)?;
-            xline_store.insert_deployment_yaml(&name, &yaml).await?;
-            info!(
-                target: "rks::node::user_dispatch",
-                "updated Deployment {name}"
-            );
+        RksMessage::UpdateDeployment(incoming_deploy) => {
+            let name = incoming_deploy.metadata.name.clone();
+            if let Some(existing_yaml) = xline_store.get_deployment_yaml(&name).await? {
+                let mut final_deploy: Deployment = serde_yaml::from_str(&existing_yaml)?;
+                if final_deploy.spec != incoming_deploy.spec {
+                    let current_gen = final_deploy.metadata.generation.unwrap_or(0);
+                    final_deploy.metadata.generation = Some(current_gen + 1);
+                    final_deploy.spec = incoming_deploy.spec.clone();
+                    info!(
+                        "Deployment {} spec updated, add generation to {}",
+                        name,
+                        current_gen + 1
+                    );
+                }
+                let yaml = serde_yaml::to_string(&final_deploy)?;
+                xline_store.insert_deployment_yaml(&name, &yaml).await?;
+            } else {
+                let new_deploy = *incoming_deploy;
+                let yaml = serde_yaml::to_string(&new_deploy)?;
+                xline_store.insert_deployment_yaml(&name, &yaml).await?;
+            }
             conn.send_msg(&RksMessage::Ack).await?;
         }
 

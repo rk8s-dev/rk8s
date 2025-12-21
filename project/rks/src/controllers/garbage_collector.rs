@@ -202,7 +202,11 @@ impl Controller for GarbageCollector {
     }
 
     fn watch_resources(&self) -> Vec<ResourceKind> {
-        vec![ResourceKind::Pod, ResourceKind::ReplicaSet,ResourceKind::Deployment]
+        vec![
+            ResourceKind::Pod,
+            ResourceKind::ReplicaSet,
+            ResourceKind::Deployment,
+        ]
     }
 
     async fn handle_watch_response(

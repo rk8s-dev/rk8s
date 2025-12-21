@@ -1016,7 +1016,10 @@ async fn test_deployment_revision_initial() -> Result<()> {
     // RS history should be empty for new RS
     let history = get_rs_revision_history(&owned_rs[0]);
     println!("RS revision history: {:?}", history);
-    assert!(history.is_empty(), "New RS should have empty revision history");
+    assert!(
+        history.is_empty(),
+        "New RS should have empty revision history"
+    );
 
     cleanup_deployment_test(&store, &["test-rev-init"], &owned_rs).await?;
     Ok(())
@@ -1059,7 +1062,10 @@ async fn test_deployment_revision_increment() -> Result<()> {
 
     // Verify RS
     let owned_rs = get_owned_replicasets(&store, "test-rev-inc").await?;
-    let new_rs: Vec<_> = owned_rs.iter().filter(|rs| get_rs_revision(rs) == 2).collect();
+    let new_rs: Vec<_> = owned_rs
+        .iter()
+        .filter(|rs| get_rs_revision(rs) == 2)
+        .collect();
     assert!(!new_rs.is_empty(), "Should have RS with revision=2");
     println!("Found RS with revision=2: {}", new_rs[0].metadata.name);
 
@@ -1111,17 +1117,19 @@ async fn test_deployment_rollback_to_previous() -> Result<()> {
 
     // Verify template is back to v1
     assert_eq!(
-        deploy.spec.template.spec.containers[0].image,
-        "nginx:v1",
+        deploy.spec.template.spec.containers[0].image, "nginx:v1",
         "Should be back to v1 image"
     );
     println!("Verified: image is nginx:v1");
 
     // Check RS-v1 now has revision=3 with history=["1"]
     let owned_rs = get_owned_replicasets(&store, "test-rollback").await?;
-    let current_rs: Vec<_> = owned_rs.iter().filter(|rs| get_rs_revision(rs) == 3).collect();
+    let current_rs: Vec<_> = owned_rs
+        .iter()
+        .filter(|rs| get_rs_revision(rs) == 3)
+        .collect();
     assert!(!current_rs.is_empty(), "Should have RS with revision=3");
-    
+
     let history = get_rs_revision_history(current_rs[0]);
     println!("Reused RS history: {:?}", history);
     assert!(history.contains(&1), "History should contain 1");
@@ -1138,46 +1146,56 @@ async fn test_deployment_rollback_to_specific_revision() -> Result<()> {
 
     // Create deployment: v1 -> v2 -> v3
     let mut deployment = create_test_deployment("test-rollback-spec", 2);
-    
+
     // v1
     deployment.spec.template.spec.containers[0].image = "nginx:v1".to_string();
     let yaml = serde_yaml::to_string(&deployment)?;
-    store.insert_deployment_yaml("test-rollback-spec", &yaml).await?;
+    store
+        .insert_deployment_yaml("test-rollback-spec", &yaml)
+        .await?;
     sleep(Duration::from_secs(2)).await;
     println!("Created v1 (revision=1)");
 
     // v2
     deployment.spec.template.spec.containers[0].image = "nginx:v2".to_string();
     let yaml = serde_yaml::to_string(&deployment)?;
-    store.insert_deployment_yaml("test-rollback-spec", &yaml).await?;
+    store
+        .insert_deployment_yaml("test-rollback-spec", &yaml)
+        .await?;
     sleep(Duration::from_secs(2)).await;
     println!("Updated to v2 (revision=2)");
 
     // v3
     deployment.spec.template.spec.containers[0].image = "nginx:v3".to_string();
     let yaml = serde_yaml::to_string(&deployment)?;
-    store.insert_deployment_yaml("test-rollback-spec", &yaml).await?;
+    store
+        .insert_deployment_yaml("test-rollback-spec", &yaml)
+        .await?;
     sleep(Duration::from_secs(2)).await;
     println!("Updated to v3 (revision=3)");
 
     // Rollback to revision=1 (v1)
     let controller = DeploymentController::new(store.clone());
-    controller.rollback_to_revision("test-rollback-spec", 1).await?;
+    controller
+        .rollback_to_revision("test-rollback-spec", 1)
+        .await?;
 
     println!("Rolling back to revision=1");
     sleep(Duration::from_secs(2)).await;
 
     // Verify
-    let deploy_yaml = store.get_deployment_yaml("test-rollback-spec").await?.unwrap();
+    let deploy_yaml = store
+        .get_deployment_yaml("test-rollback-spec")
+        .await?
+        .unwrap();
     let deploy: Deployment = serde_yaml::from_str(&deploy_yaml)?;
-    
+
     let rev = get_deployment_revision(&deploy);
     println!("Deployment revision after rollback: {}", rev);
     assert_eq!(rev, 4, "Rollback should create revision=4");
 
     assert_eq!(
-        deploy.spec.template.spec.containers[0].image,
-        "nginx:v1",
+        deploy.spec.template.spec.containers[0].image, "nginx:v1",
         "Should be back to v1 image"
     );
     println!("Verified: image is nginx:v1");
@@ -1229,17 +1247,17 @@ async fn test_deployment_revision_history_accumulation() -> Result<()> {
 
     // Check RS history
     let owned_rs = get_owned_replicasets(&store, "test-rev-hist").await?;
-    
+
     // Find the v1 RS (currently active with revision=5)
     let v1_rs: Vec<_> = owned_rs
         .iter()
         .filter(|rs| rs.spec.template.spec.containers[0].image == "nginx:v1")
         .collect();
-    
+
     assert!(!v1_rs.is_empty(), "Should have v1 RS");
     let history = get_rs_revision_history(v1_rs[0]);
     println!("v1 RS history: {:?}", history);
-    
+
     // History should contain [1, 3] (previous times it held a revision)
     assert!(history.contains(&1), "History should contain 1");
     assert!(history.contains(&3), "History should contain 3");
@@ -1274,7 +1292,9 @@ async fn test_deployment_get_revision_history() -> Result<()> {
     sleep(Duration::from_secs(2)).await;
 
     // Get history
-    let history = controller.get_deployment_revision_history("test-get-hist").await?;
+    let history = controller
+        .get_deployment_revision_history("test-get-hist")
+        .await?;
 
     println!("Revision history:");
     for info in &history {
@@ -1285,7 +1305,7 @@ async fn test_deployment_get_revision_history() -> Result<()> {
     }
 
     assert_eq!(history.len(), 3, "Should have 3 revisions");
-    
+
     // The current one should be revision=3
     let current: Vec<_> = history.iter().filter(|h| h.is_current).collect();
     assert_eq!(current.len(), 1, "Should have exactly one current revision");

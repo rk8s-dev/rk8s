@@ -62,7 +62,7 @@ impl DeploymentController {
                     .await?
             }
             DeploymentStrategy::RollingUpdate { rolling_update } => {
-                self.rolling_update(&deployment, &new_rs_opt, &old_rss, rolling_update)
+                self.rolling_update(&deployment, &old_rss, rolling_update)
                     .await?
             }
         }
@@ -267,9 +267,7 @@ impl DeploymentController {
 
     /// Check if a ReplicaSet's pod template matches the Deployment's pod template
     fn replicaset_matches_deployment(&self, rs: &ReplicaSet, deployment: &Deployment) -> bool {
-        let rs_yaml = serde_yaml::to_string(&rs.spec.template.spec).unwrap_or_default();
-        let deploy_yaml = serde_yaml::to_string(&deployment.spec.template.spec).unwrap_or_default();
-        rs_yaml == deploy_yaml
+        rs.spec.template.spec == deployment.spec.template.spec
     }
 
     /// Separate new ReplicaSet (matching current template, just one) from old ones (maybe a lot of)
@@ -459,7 +457,6 @@ impl DeploymentController {
     async fn rolling_update(
         &self,
         deployment: &Deployment,
-        new_rs_opt: &Option<ReplicaSet>,
         old_rss: &[ReplicaSet],
         strategy: &RollingUpdateStrategy,
     ) -> Result<()> {
@@ -473,17 +470,9 @@ impl DeploymentController {
             "Rolling update for {}: desired={}, maxSurge={}, maxUnavailable={}",
             deployment.metadata.name, desired, max_surge, max_unavailable
         );
-        let new_rs = match new_rs_opt {
-            Some(rs) => rs.clone(),
-            None => {
-                let all_rs = self.store.list_replicasets().await?;
-                let owned_rs: Vec<ReplicaSet> = all_rs
-                    .into_iter()
-                    .filter(|rs| self.is_owned_by(&rs.metadata, &deployment.metadata))
-                    .collect();
-                self.get_or_create_replicaset(deployment, &owned_rs).await?
-            }
-        };
+        let owned_rs = self.get_all_replicasets_for_deployment(deployment).await?;
+
+        let new_rs = self.get_or_create_replicaset(deployment, &owned_rs).await?;
 
         // get some state,total(all pods in new and old RSs), available pods(ready pods in new and old RSs)...
         let mut all_rss = vec![new_rs.clone()];
@@ -961,6 +950,9 @@ impl DeploymentController {
         let mut updated_deploy = deployment.clone();
         updated_deploy.spec.template = target_rs.spec.template.clone();
 
+        let current_gen = updated_deploy.metadata.generation.unwrap_or(0);
+        updated_deploy.metadata.generation = Some(current_gen + 1);
+
         let updated_yaml = serde_yaml::to_string(&updated_deploy)?;
         self.store
             .insert_deployment_yaml(deployment_name, &updated_yaml)
@@ -970,8 +962,6 @@ impl DeploymentController {
             "Initiated rollback of {} to revision {} (RS: {})",
             deployment_name, target, target_rs.metadata.name
         );
-
-        self.reconcile_by_name(deployment_name).await?;
         Ok(())
     }
 
@@ -1076,11 +1066,11 @@ impl Controller for DeploymentController {
                     WatchEvent::Update { old_yaml, new_yaml } => {
                         let old_deploy: Deployment = serde_yaml::from_str(old_yaml)?;
                         let new_deploy: Deployment = serde_yaml::from_str(new_yaml)?;
-
-                        if old_deploy.spec != new_deploy.spec {
-                            self.increment_generation(&new_deploy).await?;
+                        if old_deploy.metadata.generation != new_deploy.metadata.generation
+                            || old_deploy.spec != new_deploy.spec
+                        {
                             should_reconcile = true;
-                        } 
+                        }
                     }
                     WatchEvent::Delete { .. } => {}
                 }
@@ -1100,7 +1090,8 @@ impl Controller for DeploymentController {
                         let status_changed = old_rs.status.replicas != new_rs.status.replicas
                             || old_rs.status.ready_replicas != new_rs.status.ready_replicas
                             || old_rs.status.available_replicas != new_rs.status.available_replicas
-                            || old_rs.status.fully_labeled_replicas != new_rs.status.fully_labeled_replicas;
+                            || old_rs.status.fully_labeled_replicas
+                                != new_rs.status.fully_labeled_replicas;
 
                         if status_changed
                             && let Err(e) = self.update_deployment_for_replicaset(&new_rs).await
@@ -1130,37 +1121,6 @@ impl Controller for DeploymentController {
 }
 
 impl DeploymentController {
-    /// Increment generation when spec changes
-    async fn increment_generation(&self, deployment: &Deployment) -> Result<()> {
-        let deploy_name = &deployment.metadata.name;
-
-        let yaml = self
-            .store
-            .get_deployment_yaml(deploy_name)
-            .await?
-            .ok_or_else(|| anyhow!("Deployment {} not found", deploy_name))?;
-
-        let mut deploy: Deployment = serde_yaml::from_str(&yaml)?;
-        let old_gen = deploy.metadata.generation.unwrap_or(0);
-        deploy.metadata.generation = Some(old_gen + 1);
-
-        debug!("Original YAML spec hash: {:?}", serde_yaml::to_string(&deploy.spec).unwrap().len());
-        let updated_yaml = serde_yaml::to_string(&deploy)?;
-        let test_deploy: Deployment = serde_yaml::from_str(&updated_yaml)?;
-        debug!("Re-serialized YAML spec hash: {:?}", serde_yaml::to_string(&test_deploy.spec).unwrap().len());
-        self.store
-            .insert_deployment_yaml(deploy_name, &updated_yaml)
-            .await?;
-
-        info!(
-            "Incremented generation to {} for deployment {}",
-            old_gen + 1,
-            deploy_name
-        );
-
-        Ok(())
-    }
-
     /// Update deployment status when ReplicaSet changes
     async fn update_deployment_for_replicaset(&self, rs: &ReplicaSet) -> Result<()> {
         if let Some(owner_refs) = &rs.metadata.owner_references {
@@ -1171,12 +1131,13 @@ impl DeploymentController {
                     if let Some(yaml) = self.store.get_deployment_yaml(deployment_name).await? {
                         let deployment: Deployment = serde_yaml::from_str(&yaml)?;
                         self.update_deployment_status(&deployment).await?;
-                        
+
                         // Check if rolling update is in progress
-                        let needs_reconcile = deployment.status.replicas != deployment.spec.replicas
+                        let needs_reconcile = deployment.status.replicas
+                            != deployment.spec.replicas
                             || deployment.status.updated_replicas != deployment.spec.replicas
                             || deployment.status.available_replicas != deployment.spec.replicas;
-                        
+
                         if needs_reconcile {
                             self.reconcile_by_name(deployment_name).await?;
                         }

@@ -172,8 +172,8 @@ pub async fn get_deployment_history(
 fn deployment_from_path(deploy_yaml: &str) -> Result<Box<Deployment>> {
     let deploy_file = File::open(deploy_yaml)
         .map_err(|e| anyhow!("Failed to open file '{}': {}", deploy_yaml, e))?;
-    let deploy: Deployment = serde_yaml::from_reader(deploy_file)
-        .map_err(|e| anyhow!("Failed to parse YAML: {}", e))?;
+    let deploy: Deployment =
+        serde_yaml::from_reader(deploy_file).map_err(|e| anyhow!("Failed to parse YAML: {}", e))?;
 
     // Validate the Deployment
     validate_deployment(&deploy)?;
@@ -241,35 +241,33 @@ fn validate_deployment(deploy: &Deployment) -> Result<()> {
     // Validate matchExpressions against template labels
     for expr in &deploy.spec.selector.match_expressions {
         match &expr.operator {
-            LabelSelectorOperator::In => {
-                match template_labels.get(&expr.key) {
-                    Some(value) if expr.values.contains(value) => {}
-                    Some(value) => {
-                        return Err(anyhow!(
-                            "Selector matchExpressions: template label '{}={}' value not in required set {:?}",
-                            expr.key,
-                            value,
-                            expr.values
-                        ));
-                    }
-                    None => {
-                        return Err(anyhow!(
-                            "Selector matchExpressions: template missing required label '{}' (In operator)",
-                            expr.key
-                        ));
-                    }
+            LabelSelectorOperator::In => match template_labels.get(&expr.key) {
+                Some(value) if expr.values.contains(value) => {}
+                Some(value) => {
+                    return Err(anyhow!(
+                        "Selector matchExpressions: template label '{}={}' value not in required set {:?}",
+                        expr.key,
+                        value,
+                        expr.values
+                    ));
                 }
-            }
+                None => {
+                    return Err(anyhow!(
+                        "Selector matchExpressions: template missing required label '{}' (In operator)",
+                        expr.key
+                    ));
+                }
+            },
             LabelSelectorOperator::NotIn => {
-                if let Some(value) = template_labels.get(&expr.key) {
-                    if expr.values.contains(value) {
-                        return Err(anyhow!(
-                            "Selector matchExpressions: template label '{}={}' is in forbidden set {:?} (NotIn operator)",
-                            expr.key,
-                            value,
-                            expr.values
-                        ));
-                    }
+                if let Some(value) = template_labels.get(&expr.key)
+                    && expr.values.contains(value)
+                {
+                    return Err(anyhow!(
+                        "Selector matchExpressions: template label '{}={}' is in forbidden set {:?} (NotIn operator)",
+                        expr.key,
+                        value,
+                        expr.values
+                    ));
                 }
             }
             LabelSelectorOperator::Exists => {
@@ -310,10 +308,7 @@ fn validate_deployment(deploy: &Deployment) -> Result<()> {
                         ));
                     }
                 } else if s.parse::<i32>().map(|n| n < 0).unwrap_or(true) {
-                    return Err(anyhow!(
-                        "RollingUpdate strategy maxSurge is invalid: {}",
-                        s
-                    ));
+                    return Err(anyhow!("RollingUpdate strategy maxSurge is invalid: {}", s));
                 }
             }
             _ => {}
@@ -385,10 +380,7 @@ fn validate_deployment(deploy: &Deployment) -> Result<()> {
 /// Print deployments in a table format
 fn list_print(deps: Vec<Deployment>) -> Result<()> {
     let mut tw = TabWriter::new(io::stdout());
-    writeln!(
-        tw,
-        "NAME\tREADY\tUP-TO-DATE\tAVAILABLE\tAGE\tSTRATEGY"
-    )?;
+    writeln!(tw, "NAME\tREADY\tUP-TO-DATE\tAVAILABLE\tAGE\tSTRATEGY")?;
 
     for dep in deps {
         let name = &dep.metadata.name;
