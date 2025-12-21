@@ -487,7 +487,10 @@ pub enum RksMessage {
     DeleteDeployment(String),
     GetDeployment(String),
     ListDeployment,
-    RollbackDeployment { name: String, revision: i64 },
+    RollbackDeployment {
+        name: String,
+        revision: i64,
+    },
     GetDeploymentHistory(String),
 
     GetNodeCount,
@@ -550,7 +553,11 @@ impl std::fmt::Debug for RksMessage {
             }
             Self::ListDeployment => f.write_str("RksMessage::ListDeployment"),
             Self::RollbackDeployment { name, revision } => {
-                write!(f, "RksMessage::RollbackDeployment {{ name: {}, revision: {} }}", name, revision)
+                write!(
+                    f,
+                    "RksMessage::RollbackDeployment {{ name: {}, revision: {} }}",
+                    name, revision
+                )
             }
             Self::GetDeploymentHistory(name) => {
                 write!(f, "RksMessage::GetDeploymentHistory {{ name: {} }}", name)
@@ -593,10 +600,18 @@ impl std::fmt::Debug for RksMessage {
             }
             Self::GetDeploymentRes(_) => f.write_str("RksMessage::GetDeploymentRes { .. }"),
             Self::ListDeploymentRes(deps) => {
-                write!(f, "RksMessage::ListDeploymentRes {{ count: {} }}", deps.len())
+                write!(
+                    f,
+                    "RksMessage::ListDeploymentRes {{ count: {} }}",
+                    deps.len()
+                )
             }
             Self::DeploymentHistoryRes(history) => {
-                write!(f, "RksMessage::DeploymentHistoryRes {{ count: {} }}", history.len())
+                write!(
+                    f,
+                    "RksMessage::DeploymentHistoryRes {{ count: {} }}",
+                    history.len()
+                )
             }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(
@@ -643,7 +658,9 @@ impl Display for RksMessage {
                     write!(f, "Rollback deployment '{}' to revision {}", name, revision)
                 }
             }
-            Self::GetDeploymentHistory(name) => write!(f, "Get deployment '{}' revision history", name),
+            Self::GetDeploymentHistory(name) => {
+                write!(f, "Get deployment '{}' revision history", name)
+            }
             Self::GetNodeCount => f.write_str("Get node count"),
             Self::RegisterNode(node) => write!(f, "Register node '{}'", node.metadata.name),
             Self::UserRequest(payload) => write!(f, "User request: {}", payload),
@@ -737,14 +754,27 @@ impl Display for RksMessage {
                 if deps.is_empty() {
                     return f.write_str("List deployments response: no deployments found");
                 }
-                let preview = deps.iter().take(3).map(|d| d.metadata.name.as_str()).collect::<Vec<_>>();
+                let preview = deps
+                    .iter()
+                    .take(3)
+                    .map(|d| d.metadata.name.as_str())
+                    .collect::<Vec<_>>();
                 if deps.len() > preview.len() {
-                    return write!(f, "List deployments response: {} (+{} more)", preview.join(", "), deps.len() - preview.len());
+                    return write!(
+                        f,
+                        "List deployments response: {} (+{} more)",
+                        preview.join(", "),
+                        deps.len() - preview.len()
+                    );
                 }
                 write!(f, "List deployments response: {}", preview.join(", "))
             }
             Self::DeploymentHistoryRes(history) => {
-                write!(f, "Deployment history response: {} revision(s)", history.len())
+                write!(
+                    f,
+                    "Deployment history response: {} revision(s)",
+                    history.len()
+                )
             }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
