@@ -23,10 +23,7 @@ rust_library(
     crate = "zerofrom",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    features = [
-        "alloc",
-        "derive",
-    ],
+    features = ["derive"],
     rustc_flags = ["@$(location :zerofrom-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/zerofrom-derive/0.1.6:zerofrom-derive"],

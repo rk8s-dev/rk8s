@@ -2,9 +2,11 @@
 
 use crate::meta::Permission;
 use crate::meta::entities::content_meta::EntryType;
+use crate::meta::file_lock::PlockRecord;
 use crate::meta::store::{FileAttr, FileType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Etcd entry information (reverse index: inode -> file/directory attributes)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,4 +115,11 @@ impl EtcdForwardEntry {
             EntryType::Directory
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EtcdPlock {
+    pub sid: Uuid,
+    pub owner: i64,
+    pub records: Vec<PlockRecord>,
 }

@@ -32,10 +32,10 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/openssl-probe/0.1.6:openssl-probe",
-        "//third-party/rust/crates/openssl-sys/0.9.109:openssl-sys",
-        "//third-party/rust/crates/openssl/0.10.73:openssl",
+        "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys",
+        "//third-party/rust/crates/openssl/0.10.75:openssl",
     ],
 )
 
@@ -54,7 +54,7 @@ buildscript_run(
     package_name = "native-tls",
     buildscript_rule = ":native-tls-build-script-build",
     env_srcs = [
-        "//third-party/rust/crates/openssl-sys/0.9.109:openssl-sys-build-script-main-run[metadata]",
+        "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys-build-script-main-run[metadata]",
         ":native-tls-manifest[env_dict]",
     ],
     version = "0.2.14",

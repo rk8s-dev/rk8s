@@ -9,6 +9,7 @@ use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
 use crate::meta::MetaStore;
 use crate::meta::factory::create_meta_store_from_url;
+use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::MetaError;
 use crate::vfs::fs::{DirEntry, FileAttr, VFS};
 use std::path::Path;
@@ -91,6 +92,30 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
 
     pub async fn truncate(&self, path: &str, size: u64) -> Result<(), String> {
         self.fs.truncate(path, size).await
+    }
+
+    /// Get file lock information for a given path and query.
+    pub async fn get_plock(
+        &self,
+        path: &str,
+        query: &FileLockQuery,
+    ) -> Result<FileLockInfo, String> {
+        self.fs.get_plock(path, query).await
+    }
+
+    /// Set file lock for a given path.
+    pub async fn set_plock(
+        &self,
+        path: &str,
+        owner: i64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), String> {
+        self.fs
+            .set_plock(path, owner, block, lock_type, range, pid)
+            .await
     }
 }
 

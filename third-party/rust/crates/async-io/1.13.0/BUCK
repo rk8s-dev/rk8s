@@ -33,10 +33,10 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-lock/2.8.0:async-lock",
-        "//third-party/rust/crates/cfg-if/1.0.3:cfg-if",
+        "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
         "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue",
         "//third-party/rust/crates/futures-lite/1.13.0:futures-lite",
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/parking/2.2.1:parking",
         "//third-party/rust/crates/polling/2.8.0:polling",
         "//third-party/rust/crates/rustix/0.37.28:rustix",

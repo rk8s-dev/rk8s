@@ -30,7 +30,7 @@ rust_library(
     rustc_flags = ["@$(location :procfs-core-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/bitflags/2.10.0:bitflags",
         "//third-party/rust/crates/chrono/0.4.42:chrono",
         "//third-party/rust/crates/hex/0.4.3:hex",
     ],

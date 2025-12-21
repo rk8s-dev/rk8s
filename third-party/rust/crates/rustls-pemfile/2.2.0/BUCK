@@ -29,7 +29,7 @@ rust_library(
     ],
     rustc_flags = ["@$(location :rustls-pemfile-manifest[env_flags])"],
     named_deps = {
-        "pki_types": "//third-party/rust/crates/rustls-pki-types/1.12.0:rustls-pki-types",
+        "pki_types": "//third-party/rust/crates/rustls-pki-types/1.13.1:rustls-pki-types",
     },
     visibility = ["PUBLIC"],
 )

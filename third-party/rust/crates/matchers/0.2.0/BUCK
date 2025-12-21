@@ -25,5 +25,5 @@ rust_library(
     edition = "2018",
     rustc_flags = ["@$(location :matchers-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/regex-automata/0.4.12:regex-automata"],
+    deps = ["//third-party/rust/crates/regex-automata/0.4.13:regex-automata"],
 )

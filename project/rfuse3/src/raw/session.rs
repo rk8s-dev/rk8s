@@ -2669,7 +2669,7 @@ async fn worker_getlk<FS: Filesystem + Send + Sync + 'static>(
                 lk_in.owner,
                 lk_in.lk.start,
                 lk_in.lk.end,
-                lk_in.lk.typ,
+                lk_in.lk.r#type,
                 lk_in.lk.pid,
             )
             .await
@@ -2745,7 +2745,7 @@ async fn worker_setlk<FS: Filesystem + Send + Sync + 'static>(
                 lk_in.owner,
                 lk_in.lk.start,
                 lk_in.lk.end,
-                lk_in.lk.typ,
+                lk_in.lk.r#type,
                 lk_in.lk.pid,
                 is_blocking,
             )

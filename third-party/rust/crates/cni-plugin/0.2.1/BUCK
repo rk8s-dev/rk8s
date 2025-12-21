@@ -34,7 +34,7 @@ rust_library(
         "//third-party/rust/crates/async-process/1.8.1:async-process",
         "//third-party/rust/crates/futures/0.3.31:futures",
         "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork",
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/macaddr/1.0.1:macaddr",
         "//third-party/rust/crates/regex/1.12.2:regex",
         "//third-party/rust/crates/semver/0.11.0:semver",

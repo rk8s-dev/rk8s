@@ -29,5 +29,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :rand_core-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/getrandom/0.3.3:getrandom"],
+    deps = ["//third-party/rust/crates/getrandom/0.3.4:getrandom"],
 )

@@ -32,7 +32,7 @@ rust_library(
     deps = [
         "//third-party/rust/crates/hcl-edit/0.8.8:hcl-edit",
         "//third-party/rust/crates/hcl-primitives/0.1.11:hcl-primitives",
-        "//third-party/rust/crates/indexmap/2.11.4:indexmap",
+        "//third-party/rust/crates/indexmap/2.12.1:indexmap",
         "//third-party/rust/crates/itoa/1.0.15:itoa",
         "//third-party/rust/crates/serde/1.0.228:serde",
     ],

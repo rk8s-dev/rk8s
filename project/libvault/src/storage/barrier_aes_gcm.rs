@@ -13,7 +13,7 @@ use openssl::{
     hash::{MessageDigest, hash},
     symm::{Cipher, Crypter, Mode},
 };
-use rand::{Rng, thread_rng};
+use rand::{Rng, rng};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -170,7 +170,7 @@ impl SecurityBarrier for AESGCMBarrier {
         // will be zeroized on drop
         let mut buf = Zeroizing::new(vec![0u8; key_size]);
 
-        thread_rng().fill(buf.deref_mut().as_mut_slice());
+        rng().fill(buf.deref_mut().as_mut_slice());
         Ok(buf)
     }
 
@@ -290,7 +290,7 @@ impl AESGCMBarrier {
         let iv = match iv_len {
             0 => None,
             _ => {
-                thread_rng().fill(nonce.deref_mut().as_mut_slice());
+                rng().fill(nonce.deref_mut().as_mut_slice());
                 out[5..5 + iv_len].copy_from_slice(nonce.deref().as_slice());
                 Some(nonce.deref().as_slice())
             }

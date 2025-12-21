@@ -25,5 +25,5 @@ rust_library(
     edition = "2018",
     rustc_flags = ["@$(location :instant-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/cfg-if/1.0.3:cfg-if"],
+    deps = ["//third-party/rust/crates/cfg-if/1.0.4:cfg-if"],
 )

@@ -52,11 +52,11 @@ rust_library(
     deps = [
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",
         "//third-party/rust/crates/futures-util/0.3.31:futures-util",
-        "//third-party/rust/crates/indexmap/2.11.4:indexmap",
+        "//third-party/rust/crates/indexmap/2.12.1:indexmap",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/slab/0.4.11:slab",
         "//third-party/rust/crates/sync_wrapper/1.0.2:sync_wrapper",
-        "//third-party/rust/crates/tokio-util/0.7.16:tokio-util",
+        "//third-party/rust/crates/tokio-util/0.7.17:tokio-util",
         "//third-party/rust/crates/tokio/1.48.0:tokio",
         "//third-party/rust/crates/tower-layer/0.3.3:tower-layer",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",

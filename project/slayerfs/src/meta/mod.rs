@@ -17,6 +17,7 @@ pub mod client;
 pub mod config;
 pub mod entities;
 pub mod factory;
+pub mod file_lock;
 pub mod layer;
 pub mod migrations;
 pub mod permission;

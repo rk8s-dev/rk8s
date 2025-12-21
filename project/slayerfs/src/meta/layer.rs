@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::SessionInfo;
+use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{
     DirEntry, FileAttr, FileType, MetaError, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
@@ -80,4 +81,17 @@ pub trait MetaLayer: Send + Sync {
     // ---------- Session lifecycle ----------
     async fn start_session(&self, session_info: SessionInfo) -> Result<(), MetaError>;
     async fn shutdown_session(&self) -> Result<(), MetaError>;
+
+    // ---------- File lock operations ----------
+    async fn get_plock(&self, inode: i64, query: &FileLockQuery)
+    -> Result<FileLockInfo, MetaError>;
+    async fn set_plock(
+        &self,
+        inode: i64,
+        owner: i64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), MetaError>;
 }

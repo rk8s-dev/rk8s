@@ -35,7 +35,7 @@ rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
+        "//third-party/rust/crates/bitflags/2.10.0:bitflags",
         "//third-party/rust/crates/libc/0.2.178:libc",
     ],
 )

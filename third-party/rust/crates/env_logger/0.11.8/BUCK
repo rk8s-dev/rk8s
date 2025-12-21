@@ -35,8 +35,8 @@ rust_library(
     deps = [
         "//third-party/rust/crates/anstream/0.6.21:anstream",
         "//third-party/rust/crates/anstyle/1.0.13:anstyle",
-        "//third-party/rust/crates/env_filter/0.1.3:env_filter",
-        "//third-party/rust/crates/jiff/0.2.15:jiff",
-        "//third-party/rust/crates/log/0.4.28:log",
+        "//third-party/rust/crates/env_filter/0.1.4:env_filter",
+        "//third-party/rust/crates/jiff/0.2.16:jiff",
+        "//third-party/rust/crates/log/0.4.29:log",
     ],
 )

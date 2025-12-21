@@ -30,5 +30,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :toml_parser-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/winnow/0.7.13:winnow"],
+    deps = ["//third-party/rust/crates/winnow/0.7.14:winnow"],
 )

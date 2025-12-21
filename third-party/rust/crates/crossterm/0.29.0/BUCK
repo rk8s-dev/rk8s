@@ -27,8 +27,8 @@ rust_library(
     rustc_flags = ["@$(location :crossterm-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.9.4:bitflags",
-        "//third-party/rust/crates/document-features/0.2.11:document-features",
+        "//third-party/rust/crates/bitflags/2.10.0:bitflags",
+        "//third-party/rust/crates/document-features/0.2.12:document-features",
         "//third-party/rust/crates/parking_lot/0.12.5:parking_lot",
         "//third-party/rust/crates/rustix/1.1.2:rustix",
     ],

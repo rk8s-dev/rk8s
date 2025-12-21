@@ -36,7 +36,7 @@ rust_library(
         "//third-party/rust/crates/anes/0.1.6:anes",
         "//third-party/rust/crates/cast/0.3.0:cast",
         "//third-party/rust/crates/ciborium/0.2.2:ciborium",
-        "//third-party/rust/crates/clap/4.5.51:clap",
+        "//third-party/rust/crates/clap/4.5.53:clap",
         "//third-party/rust/crates/criterion-plot/0.5.0:criterion-plot",
         "//third-party/rust/crates/is-terminal/0.4.17:is-terminal",
         "//third-party/rust/crates/itertools/0.10.5:itertools",

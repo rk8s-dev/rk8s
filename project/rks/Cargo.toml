@@ -33,14 +33,14 @@ context = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 native-tls = { workspace = true }
-tonic = "=0.14.2"
+tonic = { workspace = true }
 rand = { workspace = true }
 netlink-packet-route = { workspace = true }
 rtnetlink = { workspace = true }
 nix = { workspace = true, features = ["net"] }
 dotenvy = { workspace = true }
 tempfile = { workspace = true }
-tokio-util = "0.7.0"
+tokio-util = { workspace = true }
 env_logger = { workspace = true }
 once_cell = { workspace = true }
 futures-util = { workspace = true }
@@ -51,7 +51,7 @@ hickory-resolver = { workspace = true }
 nftables = { workspace = true }
 axum = { workspace = true }
 humantime = { workspace = true }
-base64 = "0.20.0"
+base64 = { workspace = true }
 reqwest = { workspace = true }
 either = { workspace = true }
 tokio-stream = { workspace = true }

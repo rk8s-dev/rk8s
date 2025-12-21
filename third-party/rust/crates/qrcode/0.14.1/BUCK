@@ -31,5 +31,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :qrcode-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/image/0.25.8:image"],
+    deps = ["//third-party/rust/crates/image/0.25.9:image"],
 )

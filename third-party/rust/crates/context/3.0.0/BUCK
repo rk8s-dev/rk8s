@@ -42,7 +42,7 @@ rust_binary(
     edition = "2015",
     rustc_flags = ["@$(location :context-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.48:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.49:cc"],
 )
 
 buildscript_run(

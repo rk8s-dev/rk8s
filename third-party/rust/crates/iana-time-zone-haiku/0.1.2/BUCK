@@ -41,7 +41,7 @@ rust_binary(
     edition = "2018",
     rustc_flags = ["@$(location :iana-time-zone-haiku-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.48:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.49:cc"],
 )
 
 buildscript_run(

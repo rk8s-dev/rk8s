@@ -1,21 +1,22 @@
 //! FUSE adapter and request handling
-//! This module provides the FUSE (Filesystem in Userspace) integration for SlayerFS.  
-//! It implements the adapter and request handling logic required to expose the virtual filesystem  
-//! to the operating system via the FUSE protocol.  
-//!  
-//! Main components:  
-//! - `adapter`: Contains the FUSE adapter implementation.  
-//! - `mount`: Handles mounting the virtual filesystem using FUSE.  
-//! - Implementation of the `Filesystem` trait for `VFS`, enabling translation of FUSE requests  
-//!   into virtual filesystem operations.  
-//! - Helpers for attribute and file type conversion between VFS and FUSE representations.  
-//!  
-//! The module also includes platform-specific tests for mounting and basic operations,  
+//! This module provides the FUSE (Filesystem in Userspace) integration for SlayerFS.
+//! It implements the adapter and request handling logic required to expose the virtual filesystem
+//! to the operating system via the FUSE protocol.
+//!
+//! Main components:
+//! - `adapter`: Contains the FUSE adapter implementation.
+//! - `mount`: Handles mounting the virtual filesystem using FUSE.
+//! - Implementation of the `Filesystem` trait for `VFS`, enabling translation of FUSE requests
+//!   into virtual filesystem operations.
+//! - Helpers for attribute and file type conversion between VFS and FUSE representations.
+//!
+//! The module also includes platform-specific tests for mounting and basic operations,
 //! and provides utilities for mapping VFS metadata to FUSE attributes.
 pub mod adapter;
 pub mod mount;
 use crate::chuck::store::BlockStore;
 use crate::meta::MetaStore;
+use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
 use crate::vfs::fs::{FileAttr as VfsFileAttr, FileType as VfsFileType, VFS};
 use bytes::Bytes;
@@ -24,7 +25,7 @@ use rfuse3::Result as FuseResult;
 use rfuse3::raw::Request;
 use rfuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyCreated, ReplyData, ReplyDirectory,
-    ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyOpen, ReplyStatFs, ReplyWrite,
+    ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyLock, ReplyOpen, ReplyStatFs, ReplyWrite,
 };
 use std::ffi::{OsStr, OsString};
 use std::num::NonZeroU32;
@@ -1036,6 +1037,95 @@ where
         _datasync: bool,
     ) -> FuseResult<()> {
         Ok(())
+    }
+
+    // Test for a POSIX file lock
+    async fn getlk(
+        &self,
+        _req: Request,
+        inode: u64,
+        _fh: u64,
+        lock_owner: u64,
+        start: u64,
+        end: u64,
+        lock_type: u32,
+        _pid: u32,
+    ) -> FuseResult<ReplyLock> {
+        // Convert FUSE lock type to our internal type
+        let fl_type = match lock_type as i32 {
+            libc::F_RDLCK => FileLockType::Read,
+            libc::F_WRLCK => FileLockType::Write,
+            libc::F_UNLCK => FileLockType::UnLock,
+            _ => return Err(libc::EINVAL.into()),
+        };
+
+        let query = FileLockQuery {
+            owner: lock_owner as i64,
+            lock_type: fl_type,
+            range: FileLockRange { start, end },
+        };
+
+        match self.get_plock_ino(inode as i64, &query).await {
+            Ok(info) => {
+                // Convert internal lock type back to FUSE type
+                let fuse_type = match info.lock_type {
+                    FileLockType::Read => libc::F_RDLCK,
+                    FileLockType::Write => libc::F_WRLCK,
+                    FileLockType::UnLock => libc::F_UNLCK,
+                };
+                Ok(ReplyLock {
+                    r#type: fuse_type as u32,
+                    start: info.range.start,
+                    end: info.range.end,
+                    pid: info.pid,
+                })
+            }
+            Err(e) => Err(match e {
+                MetaError::NotFound(_) => libc::ENOENT,
+                MetaError::NotSupported(_) => libc::ENOSYS,
+                _ => libc::EIO,
+            }
+            .into()),
+        }
+    }
+
+    // Acquire, modify or release a POSIX file lock
+    async fn setlk(
+        &self,
+        _req: Request,
+        inode: u64,
+        _fh: u64,
+        lock_owner: u64,
+        start: u64,
+        end: u64,
+        lock_type: u32,
+        pid: u32,
+        block: bool,
+    ) -> FuseResult<()> {
+        // Convert FUSE lock type to our internal type
+        let fl_type = match lock_type as i32 {
+            libc::F_RDLCK => FileLockType::Read,
+            libc::F_WRLCK => FileLockType::Write,
+            libc::F_UNLCK => FileLockType::UnLock,
+            _ => return Err(libc::EINVAL.into()),
+        };
+
+        let range = FileLockRange { start, end };
+
+        // Note: block parameter is ignored for now, non-blocking only
+        match self
+            .set_plock_ino(inode as i64, lock_owner as i64, block, fl_type, range, pid)
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(e) => Err(match e {
+                MetaError::NotFound(_) => libc::ENOENT,
+                MetaError::LockConflict { .. } => libc::EAGAIN, // Lock conflict
+                MetaError::NotSupported(_) => libc::ENOSYS,
+                _ => libc::EIO,
+            }
+            .into()),
+        }
     }
 
     // Forget (kernel reference drop); no inode ref tracking yet so no-op

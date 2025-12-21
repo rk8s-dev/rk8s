@@ -32,7 +32,7 @@ rust_library(
     rustc_flags = ["@$(location :prost-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.10.1:bytes",
+        "//third-party/rust/crates/bytes/1.11.0:bytes",
         "//third-party/rust/crates/prost-derive/0.13.5:prost-derive",
     ],
 )

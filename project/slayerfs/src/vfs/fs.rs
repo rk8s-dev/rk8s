@@ -6,7 +6,9 @@ use crate::chuck::store::BlockStore;
 use crate::chuck::writer::ChunkWriter;
 use crate::meta::client::{MetaClient, MetaClientOptions};
 use crate::meta::config::{CacheCapacity, CacheTtl};
-use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
+use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
+use crate::meta::store::MetaError;
+use crate::meta::store::{SetAttrFlags, SetAttrRequest};
 use crate::meta::{MetaLayer, MetaStore};
 use dashmap::{DashMap, Entry};
 use std::collections::HashMap;
@@ -1195,6 +1197,77 @@ where
     /// Drop modification markers older than `ttl` to keep the tracker bounded.
     pub async fn cleanup_modified(&self, ttl: Duration) {
         self.state.modified.cleanup_older_than(ttl).await;
+    }
+
+    /// Get file lock information for a given inode and query.
+    pub async fn get_plock_ino(
+        &self,
+        inode: i64,
+        query: &FileLockQuery,
+    ) -> Result<FileLockInfo, MetaError> {
+        self.core.meta_layer.get_plock(inode, query).await
+    }
+
+    /// Set file lock for a given inode.
+    pub async fn set_plock_ino(
+        &self,
+        inode: i64,
+        owner: i64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), MetaError> {
+        self.core
+            .meta_layer
+            .set_plock(inode, owner, block, lock_type, range, pid)
+            .await
+    }
+
+    /// Get file lock information by path.
+    pub async fn get_plock(
+        &self,
+        path: &str,
+        query: &FileLockQuery,
+    ) -> Result<FileLockInfo, String> {
+        let path = Self::norm_path(path);
+        let (inode, _) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "not found".to_string())?;
+        self.core
+            .meta_layer
+            .get_plock(inode, query)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Set file lock by path.
+    pub async fn set_plock(
+        &self,
+        path: &str,
+        owner: i64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), String> {
+        let path = Self::norm_path(path);
+        let (inode, _) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "not found".to_string())?;
+        self.core
+            .meta_layer
+            .set_plock(inode, owner, block, lock_type, range, pid)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     /// Update timestamps on flush/fsync for files that may have been modified via mmap.

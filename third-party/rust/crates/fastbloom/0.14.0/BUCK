@@ -31,7 +31,7 @@ rust_library(
     rustc_flags = ["@$(location :fastbloom-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/getrandom/0.3.3:getrandom",
+        "//third-party/rust/crates/getrandom/0.3.4:getrandom",
         "//third-party/rust/crates/libm/0.2.15:libm",
         "//third-party/rust/crates/rand/0.9.2:rand",
         "//third-party/rust/crates/siphasher/1.0.1:siphasher",

@@ -4,6 +4,7 @@
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::entities::content_meta::EntryType;
+use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt;
@@ -286,6 +287,23 @@ pub enum MetaError {
 
     #[error("Session not found: {0}")]
     SessionNotFound(Uuid),
+
+    #[error("Lock conflict on inode {inode} for owner {owner}, range: {range:?}")]
+    LockConflict {
+        inode: i64,
+        owner: i64,
+        range: FileLockRange,
+    },
+
+    #[error("Lock not found on inode {inode} for owner {owner}, range: {range:?}")]
+    LockNotFound {
+        inode: i64,
+        owner: u64,
+        range: FileLockRange,
+    },
+
+    #[error("Deadlock detected involving owners: {owners:?}")]
+    DeadlockDetected { owners: Vec<u64> },
 
     #[error("Invalid handle: {0}")]
     InvalidHandle(u64),
@@ -736,6 +754,36 @@ pub trait MetaStore: Send + Sync {
         let _ = (
             inode, index, origin, slices, skipped, pos, id, size, delayed,
         );
+        Err(MetaError::NotImplemented)
+    }
+    // ---------- File lock ----------
+
+    /// Gets lock information for a given file region.
+    async fn get_plock(
+        &self,
+        inode: i64,
+        query: &FileLockQuery,
+    ) -> Result<FileLockInfo, MetaError> {
+        let _ = (inode, query);
+        Err(MetaError::NotImplemented)
+    }
+
+    /// Sets or clears a file segment lock (non-blocking).
+    async fn set_plock(
+        &self,
+        inode: i64,
+        owner: i64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), MetaError> {
+        let _ = (inode, owner, lock_type, pid, block, range);
+        Err(MetaError::NotImplemented)
+    }
+
+    fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
+        let _ = sid;
         Err(MetaError::NotImplemented)
     }
 }

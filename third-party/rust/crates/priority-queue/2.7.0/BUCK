@@ -31,7 +31,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/equivalent/1.0.2:equivalent",
-        "//third-party/rust/crates/indexmap/2.11.4:indexmap",
+        "//third-party/rust/crates/indexmap/2.12.1:indexmap",
         "//third-party/rust/crates/serde/1.0.228:serde",
     ],
 )

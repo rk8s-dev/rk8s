@@ -29,5 +29,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :redox_syscall-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/bitflags/2.9.4:bitflags"],
+    deps = ["//third-party/rust/crates/bitflags/2.10.0:bitflags"],
 )
