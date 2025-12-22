@@ -7,6 +7,7 @@ use crate::chuck::slice::key_for_slice;
 use crate::meta::backoff::backoff;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
+use crate::meta::entities::etcd::EtcdLinkParent;
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
 use crate::meta::file_lock::{
@@ -86,6 +87,11 @@ impl EtcdMetaStore {
 
     fn etcd_plock_key(inode: i64) -> String {
         format!("p:{inode}")
+    }
+
+    /// Etcd helper method: generate link parent key for multi-hardlink files
+    fn etcd_link_parent_key(inode: i64) -> String {
+        format!("l:{}", inode)
     }
 
     /// Create or open an etcd metadata store
@@ -364,6 +370,7 @@ impl EtcdMetaStore {
                 entry_info.modify_time,
                 entry_info.create_time,
                 entry_info.nlink as i32,
+                entry_info.parent_inode,
                 entry_info.deleted,
                 entry_info.symlink_target.clone(),
             );
@@ -1437,13 +1444,63 @@ impl MetaStore for EtcdMetaStore {
             return Err(MetaError::NotFound(ino));
         }
 
+        let old_nlink = entry_info.nlink;
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         entry_info.nlink = entry_info.nlink.saturating_add(1);
         entry_info.modify_time = now;
         entry_info.create_time = now; // Update ctime when creating hard link
-        entry_info.parent_inode = parent;
-        entry_info.entry_name = name.to_string();
         entry_info.deleted = false;
+
+        if old_nlink == 1 {
+            // First hardlink: transition to LinkParent mode
+            use crate::meta::entities::etcd::EtcdLinkParent;
+
+            let old_parent = entry_info.parent_inode;
+            let old_entry_name = entry_info.entry_name.clone();
+
+            // Use link_parent instead of parent
+            entry_info.parent_inode = 0;
+            entry_info.entry_name = String::new();
+            let link_parent_key = Self::etcd_link_parent_key(ino);
+            let link_parents = vec![
+                EtcdLinkParent {
+                    parent_inode: old_parent,
+                    entry_name: old_entry_name,
+                },
+                EtcdLinkParent {
+                    parent_inode: parent,
+                    entry_name: name.to_string(),
+                },
+            ];
+
+            self.etcd_put_json(&link_parent_key, &link_parents, None)
+                .await?;
+        } else if old_nlink > 1 {
+            // Already using LinkParent, just add new entry
+            use crate::meta::entities::etcd::EtcdLinkParent;
+
+            let link_parent_key = Self::etcd_link_parent_key(ino);
+
+            self.atomic_update(
+                &link_parent_key,
+                |mut link_parents: Vec<EtcdLinkParent>| {
+                    link_parents.push(EtcdLinkParent {
+                        parent_inode: parent,
+                        entry_name: name.to_string(),
+                    });
+                    Ok((link_parents, ()))
+                },
+                || {
+                    Err(MetaError::Internal(format!(
+                        "LinkParent key {} not found for inode {}",
+                        link_parent_key, ino
+                    )))
+                },
+                10,
+                &None,
+            )
+            .await?;
+        }
 
         let forward_key = Self::etcd_forward_key(parent, name);
         let entry_type = if entry_info.symlink_target.is_some() {
@@ -1678,17 +1735,41 @@ impl MetaStore for EtcdMetaStore {
                 None => return Err(MetaError::NotFound(file_ino)),
             };
 
-        // Update file metadata - mark as deleted or decrease nlink
-        if entry_info.nlink > 1 {
-            // File has multiple links, just decrease nlink
-            entry_info.nlink -= 1;
+        let current_nlink = entry_info.nlink;
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        if current_nlink > 1 {
+            let link_parent_key = Self::etcd_link_parent_key(file_ino);
+
+            self.atomic_update(
+                &link_parent_key,
+                |link_parents: Vec<EtcdLinkParent>| {
+                    let updated_parents: Vec<EtcdLinkParent> = link_parents
+                        .into_iter()
+                        .filter(|lp| lp.parent_inode != parent || lp.entry_name != name)
+                        .collect();
+                    Ok((updated_parents, ()))
+                },
+                || {
+                    Err(MetaError::Internal(format!(
+                        "LinkParent key {} not found for inode {}",
+                        link_parent_key, file_ino
+                    )))
+                },
+                10,
+                &None,
+            )
+            .await?;
+
+            entry_info.nlink = current_nlink - 1;
+            entry_info.deleted = false;
         } else {
-            // Last link, mark as deleted
             entry_info.deleted = true;
             entry_info.nlink = 0;
+            entry_info.parent_inode = 0;
         }
 
-        entry_info.modify_time = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        entry_info.modify_time = now;
 
         let updated_json = serde_json::to_string(&entry_info)
             .map_err(|e| MetaError::Internal(format!("Failed to serialize entry info: {}", e)))?;

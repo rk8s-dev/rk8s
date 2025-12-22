@@ -123,3 +123,9 @@ pub struct EtcdPlock {
     pub owner: i64,
     pub records: Vec<PlockRecord>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EtcdLinkParent {
+    pub parent_inode: i64,
+    pub entry_name: String,
+}
