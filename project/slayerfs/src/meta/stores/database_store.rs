@@ -5,6 +5,7 @@
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
+use crate::meta::entities::link_parent_meta;
 use crate::meta::entities::session_meta::{self, Entity as SessionMeta};
 use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
 use crate::meta::entities::*;
@@ -186,6 +187,10 @@ impl DatabaseMetaStore {
                 .to_owned(),
             schema
                 .create_table_from_entity(FileMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(LinkParentMeta)
                 .if_not_exists()
                 .to_owned(),
             schema
@@ -469,6 +474,7 @@ impl DatabaseMetaStore {
             modify_time: Set(now),
             create_time: Set(now),
             nlink: Set(1),
+            parent: Set(parent_inode),
             deleted: Set(false),
             symlink_target: Set(None),
         };
@@ -1035,11 +1041,20 @@ impl MetaStore for DatabaseMetaStore {
         };
 
         if current_nlink > 1 {
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(file_id))
+                .filter(link_parent_meta::Column::ParentInode.eq(parent))
+                .filter(link_parent_meta::Column::EntryName.eq(name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
             file_meta.nlink = Set(current_nlink - 1);
             file_meta.deleted = Set(false);
         } else {
             file_meta.deleted = Set(true);
             file_meta.nlink = Set(0);
+            file_meta.parent = Set(0);
         }
 
         file_meta.modify_time = Set(now);
@@ -1131,12 +1146,65 @@ impl MetaStore for DatabaseMetaStore {
         };
         new_entry.insert(&txn).await.map_err(MetaError::Database)?;
 
+        let old_nlink = file.nlink;
         let new_nlink = file.nlink.saturating_add(1);
-        let mut file_active: file_meta::ActiveModel = file.into();
+        let mut file_active: file_meta::ActiveModel = file.clone().into();
         file_active.nlink = Set(new_nlink);
         file_active.modify_time = Set(now);
         file_active.create_time = Set(now);
         file_active.deleted = Set(false);
+
+        if old_nlink == 1 {
+            // Find the original parent from ContentMeta
+            let original_entry = ContentMeta::find()
+                .filter(content_meta::Column::Inode.eq(ino))
+                .one(&txn)
+                .await
+                .map_err(MetaError::Database)?
+                .ok_or_else(|| {
+                    MetaError::Internal(format!("ContentMeta entry not found for inode {}", ino))
+                })?;
+
+            let old_parent = file.parent;
+            let old_entry_name = original_entry.entry_name;
+
+            // Use link_parent instead of parent
+            file_active.parent = Set(0);
+            let link_parent_old = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(old_parent),
+                entry_name: Set(old_entry_name),
+            };
+            link_parent_old
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            // New link
+            let link_parent_new = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(parent),
+                entry_name: Set(name.to_string()),
+            };
+            link_parent_new
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if old_nlink > 1 {
+            // Already using LinkParent, just add new entry
+            use crate::meta::entities::link_parent_meta;
+
+            let link_parent_new = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(parent),
+                entry_name: Set(name.to_string()),
+            };
+            link_parent_new
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
         file_active
             .update(&txn)
             .await
@@ -1202,6 +1270,7 @@ impl MetaStore for DatabaseMetaStore {
             modify_time: Set(now),
             create_time: Set(now),
             nlink: Set(1),
+            parent: Set(parent),
             deleted: Set(false),
             symlink_target: Set(Some(target.to_string())),
         };
@@ -2058,6 +2127,292 @@ mod tests {
         fn get_store(&self, index: usize) -> &DatabaseMetaStore {
             &self.stores[index]
         }
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_parent_field_single_link() {
+        // Test that single-link files use parent field for O(1) lookup
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create a file
+        let file_ino = store
+            .create_file(parent, "single_link_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // Verify file has nlink=1
+        let file_meta = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file_meta.nlink, 1);
+        assert_eq!(
+            file_meta.parent, parent,
+            "Parent field should be set for single-link files"
+        );
+
+        // Verify no LinkParent entries exist
+        use crate::meta::entities::link_parent_meta;
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert!(
+            link_parents.is_empty(),
+            "No LinkParent entries should exist for single-link files"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_transition_to_linkparent() {
+        // Test transition from parent field to LinkParent when creating first hardlink
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create a file
+        let file_ino = store
+            .create_file(parent, "original_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // Verify initial state
+        let file_before = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(file_before.nlink, 1);
+        assert_eq!(file_before.parent, parent);
+
+        // Create a hardlink
+        let _attr = store.link(file_ino, parent, "hardlink.txt").await.unwrap();
+
+        // Verify transition to LinkParent mode
+        let file_after = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            file_after.nlink, 2,
+            "nlink should be 2 after creating hardlink"
+        );
+        assert_eq!(
+            file_after.parent, 0,
+            "Parent field should be 0 after transition to LinkParent mode"
+        );
+
+        // Verify LinkParent entries for both links
+        use crate::meta::entities::link_parent_meta;
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert_eq!(link_parents.len(), 2, "Should have 2 LinkParent entries");
+
+        // Verify both links are tracked
+        let names: Vec<String> = link_parents
+            .iter()
+            .map(|lp| lp.entry_name.clone())
+            .collect();
+        assert!(names.contains(&"original_file.txt".to_string()));
+        assert!(names.contains(&"hardlink.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_no_reversion_to_parent() {
+        // Test that LinkParent persists even when nlink drops back to 1
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create a file
+        let file_ino = store
+            .create_file(parent, "file1.txt".to_string())
+            .await
+            .unwrap();
+
+        // Create a hardlink (nlink: 1 -> 2)
+        store.link(file_ino, parent, "file2.txt").await.unwrap();
+
+        // Verify LinkParent mode is active
+        let file_after_link = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(file_after_link.nlink, 2);
+        assert_eq!(file_after_link.parent, 0);
+
+        // Unlink one of the files (nlink: 2 -> 1)
+        store.unlink(parent, "file2.txt").await.unwrap();
+
+        // Verify nlink dropped to 1 but parent field is still 0
+        let file_after_unlink = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            file_after_unlink.nlink, 1,
+            "nlink should be 1 after unlinking one hardlink"
+        );
+        assert_eq!(
+            file_after_unlink.parent, 0,
+            "Parent field should remain 0 (no reversion to parent field)"
+        );
+
+        // Verify LinkParent entry still exists for remaining link
+        use crate::meta::entities::link_parent_meta;
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            link_parents.len(),
+            1,
+            "Should still have 1 LinkParent entry"
+        );
+        assert_eq!(link_parents[0].entry_name, "file1.txt");
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_multiple_links() {
+        // Test LinkParent with multiple hardlinks
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create original file
+        let file_ino = store
+            .create_file(parent, "link1.txt".to_string())
+            .await
+            .unwrap();
+
+        // Create multiple hardlinks
+        store.link(file_ino, parent, "link2.txt").await.unwrap();
+        store.link(file_ino, parent, "link3.txt").await.unwrap();
+        store.link(file_ino, parent, "link4.txt").await.unwrap();
+
+        // Verify nlink count
+        let file_meta = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file_meta.nlink, 4, "Should have 4 links");
+        assert_eq!(
+            file_meta.parent, 0,
+            "Parent field should be 0 for multi-link files"
+        );
+
+        // Verify all LinkParent entries
+        use crate::meta::entities::link_parent_meta;
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert_eq!(link_parents.len(), 4, "Should have 4 LinkParent entries");
+
+        let names: Vec<String> = link_parents
+            .iter()
+            .map(|lp| lp.entry_name.clone())
+            .collect();
+        assert!(names.contains(&"link1.txt".to_string()));
+        assert!(names.contains(&"link2.txt".to_string()));
+        assert!(names.contains(&"link3.txt".to_string()));
+        assert!(names.contains(&"link4.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_last_unlink_cleanup() {
+        // Test that last unlink marks file as deleted and cleans up LinkParent entries
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create file with hardlink
+        let file_ino = store
+            .create_file(parent, "fileA.txt".to_string())
+            .await
+            .unwrap();
+        store.link(file_ino, parent, "fileB.txt").await.unwrap();
+
+        // Unlink both files
+        store.unlink(parent, "fileB.txt").await.unwrap();
+        store.unlink(parent, "fileA.txt").await.unwrap();
+
+        // Verify file is marked as deleted
+        let file_meta = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file_meta.nlink, 0, "nlink should be 0");
+        assert_eq!(file_meta.parent, 0, "parent should be 0");
+        assert!(file_meta.deleted, "File should be marked as deleted");
+
+        // Verify all LinkParent entries are cleaned up
+        use crate::meta::entities::link_parent_meta;
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert!(
+            link_parents.is_empty(),
+            "All LinkParent entries should be cleaned up"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_symlink_uses_parent_field() {
+        // Test that symlinks use parent field (they always have nlink=1)
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create a symlink
+        let (symlink_ino, _attr) = store
+            .symlink(parent, "my_symlink", "/target/path")
+            .await
+            .unwrap();
+
+        // Verify symlink has nlink=1 and uses parent field
+        let file_meta = FileMeta::find_by_id(symlink_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file_meta.nlink, 1, "Symlink should have nlink=1");
+        assert_eq!(file_meta.parent, parent, "Symlink should use parent field");
+        assert_eq!(file_meta.symlink_target, Some("/target/path".to_string()));
+
+        // Verify no LinkParent entries
+        use crate::meta::entities::link_parent_meta;
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(symlink_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert!(
+            link_parents.is_empty(),
+            "Symlinks should not have LinkParent entries"
+        );
     }
 
     #[tokio::test]

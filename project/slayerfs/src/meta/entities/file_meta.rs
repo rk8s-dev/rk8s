@@ -19,6 +19,10 @@ pub struct Model {
     #[sea_orm(column_type = "Integer")]
     pub nlink: i32,
 
+    /// Parent directory inode for single-link files (nlink==1).
+    #[sea_orm(column_type = "BigInteger", default_value = "0")]
+    pub parent: i64,
+
     /// Whether the file is marked for deletion (for garbage collection)
     #[sea_orm(column_type = "Boolean", default_value = "false")]
     pub deleted: bool,
@@ -47,6 +51,7 @@ impl Model {
         modify_time: i64,
         create_time: i64,
         nlink: i32,
+        parent: i64,
         deleted: bool,
         symlink_target: Option<String>,
     ) -> Self {
@@ -58,6 +63,7 @@ impl Model {
             modify_time,
             create_time,
             nlink,
+            parent,
             deleted,
             symlink_target,
         }
