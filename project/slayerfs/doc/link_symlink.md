@@ -2,14 +2,14 @@
 
 ## Overview
 
-SlayerFS implements both hardlinks and symlinks with an optimized metadata strategythat provides O(1)parent directory lookup for
+SlayerFS implements both hardlinks and symlinks with an optimized metadata strategy that provides O(1) parent directory lookup for
 single-link files while efficiently managing multi-link scenarios.
 
 ## Design Principles
 
 ### 1. Immediate Transition Strategy
 
-The linking mechanism uses an **immediate transition strategy**: once a hardlink is created (nlink becomes >1),the system permanently
+The linking mechanism uses an **immediate transition strategy**: once a hardlink is created (nlink becomes >1), the system permanently
 switches to LinkParent tracking mode and never reverts back to using the parent field, even if nlink drops back to 1.
 
 ### 2. Hybrid Parent Tracking
@@ -60,19 +60,20 @@ Process:
 
 ```
 Process:
-1. Mark file.deleted = true
-2. Set file.nlink = 0
-3. Set file.parent = 0
+1. Delete the file entry from ContentMeta
+2. Mark file.deleted = true
+3. Set file.nlink = 0
+4. Set file.parent = 0
 ```
 
 ## Symlink Semantics
 
 **POSIX Standard Behavior** :
 
-- `lstat()`: Return symlink metadata (current behavior is correct)
+- `lstat()`: Return symlink metadata
 - `stat()`: Follow symlink and return target file metadata
 
-According to these semantics,`resolve_path` & `resolve_path_follow` is implemented.
+According to these semantics, `resolve_path` & `resolve_path_follow` is implemented.
 
 ### Symlink Properties
 
@@ -81,8 +82,3 @@ According to these semantics,`resolve_path` & `resolve_path_follow` is implement
 - Target path stored in `symlink_target` field
 - Target can be absolute or relative path
 - Target may not exist (dangling symlink)
-
-## TODO
-
-- [] Maximum Follow Depth
-- [] Cycle Detection

@@ -1147,7 +1147,17 @@ impl MetaStore for DatabaseMetaStore {
         let old_nlink = file.nlink;
         let new_nlink = file.nlink.saturating_add(1);
 
-        // Query original entry before inserting new entry to avoid conflicts
+        // Query original entry BEFORE inserting new entry to avoid conflicts
+        //
+        // Why query ContentMeta instead of using file.parent directly?
+        // - file.parent only stores the parent inode, not the entry name
+        // - We need both parent_inode AND entry_name to create LinkParent entries
+        // - ContentMeta stores the complete directory entry (parent_inode + entry_name)
+        //
+        // Why query before insert?
+        // - After inserting the new entry, there will be 2 ContentMeta rows with the same inode
+        // - Using one() on multiple rows may return either entry non-deterministically
+        // - We must capture the original entry's name before creating the new link
         let original_entry = if old_nlink == 1 {
             Some(
                 ContentMeta::find()
