@@ -481,8 +481,8 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             match part {
                 "" | "." => continue, // Skip empty and current directory
                 ".." => {
-                    if !components.is_empty()
-                        && !(is_absolute && components.len() == 1 && components[0] == "")
+                    if !(components.is_empty()
+                        || is_absolute && components.len() == 1 && components[0].is_empty())
                     {
                         components.pop();
                     }
