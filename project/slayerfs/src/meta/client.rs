@@ -464,6 +464,44 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
     }
 
+    /// Normalizes a path by resolving `.` and `..` components.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to normalize (can be absolute or relative)
+    ///
+    /// # Returns
+    ///
+    /// A normalized absolute path with `.` and `..` resolved.
+    fn normalize_path(path: &str) -> String {
+        let mut components: Vec<&str> = Vec::new();
+        let is_absolute = path.starts_with('/');
+
+        for part in path.split('/') {
+            match part {
+                "" | "." => continue, // Skip empty and current directory
+                ".." => {
+                    if !components.is_empty()
+                        && !(is_absolute && components.len() == 1 && components[0] == "")
+                    {
+                        components.pop();
+                    }
+                }
+                _ => components.push(part),
+            }
+        }
+
+        if is_absolute {
+            if components.is_empty() {
+                "/".to_string()
+            } else {
+                format!("/{}", components.join("/"))
+            }
+        } else {
+            components.join("/")
+        }
+    }
+
     /// Resolves a file path to its corresponding inode number (**lstat semantics**).
     ///
     /// This method walks through the path components from root to leaf,
@@ -480,7 +518,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// * `Ok(i64)` - The inode number of the file/directory/symlink
     /// * `Err(MetaError::NotFound)` - If any component in the path doesn't exist
     /// * `Err(MetaError::...)` - Other metadata errors
-    // * TODO: Cycle detection is not implemented. Circular symlinks may loop.
     pub async fn resolve_path(&self, path: &str) -> Result<i64, MetaError> {
         self.resolve_path_impl(path, false).await
     }
@@ -571,7 +608,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                     let remaining = segments[idx + 1..].join("/");
 
                     // Resolve absolute vs relative target
-                    // TODO: Cycle detection not implemented
                     let resolved_target = if target.starts_with('/') {
                         target
                     } else {
@@ -587,9 +623,9 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                     };
 
                     current_path = if remaining.is_empty() {
-                        resolved_target
+                        Self::normalize_path(&resolved_target)
                     } else {
-                        format!("{}/{}", resolved_target, remaining)
+                        Self::normalize_path(&format!("{}/{}", resolved_target, remaining))
                     };
 
                     symlink_encountered = true;
