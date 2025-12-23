@@ -1052,6 +1052,12 @@ impl MetaStore for DatabaseMetaStore {
             file_meta.nlink = Set(current_nlink - 1);
             file_meta.deleted = Set(false);
         } else {
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(file_id))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
             file_meta.deleted = Set(true);
             file_meta.nlink = Set(0);
             file_meta.parent = Set(0);
@@ -1138,6 +1144,28 @@ impl MetaStore for DatabaseMetaStore {
             EntryType::File
         };
 
+        let old_nlink = file.nlink;
+        let new_nlink = file.nlink.saturating_add(1);
+
+        // Query original entry before inserting new entry to avoid conflicts
+        let original_entry = if old_nlink == 1 {
+            Some(
+                ContentMeta::find()
+                    .filter(content_meta::Column::Inode.eq(ino))
+                    .one(&txn)
+                    .await
+                    .map_err(MetaError::Database)?
+                    .ok_or_else(|| {
+                        MetaError::Internal(format!(
+                            "ContentMeta entry not found for inode {}",
+                            ino
+                        ))
+                    })?,
+            )
+        } else {
+            None
+        };
+
         let new_entry = content_meta::ActiveModel {
             inode: Set(ino),
             parent_inode: Set(parent),
@@ -1146,8 +1174,6 @@ impl MetaStore for DatabaseMetaStore {
         };
         new_entry.insert(&txn).await.map_err(MetaError::Database)?;
 
-        let old_nlink = file.nlink;
-        let new_nlink = file.nlink.saturating_add(1);
         let mut file_active: file_meta::ActiveModel = file.clone().into();
         file_active.nlink = Set(new_nlink);
         file_active.modify_time = Set(now);
@@ -1155,18 +1181,9 @@ impl MetaStore for DatabaseMetaStore {
         file_active.deleted = Set(false);
 
         if old_nlink == 1 {
-            // Find the original parent from ContentMeta
-            let original_entry = ContentMeta::find()
-                .filter(content_meta::Column::Inode.eq(ino))
-                .one(&txn)
-                .await
-                .map_err(MetaError::Database)?
-                .ok_or_else(|| {
-                    MetaError::Internal(format!("ContentMeta entry not found for inode {}", ino))
-                })?;
-
+            let orig = original_entry.unwrap();
             let old_parent = file.parent;
-            let old_entry_name = original_entry.entry_name;
+            let old_entry_name = orig.entry_name;
 
             // Use link_parent instead of parent
             file_active.parent = Set(0);
@@ -1191,9 +1208,6 @@ impl MetaStore for DatabaseMetaStore {
                 .await
                 .map_err(MetaError::Database)?;
         } else if old_nlink > 1 {
-            // Already using LinkParent, just add new entry
-            use crate::meta::entities::link_parent_meta;
-
             let link_parent_new = link_parent_meta::ActiveModel {
                 inode: Set(ino),
                 parent_inode: Set(parent),
@@ -2155,7 +2169,6 @@ mod tests {
         );
 
         // Verify no LinkParent entries exist
-        use crate::meta::entities::link_parent_meta;
         let link_parents = LinkParentMeta::find()
             .filter(link_parent_meta::Column::Inode.eq(file_ino))
             .all(&store.db)
@@ -2209,7 +2222,6 @@ mod tests {
         );
 
         // Verify LinkParent entries for both links
-        use crate::meta::entities::link_parent_meta;
         let link_parents = LinkParentMeta::find()
             .filter(link_parent_meta::Column::Inode.eq(file_ino))
             .all(&store.db)
@@ -2271,7 +2283,6 @@ mod tests {
         );
 
         // Verify LinkParent entry still exists for remaining link
-        use crate::meta::entities::link_parent_meta;
         let link_parents = LinkParentMeta::find()
             .filter(link_parent_meta::Column::Inode.eq(file_ino))
             .all(&store.db)
@@ -2317,7 +2328,6 @@ mod tests {
         );
 
         // Verify all LinkParent entries
-        use crate::meta::entities::link_parent_meta;
         let link_parents = LinkParentMeta::find()
             .filter(link_parent_meta::Column::Inode.eq(file_ino))
             .all(&store.db)
@@ -2365,7 +2375,6 @@ mod tests {
         assert!(file_meta.deleted, "File should be marked as deleted");
 
         // Verify all LinkParent entries are cleaned up
-        use crate::meta::entities::link_parent_meta;
         let link_parents = LinkParentMeta::find()
             .filter(link_parent_meta::Column::Inode.eq(file_ino))
             .all(&store.db)
@@ -2402,7 +2411,6 @@ mod tests {
         assert_eq!(file_meta.symlink_target, Some("/target/path".to_string()));
 
         // Verify no LinkParent entries
-        use crate::meta::entities::link_parent_meta;
         let link_parents = LinkParentMeta::find()
             .filter(link_parent_meta::Column::Inode.eq(symlink_ino))
             .all(&store.db)
