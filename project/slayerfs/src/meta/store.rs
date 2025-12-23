@@ -259,6 +259,11 @@ pub enum MetaError {
     #[error("Invalid path: {0}")]
     InvalidPath(String),
 
+    #[error(
+        "More than max_symlinks symbolic links were encountered during resolution of the path."
+    )]
+    TooManySymlinks,
+
     #[error("Operation not supported: {0}")]
     NotSupported(String),
 

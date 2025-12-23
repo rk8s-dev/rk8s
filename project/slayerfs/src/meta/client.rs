@@ -52,6 +52,8 @@ pub struct MetaClientOptions {
     /// When true, lookups fall back to case-insensitive matching similar to
     /// JuiceFS `CaseInsensi`.
     pub case_insensitive: bool,
+    /// Maximum symlink follow depth (POSIX SYMLOOP_MAX).
+    pub max_symlinks: usize,
 }
 
 impl Default for MetaClientOptions {
@@ -62,6 +64,7 @@ impl Default for MetaClientOptions {
             read_only: false,
             no_background_jobs: false,
             case_insensitive: false,
+            max_symlinks: 40,
         }
     }
 }
@@ -478,8 +481,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// * `Err(MetaError::NotFound)` - If any component in the path doesn't exist
     /// * `Err(MetaError::...)` - Other metadata errors
     // * TODO: Cycle detection is not implemented. Circular symlinks may loop.
-    // * TODO: A maximum symlink depth limit (e.g., POSIX SYMLOOP_MAX)
-    //   should be added to prevent infinite loops.
     pub async fn resolve_path(&self, path: &str) -> Result<i64, MetaError> {
         self.resolve_path_impl(path, false).await
     }
@@ -530,8 +531,13 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         info!("MetaClient: Path cache MISS for '{}'", path);
 
         let mut current_path = path.to_string();
-        // TODO: Add max iteration limit to prevent infinite symlink loops
+        let mut symlink_depth = 0;
+        let max_symlinks = self.options.max_symlinks;
+
         loop {
+            if symlink_depth >= max_symlinks {
+                return Err(MetaError::TooManySymlinks);
+            }
             let segments: Vec<&str> = current_path
                 .trim_start_matches('/')
                 .split('/')
@@ -587,6 +593,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                     };
 
                     symlink_encountered = true;
+                    symlink_depth += 1;
                     break;
                 }
 

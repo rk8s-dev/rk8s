@@ -147,6 +147,13 @@ pub struct ClientOptions {
     /// Optional override for the session heartbeat interval.
     #[serde(default, with = "duration_option_serde")]
     pub session_heartbeat: Option<Duration>,
+    /// Maximum symlink follow depth.
+    #[serde(default = "default_max_symlinks")]
+    pub max_symlinks: usize,
+}
+
+fn default_max_symlinks() -> usize {
+    40
 }
 
 /// Cache capacity configuration
