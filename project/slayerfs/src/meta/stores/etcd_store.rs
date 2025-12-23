@@ -1453,7 +1453,6 @@ impl MetaStore for EtcdMetaStore {
 
         if old_nlink == 1 {
             // First hardlink: transition to LinkParent mode
-            use crate::meta::entities::etcd::EtcdLinkParent;
 
             let old_parent = entry_info.parent_inode;
             let old_entry_name = entry_info.entry_name.clone();
@@ -1477,8 +1476,6 @@ impl MetaStore for EtcdMetaStore {
                 .await?;
         } else if old_nlink > 1 {
             // Already using LinkParent, just add new entry
-            use crate::meta::entities::etcd::EtcdLinkParent;
-
             let link_parent_key = Self::etcd_link_parent_key(ino);
 
             self.atomic_update(
@@ -1764,6 +1761,9 @@ impl MetaStore for EtcdMetaStore {
             entry_info.nlink = current_nlink - 1;
             entry_info.deleted = false;
         } else {
+            let link_parent_key = Self::etcd_link_parent_key(file_ino);
+            let _ = client.delete(link_parent_key, None).await;
+
             entry_info.deleted = true;
             entry_info.nlink = 0;
             entry_info.parent_inode = 0;
