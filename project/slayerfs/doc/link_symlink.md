@@ -68,7 +68,7 @@ Process:
 
 ## Symlink Semantics
 
-**POSIX Standard Behavior** :
+**POSIX Standard Behavior**:
 
 - `lstat()`: Return symlink metadata
 - `stat()`: Follow symlink and return target file metadata
