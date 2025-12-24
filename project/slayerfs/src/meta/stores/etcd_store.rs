@@ -1738,32 +1738,74 @@ impl MetaStore for EtcdMetaStore {
         if current_nlink > 1 {
             let link_parent_key = Self::etcd_link_parent_key(file_ino);
 
-            self.atomic_update(
-                &link_parent_key,
-                |link_parents: Vec<EtcdLinkParent>| {
-                    let updated_parents: Vec<EtcdLinkParent> = link_parents
-                        .into_iter()
-                        .filter(|lp| lp.parent_inode != parent || lp.entry_name != name)
-                        .collect();
-                    Ok((updated_parents, ()))
-                },
-                || {
-                    Err(MetaError::Internal(format!(
-                        "LinkParent key {} not found for inode {}",
-                        link_parent_key, file_ino
-                    )))
-                },
-                10,
-                &None,
-            )
-            .await?;
+            // 2->1 transition: Need to restore parent before deleting LinkParent
+            if current_nlink == 2 {
+                // Get LinkParent entries
+                let link_parents: Vec<EtcdLinkParent> = self
+                    .etcd_get_json(&link_parent_key)
+                    .await?
+                    .ok_or_else(|| {
+                        MetaError::Internal(format!(
+                            "LinkParent key not found for inode {} with nlink=2. Data inconsistency detected!",
+                            file_ino
+                        ))
+                    })?;
 
-            entry_info.nlink = current_nlink - 1;
-            entry_info.deleted = false;
+                // Find the remaining entry
+                let remaining = link_parents
+                    .iter()
+                    .find(|lp| lp.parent_inode != parent || lp.entry_name != name)
+                    .ok_or_else(|| {
+                        MetaError::Internal(format!(
+                            "No remaining LinkParent found for inode {} during 2->1 transition",
+                            file_ino
+                        ))
+                    })?;
+
+                // Restore parent and entry_name from remaining entry
+                entry_info.parent_inode = remaining.parent_inode;
+                entry_info.entry_name = remaining.entry_name.clone();
+
+                // Delete all LinkParent entries
+                client
+                    .delete(link_parent_key.clone(), None)
+                    .await
+                    .map_err(|e| {
+                        MetaError::Internal(format!(
+                            "Failed to delete LinkParent for inode {}: {}",
+                            file_ino, e
+                        ))
+                    })?;
+
+                entry_info.nlink = 1;
+                entry_info.deleted = false;
+            } else {
+                // n->n-1 transition (n > 2): Just remove the specific LinkParent entry
+                self.atomic_update(
+                    &link_parent_key,
+                    |link_parents: Vec<EtcdLinkParent>| {
+                        let updated_parents: Vec<EtcdLinkParent> = link_parents
+                            .into_iter()
+                            .filter(|lp| lp.parent_inode != parent || lp.entry_name != name)
+                            .collect();
+                        Ok((updated_parents, ()))
+                    },
+                    || {
+                        Err(MetaError::Internal(format!(
+                            "LinkParent key {} not found for inode {}",
+                            link_parent_key, file_ino
+                        )))
+                    },
+                    10,
+                    &None,
+                )
+                .await?;
+
+                entry_info.nlink = current_nlink - 1;
+                entry_info.deleted = false;
+            }
         } else {
-            let link_parent_key = Self::etcd_link_parent_key(file_ino);
-            let _ = client.delete(link_parent_key, None).await;
-
+            // 1->0 transition: Mark as deleted
             entry_info.deleted = true;
             entry_info.nlink = 0;
             entry_info.parent_inode = 0;

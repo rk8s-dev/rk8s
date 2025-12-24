@@ -1041,6 +1041,7 @@ impl MetaStore for DatabaseMetaStore {
         };
 
         if current_nlink > 1 {
+            // Delete the LinkParent entry for this specific (parent, name)
             LinkParentMeta::delete_many()
                 .filter(link_parent_meta::Column::Inode.eq(file_id))
                 .filter(link_parent_meta::Column::ParentInode.eq(parent))
@@ -1051,13 +1052,32 @@ impl MetaStore for DatabaseMetaStore {
 
             file_meta.nlink = Set(current_nlink - 1);
             file_meta.deleted = Set(false);
-        } else {
-            LinkParentMeta::delete_many()
-                .filter(link_parent_meta::Column::Inode.eq(file_id))
-                .exec(&txn)
-                .await
-                .map_err(MetaError::Database)?;
 
+            // 2->1 transition: Restore parent field and remove all LinkParent
+            if current_nlink == 2 {
+                // Find the remaining ContentMeta entry
+                let remaining_entry = ContentMeta::find()
+                    .filter(content_meta::Column::Inode.eq(file_id))
+                    .one(&txn)
+                    .await
+                    .map_err(MetaError::Database)?
+                    .ok_or(MetaError::Internal(format!(
+                        "No remaining ContentMeta found for inode {}",
+                        file_id
+                    )))?;
+
+                // Restore parent field from remaining entry
+                file_meta.parent = Set(remaining_entry.parent_inode);
+
+                // Delete all LinkParent entries
+                LinkParentMeta::delete_many()
+                    .filter(link_parent_meta::Column::Inode.eq(file_id))
+                    .exec(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+            }
+        } else {
+            // 1->0 transition: Mark as deleted
             file_meta.deleted = Set(true);
             file_meta.nlink = Set(0);
             file_meta.parent = Set(0);
