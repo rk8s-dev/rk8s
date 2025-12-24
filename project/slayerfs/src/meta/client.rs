@@ -481,9 +481,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             match part {
                 "" | "." => continue, // Skip empty and current directory
                 ".." => {
-                    if !(components.is_empty()
-                        || is_absolute && components.len() == 1 && components[0].is_empty())
-                    {
+                    if !(components.is_empty()) {
                         components.pop();
                     }
                 }
@@ -1278,6 +1276,61 @@ mod tests {
         };
 
         MetaClient::new(store, capacity, ttl)
+    }
+
+    #[test]
+    fn test_normalize_path() {
+        // Basic absolute paths
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("/"), "/");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/user"),
+            "/home/user"
+        );
+
+        // Handle .
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("/./"), "/");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/./user"),
+            "/home/user"
+        );
+
+        // Handle ..
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/user/../"),
+            "/home"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/../user"),
+            "/user"
+        );
+
+        // Complex cases
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/a/b/../c/./d"),
+            "/a/c/d"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/a/./b/../../c"),
+            "/c"
+        );
+
+        // Relative paths
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("file.txt"),
+            "file.txt"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("../file.txt"),
+            "file.txt"
+        );
+
+        // Edge cases
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path(""), "");
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("."), "");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/../../../file.txt"),
+            "/file.txt"
+        );
     }
 
     /// Test scenario: Call readdir immediately after creating files to verify fully_loaded flag handling
