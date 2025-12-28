@@ -147,12 +147,14 @@ impl DatabaseMetaStore {
             DatabaseType::Sqlite { url } => {
                 info!("Connecting to SQLite: {}", url);
                 let mut opts = ConnectOptions::new(url.clone());
-                // SQLite with file::memory: (named shared memory) needs single connection
-                // sqlite::memory: (anonymous) can use multiple connections for tests
+                // SQLite named shared memory (sqlite:file::memory:) needs single connection
+                // SQLite anonymous in-memory (sqlite::memory:) can use multiple connections
+                // Check for file::memory: first (more specific) before ::memory: (more general)
                 if url.contains("file::memory:") {
+                    // Named shared memory databases require exactly 1 connection
                     opts.max_connections(1).min_connections(1);
                 } else if url.contains("::memory:") {
-                    // For sqlite::memory: allow more connections for concurrent tests
+                    // Anonymous in-memory databases can use multiple connections for tests
                     opts.max_connections(5).min_connections(1);
                 } else {
                     // File-based databases can use more connections
@@ -160,7 +162,7 @@ impl DatabaseMetaStore {
                 }
                 opts.connect_timeout(Duration::from_secs(30))
                     .idle_timeout(Duration::from_secs(30))
-                    .acquire_timeout(Duration::from_secs(60));
+                    .acquire_timeout(Duration::from_secs(30));
                 let db = Database::connect(opts).await?;
                 Ok(db)
             }
@@ -2558,7 +2560,10 @@ mod tests {
         assert_eq!(lock_info2.lock_type, FileLockType::Read);
         assert_eq!(lock_info2.range.start, 0);
         assert_eq!(lock_info2.range.end, 100);
-        // pid is 0 for cross-session queries (security feature)
+        assert_eq!(
+            lock_info2.pid, 0,
+            "pid should be 0 for cross-session queries (security feature)"
+        );
     }
 
     #[tokio::test]
