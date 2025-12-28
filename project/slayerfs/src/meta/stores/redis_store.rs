@@ -1287,6 +1287,7 @@ mod tests {
     use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
     use crate::meta::store::MetaError;
     use crate::meta::stores::RedisMetaStore;
+    use serial_test::serial;
     use tokio::time;
     use uuid::Uuid;
 
@@ -1418,6 +1419,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_basic_read_lock() {
         let store = new_test_store().await;
@@ -1458,6 +1460,7 @@ mod tests {
         assert_eq!(lock_info.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_multiple_read_locks() {
         // Create session manager with 2 sessions
@@ -1527,6 +1530,7 @@ mod tests {
         assert_eq!(lock_info2.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_write_lock_conflict() {
         // Create session manager with 2 sessions
@@ -1588,6 +1592,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_lock_release() {
         let session_id = Uuid::now_v7();
@@ -1644,6 +1649,7 @@ mod tests {
         assert_eq!(lock_info.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_non_overlapping_locks() {
         // Create session manager with 2 sessions
@@ -1719,6 +1725,7 @@ mod tests {
         assert_eq!(lock_info2.pid, 5678);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_concurrent_read_write_locks() {
         // Test multiple sessions acquiring different types of locks
@@ -1826,6 +1833,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_cross_session_lock_visibility() {
         // Test that locks set by one session are visible to another session

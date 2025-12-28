@@ -51,3 +51,4 @@ uuid = { workspace = true, features = ["v7"] }
 tempfile = { workspace = true }
 criterion = { workspace = true }
 pprof = { workspace = true }
+serial_test = { workspace = true }
