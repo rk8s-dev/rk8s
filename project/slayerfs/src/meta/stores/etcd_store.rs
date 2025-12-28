@@ -910,8 +910,10 @@ impl EtcdMetaStore {
             .sid
             .get()
             .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
-        let lease = *self.get_lease()?;
-        let put_options = Some(PutOptions::new().with_lease(lease));
+        let put_options = self
+            .lease
+            .get()
+            .map(|lease| PutOptions::new().with_lease(*lease));
 
         match lock_type {
             FileLockType::UnLock => {
@@ -2605,6 +2607,35 @@ mod tests {
     use tokio::time;
     use uuid::Uuid;
 
+    async fn cleanup_test_data() -> Result<(), MetaError> {
+        use etcd_client::GetOptions;
+
+        let mut client =
+            crate::meta::stores::etcd_store::EtcdClient::connect(vec!["127.0.0.1:2379"], None)
+                .await
+                .map_err(|e| MetaError::Config(format!("Failed to connect to etcd: {}", e)))?;
+
+        let resp = client
+            .get("", Some(GetOptions::new().with_prefix()))
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to get etcd keys: {}", e)))?;
+
+        for kv in resp.kvs() {
+            let key = String::from_utf8_lossy(kv.key());
+            client
+                .delete(key.as_ref(), None)
+                .await
+                .map_err(|e| MetaError::Internal(format!("Failed to delete key {}: {}", key, e)))?;
+        }
+
+        let config = test_config();
+        let _store = EtcdMetaStore::from_config(config.clone())
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to reinitialize root: {}", e)))?;
+
+        Ok(())
+    }
+
     fn test_config() -> Config {
         Config {
             database: DatabaseConfig {
@@ -2631,6 +2662,10 @@ mod tests {
     }
 
     async fn new_test_store() -> EtcdMetaStore {
+        if let Err(e) = cleanup_test_data().await {
+            eprintln!("Failed to cleanup etcd test data: {}", e);
+        }
+
         EtcdMetaStore::from_config(test_config())
             .await
             .expect("Failed to create test database store")
@@ -2759,7 +2794,10 @@ mod tests {
         let store1 = session_mgr.get_store(0);
         let parent = store1.root_ino();
         let file_ino = store1
-            .create_file(parent, "test_multiple_read_locks_file.txt".to_string())
+            .create_file(
+                parent,
+                format!("test_multiple_read_locks_{}.txt", Uuid::now_v7()),
+            )
             .await
             .unwrap();
 
