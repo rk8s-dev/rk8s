@@ -53,6 +53,15 @@ docker-compose down
 
 Both `podman-compose` and `podman compose` syntaxes are supported.
 
+## Security Notice
+
+**WARNING**: The services in this configuration use default credentials that are only suitable for local development:
+- **PostgreSQL**: username `slayerfs`, password `slayerfs`
+- **etcd**: No authentication
+- **Redis**: No authentication
+
+These credentials are **NOT secure** and must NEVER be used in production or any shared/accessible environment. Always use strong, unique credentials and proper authentication mechanisms for production deployments.
+
 ## Usage
 
 ### Docker

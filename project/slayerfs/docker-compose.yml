@@ -7,7 +7,8 @@ services:
       - "2380:2380"
     environment:
       - ETCDCTL_API=3
-    command: /usr/local/bin/etcd
+    command: >
+      /usr/local/bin/etcd
       --name etcd-single
       --data-dir /etcd-data
       --listen-client-urls http://0.0.0.0:2379
@@ -32,7 +33,8 @@ services:
     container_name: redis-slayerfs-test
     ports:
       - "6379:6379"
-    command: redis-server
+    command: >
+      redis-server
       --appendonly yes
       --appendfsync everysec
     healthcheck:
@@ -48,6 +50,7 @@ services:
     container_name: pgsql-slayerfs-test
     ports:
       - "5432:5432"
+    # WARNING: Development-only credentials. Do NOT use these values in production or shared environments!
     environment:
       - POSTGRES_DB=database
       - POSTGRES_USER=slayerfs
