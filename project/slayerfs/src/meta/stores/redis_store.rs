@@ -1290,6 +1290,28 @@ mod tests {
     use tokio::time;
     use uuid::Uuid;
 
+    async fn cleanup_test_data() -> Result<(), MetaError> {
+        let url = "redis://127.0.0.1:6379/0";
+        let client = redis::Client::open(url)
+            .map_err(|e| MetaError::Config(format!("Failed to create Redis client: {}", e)))?;
+        let mut conn = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| MetaError::Config(format!("Failed to connect to Redis: {}", e)))?;
+
+        let _: () = redis::cmd("FLUSHDB")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to flush Redis DB: {}", e)))?;
+
+        let config = test_config();
+        let _store = RedisMetaStore::from_config(config.clone())
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to reinitialize root: {}", e)))?;
+
+        Ok(())
+    }
+
     fn test_config() -> Config {
         Config {
             database: DatabaseConfig {
@@ -1316,6 +1338,10 @@ mod tests {
     }
 
     async fn new_test_store() -> RedisMetaStore {
+        if let Err(e) = cleanup_test_data().await {
+            eprintln!("Failed to cleanup Redis test data: {}", e);
+        }
+
         RedisMetaStore::from_config(test_config())
             .await
             .expect("Failed to create test database store")
@@ -1444,7 +1470,10 @@ mod tests {
         let store1 = session_mgr.get_store(0);
         let parent = store1.root_ino();
         let file_ino = store1
-            .create_file(parent, "test_multiple_read_locks_file.txt".to_string())
+            .create_file(
+                parent,
+                format!("test_multiple_read_locks_{}.txt", Uuid::now_v7()),
+            )
             .await
             .unwrap();
 
