@@ -34,6 +34,25 @@ brew install docker docker-compose
 brew install podman podman-compose
 ```
 
+## Version Compatibility
+
+The commands in this guide use `docker compose` (without hyphen), which is the modern Docker Compose V2 syntax. This is available in:
+- Docker Desktop 4.10+ (includes Compose V2)
+- Docker Engine with the `docker-compose-plugin` package installed
+
+For older installations using the standalone `docker-compose` binary (with hyphen), replace `docker compose` with `docker-compose` in all commands.
+
+Example for older versions:
+```bash
+# Start services (older docker-compose v1 syntax)
+docker-compose up -d
+
+# Stop services
+docker-compose down
+```
+
+Both `podman-compose` and `podman compose` syntaxes are supported.
+
 ## Usage
 
 ### Docker
