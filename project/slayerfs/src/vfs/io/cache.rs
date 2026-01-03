@@ -85,25 +85,43 @@ where
         // Lock the gate to block other write operations.
         let _guard = inode.gate.write().await;
 
-        let mut chunks = self.caches.get_or_create(inode.ino() as u64);
-        let dirty_results = chunks.collect_dirty_chunks();
+        {
+            let mut chunks = self.caches.get_or_create(inode.ino() as u64);
+            let dirty_results = chunks.collect_dirty_chunks();
 
-        let mut need_clean = Vec::new();
-        for (chunk_index, clean_info, write_op) in dirty_results {
-            need_clean.push((chunk_index, clean_info));
+            let mut need_clean = Vec::new();
+            for (chunk_index, clean_info, write_op) in dirty_results {
+                need_clean.push((chunk_index, clean_info));
 
-            let chunk_id = chunk_id_for(inode.ino(), chunk_index);
-            let writer = self.chunk_io.writer(chunk_id);
-            for (offset, buf) in write_op {
-                writer.write(offset, &buf).await?;
+                let chunk_id = chunk_id_for(inode.ino(), chunk_index);
+                let writer = self.chunk_io.writer(chunk_id);
+                for (offset, buf) in write_op {
+                    writer.write(offset, &buf).await?;
+                }
+            }
+
+            for (chunk_index, clean_info) in need_clean {
+                chunks.mark_clean(chunk_index, clean_info);
             }
         }
-
-        for (chunk_index, clean_info) in need_clean {
-            chunks.mark_clean(chunk_index, clean_info);
-        }
+        self.caches.evict();
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn evict(&self) {
+        self.caches.evict();
+    }
+
+    #[cfg(test)]
+    pub fn debug_dirty_writes(&self, ino: u64) -> Vec<(u64, Vec<(u32, Vec<u8>)>)> {
+        let cache = self.caches.get_or_create(ino);
+        cache
+            .collect_dirty_chunks()
+            .into_iter()
+            .map(|(chunk_index, _clean, writes)| (chunk_index, writes))
+            .collect()
     }
 }
 
@@ -130,7 +148,7 @@ where
         len: u32,
         op: AccessKind,
     ) -> anyhow::Result<PagedCacheGuard<'_>> {
-        let mut guard = self.cache.prepare(index);
+        let mut guard = self.cache.prepare(self.ino as u64, index);
         let info = guard.probe(offset, len, op);
 
         let mut position = 0;

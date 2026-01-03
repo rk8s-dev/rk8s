@@ -28,7 +28,7 @@ where
         &self.cache_ctl
     }
 
-    pub async fn write(&self, offset: u64, buf: &[u8]) -> anyhow::Result<usize> {
+    pub async fn write(&mut self, offset: u64, buf: &[u8]) -> anyhow::Result<usize> {
         let layout = self.cache_ctl.chunk_io.layout();
         let chunk_span = ChunkSpan::new(
             layout.chunk_index_of(offset),

@@ -82,12 +82,12 @@ where
     pub async fn write(&self, buf: &[u8]) -> anyhow::Result<SliceDesc> {
         let mut cursor = 0;
 
-        for (index, span) in block_span_iter(self.desc, self.layout).enumerate() {
+        for span in block_span_iter(self.desc, self.layout) {
             let take = span.len as usize;
             let data = &buf[cursor..(cursor + take)];
 
             self.store
-                .write_range((self.desc.slice_id, index as u32), span.offset, data)
+                .write_range((self.desc.slice_id, span.index as u32), span.offset, data)
                 .await?;
             cursor += take;
         }
@@ -103,11 +103,11 @@ where
         debug_assert_eq!(buf.len(), self.desc.length as usize);
         let mut cursor = 0usize;
 
-        for (index, span) in block_span_iter(self.desc, self.layout).enumerate() {
+        for span in block_span_iter(self.desc, self.layout) {
             let take = span.len as usize;
             let out = &mut buf[cursor..cursor + take];
             self.store
-                .read_range((self.desc.slice_id, index as u32), span.offset, out)
+                .read_range((self.desc.slice_id, span.index as u32), span.offset, out)
                 .await?;
             cursor += take;
         }

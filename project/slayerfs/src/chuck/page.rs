@@ -6,59 +6,133 @@ use crate::vfs::inode::Inode;
 use dashmap::DashMap;
 use dashmap::mapref::one::RefMut;
 use sea_orm::sea_query::ExprTrait;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::io::{Cursor, Read, Write};
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::slice::SliceIndex;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use lru::LruCache;
 
 // 4KB
 pub const DEFAULT_PAGE_SIZE: u32 = 4 * 1024;
 
+// 256MB
+pub const DEFAULT_CACHE_MAX_BYTES: u64 = 256 * 1024 * 1024;
+
+// 256 * 0.8 = 204MB
+pub const DEFAULT_LOW_WATERMARK: u64 = 204 * 1024 * 1024;
+
 type DirtyChunkWrite = (u32, Vec<u8>);
+
 type DirtyChunkFlush = (u64, Vec<MarkCleanInfo>, Vec<DirtyChunkWrite>);
 
+/// (ino, chunk_index, page_index)
+type AccessKey = (u64, u64, u64);
+
+pub struct CacheBudget {
+    current_bytes: Arc<AtomicU64>,
+    max_bytes: u64,
+    low_watermark: u64,
+}
+
+impl Default for CacheBudget {
+    fn default() -> Self {
+        Self::new(DEFAULT_CACHE_MAX_BYTES, DEFAULT_LOW_WATERMARK)
+    }
+}
+
+impl CacheBudget {
+    pub fn new(max_bytes: u64, low_watermark: u64) -> Self {
+        Self {
+            current_bytes: Arc::new(AtomicU64::new(0)),
+            max_bytes,
+            low_watermark,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn current_bytes(&self) -> u64 {
+        self.current_bytes.load(Ordering::Relaxed)
+    }
+}
+
 /// Page cache configuration shared across inodes.
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct PagedCacheConfig {
     pub layout: ChunkLayout,
+    pub budget: Arc<CacheBudget>,
     pub page_size: u32,
 }
 
 /// Per-inode cache registry.
 pub struct Folio {
     caches: DashMap<u64, PagedCache>,
-    config: PagedCacheConfig,
+    replacer: Arc<Mutex<LruCache<AccessKey, ()>>>,
+    config: Arc<PagedCacheConfig>,
 }
 
 impl Folio {
     pub fn new(config: PagedCacheConfig) -> Folio {
         Self {
             caches: DashMap::new(),
-            config,
+            replacer: Arc::new(Mutex::new(LruCache::unbounded())),
+            config: Arc::new(config),
         }
     }
 
     pub fn get_or_create(&self, index: u64) -> RefMut<'_, u64, PagedCache> {
         self.caches
             .entry(index)
-            .or_insert_with(|| PagedCache::new(self.config))
+            .or_insert_with(|| PagedCache::new(self.config.clone(), self.replacer.clone()))
     }
 
     pub fn collect_all_ino(&self) -> Vec<u64> {
         self.caches.iter().map(|kv| *kv.key()).collect()
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn evict(&self) {
+        let mut current_bytes = self.config.budget.current_bytes.load(Ordering::Relaxed);
+        if current_bytes <= self.config.budget.max_bytes {
+            return;
+        }
+
+        let mut replacer = self.replacer.lock().unwrap();
+        let mut attempts = replacer.len();
+        while current_bytes > self.config.budget.low_watermark && attempts > 0 {
+            let Some((key, _)) = replacer.pop_lru() else {
+                break;
+            };
+            let (ino, chunk_index, page_index) = key;
+
+            if let Some(mut cache) = self.caches.get_mut(&ino)
+                && cache.evict_page(chunk_index, page_index)
+            {
+                current_bytes = self.config.budget.current_bytes.load(Ordering::Relaxed);
+                attempts = replacer.len();
+                continue;
+            }
+
+            replacer.put(key, ());
+            attempts -= 1;
+        }
     }
 }
 
 /// Page cache for a single inode, keyed by chunk index.
 pub struct PagedCache {
     pages: DashMap<u64, ChunkPage>,
-    config: PagedCacheConfig,
+    replacer: Arc<Mutex<LruCache<AccessKey, ()>>>,
+    config: Arc<PagedCacheConfig>,
 }
 
 /// Guard holding a mutable chunk page map for a specific chunk index.
 pub struct PagedCacheGuard<'a> {
+    ino: u64,
+    index: u64,
+    replacer: Arc<Mutex<LruCache<AccessKey, ()>>>,
     page: RefMut<'a, u64, ChunkPage>,
 }
 
@@ -94,9 +168,10 @@ impl<'a> PagedCacheGuard<'a> {
         let start = info.offset / self.page.config.page_size;
         let pages = (info.len as usize) / page_size;
 
+        let current_bytes = self.page.config.budget.current_bytes.clone();
         for i in 0..pages {
             let index = (start + i as u32) as u64;
-            let page = self.page.ensure_page(index);
+            let page = self.page.ensure_page(index, current_bytes.clone());
             debug_assert!(page.state == PageState::Invalid);
 
             page.state = PageState::Valid;
@@ -104,10 +179,40 @@ impl<'a> PagedCacheGuard<'a> {
                 .copy_from_slice(&buf[i * page_size..(i + 1) * page_size]);
         }
     }
+
+    pub fn read_at(&mut self, buf: &mut [u8], offset: u32) -> anyhow::Result<usize> {
+        let mut touched = Vec::new();
+        let n = self.read_at_with(buf, offset, |index| {
+            touched.push(index);
+        })?;
+
+        {
+            let mut replacer = self.replacer.lock().unwrap();
+            for index in touched {
+                replacer.put((self.ino, self.index, index), ());
+            }
+        }
+        Ok(n)
+    }
+
+    pub fn write_at(&mut self, buf: &[u8], offset: u32) -> anyhow::Result<usize> {
+        let mut touched = Vec::new();
+        let n = self.write_at_with(buf, offset, |index| {
+            touched.push(index);
+        })?;
+
+        {
+            let mut replacer = self.replacer.lock().unwrap();
+            for index in touched {
+                replacer.put((self.ino, self.index, index), ());
+            }
+        }
+        Ok(n)
+    }
 }
 
 impl PagedCache {
-    pub fn new(config: PagedCacheConfig) -> Self {
+    pub fn new(config: Arc<PagedCacheConfig>, replacer: Arc<Mutex<LruCache<AccessKey, ()>>>) -> Self {
         assert_eq!(
             config.layout.chunk_size % config.page_size as u64,
             0,
@@ -116,19 +221,20 @@ impl PagedCache {
 
         Self {
             pages: DashMap::default(),
+            replacer,
             config,
         }
     }
 
-    pub fn prepare(&self, index: u64) -> PagedCacheGuard<'_> {
+    pub fn prepare(&self, ino: u64, index: u64) -> PagedCacheGuard<'_> {
         let page = self.ensure_chunk(index);
-        PagedCacheGuard { page }
+        PagedCacheGuard { ino, index, page, replacer: self.replacer.clone()}
     }
 
     pub fn ensure_chunk(&self, index: u64) -> RefMut<'_, u64, ChunkPage> {
         self.pages
             .entry(index)
-            .or_insert(ChunkPage::new(self.config))
+            .or_insert(ChunkPage::new(self.config.clone()))
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -152,7 +258,9 @@ impl PagedCache {
                 write_op.push((page.index as u32 * page_size, page.data));
             }
 
-            results.push((index, info, write_op));
+            if !write_op.is_empty() {
+                results.push((index, info, write_op));
+            }
         }
         results
     }
@@ -164,24 +272,51 @@ impl PagedCache {
             .expect("The chunk which will be marked as clean must exist")
             .mark_clean(clean_info);
     }
+
+    pub fn evict_page(&mut self, chunk_index: u64, page_index: u64) -> bool {
+        let mut chunk = match self.pages.get_mut(&chunk_index) {
+            Some(chunk) => chunk,
+            None => return false,
+        };
+
+        chunk.evict_page(page_index)
+    }
 }
 
 /// Page table for a single chunk.
 pub struct ChunkPage {
     pages: BTreeMap<u64, Page>,
-    config: PagedCacheConfig,
+    config: Arc<PagedCacheConfig>,
 }
 
 impl ChunkPage {
-    pub fn new(config: PagedCacheConfig) -> Self {
+    pub fn new(config: Arc<PagedCacheConfig>) -> Self {
         Self {
             pages: BTreeMap::default(),
             config,
         }
     }
 
-    pub fn ensure_page(&mut self, index: u64) -> &mut Page {
-        self.pages.entry(index).or_default()
+    pub fn ensure_page(&mut self, index: u64, current_bytes: Arc<AtomicU64>) -> &mut Page {
+        self.pages.entry(index).or_insert_with(|| Page::new(current_bytes))
+    }
+
+    fn evict_page(&mut self, index: u64) -> bool {
+        let Some(page) = self.pages.remove(&index) else {
+            return false;
+        };
+
+        if page.state == PageState::Dirty {
+            self.pages.insert(index, page);
+            return false;
+        }
+
+        let size = page.size();
+        if size > 0 {
+            page.current_bytes
+                .fetch_sub(size as u64, Ordering::Relaxed);
+        }
+        true
     }
 
     #[tracing::instrument(level = "trace", skip(self, info))]
@@ -250,9 +385,10 @@ impl ChunkPage {
 
         let mut results: Vec<BackfillInfo> = Vec::new();
 
+        let current_bytes = self.config.budget.current_bytes.clone();
         for span in page_span {
             let is_full_page = span.offset == 0 && span.len == page_size;
-            let page = self.ensure_page(span.index);
+            let page = self.ensure_page(span.index, current_bytes.clone());
 
             let need_backfill = match op {
                 AccessKind::Write => page.state == PageState::Invalid && !is_full_page,
@@ -277,32 +413,34 @@ impl ChunkPage {
         results
     }
 
-    /// Read from cache; caller must ensure pages are valid (via backfill).
-    pub fn read_at(&mut self, mut buf: &mut [u8], offset: u32) -> anyhow::Result<usize> {
+    pub fn read_at_with(&mut self, mut buf: &mut [u8], offset: u32, mut on_page: impl FnMut(u64)) -> anyhow::Result<usize> {
         let len = buf.len();
         let page_span = self.split_into_page_span(offset, len as u32);
 
         let mut read_bytes = 0;
         for span in page_span {
+            on_page(span.index);
             let slice = self
                 .pages
                 .get(&span.index)
                 .ok_or_else(|| anyhow::anyhow!("Try reading from an invalid page"))?
                 .slice(span.offset, span.len)?;
+
             read_bytes += buf.write(slice)?;
         }
         Ok(read_bytes)
+
     }
 
-    /// Write into cache; full-page writes can proceed without backfill.
-    pub fn write_at(&mut self, buf: &[u8], offset: u32) -> anyhow::Result<usize> {
+    pub fn write_at_with(&mut self, buf: &[u8], offset: u32, mut on_page: impl FnMut(u64)) -> anyhow::Result<usize> {
         let len = buf.len();
         let page_span = self.split_into_page_span(offset, len as u32);
         let page_size = self.config.page_size;
 
         let mut cursor = Cursor::new(buf);
         for span in page_span {
-            let page = self.ensure_page(span.index);
+            on_page(span.index);
+            let page = self.ensure_page(span.index, self.config.budget.current_bytes.clone());
 
             // Lazily update state when writing
             if page.state == PageState::Invalid && span.offset == 0 && span.len == page_size {
@@ -316,6 +454,7 @@ impl ChunkPage {
             let _ = cursor.read(slice)?;
         }
         Ok(cursor.position() as usize)
+
     }
 }
 
@@ -330,15 +469,28 @@ enum PageState {
 #[derive(Default)]
 pub struct Page {
     state: PageState,
+    current_bytes: Arc<AtomicU64>,
     buf: Vec<u8>,
 }
 
 impl Page {
+    fn new(current_bytes: Arc<AtomicU64>) -> Self {
+        Self {
+            current_bytes,
+            ..Default::default()
+        }
+    }
+
     fn padding_to_size(&mut self, size: usize) -> &mut [u8] {
         if self.buf.len() < size {
+            self.current_bytes.fetch_add((size - self.buf.len()) as u64, Ordering::Relaxed);
             self.buf.resize(size, 0);
         }
         &mut self.buf[..]
+    }
+
+    fn size(&self) -> usize {
+        self.buf.len()
     }
 
     pub fn slice(&self, offset: u32, len: u32) -> anyhow::Result<&[u8]> {
@@ -347,7 +499,7 @@ impl Page {
             "The page that be read shouldn't be invalid"
         );
 
-        // if the page is valid, we must ensure that the length of buf is long enough.
+        // If the page is valid, we must ensure that the length of buf is long enough.
         let end = (offset + len) as usize;
         Ok(&self.buf[offset as usize..end])
     }
@@ -360,9 +512,7 @@ impl Page {
         self.state = PageState::Dirty;
 
         let end = (offset + len) as usize;
-        if self.buf.len() < end {
-            self.buf.resize(end, 0);
-        }
+        self.padding_to_size(end);
         Ok(&mut self.buf[offset as usize..end])
     }
 }
@@ -389,10 +539,13 @@ pub struct MarkCleanInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccessKind, DEFAULT_PAGE_SIZE, PagedCache, PagedCacheConfig};
+    use super::{AccessKey, AccessKind, CacheBudget, DEFAULT_PAGE_SIZE, Folio, PagedCache, PagedCacheConfig};
     use crate::chuck::ChunkLayout;
+    use lru::LruCache;
     use rand::Rng;
     use std::collections::HashMap;
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
 
     type Result<T> = anyhow::Result<T>;
 
@@ -403,7 +556,7 @@ mod tests {
         len: u32,
         op: AccessKind,
     ) -> super::PagedCacheGuard<'_> {
-        let mut guard = cache.prepare(index);
+        let mut guard = cache.prepare(0, index);
         if len == 0 {
             return guard;
         }
@@ -440,13 +593,18 @@ mod tests {
         guard.read_at(buf, offset)
     }
 
-    fn setup() -> PagedCache {
+    fn build_cache(layout: ChunkLayout, page_size: u32) -> PagedCache {
         let config = PagedCacheConfig {
-            layout: ChunkLayout::default(),
-            page_size: DEFAULT_PAGE_SIZE,
+            layout,
+            budget: Arc::new(CacheBudget::default()),
+            page_size,
         };
+        let replacer = Arc::new(Mutex::new(LruCache::<AccessKey, ()>::unbounded()));
+        PagedCache::new(Arc::new(config), replacer)
+    }
 
-        PagedCache::new(config)
+    fn setup() -> PagedCache {
+        build_cache(ChunkLayout::default(), DEFAULT_PAGE_SIZE)
     }
 
     #[test]
@@ -528,15 +686,15 @@ mod tests {
 
     #[test]
     fn test_read_requires_backfill() -> Result<()> {
-        let cache = PagedCache::new(PagedCacheConfig {
-            layout: ChunkLayout {
+        let cache = build_cache(
+            ChunkLayout {
                 block_size: 1024,
                 chunk_size: 256,
             },
-            page_size: 64,
-        });
+            64,
+        );
 
-        let mut guard = cache.prepare(0);
+        let mut guard = cache.prepare(0, 0);
         let mut buf = vec![0u8; 8];
         assert!(guard.read_at(&mut buf, 0).is_err());
 
@@ -558,15 +716,15 @@ mod tests {
 
     #[test]
     fn test_probe_backfill_ranges_across_pages() {
-        let cache = PagedCache::new(PagedCacheConfig {
-            layout: ChunkLayout {
+        let cache = build_cache(
+            ChunkLayout {
                 block_size: 1024,
                 chunk_size: 256,
             },
-            page_size: 64,
-        });
+            64,
+        );
 
-        let mut guard = cache.prepare(0);
+        let mut guard = cache.prepare(0, 0);
         let infos = guard.probe(32, 100, AccessKind::Read);
 
         assert_eq!(infos.len(), 1);
@@ -576,15 +734,15 @@ mod tests {
 
     #[test]
     fn test_partial_write_backfill_preserves_page() -> Result<()> {
-        let cache = PagedCache::new(PagedCacheConfig {
-            layout: ChunkLayout {
+        let cache = build_cache(
+            ChunkLayout {
                 block_size: 1024,
                 chunk_size: 256,
             },
-            page_size: 64,
-        });
+            64,
+        );
 
-        let mut guard = cache.prepare(0);
+        let mut guard = cache.prepare(0, 0);
         let infos = guard.probe(4, 4, AccessKind::Write);
         assert_eq!(infos.len(), 1);
 
@@ -602,13 +760,13 @@ mod tests {
 
     #[test]
     fn test_full_page_span_write_without_backfill() -> Result<()> {
-        let cache = PagedCache::new(PagedCacheConfig {
-            layout: ChunkLayout {
+        let cache = build_cache(
+            ChunkLayout {
                 block_size: 1024,
                 chunk_size: 256,
             },
-            page_size: 64,
-        });
+            64,
+        );
 
         // offset=99, len=93 -> spans a partial page then a full page.
         let offset = 99u32;
@@ -626,32 +784,32 @@ mod tests {
 
     #[test]
     fn fuzz_test_cache_consistency() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let chunk_size: usize = 256;
         let page_size = 64;
 
         let iterations = 10_000;
 
-        let cache = PagedCache::new(PagedCacheConfig {
-            layout: ChunkLayout {
+        let cache = build_cache(
+            ChunkLayout {
                 block_size: 64,
                 chunk_size: 256,
             },
             page_size,
-        });
+        );
 
         let mut model: HashMap<u64, Vec<u8>> = HashMap::new();
 
         for i in 0..iterations {
-            let index: u64 = rng.gen_range(0..20);
+            let index: u64 = rng.random_range(0..20);
 
-            let len: usize = rng.gen_range(0..=chunk_size);
+            let len: usize = rng.random_range(0..=chunk_size);
 
             let max_offset = chunk_size - len;
-            let offset: u32 = rng.gen_range(0..=max_offset) as u32;
+            let offset: u32 = rng.random_range(0..=max_offset) as u32;
 
-            if rng.gen_bool(0.5) {
+            if rng.random_bool(0.5) {
                 let mut write_buf = vec![0u8; len];
                 rng.fill(&mut write_buf[..]);
 
@@ -692,5 +850,78 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_evict_removes_clean_pages() {
+        let page_size = 16u32;
+        let budget = Arc::new(CacheBudget::new(page_size as u64, 0));
+        let config = PagedCacheConfig {
+            layout: ChunkLayout {
+                block_size: 64,
+                chunk_size: 64,
+            },
+            budget: budget.clone(),
+            page_size,
+        };
+        let folio = Folio::new(config);
+
+        let ino = 1u64;
+        {
+            let cache = folio.get_or_create(ino);
+            let mut guard = cache.prepare(ino, 0);
+
+            let infos = guard.probe(0, page_size * 2, AccessKind::Read);
+            assert_eq!(infos.len(), 1);
+            let buf = vec![0xABu8; infos[0].len as usize];
+            guard.fill_back(infos[0], &buf);
+
+            let mut tmp = vec![0u8; 1];
+            guard.read_at(&mut tmp, 0).unwrap();
+            guard.read_at(&mut tmp, page_size).unwrap();
+        }
+
+        assert_eq!(
+            budget.current_bytes.load(Ordering::Relaxed),
+            (page_size * 2) as u64
+        );
+        folio.evict();
+        assert_eq!(budget.current_bytes.load(Ordering::Relaxed), 0);
+
+        let cache = folio.get_or_create(ino);
+        let chunk = cache.pages.get(&0).expect("chunk should exist");
+        assert!(chunk.pages.is_empty());
+    }
+
+    #[test]
+    fn test_evict_skips_dirty_pages() -> Result<()> {
+        let page_size = 16u32;
+        let budget = Arc::new(CacheBudget::new(page_size as u64, 0));
+        let config = PagedCacheConfig {
+            layout: ChunkLayout {
+                block_size: 64,
+                chunk_size: 64,
+            },
+            budget: budget.clone(),
+            page_size,
+        };
+        let folio = Folio::new(config);
+
+        let ino = 2u64;
+        {
+            let cache = folio.get_or_create(ino);
+            let mut guard = cache.prepare(ino, 0);
+            let data = vec![0xCDu8; page_size as usize];
+            guard.write_at(&data, 0)?;
+        }
+
+        assert_eq!(budget.current_bytes.load(Ordering::Relaxed), page_size as u64);
+        folio.evict();
+        assert_eq!(budget.current_bytes.load(Ordering::Relaxed), page_size as u64);
+
+        let cache = folio.get_or_create(ino);
+        let chunk = cache.pages.get(&0).expect("chunk should exist");
+        assert_eq!(chunk.pages.len(), 1);
+        Ok(())
     }
 }

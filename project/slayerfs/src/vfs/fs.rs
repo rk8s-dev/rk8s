@@ -1,7 +1,7 @@
 //! FUSE/SDK-friendly VFS with path-based create/mkdir/read/write/readdir/stat support.
 
 use crate::chuck::chunk::ChunkLayout;
-use crate::chuck::page::{DEFAULT_PAGE_SIZE, PagedCacheConfig};
+use crate::chuck::page::{CacheBudget, DEFAULT_PAGE_SIZE, PagedCacheConfig};
 use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
 use crate::chuck::writer::ChunkWriter;
@@ -219,6 +219,7 @@ where
     fn new(chunk_io: Arc<ChunkIoFactory<S, M>>) -> Self {
         let cache_config = PagedCacheConfig {
             layout: chunk_io.layout,
+            budget: Arc::new(CacheBudget::default()),
             page_size: DEFAULT_PAGE_SIZE,
         };
 
@@ -1072,7 +1073,7 @@ where
             .writer(ino)
             .ok_or_else(|| "file writer is not initialized".to_string())?;
 
-        let guard = writer.write().await;
+        let mut guard = writer.write().await;
         let written = guard.write(offset, data).await.map_err(|e| e.to_string())?;
 
         let target_size = offset + data.len() as u64;
@@ -1431,6 +1432,43 @@ mod tests {
         VFS::new(layout, store, meta_store).await.unwrap()
     }
 
+    async fn build_mem_fs_with_cache(
+        cache_config: PagedCacheConfig,
+    ) -> VFS<InMemoryBlockStore, Arc<DatabaseMetaStore>> {
+        let layout = cache_config.layout;
+        let store = Arc::new(InMemoryBlockStore::new());
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let meta = Arc::new(meta_store);
+
+        let meta_client = MetaClient::with_options(
+            Arc::clone(&meta),
+            CacheCapacity::default(),
+            CacheTtl::for_sqlite(),
+            MetaClientOptions::default(),
+        );
+        meta_client.initialize().await.unwrap();
+        let meta_layer: Arc<MetaClient<Arc<DatabaseMetaStore>>> = meta_client.clone();
+        let root = meta_layer.root_ino();
+
+        let core = Arc::new(VfsCore::new(
+            layout,
+            Arc::clone(&store),
+            Arc::clone(&meta),
+            meta_layer,
+            root,
+        ));
+
+        let state = Arc::new(VfsState {
+            cache_ctl: Arc::new(CacheCtl::new(cache_config, core.chunk_io.clone())),
+            handles: HandleRegistry::new(),
+            files: FileRegistry::new(),
+            modified: ModifiedTracker::new(),
+        });
+
+        VFS { core, state }
+    }
+
     async fn apply_write(
         fs: &VFS<InMemoryBlockStore, Arc<DatabaseMetaStore>>,
         path: &str,
@@ -1635,6 +1673,333 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_cache_eviction_reclaims_memory() -> anyhow::Result<()> {
+        let page_size = 256u32;
+        let max_bytes = (page_size as u64) * 3;
+        let low_watermark = page_size as u64;
+        let budget = Arc::new(CacheBudget::new(max_bytes, low_watermark));
+        let layout = ChunkLayout::default();
+
+        let cache_config = PagedCacheConfig {
+            layout,
+            budget: budget.clone(),
+            page_size,
+        };
+
+        let fs = build_mem_fs_with_cache(cache_config).await;
+        let path = "/evict.txt";
+        fs.create_file(path).await.expect("create file");
+
+        let data = vec![0x7Eu8; page_size as usize * 10];
+        timeout(Duration::from_secs(5), fs.write(path, 0, &data))
+            .await
+            .expect("write timed out")
+            .expect("write data");
+
+        assert!(
+            budget.current_bytes() > max_bytes,
+            "expected cache bytes to exceed budget before eviction"
+        );
+
+        timeout(Duration::from_secs(5), fs.fsync(path))
+            .await
+            .expect("fsync timed out")
+            .expect("fsync before eviction");
+        fs.state.cache_ctl.evict();
+
+        assert!(
+            budget.current_bytes() <= low_watermark,
+            "expected cache bytes to be reduced after eviction"
+        );
+
+        let out = timeout(Duration::from_secs(5), fs.read(path, 0, data.len()))
+            .await
+            .expect("read timed out")
+            .expect("read after eviction");
+        assert_eq!(out, data);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cache_eviction_respects_dirty_pages() -> anyhow::Result<()> {
+        let page_size = 256u32;
+        let max_bytes = (page_size as u64) * 3;
+        let low_watermark = 0;
+        let budget = Arc::new(CacheBudget::new(max_bytes, low_watermark));
+        let layout = ChunkLayout::default();
+
+        let cache_config = PagedCacheConfig {
+            layout,
+            budget: budget.clone(),
+            page_size,
+        };
+
+        let fs = build_mem_fs_with_cache(cache_config).await;
+        let path_a = "/evict_a.txt";
+        let path_b = "/evict_b.txt";
+        fs.create_file(path_a).await.expect("create file a");
+        fs.create_file(path_b).await.expect("create file b");
+
+        let data_a = vec![0x11u8; page_size as usize * 6];
+        let data_b = vec![0x22u8; page_size as usize * 2];
+
+        timeout(Duration::from_secs(5), fs.write(path_a, 0, &data_a))
+            .await
+            .expect("write a timed out")
+            .expect("write a");
+        timeout(Duration::from_secs(5), fs.write(path_b, 0, &data_b))
+            .await
+            .expect("write b timed out")
+            .expect("write b");
+
+        let total_bytes = (data_a.len() + data_b.len()) as u64;
+        let dirty_bytes = data_b.len() as u64;
+
+        assert_eq!(budget.current_bytes(), total_bytes);
+        fs.state.cache_ctl.evict();
+        assert_eq!(budget.current_bytes(), total_bytes);
+
+        timeout(Duration::from_secs(5), fs.fsync(path_a))
+            .await
+            .expect("fsync a timed out")
+            .expect("fsync a");
+        assert_eq!(budget.current_bytes(), dirty_bytes);
+
+        let out_a = timeout(Duration::from_secs(5), fs.read(path_a, 0, data_a.len()))
+            .await
+            .expect("read a timed out")
+            .expect("read a");
+        assert_eq!(out_a, data_a);
+
+        let out_b = timeout(Duration::from_secs(5), fs.read(path_b, 0, data_b.len()))
+            .await
+            .expect("read b timed out")
+            .expect("read b");
+        assert_eq!(out_b, data_b);
+
+        timeout(Duration::from_secs(5), fs.fsync(path_b))
+            .await
+            .expect("fsync b timed out")
+            .expect("fsync b");
+        fs.state.cache_ctl.evict();
+        assert_eq!(budget.current_bytes(), 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cache_eviction_cross_chunk_writes() -> anyhow::Result<()> {
+        let layout = ChunkLayout {
+            chunk_size: 64 * 1024,
+            block_size: 4 * 1024,
+        };
+        let page_size = 512u32;
+        let max_bytes = (page_size as u64) * 8;
+        let low_watermark = (page_size as u64) * 2;
+        let budget = Arc::new(CacheBudget::new(max_bytes, low_watermark));
+
+        let cache_config = PagedCacheConfig {
+            layout,
+            budget: budget.clone(),
+            page_size,
+        };
+
+        let fs = build_mem_fs_with_cache(cache_config).await;
+        let path = "/evict_cross_chunk.txt";
+        fs.create_file(path).await.expect("create file");
+
+        let mut model = Vec::new();
+
+        let write_cases = [
+            (0usize, layout.chunk_size as usize / 2, 0x11),
+            (layout.chunk_size as usize - 1000, 5000, 0xA1),
+            (
+                layout.chunk_size as usize + 10_000,
+                layout.chunk_size as usize + 3000,
+                0x3C,
+            ),
+            ((layout.chunk_size * 2) as usize + 20_000, 8000, 0xF0),
+        ];
+
+        for (offset, len, seed) in write_cases {
+            let mut data = vec![0u8; len];
+            for (i, b) in data.iter_mut().enumerate() {
+                *b = (i as u8).wrapping_mul(31).wrapping_add(seed);
+            }
+            timeout(
+                Duration::from_secs(5),
+                apply_write(&fs, path, &mut model, offset, &data),
+            )
+            .await
+            .expect("write timed out");
+        }
+
+        assert!(
+            budget.current_bytes() > max_bytes,
+            "expected cache bytes to exceed budget before eviction"
+        );
+
+        timeout(Duration::from_secs(5), fs.fsync(path))
+            .await
+            .expect("fsync timed out")
+            .expect("fsync");
+        fs.state.cache_ctl.evict();
+
+        assert!(
+            budget.current_bytes() <= low_watermark,
+            "expected cache bytes to be reduced after eviction"
+        );
+
+        let boundary_reads = vec![
+            (0usize, 32usize),
+            (layout.chunk_size as usize - 32, 128),
+            (layout.chunk_size as usize + 100, 256),
+            ((layout.chunk_size * 2) as usize - 32, 128),
+            ((layout.chunk_size * 2) as usize + 100, 256),
+            (model.len().saturating_sub(64), 64),
+        ];
+        for (offset, len) in boundary_reads {
+            timeout(Duration::from_secs(5), expect_read(&fs, path, &model, offset, len))
+                .await
+                .expect("boundary read timed out");
+        }
+
+        let out = timeout(Duration::from_secs(5), fs.read(path, 0, model.len()))
+            .await
+            .expect("full read timed out")
+            .expect("full read");
+        assert_eq!(out, model);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_repro_cross_chunk_overwrite() -> anyhow::Result<()> {
+        let layout = ChunkLayout {
+            chunk_size: 1024,
+            block_size: 256,
+        };
+        let page_size = 128u32;
+        let max_bytes = (page_size as u64) * 4;
+        let low_watermark = 0;
+        let budget = Arc::new(CacheBudget::new(max_bytes, low_watermark));
+
+        let cache_config = PagedCacheConfig {
+            layout,
+            budget: budget.clone(),
+            page_size,
+        };
+
+        let fs = build_mem_fs_with_cache(cache_config).await;
+        let path = "/repro_cross_chunk.txt";
+        fs.create_file(path).await.expect("create file");
+
+        let mut model = Vec::new();
+        let base_len = (layout.chunk_size * 2) as usize + 128;
+        let mut base = vec![0u8; base_len];
+        for (i, b) in base.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(31).wrapping_add(1);
+        }
+        timeout(Duration::from_secs(5), apply_write(&fs, path, &mut model, 0, &base))
+            .await
+            .expect("base write timed out");
+
+        let overwrite_offset = layout.chunk_size as usize - 64;
+        let mut overwrite = vec![0u8; 256];
+        for (i, b) in overwrite.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(17).wrapping_add(0xA1);
+        }
+        timeout(
+            Duration::from_secs(5),
+            apply_write(&fs, path, &mut model, overwrite_offset, &overwrite),
+        )
+        .await
+        .expect("overwrite timed out");
+
+        let ino = fs
+            .core
+            .meta_layer
+            .lookup_path(path)
+            .await
+            .unwrap()
+            .unwrap()
+            .0;
+        let dirty = fs.state.cache_ctl.debug_dirty_writes(ino as u64);
+        let chunk0 = dirty
+            .iter()
+            .find(|(chunk_index, _)| *chunk_index == 0)
+            .expect("dirty chunk0 missing");
+        let chunk0_part = (layout.chunk_size as usize - overwrite_offset) as usize;
+        let expected0 = &model[overwrite_offset..overwrite_offset + chunk0_part];
+        let mut matched = false;
+        for (offset, buf) in &chunk0.1 {
+            let off = *offset as usize;
+            if off == overwrite_offset {
+                assert_eq!(&buf[..chunk0_part], expected0, "chunk0 dirty slice mismatch");
+                matched = true;
+                break;
+            }
+            if off == 0 && buf.len() >= overwrite_offset + chunk0_part {
+                assert_eq!(
+                    &buf[overwrite_offset..overwrite_offset + chunk0_part],
+                    expected0,
+                    "chunk0 dirty buffer mismatch"
+                );
+                matched = true;
+                break;
+            }
+        }
+        assert!(matched, "chunk0 dirty buffer not found");
+
+        timeout(Duration::from_secs(5), fs.fsync(path))
+            .await
+            .expect("fsync timed out")
+            .expect("fsync");
+        fs.state.cache_ctl.evict();
+
+        let chunk0_id = chunk_id_for(ino, 0);
+        let chunk1_id = chunk_id_for(ino, 1);
+        let slices0 = fs.core.chunk_io.meta.get_slices(chunk0_id).await.unwrap();
+        let slices1 = fs.core.chunk_io.meta.get_slices(chunk1_id).await.unwrap();
+
+        let chunk0_part = (layout.chunk_size as usize - overwrite_offset) as u32;
+        let chunk1_part = overwrite.len() as u32 - chunk0_part;
+
+        let chunk0_end = overwrite_offset as u32 + chunk0_part;
+        let chunk1_end = chunk1_part;
+        assert!(
+            slices0.iter().any(|s| s.offset <= overwrite_offset as u32 && s.offset + s.length >= chunk0_end),
+            "expected overwrite range covered in chunk0, slices0={slices0:?}"
+        );
+        assert!(
+            slices1.iter().any(|s| s.offset <= 0 && s.offset + s.length >= chunk1_end),
+            "expected overwrite range covered in chunk1, slices1={slices1:?}"
+        );
+
+        let mut reader0 = fs.core.chunk_io.reader(chunk0_id);
+        reader0.prepare_slices().await.unwrap();
+        let chunk0_read = reader0
+            .read(overwrite_offset as u32, chunk0_part as usize)
+            .await
+            .unwrap();
+        let expected0 =
+            &model[overwrite_offset..overwrite_offset + chunk0_part as usize];
+        assert_eq!(chunk0_read, expected0, "chunk0 backend mismatch");
+
+        let out = timeout(
+            Duration::from_secs(5),
+            fs.read(path, overwrite_offset as u64, overwrite.len()),
+        )
+        .await
+        .expect("read timed out")
+        .expect("read");
+        assert_eq!(out, model[overwrite_offset..overwrite_offset + overwrite.len()]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn fuzz_test_read_and_write() -> anyhow::Result<()> {
         let fs = build_mem_fs().await;
 
@@ -1700,10 +2065,10 @@ mod tests {
 
         let iterations = 400;
         for _i in 0..iterations {
-            if rng.gen_bool(0.6) {
-                let offset = rng.gen_range(0..=max_size);
+            if rng.random_bool(0.6) {
+                let offset = rng.random_range(0..=max_size);
                 let remaining = max_size.saturating_sub(offset);
-                let len = rng.gen_range(0..=max_io.min(remaining));
+                let len = rng.random_range(0..=max_io.min(remaining));
                 if len == 0 {
                     continue;
                 }
@@ -1712,17 +2077,17 @@ mod tests {
                 rng.fill(&mut data[..]);
                 apply_write(&fs, path, &mut model, offset, &data).await;
             } else {
-                let offset = rng.gen_range(0..=max_size + max_io);
-                let len = rng.gen_range(0..=max_io);
+                let offset = rng.random_range(0..=max_size + max_io);
+                let len = rng.random_range(0..=max_io);
                 expect_read(&fs, path, &model, offset, len).await;
             }
 
-            if rng.gen_bool(0.05) {
+            if rng.random_bool(0.05) {
                 fs.fsync(path).await.expect("fsync during fuzz");
                 if !model.is_empty() {
-                    let sample_offset = rng.gen_range(0..model.len());
+                    let sample_offset = rng.random_range(0..model.len());
                     let max_len = model.len() - sample_offset;
-                    let sample_len = rng.gen_range(1..=std::cmp::min(64 * 1024, max_len));
+                    let sample_len = rng.random_range(1..=std::cmp::min(64 * 1024, max_len));
                     let backend =
                         read_backend_range(&fs, ino, sample_offset as u64, sample_len).await?;
                     assert_eq!(

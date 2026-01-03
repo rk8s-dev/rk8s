@@ -7039,6 +7039,7 @@ dependencies = [
  "if-addrs",
  "libc",
  "log",
+ "lru 0.16.2",
  "md5",
  "moka",
  "pprof",
