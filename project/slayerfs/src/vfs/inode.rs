@@ -7,6 +7,7 @@ use tokio::sync::watch;
 #[derive(Clone)]
 pub struct Inode {
     ino: i64,
+    pub gate: Arc<tokio::sync::RwLock<()>>,
     length_rx: watch::Receiver<u64>,
     length_tx: watch::Sender<u64>,
 }
@@ -17,6 +18,7 @@ impl Inode {
 
         Arc::new(Self {
             ino,
+            gate: Arc::new(tokio::sync::RwLock::new(())),
             length_rx: rx,
             length_tx: tx,
         })

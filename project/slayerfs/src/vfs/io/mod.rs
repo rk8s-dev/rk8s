@@ -6,9 +6,11 @@ use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+pub mod cache;
 mod reader;
 mod writer;
 
+use crate::vfs::io::cache::CacheCtl;
 pub use reader::FileReader;
 pub use writer::FileWriter;
 
@@ -46,19 +48,19 @@ where
     }
 
     // Protect by inode entry.
-    pub fn ensure_init(&self, inode: Arc<Inode>, chunk_io: Arc<ChunkIoFactory<B, M>>) {
+    pub fn ensure_init(
+        &self,
+        inode: Arc<Inode>,
+        chunk_io: Arc<ChunkIoFactory<B, M>>,
+        cache_ctl: Arc<CacheCtl<B, M>>,
+    ) {
         let ino = inode.ino();
 
         // Only initialize writer/reader if not already present.
         let writer_arc = self
             .writers
             .entry(ino)
-            .or_insert_with(|| {
-                Arc::new(RwLock::new(FileWriter::new(
-                    inode.clone(),
-                    chunk_io.clone(),
-                )))
-            })
+            .or_insert_with(|| Arc::new(RwLock::new(FileWriter::new(inode.clone(), cache_ctl))))
             .clone();
         self.readers
             .entry(ino)

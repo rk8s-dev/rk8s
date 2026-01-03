@@ -1,6 +1,7 @@
 //! FUSE/SDK-friendly VFS with path-based create/mkdir/read/write/readdir/stat support.
 
 use crate::chuck::chunk::ChunkLayout;
+use crate::chuck::page::{DEFAULT_PAGE_SIZE, PagedCacheConfig};
 use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
 use crate::chuck::writer::ChunkWriter;
@@ -16,12 +17,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-
 // Re-export types from meta::store for convenience
 pub use crate::meta::store::{DirEntry, FileAttr, FileType};
 use crate::vfs::handles::{DirHandle, FileHandle, HandleFlags};
 use crate::vfs::inode::Inode;
 use crate::vfs::io::FileRegistry;
+use crate::vfs::io::cache::CacheCtl;
 
 struct HandleRegistry {
     handles: DashMap<i64, Vec<FileHandle>>,
@@ -204,6 +205,7 @@ where
     S: BlockStore,
     M: MetaStore + 'static,
 {
+    cache_ctl: Arc<CacheCtl<S, M>>,
     handles: HandleRegistry,
     files: FileRegistry<S, M>,
     modified: ModifiedTracker,
@@ -214,8 +216,14 @@ where
     S: BlockStore,
     M: MetaStore + 'static,
 {
-    fn new() -> Self {
+    fn new(chunk_io: Arc<ChunkIoFactory<S, M>>) -> Self {
+        let cache_config = PagedCacheConfig {
+            layout: chunk_io.layout,
+            page_size: DEFAULT_PAGE_SIZE,
+        };
+
         Self {
+            cache_ctl: Arc::new(CacheCtl::new(cache_config, chunk_io)),
             handles: HandleRegistry::new(),
             files: FileRegistry::new(),
             modified: ModifiedTracker::new(),
@@ -325,7 +333,7 @@ where
             meta_layer,
             root_ino,
         ));
-        let state = Arc::new(VfsState::new());
+        let state = Arc::new(VfsState::new(core.chunk_io.clone()));
 
         Ok(Self { core, state })
     }
@@ -414,6 +422,15 @@ where
         }
 
         Ok(())
+    }
+
+    pub fn enable_auto_writeback(&self)
+    where
+        S: Send + Sync + 'static,
+        M: Send + Sync + 'static,
+    {
+        let cache_ctl = self.state.cache_ctl.clone();
+        cache_ctl.emit_flush_background();
     }
 
     /// Update mtime and ctime for an inode to current time
@@ -1099,6 +1116,45 @@ where
         self.read_ino(ino, offset, len).await
     }
 
+    /// Flush cached writes for the file at `path` to the backing store.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn fsync(&self, path: &str) -> Result<(), String> {
+        let path = Self::norm_path(path);
+        let (ino, kind) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "not found".to_string())?;
+        if kind != FileType::File {
+            return Err("not a file".into());
+        }
+        self.fsync_ino(ino).await
+    }
+
+    /// Flush cached writes by inode.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn fsync_ino(&self, ino: i64) -> Result<(), String> {
+        self.ensure_inode_registered(ino).await?;
+
+        let writer = self
+            .state
+            .files
+            .writer(ino)
+            .ok_or_else(|| "file writer is not initialized".to_string())?;
+        let _guard = writer.write().await;
+
+        self.state
+            .cache_ctl
+            .flush_one(ino as u64)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        self.update_timestamps_on_flush(ino).await?;
+        Ok(())
+    }
+
     /// Allocate a per-file handle, returning the opaque fh id.
     pub async fn open_handle(&self, ino: i64, attr: FileAttr, read: bool, write: bool) -> u64 {
         self.state
@@ -1322,9 +1378,11 @@ where
                 }
 
                 let inode = Inode::new(ino, attr.size);
-                self.state
-                    .files
-                    .ensure_init(Arc::clone(&inode), Arc::clone(&self.core.chunk_io));
+                self.state.files.ensure_init(
+                    Arc::clone(&inode),
+                    Arc::clone(&self.core.chunk_io),
+                    Arc::clone(&self.state.cache_ctl),
+                );
                 entry.insert(inode.clone());
                 Ok(inode)
             }
@@ -1339,12 +1397,345 @@ mod tests {
     use crate::cadapter::localfs::LocalFsBackend;
     use crate::chuck::store::InMemoryBlockStore;
     use crate::chuck::store::ObjectBlockStore;
+    use crate::chuck::{ChunkSpan, ChunkTag};
     use crate::meta::factory::create_meta_store_from_url;
+    use crate::meta::stores::DatabaseMetaStore;
+    use crate::vfs::chunk_id_for;
     use async_trait::async_trait;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+    use std::convert::TryFrom;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::sync::{Barrier, Notify};
     use tokio::time::{sleep, timeout};
+    use tracing_subscriber::fmt::format::FmtSpan;
+
+    async fn build_test_fs() -> VFS<ObjectBlockStore<LocalFsBackend>, Arc<DatabaseMetaStore>> {
+        let layout = ChunkLayout::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
+        let store = ObjectBlockStore::new(client);
+
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        VFS::new(layout, store, meta_store).await.unwrap()
+    }
+
+    async fn build_mem_fs() -> VFS<InMemoryBlockStore, Arc<DatabaseMetaStore>> {
+        let layout = ChunkLayout::default();
+        let store = InMemoryBlockStore::new();
+
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        VFS::new(layout, store, meta_store).await.unwrap()
+    }
+
+    async fn apply_write(
+        fs: &VFS<InMemoryBlockStore, Arc<DatabaseMetaStore>>,
+        path: &str,
+        model: &mut Vec<u8>,
+        offset: usize,
+        data: &[u8],
+    ) {
+        let written = fs.write(path, offset as u64, data).await.expect("write");
+        assert_eq!(written, data.len());
+
+        let end = offset + data.len();
+        if model.len() < end {
+            model.resize(end, 0);
+        }
+        model[offset..end].copy_from_slice(data);
+
+        let out = fs
+            .read(path, offset as u64, data.len())
+            .await
+            .expect("read after write");
+        assert_eq!(out, data, "read-after-write mismatch at offset {offset}");
+    }
+
+    async fn expect_read(
+        fs: &VFS<InMemoryBlockStore, Arc<DatabaseMetaStore>>,
+        path: &str,
+        model: &[u8],
+        offset: usize,
+        len: usize,
+    ) {
+        let out = fs.read(path, offset as u64, len).await.expect("read");
+        let expected = if offset >= model.len() {
+            Vec::new()
+        } else {
+            let end = std::cmp::min(model.len(), offset + len);
+            model[offset..end].to_vec()
+        };
+        assert_eq!(out, expected, "read mismatch at offset {offset} len {len}");
+    }
+
+    async fn read_backend_range(
+        fs: &VFS<InMemoryBlockStore, Arc<DatabaseMetaStore>>,
+        ino: i64,
+        offset: u64,
+        len: usize,
+    ) -> anyhow::Result<Vec<u8>> {
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+
+        let layout = fs.core.chunk_io.layout();
+        let chunk_span = ChunkSpan::new(
+            layout.chunk_index_of(offset),
+            u32::try_from(layout.within_chunk_offset(offset))
+                .expect("chunk offset must fit within u32"),
+            u32::try_from(len).expect("read length must fit within u32"),
+        );
+        let spans: Vec<ChunkSpan> = chunk_span
+            .split_into::<ChunkTag>(layout.chunk_size, layout.chunk_size, false)
+            .collect();
+
+        let mut out = Vec::with_capacity(len);
+        for span in spans {
+            let chunk_id = chunk_id_for(ino, span.index);
+            let mut reader = fs.core.chunk_io.reader(chunk_id);
+            reader.prepare_slices().await?;
+            let part = reader.read(span.offset, span.len as usize).await?;
+            out.extend(part);
+        }
+
+        Ok(out)
+    }
+
+    #[tokio::test]
+    async fn test_basic_read_and_write() -> anyhow::Result<()> {
+        let fs = build_test_fs().await;
+
+        fs.create_file("/hello.txt").await.expect("create file");
+        fs.write("/hello.txt", 0, b"hello_world")
+            .await
+            .expect("write file");
+
+        let bytes = fs
+            .read("/hello.txt", 0, b"hello_world".len())
+            .await
+            .expect("read file");
+        assert_eq!(b"hello_world", &bytes[..]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_flush_persists_cached_writes() -> anyhow::Result<()> {
+        let fs = build_mem_fs().await;
+        let layout = ChunkLayout::default();
+
+        let ino = fs
+            .create_file("/flush_basic.txt")
+            .await
+            .expect("create file");
+        let data = b"flush_payload";
+        let offset = 1234u64;
+
+        fs.write("/flush_basic.txt", offset, data)
+            .await
+            .expect("write");
+
+        let chunk_id = chunk_id_for(ino, layout.chunk_index_of(offset));
+        let mut reader = fs.core.chunk_io.reader(chunk_id);
+        reader.prepare_slices().await?;
+        let before = reader
+            .read(layout.within_chunk_offset(offset) as u32, data.len())
+            .await?;
+        assert_eq!(before, vec![0u8; data.len()]);
+
+        fs.state.cache_ctl.flush_all().await?;
+
+        let mut reader = fs.core.chunk_io.reader(chunk_id);
+        reader.prepare_slices().await?;
+        let after = reader
+            .read(layout.within_chunk_offset(offset) as u32, data.len())
+            .await?;
+        assert_eq!(after, data);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_flush_cross_chunk_boundary() -> anyhow::Result<()> {
+        let fs = build_mem_fs().await;
+        let layout = ChunkLayout::default();
+
+        let ino = fs
+            .create_file("/flush_cross_chunk.txt")
+            .await
+            .expect("create file");
+        let chunk_size = layout.chunk_size as u64;
+
+        let offset = chunk_size - 10;
+        let data = vec![0xABu8; 20];
+        fs.write("/flush_cross_chunk.txt", offset, &data)
+            .await
+            .expect("write");
+
+        fs.state.cache_ctl.flush_all().await?;
+
+        let chunk0 = chunk_id_for(ino, 0);
+        let chunk1 = chunk_id_for(ino, 1);
+
+        let mut reader0 = fs.core.chunk_io.reader(chunk0);
+        reader0.prepare_slices().await?;
+        let out0 = reader0.read((chunk_size - 10) as u32, 10).await?;
+        assert_eq!(out0, vec![0xABu8; 10]);
+
+        let mut reader1 = fs.core.chunk_io.reader(chunk1);
+        reader1.prepare_slices().await?;
+        let out1 = reader1.read(0, 10).await?;
+        assert_eq!(out1, vec![0xABu8; 10]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_fsync_persists_cached_writes() -> anyhow::Result<()> {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new("off,slayerfs=trace"))
+            .with_span_events(FmtSpan::CLOSE)
+            .init();
+        let fs = build_mem_fs().await;
+        let layout = ChunkLayout::default();
+
+        let ino = fs
+            .create_file("/fsync_basic.txt")
+            .await
+            .expect("create file");
+        let offset = (layout.block_size / 2) as u64;
+        let data_len = layout.block_size as usize + 123;
+        let data = vec![0x5Au8; data_len];
+
+        fs.write("/fsync_basic.txt", offset, &data)
+            .await
+            .expect("write");
+
+        let chunk_id = chunk_id_for(ino, layout.chunk_index_of(offset));
+        let mut reader = fs.core.chunk_io.reader(chunk_id);
+        reader.prepare_slices().await?;
+        let before = reader
+            .read(layout.within_chunk_offset(offset) as u32, data_len)
+            .await?;
+        assert_eq!(before, vec![0u8; data_len]);
+
+        fs.fsync("/fsync_basic.txt").await.expect("fsync");
+
+        let mut reader = fs.core.chunk_io.reader(chunk_id);
+        reader.prepare_slices().await?;
+        let after = reader
+            .read(layout.within_chunk_offset(offset) as u32, data_len)
+            .await?;
+        assert_eq!(after, data);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fuzz_test_read_and_write() -> anyhow::Result<()> {
+        let fs = build_mem_fs().await;
+
+        let ino = fs.create_file("/payload.txt").await.expect("create file");
+
+        let mut rng = StdRng::seed_from_u64(0xC0FFEE);
+        let layout = ChunkLayout::default();
+        let path = "/payload.txt";
+        let block_size = layout.block_size as usize;
+        let chunk_size = layout.chunk_size as usize;
+        let max_extra = block_size * 2;
+        let max_io = 256 * 1024;
+        let max_size = chunk_size + max_extra;
+
+        let mut model = Vec::<u8>::new();
+
+        // Boundary writes (block + chunk edges) and a couple large writes.
+        let boundary_writes = vec![
+            (0usize, 1usize),
+            (block_size.saturating_sub(1), 1),
+            (block_size.saturating_sub(1), 2),
+            (block_size, 1),
+            (block_size + 1, block_size / 2),
+            (block_size * 2 - 1, 2),
+            (chunk_size.saturating_sub(1), 1),
+            (chunk_size.saturating_sub(1), 2),
+            (chunk_size, 1),
+            (chunk_size + block_size.saturating_sub(1), 2),
+            (chunk_size + block_size / 2, block_size),
+            (chunk_size.saturating_sub(block_size / 2), block_size + 1),
+            (0, block_size),
+            (0, block_size * 2),
+        ];
+
+        for (offset, len) in boundary_writes {
+            let mut data = vec![0u8; len];
+            for (i, b) in data.iter_mut().enumerate() {
+                *b = (i as u8).wrapping_add((offset as u8).wrapping_mul(31));
+            }
+            apply_write(&fs, path, &mut model, offset, &data).await;
+        }
+        fs.fsync(path).await.expect("fsync after boundary writes");
+        if !model.is_empty() {
+            let sample_len = std::cmp::min(64 * 1024, model.len());
+            let backend = read_backend_range(&fs, ino, 0, sample_len).await?;
+            assert_eq!(backend, model[..sample_len], "backend mismatch after fsync");
+        }
+
+        // Boundary reads (including crossing block/chunk and EOF cases).
+        let boundary_reads = vec![
+            (0usize, 1usize),
+            (block_size.saturating_sub(1), 2),
+            (block_size, 2),
+            (chunk_size.saturating_sub(1), 2),
+            (chunk_size, 2),
+            (chunk_size + block_size.saturating_sub(1), 2),
+            (model.len() + 16, 32),
+        ];
+
+        for (offset, len) in boundary_reads {
+            expect_read(&fs, path, &model, offset, len).await;
+        }
+
+        let iterations = 400;
+        for _i in 0..iterations {
+            if rng.gen_bool(0.6) {
+                let offset = rng.gen_range(0..=max_size);
+                let remaining = max_size.saturating_sub(offset);
+                let len = rng.gen_range(0..=max_io.min(remaining));
+                if len == 0 {
+                    continue;
+                }
+
+                let mut data = vec![0u8; len];
+                rng.fill(&mut data[..]);
+                apply_write(&fs, path, &mut model, offset, &data).await;
+            } else {
+                let offset = rng.gen_range(0..=max_size + max_io);
+                let len = rng.gen_range(0..=max_io);
+                expect_read(&fs, path, &model, offset, len).await;
+            }
+
+            if rng.gen_bool(0.05) {
+                fs.fsync(path).await.expect("fsync during fuzz");
+                if !model.is_empty() {
+                    let sample_offset = rng.gen_range(0..model.len());
+                    let max_len = model.len() - sample_offset;
+                    let sample_len = rng.gen_range(1..=std::cmp::min(64 * 1024, max_len));
+                    let backend =
+                        read_backend_range(&fs, ino, sample_offset as u64, sample_len).await?;
+                    assert_eq!(
+                        backend,
+                        model[sample_offset..sample_offset + sample_len],
+                        "backend mismatch after fsync at offset {sample_offset} len {sample_len}"
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_fs_mkdir_create_write_read_readdir() {
@@ -1479,6 +1870,7 @@ mod tests {
                 .write("/shared", 0, &writer_payload)
                 .await
                 .expect("write shared");
+            writer_fs.fsync("/shared").await.expect("fsync shared");
         });
 
         controller.wait_for_block().await;

@@ -1,8 +1,8 @@
+use crate::chuck::page::AccessKind;
 use crate::chuck::{BlockStore, ChunkSpan, ChunkTag};
 use crate::meta::MetaStore;
-use crate::vfs::chunk_id_for;
-use crate::vfs::fs::ChunkIoFactory;
 use crate::vfs::inode::Inode;
+use crate::vfs::io::cache::CacheCtl;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ where
     M: MetaStore,
 {
     inode: Arc<Inode>,
-    chunk_io: Arc<ChunkIoFactory<B, M>>,
+    cache_ctl: Arc<CacheCtl<B, M>>,
 }
 
 impl<B, M> FileWriter<B, M>
@@ -20,12 +20,16 @@ where
     B: BlockStore,
     M: MetaStore,
 {
-    pub fn new(inode: Arc<Inode>, chunk_io: Arc<ChunkIoFactory<B, M>>) -> Self {
-        FileWriter { inode, chunk_io }
+    pub fn new(inode: Arc<Inode>, cache_ctl: Arc<CacheCtl<B, M>>) -> Self {
+        FileWriter { inode, cache_ctl }
+    }
+
+    pub fn cache_ctl(&self) -> &CacheCtl<B, M> {
+        &self.cache_ctl
     }
 
     pub async fn write(&self, offset: u64, buf: &[u8]) -> anyhow::Result<usize> {
-        let layout = self.chunk_io.layout();
+        let layout = self.cache_ctl.chunk_io.layout();
         let chunk_span = ChunkSpan::new(
             layout.chunk_index_of(offset),
             u32::try_from(layout.within_chunk_offset(offset))
@@ -36,15 +40,16 @@ where
             .split_into::<ChunkTag>(layout.chunk_size, layout.chunk_size, false)
             .collect();
 
-        let mut cursor = 0usize;
-        for sp in spans {
-            let cid = chunk_id_for(self.inode.ino(), sp.index);
-            let writer = self.chunk_io.writer(cid);
-            let take = sp.len as usize;
-            let buf = &buf[cursor..cursor + take];
-            writer.write(sp.offset, buf).await?;
-            cursor += take;
+        let mut cursor = 0;
+        let mut cache = self.cache_ctl.prepare(self.inode.clone());
+        for span in spans {
+            let mut guard = cache
+                .probe(span.index, span.offset, span.len, AccessKind::Write)
+                .await?;
+            guard.write_at(&buf[cursor..cursor + span.len as usize], span.offset)?;
+            cursor += span.len as usize;
         }
+
         Ok(buf.len())
     }
 }

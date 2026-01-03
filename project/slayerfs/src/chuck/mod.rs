@@ -16,6 +16,7 @@
 
 pub mod cache;
 pub mod chunk;
+pub mod page;
 pub mod reader;
 pub mod slice;
 pub mod span;

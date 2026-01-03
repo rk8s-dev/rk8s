@@ -1,13 +1,12 @@
+use super::FileWriter;
+use crate::chuck::page::AccessKind;
 use crate::chuck::{BlockStore, ChunkSpan, ChunkTag};
 use crate::meta::MetaStore;
-use crate::vfs::chunk_id_for;
 use crate::vfs::fs::ChunkIoFactory;
 use crate::vfs::inode::Inode;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-use super::FileWriter;
 
 pub struct FileReader<B, M>
 where
@@ -69,25 +68,20 @@ where
         let spans: Vec<ChunkSpan> = chunk_span
             .split_into::<ChunkTag>(layout.chunk_size, layout.chunk_size, false)
             .collect();
-        let mut readers = Vec::new();
-        for span in spans.iter() {
-            let cid = chunk_id_for(self.inode.ino(), span.index);
-            let mut reader = self.chunk_io.reader(cid);
-            reader.prepare_slices().await?;
-            readers.push(reader);
+
+        let mut out = Vec::with_capacity(actual_len);
+
+        let cache_ctl = writer_guard.cache_ctl();
+        let mut cache = cache_ctl.prepare(self.inode.clone());
+        for span in spans {
+            let mut guard = cache
+                .probe(span.index, span.offset, span.len, AccessKind::Read)
+                .await?;
+            let mut buf = vec![0_u8; span.len as usize];
+            guard.read_at(&mut buf, span.offset)?;
+            out.extend(buf);
         }
 
-        // Once every chunk has fetched its slice metadata, no existing slice will be mutated
-        // (writers only append new slices). That means the buffered `ChunkReader`s are safe to
-        // use without holding the writer lock, so we can release the guard and avoid blocking
-        // concurrent writes while we drain the per-chunk futures below.
-        drop(writer_guard);
-
-        let mut out = Vec::new();
-        for (span, mut reader) in spans.into_iter().zip(readers.into_iter()) {
-            let part = reader.read(span.offset, span.len as usize).await?;
-            out.extend(part);
-        }
         Ok(out)
     }
 }

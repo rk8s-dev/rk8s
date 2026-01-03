@@ -7022,6 +7022,7 @@ dependencies = [
  "aws-sdk-s3",
  "base64 0.22.1",
  "bitflags 2.10.0",
+ "builder-pattern",
  "bytes",
  "chrono",
  "clap",

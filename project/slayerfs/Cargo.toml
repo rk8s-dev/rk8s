@@ -46,9 +46,14 @@ bitflags = { workspace = true }
 redis = { workspace = true }
 if-addrs = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
+builder-pattern = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
 pprof = { workspace = true }
 serial_test = { workspace = true }
+
+[[bench]]
+name = "slayerfs_bench"
+harness = false
