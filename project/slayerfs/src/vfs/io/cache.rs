@@ -88,9 +88,6 @@ where
         let mut chunks = self.caches.get_or_create(inode.ino() as u64);
         let dirty_results = chunks.collect_dirty_chunks();
 
-        // Drop the write lock to permit concurrently read.
-        drop(_guard);
-
         let mut need_clean = Vec::new();
         for (chunk_index, clean_info, write_op) in dirty_results {
             need_clean.push((chunk_index, clean_info));
