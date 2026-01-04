@@ -1,7 +1,7 @@
 //! FUSE/SDK-friendly VFS with path-based create/mkdir/read/write/readdir/stat support.
 
 use crate::chuck::chunk::ChunkLayout;
-use crate::chuck::page::{CacheBudget, DEFAULT_PAGE_SIZE, PagedCacheConfig};
+use crate::chuck::page::PagedCacheConfig;
 use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
 use crate::chuck::writer::ChunkWriter;
@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 // Re-export types from meta::store for convenience
 pub use crate::meta::store::{DirEntry, FileAttr, FileType};
+use crate::vfs::config::VFSConfig;
 use crate::vfs::handles::{DirHandle, FileHandle, HandleFlags};
 use crate::vfs::inode::Inode;
 use crate::vfs::io::FileRegistry;
@@ -216,13 +217,7 @@ where
     S: BlockStore,
     M: MetaStore + 'static,
 {
-    fn new(chunk_io: Arc<ChunkIoFactory<S, M>>) -> Self {
-        let cache_config = PagedCacheConfig {
-            layout: chunk_io.layout,
-            budget: Arc::new(CacheBudget::default()),
-            page_size: DEFAULT_PAGE_SIZE,
-        };
-
+    fn new(cache_config: PagedCacheConfig, chunk_io: Arc<ChunkIoFactory<S, M>>) -> Self {
         Self {
             cache_ctl: Arc::new(CacheCtl::new(cache_config, chunk_io)),
             handles: HandleRegistry::new(),
@@ -306,22 +301,42 @@ where
     M: MetaStore + 'static,
 {
     pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, String> {
-        Self::with_meta_client_config(layout, store, meta, MetaClientConfig::default()).await
+        Self::with_meta_client_config(
+            layout,
+            PagedCacheConfig::default(),
+            store,
+            meta,
+            MetaClientConfig::default(),
+        )
+        .await
+    }
+
+    pub async fn with_config(config: VFSConfig, store: S, meta: M) -> Result<Self, String> {
+        Self::with_meta_client_config(
+            config.layout,
+            config.cache_config,
+            store,
+            meta,
+            config.meta_config,
+        )
+        .await
     }
 
     pub async fn with_meta_layer(
         layout: ChunkLayout,
+        cache_config: PagedCacheConfig,
         store: S,
         meta: M,
         meta_layer: Arc<MetaClient<M>>,
     ) -> Result<Self, String> {
         let store = Arc::new(store);
         let meta = Arc::new(meta);
-        Self::from_components(layout, store, meta, meta_layer)
+        Self::from_components(layout, cache_config, store, meta, meta_layer)
     }
 
     fn from_components(
         layout: ChunkLayout,
+        cache_config: PagedCacheConfig,
         store: Arc<S>,
         meta: Arc<M>,
         meta_layer: Arc<MetaClient<M>>,
@@ -334,13 +349,14 @@ where
             meta_layer,
             root_ino,
         ));
-        let state = Arc::new(VfsState::new(core.chunk_io.clone()));
+        let state = Arc::new(VfsState::new(cache_config, core.chunk_io.clone()));
 
         Ok(Self { core, state })
     }
 
     pub async fn with_meta_client_config(
         layout: ChunkLayout,
+        cache_config: PagedCacheConfig,
         store: S,
         meta: M,
         config: MetaClientConfig,
@@ -365,7 +381,7 @@ where
 
         let meta_layer: Arc<MetaClient<M>> = meta_client.clone();
 
-        Self::from_components(layout, store, meta, meta_layer)
+        Self::from_components(layout, cache_config, store, meta, meta_layer)
     }
 
     pub fn root_ino(&self) -> i64 {
@@ -1396,6 +1412,7 @@ mod tests {
     use super::*;
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
+    use crate::chuck::page::CacheBudget;
     use crate::chuck::store::InMemoryBlockStore;
     use crate::chuck::store::ObjectBlockStore;
     use crate::chuck::{ChunkSpan, ChunkTag};
@@ -1467,6 +1484,19 @@ mod tests {
         });
 
         VFS { core, state }
+    }
+
+    fn cache_config_for_test(
+        layout: ChunkLayout,
+        budget: Arc<CacheBudget>,
+        page_size: u32,
+    ) -> PagedCacheConfig {
+        PagedCacheConfig {
+            layout,
+            budget,
+            page_size,
+            ..PagedCacheConfig::default()
+        }
     }
 
     async fn apply_write(
@@ -1680,11 +1710,7 @@ mod tests {
         let budget = Arc::new(CacheBudget::new(max_bytes, low_watermark));
         let layout = ChunkLayout::default();
 
-        let cache_config = PagedCacheConfig {
-            layout,
-            budget: budget.clone(),
-            page_size,
-        };
+        let cache_config = cache_config_for_test(layout, budget.clone(), page_size);
 
         let fs = build_mem_fs_with_cache(cache_config).await;
         let path = "/evict.txt";
@@ -1729,11 +1755,7 @@ mod tests {
         let budget = Arc::new(CacheBudget::new(max_bytes, low_watermark));
         let layout = ChunkLayout::default();
 
-        let cache_config = PagedCacheConfig {
-            layout,
-            budget: budget.clone(),
-            page_size,
-        };
+        let cache_config = cache_config_for_test(layout, budget.clone(), page_size);
 
         let fs = build_mem_fs_with_cache(cache_config).await;
         let path_a = "/evict_a.txt";
@@ -1799,11 +1821,7 @@ mod tests {
         let low_watermark = (page_size as u64) * 2;
         let budget = Arc::new(CacheBudget::new(max_bytes, low_watermark));
 
-        let cache_config = PagedCacheConfig {
-            layout,
-            budget: budget.clone(),
-            page_size,
-        };
+        let cache_config = cache_config_for_test(layout, budget.clone(), page_size);
 
         let fs = build_mem_fs_with_cache(cache_config).await;
         let path = "/evict_cross_chunk.txt";
@@ -1860,9 +1878,12 @@ mod tests {
             (model.len().saturating_sub(64), 64),
         ];
         for (offset, len) in boundary_reads {
-            timeout(Duration::from_secs(5), expect_read(&fs, path, &model, offset, len))
-                .await
-                .expect("boundary read timed out");
+            timeout(
+                Duration::from_secs(5),
+                expect_read(&fs, path, &model, offset, len),
+            )
+            .await
+            .expect("boundary read timed out");
         }
 
         let out = timeout(Duration::from_secs(5), fs.read(path, 0, model.len()))
@@ -1885,11 +1906,7 @@ mod tests {
         let low_watermark = 0;
         let budget = Arc::new(CacheBudget::new(max_bytes, low_watermark));
 
-        let cache_config = PagedCacheConfig {
-            layout,
-            budget: budget.clone(),
-            page_size,
-        };
+        let cache_config = cache_config_for_test(layout, budget.clone(), page_size);
 
         let fs = build_mem_fs_with_cache(cache_config).await;
         let path = "/repro_cross_chunk.txt";
@@ -1901,9 +1918,12 @@ mod tests {
         for (i, b) in base.iter_mut().enumerate() {
             *b = (i as u8).wrapping_mul(31).wrapping_add(1);
         }
-        timeout(Duration::from_secs(5), apply_write(&fs, path, &mut model, 0, &base))
-            .await
-            .expect("base write timed out");
+        timeout(
+            Duration::from_secs(5),
+            apply_write(&fs, path, &mut model, 0, &base),
+        )
+        .await
+        .expect("base write timed out");
 
         let overwrite_offset = layout.chunk_size as usize - 64;
         let mut overwrite = vec![0u8; 256];
@@ -1936,7 +1956,11 @@ mod tests {
         for (offset, buf) in &chunk0.1 {
             let off = *offset as usize;
             if off == overwrite_offset {
-                assert_eq!(&buf[..chunk0_part], expected0, "chunk0 dirty slice mismatch");
+                assert_eq!(
+                    &buf[..chunk0_part],
+                    expected0,
+                    "chunk0 dirty slice mismatch"
+                );
                 matched = true;
                 break;
             }
@@ -1969,11 +1993,15 @@ mod tests {
         let chunk0_end = overwrite_offset as u32 + chunk0_part;
         let chunk1_end = chunk1_part;
         assert!(
-            slices0.iter().any(|s| s.offset <= overwrite_offset as u32 && s.offset + s.length >= chunk0_end),
+            slices0
+                .iter()
+                .any(|s| s.offset <= overwrite_offset as u32 && s.offset + s.length >= chunk0_end),
             "expected overwrite range covered in chunk0, slices0={slices0:?}"
         );
         assert!(
-            slices1.iter().any(|s| s.offset <= 0 && s.offset + s.length >= chunk1_end),
+            slices1
+                .iter()
+                .any(|s| s.offset <= 0 && s.offset + s.length >= chunk1_end),
             "expected overwrite range covered in chunk1, slices1={slices1:?}"
         );
 
@@ -1983,8 +2011,7 @@ mod tests {
             .read(overwrite_offset as u32, chunk0_part as usize)
             .await
             .unwrap();
-        let expected0 =
-            &model[overwrite_offset..overwrite_offset + chunk0_part as usize];
+        let expected0 = &model[overwrite_offset..overwrite_offset + chunk0_part as usize];
         assert_eq!(chunk0_read, expected0, "chunk0 backend mismatch");
 
         let out = timeout(
@@ -1994,7 +2021,10 @@ mod tests {
         .await
         .expect("read timed out")
         .expect("read");
-        assert_eq!(out, model[overwrite_offset..overwrite_offset + overwrite.len()]);
+        assert_eq!(
+            out,
+            model[overwrite_offset..overwrite_offset + overwrite.len()]
+        );
 
         Ok(())
     }

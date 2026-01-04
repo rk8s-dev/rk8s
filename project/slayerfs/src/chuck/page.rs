@@ -5,15 +5,17 @@ use crate::vfs::chunk_id_for;
 use crate::vfs::inode::Inode;
 use dashmap::DashMap;
 use dashmap::mapref::one::RefMut;
+use derive_builder::Builder;
+use lru::LruCache;
 use sea_orm::sea_query::ExprTrait;
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::io::{Cursor, Read, Write};
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::slice::SliceIndex;
-use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
-use lru::LruCache;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 // 4KB
 pub const DEFAULT_PAGE_SIZE: u32 = 4 * 1024;
@@ -31,9 +33,14 @@ type DirtyChunkFlush = (u64, Vec<MarkCleanInfo>, Vec<DirtyChunkWrite>);
 /// (ino, chunk_index, page_index)
 type AccessKey = (u64, u64, u64);
 
+#[derive(Builder)]
+#[builder(pattern = "owned")]
 pub struct CacheBudget {
+    #[builder(setter(skip), default = "Arc::new(AtomicU64::new(0))")]
     current_bytes: Arc<AtomicU64>,
+    #[builder(default = "DEFAULT_CACHE_MAX_BYTES")]
     max_bytes: u64,
+    #[builder(default = "DEFAULT_LOW_WATERMARK")]
     low_watermark: u64,
 }
 
@@ -59,11 +66,25 @@ impl CacheBudget {
 }
 
 /// Page cache configuration shared across inodes.
-#[derive(Clone)]
+#[derive(Builder, Clone)]
+#[builder(pattern = "owned")]
 pub struct PagedCacheConfig {
     pub layout: ChunkLayout,
     pub budget: Arc<CacheBudget>,
     pub page_size: u32,
+    pub flush_duration: Duration,
+}
+
+impl Default for PagedCacheConfig {
+    fn default() -> Self {
+        PagedCacheConfigBuilder::default()
+            .layout(ChunkLayout::default())
+            .budget(Arc::new(CacheBudget::default()))
+            .page_size(DEFAULT_PAGE_SIZE)
+            .flush_duration(Duration::from_secs(30))
+            .build()
+            .unwrap()
+    }
 }
 
 /// Per-inode cache registry.
@@ -74,11 +95,11 @@ pub struct Folio {
 }
 
 impl Folio {
-    pub fn new(config: PagedCacheConfig) -> Folio {
+    pub fn new(config: Arc<PagedCacheConfig>) -> Folio {
         Self {
             caches: DashMap::new(),
             replacer: Arc::new(Mutex::new(LruCache::unbounded())),
-            config: Arc::new(config),
+            config,
         }
     }
 
@@ -212,7 +233,10 @@ impl<'a> PagedCacheGuard<'a> {
 }
 
 impl PagedCache {
-    pub fn new(config: Arc<PagedCacheConfig>, replacer: Arc<Mutex<LruCache<AccessKey, ()>>>) -> Self {
+    pub fn new(
+        config: Arc<PagedCacheConfig>,
+        replacer: Arc<Mutex<LruCache<AccessKey, ()>>>,
+    ) -> Self {
         assert_eq!(
             config.layout.chunk_size % config.page_size as u64,
             0,
@@ -228,7 +252,12 @@ impl PagedCache {
 
     pub fn prepare(&self, ino: u64, index: u64) -> PagedCacheGuard<'_> {
         let page = self.ensure_chunk(index);
-        PagedCacheGuard { ino, index, page, replacer: self.replacer.clone()}
+        PagedCacheGuard {
+            ino,
+            index,
+            page,
+            replacer: self.replacer.clone(),
+        }
     }
 
     pub fn ensure_chunk(&self, index: u64) -> RefMut<'_, u64, ChunkPage> {
@@ -298,7 +327,9 @@ impl ChunkPage {
     }
 
     pub fn ensure_page(&mut self, index: u64, current_bytes: Arc<AtomicU64>) -> &mut Page {
-        self.pages.entry(index).or_insert_with(|| Page::new(current_bytes))
+        self.pages
+            .entry(index)
+            .or_insert_with(|| Page::new(current_bytes))
     }
 
     fn evict_page(&mut self, index: u64) -> bool {
@@ -313,8 +344,7 @@ impl ChunkPage {
 
         let size = page.size();
         if size > 0 {
-            page.current_bytes
-                .fetch_sub(size as u64, Ordering::Relaxed);
+            page.current_bytes.fetch_sub(size as u64, Ordering::Relaxed);
         }
         true
     }
@@ -413,7 +443,12 @@ impl ChunkPage {
         results
     }
 
-    pub fn read_at_with(&mut self, mut buf: &mut [u8], offset: u32, mut on_page: impl FnMut(u64)) -> anyhow::Result<usize> {
+    pub fn read_at_with(
+        &mut self,
+        mut buf: &mut [u8],
+        offset: u32,
+        mut on_page: impl FnMut(u64),
+    ) -> anyhow::Result<usize> {
         let len = buf.len();
         let page_span = self.split_into_page_span(offset, len as u32);
 
@@ -429,10 +464,14 @@ impl ChunkPage {
             read_bytes += buf.write(slice)?;
         }
         Ok(read_bytes)
-
     }
 
-    pub fn write_at_with(&mut self, buf: &[u8], offset: u32, mut on_page: impl FnMut(u64)) -> anyhow::Result<usize> {
+    pub fn write_at_with(
+        &mut self,
+        buf: &[u8],
+        offset: u32,
+        mut on_page: impl FnMut(u64),
+    ) -> anyhow::Result<usize> {
         let len = buf.len();
         let page_span = self.split_into_page_span(offset, len as u32);
         let page_size = self.config.page_size;
@@ -454,7 +493,6 @@ impl ChunkPage {
             let _ = cursor.read(slice)?;
         }
         Ok(cursor.position() as usize)
-
     }
 }
 
@@ -483,7 +521,8 @@ impl Page {
 
     fn padding_to_size(&mut self, size: usize) -> &mut [u8] {
         if self.buf.len() < size {
-            self.current_bytes.fetch_add((size - self.buf.len()) as u64, Ordering::Relaxed);
+            self.current_bytes
+                .fetch_add((size - self.buf.len()) as u64, Ordering::Relaxed);
             self.buf.resize(size, 0);
         }
         &mut self.buf[..]
@@ -539,7 +578,9 @@ pub struct MarkCleanInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccessKey, AccessKind, CacheBudget, DEFAULT_PAGE_SIZE, Folio, PagedCache, PagedCacheConfig};
+    use super::{
+        AccessKey, AccessKind, CacheBudget, DEFAULT_PAGE_SIZE, Folio, PagedCache, PagedCacheConfig,
+    };
     use crate::chuck::ChunkLayout;
     use lru::LruCache;
     use rand::Rng;
@@ -598,6 +639,7 @@ mod tests {
             layout,
             budget: Arc::new(CacheBudget::default()),
             page_size,
+            ..PagedCacheConfig::default()
         };
         let replacer = Arc::new(Mutex::new(LruCache::<AccessKey, ()>::unbounded()));
         PagedCache::new(Arc::new(config), replacer)
@@ -863,8 +905,9 @@ mod tests {
             },
             budget: budget.clone(),
             page_size,
+            ..PagedCacheConfig::default()
         };
-        let folio = Folio::new(config);
+        let folio = Folio::new(Arc::new(config));
 
         let ino = 1u64;
         {
@@ -904,8 +947,9 @@ mod tests {
             },
             budget: budget.clone(),
             page_size,
+            ..PagedCacheConfig::default()
         };
-        let folio = Folio::new(config);
+        let folio = Folio::new(Arc::new(config));
 
         let ino = 2u64;
         {
@@ -915,9 +959,15 @@ mod tests {
             guard.write_at(&data, 0)?;
         }
 
-        assert_eq!(budget.current_bytes.load(Ordering::Relaxed), page_size as u64);
+        assert_eq!(
+            budget.current_bytes.load(Ordering::Relaxed),
+            page_size as u64
+        );
         folio.evict();
-        assert_eq!(budget.current_bytes.load(Ordering::Relaxed), page_size as u64);
+        assert_eq!(
+            budget.current_bytes.load(Ordering::Relaxed),
+            page_size as u64
+        );
 
         let cache = folio.get_or_create(ino);
         let chunk = cache.pages.get(&0).expect("chunk should exist");

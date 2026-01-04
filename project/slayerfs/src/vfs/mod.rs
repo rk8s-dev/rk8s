@@ -16,6 +16,7 @@
 //! - `handles`: file and directory handle management
 //! - `cache`: caching helpers and policies
 pub mod cache;
+mod config;
 pub mod demo;
 pub mod fs;
 pub mod handles;
@@ -23,7 +24,6 @@ pub mod inode;
 pub mod io;
 pub mod sdk;
 pub mod simple;
-
 // Module implementation TODOs remain.
 
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;

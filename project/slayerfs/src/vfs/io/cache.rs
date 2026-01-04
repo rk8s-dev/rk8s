@@ -7,13 +7,13 @@ use crate::vfs::inode::Inode;
 use dashmap::DashMap;
 use dashmap::mapref::one::RefMut;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct CacheCtl<B, M>
 where
     B: BlockStore,
     M: MetaStore,
 {
+    config: Arc<PagedCacheConfig>,
     caches: Arc<Folio>,
     inodes: DashMap<u64, Arc<Inode>>,
     pub chunk_io: Arc<ChunkIoFactory<B, M>>,
@@ -25,7 +25,9 @@ where
     M: MetaStore,
 {
     pub fn new(config: PagedCacheConfig, chunk_io: Arc<ChunkIoFactory<B, M>>) -> Self {
+        let config = Arc::new(config);
         Self {
+            config: config.clone(),
             caches: Arc::new(Folio::new(config)),
             inodes: DashMap::new(),
             chunk_io,
@@ -52,7 +54,7 @@ where
         let ctl = self.clone();
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            let mut interval = tokio::time::interval(ctl.config.flush_duration);
 
             loop {
                 interval.tick().await;
