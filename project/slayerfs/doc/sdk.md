@@ -54,7 +54,7 @@ async fn main() {
 - `stat(path) -> Result<FileAttr, String>`：获取 kind/size；size 来自元数据层
 - `unlink(path) -> Result<(), String>`：删除文件；目录会报错 `"is a directory"`
 - `rmdir(path) -> Result<(), String>`：删除空目录；根目录不可删除；非空报错 `"directory not empty"`
-- `rename(old, new) -> Result<(), String>`：仅文件；目标不得存在；目标父目录缺失会自动创建
+- `rename(old, new) -> Result<(), String>`：支持文件与目录；遵循 POSIX rename 的“替换”语义（类型需兼容，非空目录不可被替换）；目标父目录缺失会自动创建
 - `truncate(path, size) -> Result<(), String>`：仅更新文件 size；收缩不立即清理块数据
 
 类型摘录：
@@ -75,6 +75,41 @@ async fn main() {
 ## 测试与演示
 - 本仓库内含端到端测试（`vfs::sdk`、`vfs::fs`、`vfs::simple`）与一个本地演示入口（`demo-localfs`）
 - 你可以运行测试或示例来验证行为（见根目录 README）
+
+## 后续：std/tokio 风格 SDK 设计
+
+如果你希望像 `tokio::fs/std::fs` 一样通过 `OpenOptions`/`File` 进行顺序读写（无需手动维护 offset），并将错误稳定映射到 `std::io::ErrorKind`，请参阅：`doc/sdk_stdlike_design.md`。
+
+## std/tokio 风格 SDK（File API，async）
+
+SlayerFS 也提供一个更贴近 `tokio::fs` 的封装（`slayerfs::sdk_fs`），以“文件对象”的方式进行顺序读写，并返回 `std::io::Result<T>`：
+
+```rust
+use slayerfs::chuck::chunk::ChunkLayout;
+use slayerfs::sdk_fs::{self, DynClient, OpenOptions};
+use slayerfs::vfs::sdk::LocalClient;
+use std::io::SeekFrom;
+use std::sync::Arc;
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> std::io::Result<()> {
+    let layout = ChunkLayout::default();
+    let cli = LocalClient::new_local("/tmp/slayerfs-objstore", layout).await.unwrap();
+    let client: DynClient = Arc::new(cli);
+
+    sdk_fs::create_dir_all(Arc::clone(&client), "/demo").await?;
+
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true).create(true).truncate(true);
+    let f = opts.open(Arc::clone(&client), "/demo/hello.txt").await?;
+    f.write_all(b"hello").await?;
+
+    f.seek(SeekFrom::Start(0)).await?;
+    let s = sdk_fs::read_to_string(Arc::clone(&client), "/demo/hello.txt").await?;
+    assert_eq!(s, "hello");
+    Ok(())
+}
+```
 
 ---
 如需在 README 中加入更多高级示例（如 S3 后端或并发写读场景），可以在此文档基础上继续扩展。

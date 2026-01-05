@@ -12,6 +12,7 @@ use crate::meta::factory::create_meta_store_from_url;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::MetaError;
 use crate::vfs::fs::{DirEntry, FileAttr, VFS};
+use std::io;
 use std::path::Path;
 
 /// SDK client parametrized by its backend.
@@ -40,12 +41,7 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
         Ok(())
     }
 
-    pub async fn write_at(
-        &mut self,
-        path: &str,
-        offset: u64,
-        data: &[u8],
-    ) -> Result<usize, String> {
+    pub async fn write_at(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
         self.fs.write(path, offset, data).await
     }
 
@@ -117,6 +113,62 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
             .set_plock(path, owner, block, lock_type, range, pid)
             .await
     }
+
+    // ===== Structured (std::io) variants for std-like SDK =====
+
+    pub async fn mkdir_p_io(&self, path: &str) -> io::Result<()> {
+        self.fs
+            .mkdir_p_err(path)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub async fn create_file_io(&self, path: &str, create_new: bool) -> io::Result<()> {
+        self.fs
+            .create_file_in_existing_dir_err(path, create_new)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub async fn write_at_io(&self, path: &str, offset: u64, data: &[u8]) -> io::Result<usize> {
+        self.fs
+            .write_err(path, offset, data)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn read_at_io(&self, path: &str, offset: u64, len: usize) -> io::Result<Vec<u8>> {
+        self.fs
+            .read_err(path, offset, len)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn readdir_io(&self, path: &str) -> io::Result<Vec<DirEntry>> {
+        self.fs.readdir_err(path).await.map_err(Into::into)
+    }
+
+    pub async fn stat_io(&self, path: &str) -> io::Result<FileAttr> {
+        self.fs.stat_err(path).await.map_err(Into::into)
+    }
+
+    pub async fn unlink_io(&self, path: &str) -> io::Result<()> {
+        self.fs.unlink_err(path).await.map_err(Into::into)
+    }
+
+    pub async fn rmdir_io(&self, path: &str) -> io::Result<()> {
+        self.fs.rmdir_err(path).await.map_err(Into::into)
+    }
+
+    pub async fn rename_io(&self, old: &str, new: &str) -> io::Result<()> {
+        self.fs.rename_err(old, new).await.map_err(Into::into)
+    }
+
+    pub async fn truncate_io(&self, path: &str, size: u64) -> io::Result<()> {
+        self.fs.truncate_err(path, size).await.map_err(Into::into)
+    }
 }
 
 // ============== Convenience builder (LocalFs backend) ==============
@@ -157,7 +209,7 @@ mod tests {
     async fn test_sdk_local_basic() {
         let layout = ChunkLayout::default();
         let tmp = tempdir().unwrap();
-        let mut cli = LocalClient::new_local(tmp.path(), layout)
+        let cli = LocalClient::new_local(tmp.path(), layout)
             .await
             .expect("init LocalClient");
 
@@ -212,7 +264,7 @@ mod tests {
     async fn test_sdk_local_links() {
         let layout = ChunkLayout::default();
         let tmp = tempdir().unwrap();
-        let mut cli = LocalClient::new_local(tmp.path(), layout)
+        let cli = LocalClient::new_local(tmp.path(), layout)
             .await
             .expect("init LocalClient");
 

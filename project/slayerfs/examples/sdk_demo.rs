@@ -15,7 +15,7 @@ async fn main() {
     };
 
     let layout = ChunkLayout::default();
-    let mut cli = LocalClient::new_local(&root, layout)
+    let cli = LocalClient::new_local(&root, layout)
         .await
         .expect("init LocalClient");
 

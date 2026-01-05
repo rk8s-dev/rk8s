@@ -17,6 +17,7 @@
 //! - `cache`: caching helpers and policies
 pub mod cache;
 pub mod demo;
+pub mod error;
 pub mod fs;
 pub mod handles;
 pub mod inode;

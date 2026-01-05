@@ -10,6 +10,7 @@ use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLoc
 use crate::meta::store::MetaError;
 use crate::meta::store::{SetAttrFlags, SetAttrRequest};
 use crate::meta::{MetaLayer, MetaStore};
+use crate::vfs::error::VfsError;
 use dashmap::{DashMap, Entry};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -528,6 +529,147 @@ where
         Ok(cur_ino)
     }
 
+    /// Recursively create directories (mkdir -p behavior) with structured errors.
+    pub async fn mkdir_p_err(&self, path: &str) -> Result<i64, VfsError> {
+        let path = Self::norm_path(path);
+        if path == "/" {
+            return Ok(self.core.root);
+        }
+
+        if let Some((ino, kind)) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+        {
+            if kind != FileType::Dir {
+                return Err(VfsError::NotADirectory { path });
+            }
+            return Ok(ino);
+        }
+
+        let mut cur_ino = self.core.root;
+        let mut cur_path = String::new();
+        for part in path.trim_start_matches('/').split('/') {
+            if part.is_empty() {
+                continue;
+            }
+            cur_path.push('/');
+            cur_path.push_str(part);
+
+            match self
+                .core
+                .meta_layer
+                .lookup(cur_ino, part)
+                .await
+                .map_err(|e| VfsError::from_meta(cur_path.clone(), e))?
+            {
+                Some(ino) => {
+                    let attr = self
+                        .core
+                        .meta_layer
+                        .stat(ino)
+                        .await
+                        .map_err(|e| VfsError::from_meta(cur_path.clone(), e))?
+                        .ok_or_else(|| VfsError::NotFound {
+                            path: cur_path.clone(),
+                        })?;
+                    if attr.kind != FileType::Dir {
+                        return Err(VfsError::NotADirectory {
+                            path: cur_path.clone(),
+                        });
+                    }
+                    cur_ino = ino;
+                }
+                None => {
+                    let ino = self
+                        .core
+                        .meta_layer
+                        .mkdir(cur_ino, part.to_string())
+                        .await
+                        .map_err(|e| VfsError::from_meta(cur_path.clone(), e))?;
+                    self.state.modified.touch(cur_ino).await;
+                    self.state.modified.touch(ino).await;
+                    cur_ino = ino;
+                }
+            }
+        }
+        Ok(cur_ino)
+    }
+
+    /// Create a regular file in an existing parent directory (std-like behavior).
+    ///
+    /// - Does not create parent directories.
+    /// - If the target exists and `create_new` is true, returns `AlreadyExists`.
+    /// - If the target exists as a directory, returns `IsADirectory`.
+    pub async fn create_file_in_existing_dir_err(
+        &self,
+        path: &str,
+        create_new: bool,
+    ) -> Result<i64, VfsError> {
+        let path = Self::norm_path(path);
+        if path == "/" {
+            return Err(VfsError::IsADirectory { path });
+        }
+
+        let (dir, name) = Self::split_dir_file(&path);
+        if name.is_empty() {
+            return Err(VfsError::InvalidInput {
+                message: "empty file name".to_string(),
+            });
+        }
+
+        let parent_ino = if dir == "/" {
+            self.core.root
+        } else {
+            let (ino, kind) = self
+                .core
+                .meta_layer
+                .lookup_path(&dir)
+                .await
+                .map_err(|e| VfsError::from_meta(dir.clone(), e))?
+                .ok_or_else(|| VfsError::NotFound { path: dir.clone() })?;
+            if kind != FileType::Dir {
+                return Err(VfsError::NotADirectory { path: dir });
+            }
+            ino
+        };
+
+        if let Some(existing) = self
+            .core
+            .meta_layer
+            .lookup(parent_ino, &name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+        {
+            let attr = self
+                .core
+                .meta_layer
+                .stat(existing)
+                .await
+                .map_err(|e| VfsError::from_meta(path.clone(), e))?
+                .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+            if attr.kind == FileType::Dir {
+                return Err(VfsError::IsADirectory { path });
+            }
+            if create_new {
+                return Err(VfsError::AlreadyExists { path });
+            }
+            return Ok(existing);
+        }
+
+        let ino = self
+            .core
+            .meta_layer
+            .create_file(parent_ino, name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        self.state.modified.touch(parent_ino).await;
+        self.state.modified.touch(ino).await;
+        Ok(ino)
+    }
+
     /// Create a regular file (running `mkdir_p` on its parent if needed).
     /// - If a directory with the same name exists, returns "is a directory".
     /// - If the file already exists, returns its inode instead of creating a new one.
@@ -718,6 +860,24 @@ where
         Some(meta_attr)
     }
 
+    /// Fetch a file's attributes (kind/size come from the MetaStore) with structured errors.
+    pub async fn stat_err(&self, path: &str) -> Result<FileAttr, VfsError> {
+        let path = Self::norm_path(path);
+        let (ino, _) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+        self.core
+            .meta_layer
+            .stat(ino)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or(VfsError::NotFound { path })
+    }
+
     /// Read a symlink target by inode.
     pub async fn readlink_ino(&self, ino: i64) -> Result<String, String> {
         let attr = self
@@ -777,6 +937,307 @@ where
             })
             .collect();
         Some(entries)
+    }
+
+    pub async fn readdir_err(&self, path: &str) -> Result<Vec<DirEntry>, VfsError> {
+        let path = Self::norm_path(path);
+        let (ino, kind) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+        if kind != FileType::Dir {
+            return Err(VfsError::NotADirectory { path });
+        }
+
+        let meta_entries = self
+            .core
+            .meta_layer
+            .readdir(ino)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        Ok(meta_entries
+            .into_iter()
+            .map(|e| DirEntry {
+                name: e.name,
+                ino: e.ino,
+                kind: e.kind,
+            })
+            .collect())
+    }
+
+    /// Remove a regular file or symlink (directories are not supported here), with structured errors.
+    pub async fn unlink_err(&self, path: &str) -> Result<(), VfsError> {
+        let path = Self::norm_path(path);
+        let (dir, name) = Self::split_dir_file(&path);
+
+        let parent_ino = if dir == "/" {
+            self.core.root
+        } else {
+            let (ino, kind) = self
+                .core
+                .meta_layer
+                .lookup_path(&dir)
+                .await
+                .map_err(|e| VfsError::from_meta(dir.clone(), e))?
+                .ok_or_else(|| VfsError::NotFound { path: dir.clone() })?;
+            if kind != FileType::Dir {
+                return Err(VfsError::NotADirectory { path: dir });
+            }
+            ino
+        };
+
+        let ino = self
+            .core
+            .meta_layer
+            .lookup(parent_ino, &name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+
+        let attr = self
+            .core
+            .meta_layer
+            .stat(ino)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+
+        if attr.kind == FileType::Dir {
+            return Err(VfsError::IsADirectory { path });
+        }
+
+        self.core
+            .meta_layer
+            .unlink(parent_ino, &name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        self.state.modified.touch(parent_ino).await;
+        self.state.modified.touch(ino).await;
+
+        Ok(())
+    }
+
+    /// Remove an empty directory (root cannot be removed), with structured errors.
+    pub async fn rmdir_err(&self, path: &str) -> Result<(), VfsError> {
+        let path = Self::norm_path(path);
+        if path == "/" {
+            return Err(VfsError::InvalidInput {
+                message: "cannot remove root".to_string(),
+            });
+        }
+
+        let (dir, name) = Self::split_dir_file(&path);
+        let parent_ino = if dir == "/" {
+            self.core.root
+        } else {
+            let (ino, kind) = self
+                .core
+                .meta_layer
+                .lookup_path(&dir)
+                .await
+                .map_err(|e| VfsError::from_meta(dir.clone(), e))?
+                .ok_or_else(|| VfsError::NotFound { path: dir.clone() })?;
+            if kind != FileType::Dir {
+                return Err(VfsError::NotADirectory { path: dir });
+            }
+            ino
+        };
+
+        let ino = self
+            .core
+            .meta_layer
+            .lookup(parent_ino, &name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+
+        let attr = self
+            .core
+            .meta_layer
+            .stat(ino)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+
+        if attr.kind != FileType::Dir {
+            return Err(VfsError::NotADirectory { path });
+        }
+
+        let children = self
+            .core
+            .meta_layer
+            .readdir(ino)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        if !children.is_empty() {
+            return Err(VfsError::DirectoryNotEmpty { path });
+        }
+
+        self.core
+            .meta_layer
+            .rmdir(parent_ino, &name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        self.state.modified.touch(parent_ino).await;
+        self.state.modified.touch(ino).await;
+
+        Ok(())
+    }
+
+    pub async fn rename_err(&self, old: &str, new: &str) -> Result<(), VfsError> {
+        let old = Self::norm_path(old);
+        let new = Self::norm_path(new);
+        self.rename(&old, &new)
+            .await
+            .map_err(|e| VfsError::from_meta(new, e))
+    }
+
+    /// Truncate/extend file size with structured errors.
+    pub async fn truncate_err(&self, path: &str, size: u64) -> Result<(), VfsError> {
+        let path = Self::norm_path(path);
+        let (ino, kind) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+
+        match kind {
+            FileType::File => {}
+            FileType::Dir => return Err(VfsError::IsADirectory { path }),
+            _ => return Err(VfsError::NotAFile { path }),
+        }
+
+        if let Some(inode) = self.state.files.inode(ino) {
+            inode.update_size(size);
+        }
+
+        self.core
+            .meta_layer
+            .set_file_size(ino, size)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        self.state.modified.touch(ino).await;
+        Ok(())
+    }
+
+    async fn ensure_inode_registered_err(
+        &self,
+        ino: i64,
+        path: &str,
+    ) -> Result<Arc<Inode>, VfsError> {
+        if let Some(inode) = self.state.files.inode(ino) {
+            return Ok(inode.clone());
+        }
+
+        match self.state.files.inode.entry(ino) {
+            Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
+            Entry::Vacant(entry) => {
+                let attr = self
+                    .core
+                    .meta_layer
+                    .stat(ino)
+                    .await
+                    .map_err(|e| VfsError::from_meta(path.to_string(), e))?
+                    .ok_or_else(|| VfsError::NotFound {
+                        path: path.to_string(),
+                    })?;
+                if attr.kind == FileType::Dir {
+                    return Err(VfsError::IsADirectory {
+                        path: path.to_string(),
+                    });
+                }
+                if attr.kind != FileType::File {
+                    return Err(VfsError::NotAFile {
+                        path: path.to_string(),
+                    });
+                }
+
+                let inode = Inode::new(ino, attr.size);
+                self.state
+                    .files
+                    .ensure_init(Arc::clone(&inode), Arc::clone(&self.core.chunk_io));
+                entry.insert(inode.clone());
+                Ok(inode)
+            }
+        }
+    }
+
+    /// Write data by file offset with structured errors.
+    pub async fn write_err(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, VfsError> {
+        let path = Self::norm_path(path);
+        let (ino, kind) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+        match kind {
+            FileType::File => {}
+            FileType::Dir => return Err(VfsError::IsADirectory { path }),
+            _ => return Err(VfsError::NotAFile { path }),
+        }
+
+        let inode = self.ensure_inode_registered_err(ino, &path).await?;
+        let writer = self
+            .state
+            .files
+            .writer(ino)
+            .ok_or_else(|| VfsError::Internal {
+                message: "file writer is not initialized".to_string(),
+            })?;
+
+        let guard = writer.write().await;
+        let written = guard
+            .write(offset, data)
+            .await
+            .map_err(|e| VfsError::Internal {
+                message: e.to_string(),
+            })?;
+
+        let target_size = offset + data.len() as u64;
+        if target_size > inode.file_size() {
+            inode.update_size(target_size);
+            self.core
+                .meta_layer
+                .set_file_size(ino, target_size)
+                .await
+                .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        }
+        self.state.modified.touch(ino).await;
+        Ok(written)
+    }
+
+    /// Read data by file offset with structured errors (clamped to file size).
+    pub async fn read_err(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, VfsError> {
+        let path = Self::norm_path(path);
+        let (ino, _) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+            .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+        self.ensure_inode_registered_err(ino, &path).await?;
+
+        let reader = self
+            .state
+            .files
+            .reader(ino)
+            .ok_or_else(|| VfsError::Internal {
+                message: "file reader is not initialized".to_string(),
+            })?;
+        reader
+            .read(offset, len)
+            .await
+            .map_err(|e| VfsError::Internal {
+                message: e.to_string(),
+            })
     }
 
     /// Check whether a path exists.

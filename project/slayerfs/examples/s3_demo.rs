@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let vfs = VFS::new(layout, store, meta_store)
         .await
         .expect("create vfs fail.");
-    let mut client = Client::from_vfs(vfs);
+    let client = Client::from_vfs(vfs);
 
     // Test basic operations
     println!("Testing basic S3 operations...");
