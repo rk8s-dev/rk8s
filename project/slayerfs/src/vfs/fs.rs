@@ -8,7 +8,7 @@ use crate::meta::client::{MetaClient, MetaClientOptions};
 use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::MetaError;
-use crate::meta::store::{SetAttrFlags, SetAttrRequest};
+use crate::meta::store::{SetAttrFlags, SetAttrRequest, StatFsSnapshot};
 use crate::meta::{MetaLayer, MetaStore};
 use crate::vfs::error::VfsError;
 use dashmap::{DashMap, Entry};
@@ -596,6 +596,78 @@ where
             }
         }
         Ok(cur_ino)
+    }
+
+    /// Create a single directory (non-recursive).
+    ///
+    /// - Parent directory must exist.
+    /// - If the target already exists as a directory, returns its inode.
+    /// - If the target exists as a file, returns `NotADirectory`.
+    /// - If parent does not exist, returns `NotFound`.
+    pub async fn mkdir_err(&self, path: &str) -> Result<i64, VfsError> {
+        let path = Self::norm_path(path);
+        if path == "/" {
+            return Ok(self.core.root);
+        }
+
+        let (dir, name) = Self::split_dir_file(&path);
+        if name.is_empty() {
+            return Err(VfsError::InvalidInput {
+                message: "empty directory name".to_string(),
+            });
+        }
+
+        // Check if parent exists
+        let parent_ino = if dir == "/" {
+            self.core.root
+        } else {
+            match self
+                .core
+                .meta_layer
+                .lookup_path(&dir)
+                .await
+                .map_err(|e| VfsError::from_meta(dir.clone(), e))?
+            {
+                Some((ino, kind)) => {
+                    if kind != FileType::Dir {
+                        return Err(VfsError::NotADirectory { path: dir });
+                    }
+                    ino
+                }
+                None => return Err(VfsError::NotFound { path: dir }),
+            }
+        };
+
+        // Check if target already exists
+        if let Some(ino) = self
+            .core
+            .meta_layer
+            .lookup(parent_ino, &name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+        {
+            let attr = self
+                .core
+                .meta_layer
+                .stat(ino)
+                .await
+                .map_err(|e| VfsError::from_meta(path.clone(), e))?
+                .ok_or_else(|| VfsError::NotFound { path: path.clone() })?;
+            if attr.kind == FileType::Dir {
+                return Ok(ino);
+            } else {
+                return Err(VfsError::AlreadyExists { path });
+            }
+        }
+
+        // Create the directory
+        let ino = self
+            .core
+            .meta_layer
+            .mkdir(parent_ino, name.to_string())
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        Ok(ino)
     }
 
     /// Create a regular file in an existing parent directory (std-like behavior).
@@ -1759,6 +1831,11 @@ where
         }
 
         Ok(())
+    }
+
+    /// Get file system statistics (total/available space and inodes).
+    pub async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
+        self.core.meta_layer.stat_fs().await
     }
 
     async fn ensure_inode_registered(&self, ino: i64) -> Result<Arc<Inode>, String> {

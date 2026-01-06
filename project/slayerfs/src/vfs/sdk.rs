@@ -10,8 +10,8 @@ use crate::chuck::store::BlockStore;
 use crate::meta::MetaStore;
 use crate::meta::factory::create_meta_store_from_url;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
-use crate::meta::store::MetaError;
-use crate::vfs::fs::{DirEntry, FileAttr, VFS};
+use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest, StatFsSnapshot};
+use crate::vfs::fs::{DirEntry, FileAttr, FileType, VFS};
 use std::io;
 use std::path::Path;
 
@@ -124,6 +124,15 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
             .map_err(Into::into)
     }
 
+    /// Create a single directory (non-recursive).
+    pub async fn mkdir_io(&self, path: &str) -> io::Result<()> {
+        self.fs
+            .mkdir_err(path)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
     pub async fn create_file_io(&self, path: &str, create_new: bool) -> io::Result<()> {
         self.fs
             .create_file_in_existing_dir_err(path, create_new)
@@ -168,6 +177,87 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
 
     pub async fn truncate_io(&self, path: &str, size: u64) -> io::Result<()> {
         self.fs.truncate_err(path, size).await.map_err(Into::into)
+    }
+
+    /// Check whether a path exists.
+    pub async fn exists(&self, path: &str) -> bool {
+        self.fs.exists(path).await
+    }
+
+    /// Set file/directory attributes (chmod, chown, utime).
+    pub async fn set_attr_io(
+        &self,
+        path: &str,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> io::Result<FileAttr> {
+        let attr = self.fs.stat_err(path).await?;
+        self.fs.set_attr(attr.ino, req, flags).await.map_err(|e| {
+            io::Error::new(io::ErrorKind::Other, e.to_string())
+        })
+    }
+
+    /// Get file attributes without following symlinks.
+    pub async fn lstat_io(&self, path: &str) -> io::Result<FileAttr> {
+        // For now, we use the same implementation as stat since VFS doesn't distinguish.
+        // TODO: Implement proper lstat that doesn't follow symlinks.
+        self.fs.stat_err(path).await.map_err(Into::into)
+    }
+
+    /// Recursively remove a directory and all its contents.
+    pub async fn remove_dir_all_io(&self, path: &str) -> io::Result<()> {
+        self.remove_dir_all_recursive(path).await
+    }
+
+    async fn remove_dir_all_recursive(&self, path: &str) -> io::Result<()> {
+        let entries = self.fs.readdir_err(path).await?;
+        for entry in entries {
+            let child_path = if path == "/" {
+                format!("/{}", entry.name)
+            } else {
+                format!("{}/{}", path, entry.name)
+            };
+            match entry.kind {
+                FileType::Dir => {
+                    Box::pin(self.remove_dir_all_recursive(&child_path)).await?;
+                }
+                _ => {
+                    self.fs.unlink_err(&child_path).await?;
+                }
+            }
+        }
+        self.fs.rmdir_err(path).await.map_err(Into::into)
+    }
+
+    /// Get file system statistics (total/available space and inodes).
+    pub async fn stat_fs_io(&self) -> io::Result<StatFsSnapshot> {
+        self.fs
+            .stat_fs()
+            .await
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+    }
+
+    /// Symlink support check for lstat.
+    pub async fn readlink_io(&self, path: &str) -> io::Result<String> {
+        self.fs.readlink(path).await.map_err(|e| {
+            io::Error::new(io::ErrorKind::Other, e)
+        })
+    }
+
+    /// Create a hard link.
+    pub async fn link_io(&self, existing: &str, link_path: &str) -> io::Result<FileAttr> {
+        self.fs.link(existing, link_path).await.map_err(|e| {
+            io::Error::new(io::ErrorKind::Other, e)
+        })
+    }
+
+    /// Create a symbolic link.
+    pub async fn symlink_io(&self, link_path: &str, target: &str) -> io::Result<FileAttr> {
+        self.fs
+            .create_symlink(link_path, target)
+            .await
+            .map(|(_, attr)| attr)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 }
 

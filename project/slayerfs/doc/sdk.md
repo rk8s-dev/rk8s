@@ -76,13 +76,9 @@ async fn main() {
 - 本仓库内含端到端测试（`vfs::sdk`、`vfs::fs`、`vfs::simple`）与一个本地演示入口（`demo-localfs`）
 - 你可以运行测试或示例来验证行为（见根目录 README）
 
-## 后续：std/tokio 风格 SDK 设计
-
-如果你希望像 `tokio::fs/std::fs` 一样通过 `OpenOptions`/`File` 进行顺序读写（无需手动维护 offset），并将错误稳定映射到 `std::io::ErrorKind`，请参阅：`doc/sdk_stdlike_design.md`。
-
 ## std/tokio 风格 SDK（File API，async）
 
-SlayerFS 也提供一个更贴近 `tokio::fs` 的封装（`slayerfs::sdk_fs`），以“文件对象”的方式进行顺序读写，并返回 `std::io::Result<T>`：
+SlayerFS 提供一个更贴近 `tokio::fs` 的封装（`slayerfs::sdk_fs`），支持通过 `OpenOptions`/`File` 进行顺序读写（无需手动维护 offset），并将错误稳定映射到 `std::io::ErrorKind`：
 
 ```rust
 use slayerfs::chuck::chunk::ChunkLayout;
@@ -108,6 +104,70 @@ async fn main() -> std::io::Result<()> {
     let s = sdk_fs::read_to_string(Arc::clone(&client), "/demo/hello.txt").await?;
     assert_eq!(s, "hello");
     Ok(())
+}
+```
+
+### std-like SDK API Reference
+
+#### File Operations
+| Function | Description |
+|----------|-------------|
+| `OpenOptions::open(client, path)` | Open file with specified options (read/write/append/truncate/create/create_new) |
+| `File::read(&self, buf)` | Read data into buffer, advancing internal offset |
+| `File::write(&self, data)` | Write data at current offset, advancing internal offset |
+| `File::seek(&self, pos)` | Seek to position (Start/Current/End) |
+| `File::metadata(&self)` | Get file metadata |
+| `File::set_len(&self, size)` | Truncate or extend file |
+| `read(client, path)` | Read entire file contents |
+| `read_to_string(client, path)` | Read file as UTF-8 string |
+| `write(client, path, data)` | Write data to file (create/truncate) |
+| `copy(client, src, dst)` | Copy file contents |
+
+#### Directory Operations
+| Function | Description |
+|----------|-------------|
+| `create_dir_all(client, path)` | Create directory recursively |
+| `read_dir(client, path)` | List directory contents |
+| `remove_dir(client, path)` | Remove empty directory |
+| `remove_dir_all(client, path)` | Remove directory and all contents recursively |
+| `remove_file(client, path)` | Remove a file |
+| `rename(client, old, new)` | Rename file or directory |
+
+#### Metadata Operations
+| Function | Description |
+|----------|-------------|
+| `exists(client, path)` | Check if path exists |
+| `metadata(client, path)` | Get file/directory metadata |
+| `symlink_metadata(client, path)` | Get metadata without following symlinks |
+| `set_permissions(client, path, mode)` | Change file permissions |
+| `chown(client, path, uid, gid)` | Change owner and group |
+| `set_times(client, path, atime, mtime)` | Set access/modification times |
+| `stat_fs(client)` | Get filesystem statistics |
+
+#### Link Operations
+| Function | Description |
+|----------|-------------|
+| `hard_link(client, original, link)` | Create hard link |
+| `symlink(client, original, link)` | Create symbolic link |
+| `read_link(client, path)` | Read symbolic link target |
+
+#### Metadata Struct Fields
+```rust
+impl Metadata {
+    fn len(&self) -> u64           // File size in bytes
+    fn is_file(&self) -> bool      // Is regular file
+    fn is_dir(&self) -> bool       // Is directory
+    fn is_symlink(&self) -> bool   // Is symbolic link
+    fn mode(&self) -> u32          // Permission mode
+    fn uid(&self) -> u32           // Owner user ID
+    fn gid(&self) -> u32           // Owner group ID
+    fn ino(&self) -> i64           // Inode number
+    fn nlink(&self) -> u32         // Number of hard links
+    fn atime(&self) -> i64         // Access time (Unix timestamp)
+    fn mtime(&self) -> i64         // Modification time (Unix timestamp)
+    fn ctime(&self) -> i64         // Status change time (Unix timestamp)
+    fn accessed(&self) -> io::Result<SystemTime>  // Access time as SystemTime
+    fn modified(&self) -> io::Result<SystemTime>  // Modification time as SystemTime
 }
 ```
 

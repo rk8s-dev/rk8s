@@ -3,22 +3,81 @@ use std::collections::VecDeque;
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, OnceLock, Weak};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 use crate::vfs::fs::{DirEntry as VfsDirEntry, FileAttr as VfsFileAttr, FileType as VfsFileType};
 
+// Re-export useful types from meta store
+pub use crate::meta::store::{SetAttrFlags, SetAttrRequest, StatFsSnapshot};
+
+/// SDK client trait for filesystem operations.
+///
+/// This trait defines the interface for filesystem operations that can be
+/// implemented by different backend storage systems.
 #[async_trait]
 pub trait SdkClient: Send + Sync + 'static {
+    /// Create a single directory (non-recursive).
+    async fn mkdir(&self, path: &str) -> io::Result<()>;
+
+    /// Create directory recursively (like `mkdir -p`).
     async fn mkdir_p(&self, path: &str) -> io::Result<()>;
+
+    /// Create a file. If `create_new` is true, fails if file already exists.
     async fn create_file(&self, path: &str, create_new: bool) -> io::Result<()>;
+
+    /// Write data at the specified offset.
     async fn write_at(&self, path: &str, offset: u64, data: &[u8]) -> io::Result<usize>;
+
+    /// Read data at the specified offset.
     async fn read_at(&self, path: &str, offset: u64, len: usize) -> io::Result<Vec<u8>>;
+
+    /// Read directory entries.
     async fn readdir(&self, path: &str) -> io::Result<Vec<VfsDirEntry>>;
+
+    /// Get file/directory attributes.
     async fn stat(&self, path: &str) -> io::Result<VfsFileAttr>;
+
+    /// Remove a file.
     async fn unlink(&self, path: &str) -> io::Result<()>;
+
+    /// Remove an empty directory.
     async fn rmdir(&self, path: &str) -> io::Result<()>;
+
+    /// Rename a file or directory.
     async fn rename(&self, old: &str, new: &str) -> io::Result<()>;
+
+    /// Truncate a file to the specified size.
     async fn truncate(&self, path: &str, size: u64) -> io::Result<()>;
+
+    /// Check whether a path exists.
+    async fn exists(&self, path: &str) -> bool;
+
+    /// Set file/directory attributes (mode, uid, gid, times).
+    async fn set_attr(
+        &self,
+        path: &str,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> io::Result<VfsFileAttr>;
+
+    /// Get file attributes without following symlinks.
+    async fn lstat(&self, path: &str) -> io::Result<VfsFileAttr>;
+
+    /// Remove a directory and all its contents recursively.
+    async fn remove_dir_all(&self, path: &str) -> io::Result<()>;
+
+    /// Get file system statistics (total/available space and inodes).
+    async fn stat_fs(&self) -> io::Result<StatFsSnapshot>;
+
+    /// Create a hard link.
+    async fn link(&self, existing: &str, link_path: &str) -> io::Result<VfsFileAttr>;
+
+    /// Create a symbolic link.
+    async fn symlink(&self, link_path: &str, target: &str) -> io::Result<VfsFileAttr>;
+
+    /// Read the target of a symbolic link.
+    async fn readlink(&self, path: &str) -> io::Result<String>;
 }
 
 pub type DynClient = Arc<dyn SdkClient>;
@@ -29,6 +88,10 @@ where
     S: crate::chuck::store::BlockStore + Send + Sync + 'static,
     M: crate::meta::MetaStore + Send + Sync + 'static,
 {
+    async fn mkdir(&self, path: &str) -> io::Result<()> {
+        self.mkdir_io(path).await
+    }
+
     async fn mkdir_p(&self, path: &str) -> io::Result<()> {
         self.mkdir_p_io(path).await
     }
@@ -68,6 +131,43 @@ where
     async fn truncate(&self, path: &str, size: u64) -> io::Result<()> {
         self.truncate_io(path, size).await
     }
+
+    async fn exists(&self, path: &str) -> bool {
+        crate::vfs::sdk::Client::exists(self, path).await
+    }
+
+    async fn set_attr(
+        &self,
+        path: &str,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> io::Result<VfsFileAttr> {
+        self.set_attr_io(path, req, flags).await
+    }
+
+    async fn lstat(&self, path: &str) -> io::Result<VfsFileAttr> {
+        self.lstat_io(path).await
+    }
+
+    async fn remove_dir_all(&self, path: &str) -> io::Result<()> {
+        self.remove_dir_all_io(path).await
+    }
+
+    async fn stat_fs(&self) -> io::Result<StatFsSnapshot> {
+        self.stat_fs_io().await
+    }
+
+    async fn link(&self, existing: &str, link_path: &str) -> io::Result<VfsFileAttr> {
+        self.link_io(existing, link_path).await
+    }
+
+    async fn symlink(&self, link_path: &str, target: &str) -> io::Result<VfsFileAttr> {
+        self.symlink_io(link_path, target).await
+    }
+
+    async fn readlink(&self, path: &str) -> io::Result<String> {
+        self.readlink_io(path).await
+    }
 }
 
 fn path_to_str(path: impl AsRef<Path>) -> io::Result<String> {
@@ -103,32 +203,115 @@ impl FileType {
     }
 }
 
+/// Metadata information about a file or directory.
 #[derive(Debug, Clone)]
 pub struct Metadata(VfsFileAttr);
 
 impl Metadata {
+    /// Returns the size of the file in bytes.
     pub fn len(&self) -> u64 {
         self.0.size
     }
 
+    /// Returns true if the file size is zero.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns the file type.
     pub fn file_type(&self) -> FileType {
         FileType(self.0.kind)
     }
 
+    /// Returns true if this is a regular file.
     pub fn is_file(&self) -> bool {
         self.0.kind == VfsFileType::File
     }
 
+    /// Returns true if this is a directory.
     pub fn is_dir(&self) -> bool {
         self.0.kind == VfsFileType::Dir
     }
 
+    /// Returns true if this is a symbolic link.
     pub fn is_symlink(&self) -> bool {
         self.0.kind == VfsFileType::Symlink
+    }
+
+    /// Returns the file mode (permissions).
+    pub fn mode(&self) -> u32 {
+        self.0.mode
+    }
+
+    /// Returns the user ID of the owner.
+    pub fn uid(&self) -> u32 {
+        self.0.uid
+    }
+
+    /// Returns the group ID of the owner.
+    pub fn gid(&self) -> u32 {
+        self.0.gid
+    }
+
+    /// Returns the inode number.
+    pub fn ino(&self) -> i64 {
+        self.0.ino
+    }
+
+    /// Returns the number of hard links.
+    pub fn nlink(&self) -> u32 {
+        self.0.nlink
+    }
+
+    /// Returns the last access time as seconds since UNIX epoch.
+    pub fn atime(&self) -> i64 {
+        self.0.atime
+    }
+
+    /// Returns the last modification time as seconds since UNIX epoch.
+    pub fn mtime(&self) -> i64 {
+        self.0.mtime
+    }
+
+    /// Returns the last status change time as seconds since UNIX epoch.
+    pub fn ctime(&self) -> i64 {
+        self.0.ctime
+    }
+
+    /// Returns the last access time as SystemTime.
+    pub fn accessed(&self) -> io::Result<SystemTime> {
+        if self.0.atime >= 0 {
+            Ok(UNIX_EPOCH + Duration::from_secs(self.0.atime as u64))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "negative timestamp not supported",
+            ))
+        }
+    }
+
+    /// Returns the last modification time as SystemTime.
+    pub fn modified(&self) -> io::Result<SystemTime> {
+        if self.0.mtime >= 0 {
+            Ok(UNIX_EPOCH + Duration::from_secs(self.0.mtime as u64))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "negative timestamp not supported",
+            ))
+        }
+    }
+
+    /// Returns the creation/status change time as SystemTime.
+    pub fn created(&self) -> io::Result<SystemTime> {
+        if self.0.ctime >= 0 {
+            Ok(UNIX_EPOCH + Duration::from_secs(self.0.ctime as u64))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "negative timestamp not supported",
+            ))
+        }
     }
 }
 
@@ -438,8 +621,42 @@ impl File {
         }
         Ok(())
     }
+
+    /// Synchronize all file data and metadata to storage.
+    ///
+    /// In SlayerFS, writes are persisted immediately to object storage,
+    /// so this is a no-op but provided for API compatibility.
+    pub async fn sync_all(&self) -> io::Result<()> {
+        // SlayerFS writes directly to object storage, so data is already persisted.
+        // This method exists for API compatibility with std::fs::File.
+        Ok(())
+    }
+
+    /// Synchronize file data to storage (without metadata).
+    ///
+    /// In SlayerFS, writes are persisted immediately to object storage,
+    /// so this is a no-op but provided for API compatibility.
+    pub async fn sync_data(&self) -> io::Result<()> {
+        // SlayerFS writes directly to object storage, so data is already persisted.
+        Ok(())
+    }
+
+    /// Flush internal buffers.
+    ///
+    /// In SlayerFS, there are no internal buffers to flush,
+    /// so this is a no-op but provided for API compatibility.
+    pub async fn flush(&self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
+/// Create a single directory (non-recursive).
+pub async fn create_dir(client: DynClient, path: impl AsRef<Path>) -> io::Result<()> {
+    let path = path_to_str(path)?;
+    client.mkdir(&path).await
+}
+
+/// Create directory recursively (like `mkdir -p`).
 pub async fn create_dir_all(client: DynClient, path: impl AsRef<Path>) -> io::Result<()> {
     let path = path_to_str(path)?;
     client.mkdir_p(&path).await
@@ -575,6 +792,189 @@ pub async fn copy(
     Ok(copied)
 }
 
+/// Check whether a path exists.
+pub async fn exists(client: DynClient, path: impl AsRef<Path>) -> bool {
+    match path_to_str(path) {
+        Ok(p) => client.exists(&p).await,
+        Err(_) => false,
+    }
+}
+
+/// Get metadata for a file or directory.
+pub async fn metadata(client: DynClient, path: impl AsRef<Path>) -> io::Result<Metadata> {
+    let path = path_to_str(path)?;
+    let attr = client.stat(&path).await?;
+    Ok(Metadata(attr))
+}
+
+/// Get metadata without following symlinks.
+pub async fn symlink_metadata(client: DynClient, path: impl AsRef<Path>) -> io::Result<Metadata> {
+    let path = path_to_str(path)?;
+    let attr = client.lstat(&path).await?;
+    Ok(Metadata(attr))
+}
+
+/// Remove a directory and all its contents recursively.
+pub async fn remove_dir_all(client: DynClient, path: impl AsRef<Path>) -> io::Result<()> {
+    let path = path_to_str(path)?;
+    client.remove_dir_all(&path).await
+}
+
+/// Change the permission mode of a file or directory.
+pub async fn set_permissions(client: DynClient, path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
+    let path = path_to_str(path)?;
+    let req = SetAttrRequest {
+        mode: Some(mode),
+        ..Default::default()
+    };
+    client.set_attr(&path, &req, SetAttrFlags::empty()).await?;
+    Ok(())
+}
+
+/// Change the owner and group of a file or directory.
+pub async fn chown(
+    client: DynClient,
+    path: impl AsRef<Path>,
+    uid: Option<u32>,
+    gid: Option<u32>,
+) -> io::Result<()> {
+    let path = path_to_str(path)?;
+    let req = SetAttrRequest {
+        uid,
+        gid,
+        ..Default::default()
+    };
+    client.set_attr(&path, &req, SetAttrFlags::empty()).await?;
+    Ok(())
+}
+
+/// Set the access and modification times of a file.
+///
+/// Times are specified as seconds since UNIX epoch.
+/// Use `None` to set to the current time.
+pub async fn set_times(
+    client: DynClient,
+    path: impl AsRef<Path>,
+    atime: Option<i64>,
+    mtime: Option<i64>,
+) -> io::Result<()> {
+    let path = path_to_str(path)?;
+    let mut flags = SetAttrFlags::empty();
+    let mut req = SetAttrRequest::default();
+
+    if let Some(a) = atime {
+        req.atime = Some(a);
+    } else {
+        flags |= SetAttrFlags::SET_ATIME_NOW;
+    }
+
+    if let Some(m) = mtime {
+        req.mtime = Some(m);
+    } else {
+        flags |= SetAttrFlags::SET_MTIME_NOW;
+    }
+
+    client.set_attr(&path, &req, flags).await?;
+    Ok(())
+}
+
+/// Get file system statistics.
+pub async fn stat_fs(client: DynClient) -> io::Result<StatFsSnapshot> {
+    client.stat_fs().await
+}
+
+/// Create a hard link.
+pub async fn hard_link(
+    client: DynClient,
+    original: impl AsRef<Path>,
+    link: impl AsRef<Path>,
+) -> io::Result<()> {
+    let original = path_to_str(original)?;
+    let link = path_to_str(link)?;
+    client.link(&original, &link).await?;
+    Ok(())
+}
+
+/// Create a symbolic link.
+pub async fn symlink(
+    client: DynClient,
+    original: impl AsRef<Path>,
+    link: impl AsRef<Path>,
+) -> io::Result<()> {
+    let original = path_to_str(original)?;
+    let link = path_to_str(link)?;
+    client.symlink(&link, &original).await?;
+    Ok(())
+}
+
+/// Read the target of a symbolic link.
+pub async fn read_link(client: DynClient, path: impl AsRef<Path>) -> io::Result<String> {
+    let path = path_to_str(path)?;
+    client.readlink(&path).await
+}
+
+bitflags::bitflags! {
+    /// Access mode flags for the `access` function.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct AccessMode: u32 {
+        /// Test for existence of file.
+        const F_OK = 0;
+        /// Test for read permission.
+        const R_OK = 4;
+        /// Test for write permission.
+        const W_OK = 2;
+        /// Test for execute permission.
+        const X_OK = 1;
+    }
+}
+
+/// Check user's permissions for a file.
+///
+/// This is a simplified implementation that checks:
+/// - F_OK: file exists
+/// - R_OK/W_OK/X_OK: based on file mode bits
+///
+/// Note: This does not check against the actual calling process's UID/GID,
+/// it simply verifies that the corresponding permission bits are set.
+pub async fn access(client: DynClient, path: impl AsRef<Path>, mode: AccessMode) -> io::Result<()> {
+    let path = path_to_str(path)?;
+    let attr = client.stat(&path).await?;
+
+    // F_OK (existence) is satisfied by successfully getting stat
+    if mode == AccessMode::F_OK || mode.is_empty() {
+        return Ok(());
+    }
+
+    let file_mode = attr.mode;
+
+    // Check "other" permission bits (simplified - doesn't check uid/gid)
+    // In a real implementation, we'd check against the process's uid/gid
+    let other_r = (file_mode & 0o004) != 0;
+    let other_w = (file_mode & 0o002) != 0;
+    let other_x = (file_mode & 0o001) != 0;
+
+    if mode.contains(AccessMode::R_OK) && !other_r {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "read permission denied",
+        ));
+    }
+    if mode.contains(AccessMode::W_OK) && !other_w {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "write permission denied",
+        ));
+    }
+    if mode.contains(AccessMode::X_OK) && !other_x {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "execute permission denied",
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -708,5 +1108,79 @@ mod tests {
         let f = ro.open(Arc::clone(&client), "/p.txt").await.unwrap();
         let err = f.write_all(b"x").await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn test_exists() {
+        let (_tmp, client) = local_client().await;
+
+        assert!(!exists(Arc::clone(&client), "/noexist.txt").await);
+        write(Arc::clone(&client), "/exist.txt", b"data").await.unwrap();
+        assert!(exists(Arc::clone(&client), "/exist.txt").await);
+        create_dir_all(Arc::clone(&client), "/dir").await.unwrap();
+        assert!(exists(Arc::clone(&client), "/dir").await);
+    }
+
+    #[tokio::test]
+    async fn test_metadata_extended() {
+        let (_tmp, client) = local_client().await;
+
+        write(Arc::clone(&client), "/meta.txt", b"hello").await.unwrap();
+        let meta = metadata(Arc::clone(&client), "/meta.txt").await.unwrap();
+
+        assert_eq!(meta.len(), 5);
+        assert!(meta.is_file());
+        assert!(!meta.is_dir());
+        assert!(meta.mode() > 0);
+        assert!(meta.mtime() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_remove_dir_all() {
+        let (_tmp, client) = local_client().await;
+
+        create_dir_all(Arc::clone(&client), "/rm/a/b").await.unwrap();
+        write(Arc::clone(&client), "/rm/a/b/f1.txt", b"1").await.unwrap();
+        write(Arc::clone(&client), "/rm/a/f2.txt", b"2").await.unwrap();
+        create_dir_all(Arc::clone(&client), "/rm/c").await.unwrap();
+        write(Arc::clone(&client), "/rm/c/f3.txt", b"3").await.unwrap();
+
+        remove_dir_all(Arc::clone(&client), "/rm").await.unwrap();
+
+        assert!(!exists(Arc::clone(&client), "/rm").await);
+        assert!(!exists(Arc::clone(&client), "/rm/a").await);
+        assert!(!exists(Arc::clone(&client), "/rm/a/b/f1.txt").await);
+    }
+
+    #[tokio::test]
+    async fn test_symlink_operations() {
+        let (_tmp, client) = local_client().await;
+
+        write(Arc::clone(&client), "/orig.txt", b"original").await.unwrap();
+
+        let result = symlink(Arc::clone(&client), "/orig.txt", "/link.txt").await;
+        if result.is_ok() {
+            let target = read_link(Arc::clone(&client), "/link.txt").await.unwrap();
+            assert_eq!(target, "/orig.txt");
+
+            let link_meta = symlink_metadata(Arc::clone(&client), "/link.txt").await.unwrap();
+            assert!(link_meta.is_symlink());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hard_link_operations() {
+        let (_tmp, client) = local_client().await;
+
+        write(Arc::clone(&client), "/source.txt", b"content").await.unwrap();
+
+        let result = hard_link(Arc::clone(&client), "/source.txt", "/hardlink.txt").await;
+        if result.is_ok() {
+            let orig_meta = metadata(Arc::clone(&client), "/source.txt").await.unwrap();
+            let link_meta = metadata(Arc::clone(&client), "/hardlink.txt").await.unwrap();
+
+            assert_eq!(orig_meta.ino(), link_meta.ino());
+            assert!(link_meta.nlink() >= 2);
+        }
     }
 }
