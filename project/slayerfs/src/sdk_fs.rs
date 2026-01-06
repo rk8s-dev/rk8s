@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::io;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 use tokio::sync::Mutex;
 
 use crate::vfs::fs::{DirEntry as VfsDirEntry, FileAttr as VfsFileAttr, FileType as VfsFileType};
@@ -74,6 +74,14 @@ fn path_to_str(path: impl AsRef<Path>) -> io::Result<String> {
     let s = path.as_ref().to_string_lossy().to_string();
     if s.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty path"));
+    }
+    for part in s.split('/').filter(|p| !p.is_empty()) {
+        if part == "." || part == ".." {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "path must not contain '.' or '..' components",
+            ));
+        }
     }
     Ok(s)
 }
@@ -249,20 +257,29 @@ struct FileState {
     length: u64,
 }
 
-fn append_locks() -> &'static dashmap::DashMap<String, Arc<Mutex<()>>> {
-    static LOCKS: OnceLock<dashmap::DashMap<String, Arc<Mutex<()>>>> = OnceLock::new();
+fn append_locks() -> &'static dashmap::DashMap<String, Weak<Mutex<()>>> {
+    static LOCKS: OnceLock<dashmap::DashMap<String, Weak<Mutex<()>>>> = OnceLock::new();
     LOCKS.get_or_init(dashmap::DashMap::new)
 }
 
 fn append_lock_for(path: &str) -> Arc<Mutex<()>> {
+    const APPEND_LOCK_CLEANUP_THRESHOLD: usize = 4096;
+
     let locks = append_locks();
-    if let Some(lock) = locks.get(path) {
-        Arc::clone(lock.value())
-    } else {
-        let lock = Arc::new(Mutex::new(()));
-        locks.insert(path.to_string(), Arc::clone(&lock));
-        lock
+    if let Some(entry) = locks.get(path)
+        && let Some(lock) = entry.value().upgrade()
+    {
+        return lock;
     }
+
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(path.to_string(), Arc::downgrade(&lock));
+
+    if locks.len() > APPEND_LOCK_CLEANUP_THRESHOLD {
+        locks.retain(|_, v| v.strong_count() > 0);
+    }
+
+    lock
 }
 
 pub struct File {
