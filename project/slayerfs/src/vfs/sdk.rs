@@ -192,9 +192,10 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
         flags: SetAttrFlags,
     ) -> io::Result<FileAttr> {
         let attr = self.fs.stat_err(path).await?;
-        self.fs.set_attr(attr.ino, req, flags).await.map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, e.to_string())
-        })
+        self.fs
+            .set_attr(attr.ino, req, flags)
+            .await
+            .map_err(io::Error::other)
     }
 
     /// Get file attributes without following symlinks.
@@ -206,6 +207,12 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
 
     /// Recursively remove a directory and all its contents.
     pub async fn remove_dir_all_io(&self, path: &str) -> io::Result<()> {
+        if path.trim_matches('/').is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "cannot remove filesystem root",
+            ));
+        }
         self.remove_dir_all_recursive(path).await
     }
 
@@ -231,24 +238,20 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
 
     /// Get file system statistics (total/available space and inodes).
     pub async fn stat_fs_io(&self) -> io::Result<StatFsSnapshot> {
-        self.fs
-            .stat_fs()
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+        self.fs.stat_fs().await.map_err(io::Error::other)
     }
 
     /// Symlink support check for lstat.
     pub async fn readlink_io(&self, path: &str) -> io::Result<String> {
-        self.fs.readlink(path).await.map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, e)
-        })
+        self.fs.readlink(path).await.map_err(io::Error::other)
     }
 
     /// Create a hard link.
     pub async fn link_io(&self, existing: &str, link_path: &str) -> io::Result<FileAttr> {
-        self.fs.link(existing, link_path).await.map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, e)
-        })
+        self.fs
+            .link(existing, link_path)
+            .await
+            .map_err(io::Error::other)
     }
 
     /// Create a symbolic link.
@@ -257,7 +260,7 @@ impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
             .create_symlink(link_path, target)
             .await
             .map(|(_, attr)| attr)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            .map_err(io::Error::other)
     }
 }
 

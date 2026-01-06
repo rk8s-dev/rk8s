@@ -602,7 +602,7 @@ where
     ///
     /// - Parent directory must exist.
     /// - If the target already exists as a directory, returns its inode.
-    /// - If the target exists as a file, returns `NotADirectory`.
+    /// - If the target exists as a non-directory, returns `AlreadyExists`.
     /// - If parent does not exist, returns `NotFound`.
     pub async fn mkdir_err(&self, path: &str) -> Result<i64, VfsError> {
         let path = Self::norm_path(path);

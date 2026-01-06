@@ -283,10 +283,7 @@ impl Metadata {
         if self.0.atime >= 0 {
             Ok(UNIX_EPOCH + Duration::from_secs(self.0.atime as u64))
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "negative timestamp not supported",
-            ))
+            Err(io::Error::other("negative timestamp not supported"))
         }
     }
 
@@ -295,10 +292,7 @@ impl Metadata {
         if self.0.mtime >= 0 {
             Ok(UNIX_EPOCH + Duration::from_secs(self.0.mtime as u64))
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "negative timestamp not supported",
-            ))
+            Err(io::Error::other("negative timestamp not supported"))
         }
     }
 
@@ -307,10 +301,7 @@ impl Metadata {
         if self.0.ctime >= 0 {
             Ok(UNIX_EPOCH + Duration::from_secs(self.0.ctime as u64))
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "negative timestamp not supported",
-            ))
+            Err(io::Error::other("negative timestamp not supported"))
         }
     }
 }
@@ -380,10 +371,10 @@ impl OpenOptions {
                 "append and truncate cannot be set together",
             ));
         }
-        if self.truncate && !(self.write || self.append) {
+        if self.truncate && !self.write {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "truncate requires write or append",
+                "truncate requires write",
             ));
         }
         if (self.create || self.create_new) && !(self.write || self.append) {
@@ -399,19 +390,28 @@ impl OpenOptions {
         self.validate()?;
         let path = path_to_str(path)?;
 
+        let mut pre_stat: Option<VfsFileAttr> = None;
         if self.create_new {
             client.create_file(&path, true).await?;
         } else if self.create {
             client.create_file(&path, false).await?;
         } else {
-            let _ = client.stat(&path).await?;
+            pre_stat = Some(client.stat(&path).await?);
         }
 
         if self.truncate {
+            if let Some(meta) = pre_stat.as_ref()
+                && meta.kind == VfsFileType::Dir
+            {
+                return Err(io::Error::new(io::ErrorKind::IsADirectory, path));
+            }
             client.truncate(&path, 0).await?;
         }
 
-        let meta = client.stat(&path).await?;
+        let meta = match (pre_stat, self.truncate) {
+            (Some(meta), false) => meta,
+            _ => client.stat(&path).await?,
+        };
         if meta.kind == VfsFileType::Dir {
             return Err(io::Error::new(io::ErrorKind::IsADirectory, path));
         }
@@ -653,7 +653,11 @@ impl File {
 /// Create a single directory (non-recursive).
 pub async fn create_dir(client: DynClient, path: impl AsRef<Path>) -> io::Result<()> {
     let path = path_to_str(path)?;
-    client.mkdir(&path).await
+    match client.stat(&path).await {
+        Ok(_) => Err(io::Error::new(io::ErrorKind::AlreadyExists, path)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => client.mkdir(&path).await,
+        Err(e) => Err(e),
+    }
 }
 
 /// Create directory recursively (like `mkdir -p`).
@@ -821,7 +825,11 @@ pub async fn remove_dir_all(client: DynClient, path: impl AsRef<Path>) -> io::Re
 }
 
 /// Change the permission mode of a file or directory.
-pub async fn set_permissions(client: DynClient, path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
+pub async fn set_permissions(
+    client: DynClient,
+    path: impl AsRef<Path>,
+    mode: u32,
+) -> io::Result<()> {
     let path = path_to_str(path)?;
     let req = SetAttrRequest {
         mode: Some(mode),
@@ -1115,7 +1123,9 @@ mod tests {
         let (_tmp, client) = local_client().await;
 
         assert!(!exists(Arc::clone(&client), "/noexist.txt").await);
-        write(Arc::clone(&client), "/exist.txt", b"data").await.unwrap();
+        write(Arc::clone(&client), "/exist.txt", b"data")
+            .await
+            .unwrap();
         assert!(exists(Arc::clone(&client), "/exist.txt").await);
         create_dir_all(Arc::clone(&client), "/dir").await.unwrap();
         assert!(exists(Arc::clone(&client), "/dir").await);
@@ -1125,7 +1135,9 @@ mod tests {
     async fn test_metadata_extended() {
         let (_tmp, client) = local_client().await;
 
-        write(Arc::clone(&client), "/meta.txt", b"hello").await.unwrap();
+        write(Arc::clone(&client), "/meta.txt", b"hello")
+            .await
+            .unwrap();
         let meta = metadata(Arc::clone(&client), "/meta.txt").await.unwrap();
 
         assert_eq!(meta.len(), 5);
@@ -1139,11 +1151,19 @@ mod tests {
     async fn test_remove_dir_all() {
         let (_tmp, client) = local_client().await;
 
-        create_dir_all(Arc::clone(&client), "/rm/a/b").await.unwrap();
-        write(Arc::clone(&client), "/rm/a/b/f1.txt", b"1").await.unwrap();
-        write(Arc::clone(&client), "/rm/a/f2.txt", b"2").await.unwrap();
+        create_dir_all(Arc::clone(&client), "/rm/a/b")
+            .await
+            .unwrap();
+        write(Arc::clone(&client), "/rm/a/b/f1.txt", b"1")
+            .await
+            .unwrap();
+        write(Arc::clone(&client), "/rm/a/f2.txt", b"2")
+            .await
+            .unwrap();
         create_dir_all(Arc::clone(&client), "/rm/c").await.unwrap();
-        write(Arc::clone(&client), "/rm/c/f3.txt", b"3").await.unwrap();
+        write(Arc::clone(&client), "/rm/c/f3.txt", b"3")
+            .await
+            .unwrap();
 
         remove_dir_all(Arc::clone(&client), "/rm").await.unwrap();
 
@@ -1153,17 +1173,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_remove_dir_all_refuses_root() {
+        let (_tmp, client) = local_client().await;
+
+        write(Arc::clone(&client), "/keep.txt", b"keep")
+            .await
+            .unwrap();
+        create_dir_all(Arc::clone(&client), "/keepdir")
+            .await
+            .unwrap();
+        write(Arc::clone(&client), "/keepdir/file.txt", b"x")
+            .await
+            .unwrap();
+
+        let err = remove_dir_all(Arc::clone(&client), "/").await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+
+        assert!(exists(Arc::clone(&client), "/keep.txt").await);
+        assert!(exists(Arc::clone(&client), "/keepdir").await);
+        assert!(exists(Arc::clone(&client), "/keepdir/file.txt").await);
+    }
+
+    #[tokio::test]
+    async fn test_create_dir_already_exists() {
+        let (_tmp, client) = local_client().await;
+
+        create_dir(Arc::clone(&client), "/dir").await.unwrap();
+        let err = create_dir(Arc::clone(&client), "/dir").await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+    }
+
+    #[tokio::test]
     async fn test_symlink_operations() {
         let (_tmp, client) = local_client().await;
 
-        write(Arc::clone(&client), "/orig.txt", b"original").await.unwrap();
+        write(Arc::clone(&client), "/orig.txt", b"original")
+            .await
+            .unwrap();
 
         let result = symlink(Arc::clone(&client), "/orig.txt", "/link.txt").await;
         if result.is_ok() {
             let target = read_link(Arc::clone(&client), "/link.txt").await.unwrap();
             assert_eq!(target, "/orig.txt");
 
-            let link_meta = symlink_metadata(Arc::clone(&client), "/link.txt").await.unwrap();
+            let link_meta = symlink_metadata(Arc::clone(&client), "/link.txt")
+                .await
+                .unwrap();
             assert!(link_meta.is_symlink());
         }
     }
@@ -1172,12 +1227,16 @@ mod tests {
     async fn test_hard_link_operations() {
         let (_tmp, client) = local_client().await;
 
-        write(Arc::clone(&client), "/source.txt", b"content").await.unwrap();
+        write(Arc::clone(&client), "/source.txt", b"content")
+            .await
+            .unwrap();
 
         let result = hard_link(Arc::clone(&client), "/source.txt", "/hardlink.txt").await;
         if result.is_ok() {
             let orig_meta = metadata(Arc::clone(&client), "/source.txt").await.unwrap();
-            let link_meta = metadata(Arc::clone(&client), "/hardlink.txt").await.unwrap();
+            let link_meta = metadata(Arc::clone(&client), "/hardlink.txt")
+                .await
+                .unwrap();
 
             assert_eq!(orig_meta.ino(), link_meta.ino());
             assert!(link_meta.nlink() >= 2);

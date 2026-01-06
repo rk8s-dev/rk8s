@@ -60,28 +60,52 @@ async fn main() -> std::io::Result<()> {
     let meta = sdk_fs::metadata(Arc::clone(&client), "/demo/hello.txt").await?;
     println!("file size: {} bytes", meta.len());
     println!("is_file: {}, is_dir: {}", meta.is_file(), meta.is_dir());
-    println!("mode: {:o}, uid: {}, gid: {}", meta.mode(), meta.uid(), meta.gid());
+    println!(
+        "mode: {:o}, uid: {}, gid: {}",
+        meta.mode(),
+        meta.uid(),
+        meta.gid()
+    );
     println!("mtime: {}", meta.mtime());
 
     println!("\n=== Directory Operations ===");
     // Create nested directories
     sdk_fs::create_dir_all(Arc::clone(&client), "/demo/sub/nested").await?;
-    sdk_fs::write(Arc::clone(&client), "/demo/sub/nested/file.txt", b"nested content").await?;
+    sdk_fs::write(
+        Arc::clone(&client),
+        "/demo/sub/nested/file.txt",
+        b"nested content",
+    )
+    .await?;
 
     // Directory listing
     let mut rd = sdk_fs::read_dir(Arc::clone(&client), "/demo").await?;
     println!("Contents of /demo:");
     while let Some(ent) = rd.next_entry().await? {
-        let type_str = if ent.file_type().is_dir() { "DIR" } else { "FILE" };
+        let type_str = if ent.file_type().is_dir() {
+            "DIR"
+        } else {
+            "FILE"
+        };
         println!("  [{type_str}] {} ({})", ent.file_name(), ent.path());
     }
 
     // Copy file
-    sdk_fs::copy(Arc::clone(&client), "/demo/hello.txt", "/demo/hello_copy.txt").await?;
+    sdk_fs::copy(
+        Arc::clone(&client),
+        "/demo/hello.txt",
+        "/demo/hello_copy.txt",
+    )
+    .await?;
     println!("\nCopied /demo/hello.txt to /demo/hello_copy.txt");
 
     // Rename file
-    sdk_fs::rename(Arc::clone(&client), "/demo/hello_copy.txt", "/demo/hello_renamed.txt").await?;
+    sdk_fs::rename(
+        Arc::clone(&client),
+        "/demo/hello_copy.txt",
+        "/demo/hello_renamed.txt",
+    )
+    .await?;
     println!("Renamed to /demo/hello_renamed.txt");
 
     println!("\n=== Cleanup with remove_dir_all ===");
