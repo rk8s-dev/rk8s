@@ -15,12 +15,12 @@ use crate::vfs::fs::{DirEntry, FileAttr, VFS};
 use std::path::Path;
 
 /// SDK client parametrized by its backend.
-pub struct Client<S: BlockStore, M: MetaStore + 'static> {
+pub struct Client<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static> {
     fs: VFS<S, M>,
 }
 
 #[allow(unused)]
-impl<S: BlockStore, M: MetaStore + 'static> Client<S, M> {
+impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static> Client<S, M> {
     pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, String> {
         let fs = VFS::new(layout, store, meta).await?;
         Ok(Self { fs })

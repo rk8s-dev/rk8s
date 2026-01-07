@@ -8,3 +8,5 @@ pub mod daemon;
 pub mod fuse;
 pub mod meta;
 pub mod vfs;
+
+pub mod utils;
