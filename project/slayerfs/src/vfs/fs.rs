@@ -1012,6 +1012,7 @@ where
 
     /// Write data by file offset. Internally splits the range into per-chunk writes.
     /// Writes each affected chunk fragment. Updates the file size at the end only if the write extends the file.
+    /// todo: Waiting for handle-based api to fix consistency problems...
     pub async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
         let path = Self::norm_path(path);
         let (ino, kind) = self

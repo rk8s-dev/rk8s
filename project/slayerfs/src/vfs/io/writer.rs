@@ -12,6 +12,8 @@
 use super::reader::DataReader;
 use crate::chuck::writer::DataUploader;
 use crate::chuck::{BlockStore, SliceDesc};
+use crate::meta::backoff::backoff;
+use crate::meta::store::MetaError;
 use crate::meta::{MetaStore, SLICE_ID_KEY};
 use crate::vfs::backend::Backend;
 use crate::vfs::cache::page::CacheSlice;
@@ -23,15 +25,20 @@ use crate::vfs::io::split_chunk_spans;
 use dashmap::DashMap;
 use rand::RngCore;
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::{interval, timeout};
+use tracing::warn;
 
 const FLUSH_DURATION: Duration = Duration::from_secs(5);
 const COMMIT_WAIT_SLICE: Duration = Duration::from_millis(100);
 const FLUSH_WAIT: Duration = Duration::from_secs(3);
 const FLUSH_DEADLINE: Duration = Duration::from_secs(300);
+const UPLOAD_MAX_RETRIES: u64 = 5;
+
+const MAX_UNFLUSHED_SLICES: usize = 3;
+const MAX_SLICES_THRESHOLD: usize = 800;
 
 #[derive(Default, Copy, Clone)]
 pub(crate) enum SliceStatus {
@@ -125,12 +132,18 @@ where
     M: MetaStore,
 {
     fn with_mut<T>(&self, f: impl FnOnce(&mut SliceState) -> T) -> T {
-        let mut guard = self.slice.lock().expect("slice lock poisoned");
+        let mut guard = self
+            .slice
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         f(&mut guard)
     }
 
     fn with_ref<T>(&self, f: impl FnOnce(&SliceState) -> T) -> T {
-        let guard = self.slice.lock().expect("slice lock poisoned");
+        let guard = self
+            .slice
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         f(&guard)
     }
 
@@ -163,17 +176,18 @@ where
         self.with_ref(|s| SliceRuntime {
             status: s.state,
             err: s.err.clone(),
-            freezed: !matches!(s.state, SliceStatus::Writeable),
+            frozen: !matches!(s.state, SliceStatus::Writeable),
             started: s.started,
             notify: s.notify.clone(),
         })
     }
 
-    // Transition Readonly -> Uploading. Returns false if already uploading/finished.
+    // Transition Readonly/Failed -> Uploading. Returns false if already uploading/finished.
     fn start_uploading(&self) -> bool {
         self.with_mut(|s| {
-            if matches!(s.state, SliceStatus::Readonly) {
+            if matches!(s.state, SliceStatus::Readonly | SliceStatus::Failed) {
                 s.state = SliceStatus::Uploading;
+                s.err = None;
                 return true;
             }
             false
@@ -250,7 +264,7 @@ where
 struct SliceRuntime {
     status: SliceStatus,
     err: Option<String>,
-    freezed: bool,
+    frozen: bool,
     started: Instant,
     notify: Arc<Notify>,
 }
@@ -305,7 +319,7 @@ where
             (chunk.chunk_id, slices)
         };
 
-        assert!(
+        anyhow::ensure!(
             offset as u64 + len as u64 <= self.shared.config.layout.chunk_size,
             "A write operation cannot exceed the chunk size"
         );
@@ -324,7 +338,7 @@ where
             }
 
             // Prevent slices from remaining unflushed for too long.
-            if idx > 3 && handle.freeze() {
+            if idx > MAX_UNFLUSHED_SLICES && handle.freeze() {
                 flush.push(slice.clone());
             }
         }
@@ -478,7 +492,7 @@ where
         reader: Arc<DataReader<B, M>>,
     ) -> Self {
         let shared = Arc::new(Shared::new(inode, config, backend, reader));
-        let flush_shared = shared.clone();
+        let flush_shared = Arc::downgrade(&shared);
         tokio::spawn(async move { Self::auto_flush(flush_shared).await });
         Self { shared }
     }
@@ -603,14 +617,22 @@ where
     /// Spawn a background task to upload a frozen slice's data.
     /// Metadata commit is handled separately by commit_chunk.
     fn spawn_flush_slice(shared: Arc<Shared<B, M>>, slice: Arc<StdMutex<SliceState>>) {
+        let handle = SliceHandle {
+            slice: &slice,
+            shared: &shared,
+        };
+        if !handle.start_uploading() {
+            return;
+        }
+        Self::spawn_upload_task(shared, slice);
+    }
+
+    fn spawn_upload_task(shared: Arc<Shared<B, M>>, slice: Arc<StdMutex<SliceState>>) {
         tokio::spawn(async move {
             let handle = SliceHandle {
                 slice: &slice,
                 shared: &shared,
             };
-            if !handle.start_uploading() {
-                return;
-            }
             let snapshot = handle.snapshot_for_flush();
 
             let Some((chunk_id, offset, data, slice_id)) = snapshot else {
@@ -634,9 +656,37 @@ where
             };
 
             let uploader = DataUploader::new(shared.config.layout, chunk_id, &shared.backend);
-            match uploader.write_at(sid, offset, &data).await {
-                Ok(_) => handle.mark_uploaded(),
-                Err(err) => handle.mark_failed(err),
+            let result = backoff(UPLOAD_MAX_RETRIES, || async {
+                match uploader.write_at(sid, offset, &data).await {
+                    Ok(_) => Ok(()),
+                    Err(err) => {
+                        warn!(
+                            chunk_id,
+                            slice_id = sid,
+                            offset,
+                            len = data.len(),
+                            error = ?err,
+                            "upload failed, retrying"
+                        );
+                        Err(MetaError::ContinueRetry)
+                    }
+                }
+            })
+            .await;
+
+            match result {
+                Ok(()) => handle.mark_uploaded(),
+                Err(err) => {
+                    warn!(
+                        chunk_id,
+                        slice_id = sid,
+                        offset,
+                        len = data.len(),
+                        error = ?err,
+                        "upload failed after retries"
+                    );
+                    handle.mark_failed(anyhow::anyhow!(err))
+                }
             }
         });
     }
@@ -665,7 +715,7 @@ where
                 return;
             };
 
-            // Fast path: get a snapshot of the current slice to check its status.
+            // Get a snapshot of the current slice to check its status.
             // The `notification` in `Notify` is not queued (but the waiters are), this may result in a lost wake-up.
             // So it is needed to wait for an extra cycle to check timeout (COMMIT_WAIT_SLICE).
             let runtime = SliceHandle {
@@ -673,6 +723,12 @@ where
                 shared: &shared,
             }
             .runtime_snapshot();
+
+            if matches!(runtime.status, SliceStatus::Failed) {
+                Self::spawn_flush_slice(shared.clone(), slice.clone());
+                tokio::time::sleep(COMMIT_WAIT_SLICE).await;
+                continue;
+            }
 
             if !runtime.upload_done() {
                 if timeout(COMMIT_WAIT_SLICE, runtime.notify.notified())
@@ -682,8 +738,8 @@ where
                     continue;
                 }
 
-                // If the slice is too old, it will be freezed and flush.
-                if !runtime.freezed && runtime.started.elapsed() > FLUSH_DURATION * 2 {
+                // If the slice is too old, it will be frozen and flushed.
+                if !runtime.frozen && runtime.started.elapsed() > FLUSH_DURATION * 2 {
                     let froze = SliceHandle {
                         slice: &slice,
                         shared: &shared,
@@ -695,6 +751,8 @@ where
                 }
                 continue;
             }
+
+            let mut should_pop = false;
 
             if runtime.can_commit() && runtime.err.is_none() {
                 let desc = SliceHandle {
@@ -724,8 +782,18 @@ where
                             .reader
                             .invalidate(ino as u64, file_offset, desc.length as usize)
                             .await;
+                        should_pop = true;
                     }
+                } else {
+                    should_pop = true;
                 }
+            } else if matches!(runtime.status, SliceStatus::Committed) {
+                should_pop = true;
+            }
+
+            if !should_pop {
+                tokio::time::sleep(COMMIT_WAIT_SLICE).await;
+                continue;
             }
 
             let mut guard = shared.inner.lock().await;
@@ -750,10 +818,15 @@ where
 
     /// The automatic flush loop: periodically freezes older/idle slices to reduce memory
     /// usage and ensure progress. It does not commit metadata directly.
-    async fn auto_flush(shared: Arc<Shared<B, M>>) {
+    /// Use `Weak` to stop it when the `FileWriter` was dropped.
+    async fn auto_flush(shared: Weak<Shared<B, M>>) {
         let idle = Duration::from_secs(1);
 
         loop {
+            let Some(shared) = shared.upgrade() else {
+                return;
+            };
+
             let mut to_flush = Vec::new();
             {
                 let guard = shared.inner.lock().await;
@@ -768,7 +841,7 @@ where
                 drop(guard);
 
                 // if there are too many slices, it should flush "a few more" to reduce memory usage.
-                let too_many = total_slices > 800;
+                let too_many = total_slices > MAX_SLICES_THRESHOLD;
 
                 // Randomly select a half of chunk to do extra flush to avoid jitter.
                 let pick_bit = (rand::rng().next_u64() & 1) as usize;
@@ -814,6 +887,7 @@ where
             for slice in to_flush {
                 Self::spawn_flush_slice(shared.clone(), slice);
             }
+
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }

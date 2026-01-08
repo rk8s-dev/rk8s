@@ -1,4 +1,5 @@
 use crate::chuck::BlockStore;
+use crate::meta::MetaStore;
 use std::sync::Arc;
 
 pub struct Backend<B, M> {
@@ -9,7 +10,7 @@ pub struct Backend<B, M> {
 impl<B, M> Backend<B, M>
 where
     B: BlockStore,
-    M:,
+    M: MetaStore,
 {
     pub fn new(store: Arc<B>, meta: Arc<M>) -> Self {
         Self { store, meta }
