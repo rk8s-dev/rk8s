@@ -1,3 +1,11 @@
+// Read pipeline (high-level):
+// - FileReader::read_at splits a file read into chunk spans and prepares slices.
+// - prepare_slices ensures SliceState records exist for target ranges and kicks off
+//   background_fetch to pull data from object storage.
+// - read_from_slice waits until the slice is Ready (or Invalid) and copies data into
+//   the caller buffer. Overlapping slices obey "latest slice wins" ordering.
+// - Writer commit will call DataReader::invalidate(...) to mark cached slices stale.
+
 use crate::chuck::reader::DataFetcher;
 use crate::chuck::{BlockStore, ChunkLayout};
 use crate::meta::MetaStore;
@@ -229,6 +237,7 @@ where
             return Ok(0);
         }
 
+        // Pre-fill with zeros so holes or missing slices read as zeros.
         buf[..actual_len].fill(0);
 
         let spans = split_chunk_spans(self.config.layout, offset, actual_len);
@@ -273,6 +282,8 @@ where
         }
     }
 
+    // Read from cached slices for a chunk. This waits for slice readiness and copies
+    // overlapping ranges into the provided buffer.
     async fn read_from_slice(&self, index: u64, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
         let slices = {
             let guard = self.slices.lock().await;

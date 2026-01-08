@@ -1,3 +1,14 @@
+// Write pipeline (high-level):
+// - FileWriter::write_at splits a file write into chunk spans and appends data into SliceState
+//   (Writeable). Slices are append-only and live inside each ChunkState.
+// - When a slice is frozen (Readonly), it becomes eligible for upload. auto_flush and explicit
+//   flush() can freeze slices. spawn_flush_slice performs the upload:
+//     Readonly -> Uploading -> Uploaded/Failed
+// - commit_chunk runs per-chunk and waits for Uploaded slices. It appends metadata (SliceDesc)
+//   to MetaStore and marks them Committed. Only Committed slices are visible to readers.
+// - FileWriter::flush() freezes all slices and waits until commit threads drain the chunks.
+//   While flushing, new writes are blocked via flush_waiting/write_waiting gates.
+
 use super::reader::DataReader;
 use crate::chuck::writer::DataUploader;
 use crate::chuck::{BlockStore, SliceDesc};
@@ -24,10 +35,17 @@ const FLUSH_DEADLINE: Duration = Duration::from_secs(300);
 
 #[derive(Default, Copy, Clone)]
 pub(crate) enum SliceStatus {
+    /// Writeable: append-only.
     #[default]
     Writeable,
     /// Readonly: frozen, no more writes allowed.
     Readonly,
+    /// Uploading: data is being uploaded to object storage.
+    Uploading,
+    /// Uploaded: data uploaded successfully.
+    Uploaded,
+    /// Failed: data upload failed.
+    Failed,
     /// Committed: metadata committed.
     Committed,
 }
@@ -41,7 +59,7 @@ pub(crate) struct SliceState {
     /// Offset relative to the chunk start.
     offset: u32,
     data: CacheSlice,
-    done: bool,
+    /// Error occurred at background thread.
     err: Option<String>,
     notify: Arc<Notify>,
     started: Instant,
@@ -57,7 +75,6 @@ impl SliceState {
             slice_id: None,
             offset,
             data: CacheSlice::new(config),
-            done: false,
             err: None,
             notify: Arc::new(Notify::new()),
             started: now,
@@ -144,7 +161,7 @@ where
 
     fn runtime_snapshot(&self) -> SliceRuntime {
         self.with_ref(|s| SliceRuntime {
-            done: s.done,
+            status: s.state,
             err: s.err.clone(),
             freezed: !matches!(s.state, SliceStatus::Writeable),
             started: s.started,
@@ -152,12 +169,33 @@ where
         })
     }
 
-    fn mark_done(&self, result: anyhow::Result<()>) {
+    // Transition Readonly -> Uploading. Returns false if already uploading/finished.
+    fn start_uploading(&self) -> bool {
         self.with_mut(|s| {
-            s.done = true;
-            if let Err(err) = result
-                && s.err.is_none()
-            {
+            if matches!(s.state, SliceStatus::Readonly) {
+                s.state = SliceStatus::Uploading;
+                return true;
+            }
+            false
+        })
+    }
+
+    // Mark data upload success. Commit thread can now append metadata.
+    fn mark_uploaded(&self) {
+        self.with_mut(|s| {
+            if matches!(s.state, SliceStatus::Uploading | SliceStatus::Readonly) {
+                s.state = SliceStatus::Uploaded;
+                s.err = None;
+            }
+            s.notify.notify_waiters();
+        })
+    }
+
+    // Mark data upload failure and wake commit waiters.
+    fn mark_failed(&self, err: anyhow::Error) {
+        self.with_mut(|s| {
+            s.state = SliceStatus::Failed;
+            if s.err.is_none() {
                 s.err = Some(err.to_string());
             }
             s.notify.notify_waiters();
@@ -210,11 +248,24 @@ where
 
 /// A snapshot of a slice, allowing us to check slice status without lock.
 struct SliceRuntime {
-    done: bool,
+    status: SliceStatus,
     err: Option<String>,
     freezed: bool,
     started: Instant,
     notify: Arc<Notify>,
+}
+
+impl SliceRuntime {
+    fn upload_done(&self) -> bool {
+        matches!(
+            self.status,
+            SliceStatus::Uploaded | SliceStatus::Failed | SliceStatus::Committed
+        )
+    }
+
+    fn can_commit(&self) -> bool {
+        matches!(self.status, SliceStatus::Uploaded)
+    }
 }
 
 struct WriteAction {
@@ -315,6 +366,7 @@ where
         ))
     }
 
+    // Append data to a writable slice. If the slice reaches chunk end, freeze + flush it.
     fn write_at(&mut self, offset: u32, buf: &[u8]) -> anyhow::Result<WriteAction> {
         let (slice, mut action) = self.find_slice_or_create(offset, buf.len())?;
         let handle = SliceHandle {
@@ -431,10 +483,12 @@ where
         Self { shared }
     }
 
+    // Write path: split into chunk spans, append to per-chunk slices, and possibly
+    // trigger background flush/commit. Updates in-memory inode size at the end.
     pub async fn write_at(&self, offset: u64, buf: &[u8]) -> anyhow::Result<usize> {
         let mut guard = self.shared.inner.lock().await;
 
-        // Wait for all flush done
+        // Wait for any ongoing flush to finish. This serializes writes with flush().
         guard.write_waiting += 1;
         while guard.flush_waiting > 0 {
             drop(guard);
@@ -475,6 +529,8 @@ where
         Ok(buf.len())
     }
 
+    // Flush: freeze all slices, upload them, and wait for commit threads to drain.
+    // This blocks new writes until flushing completes (flush_waiting gate).
     pub async fn flush(&self) -> anyhow::Result<()> {
         {
             let mut guard = self.shared.inner.lock().await;
@@ -544,17 +600,21 @@ where
         guard.has_chunks()
     }
 
-    /// Spawn a new background thread to flush the specific slice.
+    /// Spawn a background task to upload a frozen slice's data.
+    /// Metadata commit is handled separately by commit_chunk.
     fn spawn_flush_slice(shared: Arc<Shared<B, M>>, slice: Arc<StdMutex<SliceState>>) {
         tokio::spawn(async move {
             let handle = SliceHandle {
                 slice: &slice,
                 shared: &shared,
             };
+            if !handle.start_uploading() {
+                return;
+            }
             let snapshot = handle.snapshot_for_flush();
 
             let Some((chunk_id, offset, data, slice_id)) = snapshot else {
-                handle.mark_done(Ok(()));
+                handle.mark_uploaded();
                 return;
             };
 
@@ -564,7 +624,7 @@ where
                     let id = match shared.backend.meta().next_id(SLICE_ID_KEY).await {
                         Ok(id) => id as u64,
                         Err(err) => {
-                            handle.mark_done(Err(anyhow::anyhow!(err)));
+                            handle.mark_failed(anyhow::anyhow!(err));
                             return;
                         }
                     };
@@ -574,12 +634,15 @@ where
             };
 
             let uploader = DataUploader::new(shared.config.layout, chunk_id, &shared.backend);
-            let result = uploader.write_at(sid, offset, &data).await.map(|_| ());
-            handle.mark_done(result);
+            match uploader.write_at(sid, offset, &data).await {
+                Ok(_) => handle.mark_uploaded(),
+                Err(err) => handle.mark_failed(err),
+            }
         });
     }
 
     /// The background thread for committing a chunk.
+    /// It waits for Uploaded slices, appends metadata, and marks them Committed.
     /// Each chunk will have a unique committing thread.
     async fn commit_chunk(shared: Arc<Shared<B, M>>, chunk_id: u64) {
         loop {
@@ -611,7 +674,7 @@ where
             }
             .runtime_snapshot();
 
-            if !runtime.done {
+            if !runtime.upload_done() {
                 if timeout(COMMIT_WAIT_SLICE, runtime.notify.notified())
                     .await
                     .is_ok()
@@ -633,7 +696,7 @@ where
                 continue;
             }
 
-            if runtime.err.is_none() {
+            if runtime.can_commit() && runtime.err.is_none() {
                 let desc = SliceHandle {
                     slice: &slice,
                     shared: &shared,
@@ -685,7 +748,8 @@ where
         }
     }
 
-    /// The automatically flush thread.
+    /// The automatic flush loop: periodically freezes older/idle slices to reduce memory
+    /// usage and ensure progress. It does not commit metadata directly.
     async fn auto_flush(shared: Arc<Shared<B, M>>) {
         let idle = Duration::from_secs(1);
 
