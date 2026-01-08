@@ -224,7 +224,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 if-addrs = "0.6.0"
 redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
-slotmap = "1.1.1"
 
 [profile.release]
 debug = true
