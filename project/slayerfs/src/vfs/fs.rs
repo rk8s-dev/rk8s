@@ -259,23 +259,45 @@ where
         Self::with_meta_client_config(layout, store, meta, MetaClientConfig::default()).await
     }
 
+    pub async fn with_config(config: VFSConfig, store: S, meta: M) -> Result<Self, String> {
+        let store = Arc::new(store);
+        let meta = Arc::new(meta);
+
+        let ttl = if config.meta.ttl.is_zero() {
+            CacheTtl::for_sqlite()
+        } else {
+            config.meta.ttl.clone()
+        };
+
+        let meta_client = MetaClient::with_options(
+            Arc::clone(&meta),
+            config.meta.capacity.clone(),
+            ttl,
+            config.meta.options.clone(),
+        );
+
+        Self::from_components(config, store, meta, meta_client)
+    }
+
     pub async fn with_meta_layer(
         layout: ChunkLayout,
         store: S,
         meta: M,
         meta_layer: Arc<MetaClient<M>>,
     ) -> Result<Self, String> {
+        let config = VFSConfig::new(layout);
         let store = Arc::new(store);
         let meta = Arc::new(meta);
-        Self::from_components(layout, store, meta, meta_layer)
+        Self::from_components(config, store, meta, meta_layer)
     }
 
     fn from_components(
-        layout: ChunkLayout,
+        config: VFSConfig,
         store: Arc<S>,
         meta: Arc<M>,
         meta_layer: Arc<MetaClient<M>>,
     ) -> Result<Self, String> {
+        let layout = config.write.layout;
         let root_ino = meta_layer.root_ino();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let core = Arc::new(VfsCore::new(layout, backend.clone(), meta_layer, root_ino));
@@ -311,7 +333,7 @@ where
 
         let meta_layer: Arc<MetaClient<M>> = meta_client.clone();
 
-        Self::from_components(layout, store, meta, meta_layer)
+        Self::from_components(VFSConfig::new(layout), store, meta, meta_layer)
     }
 
     pub fn root_ino(&self) -> i64 {

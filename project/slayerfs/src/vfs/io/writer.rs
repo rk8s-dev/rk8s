@@ -1082,7 +1082,7 @@ mod tests {
             backend.clone(),
         ));
         let write_cfg = Arc::new(
-            WriteConfig::new(layout, 4 * 1024).with_flush_all_interval(Duration::from_millis(50)),
+            WriteConfig::new(layout, 4 * 1024).flush_all_interval(Duration::from_millis(50)),
         );
         let writer_pool = Arc::new(DataWriter::new(write_cfg, backend.clone(), reader));
         writer_pool.start_flush_background();
