@@ -6,7 +6,8 @@
 //! serialization for file attributes. Advanced features (sessions, quota, etc.)
 //! can be layered on later by extending the schema.
 
-use crate::chuck::{SliceDesc, chunk::DEFAULT_CHUNK_SIZE};
+use super::{apply_truncate_plan, trim_slices_in_place};
+use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::file_lock::{
@@ -536,49 +537,36 @@ impl RedisMetaStore {
         ino: i64,
         new_size: u64,
         old_size: u64,
+        chunk_size: u64,
     ) -> Result<(), MetaError> {
-        if new_size >= old_size {
-            return Ok(());
-        }
-
-        let chunk_size = DEFAULT_CHUNK_SIZE;
-        let cutoff_chunk = new_size / chunk_size;
-        let cutoff_offset = (new_size % chunk_size) as u32;
-        let old_chunk_count = old_size.div_ceil(chunk_size);
-
-        // Trim the partially truncated chunk, if any.
-        if cutoff_offset > 0 {
-            let chunk_id = self.chunk_id(ino, cutoff_chunk);
-            let mut slices = self.get_slices(chunk_id).await?;
-            slices.retain(|s| s.offset < cutoff_offset);
-            for slice in slices.iter_mut() {
-                let end = slice.offset + slice.length;
-                if end > cutoff_offset {
-                    slice.length = cutoff_offset - slice.offset;
+        apply_truncate_plan(
+            new_size,
+            old_size,
+            chunk_size,
+            |cutoff_chunk, cutoff_offset| async move {
+                let chunk_id = self.chunk_id(ino, cutoff_chunk);
+                let mut slices = self.get_slices(chunk_id).await?;
+                trim_slices_in_place(&mut slices, cutoff_offset);
+                self.rewrite_slices(chunk_id, &slices).await?;
+                Ok(())
+            },
+            |start, end| async move {
+                for idx in start..end {
+                    let chunk_id = self.chunk_id(ino, idx);
+                    let key = self.chunk_key(chunk_id);
+                    let mut conn = self.conn.clone();
+                    redis::cmd("DEL")
+                        .arg(&key)
+                        .query_async::<()>(&mut conn)
+                        .await
+                        .map_err(redis_err)?;
                 }
-            }
-            self.rewrite_slices(chunk_id, &slices).await?;
-        }
-
-        // Drop any chunks completely past the new EOF.
-        let drop_start = if cutoff_offset == 0 {
-            cutoff_chunk
-        } else {
-            cutoff_chunk + 1
-        };
-        for idx in drop_start..old_chunk_count {
-            let chunk_id = self.chunk_id(ino, idx);
-            let key = self.chunk_key(chunk_id);
-            let mut conn = self.conn.clone();
-            redis::cmd("DEL")
-                .arg(&key)
-                .query_async::<()>(&mut conn)
-                .await
-                .map_err(redis_err)?;
-        }
-
-        Ok(())
+                Ok(())
+            },
+        )
+        .await
     }
+
     fn set_sid(&self, session_id: Uuid) -> Result<(), MetaError> {
         self.sid
             .set(session_id)
@@ -804,7 +792,6 @@ impl MetaStore for RedisMetaStore {
         flags: SetAttrFlags,
     ) -> Result<FileAttr, MetaError> {
         let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
-        let old_size = node.attr.size;
         let mut ctime_update = false;
         let now = current_time();
 
@@ -868,19 +855,39 @@ impl MetaStore for RedisMetaStore {
             node.attr.ctime = now;
         }
 
-        if let Some(size) = req.size {
-            self.prune_slices_for_truncate(ino, size, old_size).await?;
-        }
-
         self.save_node(&node).await?;
         Ok(node.attr.to_file_attr(node.ino, node.kind.into()))
     }
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
+        let now = current_time();
+        node.attr.size = size;
+        node.attr.mtime = now;
+        node.attr.ctime = now;
+        self.save_node(&node).await
+    }
+
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        // TODO: Use a Lua script for atomic update.
+        let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
+        let old_size = node.attr.size;
+        if size <= old_size {
+            return Ok(());
+        }
+        let now = current_time();
+        node.attr.size = size;
+        node.attr.mtime = now;
+        node.attr.ctime = now;
+        self.save_node(&node).await
+    }
+
+    async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
+        let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
         let old_size = node.attr.size;
         let now = current_time();
-        self.prune_slices_for_truncate(ino, size, old_size).await?;
+        self.prune_slices_for_truncate(ino, size, old_size, chunk_size)
+            .await?;
         node.attr.size = size;
         node.attr.mtime = now;
         node.attr.ctime = now;

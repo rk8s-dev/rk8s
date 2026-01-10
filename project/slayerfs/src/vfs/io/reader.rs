@@ -21,10 +21,11 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::{Mutex, Notify};
 
+#[allow(clippy::type_complexity)]
 pub struct DataReader<B, M> {
     config: Arc<ReadConfig>,
-    // todo: use per-handle level reader to improve concurrent degree
-    files: DashMap<u64, Arc<FileReader<B, M>>>,
+    // per-handle readers, grouped by inode
+    files: DashMap<u64, Vec<(u64, Arc<FileReader<B, M>>)>>, // ino -> (fh, reader)
     backend: Arc<Backend<B, M>>,
 }
 
@@ -41,28 +42,63 @@ where
         }
     }
 
-    pub fn ensure_file(&self, ino: Arc<Inode>) -> Arc<FileReader<B, M>> {
+    pub fn open_for_handle(&self, ino: Arc<Inode>, fh: u64) -> Arc<FileReader<B, M>> {
+        let ino_number = ino.ino();
+        let reader = Arc::new(FileReader::new(
+            self.config.clone(),
+            ino,
+            self.backend.clone(),
+        ));
+
         self.files
-            .entry(ino.ino() as u64)
-            .or_insert_with(|| {
-                Arc::new(FileReader::new(
-                    self.config.clone(),
-                    ino,
-                    self.backend.clone(),
-                ))
-            })
-            .clone()
+            .entry(ino_number as u64)
+            .or_default()
+            .push((fh, reader.clone()));
+        reader
+    }
+
+    pub fn close_for_handle(&self, ino: u64, fh: u64) {
+        if let Some(mut entry) = self.files.get_mut(&ino) {
+            entry.retain(|(id, _)| *id != fh);
+            let empty = entry.is_empty();
+            drop(entry);
+            if empty {
+                self.files.remove(&ino);
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn reader_for_handle(&self, ino: u64, fh: u64) -> Option<Arc<FileReader<B, M>>> {
+        self.files.get(&ino).and_then(|entry| {
+            entry
+                .iter()
+                .find(|(id, _)| *id == fh)
+                .map(|(_, reader)| reader.clone())
+        })
     }
 
     pub async fn invalidate(&self, ino: u64, offset: u64, len: usize) -> anyhow::Result<()> {
-        let reader = self
-            .files
-            .get(&ino)
-            .ok_or_else(|| anyhow::anyhow!("File (ino: {ino}) reader not found"))?
-            .clone();
+        let readers = match self.files.get(&ino) {
+            Some(entry) => entry.iter().map(|(_, reader)| reader.clone()).collect(),
+            None => Vec::new(),
+        };
 
-        reader.invalidate(offset, len).await;
+        for reader in readers {
+            reader.invalidate(offset, len).await;
+        }
         Ok(())
+    }
+
+    pub async fn invalidate_all(&self, ino: u64) {
+        let readers = match self.files.get(&ino) {
+            Some(entry) => entry.iter().map(|(_, reader)| reader.clone()).collect(),
+            None => Vec::new(),
+        };
+
+        for reader in readers {
+            reader.invalidate_all().await;
+        }
     }
 }
 
@@ -412,6 +448,11 @@ where
         }
     }
 
+    async fn invalidate_all(&self) {
+        let mut guard = self.slices.lock().await;
+        guard.clear();
+    }
+
     /// Clean all invalid and unused slices.
     async fn cleanup_invalid(&self) {
         let mut guard = self.slices.lock().await;
@@ -478,7 +519,7 @@ mod tests {
 
         let inode = Inode::new(ino, offset + data.len() as u64);
         let reader = DataReader::new(Arc::new(ReadConfig::new(layout)), backend.clone());
-        let file_reader = reader.ensure_file(inode);
+        let file_reader = reader.open_for_handle(inode, 1);
         let out = file_reader.read(offset, data.len()).await.unwrap();
         assert_eq!(out, data);
     }
@@ -512,7 +553,7 @@ mod tests {
 
         let inode = Inode::new(ino, data1.len() as u64);
         let reader = DataReader::new(Arc::new(ReadConfig::new(layout)), backend.clone());
-        let file_reader = reader.ensure_file(inode);
+        let file_reader = reader.open_for_handle(inode, 1);
         let out1 = file_reader.read(0, data1.len()).await.unwrap();
         assert_eq!(out1, data1);
 
@@ -551,7 +592,7 @@ mod tests {
             Arc::new(ReadConfig::new(layout)),
             backend.clone(),
         ));
-        let file_reader = reader.ensure_file(inode.clone());
+        let file_reader = reader.open_for_handle(inode.clone(), 1);
 
         let writer = Arc::new(FileWriter::new(
             inode,

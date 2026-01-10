@@ -960,6 +960,17 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.cached_stat(ino).await
     }
 
+    async fn stat_fresh(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
+        let inode = self.check_root(ino);
+        self.inode_cache.invalidate_inode(inode).await;
+
+        let attr = self.store.stat(inode).await?;
+        if let Some(ref a) = attr {
+            self.inode_cache.insert_node(inode, a.clone(), None).await;
+        }
+        Ok(attr)
+    }
+
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         self.cached_lookup(parent, name).await
     }
@@ -1230,6 +1241,29 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             attr.size = size;
         }
 
+        Ok(())
+    }
+
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        self.store.extend_file_size(inode, size).await?;
+
+        if let Some(node) = self.inode_cache.get_node(inode).await {
+            let mut attr = node.attr.write().await;
+            if size > attr.size {
+                attr.size = size;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        self.store.truncate(inode, size, chunk_size).await?;
+        self.inode_cache.invalidate_inode(inode).await;
         Ok(())
     }
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {

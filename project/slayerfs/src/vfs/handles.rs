@@ -1,37 +1,271 @@
 //! File and directory handle management
 
+use crate::chuck::BlockStore;
+use crate::meta::MetaStore;
 use crate::meta::store::FileAttr;
 use crate::vfs::fs::DirEntry;
+use crate::vfs::io::{FileReader, FileWriter};
+use anyhow::anyhow;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 /// Maximum entries to return per readdir/readdirplus call
 /// The setting should be based on the size of the cache handled by the kernel at one time.
 pub const MAX_READDIR_ENTRIES: usize = 50;
 
-#[allow(dead_code)]
-pub struct FileHandle {
-    pub fh: u64,
-    pub ino: i64,
-    pub attr: FileAttr,
-    pub opened_at: Instant,
-    pub last_offset: u64,
-    pub flags: HandleFlags,
+struct GateState {
+    readers: u32,
+    writers_waiting: u32,
+    writing: bool,
 }
 
-impl FileHandle {
+struct HandleGate {
+    state: StdMutex<GateState>,
+    notify: Notify,
+}
+
+impl HandleGate {
+    fn new() -> Self {
+        Self {
+            state: StdMutex::new(GateState {
+                readers: 0,
+                writers_waiting: 0,
+                writing: false,
+            }),
+            notify: Notify::new(),
+        }
+    }
+
+    async fn read_lock(self: &Arc<Self>) -> HandleReadGuard {
+        loop {
+            let notified = {
+                let mut guard = self.state.lock().unwrap();
+                if guard.writing || guard.writers_waiting > 0 {
+                    self.notify.notified()
+                } else {
+                    guard.readers = guard.readers.saturating_add(1);
+                    return HandleReadGuard {
+                        gate: Arc::clone(self),
+                    };
+                }
+            };
+            notified.await;
+        }
+    }
+
+    async fn write_lock(self: &Arc<Self>) -> HandleWriteGuard {
+        let mut waiter = HandleWriteWaiter::new(self);
+        loop {
+            let notified = {
+                let mut guard = self.state.lock().unwrap();
+                if guard.readers == 0 && !guard.writing {
+                    guard.writing = true;
+                    guard.writers_waiting = guard.writers_waiting.saturating_sub(1);
+                    waiter.disarm();
+                    return HandleWriteGuard {
+                        gate: Arc::clone(self),
+                    };
+                }
+                self.notify.notified()
+            };
+            notified.await;
+        }
+    }
+
+    fn read_unlock(&self) {
+        let mut guard = self.state.lock().unwrap();
+        guard.readers = guard.readers.saturating_sub(1);
+        if guard.readers == 0 {
+            self.notify.notify_waiters();
+        }
+    }
+
+    fn write_unlock(&self) {
+        let mut guard = self.state.lock().unwrap();
+        guard.writing = false;
+        self.notify.notify_waiters();
+    }
+
+    fn waiting_dec(&self) {
+        let mut guard = self.state.lock().unwrap();
+        guard.writers_waiting = guard.writers_waiting.saturating_sub(1);
+        self.notify.notify_waiters();
+    }
+}
+
+struct HandleReadGuard {
+    gate: Arc<HandleGate>,
+}
+
+impl Drop for HandleReadGuard {
+    fn drop(&mut self) {
+        self.gate.read_unlock();
+    }
+}
+
+struct HandleWriteGuard {
+    gate: Arc<HandleGate>,
+}
+
+impl Drop for HandleWriteGuard {
+    fn drop(&mut self) {
+        self.gate.write_unlock();
+    }
+}
+
+struct HandleWriteWaiter<'a> {
+    gate: &'a HandleGate,
+    active: bool,
+}
+
+impl<'a> HandleWriteWaiter<'a> {
+    fn new(gate: &'a HandleGate) -> Self {
+        {
+            let mut guard = gate.state.lock().unwrap();
+            guard.writers_waiting = guard.writers_waiting.saturating_add(1);
+        }
+        Self { gate, active: true }
+    }
+
+    fn disarm(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for HandleWriteWaiter<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.gate.waiting_dec();
+        }
+    }
+}
+
+struct FileHandleState<B, M>
+where
+    B: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
+{
+    attr: FileAttr,
+    last_offset: u64,
+    reader: Option<Arc<FileReader<B, M>>>,
+    writer: Option<Arc<FileWriter<B, M>>>,
+}
+
+#[allow(dead_code)]
+pub struct FileHandle<B, M>
+where
+    B: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
+{
+    pub fh: u64,
+    pub ino: i64,
+    pub opened_at: Instant,
+    pub flags: HandleFlags,
+    gate: Arc<HandleGate>,
+    state: StdMutex<FileHandleState<B, M>>,
+}
+
+impl<B, M> FileHandle<B, M>
+where
+    B: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
+{
     pub fn new(fh: u64, ino: i64, attr: FileAttr, flags: HandleFlags) -> Self {
         Self {
             fh,
             ino,
-            attr,
             opened_at: Instant::now(),
-            last_offset: 0,
             flags,
+            gate: Arc::new(HandleGate::new()),
+            state: StdMutex::new(FileHandleState {
+                attr,
+                last_offset: 0,
+                reader: None,
+                writer: None,
+            }),
         }
     }
+
+    pub fn reader(&self, reader: Arc<FileReader<B, M>>) {
+        let mut guard = self.state.lock().unwrap();
+        guard.reader = Some(reader);
+    }
+
+    pub fn writer(&self, writer: Arc<FileWriter<B, M>>) {
+        let mut guard = self.state.lock().unwrap();
+        guard.writer = Some(writer);
+    }
+
+    pub fn attr(&self) -> FileAttr {
+        self.state.lock().unwrap().attr.clone()
+    }
+
+    pub fn update_attr(&self, attr: &FileAttr) {
+        self.state.lock().unwrap().attr = attr.clone();
+    }
+
+    pub fn update_offset(&self, offset: u64) {
+        self.state.lock().unwrap().last_offset = offset;
+    }
+
+    #[allow(dead_code)]
+    pub fn last_offset(&self) -> u64 {
+        self.state.lock().unwrap().last_offset
+    }
+
+    pub async fn read(&self, offset: u64, len: usize) -> anyhow::Result<Vec<u8>> {
+        let _guard = self.gate.read_lock().await;
+        let reader = {
+            let guard = self.state.lock().unwrap();
+            guard
+                .reader
+                .clone()
+                .ok_or_else(|| anyhow!("file handle reader not initialized"))?
+        };
+        let data = reader.read(offset, len).await?;
+        self.update_offset(offset + data.len() as u64);
+        Ok(data)
+    }
+
+    pub async fn write(&self, offset: u64, data: &[u8]) -> anyhow::Result<usize> {
+        let _guard = self.gate.write_lock().await;
+        let writer = {
+            let guard = self.state.lock().unwrap();
+            guard
+                .writer
+                .clone()
+                .ok_or_else(|| anyhow!("file handle writer not initialized"))?
+        };
+        let written = writer.write_at(offset, data).await?;
+        self.update_offset(offset + written as u64);
+        Ok(written)
+    }
+
+    pub async fn flush(&self) -> anyhow::Result<()> {
+        let _guard = self.gate.write_lock().await;
+        let writer = {
+            let guard = self.state.lock().unwrap();
+            guard
+                .writer
+                .clone()
+                .ok_or_else(|| anyhow!("file handle writer not initialized"))?
+        };
+        writer.flush().await?;
+        Ok(())
+    }
+
+    pub async fn lock_write(&self) -> FileHandleWriteGuard {
+        let guard = self.gate.write_lock().await;
+        FileHandleWriteGuard { _guard: guard }
+    }
+}
+
+pub struct FileHandleWriteGuard {
+    _guard: HandleWriteGuard,
 }
 
 #[allow(dead_code)]

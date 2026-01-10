@@ -2,6 +2,7 @@
 //!
 //! Uses Etcd/etcd as the backend for metadata storage
 
+use super::{apply_truncate_plan, trim_slices_in_place};
 use crate::chuck::SliceDesc;
 use crate::chuck::slice::key_for_slice;
 use crate::meta::backoff::backoff;
@@ -18,6 +19,7 @@ use crate::meta::store::{
 };
 use crate::meta::stores::pool::IdPool;
 use crate::meta::{INODE_ID_KEY, Permission};
+use crate::vfs::chunk_id_for;
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -196,6 +198,48 @@ impl EtcdMetaStore {
             .await
             .map(|_| ())
             .map_err(|e| MetaError::Internal(format!("Failed to put key {key}: {e}")))
+    }
+
+    async fn prune_slices_for_truncate(
+        &self,
+        ino: i64,
+        new_size: u64,
+        old_size: u64,
+        chunk_size: u64,
+    ) -> Result<(), MetaError> {
+        apply_truncate_plan(
+            new_size,
+            old_size,
+            chunk_size,
+            |cutoff_chunk, cutoff_offset| async move {
+                let chunk_id = chunk_id_for(ino, cutoff_chunk);
+                let key = key_for_slice(chunk_id);
+                let mut slices: Vec<SliceDesc> =
+                    self.etcd_get_json(&key).await?.unwrap_or_default();
+                trim_slices_in_place(&mut slices, cutoff_offset);
+                if slices.is_empty() {
+                    let mut client = self.client.clone();
+                    client.delete(key.as_str(), None).await.map_err(|e| {
+                        MetaError::Internal(format!("Failed to delete key {key}: {e}"))
+                    })?;
+                } else {
+                    self.etcd_put_json(&key, &slices, None).await?;
+                }
+                Ok(())
+            },
+            |start, end| async move {
+                for idx in start..end {
+                    let chunk_id = chunk_id_for(ino, idx);
+                    let key = key_for_slice(chunk_id);
+                    let mut client = self.client.clone();
+                    client.delete(key.as_str(), None).await.map_err(|e| {
+                        MetaError::Internal(format!("Failed to delete key {key}: {e}"))
+                    })?;
+                }
+                Ok(())
+            },
+        )
+        .await
     }
 
     /// Lenient variant: on etcd client error, log and return Ok(None).
@@ -2172,6 +2216,59 @@ impl MetaStore for EtcdMetaStore {
         )
         .await
         .map(|_| ())
+    }
+
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
+        self.atomic_update(
+            &reverse_key,
+            |mut entry_info: EtcdEntryInfo| {
+                if !entry_info.is_file {
+                    return Err(MetaError::Internal(
+                        "Cannot set size for directory".to_string(),
+                    ));
+                }
+
+                let current = entry_info.size.unwrap_or(0) as u64;
+                if size > current {
+                    entry_info.size = Some(size as i64);
+                    entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                }
+                Ok((entry_info, ()))
+            },
+            || Err(MetaError::NotFound(ino)),
+            10,
+            &None,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
+        let old_size = self
+            .atomic_update(
+                &reverse_key,
+                |mut entry_info: EtcdEntryInfo| {
+                    if !entry_info.is_file {
+                        return Err(MetaError::Internal(
+                            "Cannot set size for directory".to_string(),
+                        ));
+                    }
+                    let prev = entry_info.size.unwrap_or(0) as u64;
+                    entry_info.size = Some(size as i64);
+                    entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                    Ok((entry_info, prev))
+                },
+                || Err(MetaError::NotFound(ino)),
+                10,
+                &None,
+            )
+            .await?;
+
+        self.prune_slices_for_truncate(ino, size, old_size, chunk_size)
+            .await?;
+        Ok(())
     }
 
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {

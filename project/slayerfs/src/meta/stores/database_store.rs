@@ -2,6 +2,7 @@
 //!
 //! Supports SQLite and PostgreSQL backends via SeaORM
 
+use super::{TrimAction, apply_truncate_plan, trim_action};
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
@@ -17,6 +18,7 @@ use crate::meta::store::{
     StatFsSnapshot,
 };
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
+use crate::vfs::chunk_id_for;
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::{Duration as ChronoDuration, Utc};
@@ -536,6 +538,61 @@ impl DatabaseMetaStore {
 
     fn now_nanos() -> i64 {
         Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    }
+
+    async fn prune_slices_for_truncate<C>(
+        &self,
+        conn: &C,
+        ino: i64,
+        new_size: u64,
+        old_size: u64,
+        chunk_size: u64,
+    ) -> Result<(), MetaError>
+    where
+        C: ConnectionTrait,
+    {
+        apply_truncate_plan(
+            new_size,
+            old_size,
+            chunk_size,
+            |cutoff_chunk, cutoff_offset| async move {
+                let chunk_id = chunk_id_for(ino, cutoff_chunk) as i64;
+                let rows = SliceMeta::find()
+                    .filter(slice_meta::Column::ChunkId.eq(chunk_id))
+                    .order_by_asc(slice_meta::Column::Id)
+                    .all(conn)
+                    .await
+                    .map_err(MetaError::Database)?;
+
+                for row in rows {
+                    match trim_action(row.offset as u32, row.length as u32, cutoff_offset) {
+                        TrimAction::Keep => {}
+                        TrimAction::Drop => {
+                            let active: slice_meta::ActiveModel = row.into();
+                            active.delete(conn).await.map_err(MetaError::Database)?;
+                        }
+                        TrimAction::Truncate(new_len) => {
+                            let mut active: slice_meta::ActiveModel = row.into();
+                            active.length = Set(new_len as i32);
+                            active.update(conn).await.map_err(MetaError::Database)?;
+                        }
+                    }
+                }
+                Ok(())
+            },
+            |start, end| async move {
+                let start_chunk_id = chunk_id_for(ino, start) as i64;
+                let end_chunk_id = chunk_id_for(ino, end) as i64;
+                SliceMeta::delete_many()
+                    .filter(slice_meta::Column::ChunkId.gte(start_chunk_id))
+                    .filter(slice_meta::Column::ChunkId.lt(end_chunk_id))
+                    .exec(conn)
+                    .await
+                    .map_err(MetaError::Database)?;
+                Ok(())
+            },
+        )
+        .await
     }
 
     /// Convert FileMeta to FileAttr
@@ -1558,6 +1615,64 @@ impl MetaStore for DatabaseMetaStore {
             .await
             .map_err(|e| MetaError::Internal(e.to_string()))?;
 
+        Ok(())
+    }
+
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        let now = Self::now_nanos();
+        let result = file_meta::Entity::update_many()
+            .col_expr(
+                file_meta::Column::Size,
+                sea_query::Expr::val(size as i64).into(),
+            )
+            .col_expr(
+                file_meta::Column::ModifyTime,
+                sea_query::Expr::val(now).into(),
+            )
+            .filter(file_meta::Column::Inode.eq(ino))
+            .filter(file_meta::Column::Size.lt(size as i64))
+            .exec(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if result.rows_affected == 0 {
+            let exists = FileMeta::find_by_id(ino)
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+            if exists.is_none() {
+                return Err(MetaError::NotFound(ino));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let mut file_meta: file_meta::ActiveModel = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(ino))?
+            .into();
+
+        let old_size = match &file_meta.size {
+            Set(s) | Unchanged(s) => *s as u64,
+            _ => 0,
+        };
+
+        file_meta.size = Set(size as i64);
+        if old_size != size {
+            file_meta.modify_time = Set(Self::now_nanos());
+        }
+
+        file_meta.update(&txn).await.map_err(MetaError::Database)?;
+        self.prune_slices_for_truncate(&txn, ino, size, old_size, chunk_size)
+            .await?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
     }
 

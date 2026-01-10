@@ -111,14 +111,21 @@ Consistency semantics (current implementation)
 This project is still evolving. The current behavior (as of now) is:
 
 - Single-process (one VFS instance):
-  - Read-after-write is enforced by flushing pending writes before each read
-    (best-effort). This means a read may block until pending slices are uploaded
-    and metadata committed.
+  - Handle-based IO: reads and writes go through `FileHandle` with a per-handle
+    gate. Writes wait for in-flight reads; reads wait for in-flight writes.
+  - Read-after-write is enforced by flushing pending writes before each read.
+    Reads may block until pending slices are uploaded and metadata committed.
   - Writes are append-only slices inside each chunk. Metadata is committed
     asynchronously by a per-chunk commit loop. Only committed slices are visible
     to readers.
   - Flush serializes with writes: while a flush is in progress, new writes to the
     same file wait.
+
+- Truncate (single-process):
+  - Truncate locks all file handles, flushes pending writes, updates metadata,
+    prunes slices using the configured `layout.chunk_size`, clears reader and
+    writer caches for the inode, and updates the in-memory size. This prevents
+    old data from reappearing after a shrink followed by an extend.
 
 - Multi-process / multi-client:
   - There is no cross-client cache coherence yet. Reader caches are only
@@ -129,12 +136,12 @@ This project is still evolving. The current behavior (as of now) is:
     read zeros.
 
 - Close-to-open:
-  - Not fully implemented. The handle-based open/close APIs are not wired into
-    the main read/write path yet. In other words, there is no "close" event that
-    guarantees a synchronous fsync and global cache invalidation.
+  - Best-effort only. `open` uses a cache-bypassing stat (`stat_fresh`) to refresh
+    the inode size/attrs, and `close` triggers a flush for write handles.
+    Cross-client cache invalidation is not implemented yet.
 
-These semantics will be tightened as handle lifecycle is integrated and cache
-invalidation is coordinated across clients.
+These semantics will be tightened as cache invalidation is coordinated across
+clients.
 
 Metadata model (suggested simplified SQL schema)
 -------------------------------------
@@ -195,5 +202,4 @@ CREATE TABLE sessions (
 	last_heartbeat TIMESTAMP
 );
 ```
-
 

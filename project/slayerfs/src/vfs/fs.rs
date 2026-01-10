@@ -1,4 +1,4 @@
-//! FUSE/SDK-friendly VFS with path-based create/mkdir/read/write/readdir/stat support.
+//! FUSE/SDK-friendly VFS with path-based metadata ops and handle-based IO.
 
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
@@ -19,92 +19,106 @@ use tokio::sync::Mutex;
 pub use crate::meta::store::{DirEntry, FileAttr, FileType};
 use crate::vfs::backend::Backend;
 use crate::vfs::config::VFSConfig;
+use crate::vfs::error::{PathHint, VfsError};
 use crate::vfs::handles::{DirHandle, FileHandle, HandleFlags};
 use crate::vfs::inode::Inode;
 use crate::vfs::io::{DataReader, DataWriter};
 
-struct HandleRegistry {
-    handles: DashMap<i64, Vec<FileHandle>>,
-    handle_ino: DashMap<u64, i64>,
+struct HandleRegistry<B, M>
+where
+    B: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
+{
+    handles: DashMap<u64, Arc<FileHandle<B, M>>>,
+    inode_handles: DashMap<i64, Vec<u64>>,
     dir_handles: DashMap<u64, Arc<DirHandle>>,
     next_fh: AtomicU64,
 }
 
-impl HandleRegistry {
+impl<B, M> HandleRegistry<B, M>
+where
+    B: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
+{
     fn new() -> Self {
         Self {
             handles: DashMap::new(),
-            handle_ino: DashMap::new(),
+            inode_handles: DashMap::new(),
             dir_handles: DashMap::new(),
             next_fh: AtomicU64::new(1),
         }
     }
 
-    async fn allocate(&self, ino: i64, attr: FileAttr, flags: HandleFlags) -> u64 {
+    async fn allocate(
+        &self,
+        ino: i64,
+        attr: FileAttr,
+        flags: HandleFlags,
+    ) -> Arc<FileHandle<B, M>> {
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
-        self.handles
-            .entry(ino)
-            .or_default()
-            .push(FileHandle::new(fh, ino, attr, flags));
-        self.handle_ino.insert(fh, ino);
-        fh
+        let handle = Arc::new(FileHandle::new(fh, ino, attr, flags));
+        self.handles.insert(fh, handle.clone());
+        self.inode_handles.entry(ino).or_default().push(fh);
+        handle
     }
 
-    async fn release(&self, fh: u64) -> Option<FileHandle> {
-        let ino = self.handle_ino.remove(&fh)?.1;
-        let mut entry = self.handles.get_mut(&ino)?;
-        if let Some(idx) = entry.iter().position(|h| h.fh == fh) {
-            let handle = entry.remove(idx);
+    async fn release(&self, fh: u64) -> Option<(Arc<FileHandle<B, M>>, bool)> {
+        let handle = self.handles.remove(&fh)?.1;
+        let ino = handle.ino;
+        let mut last = false;
+        if let Some(mut entry) = self.inode_handles.get_mut(&ino) {
+            if let Some(idx) = entry.iter().position(|id| *id == fh) {
+                entry.remove(idx);
+            }
             let empty = entry.is_empty();
             drop(entry);
             if empty {
-                self.handles.remove(&ino);
+                self.inode_handles.remove(&ino);
+                last = true;
             }
-            Some(handle)
-        } else {
-            None
         }
+        Some((handle, last))
     }
 
-    async fn with_handle_mut<R>(&self, fh: u64, f: impl FnOnce(&mut FileHandle) -> R) -> Option<R> {
-        let ino = *self.handle_ino.get(&fh)?.value();
-        let mut entry = self.handles.get_mut(&ino)?;
-        entry.iter_mut().find(|h| h.fh == fh).map(f)
+    async fn get(&self, fh: u64) -> Option<Arc<FileHandle<B, M>>> {
+        self.handles.get(&fh).map(|entry| Arc::clone(entry.value()))
     }
 
     async fn handles_for(&self, ino: i64) -> Vec<u64> {
-        self.handles
+        self.inode_handles
             .get(&ino)
-            .map(|entry| entry.iter().map(|h| h.fh).collect())
+            .map(|entry| entry.value().clone())
             .unwrap_or_default()
     }
 
     async fn attr_for(&self, fh: u64) -> Option<FileAttr> {
-        let ino = *self.handle_ino.get(&fh)?.value();
-        let entry = self.handles.get(&ino)?;
-        entry.iter().find(|h| h.fh == fh).map(|h| h.attr.clone())
+        self.handles.get(&fh).map(|entry| entry.attr())
     }
 
     async fn attr_for_inode(&self, ino: i64) -> Option<FileAttr> {
-        self.handles
-            .get(&ino)
-            .and_then(|entry| entry.iter().next().map(|h| h.attr.clone()))
+        let fhs = self.handles_for(ino).await;
+        for fh in fhs {
+            if let Some(handle) = self.handles.get(&fh) {
+                return Some(handle.attr());
+            }
+        }
+        None
     }
 
     async fn update_attr_for_inode(&self, ino: i64, attr: &FileAttr) {
-        if let Some(mut entry) = self.handles.get_mut(&ino) {
-            for handle in entry.iter_mut() {
-                handle.attr = attr.clone();
+        let fhs = self.handles_for(ino).await;
+        for fh in fhs {
+            if let Some(handle) = self.handles.get(&fh) {
+                handle.update_attr(attr);
             }
         }
     }
 
     /// Check if any handle for this inode was opened for writing
     async fn has_write_handle(&self, ino: i64) -> bool {
-        self.handles
-            .get(&ino)
-            .map(|entry| entry.iter().any(|h| h.flags.write))
-            .unwrap_or(false)
+        let fhs = self.handles_for(ino).await;
+        fhs.iter()
+            .any(|fh| self.handles.get(fh).map(|h| h.flags.write).unwrap_or(false))
     }
 
     async fn allocate_dir(&self, handle: DirHandle) -> u64 {
@@ -158,7 +172,7 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    handles: HandleRegistry,
+    handles: HandleRegistry<S, M>,
     inodes: DashMap<i64, Arc<Inode>>,
     reader: Arc<DataReader<S, M>>,
     writer: Arc<DataWriter<S, M>>,
@@ -737,25 +751,6 @@ where
         self.readlink_ino(ino).await
     }
 
-    /// List directory entries; returns None if the path is missing or not a directory.
-    /// `.` and `..` are not included.
-    pub async fn readdir(&self, path: &str) -> Option<Vec<DirEntry>> {
-        let path = Self::norm_path(path);
-        let (ino, _) = self.core.meta_layer.lookup_path(&path).await.ok()??;
-
-        let meta_entries = self.core.meta_layer.readdir(ino).await.ok()?;
-
-        let entries: Vec<DirEntry> = meta_entries
-            .into_iter()
-            .map(|e| DirEntry {
-                name: e.name,
-                ino: e.ino,
-                kind: e.kind,
-            })
-            .collect();
-        Some(entries)
-    }
-
     /// Check whether a path exists.
     pub async fn exists(&self, path: &str) -> bool {
         let path = Self::norm_path(path);
@@ -978,15 +973,34 @@ where
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "not found".to_string())?;
-        if let Some(inode) = self.state.inodes.get(&ino) {
-            inode.update_size(size);
+
+        let fhs = self.state.handles.handles_for(ino).await;
+        let mut guards = Vec::with_capacity(fhs.len());
+        for fh in fhs {
+            if let Some(handle) = self.state.handles.get(fh).await {
+                guards.push(handle.lock_write().await);
+            }
         }
+
+        self.state.writer.flush_if_exists(ino as u64).await;
         self.core
             .meta_layer
-            .set_file_size(ino, size)
+            .truncate(ino, size, self.core.layout.chunk_size)
             .await
             .map_err(|e| e.to_string())?;
+
+        // POSIX semantic for `truncate`: `truncate` is immediately visible to old handles.
+        self.state.reader.invalidate_all(ino as u64).await;
+        self.state.writer.clear(ino as u64).await;
+
+        self.ensure_inode_cached(ino, size);
+        if let Some(mut attr) = self.state.handles.attr_for_inode(ino).await {
+            attr.size = size;
+            self.state.handles.update_attr_for_inode(ino, &attr).await;
+        }
+
         self.state.modified.touch(ino).await;
+        drop(guards);
         Ok(())
     }
 
@@ -996,7 +1010,16 @@ where
         req: &SetAttrRequest,
         flags: SetAttrFlags,
     ) -> Result<FileAttr, MetaError> {
-        let attr = self.core.meta_layer.set_attr(ino, req, flags).await?;
+        if let Some(size) = req.size {
+            self.core
+                .meta_layer
+                .truncate(ino, size, self.core.layout.chunk_size)
+                .await?;
+        }
+
+        let mut filtered = *req;
+        filtered.size = None;
+        let attr = self.core.meta_layer.set_attr(ino, &filtered, flags).await?;
 
         if let Some(size) = req.size
             && let Some(inode) = self.state.inodes.get(&ino)
@@ -1010,100 +1033,138 @@ where
         Ok(attr)
     }
 
-    /// Write data by file offset. Internally splits the range into per-chunk writes.
-    /// Writes each affected chunk fragment. Updates the file size at the end only if the write extends the file.
-    /// todo: Waiting for handle-based api to fix consistency problems...
-    pub async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
-        let path = Self::norm_path(path);
-        let (ino, kind) = self
-            .core
-            .meta_layer
-            .lookup_path(&path)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "not found".to_string())?;
-        if kind != FileType::File {
-            return Err("not a file".into());
-        }
-
-        let inode = self.ensure_inode_registered(ino).await?;
-        let old_size = inode.file_size();
-        let writer = self.state.writer.ensure_file(inode.clone());
-        let written = writer
-            .write_at(offset, data)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let target_size = offset + written as u64;
-        if target_size > old_size {
-            self.core
-                .meta_layer
-                .set_file_size(ino, target_size)
-                .await
-                .map_err(|e| e.to_string())?;
-        }
-        self.state.modified.touch(ino).await;
-        Ok(written)
-    }
-
-    /// Read data by file offset.
-    /// Read by inode directly
-    pub async fn read_ino(&self, ino: i64, offset: u64, len: usize) -> Result<Vec<u8>, String> {
+    /// Read data by file handle and offset.
+    pub async fn read(&self, fh: u64, offset: u64, len: usize) -> Result<Vec<u8>, VfsError> {
         if len == 0 {
             return Ok(Vec::new());
         }
 
+        let handle = self
+            .state
+            .handles
+            .get(fh)
+            .await
+            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        if !handle.flags.read {
+            return Err(VfsError::PermissionDenied {
+                path: PathHint::none(),
+            });
+        }
+
         // Before reading, it is needed to flush all cached data.
-        self.state.writer.flush_if_exists(ino as u64).await;
-        let inode = self.ensure_inode_registered(ino).await?;
-        let reader = self.state.reader.ensure_file(inode);
-        reader.read(offset, len).await.map_err(|e| e.to_string())
+        self.state.writer.flush_if_exists(handle.ino as u64).await;
+        handle.read(offset, len).await.map_err(|_| VfsError::Other)
     }
 
-    /// Read by path (convenience method that uses read_ino internally)
-    pub async fn read(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, String> {
-        let path = Self::norm_path(path);
-        let (ino, _) = self
-            .core
-            .meta_layer
-            .lookup_path(&path)
+    /// Write data by file handle and offset.
+    pub async fn write(&self, fh: u64, offset: u64, data: &[u8]) -> Result<usize, VfsError> {
+        if data.is_empty() {
+            return Ok(0);
+        }
+
+        let handle = self
+            .state
+            .handles
+            .get(fh)
             .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "not found".to_string())?;
-        self.read_ino(ino, offset, len).await
+            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        if !handle.flags.write {
+            return Err(VfsError::PermissionDenied {
+                path: PathHint::none(),
+            });
+        }
+
+        let _inode = self.ensure_inode_registered(handle.ino).await?;
+        let written = handle
+            .write(offset, data)
+            .await
+            .map_err(|_| VfsError::Other)?;
+
+        let target_size = offset + written as u64;
+
+        // POSIX semantic for `write`: it is unable to shorten the file.
+        self.core
+            .meta_layer
+            .extend_file_size(handle.ino, target_size)
+            .await?;
+        self.state.modified.touch(handle.ino).await;
+        Ok(written)
     }
 
     /// Allocate a per-file handle, returning the opaque fh id.
-    pub async fn open_handle(&self, ino: i64, attr: FileAttr, read: bool, write: bool) -> u64 {
-        self.state
+    pub async fn open(&self, ino: i64, attr: FileAttr, read: bool, write: bool) -> u64 {
+        let mut latest_attr = attr;
+
+        // Retrieve the latest attr for close-to-open semantic.
+        match self.core.meta_layer.stat_fresh(ino).await {
+            Ok(Some(fresh)) => {
+                latest_attr = fresh;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!("open: stat_fresh failed for ino {}: {}", ino, err);
+            }
+        }
+
+        let inode = self.ensure_inode_cached(ino, latest_attr.size);
+        let handle = self
+            .state
             .handles
-            .allocate(ino, attr, HandleFlags::new(read, write))
-            .await
+            .allocate(ino, latest_attr, HandleFlags::new(read, write))
+            .await;
+
+        let reader = self.state.reader.open_for_handle(inode.clone(), handle.fh);
+        handle.reader(reader);
+        if write {
+            let writer = self.state.writer.ensure_file(inode.clone());
+            handle.writer(writer);
+        }
+        handle.fh
     }
 
     /// Release a previously allocated file handle.
-    pub async fn close_handle(&self, fh: u64) -> Result<(), String> {
-        self.state
+    pub async fn close(&self, fh: u64) -> Result<(), VfsError> {
+        let (handle, last) = self
+            .state
             .handles
             .release(fh)
             .await
-            .map(|_| ())
-            .ok_or_else(|| "invalid handle".into())
+            .ok_or(VfsError::StaleNetworkFileHandle)?;
+
+        if handle.flags.write {
+            handle.flush().await.map_err(|_| VfsError::Other)?;
+            self.update_mtime_ctime(handle.ino)
+                .await
+                .map_err(|_| VfsError::Other)?;
+        }
+
+        self.state.reader.close_for_handle(handle.ino as u64, fh);
+        if !self.state.handles.has_write_handle(handle.ino).await {
+            self.state.writer.release(handle.ino as u64);
+        }
+        if last {
+            self.state.inodes.remove(&handle.ino);
+        }
+        Ok(())
     }
 
     /// Open a directory handle for reading. Returns the file handle ID.
     /// This pre-loads all directory entries and starts background batch prefetch for attributes.
-    pub async fn opendir_handle(&self, ino: i64) -> Result<u64, MetaError> {
+    pub async fn opendir(&self, ino: i64) -> Result<u64, VfsError> {
         // Verify directory exists
         let attr = self
             .core
             .meta_layer
             .stat(ino)
             .await?
-            .ok_or(MetaError::NotFound(ino))?;
+            .ok_or(VfsError::NotFound {
+                path: PathHint::none(),
+            })?;
 
         if attr.kind != FileType::Dir {
-            return Err(MetaError::NotDirectory(ino));
+            return Err(VfsError::NotADirectory {
+                path: PathHint::none(),
+            });
         }
 
         // Load all directory entries
@@ -1120,13 +1181,13 @@ where
     }
 
     /// Close a directory handle
-    pub async fn closedir_handle(&self, fh: u64) -> Result<(), MetaError> {
+    pub async fn closedir(&self, fh: u64) -> Result<(), VfsError> {
         let handle = self
             .state
             .handles
             .release_dir(fh)
             .await
-            .ok_or(MetaError::InvalidHandle(fh))?;
+            .ok_or(VfsError::StaleNetworkFileHandle)?;
 
         tracing::info!(
             "release dir handle: fh={}, ino={}, entries={}",
@@ -1150,19 +1211,19 @@ where
     }
 
     /// Read directory entries by handle with pagination
-    pub async fn readdir_by_handle(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
+    pub async fn readdir(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
         let handle = self.state.handles.get_dir(fh).await?;
         Some(handle.get_entries(offset))
     }
 
     /// Update cached information about a handle (e.g. last observed offset).
-    pub async fn touch_handle_offset(&self, fh: u64, offset: u64) -> Result<(), String> {
+    pub async fn touch_handle_offset(&self, fh: u64, offset: u64) -> Result<(), VfsError> {
         self.state
             .handles
-            .with_handle_mut(fh, |handle| handle.last_offset = offset)
+            .get(fh)
             .await
-            .map(|_| ())
-            .ok_or_else(|| "invalid handle".into())
+            .map(|handle| handle.update_offset(offset))
+            .ok_or(VfsError::StaleNetworkFileHandle)
     }
 
     /// List all open handles for an inode.
@@ -1274,13 +1335,35 @@ where
         Ok(())
     }
 
-    async fn ensure_inode_registered(&self, ino: i64) -> Result<Arc<Inode>, String> {
-        // fast path to check whether there is an existing inode.
+    fn ensure_inode_cached(&self, ino: i64, size: u64) -> Arc<Inode> {
+        if let Some(inode) = self.state.inodes.get(&ino) {
+            if size != inode.file_size() {
+                inode.update_size(size);
+            }
+            return inode.clone();
+        }
+
+        match self.state.inodes.entry(ino) {
+            Entry::Occupied(entry) => {
+                let inode = Arc::clone(entry.get());
+                if size != inode.file_size() {
+                    inode.update_size(size);
+                }
+                inode
+            }
+            Entry::Vacant(entry) => {
+                let inode = Inode::new(ino, size);
+                entry.insert(inode.clone());
+                inode
+            }
+        }
+    }
+
+    async fn ensure_inode_registered(&self, ino: i64) -> Result<Arc<Inode>, VfsError> {
         if let Some(inode) = self.state.inodes.get(&ino) {
             return Ok(inode.clone());
         }
 
-        // double-check: lock the entry and do the check again.
         match self.state.inodes.entry(ino) {
             Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
             Entry::Vacant(entry) => {
@@ -1288,16 +1371,21 @@ where
                     .core
                     .meta_layer
                     .stat(ino)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| "not found".to_string())?;
+                    .await?
+                    .ok_or(VfsError::NotFound {
+                        path: PathHint::none(),
+                    })?;
                 if attr.kind != FileType::File {
-                    return Err("not a file".into());
+                    let err = match attr.kind {
+                        FileType::Dir => VfsError::IsADirectory {
+                            path: PathHint::none(),
+                        },
+                        _ => VfsError::InvalidInput,
+                    };
+                    return Err(err);
                 }
 
                 let inode = Inode::new(ino, attr.size);
-                self.state.reader.ensure_file(Arc::clone(&inode));
-                self.state.writer.ensure_file(Arc::clone(&inode));
                 entry.insert(inode.clone());
                 Ok(inode)
             }
@@ -1318,6 +1406,58 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::Barrier;
 
+    async fn open_file<S, M>(fs: &VFS<S, M>, path: &str, read: bool, write: bool) -> u64
+    where
+        S: BlockStore + Send + Sync + 'static,
+        M: MetaStore + Send + Sync + 'static,
+    {
+        let attr = fs.stat(path).await.expect("stat");
+        fs.open(attr.ino, attr, read, write).await
+    }
+
+    async fn write_path<S, M>(fs: &VFS<S, M>, path: &str, offset: u64, data: &[u8]) -> usize
+    where
+        S: BlockStore + Send + Sync + 'static,
+        M: MetaStore + Send + Sync + 'static,
+    {
+        let fh = open_file(fs, path, false, true).await;
+        let result = fs.write(fh, offset, data).await.expect("write");
+        let _ = fs.close(fh).await;
+        result
+    }
+
+    async fn read_path<S, M>(fs: &VFS<S, M>, path: &str, offset: u64, len: usize) -> Vec<u8>
+    where
+        S: BlockStore + Send + Sync + 'static,
+        M: MetaStore + Send + Sync + 'static,
+    {
+        let fh = open_file(fs, path, true, false).await;
+        let result = fs.read(fh, offset, len).await.expect("read");
+        let _ = fs.close(fh).await;
+        result
+    }
+
+    async fn readdir_path<S, M>(fs: &VFS<S, M>, path: &str) -> Vec<DirEntry>
+    where
+        S: BlockStore + Send + Sync + 'static,
+        M: MetaStore + Send + Sync + 'static,
+    {
+        let attr = fs.stat(path).await.expect("stat");
+        let fh = fs.opendir(attr.ino).await.expect("opendir");
+        let mut offset = 0u64;
+        let mut entries = Vec::new();
+        loop {
+            let batch = fs.readdir(fh, offset).await.unwrap_or_default();
+            if batch.is_empty() {
+                break;
+            }
+            offset += batch.len() as u64;
+            entries.extend(batch);
+        }
+        let _ = fs.closedir(fh).await;
+        entries
+    }
+
     #[tokio::test]
     async fn test_fs_mkdir_create_write_read_readdir() {
         let layout = ChunkLayout::default();
@@ -1336,9 +1476,7 @@ mod tests {
         for (i, b) in data.iter_mut().enumerate().take(data_len) {
             *b = (i % 251) as u8;
         }
-        fs.write("/a/b/hello.txt", (layout.block_size / 2) as u64, &data)
-            .await
-            .expect("write");
+        write_path(&fs, "/a/b/hello.txt", (layout.block_size / 2) as u64, &data).await;
         let (ino, _) = fs
             .core
             .meta_layer
@@ -1349,13 +1487,16 @@ mod tests {
         let inode = fs.ensure_inode_registered(ino).await.unwrap();
         let writer = fs.state.writer.ensure_file(inode);
         writer.flush().await.unwrap();
-        let out = fs
-            .read("/a/b/hello.txt", (layout.block_size / 2) as u64, data_len)
-            .await
-            .expect("read");
+        let out = read_path(
+            &fs,
+            "/a/b/hello.txt",
+            (layout.block_size / 2) as u64,
+            data_len,
+        )
+        .await;
         assert_eq!(out, data);
 
-        let entries = fs.readdir("/a/b").await.expect("readdir");
+        let entries = readdir_path(&fs, "/a/b").await;
         assert!(
             entries
                 .iter()
@@ -1401,6 +1542,62 @@ mod tests {
         assert!(!fs.exists("/a/b").await);
     }
 
+    #[tokio::test]
+    async fn test_fs_truncate_prunes_chunks_and_zero_fills() {
+        let layout = ChunkLayout {
+            chunk_size: 8 * 1024,
+            block_size: 4 * 1024,
+        };
+        let store = InMemoryBlockStore::new();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+        fs.create_file("/t.bin").await.unwrap();
+
+        let len = layout.chunk_size as usize + 2048;
+        let mut data = vec![0u8; len];
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        write_path(&fs, "/t.bin", 0, &data).await;
+
+        fs.truncate("/t.bin", 1024).await.unwrap();
+        let head = read_path(&fs, "/t.bin", 0, 4096).await;
+        assert_eq!(head.len(), 1024);
+        assert_eq!(head, data[..1024].to_vec());
+
+        let new_size = layout.chunk_size + 4096;
+        fs.truncate("/t.bin", new_size).await.unwrap();
+        let st = fs.stat("/t.bin").await.unwrap();
+        assert_eq!(st.size, new_size);
+
+        let hole = read_path(&fs, "/t.bin", layout.chunk_size + 512, 1024).await;
+        assert_eq!(hole, vec![0u8; 1024]);
+    }
+
+    #[tokio::test]
+    async fn test_fs_close_releases_writer_and_inode() {
+        let layout = ChunkLayout {
+            chunk_size: 8 * 1024,
+            block_size: 4 * 1024,
+        };
+        let store = InMemoryBlockStore::new();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+        fs.create_file("/close.bin").await.unwrap();
+        let attr = fs.stat("/close.bin").await.unwrap();
+        let fh = fs.open(attr.ino, attr.clone(), false, true).await;
+        let data = vec![1u8; 2048];
+        fs.write(fh, 0, &data).await.unwrap();
+        fs.close(fh).await.unwrap();
+
+        assert!(!fs.state.writer.has_file(attr.ino as u64));
+        assert!(!fs.state.inodes.contains_key(&attr.ino));
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_fs_parallel_writes_to_distinct_files() {
         let layout = ChunkLayout {
@@ -1437,7 +1634,7 @@ mod tests {
             let barrier = barrier.clone();
             handles.push(tokio::spawn(async move {
                 barrier.wait().await;
-                fs_clone.write(&path, 0, &data).await.unwrap();
+                write_path(&fs_clone, &path, 0, &data).await;
                 (path, data)
             }));
         }
@@ -1457,7 +1654,7 @@ mod tests {
         }
 
         for (path, data) in results {
-            let out = fs.read(&path, 0, data.len()).await.unwrap();
+            let out = read_path(&fs, &path, 0, data.len()).await;
             assert_eq!(out, data);
         }
     }
@@ -1512,7 +1709,7 @@ mod tests {
                         let mut data = vec![0u8; len];
                         rng.fill_bytes(&mut data);
 
-                        fs.write(&path, offset as u64, &data).await.unwrap();
+                        write_path(&fs, &path, offset as u64, &data).await;
 
                         let end = offset + len;
                         if guard.len() < end {
@@ -1523,14 +1720,14 @@ mod tests {
                         let guard = state.lock().await;
                         let cur_len = guard.len();
                         if cur_len == 0 {
-                            let out = fs.read(&path, 0, 0).await.unwrap();
+                            let out = read_path(&fs, &path, 0, 0).await;
                             assert!(out.is_empty());
                             continue;
                         }
                         let offset = rng.random_range(0..cur_len);
                         let len = rng.random_range(1..=std::cmp::min(cur_len - offset, max_write));
                         let expected = guard[offset..offset + len].to_vec();
-                        let out = fs.read(&path, offset as u64, len).await.unwrap();
+                        let out = read_path(&fs, &path, offset as u64, len).await;
                         assert_eq!(out, expected);
                     }
                 }
@@ -1546,7 +1743,7 @@ mod tests {
             let state = state.clone();
             let guard = state.lock().await;
             let expected = guard.clone();
-            let out = fs.read(&path, 0, expected.len()).await.unwrap();
+            let out = read_path(&fs, &path, 0, expected.len()).await;
             assert_eq!(out, expected);
         }
     }

@@ -609,6 +609,14 @@ where
         result
     }
 
+    pub async fn clear(&self) {
+        let mut guard = self.shared.inner.lock().await;
+        guard.chunks.clear();
+        if guard.flush_waiting > 0 {
+            self.shared.flush_notify.notify_waiters();
+        }
+    }
+
     pub async fn has_pending(&self) -> bool {
         let guard = self.shared.inner.lock().await;
         guard.has_chunks()
@@ -956,6 +964,22 @@ where
         }
     }
 
+    pub async fn clear(&self, ino: u64) {
+        let writer = self.files.get(&ino).map(|entry| entry.value().clone());
+        if let Some(writer) = writer {
+            writer.clear().await;
+        }
+    }
+
+    pub fn release(&self, ino: u64) {
+        self.files.remove(&ino);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_file(&self, ino: u64) -> bool {
+        self.files.contains_key(&ino)
+    }
+
     async fn flush_once(&self) {
         let writers: Vec<Arc<FileWriter<B, M>>> = self
             .files
@@ -1140,7 +1164,7 @@ mod tests {
         writer.write_at(0, &data).await.unwrap();
         writer.flush().await.unwrap();
 
-        let file_reader = reader.ensure_file(inode);
+        let file_reader = reader.open_for_handle(inode, 1);
         let out = file_reader.read(0, len).await.unwrap();
         assert_eq!(out, data);
     }

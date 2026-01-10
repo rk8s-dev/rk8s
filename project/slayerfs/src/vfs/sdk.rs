@@ -11,7 +11,7 @@ use crate::meta::MetaStore;
 use crate::meta::factory::create_meta_store_from_url;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::MetaError;
-use crate::vfs::fs::{DirEntry, FileAttr, VFS};
+use crate::vfs::fs::{DirEntry, FileAttr, FileType, VFS};
 use std::path::Path;
 
 /// SDK client parametrized by its backend.
@@ -46,18 +46,59 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         offset: u64,
         data: &[u8],
     ) -> Result<usize, String> {
-        self.fs.write(path, offset, data).await
+        let attr = self
+            .fs
+            .stat(path)
+            .await
+            .ok_or_else(|| "not found".to_string())?;
+        let fh = self.fs.open(attr.ino, attr, false, true).await;
+        let result = self
+            .fs
+            .write(fh, offset, data)
+            .await
+            .map_err(|e| e.to_string());
+        let _ = self.fs.close(fh).await;
+        result
     }
 
     pub async fn read_at(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, String> {
-        self.fs.read(path, offset, len).await
+        let attr = self
+            .fs
+            .stat(path)
+            .await
+            .ok_or_else(|| "not found".to_string())?;
+        let fh = self.fs.open(attr.ino, attr, true, false).await;
+        let result = self
+            .fs
+            .read(fh, offset, len)
+            .await
+            .map_err(|e| e.to_string());
+        let _ = self.fs.close(fh).await;
+        result
     }
 
     pub async fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, String> {
-        self.fs
-            .readdir(path)
+        let attr = self
+            .fs
+            .stat(path)
             .await
-            .ok_or_else(|| "not a dir or not found".into())
+            .ok_or_else(|| "not found".to_string())?;
+        if attr.kind != FileType::Dir {
+            return Err("not a dir".into());
+        }
+        let fh = self.fs.opendir(attr.ino).await.map_err(|e| e.to_string())?;
+        let mut offset = 0u64;
+        let mut entries = Vec::new();
+        loop {
+            let batch = self.fs.readdir(fh, offset).await.unwrap_or_default();
+            if batch.is_empty() {
+                break;
+            }
+            offset += batch.len() as u64;
+            entries.extend(batch);
+        }
+        let _ = self.fs.closedir(fh).await;
+        Ok(entries)
     }
 
     pub async fn stat(&self, path: &str) -> Result<FileAttr, String> {

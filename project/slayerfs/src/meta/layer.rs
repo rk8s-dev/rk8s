@@ -34,6 +34,9 @@ pub trait MetaLayer: Send + Sync {
 
     // ---------- Core path operations ----------
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError>;
+
+    /// Do `stat` but bypass the inode cache.
+    async fn stat_fresh(&self, ino: i64) -> Result<Option<FileAttr>, MetaError>;
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError>;
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError>;
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError>;
@@ -56,6 +59,8 @@ pub trait MetaLayer: Send + Sync {
         new_name: String,
     ) -> Result<(), MetaError>;
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
+    async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError>;
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError>;
     async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError>;
     async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError>;

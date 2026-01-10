@@ -4,7 +4,9 @@ mod reader;
 mod writer;
 
 pub use reader::DataReader;
+pub use reader::FileReader;
 pub use writer::DataWriter;
+pub use writer::FileWriter;
 
 pub(crate) fn split_chunk_spans(layout: ChunkLayout, offset: u64, len: usize) -> Vec<ChunkSpan> {
     if len == 0 {

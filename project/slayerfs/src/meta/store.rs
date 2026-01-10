@@ -391,6 +391,12 @@ pub trait MetaStore: Send + Sync {
     ) -> Result<(), MetaError>;
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        self.set_file_size(ino, size).await
+    }
+    async fn truncate(&self, ino: i64, size: u64, _chunk_size: u64) -> Result<(), MetaError> {
+        self.set_file_size(ino, size).await
+    }
 
     /// get the node's parent inode
     async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError>;

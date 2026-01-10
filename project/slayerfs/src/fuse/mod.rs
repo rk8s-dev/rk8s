@@ -18,6 +18,7 @@ use crate::chuck::store::BlockStore;
 use crate::meta::MetaStore;
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
+use crate::vfs::error::VfsError;
 use crate::vfs::fs::{FileAttr as VfsFileAttr, FileType as VfsFileType, VFS};
 use bytes::Bytes;
 use rfuse3::Errno;
@@ -187,9 +188,7 @@ where
         let accmode = flags & (libc::O_ACCMODE as u32);
         let read = accmode != (libc::O_WRONLY as u32);
         let write = accmode != (libc::O_RDONLY as u32);
-        let fh = self
-            .open_handle(ino as i64, attr.clone(), read, write)
-            .await;
+        let fh = self.open(ino as i64, attr.clone(), read, write).await;
 
         Ok(ReplyOpen { fh, flags })
     }
@@ -204,11 +203,10 @@ where
         }
 
         // Create directory handle for efficient readdir operations
-        let fh = self.opendir_handle(ino as i64).await.map_err(|e| match e {
-            MetaError::NotFound(_) => libc::ENOENT,
-            MetaError::NotDirectory(_) => libc::ENOTDIR,
-            _ => libc::EIO,
-        })?;
+        let fh = self
+            .opendir(ino as i64)
+            .await
+            .map_err(Into::<Errno>::into)?;
 
         Ok(ReplyOpen { fh, flags: 0 })
     }
@@ -218,7 +216,7 @@ where
         &self,
         _req: Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: u64,
         size: u32,
     ) -> FuseResult<ReplyData> {
@@ -227,10 +225,23 @@ where
             return Err(libc::ENOENT.into());
         };
 
-        let data = self
-            .read_ino(ino as i64, offset, size as usize)
-            .await
-            .map_err(|_| libc::EIO)?;
+        let data = if fh != 0 {
+            self.read(fh, offset, size as usize)
+                .await
+                .map_err(Into::<Errno>::into)?
+        } else {
+            let attr = self
+                .stat_ino(ino as i64)
+                .await
+                .ok_or_else(|| Errno::from(libc::ENOENT))?;
+            let tmp_fh = self.open(ino as i64, attr, true, false).await;
+            let out = self
+                .read(tmp_fh, offset, size as usize)
+                .await
+                .map_err(Into::<Errno>::into)?;
+            let _ = self.close(tmp_fh).await;
+            out
+        };
 
         // Update atime after successful read
         if let Err(e) = self.update_atime(ino as i64).await {
@@ -268,19 +279,29 @@ where
         &self,
         _req: Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: u64,
         data: &[u8],
         _write_flags: u32,
         _flags: u32,
     ) -> FuseResult<ReplyWrite> {
-        let Some(path) = self.path_of(ino as i64).await else {
-            return Err(libc::ENOENT.into());
+        let n = if fh != 0 {
+            self.write(fh, offset, data)
+                .await
+                .map_err(Into::<Errno>::into)? as u32
+        } else {
+            let attr = self
+                .stat_ino(ino as i64)
+                .await
+                .ok_or_else(|| Errno::from(libc::ENOENT))?;
+            let tmp_fh = self.open(ino as i64, attr, false, true).await;
+            let out = self
+                .write(tmp_fh, offset, data)
+                .await
+                .map_err(Into::<Errno>::into)? as u32;
+            let _ = self.close(tmp_fh).await;
+            out
         };
-        let n = self
-            .write(&path, offset, data)
-            .await
-            .map_err(|_| libc::EIO)? as u32;
         Ok(ReplyWrite { written: n })
     }
 
@@ -343,7 +364,7 @@ where
         let vattr = self
             .set_attr(ino as i64, &meta_req, meta_flags)
             .await
-            .map_err(|e| meta_error_to_errno(&e))?;
+            .map_err(Into::<Errno>::into)?;
 
         let attr = vfs_to_fuse_attr(&vattr, &req);
         Ok(ReplyAttr {
@@ -363,7 +384,7 @@ where
         // Try to use handle first
         let entries = if fh != 0 {
             let entries_offset = offset.saturating_sub(3) as u64;
-            self.readdir_by_handle(fh, entries_offset).await
+            self.readdir(fh, entries_offset).await
         } else {
             None
         };
@@ -470,7 +491,7 @@ where
             }
 
             let entries_offset = offset.saturating_sub(2);
-            self.readdir_by_handle(fh, entries_offset).await
+            self.readdir(fh, entries_offset).await
         } else {
             None
         };
@@ -976,7 +997,7 @@ where
         _lock_owner: u64,
         _flush: bool,
     ) -> FuseResult<()> {
-        let _ = self.close_handle(fh).await;
+        let _ = self.close(fh).await;
         Ok(())
     }
 
@@ -1013,9 +1034,9 @@ where
             return Ok(()); // No handle to release
         }
 
-        if let Err(e) = self.closedir_handle(fh).await {
+        if let Err(e) = self.closedir(fh).await {
             match e {
-                MetaError::InvalidHandle(_) => {
+                VfsError::StaleNetworkFileHandle => {
                     // Handle not found, but that's ok - might be a stateless readdir
                     tracing::debug!("releasedir: handle {} not found (stateless mode)", fh);
                 }
@@ -1192,18 +1213,67 @@ where
 }
 
 // =============== helpers ===============
-fn meta_error_to_errno(e: &MetaError) -> Errno {
-    let code = match e {
-        MetaError::NotFound(_) => libc::ENOENT,
-        MetaError::ParentNotFound(_) => libc::ENOENT,
-        MetaError::NotDirectory(_) => libc::ENOTDIR,
-        MetaError::DirectoryNotEmpty(_) => libc::ENOTEMPTY,
-        MetaError::AlreadyExists { .. } => libc::EEXIST,
-        MetaError::NotSupported(_) | MetaError::NotImplemented => libc::ENOSYS,
-        MetaError::InvalidPath(_) => libc::EINVAL,
-        _ => libc::EIO,
-    };
-    Errno::from(code)
+impl From<MetaError> for Errno {
+    fn from(val: MetaError) -> Self {
+        let code = match val {
+            MetaError::NotFound(_) => libc::ENOENT,
+            MetaError::ParentNotFound(_) => libc::ENOENT,
+            MetaError::NotDirectory(_) => libc::ENOTDIR,
+            MetaError::DirectoryNotEmpty(_) => libc::ENOTEMPTY,
+            MetaError::AlreadyExists { .. } => libc::EEXIST,
+            MetaError::NotSupported(_) | MetaError::NotImplemented => libc::ENOSYS,
+            MetaError::InvalidPath(_) => libc::EINVAL,
+            _ => libc::EIO,
+        };
+        Errno::from(code)
+    }
+}
+
+impl From<VfsError> for Errno {
+    fn from(val: VfsError) -> Self {
+        let code = match val {
+            VfsError::NotFound { .. } => libc::ENOENT,
+            VfsError::AlreadyExists { .. } => libc::EEXIST,
+            VfsError::NotADirectory { .. } => libc::ENOTDIR,
+            VfsError::IsADirectory { .. } => libc::EISDIR,
+            VfsError::DirectoryNotEmpty { .. } => libc::ENOTEMPTY,
+            VfsError::PermissionDenied { .. } => libc::EACCES,
+            VfsError::ReadOnlyFilesystem { .. } => libc::EROFS,
+            VfsError::ConnectionRefused => libc::ECONNREFUSED,
+            VfsError::ConnectionReset => libc::ECONNRESET,
+            VfsError::HostUnreachable => libc::EHOSTUNREACH,
+            VfsError::NetworkUnreachable => libc::ENETUNREACH,
+            VfsError::ConnectionAborted => libc::ECONNABORTED,
+            VfsError::NotConnected => libc::ENOTCONN,
+            VfsError::AddrInUse => libc::EADDRINUSE,
+            VfsError::AddrNotAvailable => libc::EADDRNOTAVAIL,
+            VfsError::NetworkDown => libc::ENETDOWN,
+            VfsError::BrokenPipe => libc::EPIPE,
+            VfsError::WouldBlock => libc::EAGAIN,
+            VfsError::InvalidInput => libc::EINVAL,
+            VfsError::InvalidData => libc::EINVAL,
+            VfsError::TimedOut => libc::ETIMEDOUT,
+            VfsError::WriteZero => libc::EIO,
+            VfsError::StorageFull => libc::ENOSPC,
+            VfsError::NotSeekable => libc::ESPIPE,
+            VfsError::QuotaExceeded => libc::EDQUOT,
+            VfsError::FileTooLarge => libc::EFBIG,
+            VfsError::ResourceBusy => libc::EBUSY,
+            VfsError::ExecutableFileBusy => libc::ETXTBSY,
+            VfsError::Deadlock => libc::EDEADLK,
+            VfsError::CrossesDevices => libc::EXDEV,
+            VfsError::TooManyLinks => libc::EMLINK,
+            VfsError::InvalidFilename => libc::EINVAL,
+            VfsError::ArgumentListTooLong => libc::E2BIG,
+            VfsError::Interrupted => libc::EINTR,
+            VfsError::Unsupported => libc::ENOSYS,
+            VfsError::UnexpectedEof => libc::EIO,
+            VfsError::OutOfMemory => libc::ENOMEM,
+            VfsError::StaleNetworkFileHandle => libc::ESTALE,
+            VfsError::Other => libc::EIO,
+        };
+        code.into()
+    }
 }
 
 fn vfs_kind_to_fuse(k: VfsFileType) -> FuseFileType {
