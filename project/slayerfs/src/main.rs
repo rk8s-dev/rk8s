@@ -99,7 +99,7 @@ async fn mount_cmd(args: MountArgs) -> anyhow::Result<()> {
 
     let fs = VFS::new(layout, store, meta_store)
         .await
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::from)?;
     let handle = mount_vfs_unprivileged(fs, &args.mount_point).await?;
 
     println!("mounted at {}", args.mount_point.display());

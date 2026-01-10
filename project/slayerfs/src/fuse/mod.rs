@@ -255,16 +255,7 @@ where
     }
 
     async fn readlink(&self, _req: Request, ino: u64) -> FuseResult<ReplyData> {
-        let target = self.readlink_ino(ino as i64).await.map_err(|e| -> Errno {
-            let code = match e.as_str() {
-                "not found" => libc::ENOENT,
-                "not a symlink" => libc::EINVAL,
-                "not supported" => libc::ENOSYS,
-                _ if e.contains("not supported") => libc::ENOSYS,
-                _ => libc::EIO,
-            };
-            code.into()
-        })?;
+        let target = self.readlink_ino(ino as i64).await.map_err(Errno::from)?;
 
         // Update atime after successful readlink
         let _ = self.update_atime(ino as i64).await;
@@ -597,22 +588,16 @@ where
         let ino = match file_type {
             libc::S_IFREG => {
                 // Regular file - use create_file
-                self.create_file(&p).await.map_err(|e| match e.as_str() {
-                    "is a directory" => libc::EISDIR,
-                    _ => libc::EIO,
-                })?
+                self.create_file(&p).await.map_err(Errno::from)?
             }
             libc::S_IFDIR => {
                 // Directory - use mkdir_p
-                self.mkdir_p(&p).await.map_err(|_| libc::EIO)?
+                self.mkdir_p(&p).await.map_err(Errno::from)?
             }
             libc::S_IFIFO | libc::S_IFSOCK => {
                 // FIFO and socket: not fully supported, but create as regular file
                 // This allows tests to pass, though the special semantics are lost
-                self.create_file(&p).await.map_err(|e| match e.as_str() {
-                    "is a directory" => libc::EISDIR,
-                    _ => libc::EIO,
-                })?
+                self.create_file(&p).await.map_err(Errno::from)?
             }
             libc::S_IFCHR | libc::S_IFBLK => {
                 // Character and block devices are not supported in FUSE userspace
@@ -668,7 +653,7 @@ where
             p.push('/');
         }
         p.push_str(&name);
-        let _ino = self.mkdir_p(&p).await.map_err(|_| libc::EIO)?;
+        let _ino = self.mkdir_p(&p).await.map_err(Errno::from)?;
         // Preserve special bits (sticky, setuid, setgid) along with permission bits
         let masked_mode = (mode & 0o7777) & !(umask & 0o777);
         let Some(vattr) = self
@@ -709,10 +694,7 @@ where
             p.push('/');
         }
         p.push_str(&name);
-        let ino = self.create_file(&p).await.map_err(|e| match e.as_str() {
-            "is a directory" => libc::EISDIR,
-            _ => libc::EIO,
-        })?;
+        let ino = self.create_file(&p).await.map_err(Errno::from)?;
         let Some(vattr) = self
             .apply_new_entry_attrs(ino, req.uid, req.gid, Some(mode & 0o7777))
             .await
@@ -777,21 +759,7 @@ where
 
         let attr = VFS::link(self, &existing_path, &parent_path)
             .await
-            .map_err(|e| -> Errno {
-                let code = match e.as_str() {
-                    "not found" => libc::ENOENT,
-                    "parent not found" => libc::ENOENT,
-                    "not a directory" => libc::ENOTDIR,
-                    "already exists" => libc::EEXIST,
-                    "is a directory" => libc::EISDIR,
-                    "invalid name" => libc::EINVAL,
-                    "invalid path" => libc::ENOENT,
-                    "not supported" => libc::ENOSYS,
-                    _ if e.contains("not supported") => libc::ENOSYS,
-                    _ => libc::EIO,
-                };
-                code.into()
-            })?;
+            .map_err(Errno::from)?;
 
         let fuse_attr = vfs_to_fuse_attr(&attr, &req);
         Ok(ReplyEntry {
@@ -837,19 +805,7 @@ where
         let (ino, vattr) = self
             .create_symlink(&parent_path, target.as_ref())
             .await
-            .map_err(|e| -> Errno {
-                let code = match e.as_str() {
-                    "invalid path" => libc::ENOENT,
-                    "invalid name" => libc::EINVAL,
-                    "parent not found" => libc::ENOENT,
-                    "not a directory" => libc::ENOTDIR,
-                    "already exists" => libc::EEXIST,
-                    "not supported" => libc::ENOSYS,
-                    _ if e.contains("not supported") => libc::ENOSYS,
-                    _ => libc::EIO,
-                };
-                code.into()
-            })?;
+            .map_err(Errno::from)?;
 
         let attr = self
             .apply_new_entry_attrs(ino, req.uid, req.gid, None)
@@ -890,14 +846,7 @@ where
             p.push('/');
         }
         p.push_str(&name);
-        self.unlink(&p).await.map_err(|e| {
-            let code = match e.as_str() {
-                "not found" => libc::ENOENT,
-                "is a directory" => libc::EISDIR,
-                _ => libc::EIO,
-            };
-            code.into()
-        })
+        self.unlink(&p).await.map_err(Errno::from)
     }
 
     // Remove an empty directory
@@ -926,14 +875,7 @@ where
             p.push('/');
         }
         p.push_str(&name);
-        self.rmdir(&p).await.map_err(|e| {
-            let code = match e.as_str() {
-                "not found" => libc::ENOENT,
-                "directory not empty" => libc::ENOTEMPTY,
-                _ => libc::EIO,
-            };
-            code.into()
-        })
+        self.rmdir(&p).await.map_err(Errno::from)
     }
 
     // Rename (files or directories)
@@ -978,12 +920,7 @@ where
             newp.push('/');
         }
         newp.push_str(&new_name);
-        VFS::rename(self, &oldp, &newp).await.map_err(|e| match e {
-            MetaError::AlreadyExists { .. } => libc::EEXIST.into(),
-            MetaError::DirectoryNotEmpty(_) => libc::ENOTEMPTY.into(),
-            MetaError::NotDirectory(_) => libc::ENOTDIR.into(),
-            _ => libc::EIO.into(),
-        })
+        VFS::rename(self, &oldp, &newp).await.map_err(Errno::from)
     }
 
     // ===== Resource release & sync: stateless implementation, return success =====
@@ -1101,12 +1038,7 @@ where
                     pid: info.pid,
                 })
             }
-            Err(e) => Err(match e {
-                MetaError::NotFound(_) => libc::ENOENT,
-                MetaError::NotSupported(_) => libc::ENOSYS,
-                _ => libc::EIO,
-            }
-            .into()),
+            Err(e) => Err(Errno::from(e)),
         }
     }
 
@@ -1139,13 +1071,7 @@ where
             .await
         {
             Ok(()) => Ok(()),
-            Err(e) => Err(match e {
-                MetaError::NotFound(_) => libc::ENOENT,
-                MetaError::LockConflict { .. } => libc::EAGAIN, // Lock conflict
-                MetaError::NotSupported(_) => libc::ENOSYS,
-                _ => libc::EIO,
-            }
-            .into()),
+            Err(e) => Err(Errno::from(e)),
         }
     }
 

@@ -10,7 +10,7 @@ use crate::chuck::store::BlockStore;
 use crate::meta::MetaStore;
 use crate::meta::factory::create_meta_store_from_url;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
-use crate::meta::store::MetaError;
+use crate::vfs::error::{PathHint, VfsError};
 use crate::vfs::fs::{DirEntry, FileAttr, FileType, VFS};
 use std::path::Path;
 
@@ -21,7 +21,7 @@ pub struct Client<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + S
 
 #[allow(unused)]
 impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static> Client<S, M> {
-    pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, String> {
+    pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, VfsError> {
         let fs = VFS::new(layout, store, meta).await?;
         Ok(Self { fs })
     }
@@ -30,12 +30,12 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         Self { fs }
     }
 
-    pub async fn mkdir_p(&self, path: &str) -> Result<(), String> {
+    pub async fn mkdir_p(&self, path: &str) -> Result<(), VfsError> {
         let _ = self.fs.mkdir_p(path).await?;
         Ok(())
     }
 
-    pub async fn create(&self, path: &str) -> Result<(), String> {
+    pub async fn create(&self, path: &str) -> Result<(), VfsError> {
         let _ = self.fs.create_file(path).await?;
         Ok(())
     }
@@ -45,48 +45,36 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         path: &str,
         offset: u64,
         data: &[u8],
-    ) -> Result<usize, String> {
-        let attr = self
-            .fs
-            .stat(path)
-            .await
-            .ok_or_else(|| "not found".to_string())?;
+    ) -> Result<usize, VfsError> {
+        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
+            path: PathHint::some(path),
+        })?;
         let fh = self.fs.open(attr.ino, attr, false, true).await;
-        let result = self
-            .fs
-            .write(fh, offset, data)
-            .await
-            .map_err(|e| e.to_string());
+        let result = self.fs.write(fh, offset, data).await;
         let _ = self.fs.close(fh).await;
         result
     }
 
-    pub async fn read_at(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, String> {
-        let attr = self
-            .fs
-            .stat(path)
-            .await
-            .ok_or_else(|| "not found".to_string())?;
+    pub async fn read_at(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, VfsError> {
+        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
+            path: PathHint::some(path),
+        })?;
         let fh = self.fs.open(attr.ino, attr, true, false).await;
-        let result = self
-            .fs
-            .read(fh, offset, len)
-            .await
-            .map_err(|e| e.to_string());
+        let result = self.fs.read(fh, offset, len).await;
         let _ = self.fs.close(fh).await;
         result
     }
 
-    pub async fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, String> {
-        let attr = self
-            .fs
-            .stat(path)
-            .await
-            .ok_or_else(|| "not found".to_string())?;
+    pub async fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, VfsError> {
+        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
+            path: PathHint::some(path),
+        })?;
         if attr.kind != FileType::Dir {
-            return Err("not a dir".into());
+            return Err(VfsError::NotADirectory {
+                path: PathHint::some(path),
+            });
         }
-        let fh = self.fs.opendir(attr.ino).await.map_err(|e| e.to_string())?;
+        let fh = self.fs.opendir(attr.ino).await?;
         let mut offset = 0u64;
         let mut entries = Vec::new();
         loop {
@@ -101,37 +89,39 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         Ok(entries)
     }
 
-    pub async fn stat(&self, path: &str) -> Result<FileAttr, String> {
-        self.fs.stat(path).await.ok_or_else(|| "not found".into())
+    pub async fn stat(&self, path: &str) -> Result<FileAttr, VfsError> {
+        self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
+            path: PathHint::some(path),
+        })
     }
 
-    pub async fn link(&self, existing: &str, link_path: &str) -> Result<FileAttr, String> {
+    pub async fn link(&self, existing: &str, link_path: &str) -> Result<FileAttr, VfsError> {
         self.fs.link(existing, link_path).await
     }
 
-    pub async fn symlink(&self, link_path: &str, target: &str) -> Result<FileAttr, String> {
+    pub async fn symlink(&self, link_path: &str, target: &str) -> Result<FileAttr, VfsError> {
         let (_, attr) = self.fs.create_symlink(link_path, target).await?;
         Ok(attr)
     }
 
-    pub async fn readlink(&self, path: &str) -> Result<String, String> {
+    pub async fn readlink(&self, path: &str) -> Result<String, VfsError> {
         self.fs.readlink(path).await
     }
 
     // Extra helpers: delete / rename / truncate
-    pub async fn unlink(&self, path: &str) -> Result<(), String> {
+    pub async fn unlink(&self, path: &str) -> Result<(), VfsError> {
         self.fs.unlink(path).await
     }
 
-    pub async fn rmdir(&self, path: &str) -> Result<(), String> {
+    pub async fn rmdir(&self, path: &str) -> Result<(), VfsError> {
         self.fs.rmdir(path).await
     }
 
-    pub async fn rename(&self, old: &str, new: &str) -> Result<(), String> {
-        self.fs.rename(old, new).await.map_err(|e| e.to_string())
+    pub async fn rename(&self, old: &str, new: &str) -> Result<(), VfsError> {
+        self.fs.rename(old, new).await
     }
 
-    pub async fn truncate(&self, path: &str, size: u64) -> Result<(), String> {
+    pub async fn truncate(&self, path: &str, size: u64) -> Result<(), VfsError> {
         self.fs.truncate(path, size).await
     }
 
@@ -140,7 +130,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         &self,
         path: &str,
         query: &FileLockQuery,
-    ) -> Result<FileLockInfo, String> {
+    ) -> Result<FileLockInfo, VfsError> {
         self.fs.get_plock(path, query).await
     }
 
@@ -153,7 +143,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         lock_type: FileLockType,
         range: FileLockRange,
         pid: u32,
-    ) -> Result<(), String> {
+    ) -> Result<(), VfsError> {
         self.fs
             .set_plock(path, owner, block, lock_type, range, pid)
             .await
@@ -173,17 +163,12 @@ pub type LocalClient = Client<ObjectBlockStore<LocalFsBackend>, Arc<dyn MetaStor
 #[allow(dead_code)]
 impl LocalClient {
     #[allow(dead_code)]
-    pub async fn new_local<P: AsRef<Path>>(
-        root: P,
-        layout: ChunkLayout,
-    ) -> Result<Self, MetaError> {
+    pub async fn new_local<P: AsRef<Path>>(root: P, layout: ChunkLayout) -> Result<Self, VfsError> {
         let client = ObjectClient::new(LocalFsBackend::new(root));
         let meta_handle = create_meta_store_from_url("sqlite::memory:").await?;
         let metadata: Arc<dyn MetaStore> = meta_handle.store();
         let store = ObjectBlockStore::new(client);
-        let fs = VFS::new(layout, store, metadata)
-            .await
-            .map_err(MetaError::Internal)?;
+        let fs = VFS::new(layout, store, metadata).await?;
         Ok(Client { fs })
     }
 }
@@ -286,10 +271,8 @@ mod tests {
             assert!(legacy.is_err());
         } else if let Err(err) = &link_res {
             assert!(
-                err.contains("not supported")
-                    || err.contains("UNIQUE constraint failed")
-                    || err.contains("Database error"),
-                "unexpected hard-link error: {err}"
+                matches!(err, VfsError::Unsupported | VfsError::Other),
+                "unexpected hard-link error: {err:?}"
             );
         }
 
