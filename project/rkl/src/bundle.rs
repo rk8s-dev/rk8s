@@ -3,8 +3,8 @@ use std::{
     fs::File,
     io::{BufReader, copy},
     path::{Path, PathBuf},
-    process::Command,
 };
+use tokio::process::Command;
 
 use anyhow::Context;
 use anyhow::anyhow;
@@ -285,6 +285,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
             rootfs.display()
         ))
         .status()
+        .await
         .with_context(|| "Failed to execute cp command")?;
 
     if !status.success() {
