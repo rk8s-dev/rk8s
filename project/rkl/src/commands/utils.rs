@@ -67,6 +67,28 @@ fn generate_unique_bundle_path() -> String {
     format!("{RKL_BUNDLE_STORE}/{container_hash}")
 }
 
+pub async fn async_handle_oci_image(
+    image_ref: impl AsRef<str>,
+    _name: String,
+) -> Result<(ImageConfiguration, String)> {
+    let (manifest_path, layers) = rkb::pull::pull_or_get_image(image_ref, None::<&str>)
+        .map_err(|e| anyhow!("failed to pull image: {e}"))?;
+
+    debug!("get manifest_path: {manifest_path:?}");
+    debug!("layers: {layers:?}");
+
+    let bundle_path = generate_unique_bundle_path();
+
+    let config = get_image_config(&manifest_path)?;
+
+    if PathBuf::from(&bundle_path).exists() {
+        return Ok((config, "".to_string()));
+    }
+
+    bundle::mount_and_copy_bundle(bundle_path.clone(), &layers).await?;
+    Ok((config, bundle_path))
+}
+
 /// pull image from rkb's implementation
 pub fn handle_oci_image(
     image_ref: impl AsRef<str>,

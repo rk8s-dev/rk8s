@@ -1,3 +1,4 @@
+use crate::commands::utils::async_handle_oci_image;
 use crate::oci;
 use crate::{
     commands::{
@@ -737,6 +738,28 @@ pub fn handle_image_typ(
     if let ImageType::OCIImage = determine_image(&container_spec.image)? {
         let (image_config, bundle_path) =
             handle_oci_image(&container_spec.image, container_spec.name.clone())?;
+        // handle image_config
+        let mut builder = ContainerConfigBuilder::default();
+        if let Some(config) = image_config.config() {
+            // add cmd to config
+            builder.args_from_image_config(config.entrypoint(), config.cmd());
+            // extend env
+            builder.envs_from_image_config(config.env());
+            // set work_dir
+            builder.work_dir(config.working_dir());
+            // builder.users(config.user());
+        }
+        return Ok((Some(builder), bundle_path));
+    }
+    Ok((None, "".to_string()))
+}
+
+pub async fn async_handle_image_typ(
+    container_spec: &ContainerSpec,
+) -> Result<(Option<ContainerConfigBuilder>, String)> {
+    if let ImageType::OCIImage = determine_image(&container_spec.image)? {
+        let (image_config, bundle_path) =
+            async_handle_oci_image(&container_spec.image, container_spec.name.clone()).await?;
         // handle image_config
         let mut builder = ContainerConfigBuilder::default();
         if let Some(config) = image_config.config() {
