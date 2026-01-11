@@ -365,30 +365,30 @@ impl TaskRunner {
         Ok(result)
     }
 
-    // pub async fn async_build_create_container_request(
-    //     &self,
-    //     pod_sandbox_id: &str,
-    //     container: &ContainerSpec,
-    // ) -> Result<CreateContainerRequest, anyhow::Error> {
-    //     let (mut config_builder, bundle_path) = async_handle_image_typ(container).await?;
+    pub async fn async_build_create_container_request(
+        &self,
+        pod_sandbox_id: &str,
+        container: &ContainerSpec,
+    ) -> Result<CreateContainerRequest, anyhow::Error> {
+        let (mut config_builder, bundle_path) = async_handle_image_typ(container).await?;
 
-    //     let config = if let Some(ref mut builder) = config_builder {
-    //         builder.container_spec(container.clone())?;
-    //         builder.images(bundle_path);
-    //         builder.clone().build()
-    //     } else {
-    //         ContainerConfigBuilder::default()
-    //             .container_spec(container.clone())?
-    //             .clone()
-    //             .build()
-    //     };
+        let config = if let Some(ref mut builder) = config_builder {
+            builder.container_spec(container.clone())?;
+            builder.images(bundle_path);
+            builder.clone().build()
+        } else {
+            ContainerConfigBuilder::default()
+                .container_spec(container.clone())?
+                .clone()
+                .build()
+        };
 
-    //     Ok(CreateContainerRequest {
-    //         pod_sandbox_id: pod_sandbox_id.to_string(),
-    //         config: Some(config),
-    //         sandbox_config: self.sandbox_config.clone(),
-    //     })
-    // }
+        Ok(CreateContainerRequest {
+            pod_sandbox_id: pod_sandbox_id.to_string(),
+            config: Some(config),
+            sandbox_config: self.sandbox_config.clone(),
+        })
+    }
 
     pub fn build_create_container_request(
         &self,
@@ -729,7 +729,9 @@ impl TaskRunner {
 
         // create all container
         for container in &self.task.spec.containers {
-            let create_request = self.build_create_container_request(&pod_sandbox_id, container)?;
+            let create_request = self
+                .async_build_create_container_request(&pod_sandbox_id, container)
+                .await?;
             match self.create_container(create_request) {
                 Ok(create_response) => {
                     created_containers.push(create_response.container_id.clone());

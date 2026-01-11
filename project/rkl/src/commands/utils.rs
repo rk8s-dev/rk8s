@@ -71,7 +71,8 @@ pub async fn async_handle_oci_image(
     image_ref: impl AsRef<str>,
     _name: String,
 ) -> Result<(ImageConfiguration, String)> {
-    let (manifest_path, layers) = rkb::pull::pull_or_get_image(image_ref, None::<&str>)
+    let (manifest_path, layers) = rkb::pull::async_pull_or_get_image(image_ref, None::<&str>)
+        .await
         .map_err(|e| anyhow!("failed to pull image: {e}"))?;
 
     debug!("get manifest_path: {manifest_path:?}");
