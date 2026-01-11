@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use tokio::pin;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -42,17 +43,27 @@ impl HandleGate {
 
     async fn read_lock(self: &Arc<Self>) -> HandleReadGuard {
         loop {
-            let notified = {
+            // `notified()` does not push us into the waiting queue.
+            let notified = self.notify.notified();
+            pin!(notified);
+
+            // Critical: mutually register us into the waiting queue.
+            // There is a time window between we drop the guard and await the `notified`.
+            // After dropping the guard, a writer can `notify_waiters`, but if we aren't waiting for,
+            // we will cause a lost wake-up!
+            notified.as_mut().enable();
+            {
                 let mut guard = self.state.lock().unwrap();
-                if guard.writing || guard.writers_waiting > 0 {
-                    self.notify.notified()
-                } else {
+
+                if !guard.writing && guard.writers_waiting == 0 {
                     guard.readers = guard.readers.saturating_add(1);
                     return HandleReadGuard {
                         gate: Arc::clone(self),
-                    };
+                    }
                 }
-            };
+            }
+
+            // If we haven't been registered, we will register here once, but it may be too late!
             notified.await;
         }
     }
@@ -60,18 +71,25 @@ impl HandleGate {
     async fn write_lock(self: &Arc<Self>) -> HandleWriteGuard {
         let mut waiter = HandleWriteWaiter::new(self);
         loop {
-            let notified = {
+            let notified = self.notify.notified();
+            pin!(notified);
+
+            // Critical: refer to `read_lock`.
+            notified.as_mut().enable();
+
+            {
                 let mut guard = self.state.lock().unwrap();
+
                 if guard.readers == 0 && !guard.writing {
                     guard.writing = true;
-                    guard.writers_waiting = guard.writers_waiting.saturating_sub(1);
+                    guard.writers_waiting = guard.writers_waiting.wrapping_sub(1);
                     waiter.disarm();
                     return HandleWriteGuard {
                         gate: Arc::clone(self),
-                    };
+                    }
                 }
-                self.notify.notified()
-            };
+            }
+
             notified.await;
         }
     }
@@ -79,6 +97,7 @@ impl HandleGate {
     fn read_unlock(&self) {
         let mut guard = self.state.lock().unwrap();
         guard.readers = guard.readers.saturating_sub(1);
+        
         if guard.readers == 0 {
             self.notify.notify_waiters();
         }

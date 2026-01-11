@@ -162,6 +162,9 @@ pub enum VfsError {
     #[error("{0}")]
     Anyhow(#[from] anyhow::Error),
 
+    #[error("{0}")]
+    Meta(#[from] MetaError),
+
     #[error("other error")]
     Other,
 }
@@ -225,44 +228,6 @@ impl From<std::io::Error> for VfsError {
             ErrorKind::StaleNetworkFileHandle => VfsError::StaleNetworkFileHandle,
             ErrorKind::Other => VfsError::Other,
             _ => VfsError::Other,
-        }
-    }
-}
-
-impl From<MetaError> for VfsError {
-    fn from(value: MetaError) -> Self {
-        match value {
-            MetaError::NotFound(_) | MetaError::ParentNotFound(_) => VfsError::NotFound {
-                path: PathHint::none(),
-            },
-            MetaError::AlreadyExists { name, .. } => VfsError::AlreadyExists {
-                path: PathHint::some(name),
-            },
-            MetaError::NotDirectory(_) => VfsError::NotADirectory {
-                path: PathHint::none(),
-            },
-            MetaError::DirectoryNotEmpty(_) => VfsError::DirectoryNotEmpty {
-                path: PathHint::none(),
-            },
-            MetaError::InvalidPath(_) => VfsError::InvalidFilename,
-            MetaError::TooManySymlinks => VfsError::InvalidInput,
-            MetaError::NotSupported(_) | MetaError::NotImplemented => VfsError::Unsupported,
-            MetaError::Internal(_) => VfsError::Other,
-            MetaError::ContinueRetry | MetaError::MaxRetriesExceeded => VfsError::Other,
-            MetaError::Database(_) | MetaError::Serialization(_) | MetaError::Config(_) => {
-                VfsError::Other
-            }
-            MetaError::Io(e) => VfsError::from(e),
-            MetaError::SessionNotFound(_) => VfsError::NotFound {
-                path: PathHint::none(),
-            },
-            MetaError::LockConflict { .. } => VfsError::WouldBlock,
-            MetaError::LockNotFound { .. } => VfsError::NotFound {
-                path: PathHint::none(),
-            },
-            MetaError::DeadlockDetected { .. } => VfsError::Deadlock,
-            MetaError::InvalidHandle(_) => VfsError::StaleNetworkFileHandle,
-            MetaError::Anyhow(_) => VfsError::Other,
         }
     }
 }
