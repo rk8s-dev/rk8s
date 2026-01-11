@@ -159,6 +159,9 @@ pub enum VfsError {
     #[error("stale network file handle")]
     StaleNetworkFileHandle,
 
+    #[error("{0}")]
+    Anyhow(#[from] anyhow::Error),
+
     #[error("other error")]
     Other,
 }

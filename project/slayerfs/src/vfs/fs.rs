@@ -1120,7 +1120,7 @@ where
 
         // Before reading, it is needed to flush all cached data.
         self.state.writer.flush_if_exists(handle.ino as u64).await;
-        handle.read(offset, len).await.map_err(|_| VfsError::Other)
+        handle.read(offset, len).await.map_err(VfsError::from)
     }
 
     /// Write data by file handle and offset.
@@ -1162,7 +1162,7 @@ where
     pub async fn open(&self, ino: i64, attr: FileAttr, read: bool, write: bool) -> u64 {
         let mut latest_attr = attr;
 
-        // Retrieve the latest attr for close-to-open semantic.
+        // Retrieve the latest attr for close-to-open semantics.
         match self.core.meta_layer.stat_fresh(ino).await {
             Ok(Some(fresh)) => {
                 latest_attr = fresh;
@@ -1200,9 +1200,7 @@ where
 
         if handle.flags.write {
             handle.flush().await.map_err(|_| VfsError::Other)?;
-            self.update_mtime_ctime(handle.ino)
-                .await
-                .map_err(|_| VfsError::Other)?;
+            self.update_mtime_ctime(handle.ino).await?;
         }
 
         self.state.reader.close_for_handle(handle.ino as u64, fh);

@@ -1196,7 +1196,7 @@ impl From<VfsError> for Errno {
             VfsError::UnexpectedEof => libc::EIO,
             VfsError::OutOfMemory => libc::ENOMEM,
             VfsError::StaleNetworkFileHandle => libc::ESTALE,
-            VfsError::Other => libc::EIO,
+            _ => libc::EIO,
         };
         code.into()
     }
