@@ -1142,9 +1142,7 @@ where
         }
 
         let _inode = self.ensure_inode_registered(handle.ino).await?;
-        let written = handle
-            .write(offset, data)
-            .await?;
+        let written = handle.write(offset, data).await?;
 
         let target_size = offset + written as u64;
 

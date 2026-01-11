@@ -59,7 +59,7 @@ impl HandleGate {
                     guard.readers = guard.readers.saturating_add(1);
                     return HandleReadGuard {
                         gate: Arc::clone(self),
-                    }
+                    };
                 }
             }
 
@@ -86,7 +86,7 @@ impl HandleGate {
                     waiter.disarm();
                     return HandleWriteGuard {
                         gate: Arc::clone(self),
-                    }
+                    };
                 }
             }
 
@@ -97,7 +97,7 @@ impl HandleGate {
     fn read_unlock(&self) {
         let mut guard = self.state.lock().unwrap();
         guard.readers = guard.readers.saturating_sub(1);
-        
+
         if guard.readers == 0 {
             self.notify.notify_waiters();
         }

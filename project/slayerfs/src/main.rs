@@ -7,15 +7,19 @@ mod utils;
 mod vfs;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
 use crate::chuck::chunk::{ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
 use crate::chuck::store::ObjectBlockStore;
 use crate::fuse::mount::mount_vfs_unprivileged;
-use crate::meta::factory::create_meta_store_from_url;
+use crate::meta::MetaStore;
+use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+use crate::meta::factory::MetaStoreFactory;
+use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore};
 use crate::vfs::fs::VFS;
 
 #[derive(Parser)]
@@ -41,9 +45,17 @@ struct MountArgs {
     #[arg(long, value_name = "DIR", default_value = "./data")]
     data_dir: PathBuf,
 
-    /// Metadata backend URL (e.g. sqlite::memory: or sqlite:///tmp/slayerfs.db).
+    /// Metadata backend (sqlx or etcd).
+    #[arg(long, value_enum, default_value_t = MetaBackendKind::Sqlx)]
+    meta_backend: MetaBackendKind,
+
+    /// Metadata backend URL (sqlx only, e.g. sqlite::memory: or postgres://...).
     #[arg(long, value_name = "URL", default_value = "sqlite::memory:")]
     meta_url: String,
+
+    /// Etcd endpoint URLs (comma-separated).
+    #[arg(long, value_name = "URLS", value_delimiter = ',')]
+    meta_etcd_urls: Vec<String>,
 
     /// Chunk size in bytes.
     #[arg(long, default_value_t = DEFAULT_CHUNK_SIZE)]
@@ -52,6 +64,12 @@ struct MountArgs {
     /// Block size in bytes.
     #[arg(long, default_value_t = DEFAULT_BLOCK_SIZE)]
     block_size: u32,
+}
+
+#[derive(ValueEnum, Clone, Copy)]
+enum MetaBackendKind {
+    Sqlx,
+    Etcd,
 }
 
 #[tokio::main]
@@ -94,8 +112,7 @@ async fn mount_cmd(args: MountArgs) -> anyhow::Result<()> {
 
     let client = ObjectClient::new(LocalFsBackend::new(&args.data_dir));
     let store = ObjectBlockStore::new(client);
-    let meta_handle = create_meta_store_from_url(&args.meta_url).await?;
-    let meta_store = meta_handle.store();
+    let meta_store = create_meta_store(&args).await?;
 
     let fs = VFS::new(layout, store, meta_store)
         .await
@@ -107,4 +124,49 @@ async fn mount_cmd(args: MountArgs) -> anyhow::Result<()> {
     println!("unmounting...");
     handle.unmount().await?;
     Ok(())
+}
+
+async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore>> {
+    match args.meta_backend {
+        MetaBackendKind::Sqlx => {
+            let config = Config {
+                database: DatabaseConfig {
+                    db_config: database_type_from_url(&args.meta_url),
+                },
+                cache: CacheConfig::default(),
+                client: ClientOptions::default(),
+            };
+            let handle = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config).await?;
+            Ok(handle.store() as Arc<dyn MetaStore>)
+        }
+        MetaBackendKind::Etcd => {
+            if args.meta_etcd_urls.is_empty() {
+                anyhow::bail!("--meta-etcd-urls must be set when --meta-backend etcd");
+            }
+            let config = Config {
+                database: DatabaseConfig {
+                    db_config: DatabaseType::Etcd {
+                        urls: args.meta_etcd_urls.clone(),
+                    },
+                },
+                cache: CacheConfig::default(),
+                client: ClientOptions::default(),
+            };
+            let handle = MetaStoreFactory::<EtcdMetaStore>::create_from_config(config).await?;
+            Ok(handle.store() as Arc<dyn MetaStore>)
+        }
+    }
+}
+
+fn database_type_from_url(url: &str) -> DatabaseType {
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("postgres://") || lower.starts_with("postgresql://") {
+        DatabaseType::Postgres {
+            url: url.to_string(),
+        }
+    } else {
+        DatabaseType::Sqlite {
+            url: url.to_string(),
+        }
+    }
 }
