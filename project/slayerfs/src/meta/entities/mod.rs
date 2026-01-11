@@ -1,19 +1,19 @@
 // Core entities for decoupled metadata model
-pub mod access_meta;
-pub mod content_meta;
-pub mod etcd;
-pub mod file_meta;
-pub mod link_parent_meta;
-pub mod locks_meta;
-pub mod plock_meta;
-pub mod session_meta;
-pub mod slice_meta;
+pub(crate) mod access_meta;
+pub(crate) mod content_meta;
+pub(crate) mod etcd;
+pub(crate) mod file_meta;
+pub(crate) mod link_parent_meta;
+pub(crate) mod locks_meta;
+pub(crate) mod plock_meta;
+pub(crate) mod session_meta;
+pub(crate) mod slice_meta;
 
-pub use access_meta::{Entity as AccessMeta, Model as AccessMetaModel};
-pub use content_meta::{Entity as ContentMeta, EntryType, Model as ContentMetaModel};
-pub use file_meta::{Entity as FileMeta, Model as FileMetaModel};
-pub use link_parent_meta::Entity as LinkParentMeta;
-pub use locks_meta::Entity as LocksMeta;
-pub use plock_meta::Entity as PlockMeta;
+pub(crate) use access_meta::{Entity as AccessMeta, Model as AccessMetaModel};
+pub(crate) use content_meta::{Entity as ContentMeta, EntryType, Model as ContentMetaModel};
+pub(crate) use file_meta::{Entity as FileMeta, Model as FileMetaModel};
+pub(crate) use link_parent_meta::Entity as LinkParentMeta;
+pub(crate) use locks_meta::Entity as LocksMeta;
+pub(crate) use plock_meta::Entity as PlockMeta;
 #[allow(unused_imports)]
-pub use slice_meta::{Entity as SliceMeta, Model as SliceMetaModel};
+pub(crate) use slice_meta::{Entity as SliceMeta, Model as SliceMetaModel};

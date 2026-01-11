@@ -8,7 +8,7 @@ use crate::vfs::backend::Backend;
 use anyhow::Result;
 use futures_util::future::join_all;
 
-pub struct DataUploader<'a, B, M> {
+pub(crate) struct DataUploader<'a, B, M> {
     layout: ChunkLayout,
     id: u64,
     backend: &'a Backend<B, M>,
@@ -19,7 +19,7 @@ where
     B: BlockStore,
     M: MetaStore,
 {
-    pub fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
+    pub(crate) fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
         Self {
             layout,
             id,
@@ -28,7 +28,12 @@ where
     }
 
     /// Only write the data of a slice into the object storage. Callers must update metadata.
-    pub async fn write_at(&self, slice_id: u64, offset: u32, buf: &[u8]) -> Result<SliceDesc> {
+    pub(crate) async fn write_at(
+        &self,
+        slice_id: u64,
+        offset: u32,
+        buf: &[u8],
+    ) -> Result<SliceDesc> {
         let desc = SliceDesc {
             slice_id,
             chunk_id: self.id,

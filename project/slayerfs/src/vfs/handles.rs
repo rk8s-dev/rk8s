@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 
 /// Maximum entries to return per readdir/readdirplus call
 /// The setting should be based on the size of the cache handled by the kernel at one time.
-pub const MAX_READDIR_ENTRIES: usize = 50;
+const MAX_READDIR_ENTRIES: usize = 50;
 
 struct GateState {
     readers: u32,
@@ -156,15 +156,15 @@ where
 }
 
 #[allow(dead_code)]
-pub struct FileHandle<B, M>
+pub(crate) struct FileHandle<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    pub fh: u64,
-    pub ino: i64,
-    pub opened_at: Instant,
-    pub flags: HandleFlags,
+    pub(crate) fh: u64,
+    pub(crate) ino: i64,
+    pub(crate) opened_at: Instant,
+    pub(crate) flags: HandleFlags,
     gate: Arc<HandleGate>,
     state: StdMutex<FileHandleState<B, M>>,
 }
@@ -174,7 +174,7 @@ where
     B: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    pub fn new(fh: u64, ino: i64, attr: FileAttr, flags: HandleFlags) -> Self {
+    pub(crate) fn new(fh: u64, ino: i64, attr: FileAttr, flags: HandleFlags) -> Self {
         Self {
             fh,
             ino,
@@ -190,34 +190,34 @@ where
         }
     }
 
-    pub fn reader(&self, reader: Arc<FileReader<B, M>>) {
+    pub(crate) fn reader(&self, reader: Arc<FileReader<B, M>>) {
         let mut guard = self.state.lock().unwrap();
         guard.reader = Some(reader);
     }
 
-    pub fn writer(&self, writer: Arc<FileWriter<B, M>>) {
+    pub(crate) fn writer(&self, writer: Arc<FileWriter<B, M>>) {
         let mut guard = self.state.lock().unwrap();
         guard.writer = Some(writer);
     }
 
-    pub fn attr(&self) -> FileAttr {
+    pub(crate) fn attr(&self) -> FileAttr {
         self.state.lock().unwrap().attr.clone()
     }
 
-    pub fn update_attr(&self, attr: &FileAttr) {
+    pub(crate) fn update_attr(&self, attr: &FileAttr) {
         self.state.lock().unwrap().attr = attr.clone();
     }
 
-    pub fn update_offset(&self, offset: u64) {
+    pub(crate) fn update_offset(&self, offset: u64) {
         self.state.lock().unwrap().last_offset = offset;
     }
 
     #[allow(dead_code)]
-    pub fn last_offset(&self) -> u64 {
+    pub(crate) fn last_offset(&self) -> u64 {
         self.state.lock().unwrap().last_offset
     }
 
-    pub async fn read(&self, offset: u64, len: usize) -> anyhow::Result<Vec<u8>> {
+    pub(crate) async fn read(&self, offset: u64, len: usize) -> anyhow::Result<Vec<u8>> {
         let _guard = self.gate.read_lock().await;
         let reader = {
             let guard = self.state.lock().unwrap();
@@ -231,7 +231,7 @@ where
         Ok(data)
     }
 
-    pub async fn write(&self, offset: u64, data: &[u8]) -> anyhow::Result<usize> {
+    pub(crate) async fn write(&self, offset: u64, data: &[u8]) -> anyhow::Result<usize> {
         let _guard = self.gate.write_lock().await;
         let writer = {
             let guard = self.state.lock().unwrap();
@@ -245,7 +245,7 @@ where
         Ok(written)
     }
 
-    pub async fn flush(&self) -> anyhow::Result<()> {
+    pub(crate) async fn flush(&self) -> anyhow::Result<()> {
         let _guard = self.gate.write_lock().await;
         let writer = {
             let guard = self.state.lock().unwrap();
@@ -258,44 +258,44 @@ where
         Ok(())
     }
 
-    pub async fn lock_write(&self) -> FileHandleWriteGuard {
+    pub(crate) async fn lock_write(&self) -> FileHandleWriteGuard {
         let guard = self.gate.write_lock().await;
         FileHandleWriteGuard { _guard: guard }
     }
 }
 
-pub struct FileHandleWriteGuard {
+pub(crate) struct FileHandleWriteGuard {
     _guard: HandleWriteGuard,
 }
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
-pub struct HandleFlags {
-    pub read: bool,
-    pub write: bool,
+pub(crate) struct HandleFlags {
+    pub(crate) read: bool,
+    pub(crate) write: bool,
 }
 
 impl HandleFlags {
-    pub const fn new(read: bool, write: bool) -> Self {
+    pub(crate) const fn new(read: bool, write: bool) -> Self {
         Self { read, write }
     }
 }
 
 /// Directory handle for caching directory listing during opendir-releasedir lifecycle
-pub struct DirHandle {
-    pub ino: i64,
-    pub entries: Vec<DirEntry>,
+pub(crate) struct DirHandle {
+    pub(crate) ino: i64,
+    pub(crate) entries: Vec<DirEntry>,
     #[allow(dead_code)]
-    pub opened_at: Instant,
+    pub(crate) opened_at: Instant,
     /// Background task handle for batch attribute prefetching
-    pub prefetch_task: Option<JoinHandle<()>>,
+    pub(crate) prefetch_task: Option<JoinHandle<()>>,
     /// Flag indicating whether prefetch task has completed
-    pub prefetch_done: Arc<AtomicBool>,
+    pub(crate) prefetch_done: Arc<AtomicBool>,
 }
 
 impl DirHandle {
     #[allow(unused)]
-    pub fn new(ino: i64, entries: Vec<DirEntry>) -> Self {
+    pub(crate) fn new(ino: i64, entries: Vec<DirEntry>) -> Self {
         Self {
             ino,
             entries,
@@ -305,7 +305,7 @@ impl DirHandle {
         }
     }
 
-    pub fn with_prefetch_task(
+    pub(crate) fn with_prefetch_task(
         ino: i64,
         entries: Vec<DirEntry>,
         task: JoinHandle<()>,
@@ -321,7 +321,7 @@ impl DirHandle {
     }
 
     /// Get entries starting from offset, limited to MAX_READDIR_ENTRIES
-    pub fn get_entries(&self, offset: u64) -> Vec<DirEntry> {
+    pub(crate) fn get_entries(&self, offset: u64) -> Vec<DirEntry> {
         let start = offset as usize;
         if start >= self.entries.len() {
             return Vec::new();
@@ -332,13 +332,13 @@ impl DirHandle {
 
     /// Get total number of entries
     #[allow(dead_code)]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if directory is empty
     #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 }

@@ -15,7 +15,7 @@
 //! Submodules:
 //! - `worker`: background worker implementations (upload, gc, compaction)
 //! - `supervisor`: supervisor utilities for managing worker lifecycles
-pub mod supervisor;
+pub(crate) mod supervisor;
 pub mod worker;
 
 // Module implementation TODOs remain.

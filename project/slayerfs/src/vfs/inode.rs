@@ -5,14 +5,14 @@ use tokio::sync::watch;
 /// Slayerfs ensure `close-to-open` semantics, that is to say, each `open` operation must see
 /// the newest file states. Otherwise, it is permitted to see stale states.
 #[derive(Clone)]
-pub struct Inode {
+pub(crate) struct Inode {
     ino: i64,
     length_rx: watch::Receiver<u64>,
     length_tx: watch::Sender<u64>,
 }
 
 impl Inode {
-    pub fn new(ino: i64, size: u64) -> Arc<Inode> {
+    pub(crate) fn new(ino: i64, size: u64) -> Arc<Inode> {
         let (tx, rx) = watch::channel(size);
 
         Arc::new(Self {
@@ -22,15 +22,15 @@ impl Inode {
         })
     }
 
-    pub fn ino(&self) -> i64 {
+    pub(crate) fn ino(&self) -> i64 {
         self.ino
     }
 
-    pub fn file_size(&self) -> u64 {
+    pub(crate) fn file_size(&self) -> u64 {
         *self.length_rx.borrow()
     }
 
-    pub fn update_size(&self, new_size: u64) {
+    pub(crate) fn update_size(&self, new_size: u64) {
         self.length_tx
             .send(new_size)
             .expect("Inode invariant violated: all receivers dropped in update_size");

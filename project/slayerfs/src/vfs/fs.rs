@@ -202,7 +202,7 @@ where
 }
 
 #[allow(dead_code)]
-pub struct VfsCore<S, M>
+pub(crate) struct VfsCore<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
@@ -218,7 +218,7 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    fn new(
+    pub(crate) fn new(
         layout: ChunkLayout,
         backend: Arc<Backend<S, M>>,
         meta_layer: Arc<MetaClient<M>>,
@@ -234,10 +234,10 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct MetaClientConfig {
-    pub capacity: CacheCapacity,
-    pub ttl: CacheTtl,
-    pub options: MetaClientOptions,
+pub(crate) struct MetaClientConfig {
+    pub(crate) capacity: CacheCapacity,
+    pub(crate) ttl: CacheTtl,
+    pub(crate) options: MetaClientOptions,
 }
 
 impl Default for MetaClientConfig {
@@ -292,7 +292,7 @@ where
         Self::from_components(config, store, meta, meta_client)
     }
 
-    pub async fn with_meta_layer(
+    pub(crate) async fn with_meta_layer(
         layout: ChunkLayout,
         store: S,
         meta: M,
@@ -320,7 +320,7 @@ where
         Ok(Self { core, state })
     }
 
-    pub async fn with_meta_client_config(
+    pub(crate) async fn with_meta_client_config(
         layout: ChunkLayout,
         store: S,
         meta: M,
@@ -349,22 +349,22 @@ where
         Self::from_components(VFSConfig::new(layout), store, meta, meta_layer)
     }
 
-    pub fn root_ino(&self) -> i64 {
+    pub(crate) fn root_ino(&self) -> i64 {
         self.core.root
     }
 
     /// get the node's parent inode.
-    pub async fn parent_of(&self, ino: i64) -> Option<i64> {
+    pub(crate) async fn parent_of(&self, ino: i64) -> Option<i64> {
         self.core.meta_layer.get_parent(ino).await.ok().flatten()
     }
 
     /// get the node's fullpath.
-    pub async fn path_of(&self, ino: i64) -> Option<String> {
+    pub(crate) async fn path_of(&self, ino: i64) -> Option<String> {
         self.core.meta_layer.get_path(ino).await.ok().flatten()
     }
 
     /// get the node's child inode by name.
-    pub async fn child_of(&self, parent: i64, name: &str) -> Option<i64> {
+    pub(crate) async fn child_of(&self, parent: i64, name: &str) -> Option<i64> {
         self.core
             .meta_layer
             .lookup(parent, name)
@@ -373,12 +373,12 @@ where
             .flatten()
     }
 
-    pub async fn stat_ino(&self, ino: i64) -> Option<FileAttr> {
+    pub(crate) async fn stat_ino(&self, ino: i64) -> Option<FileAttr> {
         self.core.meta_layer.stat(ino).await.ok().flatten()
     }
 
     /// Update atime (access time) for an inode to current time
-    pub async fn update_atime(&self, ino: i64) -> Result<(), VfsError> {
+    pub(crate) async fn update_atime(&self, ino: i64) -> Result<(), VfsError> {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let now = SystemTime::now()
@@ -409,7 +409,7 @@ where
     /// Update mtime and ctime for an inode to current time
     /// This is called during flush/fsync to handle mmap writes where the kernel
     /// doesn't call the write() callback
-    pub async fn update_mtime_ctime(&self, ino: i64) -> Result<(), VfsError> {
+    pub(crate) async fn update_mtime_ctime(&self, ino: i64) -> Result<(), VfsError> {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let now = SystemTime::now()
@@ -440,7 +440,7 @@ where
     }
 
     /// List directory entries by inode
-    pub async fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
+    pub(crate) async fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
         let meta_entries = self.core.meta_layer.readdir(ino).await.ok()?;
 
         let entries: Vec<DirEntry> = meta_entries
@@ -721,7 +721,7 @@ where
     }
 
     /// Read a symlink target by inode.
-    pub async fn readlink_ino(&self, ino: i64) -> Result<String, VfsError> {
+    pub(crate) async fn readlink_ino(&self, ino: i64) -> Result<String, VfsError> {
         let attr = self
             .core
             .meta_layer
@@ -1284,7 +1284,7 @@ where
     }
 
     /// Update cached information about a handle (e.g. last observed offset).
-    pub async fn touch_handle_offset(&self, fh: u64, offset: u64) -> Result<(), VfsError> {
+    pub(crate) async fn touch_handle_offset(&self, fh: u64, offset: u64) -> Result<(), VfsError> {
         self.state
             .handles
             .get(fh)
@@ -1294,30 +1294,30 @@ where
     }
 
     /// List all open handles for an inode.
-    pub async fn handles_for(&self, ino: i64) -> Vec<u64> {
+    pub(crate) async fn handles_for(&self, ino: i64) -> Vec<u64> {
         self.state.handles.handles_for(ino).await
     }
 
-    pub async fn handle_attr(&self, fh: u64) -> Option<FileAttr> {
+    pub(crate) async fn handle_attr(&self, fh: u64) -> Option<FileAttr> {
         self.state.handles.attr_for(fh).await
     }
 
-    pub async fn handle_attr_by_ino(&self, ino: i64) -> Option<FileAttr> {
+    pub(crate) async fn handle_attr_by_ino(&self, ino: i64) -> Option<FileAttr> {
         self.state.handles.attr_for_inode(ino).await
     }
 
     /// Check whether a file has been modified since a given point in time.
-    pub async fn modified_since(&self, ino: i64, since: Instant) -> bool {
+    pub(crate) async fn modified_since(&self, ino: i64, since: Instant) -> bool {
         self.state.modified.modified_since(ino, since).await
     }
 
     /// Drop modification markers older than `ttl` to keep the tracker bounded.
-    pub async fn cleanup_modified(&self, ttl: Duration) {
+    pub(crate) async fn cleanup_modified(&self, ttl: Duration) {
         self.state.modified.cleanup_older_than(ttl).await;
     }
 
     /// Get file lock information for a given inode and query.
-    pub async fn get_plock_ino(
+    pub(crate) async fn get_plock_ino(
         &self,
         inode: i64,
         query: &FileLockQuery,
@@ -1330,7 +1330,7 @@ where
     }
 
     /// Set file lock for a given inode.
-    pub async fn set_plock_ino(
+    pub(crate) async fn set_plock_ino(
         &self,
         inode: i64,
         owner: i64,
@@ -1399,7 +1399,7 @@ where
     /// Update timestamps on flush/fsync for files that may have been modified via mmap.
     /// This is necessary because the kernel doesn't call write() for mmap writes.
     /// We only update if the file was opened for writing.
-    pub async fn update_timestamps_on_flush(&self, ino: i64) -> Result<(), VfsError> {
+    pub(crate) async fn update_timestamps_on_flush(&self, ino: i64) -> Result<(), VfsError> {
         // Check if any handle for this inode was opened for writing
         let has_write_handle = self.state.handles.has_write_handle(ino).await;
 

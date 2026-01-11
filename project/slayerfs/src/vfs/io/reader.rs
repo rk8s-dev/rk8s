@@ -22,7 +22,7 @@ use std::sync::Mutex as StdMutex;
 use tokio::sync::{Mutex, Notify};
 
 #[allow(clippy::type_complexity)]
-pub struct DataReader<B, M> {
+pub(crate) struct DataReader<B, M> {
     config: Arc<ReadConfig>,
     // per-handle readers, grouped by inode
     files: DashMap<u64, Vec<(u64, Arc<FileReader<B, M>>)>>, // ino -> (fh, reader)
@@ -34,7 +34,7 @@ where
     B: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    pub fn new(config: Arc<ReadConfig>, backend: Arc<Backend<B, M>>) -> Self {
+    pub(crate) fn new(config: Arc<ReadConfig>, backend: Arc<Backend<B, M>>) -> Self {
         Self {
             config,
             files: DashMap::new(),
@@ -42,7 +42,7 @@ where
         }
     }
 
-    pub fn open_for_handle(&self, ino: Arc<Inode>, fh: u64) -> Arc<FileReader<B, M>> {
+    pub(crate) fn open_for_handle(&self, ino: Arc<Inode>, fh: u64) -> Arc<FileReader<B, M>> {
         let ino_number = ino.ino();
         let reader = Arc::new(FileReader::new(
             self.config.clone(),
@@ -57,7 +57,7 @@ where
         reader
     }
 
-    pub fn close_for_handle(&self, ino: u64, fh: u64) {
+    pub(crate) fn close_for_handle(&self, ino: u64, fh: u64) {
         if let Some(mut entry) = self.files.get_mut(&ino) {
             entry.retain(|(id, _)| *id != fh);
             let empty = entry.is_empty();
@@ -69,7 +69,7 @@ where
     }
 
     #[allow(dead_code)]
-    pub fn reader_for_handle(&self, ino: u64, fh: u64) -> Option<Arc<FileReader<B, M>>> {
+    pub(crate) fn reader_for_handle(&self, ino: u64, fh: u64) -> Option<Arc<FileReader<B, M>>> {
         self.files.get(&ino).and_then(|entry| {
             entry
                 .iter()
@@ -78,7 +78,7 @@ where
         })
     }
 
-    pub async fn invalidate(&self, ino: u64, offset: u64, len: usize) -> anyhow::Result<()> {
+    pub(crate) async fn invalidate(&self, ino: u64, offset: u64, len: usize) -> anyhow::Result<()> {
         let readers = match self.files.get(&ino) {
             Some(entry) => entry.iter().map(|(_, reader)| reader.clone()).collect(),
             None => Vec::new(),
@@ -90,7 +90,7 @@ where
         Ok(())
     }
 
-    pub async fn invalidate_all(&self, ino: u64) {
+    pub(crate) async fn invalidate_all(&self, ino: u64) {
         let readers = match self.files.get(&ino) {
             Some(entry) => entry.iter().map(|(_, reader)| reader.clone()).collect(),
             None => Vec::new(),
@@ -227,7 +227,7 @@ impl Drop for SliceRef {
     }
 }
 
-pub struct FileReader<B, M> {
+pub(crate) struct FileReader<B, M> {
     config: Arc<ReadConfig>,
     inode: Arc<Inode>,
     slices: Mutex<VecDeque<Arc<StdMutex<SliceState>>>>,
@@ -239,7 +239,11 @@ where
     B: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    pub fn new(config: Arc<ReadConfig>, inode: Arc<Inode>, backend: Arc<Backend<B, M>>) -> Self {
+    pub(crate) fn new(
+        config: Arc<ReadConfig>,
+        inode: Arc<Inode>,
+        backend: Arc<Backend<B, M>>,
+    ) -> Self {
         Self {
             config,
             inode,
@@ -248,7 +252,7 @@ where
         }
     }
 
-    pub async fn read(&self, offset: u64, len: usize) -> anyhow::Result<Vec<u8>> {
+    pub(crate) async fn read(&self, offset: u64, len: usize) -> anyhow::Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -258,7 +262,7 @@ where
         Ok(buf)
     }
 
-    pub async fn read_at(&self, offset: u64, buf: &mut [u8]) -> anyhow::Result<usize> {
+    pub(crate) async fn read_at(&self, offset: u64, buf: &mut [u8]) -> anyhow::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
         }

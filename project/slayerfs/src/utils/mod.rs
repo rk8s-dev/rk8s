@@ -1,3 +1,3 @@
 mod intervals;
 
-pub use intervals::*;
+pub(crate) use intervals::*;

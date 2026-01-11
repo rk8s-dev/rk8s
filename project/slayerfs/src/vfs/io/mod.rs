@@ -3,10 +3,10 @@ use crate::chuck::{ChunkLayout, ChunkSpan, ChunkTag};
 mod reader;
 mod writer;
 
-pub use reader::DataReader;
-pub use reader::FileReader;
-pub use writer::DataWriter;
-pub use writer::FileWriter;
+pub(crate) use reader::DataReader;
+pub(crate) use reader::FileReader;
+pub(crate) use writer::DataWriter;
+pub(crate) use writer::FileWriter;
 
 pub(crate) fn split_chunk_spans(layout: ChunkLayout, offset: u64, len: usize) -> Vec<ChunkSpan> {
     if len == 0 {

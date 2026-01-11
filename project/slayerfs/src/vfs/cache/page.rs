@@ -13,7 +13,7 @@ pub(crate) struct CacheSlice {
 }
 
 impl CacheSlice {
-    pub fn new(config: Arc<WriteConfig>) -> Self {
+    pub(crate) fn new(config: Arc<WriteConfig>) -> Self {
         assert_eq!(
             config.layout.block_size % config.page_size,
             0,
@@ -33,7 +33,7 @@ impl CacheSlice {
     }
 
     /// Append a buffer behind the latest page. The buffer length must not exceed the remaining length.
-    pub fn append(&mut self, buf: &[u8]) -> anyhow::Result<()> {
+    pub(crate) fn append(&mut self, buf: &[u8]) -> anyhow::Result<()> {
         let max_len = self.config.layout.chunk_size;
         let next_len = self.len as u64 + buf.len() as u64;
         anyhow::ensure!(next_len <= max_len, "append exceeds chunk size");
@@ -53,15 +53,15 @@ impl CacheSlice {
         Ok(())
     }
 
-    pub fn len(&self) -> u32 {
+    pub(crate) fn len(&self) -> u32 {
         self.len
     }
 
-    pub fn can_append(&self, offset: u32) -> bool {
+    pub(crate) fn can_append(&self, offset: u32) -> bool {
         self.len == offset
     }
 
-    pub fn collect_pages(&self) -> Vec<u8> {
+    pub(crate) fn collect_pages(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.len as usize);
         let mut remaining = self.len as usize;
         for block in &self.pages {
@@ -106,7 +106,7 @@ pub(crate) struct Page {
 }
 
 impl Page {
-    pub fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize) -> Self {
         Self {
             data: BytesMut::zeroed(size),
         }

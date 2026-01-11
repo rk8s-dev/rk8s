@@ -11,7 +11,7 @@ use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use std::cmp::{max, min};
 
-pub struct DataFetcher<'a, B, M> {
+pub(crate) struct DataFetcher<'a, B, M> {
     layout: ChunkLayout,
     id: u64,
     slices: Vec<SliceDesc>,
@@ -24,7 +24,7 @@ where
     B: BlockStore,
     M: MetaStore,
 {
-    pub fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
+    pub(crate) fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
         Self {
             layout,
             id,
@@ -34,13 +34,13 @@ where
         }
     }
 
-    pub async fn prepare_slices(&mut self) -> anyhow::Result<()> {
+    pub(crate) async fn prepare_slices(&mut self) -> anyhow::Result<()> {
         self.slices = self.backend.meta().get_slices(self.id).await?;
         self.prepared = true;
         Ok(())
     }
 
-    pub async fn read_at(&mut self, offset: u32, len: usize) -> Result<Vec<u8>> {
+    pub(crate) async fn read_at(&mut self, offset: u32, len: usize) -> Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }

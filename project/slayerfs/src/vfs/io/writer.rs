@@ -74,7 +74,7 @@ pub(crate) struct SliceState {
 }
 
 impl SliceState {
-    pub fn new(chunk_id: u64, offset: u32, config: Arc<WriteConfig>) -> Self {
+    pub(crate) fn new(chunk_id: u64, offset: u32, config: Arc<WriteConfig>) -> Self {
         let now = Instant::now();
         Self {
             state: SliceStatus::Writeable,
@@ -89,18 +89,18 @@ impl SliceState {
         }
     }
 
-    pub fn append(&mut self, buf: &[u8]) -> anyhow::Result<()> {
+    pub(crate) fn append(&mut self, buf: &[u8]) -> anyhow::Result<()> {
         self.data.append(buf)?;
         self.last_mod = Instant::now();
         Ok(())
     }
 
-    pub fn can_append(&self, offset: u32) -> bool {
+    pub(crate) fn can_append(&self, offset: u32) -> bool {
         matches!(self.state, SliceStatus::Writeable) && self.data.can_append(offset)
     }
 }
 
-pub struct ChunkState {
+pub(crate) struct ChunkState {
     /// ID of the chunk.
     chunk_id: u64,
     slices: VecDeque<Arc<StdMutex<SliceState>>>,
@@ -108,7 +108,7 @@ pub struct ChunkState {
 }
 
 impl ChunkState {
-    pub fn new(id: u64) -> Self {
+    pub(crate) fn new(id: u64) -> Self {
         Self {
             chunk_id: id,
             slices: VecDeque::new(),
@@ -414,7 +414,7 @@ where
     B: BlockStore,
     M: MetaStore,
 {
-    pub fn new(
+    pub(crate) fn new(
         inode: Arc<Inode>,
         config: Arc<WriteConfig>,
         backend: Arc<Backend<B, M>>,
@@ -476,7 +476,7 @@ impl Inner {
     }
 }
 
-pub struct FileWriter<B, M> {
+pub(crate) struct FileWriter<B, M> {
     shared: Arc<Shared<B, M>>,
 }
 
@@ -485,7 +485,7 @@ where
     B: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    pub fn new(
+    pub(crate) fn new(
         inode: Arc<Inode>,
         config: Arc<WriteConfig>,
         backend: Arc<Backend<B, M>>,
@@ -499,7 +499,7 @@ where
 
     // Write path: split into chunk spans, append to per-chunk slices, and possibly
     // trigger background flush/commit. Updates in-memory inode size at the end.
-    pub async fn write_at(&self, offset: u64, buf: &[u8]) -> anyhow::Result<usize> {
+    pub(crate) async fn write_at(&self, offset: u64, buf: &[u8]) -> anyhow::Result<usize> {
         let mut guard = self.shared.inner.lock().await;
 
         // Wait for any ongoing flush to finish. This serializes writes with flush().
@@ -545,7 +545,7 @@ where
 
     // Flush: freeze all slices, upload them, and wait for commit threads to drain.
     // This blocks new writes until flushing completes (flush_waiting gate).
-    pub async fn flush(&self) -> anyhow::Result<()> {
+    pub(crate) async fn flush(&self) -> anyhow::Result<()> {
         {
             let mut guard = self.shared.inner.lock().await;
             guard.flush_waiting += 1;
@@ -609,7 +609,7 @@ where
         result
     }
 
-    pub async fn clear(&self) {
+    pub(crate) async fn clear(&self) {
         let mut guard = self.shared.inner.lock().await;
         guard.chunks.clear();
         if guard.flush_waiting > 0 {
@@ -617,7 +617,7 @@ where
         }
     }
 
-    pub async fn has_pending(&self) -> bool {
+    pub(crate) async fn has_pending(&self) -> bool {
         let guard = self.shared.inner.lock().await;
         guard.has_chunks()
     }
@@ -901,7 +901,7 @@ where
     }
 }
 
-pub struct DataWriter<B, M> {
+pub(crate) struct DataWriter<B, M> {
     config: Arc<WriteConfig>,
     backend: Arc<Backend<B, M>>,
     reader: Arc<DataReader<B, M>>,
@@ -913,7 +913,7 @@ where
     B: BlockStore + Send + Sync + 'static,
     M: MetaStore + Send + Sync + 'static,
 {
-    pub fn new(
+    pub(crate) fn new(
         config: Arc<WriteConfig>,
         backend: Arc<Backend<B, M>>,
         reader: Arc<DataReader<B, M>>,
@@ -926,7 +926,7 @@ where
         }
     }
 
-    pub fn ensure_file(&self, inode: Arc<Inode>) -> Arc<FileWriter<B, M>> {
+    pub(crate) fn ensure_file(&self, inode: Arc<Inode>) -> Arc<FileWriter<B, M>> {
         self.files
             .entry(inode.ino() as u64)
             .or_insert_with(|| {
@@ -940,7 +940,7 @@ where
             .clone()
     }
 
-    pub fn start_flush_background(self: &Arc<Self>) {
+    pub(crate) fn start_flush_background(self: &Arc<Self>) {
         let flush_interval = self.config.flush_all_interval;
         let weak = Arc::downgrade(self);
         tokio::spawn(async move {
@@ -955,7 +955,7 @@ where
         });
     }
 
-    pub async fn flush_if_exists(&self, ino: u64) {
+    pub(crate) async fn flush_if_exists(&self, ino: u64) {
         let writer = self.files.get(&ino).map(|entry| entry.value().clone());
         if let Some(writer) = writer
             && writer.has_pending().await
@@ -964,14 +964,14 @@ where
         }
     }
 
-    pub async fn clear(&self, ino: u64) {
+    pub(crate) async fn clear(&self, ino: u64) {
         let writer = self.files.get(&ino).map(|entry| entry.value().clone());
         if let Some(writer) = writer {
             writer.clear().await;
         }
     }
 
-    pub fn release(&self, ino: u64) {
+    pub(crate) fn release(&self, ino: u64) {
         self.files.remove(&ino);
     }
 

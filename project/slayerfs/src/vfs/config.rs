@@ -65,7 +65,7 @@ impl WriteConfig {
 pub struct VFSConfig {
     pub read: Arc<ReadConfig>,
     pub write: Arc<WriteConfig>,
-    pub meta: MetaClientConfig,
+    pub(crate) meta: MetaClientConfig,
 }
 
 #[allow(dead_code)]
