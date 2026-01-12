@@ -1,9 +1,9 @@
-use std::net::{IpAddr, Ipv4Addr};
-use serde::{Deserialize, Serialize};
+use cni_plugin::ip_range::IpRange;
+use ipnetwork::{IpNetwork, Ipv4Network};
 use libipam::config::IPAMConfig;
 use libipam::range_set::RangeSet;
-use ipnetwork::{IpNetwork, Ipv4Network};
-use cni_plugin::ip_range::IpRange;
+use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr};
 
 pub const CNI_VERSION: &str = "1.0.0";
 pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
