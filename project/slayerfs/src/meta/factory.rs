@@ -93,6 +93,7 @@ impl MetaStoreFactory<DatabaseMetaStore> {
                 .client
                 .session_heartbeat
                 .unwrap_or_else(|| MetaClientOptions::default().session_heartbeat),
+            max_symlinks: config.client.max_symlinks,
             ..MetaClientOptions::default()
         };
 
@@ -148,6 +149,7 @@ impl MetaStoreFactory<RedisMetaStore> {
                 .client
                 .session_heartbeat
                 .unwrap_or_else(|| MetaClientOptions::default().session_heartbeat),
+            max_symlinks: config.client.max_symlinks,
             ..MetaClientOptions::default()
         };
 
@@ -201,6 +203,7 @@ impl MetaStoreFactory<EtcdMetaStore> {
                 .client
                 .session_heartbeat
                 .unwrap_or_else(|| MetaClientOptions::default().session_heartbeat),
+            max_symlinks: config.client.max_symlinks,
             ..MetaClientOptions::default()
         };
 

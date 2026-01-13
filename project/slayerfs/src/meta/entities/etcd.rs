@@ -82,17 +82,25 @@ impl EtcdEntryInfo {
     ///
     /// FileAttr suitable for direct cache insertion
     pub fn to_file_attr(&self, ino: i64) -> FileAttr {
-        let kind = if self.symlink_target.is_some() {
-            FileType::Symlink
-        } else if self.is_file {
-            FileType::File
+        let (kind, size) = if self.is_file {
+            let file_type = if self.symlink_target.is_some() {
+                FileType::Symlink
+            } else {
+                FileType::File
+            };
+            let file_size = if let Some(target) = &self.symlink_target {
+                target.len() as u64
+            } else {
+                self.size.unwrap_or(0).max(0) as u64
+            };
+            (file_type, file_size)
         } else {
-            FileType::Dir
+            (FileType::Dir, 4096)
         };
 
         FileAttr {
             ino,
-            size: self.size.unwrap_or(0).max(0) as u64,
+            size,
             kind,
             mode: self.permission.mode,
             uid: self.permission.uid,
@@ -122,4 +130,10 @@ pub struct EtcdPlock {
     pub sid: Uuid,
     pub owner: i64,
     pub records: Vec<PlockRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EtcdLinkParent {
+    pub parent_inode: i64,
+    pub entry_name: String,
 }

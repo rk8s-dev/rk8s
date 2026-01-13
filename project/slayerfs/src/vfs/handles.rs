@@ -2,7 +2,10 @@
 
 use crate::meta::store::FileAttr;
 use crate::vfs::fs::DirEntry;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use tokio::task::JoinHandle;
 
 /// Maximum entries to return per readdir/readdirplus call
 /// The setting should be based on the size of the cache handled by the kernel at one time.
@@ -45,20 +48,41 @@ impl HandleFlags {
 }
 
 /// Directory handle for caching directory listing during opendir-releasedir lifecycle
-#[derive(Clone)]
 pub struct DirHandle {
     pub ino: i64,
     pub entries: Vec<DirEntry>,
     #[allow(dead_code)]
     pub opened_at: Instant,
+    /// Background task handle for batch attribute prefetching
+    pub prefetch_task: Option<JoinHandle<()>>,
+    /// Flag indicating whether prefetch task has completed
+    pub prefetch_done: Arc<AtomicBool>,
 }
 
 impl DirHandle {
+    #[allow(unused)]
     pub fn new(ino: i64, entries: Vec<DirEntry>) -> Self {
         Self {
             ino,
             entries,
             opened_at: Instant::now(),
+            prefetch_task: None,
+            prefetch_done: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn with_prefetch_task(
+        ino: i64,
+        entries: Vec<DirEntry>,
+        task: JoinHandle<()>,
+        done_flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            ino,
+            entries,
+            opened_at: Instant::now(),
+            prefetch_task: Some(task),
+            prefetch_done: done_flag,
         }
     }
 
@@ -82,5 +106,18 @@ impl DirHandle {
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+}
+
+impl Drop for DirHandle {
+    fn drop(&mut self) {
+        // Abort prefetch task if still running
+        if let Some(task) = self.prefetch_task.take() {
+            let is_done = self.prefetch_done.load(Ordering::Acquire);
+            if !is_done {
+                tracing::trace!("Aborting prefetch task for dir ino={}", self.ino);
+                task.abort();
+            }
+        }
     }
 }

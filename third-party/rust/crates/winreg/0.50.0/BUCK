@@ -23,6 +23,7 @@ rust_library(
     crate = "winreg",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
+    compatible_with = ["prelude//os:windows"],
     rustc_flags = ["@$(location :winreg-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [

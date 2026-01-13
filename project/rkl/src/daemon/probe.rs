@@ -869,6 +869,11 @@ mod tests {
                         ..Probe::default()
                     }),
                     startup_probe: None,
+                    security_context: None,
+                    env: None,
+                    volume_mounts: None,
+                    command: None,
+                    working_dir: None,
                 }],
                 init_containers: vec![],
                 tolerations: vec![],

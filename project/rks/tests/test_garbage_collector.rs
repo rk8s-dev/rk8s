@@ -63,6 +63,11 @@ fn pod_with_meta(name: &str, uid: Uuid, owners: Option<Vec<OwnerReference>>) -> 
         }),
         liveness_probe: None,
         readiness_probe: None,
+        security_context: None,
+        env: None,
+        volume_mounts: None,
+        command: None,
+        working_dir: None,
         startup_probe: None,
     };
 
@@ -132,6 +137,11 @@ fn replicaset_with_meta(name: &str, uid: Uuid, replicas: i32) -> ReplicaSet {
                         liveness_probe: None,
                         readiness_probe: None,
                         startup_probe: None,
+                        security_context: None,
+                        env: None,
+                        volume_mounts: None,
+                        command: None,
+                        working_dir: None,
                     }],
                     init_containers: vec![],
                     tolerations: vec![],

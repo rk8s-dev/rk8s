@@ -233,6 +233,11 @@ impl ComposeManager {
                     liveness_probe: None,
                     readiness_probe: None,
                     startup_probe: None,
+                    security_context: None,
+                    env: None,
+                    volume_mounts: None,
+                    command: None,
+                    working_dir: None,
                 };
 
                 // handle the services volume name

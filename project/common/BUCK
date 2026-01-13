@@ -32,6 +32,7 @@ rust_library(
         "//third-party/rust/crates/chrono/0.4.42:chrono",
         "//third-party/rust/crates/etcd-client/0.17.0:etcd-client",
         "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork",
+        "//third-party/rust/crates/libcontainer/0.5.7:libcontainer",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/quinn/0.11.9:quinn",
         "//third-party/rust/crates/serde/1.0.228:serde",

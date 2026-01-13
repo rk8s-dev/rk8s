@@ -45,74 +45,9 @@ pub struct SliceDesc {
     pub length: u32,
 }
 
-fn block_span_iter(desc: SliceDesc, layout: ChunkLayout) -> impl Iterator<Item = BlockSpan> {
+pub fn block_span_iter(desc: SliceDesc, layout: ChunkLayout) -> impl Iterator<Item = BlockSpan> {
     let chunk_span = Span::<ChunkTag>::new(0, desc.offset, desc.length);
     chunk_span.split_into::<BlockTag>(layout.chunk_size, layout.block_size as u64, true)
-}
-
-pub struct Write;
-
-pub struct Read;
-
-pub struct SliceIO<'a, State, B> {
-    desc: SliceDesc,
-    layout: ChunkLayout,
-    store: &'a B,
-    _io_mode: PhantomData<State>,
-}
-
-impl<'a, State, B> SliceIO<'a, State, B>
-where
-    B: BlockStore,
-{
-    pub fn new(desc: SliceDesc, layout: ChunkLayout, store: &'a B) -> SliceIO<'a, State, B> {
-        Self {
-            desc,
-            layout,
-            store,
-            _io_mode: PhantomData,
-        }
-    }
-}
-
-impl<'a, B> SliceIO<'a, Write, B>
-where
-    B: BlockStore,
-{
-    pub async fn write(&self, buf: &[u8]) -> anyhow::Result<SliceDesc> {
-        let mut cursor = 0;
-
-        for (index, span) in block_span_iter(self.desc, self.layout).enumerate() {
-            let take = span.len as usize;
-            let data = &buf[cursor..(cursor + take)];
-
-            self.store
-                .write_range((self.desc.slice_id, index as u32), span.offset, data)
-                .await?;
-            cursor += take;
-        }
-        Ok(self.desc)
-    }
-}
-
-impl<'a, B> SliceIO<'a, Read, B>
-where
-    B: BlockStore,
-{
-    pub async fn read(&self, buf: &mut [u8]) -> anyhow::Result<()> {
-        debug_assert_eq!(buf.len(), self.desc.length as usize);
-        let mut cursor = 0usize;
-
-        for (index, span) in block_span_iter(self.desc, self.layout).enumerate() {
-            let take = span.len as usize;
-            let out = &mut buf[cursor..cursor + take];
-            self.store
-                .read_range((self.desc.slice_id, index as u32), span.offset, out)
-                .await?;
-            cursor += take;
-        }
-        Ok(())
-    }
 }
 
 pub fn key_for_slice(chunk_id: u64) -> String {

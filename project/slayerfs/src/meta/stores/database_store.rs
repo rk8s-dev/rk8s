@@ -5,6 +5,7 @@
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
+use crate::meta::entities::link_parent_meta;
 use crate::meta::entities::session_meta::{self, Entity as SessionMeta};
 use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
 use crate::meta::entities::*;
@@ -20,8 +21,13 @@ use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::{Duration as ChronoDuration, Utc};
 use log::info;
+use sea_orm::ActiveValue::{self, Set, Unchanged};
 use sea_orm::prelude::Uuid;
-use sea_orm::*;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
+    EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, Schema,
+    TransactionTrait, sea_query,
+};
 use sea_query::Index;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -29,6 +35,9 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use tokio::select;
+use tokio_util::sync::CancellationToken;
+use tracing::error;
 
 #[derive(Eq, Hash, PartialEq)]
 struct PlockHashMapKey {
@@ -138,16 +147,33 @@ impl DatabaseMetaStore {
             DatabaseType::Sqlite { url } => {
                 info!("Connecting to SQLite: {}", url);
                 let mut opts = ConnectOptions::new(url.clone());
-                opts.max_connections(1)
-                    .min_connections(1)
-                    .connect_timeout(Duration::from_secs(30))
-                    .idle_timeout(Duration::from_secs(30));
+                // SQLite named shared memory (sqlite:file::memory:) needs single connection
+                // SQLite anonymous in-memory (sqlite::memory:) can use multiple connections
+                // Check for file::memory: first (more specific) before ::memory: (more general)
+                if url.contains("file::memory:") {
+                    // Named shared memory databases require exactly 1 connection
+                    opts.max_connections(1).min_connections(1);
+                } else if url.contains("::memory:") {
+                    // Anonymous in-memory databases can use multiple connections for tests
+                    opts.max_connections(5).min_connections(1);
+                } else {
+                    // File-based databases can use more connections
+                    opts.max_connections(10).min_connections(1);
+                }
+                opts.connect_timeout(Duration::from_secs(30))
+                    .idle_timeout(Duration::from_secs(30))
+                    .acquire_timeout(Duration::from_secs(30));
                 let db = Database::connect(opts).await?;
                 Ok(db)
             }
             DatabaseType::Postgres { url } => {
                 info!("Connecting to PostgreSQL: {}", url);
-                let opts = ConnectOptions::new(url.clone());
+                let mut opts = ConnectOptions::new(url.clone());
+                opts.max_connections(20)
+                    .min_connections(2)
+                    .connect_timeout(Duration::from_secs(30))
+                    .idle_timeout(Duration::from_secs(30))
+                    .acquire_timeout(Duration::from_secs(30));
                 let db = Database::connect(opts).await?;
                 Ok(db)
             }
@@ -178,6 +204,10 @@ impl DatabaseMetaStore {
                 .to_owned(),
             schema
                 .create_table_from_entity(FileMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(LinkParentMeta)
                 .if_not_exists()
                 .to_owned(),
             schema
@@ -461,6 +491,7 @@ impl DatabaseMetaStore {
             modify_time: Set(now),
             create_time: Set(now),
             nlink: Set(1),
+            parent: Set(parent_inode),
             deleted: Set(false),
             symlink_target: Set(None),
         };
@@ -507,6 +538,51 @@ impl DatabaseMetaStore {
         Utc::now().timestamp_nanos_opt().unwrap_or(0)
     }
 
+    /// Convert FileMeta to FileAttr
+    fn file_meta_to_attr(file_meta: &FileMetaModel) -> FileAttr {
+        let permission = file_meta.permission();
+        let kind = if file_meta.symlink_target.is_some() {
+            FileType::Symlink
+        } else {
+            FileType::File
+        };
+        let size = if let Some(target) = &file_meta.symlink_target {
+            target.len() as u64
+        } else {
+            file_meta.size as u64
+        };
+
+        FileAttr {
+            ino: file_meta.inode,
+            size,
+            kind,
+            mode: permission.mode,
+            uid: permission.uid,
+            gid: permission.gid,
+            atime: file_meta.access_time,
+            mtime: file_meta.modify_time,
+            ctime: file_meta.create_time,
+            nlink: file_meta.nlink as u32,
+        }
+    }
+
+    /// Convert AccessMeta to FileAttr
+    fn access_meta_to_attr(access_meta: &AccessMetaModel) -> FileAttr {
+        let permission = access_meta.permission();
+        FileAttr {
+            ino: access_meta.inode,
+            size: 4096,
+            kind: FileType::Dir,
+            mode: permission.mode,
+            uid: permission.uid,
+            gid: permission.gid,
+            atime: access_meta.access_time,
+            mtime: access_meta.modify_time,
+            ctime: access_meta.create_time,
+            nlink: access_meta.nlink as u32,
+        }
+    }
+
     async fn get_lock_internal(&self, lock_name: LockName) -> anyhow::Result<bool> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
         let lock_name_str = lock_name.to_string();
@@ -550,7 +626,7 @@ impl DatabaseMetaStore {
         Ok(flag)
     }
 
-    async fn shutdown_session_internal<C: ConnectionTrait>(
+    async fn shutdown_session_by_id<C: ConnectionTrait>(
         &self,
         session_id: Uuid,
         conn: &C,
@@ -564,6 +640,11 @@ impl DatabaseMetaStore {
             None => return Err(MetaError::SessionNotFound(session_id)),
         };
         session.delete(conn).await.map_err(MetaError::Database)?;
+
+        PlockMeta::delete_many()
+            .filter(plock_meta::Column::Sid.eq(session_id))
+            .exec(conn)
+            .await?;
         Ok(())
     }
     async fn try_set_plock(
@@ -589,7 +670,7 @@ impl DatabaseMetaStore {
         let sid = self
             .sid
             .get()
-            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+            .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
 
         match lock_type {
             FileLockType::UnLock => {
@@ -722,54 +803,113 @@ impl DatabaseMetaStore {
             }
         }
     }
+
+    fn set_sid(&self, session_id: Uuid) -> Result<(), MetaError> {
+        self.sid
+            .set(session_id)
+            .map_err(|_| MetaError::Internal("sid has been set".to_string()))?;
+        Ok(())
+    }
+
+    fn get_sid(&self) -> Result<&Uuid, MetaError> {
+        self.sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid has not been set".to_string()))
+    }
+
+    async fn refresh_session(session_id: Uuid, conn: &DatabaseConnection) -> Result<(), MetaError> {
+        let txn = conn.begin().await.map_err(MetaError::Database)?;
+        let expire = (Utc::now() + ChronoDuration::minutes(5)).timestamp_millis();
+        let session = SessionMeta::find()
+            .filter(session_meta::Column::SessionId.eq(session_id))
+            .one(&txn)
+            .await?;
+        let mut session = match session {
+            Some(s) => s.into_active_model(),
+            None => return Err(MetaError::SessionNotFound(session_id)),
+        };
+        session.expire = Set(expire);
+        session.update(&txn).await.map_err(MetaError::Database)?;
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    async fn life_cycle(token: CancellationToken, session_id: Uuid, conn: DatabaseConnection) {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            select! {
+                _ = interval.tick() => {
+                    // refresh session
+                    match Self::refresh_session(session_id, &conn).await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            error!("Failed to refresh session: {}", err);
+                        }
+                    }
+
+                }
+                _ = token.cancelled() => {
+                    break;
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
 impl MetaStore for DatabaseMetaStore {
+    fn name(&self) -> &'static str {
+        "database"
+    }
+
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         if let Ok(Some(file_meta)) = self.get_file_meta(ino).await {
-            let permission = file_meta.permission();
-            let kind = if file_meta.symlink_target.is_some() {
-                FileType::Symlink
-            } else {
-                FileType::File
-            };
-            let size = if let Some(target) = &file_meta.symlink_target {
-                target.len() as u64
-            } else {
-                file_meta.size as u64
-            };
-            return Ok(Some(FileAttr {
-                ino: file_meta.inode,
-                size,
-                kind,
-                mode: permission.mode,
-                uid: permission.uid,
-                gid: permission.gid,
-                atime: file_meta.access_time,
-                mtime: file_meta.modify_time,
-                ctime: file_meta.create_time,
-                nlink: file_meta.nlink as u32,
-            }));
+            return Ok(Some(Self::file_meta_to_attr(&file_meta)));
         }
 
         if let Ok(Some(access_meta)) = self.get_access_meta(ino).await {
-            let permission = access_meta.permission();
-            return Ok(Some(FileAttr {
-                ino: access_meta.inode,
-                size: 4096,
-                kind: FileType::Dir,
-                mode: permission.mode,
-                uid: permission.uid,
-                gid: permission.gid,
-                atime: access_meta.access_time,
-                mtime: access_meta.modify_time,
-                ctime: access_meta.create_time,
-                nlink: access_meta.nlink as u32,
-            }));
+            return Ok(Some(Self::access_meta_to_attr(&access_meta)));
         }
 
         Ok(None)
+    }
+
+    /// Batch stat implementation using SQL WHERE IN clause for optimal performance
+    async fn batch_stat(&self, inodes: &[i64]) -> Result<Vec<Option<FileAttr>>, MetaError> {
+        if inodes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Use concurrent queries for both tables - simpler and potentially faster
+        let file_query = FileMeta::find()
+            .filter(file_meta::Column::Inode.is_in(inodes.iter().copied()))
+            .all(&self.db);
+
+        let dir_query = AccessMeta::find()
+            .filter(access_meta::Column::Inode.is_in(inodes.iter().copied()))
+            .all(&self.db);
+
+        let (file_metas, access_metas) =
+            tokio::try_join!(file_query, dir_query).map_err(MetaError::Database)?;
+
+        // Build result map
+        let mut result_map: HashMap<i64, FileAttr> = HashMap::with_capacity(inodes.len());
+
+        // Process file_meta results
+        for file_meta in file_metas {
+            result_map.insert(file_meta.inode, Self::file_meta_to_attr(&file_meta));
+        }
+
+        // Process access_meta results (directories)
+        for access_meta in access_metas {
+            result_map.insert(access_meta.inode, Self::access_meta_to_attr(&access_meta));
+        }
+
+        // Preserve input order
+        Ok(inodes
+            .iter()
+            .map(|ino| result_map.get(ino).cloned())
+            .collect())
     }
 
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
@@ -971,11 +1111,46 @@ impl MetaStore for DatabaseMetaStore {
         };
 
         if current_nlink > 1 {
+            // Delete the LinkParent entry for this specific (parent, name)
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(file_id))
+                .filter(link_parent_meta::Column::ParentInode.eq(parent))
+                .filter(link_parent_meta::Column::EntryName.eq(name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
             file_meta.nlink = Set(current_nlink - 1);
             file_meta.deleted = Set(false);
+
+            // 2->1 transition: Restore parent field and remove all LinkParent
+            if current_nlink == 2 {
+                // Find the remaining ContentMeta entry
+                let remaining_entry = ContentMeta::find()
+                    .filter(content_meta::Column::Inode.eq(file_id))
+                    .one(&txn)
+                    .await
+                    .map_err(MetaError::Database)?
+                    .ok_or(MetaError::Internal(format!(
+                        "No remaining ContentMeta found for inode {}",
+                        file_id
+                    )))?;
+
+                // Restore parent field from remaining entry
+                file_meta.parent = Set(remaining_entry.parent_inode);
+
+                // Delete all LinkParent entries
+                LinkParentMeta::delete_many()
+                    .filter(link_parent_meta::Column::Inode.eq(file_id))
+                    .exec(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+            }
         } else {
+            // 1->0 transition: Mark as deleted
             file_meta.deleted = Set(true);
             file_meta.nlink = Set(0);
+            file_meta.parent = Set(0);
         }
 
         file_meta.modify_time = Set(now);
@@ -1059,6 +1234,38 @@ impl MetaStore for DatabaseMetaStore {
             EntryType::File
         };
 
+        let old_nlink = file.nlink;
+        let new_nlink = file.nlink.saturating_add(1);
+
+        // Query original entry BEFORE inserting new entry to avoid conflicts
+        //
+        // Why query ContentMeta instead of using file.parent directly?
+        // - file.parent only stores the parent inode, not the entry name
+        // - We need both parent_inode AND entry_name to create LinkParent entries
+        // - ContentMeta stores the complete directory entry (parent_inode + entry_name)
+        //
+        // Why query before insert?
+        // - After inserting the new entry, there will be 2 ContentMeta rows with the same inode
+        // - Using one() on multiple rows may return either entry non-deterministically
+        // - We must capture the original entry's name before creating the new link
+        let original_entry = if old_nlink == 1 {
+            Some(
+                ContentMeta::find()
+                    .filter(content_meta::Column::Inode.eq(ino))
+                    .one(&txn)
+                    .await
+                    .map_err(MetaError::Database)?
+                    .ok_or_else(|| {
+                        MetaError::Internal(format!(
+                            "ContentMeta entry not found for inode {}",
+                            ino
+                        ))
+                    })?,
+            )
+        } else {
+            None
+        };
+
         let new_entry = content_meta::ActiveModel {
             inode: Set(ino),
             parent_inode: Set(parent),
@@ -1067,12 +1274,51 @@ impl MetaStore for DatabaseMetaStore {
         };
         new_entry.insert(&txn).await.map_err(MetaError::Database)?;
 
-        let new_nlink = file.nlink.saturating_add(1);
-        let mut file_active: file_meta::ActiveModel = file.into();
+        let mut file_active: file_meta::ActiveModel = file.clone().into();
         file_active.nlink = Set(new_nlink);
         file_active.modify_time = Set(now);
         file_active.create_time = Set(now);
         file_active.deleted = Set(false);
+
+        if old_nlink == 1 {
+            let orig = original_entry.unwrap();
+            let old_parent = file.parent;
+            let old_entry_name = orig.entry_name;
+
+            // Use link_parent instead of parent
+            file_active.parent = Set(0);
+            let link_parent_old = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(old_parent),
+                entry_name: Set(old_entry_name),
+            };
+            link_parent_old
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            // New link
+            let link_parent_new = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(parent),
+                entry_name: Set(name.to_string()),
+            };
+            link_parent_new
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if old_nlink > 1 {
+            let link_parent_new = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(parent),
+                entry_name: Set(name.to_string()),
+            };
+            link_parent_new
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
         file_active
             .update(&txn)
             .await
@@ -1138,6 +1384,7 @@ impl MetaStore for DatabaseMetaStore {
             modify_time: Set(now),
             create_time: Set(now),
             nlink: Set(1),
+            parent: Set(parent),
             deleted: Set(false),
             symlink_target: Set(Some(target.to_string())),
         };
@@ -1758,7 +2005,11 @@ impl MetaStore for DatabaseMetaStore {
 
     // ---------- Session lifecycle implementation ----------
 
-    async fn new_session(&self, session_info: SessionInfo) -> Result<Session, MetaError> {
+    async fn start_session(
+        &self,
+        session_info: SessionInfo,
+        token: CancellationToken,
+    ) -> Result<Session, MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
         let session_id = Uuid::now_v7();
         let expire = (Utc::now() + ChronoDuration::minutes(5)).timestamp_millis();
@@ -1772,7 +2023,11 @@ impl MetaStore for DatabaseMetaStore {
             let _ = txn.rollback().await;
             return Err(MetaError::Database(e));
         }
+        self.set_sid(session_id)?;
         txn.commit().await.map_err(MetaError::Database)?;
+
+        tokio::spawn(Self::life_cycle(token.clone(), session_id, self.db.clone()));
+
         Ok(Session {
             session_id,
             expire,
@@ -1780,26 +2035,10 @@ impl MetaStore for DatabaseMetaStore {
         })
     }
 
-    async fn refresh_session(&self, session_id: Uuid) -> Result<(), MetaError> {
+    async fn shutdown_session(&self) -> Result<(), MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
-        let expire = (Utc::now() + ChronoDuration::minutes(5)).timestamp_millis();
-        let session = SessionMeta::find()
-            .filter(session_meta::Column::SessionId.eq(session_id))
-            .one(&txn)
-            .await?;
-        let mut session = match session {
-            Some(s) => s.into_active_model(),
-            None => return Err(MetaError::SessionNotFound(session_id)),
-        };
-        session.expire = Set(expire);
-        session.update(&txn).await.map_err(MetaError::Database)?;
-        txn.commit().await.map_err(MetaError::Database)?;
-        Ok(())
-    }
-
-    async fn shutdown_session(&self, session_id: Uuid) -> Result<(), MetaError> {
-        let txn = self.db.begin().await.map_err(MetaError::Database)?;
-        self.shutdown_session_internal(session_id, &txn).await?;
+        let session_id = self.get_sid()?;
+        self.shutdown_session_by_id(*session_id, &txn).await?;
         txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
     }
@@ -1812,14 +2051,14 @@ impl MetaStore for DatabaseMetaStore {
             .await?;
         for session in sessions {
             let session_id = session.session_id;
-            self.shutdown_session_internal(session_id, &txn).await?;
+            self.shutdown_session_by_id(session_id, &txn).await?;
         }
 
         txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
     }
 
-    async fn get_lock(&self, lock_name: LockName) -> bool {
+    async fn get_global_lock(&self, lock_name: LockName) -> bool {
         self.get_lock_internal(lock_name).await.unwrap_or_default()
     }
 
@@ -1836,7 +2075,7 @@ impl MetaStore for DatabaseMetaStore {
         let sid = self
             .sid
             .get()
-            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+            .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
 
         let rows = PlockMeta::find()
             .filter(plock_meta::Column::Inode.eq(inode))
@@ -1889,12 +2128,6 @@ impl MetaStore for DatabaseMetaStore {
                 Err(e) => return Err(e),
             }
         }
-    }
-
-    fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
-        self.sid
-            .set(sid)
-            .map_err(|_| MetaError::Internal("sid has been seted".to_string()))
     }
 }
 
@@ -2011,6 +2244,270 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_hardlink_parent_field_single_link() {
+        // Test that single-link files use parent field for O(1) lookup
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create a file
+        let file_ino = store
+            .create_file(parent, "single_link_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // Verify file has nlink=1
+        let file_meta = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file_meta.nlink, 1);
+        assert_eq!(
+            file_meta.parent, parent,
+            "Parent field should be set for single-link files"
+        );
+
+        // Verify no LinkParent entries exist
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert!(
+            link_parents.is_empty(),
+            "No LinkParent entries should exist for single-link files"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_transition_to_linkparent() {
+        // Test transition from parent field to LinkParent when creating first hardlink
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create a file
+        let file_ino = store
+            .create_file(parent, "original_file.txt".to_string())
+            .await
+            .unwrap();
+
+        // Verify initial state
+        let file_before = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(file_before.nlink, 1);
+        assert_eq!(file_before.parent, parent);
+
+        // Create a hardlink
+        let _attr = store.link(file_ino, parent, "hardlink.txt").await.unwrap();
+
+        // Verify transition to LinkParent mode
+        let file_after = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            file_after.nlink, 2,
+            "nlink should be 2 after creating hardlink"
+        );
+        assert_eq!(
+            file_after.parent, 0,
+            "Parent field should be 0 after transition to LinkParent mode"
+        );
+
+        // Verify LinkParent entries for both links
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert_eq!(link_parents.len(), 2, "Should have 2 LinkParent entries");
+
+        // Verify both links are tracked
+        let names: Vec<String> = link_parents
+            .iter()
+            .map(|lp| lp.entry_name.clone())
+            .collect();
+        assert!(names.contains(&"original_file.txt".to_string()));
+        assert!(names.contains(&"hardlink.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_no_reversion_to_parent() {
+        // When nlink drops from 2 to 1, parent field is restored (optimization)
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        let file_ino = store
+            .create_file(parent, "file1.txt".to_string())
+            .await
+            .unwrap();
+
+        // Create hardlink: nlink 1 -> 2, parent becomes 0 (LinkParent mode)
+        store.link(file_ino, parent, "file2.txt").await.unwrap();
+
+        let file = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(file.nlink, 2);
+        assert_eq!(file.parent, 0);
+
+        // Unlink: nlink 2 -> 1, parent restored for O(1) lookup
+        store.unlink(parent, "file2.txt").await.unwrap();
+
+        let file = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(file.nlink, 1);
+        assert_eq!(file.parent, parent);
+
+        // LinkParent entries should be removed
+        let count = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .count(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_multiple_links() {
+        // Test LinkParent with multiple hardlinks
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create original file
+        let file_ino = store
+            .create_file(parent, "link1.txt".to_string())
+            .await
+            .unwrap();
+
+        // Create multiple hardlinks
+        store.link(file_ino, parent, "link2.txt").await.unwrap();
+        store.link(file_ino, parent, "link3.txt").await.unwrap();
+        store.link(file_ino, parent, "link4.txt").await.unwrap();
+
+        // Verify nlink count
+        let file_meta = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file_meta.nlink, 4, "Should have 4 links");
+        assert_eq!(
+            file_meta.parent, 0,
+            "Parent field should be 0 for multi-link files"
+        );
+
+        // Verify all LinkParent entries
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert_eq!(link_parents.len(), 4, "Should have 4 LinkParent entries");
+
+        let names: Vec<String> = link_parents
+            .iter()
+            .map(|lp| lp.entry_name.clone())
+            .collect();
+        assert!(names.contains(&"link1.txt".to_string()));
+        assert!(names.contains(&"link2.txt".to_string()));
+        assert!(names.contains(&"link3.txt".to_string()));
+        assert!(names.contains(&"link4.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_last_unlink_cleanup() {
+        // Test that last unlink marks file as deleted and cleans up LinkParent entries
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create file with hardlink
+        let file_ino = store
+            .create_file(parent, "fileA.txt".to_string())
+            .await
+            .unwrap();
+        store.link(file_ino, parent, "fileB.txt").await.unwrap();
+
+        // Unlink both files
+        store.unlink(parent, "fileB.txt").await.unwrap();
+        store.unlink(parent, "fileA.txt").await.unwrap();
+
+        // Verify file is marked as deleted
+        let file_meta = FileMeta::find_by_id(file_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file_meta.nlink, 0, "nlink should be 0");
+        assert_eq!(file_meta.parent, 0, "parent should be 0");
+        assert!(file_meta.deleted, "File should be marked as deleted");
+
+        // Verify all LinkParent entries are cleaned up
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(file_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert!(
+            link_parents.is_empty(),
+            "All LinkParent entries should be cleaned up"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_symlink_uses_parent_field() {
+        // Test that symlinks use parent field (they always have nlink=1)
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+
+        // Create a symlink
+        let (symlink_ino, _attr) = store
+            .symlink(parent, "my_symlink", "/target/path")
+            .await
+            .unwrap();
+
+        // Verify symlink has nlink=1 and uses parent field
+        let file_meta = FileMeta::find_by_id(symlink_ino)
+            .one(&store.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file_meta.nlink, 1, "Symlink should have nlink=1");
+        assert_eq!(file_meta.parent, parent, "Symlink should use parent field");
+        assert_eq!(file_meta.symlink_target, Some("/target/path".to_string()));
+
+        // Verify no LinkParent entries
+        let link_parents = LinkParentMeta::find()
+            .filter(link_parent_meta::Column::Inode.eq(symlink_ino))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert!(
+            link_parents.is_empty(),
+            "Symlinks should not have LinkParent entries"
+        );
+    }
+
+    #[tokio::test]
     async fn test_basic_read_lock() {
         let store = new_test_store().await;
         let session_id = Uuid::now_v7();
@@ -2062,7 +2559,10 @@ mod tests {
         let store1 = session_mgr.get_store(0);
         let parent = store1.root_ino();
         let file_ino = store1
-            .create_file(parent, "test_multiple_read_locks_file.txt".to_string())
+            .create_file(
+                parent,
+                format!("test_multiple_read_locks_{}.txt", Uuid::now_v7()),
+            )
             .await
             .unwrap();
 
@@ -2070,7 +2570,7 @@ mod tests {
         store1
             .set_plock(
                 file_ino,
-                owner1 as i64,
+                owner1,
                 false,
                 FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
@@ -2084,7 +2584,7 @@ mod tests {
         store2
             .set_plock(
                 file_ino,
-                owner2 as i64,
+                owner2,
                 false,
                 FileLockType::Read,
                 FileLockRange { start: 0, end: 100 },
@@ -2113,7 +2613,10 @@ mod tests {
         assert_eq!(lock_info2.lock_type, FileLockType::Read);
         assert_eq!(lock_info2.range.start, 0);
         assert_eq!(lock_info2.range.end, 100);
-        assert_eq!(lock_info2.pid, 5678);
+        assert_eq!(
+            lock_info2.pid, 0,
+            "pid should be 0 for cross-session queries (security feature)"
+        );
     }
 
     #[tokio::test]
@@ -2128,7 +2631,10 @@ mod tests {
         let store1 = session_mgr.get_store(0);
         let parent = store1.root_ino();
         let file_ino = store1
-            .create_file(parent, "test_write_lock_conflict_file.txt".to_string())
+            .create_file(
+                parent,
+                format!("test_write_lock_conflict_{}.txt", Uuid::now_v7()),
+            )
             .await
             .unwrap();
 
@@ -2207,7 +2713,7 @@ mod tests {
 
         // Verify lock exists
         let query = FileLockQuery {
-            owner: owner as i64,
+            owner,
             lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
@@ -2245,7 +2751,10 @@ mod tests {
         let store1 = session_mgr.get_store(0);
         let parent = store1.root_ino();
         let file_ino = store1
-            .create_file(parent, "test_none_overlapping_locks_file.txt".to_string())
+            .create_file(
+                parent,
+                format!("test_non_overlapping_locks_{}.txt", Uuid::now_v7()),
+            )
             .await
             .unwrap();
 
@@ -2253,7 +2762,7 @@ mod tests {
         store1
             .set_plock(
                 file_ino,
-                owner1 as i64,
+                owner1,
                 false,
                 FileLockType::Write,
                 FileLockRange { start: 0, end: 100 },
@@ -2267,7 +2776,7 @@ mod tests {
         store2
             .set_plock(
                 file_ino,
-                owner2 as i64,
+                owner2,
                 false,
                 FileLockType::Write,
                 FileLockRange {
@@ -2317,7 +2826,7 @@ mod tests {
         let store0 = session_mgr.get_store(0);
         let parent = store0.root_ino();
         let file_ino = store0
-            .create_file(parent, "concurrent_test.txt".to_string())
+            .create_file(parent, format!("concurrent_test_{}.txt", Uuid::now_v7()))
             .await
             .unwrap();
 
@@ -2331,7 +2840,7 @@ mod tests {
             store1
                 .set_plock(
                     file_ino,
-                    owner1 as i64,
+                    owner1,
                     false,
                     FileLockType::Write,
                     FileLockRange { start: 0, end: 100 },
@@ -2347,7 +2856,7 @@ mod tests {
             store2
                 .set_plock(
                     file_ino,
-                    owner2 as i64,
+                    owner2,
                     false,
                     FileLockType::Read,
                     FileLockRange {
@@ -2366,7 +2875,7 @@ mod tests {
             let result = store3
                 .set_plock(
                     file_ino,
-                    owner3 as i64,
+                    owner3,
                     false,
                     FileLockType::Write,
                     FileLockRange {
@@ -2426,7 +2935,7 @@ mod tests {
         let store1 = session_mgr.get_store(0);
         let parent = store1.root_ino();
         let file_ino = store1
-            .create_file(parent, "visibility_test.txt".to_string())
+            .create_file(parent, format!("visibility_test_{}.txt", Uuid::now_v7()))
             .await
             .unwrap();
 

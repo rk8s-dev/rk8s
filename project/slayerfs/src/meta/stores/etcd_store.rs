@@ -7,6 +7,7 @@ use crate::chuck::slice::key_for_slice;
 use crate::meta::backoff::backoff;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
+use crate::meta::entities::etcd::EtcdLinkParent;
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
 use crate::meta::file_lock::{
@@ -20,13 +21,17 @@ use crate::meta::{INODE_ID_KEY, Permission};
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use etcd_client::{Client as EtcdClient, Compare, CompareOp, GetOptions, Txn, TxnOp};
+use etcd_client::{
+    Client as EtcdClient, Compare, CompareOp, LeaseKeeper, PutOptions, Txn, TxnOp, TxnOpResponse,
+};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
+use tokio::select;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -42,6 +47,7 @@ pub struct EtcdMetaStore {
     /// Local ID pools keyed by counter key (inode, slice, etc.)
     id_pools: IdPool,
     sid: OnceLock<Uuid>,
+    lease: OnceLock<i64>,
 }
 
 #[allow(dead_code)]
@@ -85,6 +91,11 @@ impl EtcdMetaStore {
         format!("p:{inode}")
     }
 
+    /// Etcd helper method: generate link parent key for multi-hardlink files
+    fn etcd_link_parent_key(inode: i64) -> String {
+        format!("l:{}", inode)
+    }
+
     /// Create or open an etcd metadata store
     pub async fn new(backend_path: &Path) -> Result<Self, MetaError> {
         let _config =
@@ -99,6 +110,7 @@ impl EtcdMetaStore {
             _config,
             id_pools: IdPool::default(),
             sid: OnceLock::new(),
+            lease: OnceLock::new(),
         };
         store.init_root_directory().await?;
 
@@ -116,6 +128,7 @@ impl EtcdMetaStore {
             _config,
             id_pools: IdPool::default(),
             sid: OnceLock::new(),
+            lease: OnceLock::new(),
         };
         store.init_root_directory().await?;
 
@@ -171,6 +184,7 @@ impl EtcdMetaStore {
         &self,
         key: impl AsRef<str>,
         obj: &T,
+        options: Option<PutOptions>,
     ) -> Result<(), MetaError> {
         let mut client = self.client.clone();
 
@@ -178,7 +192,7 @@ impl EtcdMetaStore {
         let key = key.as_ref();
 
         client
-            .put(key, json, None)
+            .put(key, json, options)
             .await
             .map(|_| ())
             .map_err(|e| MetaError::Internal(format!("Failed to put key {key}: {e}")))
@@ -200,9 +214,30 @@ impl EtcdMetaStore {
 
     /// Initialize root directory
     async fn init_root_directory(&self) -> Result<(), MetaError> {
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Create children key for root directory
         let children_key = Self::etcd_children_key(1);
         let root_children = EtcdDirChildren::new(1, HashMap::new());
         let children_json = serde_json::to_string(&root_children)?;
+
+        // Create reverse key (metadata) for root directory
+        let reverse_key = Self::etcd_reverse_key(1);
+        let root_entry = EtcdEntryInfo {
+            is_file: false,
+            size: None,
+            version: None,
+            permission: Permission::new(0o40755, 0, 0),
+            access_time: now,
+            modify_time: now,
+            create_time: now,
+            nlink: 2,
+            parent_inode: 1, // Root's parent is itself
+            entry_name: "/".to_string(),
+            deleted: false,
+            symlink_target: None,
+        };
+        let reverse_json = serde_json::to_string(&root_entry)?;
 
         let mut client = self.client.clone();
 
@@ -210,7 +245,10 @@ impl EtcdMetaStore {
         // version == 0 means the key is currently not present
         let txn = Txn::new()
             .when([Compare::version(children_key.clone(), CompareOp::Equal, 0)])
-            .and_then([TxnOp::put(children_key.clone(), children_json, None)]);
+            .and_then([
+                TxnOp::put(children_key.clone(), children_json, None),
+                TxnOp::put(reverse_key, reverse_json, None),
+            ]);
 
         let resp = client.txn(txn).await.map_err(|e| {
             MetaError::Config(format!("Failed to initialize root directory: {}", e))
@@ -358,6 +396,7 @@ impl EtcdMetaStore {
                 entry_info.modify_time,
                 entry_info.create_time,
                 entry_info.nlink as i32,
+                entry_info.parent_inode,
                 entry_info.deleted,
                 entry_info.symlink_target.clone(),
             );
@@ -668,6 +707,7 @@ impl EtcdMetaStore {
                     ))
                 },
                 10,
+                &None,
             )
             .await?;
 
@@ -700,6 +740,7 @@ impl EtcdMetaStore {
         f: F,
         init: I,
         max_retries: u64,
+        options: &Option<PutOptions>,
     ) -> Result<R, MetaError>
     where
         F: Fn(T) -> Result<(T, R), MetaError>,
@@ -742,9 +783,11 @@ impl EtcdMetaStore {
                 } else {
                     Compare::mod_revision(key, CompareOp::Equal, mod_revision)
                 };
-                let txn = Txn::new()
-                    .when([compare])
-                    .and_then([TxnOp::put(key, current, None)]);
+                let txn = Txn::new().when([compare]).and_then([TxnOp::put(
+                    key,
+                    current,
+                    options.clone(),
+                )]);
 
                 match client.txn(txn).await {
                     Ok(txn_resp) if txn_resp.succeeded() => Ok(ret),
@@ -862,6 +905,7 @@ impl EtcdMetaStore {
                 Ok((EtcdDirChildren::new(parent_ino, children), ()))
             },
             max_retries as u64,
+            &None,
         )
         .await
         .map(|_| ())
@@ -891,7 +935,11 @@ impl EtcdMetaStore {
         let sid = self
             .sid
             .get()
-            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+            .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
+        let put_options = self
+            .lease
+            .get()
+            .map(|lease| PutOptions::new().with_lease(*lease));
 
         match lock_type {
             FileLockType::UnLock => {
@@ -930,6 +978,7 @@ impl EtcdMetaStore {
                     },
                     || Ok((vec![], ())), // No existing locks, nothing to unlock
                     10,
+                    &put_options,
                 )
                 .await
             }
@@ -1008,6 +1057,7 @@ impl EtcdMetaStore {
                         Ok((vec![new_plock], ()))
                     },
                     10,
+                    &put_options,
                 )
                 .await
             }
@@ -1099,54 +1149,150 @@ impl EtcdMetaStore {
 
         Ok(())
     }
+    async fn shutdown_session_by_id(&self, session_id: Uuid) -> Result<(), MetaError> {
+        let session_key = Self::etcd_session_key(Some(session_id));
+        let session_info_key = Self::etcd_session_info_key(Some(session_id));
+        let mut client = self.client.clone();
+        let txn = Txn::new().and_then(vec![
+            TxnOp::delete(session_key, None),
+            TxnOp::delete(session_info_key, None),
+        ]);
+        client
+            .txn(txn)
+            .await
+            .map_err(|err| MetaError::Internal(format!("Error shutting down session: {}", err)))?;
+        Ok(())
+    }
+    fn set_sid(&self, session_id: Uuid) -> Result<(), MetaError> {
+        self.sid
+            .set(session_id)
+            .map_err(|_| MetaError::Internal("sid has been set".to_string()))?;
+        Ok(())
+    }
+    fn get_sid(&self) -> Result<&Uuid, MetaError> {
+        self.sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid has not been set".to_string()))
+    }
+    fn get_lease(&self) -> Result<&i64, MetaError> {
+        self.lease
+            .get()
+            .ok_or_else(|| MetaError::Internal("lease has not been set".to_string()))
+    }
+
+    async fn life_cycle(token: CancellationToken, mut keeper: LeaseKeeper) {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        loop {
+            select! {
+                _ = interval.tick() => {
+                    // refresh session
+                    match keeper.keep_alive().await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            error!("Failed to refresh session: {}", err);
+                        }
+                    }
+
+                }
+                _ = token.cancelled() => {
+                    break;
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
 impl MetaStore for EtcdMetaStore {
-    async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
-        if let Ok(Some(file_meta)) = self.get_file_meta(ino).await {
-            let permission = file_meta.permission();
-            let kind = if file_meta.symlink_target.is_some() {
-                FileType::Symlink
-            } else {
-                FileType::File
-            };
-            let size = if let Some(target) = &file_meta.symlink_target {
-                target.len() as u64
-            } else {
-                file_meta.size as u64
-            };
-            return Ok(Some(FileAttr {
-                ino: file_meta.inode,
-                size,
-                kind,
-                mode: permission.mode,
-                uid: permission.uid,
-                gid: permission.gid,
-                atime: file_meta.access_time,
-                mtime: file_meta.modify_time,
-                ctime: file_meta.create_time,
-                nlink: file_meta.nlink as u32,
-            }));
-        }
+    fn name(&self) -> &'static str {
+        "etcd"
+    }
 
-        if let Ok(Some(access_meta)) = self.get_access_meta(ino).await {
-            let permission = access_meta.permission();
-            return Ok(Some(FileAttr {
-                ino: access_meta.inode,
-                size: 4096,
-                kind: FileType::Dir,
-                mode: permission.mode,
-                uid: permission.uid,
-                gid: permission.gid,
-                atime: access_meta.access_time,
-                mtime: access_meta.modify_time,
-                ctime: access_meta.create_time,
-                nlink: access_meta.nlink as u32,
-            }));
+    async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
+        // Query reverse index once to get all metadata
+        let reverse_key = Self::etcd_reverse_key(ino);
+        if let Ok(Some(entry_info)) = self
+            .etcd_get_json_lenient::<EtcdEntryInfo>(&reverse_key)
+            .await
+        {
+            return Ok(Some(entry_info.to_file_attr(ino)));
         }
 
         Ok(None)
+    }
+
+    /// Batch stat implementation for Etcd using Transaction batch GET
+    /// Uses single transaction to fetch multiple keys - much faster than sequential queries
+    async fn batch_stat(&self, inodes: &[i64]) -> Result<Vec<Option<FileAttr>>, MetaError> {
+        if inodes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Etcd transaction has ~128 operations limit, process in chunks
+        const MAX_KEYS_PER_TXN: usize = 100;
+
+        let mut results: Vec<Option<FileAttr>> = vec![None; inodes.len()];
+
+        // Process in chunks to respect Etcd transaction limits
+        for (chunk_idx, chunk) in inodes.chunks(MAX_KEYS_PER_TXN).enumerate() {
+            let chunk_offset = chunk_idx * MAX_KEYS_PER_TXN;
+
+            // Build transaction with GET operations for all inodes in chunk
+            let mut get_ops = Vec::new();
+            for &ino in chunk {
+                let reverse_key = Self::etcd_reverse_key(ino);
+                get_ops.push(TxnOp::get(reverse_key.as_bytes(), None));
+            }
+
+            // Execute transaction - all GETs in single round trip
+            let mut client_clone = self.client.clone();
+            let txn = Txn::new().and_then(get_ops);
+            let txn_response = client_clone
+                .txn(txn)
+                .await
+                .map_err(|e| MetaError::Internal(format!("Etcd batch txn error: {}", e)))?;
+
+            let responses = txn_response.op_responses();
+
+            // Parse responses - one response per inode
+            for (i, &ino) in chunk.iter().enumerate() {
+                let result_idx = chunk_offset + i;
+
+                // Handle special case for root inode
+                if ino == 1 {
+                    let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                    results[result_idx] = Some(FileAttr {
+                        ino: 1,
+                        size: 4096,
+                        kind: FileType::Dir,
+                        mode: 0o40755,
+                        uid: 0,
+                        gid: 0,
+                        atime: now,
+                        mtime: now,
+                        ctime: now,
+                        nlink: 2,
+                    });
+                    continue;
+                }
+
+                // Get response for this inode
+                if let Some(resp) = responses.get(i) {
+                    // TxnOpResponse is an enum, match to extract GetResponse
+                    if let TxnOpResponse::Get(range_resp) = resp
+                        && let Some(kv) = range_resp.kvs().first()
+                    {
+                        // Parse EtcdEntryInfo from the value
+                        if let Ok(entry_info) = serde_json::from_slice::<EtcdEntryInfo>(kv.value())
+                        {
+                            results[result_idx] = Some(entry_info.to_file_attr(ino));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
@@ -1371,13 +1517,60 @@ impl MetaStore for EtcdMetaStore {
             return Err(MetaError::NotFound(ino));
         }
 
+        let old_nlink = entry_info.nlink;
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         entry_info.nlink = entry_info.nlink.saturating_add(1);
         entry_info.modify_time = now;
         entry_info.create_time = now; // Update ctime when creating hard link
-        entry_info.parent_inode = parent;
-        entry_info.entry_name = name.to_string();
         entry_info.deleted = false;
+
+        if old_nlink == 1 {
+            // First hardlink: transition to LinkParent mode
+
+            let old_parent = entry_info.parent_inode;
+            let old_entry_name = entry_info.entry_name.clone();
+
+            // Use link_parent instead of parent
+            entry_info.parent_inode = 0;
+            entry_info.entry_name = String::new();
+            let link_parent_key = Self::etcd_link_parent_key(ino);
+            let link_parents = vec![
+                EtcdLinkParent {
+                    parent_inode: old_parent,
+                    entry_name: old_entry_name,
+                },
+                EtcdLinkParent {
+                    parent_inode: parent,
+                    entry_name: name.to_string(),
+                },
+            ];
+
+            self.etcd_put_json(&link_parent_key, &link_parents, None)
+                .await?;
+        } else if old_nlink > 1 {
+            // Already using LinkParent, just add new entry
+            let link_parent_key = Self::etcd_link_parent_key(ino);
+
+            self.atomic_update(
+                &link_parent_key,
+                |mut link_parents: Vec<EtcdLinkParent>| {
+                    link_parents.push(EtcdLinkParent {
+                        parent_inode: parent,
+                        entry_name: name.to_string(),
+                    });
+                    Ok((link_parents, ()))
+                },
+                || {
+                    Err(MetaError::Internal(format!(
+                        "LinkParent key {} not found for inode {}",
+                        link_parent_key, ino
+                    )))
+                },
+                10,
+                &None,
+            )
+            .await?;
+        }
 
         let forward_key = Self::etcd_forward_key(parent, name);
         let entry_type = if entry_info.symlink_target.is_some() {
@@ -1612,17 +1805,86 @@ impl MetaStore for EtcdMetaStore {
                 None => return Err(MetaError::NotFound(file_ino)),
             };
 
-        // Update file metadata - mark as deleted or decrease nlink
-        if entry_info.nlink > 1 {
-            // File has multiple links, just decrease nlink
-            entry_info.nlink -= 1;
+        let current_nlink = entry_info.nlink;
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        if current_nlink > 1 {
+            let link_parent_key = Self::etcd_link_parent_key(file_ino);
+
+            // 2->1 transition: Need to restore parent before deleting LinkParent
+            if current_nlink == 2 {
+                // Get LinkParent entries
+                let link_parents: Vec<EtcdLinkParent> = self
+                    .etcd_get_json(&link_parent_key)
+                    .await?
+                    .ok_or_else(|| {
+                        MetaError::Internal(format!(
+                            "LinkParent key not found for inode {} with nlink=2. Data inconsistency detected!",
+                            file_ino
+                        ))
+                    })?;
+
+                // Find the remaining entry
+                let remaining = link_parents
+                    .iter()
+                    .find(|lp| lp.parent_inode != parent || lp.entry_name != name)
+                    .ok_or_else(|| {
+                        MetaError::Internal(format!(
+                            "No remaining LinkParent found for inode {} during 2->1 transition",
+                            file_ino
+                        ))
+                    })?;
+
+                // Restore parent and entry_name from remaining entry
+                entry_info.parent_inode = remaining.parent_inode;
+                entry_info.entry_name = remaining.entry_name.clone();
+
+                // Delete all LinkParent entries
+                client
+                    .delete(link_parent_key.clone(), None)
+                    .await
+                    .map_err(|e| {
+                        MetaError::Internal(format!(
+                            "Failed to delete LinkParent for inode {}: {}",
+                            file_ino, e
+                        ))
+                    })?;
+
+                entry_info.nlink = 1;
+                entry_info.deleted = false;
+            } else {
+                // n->n-1 transition (n > 2): Just remove the specific LinkParent entry
+                self.atomic_update(
+                    &link_parent_key,
+                    |link_parents: Vec<EtcdLinkParent>| {
+                        let updated_parents: Vec<EtcdLinkParent> = link_parents
+                            .into_iter()
+                            .filter(|lp| lp.parent_inode != parent || lp.entry_name != name)
+                            .collect();
+                        Ok((updated_parents, ()))
+                    },
+                    || {
+                        Err(MetaError::Internal(format!(
+                            "LinkParent key {} not found for inode {}",
+                            link_parent_key, file_ino
+                        )))
+                    },
+                    10,
+                    &None,
+                )
+                .await?;
+
+                entry_info.nlink = current_nlink - 1;
+                entry_info.deleted = false;
+            }
         } else {
-            // Last link, mark as deleted
+            // 1->0 transition: Mark as deleted
             entry_info.deleted = true;
             entry_info.nlink = 0;
+            entry_info.parent_inode = 0;
         }
 
-        entry_info.modify_time = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        entry_info.modify_time = now;
 
         let updated_json = serde_json::to_string(&entry_info)
             .map_err(|e| MetaError::Internal(format!("Failed to serialize entry info: {}", e)))?;
@@ -1906,6 +2168,7 @@ impl MetaStore for EtcdMetaStore {
             },
             || Err(MetaError::NotFound(ino)),
             10,
+            &None,
         )
         .await
         .map(|_| ())
@@ -2060,6 +2323,7 @@ impl MetaStore for EtcdMetaStore {
             },
             || Ok((vec![slice], ())),
             10,
+            &None,
         )
         .await
         .map(|_| ())
@@ -2071,7 +2335,11 @@ impl MetaStore for EtcdMetaStore {
 
     // ---------- Session lifecycle implementation ----------
 
-    async fn new_session(&self, session_info: SessionInfo) -> Result<Session, MetaError> {
+    async fn start_session(
+        &self,
+        session_info: SessionInfo,
+        token: CancellationToken,
+    ) -> Result<Session, MetaError> {
         let session_id = Uuid::now_v7();
         let session_key = Self::etcd_session_key(Some(session_id));
         let session_info_key = Self::etcd_session_info_key(Some(session_id));
@@ -2082,74 +2350,42 @@ impl MetaStore for EtcdMetaStore {
             expire,
         };
 
-        self.etcd_put_json(session_key, &expire).await?;
-        self.etcd_put_json(session_info_key, &session_info).await?;
+        let mut conn = self.client.clone();
+        let lease = conn
+            .lease_grant(60 * 5, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to grant lease: {e}")))?;
+        let options = PutOptions::new().with_lease(lease.id());
 
+        self.etcd_put_json(session_key, &expire, Some(options.clone()))
+            .await?;
+        self.etcd_put_json(session_info_key, &session_info, Some(options.clone()))
+            .await?;
+        let (keeper, _) = conn
+            .lease_keep_alive(lease.id())
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to create lease keeper: {e}")))?;
+
+        tokio::spawn(Self::life_cycle(token, keeper));
+
+        self.set_sid(session_id)?;
+        self.lease
+            .set(lease.id())
+            .map_err(|_| MetaError::Internal("Failed to set lease".to_string()))?;
         Ok(session)
     }
 
-    async fn refresh_session(&self, session_id: Uuid) -> Result<(), MetaError> {
-        let session_key = Self::etcd_session_key(Some(session_id));
-        let new_expire = (Utc::now() + Duration::minutes(5)).timestamp_millis();
-
-        self.atomic_update(
-            &session_key,
-            |_| Ok((new_expire, session_id)),
-            || Ok((new_expire, session_id)),
-            3,
-        )
-        .await?;
-
+    async fn shutdown_session(&self) -> Result<(), MetaError> {
+        let session_id = *self.get_sid()?;
+        self.shutdown_session_by_id(session_id).await?;
         Ok(())
     }
 
-    async fn shutdown_session(&self, session_id: Uuid) -> Result<(), MetaError> {
-        let session_key = Self::etcd_session_key(Some(session_id));
-        let session_info_key = Self::etcd_session_info_key(Some(session_id));
-        let mut client = self.client.clone();
-        let txn = Txn::new().and_then(vec![
-            TxnOp::delete(session_key, None),
-            TxnOp::delete(session_info_key, None),
-        ]);
-        client
-            .txn(txn)
-            .await
-            .map_err(|err| MetaError::Internal(format!("Error shutting down session: {}", err)))?;
-        Ok(())
-    }
-
+    // Etcd cleanup is performed by the lease keeper
     async fn cleanup_sessions(&self) -> Result<(), MetaError> {
-        let mut client = self.client.clone();
-        let resp = client
-            .get(
-                Self::etcd_session_key(None),
-                Some(GetOptions::new().with_prefix()),
-            )
-            .await
-            .map_err(|err| MetaError::Internal(format!("Error getting keys: {}", err)))?;
-        let sessions = resp.kvs();
-        for session in sessions {
-            let session_key = session.key_str().map_err(|err| {
-                MetaError::Internal(format!("Error deserializing key to string:{}", err))
-            })?;
-
-            let session_id = Self::get_session_id_from_session_key(session_key).ok_or(
-                MetaError::Internal(format!("Error parse session id from key: {}", session_key)),
-            )?;
-            let session_value = session.value_str().map_err(|err| {
-                MetaError::Internal(format!("Error deserializing value to string:{}", err))
-            })?;
-            let session_value: i64 = serde_json::from_str(session_value).map_err(|err| {
-                MetaError::Internal(format!("Error deserializing value to JSON:{}", err))
-            })?;
-
-            if session_value < Utc::now().timestamp_millis() {
-                self.shutdown_session(session_id).await?;
-            }
-        }
-        Ok(())
+        return Ok(());
     }
-    async fn get_lock(&self, lock_name: LockName) -> bool {
+    async fn get_global_lock(&self, lock_name: LockName) -> bool {
         let result = self
             .atomic_update::<_, _, i64, bool>(
                 &lock_name.to_string(),
@@ -2166,6 +2402,7 @@ impl MetaStore for EtcdMetaStore {
                     Ok((now, true))
                 },
                 3,
+                &None,
             )
             .await;
 
@@ -2379,7 +2616,7 @@ impl MetaStore for EtcdMetaStore {
         let sid = self
             .sid
             .get()
-            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+            .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
 
         let plocks: Vec<EtcdPlock> = self.etcd_get_json(&key).await?.unwrap_or_default();
 
@@ -2428,12 +2665,6 @@ impl MetaStore for EtcdMetaStore {
             }
         }
     }
-
-    fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
-        self.sid
-            .set(sid)
-            .map_err(|_| MetaError::Internal("sid has been seted".to_string()))
-    }
 }
 
 #[cfg(test)]
@@ -2444,8 +2675,38 @@ mod tests {
     use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
     use crate::meta::store::MetaError;
     use crate::meta::stores::EtcdMetaStore;
+    use serial_test::serial;
     use tokio::time;
     use uuid::Uuid;
+
+    async fn cleanup_test_data() -> Result<(), MetaError> {
+        use etcd_client::GetOptions;
+
+        let mut client =
+            crate::meta::stores::etcd_store::EtcdClient::connect(vec!["127.0.0.1:2379"], None)
+                .await
+                .map_err(|e| MetaError::Config(format!("Failed to connect to etcd: {}", e)))?;
+
+        let resp = client
+            .get("", Some(GetOptions::new().with_prefix()))
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to get etcd keys: {}", e)))?;
+
+        for kv in resp.kvs() {
+            let key = String::from_utf8_lossy(kv.key());
+            client
+                .delete(key.as_ref(), None)
+                .await
+                .map_err(|e| MetaError::Internal(format!("Failed to delete key {}: {}", key, e)))?;
+        }
+
+        let config = test_config();
+        let _store = EtcdMetaStore::from_config(config.clone())
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to reinitialize root: {}", e)))?;
+
+        Ok(())
+    }
 
     fn test_config() -> Config {
         Config {
@@ -2473,6 +2734,10 @@ mod tests {
     }
 
     async fn new_test_store() -> EtcdMetaStore {
+        if let Err(e) = cleanup_test_data().await {
+            eprintln!("Failed to cleanup etcd test data: {}", e);
+        }
+
         EtcdMetaStore::from_config(test_config())
             .await
             .expect("Failed to create test database store")
@@ -2549,6 +2814,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_basic_read_lock() {
         let store = new_test_store().await;
@@ -2589,6 +2855,7 @@ mod tests {
         assert_eq!(lock_info.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_multiple_read_locks() {
         // Create session manager with 2 sessions
@@ -2601,7 +2868,10 @@ mod tests {
         let store1 = session_mgr.get_store(0);
         let parent = store1.root_ino();
         let file_ino = store1
-            .create_file(parent, "test_multiple_read_locks_file.txt".to_string())
+            .create_file(
+                parent,
+                format!("test_multiple_read_locks_{}.txt", Uuid::now_v7()),
+            )
             .await
             .unwrap();
 
@@ -2655,6 +2925,7 @@ mod tests {
         assert_eq!(lock_info2.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_write_lock_conflict() {
         // Create session manager with 2 sessions
@@ -2716,6 +2987,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_lock_release() {
         let session_id = Uuid::now_v7();
@@ -2746,7 +3018,7 @@ mod tests {
 
         // Verify lock exists
         let query = FileLockQuery {
-            owner: owner,
+            owner,
             lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
@@ -2772,6 +3044,7 @@ mod tests {
         assert_eq!(lock_info.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_non_overlapping_locks() {
         // Create session manager with 2 sessions
@@ -2792,7 +3065,7 @@ mod tests {
         store1
             .set_plock(
                 file_ino,
-                owner1 as i64,
+                owner1,
                 false,
                 FileLockType::Write,
                 FileLockRange { start: 0, end: 100 },
@@ -2806,7 +3079,7 @@ mod tests {
         store2
             .set_plock(
                 file_ino,
-                owner2 as i64,
+                owner2,
                 false,
                 FileLockType::Write,
                 FileLockRange {
@@ -2847,6 +3120,7 @@ mod tests {
         assert_eq!(lock_info2.pid, 5678);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_concurrent_read_write_locks() {
         // Test multiple sessions acquiring different types of locks
@@ -2886,7 +3160,7 @@ mod tests {
             store2
                 .set_plock(
                     file_ino,
-                    owner2 as i64,
+                    owner2,
                     false,
                     FileLockType::Read,
                     FileLockRange {
@@ -2905,7 +3179,7 @@ mod tests {
             let result = store3
                 .set_plock(
                     file_ino,
-                    owner3 as i64,
+                    owner3,
                     false,
                     FileLockType::Write,
                     FileLockRange {
@@ -2954,6 +3228,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_cross_session_lock_visibility() {
         // Test that locks set by one session are visible to another session

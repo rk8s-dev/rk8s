@@ -1,120 +1,113 @@
-//! ChunkWriter: splits buffered data into block-aligned segments and writes them to the store.
+//! DataUploader: writes a slice payload into blocks without touching metadata.
 
 use super::chunk::ChunkLayout;
-use super::slice::{SliceDesc, SliceIO, Write};
+use super::slice::{SliceDesc, block_span_iter};
 use super::store::BlockStore;
-use crate::meta::{MetaStore, SLICE_ID_KEY};
+use crate::meta::MetaStore;
+use crate::vfs::backend::Backend;
 use anyhow::Result;
-use std::sync::{Arc, Mutex};
+use futures_util::future::join_all;
 
-pub struct ChunkWriter<'a, B, S> {
+pub struct DataUploader<'a, B, M> {
     layout: ChunkLayout,
-    chunk_id: u64,
-    store: &'a B,
-    meta: &'a S,
+    id: u64,
+    backend: &'a Backend<B, M>,
 }
 
-impl<'a, B: BlockStore, S: MetaStore> ChunkWriter<'a, B, S> {
-    pub fn new(layout: ChunkLayout, chunk_id: u64, store: &'a B, meta: &'a S) -> Self {
+impl<'a, B, M> DataUploader<'a, B, M>
+where
+    B: BlockStore,
+    M: MetaStore,
+{
+    pub fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
         Self {
             layout,
-            chunk_id,
-            store,
-            meta,
+            id,
+            backend,
         }
     }
 
-    /// Split a chunk-local write (offset + buffer) into block writes.
-    pub async fn write(&self, offset: u32, buf: &[u8]) -> Result<()> {
-        let slice_id = self.meta.next_id(SLICE_ID_KEY).await?;
-        let slice = SliceDesc {
-            slice_id: slice_id as u64,
-            chunk_id: self.chunk_id,
+    /// Only write the data of a slice into the object storage. Callers must update metadata.
+    pub async fn write_at(&self, slice_id: u64, offset: u32, buf: &[u8]) -> Result<SliceDesc> {
+        let desc = SliceDesc {
+            slice_id,
+            chunk_id: self.id,
             offset,
             length: buf.len() as u32,
         };
 
-        let writer = SliceIO::<Write, _>::new(slice, self.layout, self.store);
+        let mut cursor = 0;
+        let mut futures = Vec::new();
 
-        let desc = writer.write(buf).await?;
-        self.meta.append_slice(self.chunk_id, desc).await?;
-        Ok(())
+        for span in block_span_iter(desc, self.layout) {
+            let take = span.len as usize;
+            let data = &buf[cursor..(cursor + take)];
+
+            let future =
+                self.backend
+                    .store()
+                    .write_range((slice_id, span.index as u32), span.offset, data);
+            futures.push(future);
+            cursor += take;
+        }
+
+        for res in join_all(futures).await {
+            res?;
+        }
+        Ok(desc)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::ChunkReader;
-    use crate::chuck::chunk::DEFAULT_BLOCK_SIZE;
+    use crate::chuck::chunk::ChunkLayout;
+    use crate::chuck::reader::DataFetcher;
     use crate::chuck::store::InMemoryBlockStore;
+    use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;
+    use crate::vfs::backend::Backend;
+    use std::sync::Arc;
 
-    #[tokio::test]
-    async fn test_writer_cross_blocks() {
-        let layout = ChunkLayout::default();
-        let store = InMemoryBlockStore::new();
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .store();
-        let writer = ChunkWriter::new(layout, 1, &store, &meta);
-
-        // Write starting from half a block and spanning one and a half blocks.
-        let half = (layout.block_size / 2) as usize;
-        let len = layout.block_size as usize + half;
-        let mut data = vec![0u8; len];
-        for (i, b) in data.iter_mut().enumerate().take(len) {
-            *b = (i % 251) as u8; // Nontrivial data pattern
+    fn small_layout() -> ChunkLayout {
+        ChunkLayout {
+            chunk_size: 16 * 1024,
+            block_size: 4 * 1024,
         }
-        writer.write(half as u32, &data).await.unwrap();
+    }
 
-        // Read back and verify (reusing read_at).
-        let mut out = Vec::with_capacity(len);
-        // Back half of the first block.
-        let mut first = vec![0u8; (DEFAULT_BLOCK_SIZE / 2) as usize];
-        store
-            .read_range((1, 0), DEFAULT_BLOCK_SIZE / 2, &mut first)
-            .await
-            .unwrap();
-        out.extend_from_slice(&first);
-        // Entire second block.
-        let mut second = vec![0u8; layout.block_size as usize];
-        store.read_range((1, 1), 0, &mut second).await.unwrap();
-        out.extend_from_slice(&second);
-
-        assert_eq!(out, data);
+    fn patterned(len: usize, seed: u8) -> Vec<u8> {
+        let mut buf = vec![0u8; len];
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = seed.wrapping_add(i as u8);
+        }
+        buf
     }
 
     #[tokio::test]
-    async fn test_writer_copy_on_write_appends_slice() {
-        let layout = ChunkLayout::default();
-        let store = InMemoryBlockStore::new();
+    async fn test_data_uploader_roundtrip() {
+        let layout = small_layout();
+        let store = Arc::new(InMemoryBlockStore::new());
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
             .store();
-        let writer = ChunkWriter::new(layout, 9, &store, &meta);
+        let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
-        let half = (layout.block_size / 2) as usize;
-        let first = vec![1u8; half];
-        writer.write(0, &first).await.unwrap();
+        let data = patterned(layout.block_size as usize + 512, 7);
+        let offset = 512u32;
+        let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
 
-        let second = vec![2u8; half];
-        writer.write(0, &second).await.unwrap();
+        let uploader = DataUploader::new(layout, 1, backend.as_ref());
+        let desc = uploader
+            .write_at(slice_id as u64, offset, &data)
+            .await
+            .unwrap();
+        meta.append_slice(1, desc).await.unwrap();
 
-        let slices = meta.get_slices(9).await.unwrap();
-        assert_eq!(slices.len(), 2, "copy-on-write must append slices");
-        assert_eq!(slices[0].chunk_id, slices[1].chunk_id);
-        assert_eq!(slices[1].chunk_id, 9);
-        assert_eq!(slices[0].offset, slices[1].offset);
-        assert_eq!(slices[1].offset, 0);
-        assert_eq!(slices[0].length, slices[1].length);
-        assert_eq!(slices[0].length, half as u32);
-
-        let mut reader = ChunkReader::new(layout, 9, &store, &meta);
-        reader.prepare_slices().await.unwrap();
-        let out = reader.read(0, half).await.unwrap();
-        assert!(out.iter().all(|&b| b == 2));
+        let mut fetcher = DataFetcher::new(layout, 1, backend.as_ref());
+        fetcher.prepare_slices().await.unwrap();
+        let out = fetcher.read_at(offset, data.len()).await.unwrap();
+        assert_eq!(out, data);
     }
 }

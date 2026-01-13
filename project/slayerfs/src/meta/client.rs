@@ -15,6 +15,7 @@ use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
 use dashmap::DashMap;
+use futures::stream;
 use if_addrs::get_if_addrs;
 use moka::future::Cache;
 use std::sync::Arc;
@@ -22,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 use std::{collections::HashSet, process};
 use tokio::sync::{Mutex, mpsc};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::vfs::extract_ino_and_chunk_index;
@@ -52,6 +53,70 @@ pub struct MetaClientOptions {
     /// When true, lookups fall back to case-insensitive matching similar to
     /// JuiceFS `CaseInsensi`.
     pub case_insensitive: bool,
+    /// Maximum symlink follow depth (POSIX SYMLOOP_MAX).
+    pub max_symlinks: usize,
+    /// Batch attribute prefetch configuration
+    pub batch_prefetch: BatchPrefetchConfig,
+}
+
+/// Configuration for batch attribute prefetching during opendir
+#[derive(Debug, Clone)]
+pub struct BatchPrefetchConfig {
+    /// Enable batch prefetching
+    pub enabled: bool,
+    /// Batch size for each query (default: 200)
+    pub batch_size: usize,
+    /// Maximum concurrent batches (default: 3)
+    pub max_concurrency: usize,
+}
+
+impl Default for BatchPrefetchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            batch_size: 200,
+            max_concurrency: 3,
+        }
+    }
+}
+
+impl BatchPrefetchConfig {
+    /// Create optimized config for traditional databases like Postgres/sqlite
+    pub fn for_database() -> Self {
+        Self {
+            enabled: true,
+            batch_size: 500,
+            max_concurrency: 5,
+        }
+    }
+
+    /// Create optimized config for Redis
+    pub fn for_redis() -> Self {
+        Self {
+            enabled: true,
+            batch_size: 300,
+            max_concurrency: 10,
+        }
+    }
+
+    /// Create optimized config for Etcd
+    pub fn for_etcd() -> Self {
+        Self {
+            enabled: true,
+            batch_size: 100, // Etcd Txn limited to ~128 ops
+            max_concurrency: 3,
+        }
+    }
+
+    /// Automatically select optimal config based on backend store name
+    pub fn for_store(store_name: &str) -> Self {
+        match store_name {
+            name if name.contains("database") => Self::for_database(),
+            name if name.contains("redis") => Self::for_redis(),
+            name if name.contains("etcd") => Self::for_etcd(),
+            _ => Self::default(),
+        }
+    }
 }
 
 impl Default for MetaClientOptions {
@@ -62,6 +127,8 @@ impl Default for MetaClientOptions {
             read_only: false,
             no_background_jobs: false,
             case_insensitive: false,
+            max_symlinks: 40,
+            batch_prefetch: BatchPrefetchConfig::default(),
         }
     }
 }
@@ -125,8 +192,17 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         store: Arc<T>,
         capacity: CacheCapacity,
         ttl: CacheTtl,
-        options: MetaClientOptions,
+        mut options: MetaClientOptions,
     ) -> Arc<Self> {
+        let store_name = store.name();
+        // Always use the predefined configuration values.
+        // TODO: Make the values configurable.
+        options.batch_prefetch = BatchPrefetchConfig::for_store(store_name);
+        debug!(
+            "store_name: {} Batch prefetch config: size={}, concurrency={}",
+            store_name, options.batch_prefetch.batch_size, options.batch_prefetch.max_concurrency
+        );
+
         // Detect if this is an etcd backend and start Watch Worker
         let watch_worker = if options.no_background_jobs {
             None
@@ -149,7 +225,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                 warn!("Failed to start Watch Worker: {}", e);
                 None
             } else {
-                info!("Watch Worker started for etcd backend");
+                debug!("Watch Worker started for etcd backend");
 
                 // Start the invalidation handler after creating MetaClient
                 let worker_arc = Arc::new(worker);
@@ -461,10 +537,48 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
     }
 
-    /// Resolves a file path to its corresponding inode number.
+    /// Normalizes a path by resolving `.` and `..` components.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to normalize (can be absolute or relative)
+    ///
+    /// # Returns
+    ///
+    /// A normalized absolute path with `.` and `..` resolved.
+    fn normalize_path(path: &str) -> String {
+        let mut components: Vec<&str> = Vec::new();
+        let is_absolute = path.starts_with('/');
+
+        for part in path.split('/') {
+            match part {
+                "" | "." => continue, // Skip empty and current directory
+                ".." => {
+                    if !(components.is_empty()) {
+                        components.pop();
+                    }
+                }
+                _ => components.push(part),
+            }
+        }
+
+        if is_absolute {
+            if components.is_empty() {
+                "/".to_string()
+            } else {
+                format!("/{}", components.join("/"))
+            }
+        } else {
+            components.join("/")
+        }
+    }
+
+    /// Resolves a file path to its corresponding inode number (**lstat semantics**).
     ///
     /// This method walks through the path components from root to leaf,
     /// utilizing both inode cache and path cache for performance optimization.
+    /// When encountering a symlink in an intermediate path component,
+    /// it follows the symlink to resolve the target path.
     ///
     /// # Arguments
     ///
@@ -472,10 +586,28 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// # Returns
     ///
-    /// * `Ok(i64)` - The inode number of the file/directory
+    /// * `Ok(i64)` - The inode number of the file/directory/symlink
     /// * `Err(MetaError::NotFound)` - If any component in the path doesn't exist
     /// * `Err(MetaError::...)` - Other metadata errors
     pub async fn resolve_path(&self, path: &str) -> Result<i64, MetaError> {
+        self.resolve_path_impl(path, false).await
+    }
+    /// Resolves a file path to its corresponding inode number (**stat semantics**).
+    ///
+    /// This method is similar to [`resolve_path`], but follows all symlinks
+    /// including the final path component.
+    #[allow(dead_code)]
+    pub async fn resolve_path_follow(&self, path: &str) -> Result<i64, MetaError> {
+        self.resolve_path_impl(path, true).await
+    }
+
+    /// Internal implementation of path resolution with configurable symlink behavior.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The absolute path to resolve
+    /// * `follow_final` - If true, follow stat semantics, false for lstat semantics
+    async fn resolve_path_impl(&self, path: &str, follow_final: bool) -> Result<i64, MetaError> {
         info!("MetaClient: Resolving path: {}", path);
 
         let root = self.root();
@@ -484,41 +616,109 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
 
         if let Some(ino) = self.path_cache.get(path).await {
-            info!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
-            return Ok(ino);
+            if !follow_final {
+                info!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
+                return Ok(ino);
+            }
+
+            match self.cached_stat(ino).await {
+                Ok(Some(attr)) if attr.kind == FileType::Symlink => {
+                    info!(
+                        "MetaClient: Path cache HIT for '{}' -> symlink inode {}, need to follow",
+                        path, ino
+                    );
+                }
+
+                _ => {
+                    info!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
+                    return Ok(ino);
+                }
+            }
         }
 
         info!("MetaClient: Path cache MISS for '{}'", path);
 
-        let mut current_ino = root;
-        let segments: Vec<&str> = path
-            .trim_start_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
+        let mut current_path = path.to_string();
+        let mut symlink_depth = 0;
+        let max_symlinks = self.options.max_symlinks;
 
-        for seg in segments {
-            let child_ino = self
-                .cached_lookup(current_ino, seg)
-                .await?
-                .ok_or_else(|| MetaError::NotFound(current_ino))?;
+        loop {
+            if symlink_depth >= max_symlinks {
+                return Err(MetaError::TooManySymlinks);
+            }
+            let segments: Vec<&str> = current_path
+                .trim_start_matches('/')
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .collect();
 
-            current_ino = child_ino;
+            let segment_count = segments.len();
+            let mut current_ino = root;
+            let mut symlink_encountered = false;
+
+            for (idx, seg) in segments.iter().enumerate() {
+                let child_ino = self
+                    .cached_lookup(current_ino, seg)
+                    .await?
+                    .ok_or_else(|| MetaError::NotFound(current_ino))?;
+
+                let is_tail = idx == segment_count - 1;
+                let should_follow = !is_tail || follow_final;
+
+                // Follow symlinks based on position and follow_final flag
+                if should_follow
+                    && let Ok(Some(attr)) = self.cached_stat(child_ino).await
+                    && attr.kind == FileType::Symlink
+                {
+                    info!(
+                        "MetaClient: Following symlink at segment {} (inode {})",
+                        seg, child_ino
+                    );
+
+                    let target = self.store.read_symlink(child_ino).await?;
+                    let remaining = segments[idx + 1..].join("/");
+
+                    // Resolve absolute vs relative target
+                    let resolved_target = if target.starts_with('/') {
+                        target
+                    } else {
+                        let parent_path = self
+                            .get_path(current_ino)
+                            .await?
+                            .unwrap_or_else(|| "/".to_string());
+                        if parent_path == "/" {
+                            format!("/{}", target)
+                        } else {
+                            format!("{}/{}", parent_path, target)
+                        }
+                    };
+
+                    current_path = if remaining.is_empty() {
+                        Self::normalize_path(&resolved_target)
+                    } else {
+                        Self::normalize_path(&format!("{}/{}", resolved_target, remaining))
+                    };
+
+                    symlink_encountered = true;
+                    symlink_depth += 1;
+                    break;
+                }
+
+                current_ino = child_ino;
+            }
+
+            // If no symlink was encountered, we're done
+            if !symlink_encountered {
+                self.path_cache.insert(path.to_string(), current_ino).await;
+                self.path_trie.insert(path, current_ino).await;
+                self.inode_to_paths
+                    .entry(current_ino)
+                    .or_default()
+                    .push(path.to_string());
+
+                return Ok(current_ino);
+            }
         }
-
-        // Cache the resolved path in both caches
-        self.path_cache.insert(path.to_string(), current_ino).await;
-
-        // Store in trie for efficient prefix-based invalidation
-        self.path_trie.insert(path, current_ino).await;
-
-        // Maintain reverse index: inode -> paths
-        self.inode_to_paths
-            .entry(current_ino)
-            .or_default()
-            .push(path.to_string());
-
-        Ok(current_ino)
     }
 
     /// Retrieves file attributes (metadata) for a given inode with caching.
@@ -621,6 +821,116 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
         Ok(None)
     }
+
+    /// Batch prefetch attributes for directory entries in background
+    ///
+    /// This method starts a background task that:
+    /// 1. Collects inodes that need prefetching
+    /// 2. Splits them into batches
+    /// 3. Queries each batch concurrently
+    /// 4. Inserts results into cache
+    ///
+    /// Returns a tuple of (done_flag, task_handle)
+    pub fn spawn_batch_prefetch(
+        self: &Arc<Self>,
+        ino: i64,
+        entries: &[DirEntry],
+    ) -> (Arc<AtomicBool>, tokio::task::JoinHandle<()>) {
+        let config = &self.options.batch_prefetch;
+
+        if !config.enabled || entries.is_empty() {
+            let done = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let handle = tokio::spawn(async {});
+            return (done, handle);
+        }
+
+        // Collect inodes that need to be fetched
+        let inodes_to_fetch: Vec<i64> = entries.iter().map(|e| e.ino).collect();
+
+        let batch_size = config.batch_size;
+        let max_concurrency = config.max_concurrency;
+        let done_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done_flag_clone = Arc::clone(&done_flag);
+
+        let client = Arc::clone(self);
+        let parent_ino = ino; // Capture parent directory inode for the async block
+
+        let task = tokio::spawn(async move {
+            let start = std::time::Instant::now();
+            debug!(
+                "Starting batch prefetch for directory inode {}: {} entries, batch_size={}, max_concurrency={}",
+                parent_ino,
+                inodes_to_fetch.len(),
+                batch_size,
+                max_concurrency
+            );
+
+            // Split into batches
+            let chunks: Vec<Vec<i64>> = inodes_to_fetch
+                .chunks(batch_size)
+                .map(|chunk| chunk.to_vec())
+                .collect();
+
+            let total_batches = chunks.len();
+
+            // Process batches with controlled concurrency using stream
+            // This is a single-layer spawn - abort will properly cancel all work
+            use futures::stream::StreamExt;
+            stream::iter(chunks.into_iter().enumerate())
+                .map(|(batch_idx, chunk)| {
+                    let client_clone = Arc::clone(&client);
+                    let parent = parent_ino;
+                    async move {
+                        let batch_start = std::time::Instant::now();
+                        match client_clone.store.batch_stat(&chunk).await {
+                            Ok(attrs) => {
+                                let mut cached_count = 0;
+                                // Insert results into cache
+                                for (child_ino, attr_opt) in chunk.iter().zip(attrs.iter()) {
+                                    if let Some(attr) = attr_opt {
+                                        client_clone
+                                            .inode_cache
+                                            .insert_node(*child_ino, attr.clone(), Some(parent))
+                                            .await;
+                                        cached_count += 1;
+                                    }
+                                }
+                                debug!(
+                                    "Batch {}/{} completed: {} inodes queried, {} cached in {:?}",
+                                    batch_idx + 1,
+                                    total_batches,
+                                    chunk.len(),
+                                    cached_count,
+                                    batch_start.elapsed()
+                                );
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Batch {}/{} failed: {} - continuing with remaining batches",
+                                    batch_idx + 1,
+                                    total_batches,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                })
+                .buffer_unordered(max_concurrency)
+                .collect::<Vec<_>>()
+                .await;
+
+            debug!(
+                "Prefetch completed for directory inode {}: {} total inodes in {:?}",
+                parent_ino,
+                inodes_to_fetch.len(),
+                start.elapsed()
+            );
+
+            done_flag_clone.store(true, Ordering::Release);
+        });
+
+        (done_flag, task)
+    }
 }
 
 #[async_trait]
@@ -704,15 +1014,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             entries.iter().map(|e| (e.name.clone(), e.ino)).collect();
         self.inode_cache.load_children(inode, children_data).await;
 
-        // Also cache each child's attributes
-        for entry in &entries {
-            if let Ok(Some(attr)) = self.store.stat(entry.ino).await {
-                self.inode_cache
-                    .insert_node(entry.ino, attr, Some(inode))
-                    .await;
-            }
-        }
-
+        // Note: We shouldn't pre-fetch attributes here; use batch prefetch instead.
         Ok(entries)
     }
 
@@ -1149,6 +1451,61 @@ mod tests {
         };
 
         MetaClient::new(store, capacity, ttl)
+    }
+
+    #[test]
+    fn test_normalize_path() {
+        // Basic absolute paths
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("/"), "/");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/user"),
+            "/home/user"
+        );
+
+        // Handle .
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("/./"), "/");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/./user"),
+            "/home/user"
+        );
+
+        // Handle ..
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/user/../"),
+            "/home"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/../user"),
+            "/user"
+        );
+
+        // Complex cases
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/a/b/../c/./d"),
+            "/a/c/d"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/a/./b/../../c"),
+            "/c"
+        );
+
+        // Relative paths
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("file.txt"),
+            "file.txt"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("../file.txt"),
+            "file.txt"
+        );
+
+        // Edge cases
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path(""), "");
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("."), "");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/../../../file.txt"),
+            "/file.txt"
+        );
     }
 
     /// Test scenario: Call readdir immediately after creating files to verify fully_loaded flag handling

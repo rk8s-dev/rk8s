@@ -9,6 +9,7 @@ mod cri;
 mod daemon;
 mod dns;
 mod network;
+mod oci;
 mod quic;
 mod rootpath;
 mod task;

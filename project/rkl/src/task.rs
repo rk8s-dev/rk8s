@@ -2,25 +2,22 @@ use crate::commands::container::config::ContainerConfigBuilder;
 use crate::commands::container::handle_image_typ;
 use crate::commands::{create, delete, kill, load_container, start};
 use crate::cri::cri_api::{
-    CreateContainerRequest, CreateContainerResponse, LinuxContainerConfig, LinuxContainerResources,
-    PodSandboxConfig, PodSandboxMetadata, PortMapping, Protocol, RemovePodSandboxRequest,
-    RemovePodSandboxResponse, RunPodSandboxRequest, RunPodSandboxResponse, StartContainerRequest,
-    StartContainerResponse, StopPodSandboxRequest, StopPodSandboxResponse,
+    ContainerConfig, CreateContainerRequest, CreateContainerResponse, LinuxContainerConfig,
+    LinuxContainerResources, PodSandboxConfig, PodSandboxMetadata, PortMapping, Protocol,
+    RemovePodSandboxRequest, RemovePodSandboxResponse, RunPodSandboxRequest, RunPodSandboxResponse,
+    StartContainerRequest, StartContainerResponse, StopPodSandboxRequest, StopPodSandboxResponse,
 };
+use crate::oci::{self, OCISpecGenerator};
 use crate::rootpath;
 use anyhow::{Result, anyhow};
 use common::{ContainerRes, ContainerSpec, PodTask};
 use json::JsonValue;
 use libcni::rust_cni::cni::Libcni;
 use libcontainer::oci_spec::runtime::{
-    Capability, LinuxBuilder, LinuxCapabilities, LinuxCpuBuilder, LinuxMemoryBuilder,
-    LinuxNamespaceBuilder, LinuxNamespaceType, LinuxResources, LinuxResourcesBuilder,
-    ProcessBuilder, Spec,
+    LinuxCpuBuilder, LinuxMemoryBuilder, LinuxResources, LinuxResourcesBuilder,
 };
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Create, Delete, Kill, Start};
-use oci_spec::runtime::RootBuilder;
-use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -130,14 +127,54 @@ impl TaskRunner {
         let config = request.config.unwrap_or_default();
         let sandbox_id = config.metadata.unwrap_or_default().name.to_string();
 
-        // get bundle path of pause container from labels
-        let bundle_path = self.task.metadata.labels.get("bundle").cloned().unwrap();
-        // .unwrap_or(get_pause_bundle()?);
+        // 1. Get sandbox bundle path
+        let sandbox_spec = ContainerSpec {
+            name: "sandbox".to_string(),
+            // FIXME: SHOULD define a const variable image name
+            image: "pause:3.9".to_string(),
+            ports: vec![],
+            args: vec![],
+            resources: None,
+            liveness_probe: None,
+            readiness_probe: None,
+            startup_probe: None,
+            security_context: None,
+            env: None,
+            volume_mounts: None,
+            command: None,
+            working_dir: None,
+        };
+        let (config_builder, bundle_path) = handle_image_typ(&sandbox_spec)
+            .map_err(|e| anyhow!("failed to get pause container's bundle_path: {e}"))?;
+
+        // 2. build final oci specification config.json
+        let mut config = ContainerConfig::default();
+        if let Some(mut config_b) = config_builder {
+            config = config_b
+                .container_spec(sandbox_spec.clone())?
+                .clone()
+                .build();
+        }
+        let oci_spec = oci::OCISpecGenerator::new(&config, &sandbox_spec, None)
+            .generate()
+            .map_err(|e| anyhow!("failed to generate sandbox pause oci spec: {e}"))?;
+
+        let config_path = format!("{bundle_path}/config.json");
+        if !Path::new(&config_path).exists() {
+            let file = File::create(&config_path)?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer_pretty(&mut writer, &oci_spec)?;
+            writer.flush()?;
+        }
+
         let bundle_dir = PathBuf::from(&bundle_path);
         if !bundle_dir.exists() {
             return Err(anyhow!("Bundle directory does not exist"));
         }
 
+        info!("Get sandbox {sandbox_id}'s bundle path: {bundle_path}");
+
+        // 3. Create container use cri
         let create_args = Create {
             bundle: bundle_dir.clone(),
             console_socket: None,
@@ -154,6 +191,7 @@ impl TaskRunner {
         create(create_args, root_path.clone(), false)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
+        // 4. Start container use cri
         let start_args = Start {
             container_id: sandbox_id.clone(),
         };
@@ -187,6 +225,8 @@ impl TaskRunner {
             .unwrap_or("")
             .to_string();
         self.pause_pid = Some(pid_i32);
+        // let podip = runner.ip().unwrap().to_string();
+
         info!("podip:{podip}");
         let response = RunPodSandboxResponse {
             pod_sandbox_id: sandbox_id,
@@ -265,67 +305,11 @@ impl TaskRunner {
         let pause_pid = self
             .pause_pid
             .ok_or_else(|| anyhow!("Pause container PID is not set"))?;
-        // create  OCI Spec
-        let mut spec = Spec::default();
 
-        let root = RootBuilder::default()
-            .readonly(false)
-            .build()
-            .unwrap_or_default();
-
-        spec.set_root(Some(root));
-
-        let namespaces = vec![
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Pid)
-                .path(format!("/proc/{pause_pid}/ns/pid"))
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Network)
-                .path(format!("/proc/{pause_pid}/ns/net"))
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Ipc)
-                .path(format!("/proc/{pause_pid}/ns/ipc"))
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Uts)
-                .path(format!("/proc/{pause_pid}/ns/uts"))
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Mount)
-                .build()?,
-            LinuxNamespaceBuilder::default()
-                .typ(LinuxNamespaceType::Cgroup)
-                .build()?,
-        ];
-
-        let mut linux = LinuxBuilder::default().namespaces(namespaces);
-        if let Some(x) = &config.linux
-            && let Some(r) = &x.resources
-        {
-            linux = linux.resources(r);
-        }
-        let linux = linux.build()?;
-        spec.set_linux(Some(linux));
-
-        let mut process = ProcessBuilder::default().build()?;
-
-        // set args
-        let arg = if container_spec.args.is_empty() {
-            config.args.clone()
-        } else {
-            container_spec.args.clone()
-        };
-
-        process.set_args(Some(arg));
-
-        let mut capabilities = process.capabilities().clone().unwrap();
-        add_cap_net_raw(&mut capabilities);
-        process.set_capabilities(Some(capabilities));
-
-        spec.set_process(Some(process));
-        // [image_specification] check if config's spec
+        let generator = OCISpecGenerator::new(config, container_spec, Some(pause_pid));
+        let spec = generator.generate().map_err(|e| {
+            anyhow!("failed to build OCI Specification for container {container_id}: {e}")
+        })?;
 
         let bundle_path = if let Some(image_spec) = &config.image {
             image_spec.image.clone()
@@ -343,16 +327,16 @@ impl TaskRunner {
         if !bundle_dir.exists() {
             return Err(anyhow!("Bundle directory does not exist"));
         }
-        // write into config.json
+
+        // FIXME: If there is a config.json in bundle (which is unexpected in production), keep it
+        // Expected behavior: the container should own it's unique bundle path
         let config_path = format!("{bundle_path}/config.json");
-        if Path::new(&config_path).exists() {
-            fs::remove_file(&config_path)
-                .map_err(|e| anyhow!("Failed to remove existing config.json: {}", e))?;
+        if !Path::new(&config_path).exists() {
+            let file = File::create(&config_path)?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer_pretty(&mut writer, &spec)?;
+            writer.flush()?;
         }
-        let file = File::create(&config_path)?;
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(&mut writer, &spec)?;
-        writer.flush()?;
 
         let create_args = Create {
             bundle: bundle_path.clone().into(),
@@ -364,7 +348,6 @@ impl TaskRunner {
             container_id: container_id.clone(),
         };
 
-        // get root_path
         let root_path = rootpath::determine(None, &*create_syscall())
             .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
 
@@ -676,50 +659,6 @@ pub fn get_cni() -> Result<Libcni, anyhow::Error> {
         None,
     );
     Ok(cni)
-}
-
-pub fn add_cap_net_admin(capabilities: &mut LinuxCapabilities) {
-    let mut bounding = capabilities.bounding().clone().unwrap();
-    bounding.insert(Capability::NetAdmin);
-    capabilities.set_bounding(Some(bounding));
-
-    let mut effective = capabilities.effective().clone().unwrap();
-    effective.insert(Capability::NetAdmin);
-    capabilities.set_effective(Some(effective));
-
-    let mut inheritable = capabilities.inheritable().clone().unwrap();
-    inheritable.insert(Capability::NetAdmin);
-    capabilities.set_inheritable(Some(inheritable));
-
-    let mut permitted = capabilities.permitted().clone().unwrap();
-    permitted.insert(Capability::NetAdmin);
-    capabilities.set_permitted(Some(permitted));
-
-    let mut ambient = capabilities.ambient().clone().unwrap();
-    ambient.insert(Capability::NetAdmin);
-    capabilities.set_ambient(Some(ambient));
-}
-
-pub fn add_cap_net_raw(capabilities: &mut LinuxCapabilities) {
-    let mut bounding = capabilities.bounding().clone().unwrap();
-    bounding.insert(Capability::NetRaw);
-    capabilities.set_bounding(Some(bounding));
-
-    let mut effective = capabilities.effective().clone().unwrap();
-    effective.insert(Capability::NetRaw);
-    capabilities.set_effective(Some(effective));
-
-    let mut inheritable = capabilities.inheritable().clone().unwrap();
-    inheritable.insert(Capability::NetRaw);
-    capabilities.set_inheritable(Some(inheritable));
-
-    let mut permitted = capabilities.permitted().clone().unwrap();
-    permitted.insert(Capability::NetRaw);
-    capabilities.set_permitted(Some(permitted));
-
-    let mut ambient = capabilities.ambient().clone().unwrap();
-    ambient.insert(Capability::NetRaw);
-    capabilities.set_ambient(Some(ambient));
 }
 
 #[cfg(test)]

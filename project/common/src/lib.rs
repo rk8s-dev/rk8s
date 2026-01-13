@@ -18,6 +18,7 @@ pub mod _private {
 pub mod lease;
 pub mod quic;
 
+use libcontainer::oci_spec::runtime::Capability;
 pub use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -225,6 +226,74 @@ pub struct Resource {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct SecurityContext {
+    #[serde(rename = "runAsUser")]
+    pub run_as_user: Option<i64>,
+
+    #[serde(rename = "runAsGroup")]
+    pub run_as_group: Option<i64>,
+
+    #[serde(default)]
+    pub privileged: Option<bool>,
+
+    #[serde(rename = "allowPrivilegeEscalation", default)]
+    pub allow_privilege_escalation: Option<bool>,
+
+    pub capabilities: Option<Capabilities>,
+}
+
+/// The pattern should be like: "CAP_AUDIT_CONTROL" refers to  <http://man7.org/linux/man-pages/man7/capabilities.7.html>
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct Capabilities {
+    #[serde(default)]
+    pub add: Vec<Capability>, // List of capabilities to add
+
+    #[serde(default)]
+    pub drop: Vec<Capability>, // List of capabilities to drop
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct EnvVar {
+    pub name: String,
+
+    #[serde(default)]
+    pub value: Option<String>,
+    // #[serde(rename = "valueFrom", default)]
+    // pub value_from: Option<EnvVarSource>,
+}
+
+// #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+// pub struct EnvVarSource {
+//     #[serde(rename = "secretKeyRef", default)]
+//     pub secret_key_ref: Option<SecretKeySelector>, // Selects a key of a Secret
+
+//     #[serde(rename = "configMapKeyRef", default)]
+//     pub config_map_key_ref: Option<ConfigMapKeySelector>, // Selects a key of a ConfigMap
+
+//     #[serde(rename = "fieldRef", default)]
+//     pub field_ref: Option<ObjectFieldSelector>, // Selects a field of the Pod/container
+// }
+
+// // Placeholder structures for EnvVarSource fields
+// pub struct SecretKeySelector { /* ... */ }
+// pub struct ConfigMapKeySelector { /* ... */ }
+// pub struct ObjectFieldSelector { /* ... */ }
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct VolumeMount {
+    pub name: String,
+
+    #[serde(rename = "mountPath")]
+    pub mount_path: String,
+
+    #[serde(rename = "readOnly", default)]
+    pub read_only: Option<bool>,
+
+    #[serde(rename = "subPath", default)]
+    pub sub_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ContainerSpec {
     pub name: String,
 
@@ -246,6 +315,22 @@ pub struct ContainerSpec {
 
     #[serde(rename = "startupProbe", default)]
     pub startup_probe: Option<Probe>,
+
+    // Handle the security
+    #[serde(rename = "securityContext", default)]
+    pub security_context: Option<SecurityContext>,
+
+    #[serde(default)]
+    pub env: Option<Vec<EnvVar>>,
+
+    #[serde(rename = "volumeMounts", default)]
+    pub volume_mounts: Option<Vec<VolumeMount>>,
+
+    #[serde(default)]
+    pub command: Option<Vec<String>>,
+
+    #[serde(rename = "workingDir", default)]
+    pub working_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

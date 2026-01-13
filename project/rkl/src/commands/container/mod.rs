@@ -1,3 +1,4 @@
+use crate::oci;
 use crate::{
     commands::{
         Exec, ExecContainer,
@@ -9,7 +10,7 @@ use crate::{
     },
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
     rootpath,
-    task::{add_cap_net_admin, add_cap_net_raw, get_cni},
+    task::get_cni,
 };
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
@@ -173,6 +174,11 @@ impl ContainerRunner {
                 liveness_probe: None,
                 readiness_probe: None,
                 startup_probe: None,
+                security_context: None,
+                env: None,
+                volume_mounts: None,
+                command: None,
+                working_dir: None,
             },
             config: None,
             container_id: container_id.to_string(),
@@ -309,11 +315,7 @@ impl ContainerRunner {
 
         // build the process path
         let mut process = ProcessBuilder::default().cwd(&config.working_dir).build()?;
-        let mut capabilities = process.capabilities().clone().unwrap();
-        // add the CAP_NET_RAW
-        add_cap_net_raw(&mut capabilities);
-        add_cap_net_admin(&mut capabilities);
-
+        let capabilities = oci::new_linux_capabilities_with_defaults();
         process.set_capabilities(Some(capabilities));
         process.set_terminal(Some(false));
         process.set_args(Some(config.args.clone()));
@@ -322,7 +324,7 @@ impl ContainerRunner {
 
         spec.set_process(Some(process));
 
-        let mut mounts = convert_oci_mounts(&config.mounts)?;
+        let mut mounts = convert_cri_to_oci_mounts(&config.mounts)?;
         let existing_mounts = spec.mounts().clone().unwrap_or_default();
         mounts.extend(existing_mounts);
         spec.set_mounts(Some(mounts));
@@ -394,7 +396,7 @@ impl ContainerRunner {
     }
 
     pub fn setup_container_network(&self) -> Result<JsonValue> {
-        // single container status
+        // If this container is not from compose, then setup the config file again
         if self.determine_single_status() {
             setup_network_conf()?;
         }
@@ -499,7 +501,7 @@ impl ContainerRunner {
     }
 }
 
-fn convert_oci_mounts(mounts: &Vec<Mount>) -> Result<Vec<OciMount>> {
+fn convert_cri_to_oci_mounts(mounts: &Vec<Mount>) -> Result<Vec<OciMount>> {
     let mut oci_mounts: Vec<OciMount> = vec![];
     for mount in mounts {
         let oci_mount = MountBuilder::default()
@@ -793,6 +795,11 @@ mod test {
             liveness_probe: None,
             readiness_probe: None,
             startup_probe: None,
+            security_context: None,
+            env: None,
+            volume_mounts: None,
+            command: None,
+            working_dir: None,
         };
         let runner = ContainerRunner::from_spec(spec.clone(), None).unwrap();
         assert_eq!(runner.container_id, "demo1");
@@ -819,6 +826,11 @@ mod test {
                 liveness_probe: None,
                 readiness_probe: None,
                 startup_probe: None,
+                security_context: None,
+                env: None,
+                volume_mounts: None,
+                command: None,
+                working_dir: None,
             },
             None,
         )

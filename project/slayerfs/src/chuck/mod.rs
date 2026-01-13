@@ -26,9 +26,7 @@ pub mod writer;
 pub use chunk::{
     ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE, chunk_index_of, within_chunk_offset,
 };
-pub use reader::ChunkReader;
 pub use slice::{BlockSpan, SliceDesc};
 pub use span::{BlockTag, ChunkTag, PageTag, Span, SpanTag};
 pub use store::{BlockStore, InMemoryBlockStore, ObjectBlockStore, RustfsBlockStore, S3BlockStore};
 pub use util::ChunkSpan;
-pub use writer::ChunkWriter;

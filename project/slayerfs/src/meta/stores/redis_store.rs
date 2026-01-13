@@ -25,6 +25,9 @@ use std::any::Any;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::select;
+use tokio::time::MissedTickBehavior;
+use tokio_util::sync::CancellationToken;
 use tracing::error;
 use uuid::Uuid;
 
@@ -39,6 +42,8 @@ const ALL_SESSIONS_KEY: &str = "allsessions";
 const SESSION_INFOS_KEY: &str = "sessioninfos";
 const PLOCK_PREFIX: &str = "plock";
 const LOCKS_KEY: &str = "locks";
+const LOCKED_KEY: &str = "locked";
+
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
 
 /// Minimal Redis-backed meta store.
@@ -127,6 +132,10 @@ impl RedisMetaStore {
             }
         };
         Ok(suffix)
+    }
+
+    fn locked_key(sid: Uuid) -> String {
+        format!("{}{}", LOCKED_KEY, sid)
     }
 
     async fn init_root_directory(&self) -> Result<(), MetaError> {
@@ -374,7 +383,13 @@ impl RedisMetaStore {
 
                     if records.is_empty() {
                         // Remove the field if no records
-                        let _: () = conn.hdel(&plock_key, &field).await.map_err(redis_err)?;
+                        let _: () = redis::pipe()
+                            .atomic()
+                            .hdel(&plock_key, &field)
+                            .srem(Self::locked_key(*sid), inode)
+                            .exec_async(&mut conn)
+                            .await
+                            .map_err(redis_err)?;
                         return Ok(());
                     }
 
@@ -443,8 +458,11 @@ impl RedisMetaStore {
                 let new_json = serde_json::to_string(&new_records)
                     .map_err(|e| MetaError::Internal(format!("Serialization error: {e}")))?;
 
-                let _: () = conn
+                let _: () = redis::pipe()
+                    .atomic()
                     .hset(&plock_key, &field, new_json)
+                    .sadd(Self::locked_key(*sid), inode)
+                    .exec_async(&mut conn)
                     .await
                     .map_err(redis_err)?;
                 Ok(())
@@ -462,6 +480,54 @@ impl RedisMetaStore {
             pipe.cmd("RPUSH").arg(&key).arg(data);
         }
         pipe.query_async::<()>(&mut conn).await.map_err(redis_err)?;
+        Ok(())
+    }
+
+    async fn shutdown_session_by_id(&self, session_id: Uuid) -> Result<(), MetaError> {
+        let mut conn = self.conn.clone();
+        let session_id_string = session_id.to_string();
+
+        let locked_key = Self::locked_key(session_id);
+
+        let locked_files: Vec<i64> = conn
+            .smembers(&locked_key)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to get locked files: {}", e)))?;
+        let mut pipe = redis::pipe();
+        let pipe_atomic = pipe.atomic();
+        for file in locked_files {
+            let owners: Vec<String> = conn
+                .hkeys(self.plock_key(file))
+                .await
+                .map_err(|e| MetaError::Internal(e.to_string()))?;
+
+            let mut fields: Vec<String> = Vec::new();
+            for owner in owners {
+                let owner_sid = owner.split(':').next().ok_or_else(|| {
+                    MetaError::Internal(format!(
+                        "Malformed lock owner format in Redis: '{}'",
+                        owner
+                    ))
+                })?;
+                if owner_sid == session_id_string {
+                    fields.push(owner);
+                }
+            }
+
+            if !fields.is_empty() {
+                pipe_atomic.hdel(self.plock_key(file), &fields);
+            }
+
+            pipe_atomic.srem(&locked_key, file);
+        }
+
+        pipe_atomic
+            .zrem(ALL_SESSIONS_KEY, &session_id_string)
+            .hdel(SESSION_INFOS_KEY, &session_id_string)
+            .exec_async(&mut conn)
+            .await
+            .map_err(|err| MetaError::Internal(err.to_string()))?;
+
         Ok(())
     }
 
@@ -513,6 +579,52 @@ impl RedisMetaStore {
 
         Ok(())
     }
+    fn set_sid(&self, session_id: Uuid) -> Result<(), MetaError> {
+        self.sid
+            .set(session_id)
+            .map_err(|_| MetaError::Internal("sid has been set".to_string()))?;
+        Ok(())
+    }
+    fn get_sid(&self) -> Result<&Uuid, MetaError> {
+        self.sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid has not been set".to_string()))
+    }
+
+    async fn refresh_session(
+        session_id: Uuid,
+        mut conn: ConnectionManager,
+    ) -> Result<(), MetaError> {
+        let session_id_string = session_id.to_string();
+        let expire = (Utc::now() + chrono::Duration::minutes(5)).timestamp_millis();
+        redis::Cmd::zadd(ALL_SESSIONS_KEY, session_id_string, expire)
+            .exec_async(&mut conn)
+            .await
+            .map_err(|err| MetaError::Internal(err.to_string()))?;
+        Ok(())
+    }
+
+    async fn life_cycle(token: CancellationToken, session_id: Uuid, conn: ConnectionManager) {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            select! {
+                _ = interval.tick() => {
+                    // refresh session
+                    match Self::refresh_session(session_id, conn.clone()).await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            error!("Failed to refresh session: {}", err);
+                        }
+                    }
+
+                }
+                _ = token.cancelled() => {
+                    break;
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -523,6 +635,37 @@ impl MetaStore for RedisMetaStore {
 
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         Ok(self.get_node(ino).await?.map(|n| n.as_file_attr()))
+    }
+
+    /// Batch stat implementation using Redis MGET for optimal performance
+    async fn batch_stat(&self, inodes: &[i64]) -> Result<Vec<Option<FileAttr>>, MetaError> {
+        if inodes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build keys for all inodes
+        let keys: Vec<String> = inodes.iter().map(|&ino| self.node_key(ino)).collect();
+
+        // Use MGET to fetch all nodes in a single round trip
+        let mut conn = self.conn.clone();
+        let values: Vec<Option<String>> = conn.get(&keys).await.map_err(redis_err)?;
+
+        // Parse results and convert to FileAttr
+        let mut results = Vec::with_capacity(inodes.len());
+        for value in values {
+            match value {
+                Some(json_str) => match serde_json::from_str::<StoredNode>(&json_str) {
+                    Ok(node) => results.push(Some(node.as_file_attr())),
+                    Err(e) => {
+                        error!("Failed to deserialize node from Redis: {}", e);
+                        results.push(None);
+                    }
+                },
+                None => results.push(None),
+            }
+        }
+
+        Ok(results)
     }
 
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
@@ -844,7 +987,11 @@ impl MetaStore for RedisMetaStore {
         self.alloc_id(key).await
     }
 
-    async fn new_session(&self, session_info: SessionInfo) -> Result<Session, MetaError> {
+    async fn start_session(
+        &self,
+        session_info: SessionInfo,
+        token: CancellationToken,
+    ) -> Result<Session, MetaError> {
         let mut conn = self.conn.clone();
 
         let session_id = Uuid::now_v7();
@@ -867,33 +1014,20 @@ impl MetaStore for RedisMetaStore {
             .exec_async(&mut conn)
             .await
             .map_err(|err| MetaError::Internal(err.to_string()))?;
+        self.set_sid(session_id)?;
+
+        tokio::spawn(Self::life_cycle(
+            token.clone(),
+            session_id,
+            self.conn.clone(),
+        ));
 
         Ok(session)
     }
 
-    async fn refresh_session(&self, session_id: Uuid) -> Result<(), MetaError> {
-        let mut conn = self.conn.clone();
-        let session_id_string = session_id.to_string();
-        let expire = (Utc::now() + chrono::Duration::minutes(5)).timestamp_millis();
-        redis::Cmd::zadd(ALL_SESSIONS_KEY, session_id_string, expire)
-            .exec_async(&mut conn)
-            .await
-            .map_err(|err| MetaError::Internal(err.to_string()))?;
-        Ok(())
-    }
-
-    async fn shutdown_session(&self, session_id: Uuid) -> Result<(), MetaError> {
-        let mut conn = self.conn.clone();
-        let session_id_string = session_id.to_string();
-
-        redis::pipe()
-            .atomic()
-            .zrem(ALL_SESSIONS_KEY, &session_id_string)
-            .hdel(SESSION_INFOS_KEY, &session_id_string)
-            .exec_async(&mut conn)
-            .await
-            .map_err(|err| MetaError::Internal(err.to_string()))?;
-
+    async fn shutdown_session(&self) -> Result<(), MetaError> {
+        let session_id = self.get_sid()?;
+        self.shutdown_session_by_id(*session_id).await?;
         Ok(())
     }
 
@@ -907,12 +1041,12 @@ impl MetaStore for RedisMetaStore {
         for session in sessions {
             let session_id =
                 Uuid::from_str(&session).map_err(|err| MetaError::Internal(err.to_string()))?;
-            self.shutdown_session(session_id).await?;
+            self.shutdown_session_by_id(session_id).await?;
         }
         Ok(())
     }
 
-    async fn get_lock(&self, lock_name: LockName) -> bool {
+    async fn get_global_lock(&self, lock_name: LockName) -> bool {
         let lock_name = lock_name.to_string();
         let mut conn = self.conn.clone();
         let now = Utc::now().timestamp_millis();
@@ -975,7 +1109,7 @@ impl MetaStore for RedisMetaStore {
         let sid = self
             .sid
             .get()
-            .ok_or_else(|| MetaError::Internal("sid not seted".to_string()))?;
+            .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
 
         // First, try to get locks from current session's field
         let current_field = format!("{}:{}", sid, query.owner);
@@ -1052,12 +1186,6 @@ impl MetaStore for RedisMetaStore {
                 Err(e) => return Err(e),
             }
         }
-    }
-
-    fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
-        self.sid
-            .set(sid)
-            .map_err(|_| MetaError::Internal("sid already been set".to_string()))
     }
 }
 
@@ -1190,8 +1318,31 @@ mod tests {
     use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
     use crate::meta::store::MetaError;
     use crate::meta::stores::RedisMetaStore;
+    use serial_test::serial;
     use tokio::time;
     use uuid::Uuid;
+
+    async fn cleanup_test_data() -> Result<(), MetaError> {
+        let url = "redis://127.0.0.1:6379/0";
+        let client = redis::Client::open(url)
+            .map_err(|e| MetaError::Config(format!("Failed to create Redis client: {}", e)))?;
+        let mut conn = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| MetaError::Config(format!("Failed to connect to Redis: {}", e)))?;
+
+        let _: () = redis::cmd("FLUSHDB")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to flush Redis DB: {}", e)))?;
+
+        let config = test_config();
+        let _store = RedisMetaStore::from_config(config.clone())
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to reinitialize root: {}", e)))?;
+
+        Ok(())
+    }
 
     fn test_config() -> Config {
         Config {
@@ -1219,6 +1370,10 @@ mod tests {
     }
 
     async fn new_test_store() -> RedisMetaStore {
+        if let Err(e) = cleanup_test_data().await {
+            eprintln!("Failed to cleanup Redis test data: {}", e);
+        }
+
         RedisMetaStore::from_config(test_config())
             .await
             .expect("Failed to create test database store")
@@ -1295,6 +1450,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_basic_read_lock() {
         let store = new_test_store().await;
@@ -1326,7 +1482,7 @@ mod tests {
 
         // Verify lock exists
         let query = FileLockQuery {
-            owner: owner,
+            owner,
             lock_type: FileLockType::Read,
             range: FileLockRange { start: 0, end: 100 },
         };
@@ -1335,6 +1491,7 @@ mod tests {
         assert_eq!(lock_info.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_multiple_read_locks() {
         // Create session manager with 2 sessions
@@ -1347,7 +1504,10 @@ mod tests {
         let store1 = session_mgr.get_store(0);
         let parent = store1.root_ino();
         let file_ino = store1
-            .create_file(parent, "test_multiple_read_locks_file.txt".to_string())
+            .create_file(
+                parent,
+                format!("test_multiple_read_locks_{}.txt", Uuid::now_v7()),
+            )
             .await
             .unwrap();
 
@@ -1401,6 +1561,7 @@ mod tests {
         assert_eq!(lock_info2.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_write_lock_conflict() {
         // Create session manager with 2 sessions
@@ -1462,6 +1623,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_lock_release() {
         let session_id = Uuid::now_v7();
@@ -1492,7 +1654,7 @@ mod tests {
 
         // Verify lock exists
         let query = FileLockQuery {
-            owner: owner,
+            owner,
             lock_type: FileLockType::Write,
             range: FileLockRange { start: 0, end: 100 },
         };
@@ -1518,6 +1680,7 @@ mod tests {
         assert_eq!(lock_info.lock_type, FileLockType::UnLock);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_non_overlapping_locks() {
         // Create session manager with 2 sessions
@@ -1538,7 +1701,7 @@ mod tests {
         store1
             .set_plock(
                 file_ino,
-                owner1 as i64,
+                owner1,
                 false,
                 FileLockType::Write,
                 FileLockRange { start: 0, end: 100 },
@@ -1552,7 +1715,7 @@ mod tests {
         store2
             .set_plock(
                 file_ino,
-                owner2 as i64,
+                owner2,
                 false,
                 FileLockType::Write,
                 FileLockRange {
@@ -1593,6 +1756,7 @@ mod tests {
         assert_eq!(lock_info2.pid, 5678);
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_concurrent_read_write_locks() {
         // Test multiple sessions acquiring different types of locks
@@ -1632,7 +1796,7 @@ mod tests {
             store2
                 .set_plock(
                     file_ino,
-                    owner2 as i64,
+                    owner2,
                     false,
                     FileLockType::Read,
                     FileLockRange {
@@ -1651,7 +1815,7 @@ mod tests {
             let result = store3
                 .set_plock(
                     file_ino,
-                    owner3 as i64,
+                    owner3,
                     false,
                     FileLockType::Write,
                     FileLockRange {
@@ -1700,6 +1864,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_cross_session_lock_visibility() {
         // Test that locks set by one session are visible to another session

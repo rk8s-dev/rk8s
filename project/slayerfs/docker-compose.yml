@@ -1,0 +1,69 @@
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.6.0
+    container_name: etcd-slayerfs-test
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    environment:
+      - ETCDCTL_API=3
+    command: >
+      /usr/local/bin/etcd
+      --name etcd-single
+      --data-dir /etcd-data
+      --listen-client-urls http://0.0.0.0:2379
+      --advertise-client-urls http://127.0.0.1:2379
+      --listen-peer-urls http://0.0.0.0:2380
+      --initial-advertise-peer-urls http://127.0.0.1:2380
+      --initial-cluster etcd-single=http://127.0.0.1:2380
+      --initial-cluster-token etcd-cluster-token
+      --initial-cluster-state new
+      --auto-compaction-retention=1
+      --quota-backend-bytes=8589934592
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - slayerfs-network
+
+  redis:
+    image: docker.io/library/redis:7.2-alpine
+    container_name: redis-slayerfs-test
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - slayerfs-network
+
+  postgres:
+    image: docker.io/library/postgres:15-alpine
+    container_name: pgsql-slayerfs-test
+    ports:
+      - "5432:5432"
+    # WARNING: Development-only credentials. Do NOT use these values in production or shared environments!
+    environment:
+      - POSTGRES_DB=database
+      - POSTGRES_USER=slayerfs
+      - POSTGRES_PASSWORD=slayerfs
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "slayerfs"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - slayerfs-network
+
+networks:
+  slayerfs-network:
+    driver: bridge

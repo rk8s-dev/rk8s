@@ -25,3 +25,4 @@ log = { workspace = true }
 libvault = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 etcd-client = { workspace = true }
+libcontainer = { workspace = true }

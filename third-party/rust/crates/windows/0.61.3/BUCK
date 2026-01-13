@@ -23,6 +23,7 @@ rust_library(
     crate = "windows",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
+    compatible_with = ["prelude//os:windows"],
     features = [
         "Win32",
         "Win32_Foundation",

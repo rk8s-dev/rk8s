@@ -1,9 +1,7 @@
 //! FUSE/SDK-friendly VFS with path-based create/mkdir/read/write/readdir/stat support.
 
 use crate::chuck::chunk::ChunkLayout;
-use crate::chuck::reader::ChunkReader;
 use crate::chuck::store::BlockStore;
-use crate::chuck::writer::ChunkWriter;
 use crate::meta::client::{MetaClient, MetaClientOptions};
 use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
@@ -19,9 +17,11 @@ use tokio::sync::Mutex;
 
 // Re-export types from meta::store for convenience
 pub use crate::meta::store::{DirEntry, FileAttr, FileType};
+use crate::vfs::backend::Backend;
+use crate::vfs::config::VFSConfig;
 use crate::vfs::handles::{DirHandle, FileHandle, HandleFlags};
 use crate::vfs::inode::Inode;
-use crate::vfs::io::FileRegistry;
+use crate::vfs::io::{DataReader, DataWriter};
 
 struct HandleRegistry {
     handles: DashMap<i64, Vec<FileHandle>>,
@@ -153,71 +153,36 @@ impl ModifiedTracker {
     }
 }
 
-pub struct ChunkIoFactory<S, M>
-where
-    S: BlockStore,
-    M: MetaStore,
-{
-    layout: ChunkLayout,
-    store: Arc<S>,
-    meta: Arc<M>,
-}
-
-impl<S, M> ChunkIoFactory<S, M>
-where
-    S: BlockStore,
-    M: MetaStore,
-{
-    fn new(layout: ChunkLayout, store: Arc<S>, meta: Arc<M>) -> Self {
-        Self {
-            layout,
-            store,
-            meta,
-        }
-    }
-
-    pub fn layout(&self) -> ChunkLayout {
-        self.layout
-    }
-
-    pub fn reader(&self, chunk_id: u64) -> ChunkReader<'_, S, M> {
-        ChunkReader::new(
-            self.layout,
-            chunk_id,
-            self.store.as_ref(),
-            self.meta.as_ref(),
-        )
-    }
-
-    pub fn writer(&self, chunk_id: u64) -> ChunkWriter<'_, S, M> {
-        ChunkWriter::new(
-            self.layout,
-            chunk_id,
-            self.store.as_ref(),
-            self.meta.as_ref(),
-        )
-    }
-}
-
 struct VfsState<S, M>
 where
-    S: BlockStore,
-    M: MetaStore + 'static,
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
 {
     handles: HandleRegistry,
-    files: FileRegistry<S, M>,
+    inodes: DashMap<i64, Arc<Inode>>,
+    reader: Arc<DataReader<S, M>>,
+    writer: Arc<DataWriter<S, M>>,
     modified: ModifiedTracker,
 }
 
 impl<S, M> VfsState<S, M>
 where
-    S: BlockStore,
-    M: MetaStore + 'static,
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
 {
-    fn new() -> Self {
+    fn new(config: Arc<VFSConfig>, backend: Arc<Backend<S, M>>) -> Self {
+        let reader = Arc::new(DataReader::new(config.read.clone(), backend.clone()));
+        let writer = Arc::new(DataWriter::new(
+            config.write.clone(),
+            backend,
+            reader.clone(),
+        ));
+        writer.start_flush_background();
         Self {
             handles: HandleRegistry::new(),
-            files: FileRegistry::new(),
+            inodes: DashMap::new(),
+            reader,
+            writer,
             modified: ModifiedTracker::new(),
         }
     }
@@ -226,36 +191,30 @@ where
 #[allow(dead_code)]
 pub struct VfsCore<S, M>
 where
-    S: BlockStore,
-    M: MetaStore + 'static,
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
 {
     layout: ChunkLayout,
+    backend: Arc<Backend<S, M>>,
     meta_layer: Arc<MetaClient<M>>,
-    chunk_io: Arc<ChunkIoFactory<S, M>>,
     root: i64,
 }
 
 impl<S, M> VfsCore<S, M>
 where
-    S: BlockStore,
-    M: MetaStore + 'static,
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
 {
     fn new(
         layout: ChunkLayout,
-        store: Arc<S>,
-        meta_store: Arc<M>,
+        backend: Arc<Backend<S, M>>,
         meta_layer: Arc<MetaClient<M>>,
         root: i64,
     ) -> Self {
-        let chunk_io = Arc::new(ChunkIoFactory::new(
-            layout,
-            Arc::clone(&store),
-            Arc::clone(&meta_store),
-        ));
         Self {
             layout,
+            backend,
             meta_layer,
-            chunk_io,
             root,
         }
     }
@@ -283,8 +242,8 @@ impl Default for MetaClientConfig {
 #[derive(Clone)]
 pub struct VFS<S, M>
 where
-    S: BlockStore,
-    M: MetaStore + 'static,
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
 {
     core: Arc<VfsCore<S, M>>,
     state: Arc<VfsState<S, M>>,
@@ -293,11 +252,31 @@ where
 #[allow(dead_code)]
 impl<S, M> VFS<S, M>
 where
-    S: BlockStore,
-    M: MetaStore + 'static,
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + 'static,
 {
     pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, String> {
         Self::with_meta_client_config(layout, store, meta, MetaClientConfig::default()).await
+    }
+
+    pub async fn with_config(config: VFSConfig, store: S, meta: M) -> Result<Self, String> {
+        let store = Arc::new(store);
+        let meta = Arc::new(meta);
+
+        let ttl = if config.meta.ttl.is_zero() {
+            CacheTtl::for_sqlite()
+        } else {
+            config.meta.ttl.clone()
+        };
+
+        let meta_client = MetaClient::with_options(
+            Arc::clone(&meta),
+            config.meta.capacity.clone(),
+            ttl,
+            config.meta.options.clone(),
+        );
+
+        Self::from_components(config, store, meta, meta_client)
     }
 
     pub async fn with_meta_layer(
@@ -306,26 +285,24 @@ where
         meta: M,
         meta_layer: Arc<MetaClient<M>>,
     ) -> Result<Self, String> {
+        let config = VFSConfig::new(layout);
         let store = Arc::new(store);
         let meta = Arc::new(meta);
-        Self::from_components(layout, store, meta, meta_layer)
+        Self::from_components(config, store, meta, meta_layer)
     }
 
     fn from_components(
-        layout: ChunkLayout,
+        config: VFSConfig,
         store: Arc<S>,
         meta: Arc<M>,
         meta_layer: Arc<MetaClient<M>>,
     ) -> Result<Self, String> {
+        let layout = config.write.layout;
         let root_ino = meta_layer.root_ino();
-        let core = Arc::new(VfsCore::new(
-            layout,
-            Arc::clone(&store),
-            Arc::clone(&meta),
-            meta_layer,
-            root_ino,
-        ));
-        let state = Arc::new(VfsState::new());
+        let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
+        let core = Arc::new(VfsCore::new(layout, backend.clone(), meta_layer, root_ino));
+        let config = Arc::new(VFSConfig::new(layout));
+        let state = Arc::new(VfsState::new(config, backend));
 
         Ok(Self { core, state })
     }
@@ -356,7 +333,7 @@ where
 
         let meta_layer: Arc<MetaClient<M>> = meta_client.clone();
 
-        Self::from_components(layout, store, meta, meta_layer)
+        Self::from_components(VFSConfig::new(layout), store, meta, meta_layer)
     }
 
     pub fn root_ino(&self) -> i64 {
@@ -1001,7 +978,7 @@ where
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "not found".to_string())?;
-        if let Some(inode) = self.state.files.inode(ino) {
+        if let Some(inode) = self.state.inodes.get(&ino) {
             inode.update_size(size);
         }
         self.core
@@ -1022,7 +999,7 @@ where
         let attr = self.core.meta_layer.set_attr(ino, req, flags).await?;
 
         if let Some(size) = req.size
-            && let Some(inode) = self.state.files.inode(ino)
+            && let Some(inode) = self.state.inodes.get(&ino)
         {
             inode.update_size(size);
         }
@@ -1035,6 +1012,7 @@ where
 
     /// Write data by file offset. Internally splits the range into per-chunk writes.
     /// Writes each affected chunk fragment. Updates the file size at the end only if the write extends the file.
+    /// todo: Waiting for handle-based api to fix consistency problems...
     pub async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<usize, String> {
         let path = Self::norm_path(path);
         let (ino, kind) = self
@@ -1049,18 +1027,15 @@ where
         }
 
         let inode = self.ensure_inode_registered(ino).await?;
-        let writer = self
-            .state
-            .files
-            .writer(ino)
-            .ok_or_else(|| "file writer is not initialized".to_string())?;
+        let old_size = inode.file_size();
+        let writer = self.state.writer.ensure_file(inode.clone());
+        let written = writer
+            .write_at(offset, data)
+            .await
+            .map_err(|e| e.to_string())?;
 
-        let guard = writer.write().await;
-        let written = guard.write(offset, data).await.map_err(|e| e.to_string())?;
-
-        let target_size = offset + data.len() as u64;
-        if target_size > inode.file_size() {
-            inode.update_size(target_size);
+        let target_size = offset + written as u64;
+        if target_size > old_size {
             self.core
                 .meta_layer
                 .set_file_size(ino, target_size)
@@ -1077,12 +1052,11 @@ where
         if len == 0 {
             return Ok(Vec::new());
         }
-        self.ensure_inode_registered(ino).await?;
-        let reader = self
-            .state
-            .files
-            .reader(ino)
-            .ok_or_else(|| "file reader is not initialized".to_string())?;
+
+        // Before reading, it is needed to flush all cached data.
+        self.state.writer.flush_if_exists(ino as u64).await;
+        let inode = self.ensure_inode_registered(ino).await?;
+        let reader = self.state.reader.ensure_file(inode);
         reader.read(offset, len).await.map_err(|e| e.to_string())
     }
 
@@ -1118,7 +1092,7 @@ where
     }
 
     /// Open a directory handle for reading. Returns the file handle ID.
-    /// This pre-loads all directory entries to support efficient pagination.
+    /// This pre-loads all directory entries and starts background batch prefetch for attributes.
     pub async fn opendir_handle(&self, ino: i64) -> Result<u64, MetaError> {
         // Verify directory exists
         let attr = self
@@ -1135,8 +1109,11 @@ where
         // Load all directory entries
         let entries = self.core.meta_layer.readdir(ino).await?;
 
-        // Create handle
-        let handle = DirHandle::new(ino, entries);
+        // Start background batch prefetch task
+        let (done_flag, prefetch_task) = self.core.meta_layer.spawn_batch_prefetch(ino, &entries);
+
+        // Create handle with prefetch task
+        let handle = DirHandle::with_prefetch_task(ino, entries, prefetch_task, done_flag);
         let fh = self.state.handles.allocate_dir(handle).await;
 
         Ok(fh)
@@ -1157,6 +1134,18 @@ where
             handle.ino,
             handle.entries.len()
         );
+
+        // Check if prefetch task is still running
+        let is_done = handle.prefetch_done.load(Ordering::Acquire);
+        if !is_done {
+            tracing::debug!(
+                "Dir handle fh={}, ino={} released while prefetch still running - task will be aborted on drop",
+                fh,
+                handle.ino
+            );
+        }
+        // When handle is dropped (Arc refcount reaches 0), DirHandle::drop() will abort the task
+
         Ok(())
     }
 
@@ -1287,12 +1276,12 @@ where
 
     async fn ensure_inode_registered(&self, ino: i64) -> Result<Arc<Inode>, String> {
         // fast path to check whether there is an existing inode.
-        if let Some(inode) = self.state.files.inode(ino) {
+        if let Some(inode) = self.state.inodes.get(&ino) {
             return Ok(inode.clone());
         }
 
         // double-check: lock the entry and do the check again.
-        match self.state.files.inode.entry(ino) {
+        match self.state.inodes.entry(ino) {
             Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
             Entry::Vacant(entry) => {
                 let attr = self
@@ -1307,9 +1296,8 @@ where
                 }
 
                 let inode = Inode::new(ino, attr.size);
-                self.state
-                    .files
-                    .ensure_init(Arc::clone(&inode), Arc::clone(&self.core.chunk_io));
+                self.state.reader.ensure_file(Arc::clone(&inode));
+                self.state.writer.ensure_file(Arc::clone(&inode));
                 entry.insert(inode.clone());
                 Ok(inode)
             }
@@ -1325,11 +1313,10 @@ mod tests {
     use crate::chuck::store::InMemoryBlockStore;
     use crate::chuck::store::ObjectBlockStore;
     use crate::meta::factory::create_meta_store_from_url;
-    use async_trait::async_trait;
+    use rand::rngs::StdRng;
+    use rand::{Rng, RngCore, SeedableRng};
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use tokio::sync::{Barrier, Notify};
-    use tokio::time::{sleep, timeout};
+    use tokio::sync::Barrier;
 
     #[tokio::test]
     async fn test_fs_mkdir_create_write_read_readdir() {
@@ -1352,6 +1339,16 @@ mod tests {
         fs.write("/a/b/hello.txt", (layout.block_size / 2) as u64, &data)
             .await
             .expect("write");
+        let (ino, _) = fs
+            .core
+            .meta_layer
+            .lookup_path("/a/b/hello.txt")
+            .await
+            .unwrap()
+            .unwrap();
+        let inode = fs.ensure_inode_registered(ino).await.unwrap();
+        let writer = fs.state.writer.ensure_file(inode);
+        writer.flush().await.unwrap();
         let out = fs
             .read("/a/b/hello.txt", (layout.block_size / 2) as u64, data_len)
             .await
@@ -1404,229 +1401,153 @@ mod tests {
         assert!(!fs.exists("/a/b").await);
     }
 
-    /// When different inodes are written concurrently, each file should make progress without
-    /// contending on the registry locks. `BarrierBlockStore` forces the first block write of each
-    /// task to wait at a barrier so we know both writes overlapped before they finish.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_fs_parallel_writes_to_distinct_files() {
-        let layout = ChunkLayout::default();
-        let store = BarrierBlockStore::new();
+        let layout = ChunkLayout {
+            chunk_size: 8 * 1024,
+            block_size: 4 * 1024,
+        };
+        let store = InMemoryBlockStore::new();
         let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
         let meta_store = meta_handle.store();
-        let fs = VFS::new(layout, store, meta_store).await.unwrap();
+        let fs = Arc::new(VFS::new(layout, store, meta_store).await.unwrap());
 
-        fs.create_file("/alpha").await.unwrap();
-        fs.create_file("/beta").await.unwrap();
-        let payload = vec![7u8; 8];
+        fs.mkdir_p("/data").await.unwrap();
 
-        let fs_a = fs.clone();
-        let task_a = tokio::spawn({
-            let data = payload.clone();
-            async move {
-                fs_a.write("/alpha", 0, &data).await.expect("write alpha");
+        let file_count = 4usize;
+        let barrier = Arc::new(Barrier::new(file_count + 1));
+        let mut handles = Vec::new();
+
+        for i in 0..file_count {
+            let path = format!("/data/f{i}.bin");
+            fs.create_file(&path).await.unwrap();
+
+            let len = match i {
+                0 => 1024,
+                1 => layout.block_size as usize,
+                2 => layout.block_size as usize + 512,
+                _ => layout.chunk_size as usize + 512,
+            };
+            let mut data = vec![0u8; len];
+            for (idx, b) in data.iter_mut().enumerate() {
+                *b = (i as u8).wrapping_add(idx as u8);
             }
-        });
-        let fs_b = fs.clone();
-        let task_b = tokio::spawn({
-            let data = payload.clone();
-            async move {
-                fs_b.write("/beta", 0, &data).await.expect("write beta");
-            }
-        });
 
-        timeout(Duration::from_secs(2), async {
-            task_a.await.unwrap();
-            task_b.await.unwrap();
-        })
-        .await
-        .expect("writes on different files should not block each other");
+            let fs_clone = fs.clone();
+            let barrier = barrier.clone();
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                fs_clone.write(&path, 0, &data).await.unwrap();
+                (path, data)
+            }));
+        }
+
+        barrier.wait().await;
+
+        let mut results = Vec::new();
+        for handle in handles {
+            results.push(handle.await.unwrap());
+        }
+
+        for (path, _) in results.iter() {
+            let (ino, _) = fs.core.meta_layer.lookup_path(path).await.unwrap().unwrap();
+            let inode = fs.ensure_inode_registered(ino).await.unwrap();
+            let writer = fs.state.writer.ensure_file(inode);
+            writer.flush().await.unwrap();
+        }
+
+        for (path, data) in results {
+            let out = fs.read(&path, 0, data.len()).await.unwrap();
+            assert_eq!(out, data);
+        }
     }
 
-    /// Readers of the same inode must be serialized behind in-flight writers to avoid racing
-    /// with partial chunk updates. `BlockingBlockStore` pauses the first `write_range` until the
-    /// test explicitly releases it; the read should block until then and observe the final data.
-    #[tokio::test]
-    async fn test_fs_same_file_read_waits_for_active_write() {
-        let layout = ChunkLayout::default();
-        let (store, controller) = BlockingBlockStore::new();
+    /// The test will take approximately 10 seconds to complete.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_fs_fuzz_parallel_read_write() {
+        let layout = ChunkLayout {
+            chunk_size: 16 * 1024,
+            block_size: 4 * 1024,
+        };
+        let store = InMemoryBlockStore::new();
         let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
         let meta_store = meta_handle.store();
-        let fs = VFS::new(layout, store, meta_store).await.unwrap();
-        fs.create_file("/shared").await.unwrap();
-        let payload = vec![3u8; 32];
-        let expected = payload.clone();
-        let len = expected.len();
+        let fs = Arc::new(VFS::new(layout, store, meta_store).await.unwrap());
 
-        let writer_fs = fs.clone();
-        let writer_payload = payload;
-        let writer = tokio::spawn(async move {
-            writer_fs
-                .write("/shared", 0, &writer_payload)
-                .await
-                .expect("write shared");
-        });
+        fs.mkdir_p("/fuzz").await.unwrap();
 
-        controller.wait_for_block().await;
+        let file_count = 4usize;
+        let mut paths = Vec::with_capacity(file_count);
+        let mut states = Vec::with_capacity(file_count);
 
-        let read_finished = Arc::new(AtomicBool::new(false));
-        let reader_fs = fs.clone();
-        let read_done = read_finished.clone();
-        let reader = tokio::spawn(async move {
-            let data = reader_fs
-                .read("/shared", 0, len)
-                .await
-                .expect("read shared");
-            read_done.store(true, Ordering::SeqCst);
-            data
-        });
-
-        sleep(Duration::from_millis(50)).await;
-        assert!(
-            !read_finished.load(Ordering::SeqCst),
-            "read should wait for in-flight writer"
-        );
-
-        controller.release_block();
-
-        let contents = reader.await.unwrap();
-        assert_eq!(contents, expected, "read should observe written bytes");
-        writer.await.unwrap();
-    }
-
-    /// BlockStore wrapper that synchronizes the first two writes so we can prove inter-file
-    /// operations progress concurrently.
-    #[derive(Clone)]
-    struct BarrierBlockStore {
-        inner: Arc<InMemoryBlockStore>,
-        gate: Arc<Barrier>,
-        calls: Arc<AtomicUsize>,
-    }
-
-    impl BarrierBlockStore {
-        fn new() -> Self {
-            Self {
-                inner: Arc::new(InMemoryBlockStore::new()),
-                gate: Arc::new(Barrier::new(2)),
-                calls: Arc::new(AtomicUsize::new(0)),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl BlockStore for BarrierBlockStore {
-        async fn write_range(
-            &self,
-            key: crate::chuck::store::BlockKey,
-            offset: u32,
-            data: &[u8],
-        ) -> anyhow::Result<u64> {
-            let idx = self.calls.fetch_add(1, Ordering::SeqCst);
-            if idx < 2 {
-                self.gate.wait().await;
-            }
-            self.inner.write_range(key, offset, data).await
+        for i in 0..file_count {
+            let path = format!("/fuzz/f{i}.bin");
+            fs.create_file(&path).await.unwrap();
+            paths.push(path);
+            states.push(Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new())));
         }
 
-        async fn read_range(
-            &self,
-            key: crate::chuck::store::BlockKey,
-            offset: u32,
-            buf: &mut [u8],
-        ) -> anyhow::Result<()> {
-            self.inner.read_range(key, offset, buf).await
+        let task_count = 4usize;
+        let iterations = 5000usize;
+        let max_write = 4096usize;
+
+        let mut handles = Vec::with_capacity(task_count);
+        for t in 0..task_count {
+            let fs = fs.clone();
+            let paths = paths.clone();
+            let states = states.clone();
+            let mut rng = StdRng::seed_from_u64(0x5EED_u64 + t as u64);
+            handles.push(tokio::spawn(async move {
+                for _ in 0..iterations {
+                    let file_idx = rng.random_range(0..file_count);
+                    let path = paths[file_idx].clone();
+                    let state = states[file_idx].clone();
+
+                    if rng.random_range(0..100) < 60 {
+                        let mut guard = state.lock().await;
+                        let cur_len = guard.len();
+                        let max_offset = cur_len + layout.block_size as usize;
+                        let offset = rng.random_range(0..=max_offset);
+                        let len = rng.random_range(1..=max_write);
+                        let mut data = vec![0u8; len];
+                        rng.fill_bytes(&mut data);
+
+                        fs.write(&path, offset as u64, &data).await.unwrap();
+
+                        let end = offset + len;
+                        if guard.len() < end {
+                            guard.resize(end, 0);
+                        }
+                        guard[offset..end].copy_from_slice(&data);
+                    } else {
+                        let guard = state.lock().await;
+                        let cur_len = guard.len();
+                        if cur_len == 0 {
+                            let out = fs.read(&path, 0, 0).await.unwrap();
+                            assert!(out.is_empty());
+                            continue;
+                        }
+                        let offset = rng.random_range(0..cur_len);
+                        let len = rng.random_range(1..=std::cmp::min(cur_len - offset, max_write));
+                        let expected = guard[offset..offset + len].to_vec();
+                        let out = fs.read(&path, offset as u64, len).await.unwrap();
+                        assert_eq!(out, expected);
+                    }
+                }
+            }));
         }
 
-        async fn delete_range(
-            &self,
-            key: crate::chuck::store::BlockKey,
-            len: usize,
-        ) -> anyhow::Result<()> {
-            self.inner.delete_range(key, len).await
-        }
-    }
-
-    /// BlockStore wrapper that pauses the first write until the test releases it, letting us
-    /// simulate a long-running writer on a single inode.
-    #[derive(Clone)]
-    struct BlockingBlockStore {
-        inner: Arc<InMemoryBlockStore>,
-        state: Arc<BlockingState>,
-    }
-
-    impl BlockingBlockStore {
-        fn new() -> (Self, BlockingController) {
-            let state = Arc::new(BlockingState::new());
-            (
-                Self {
-                    inner: Arc::new(InMemoryBlockStore::new()),
-                    state: state.clone(),
-                },
-                BlockingController { state },
-            )
-        }
-    }
-
-    struct BlockingState {
-        paused: AtomicBool,
-        started: Notify,
-        release: Notify,
-    }
-
-    impl BlockingState {
-        fn new() -> Self {
-            Self {
-                paused: AtomicBool::new(true),
-                started: Notify::new(),
-                release: Notify::new(),
-            }
-        }
-    }
-
-    /// Small handle that lets tests await the point where the writer is blocked and then release it.
-    struct BlockingController {
-        state: Arc<BlockingState>,
-    }
-
-    impl BlockingController {
-        async fn wait_for_block(&self) {
-            self.state.started.notified().await;
+        for handle in handles {
+            handle.await.unwrap();
         }
 
-        fn release_block(&self) {
-            self.state.release.notify_waiters();
-        }
-    }
-
-    #[async_trait]
-    impl BlockStore for BlockingBlockStore {
-        async fn write_range(
-            &self,
-            key: crate::chuck::store::BlockKey,
-            offset: u32,
-            data: &[u8],
-        ) -> anyhow::Result<u64> {
-            if self.state.paused.swap(false, Ordering::SeqCst) {
-                self.state.started.notify_waiters();
-                self.state.release.notified().await;
-            }
-            self.inner.write_range(key, offset, data).await
-        }
-
-        async fn read_range(
-            &self,
-            key: crate::chuck::store::BlockKey,
-            offset: u32,
-            buf: &mut [u8],
-        ) -> anyhow::Result<()> {
-            self.inner.read_range(key, offset, buf).await
-        }
-
-        async fn delete_range(
-            &self,
-            key: crate::chuck::store::BlockKey,
-            len: usize,
-        ) -> anyhow::Result<()> {
-            self.inner.delete_range(key, len).await
+        for (path, state) in paths.iter().zip(states.iter()) {
+            let path = path.clone();
+            let state = state.clone();
+            let guard = state.lock().await;
+            let expected = guard.clone();
+            let out = fs.read(&path, 0, expected.len()).await.unwrap();
+            assert_eq!(out, expected);
         }
     }
 }

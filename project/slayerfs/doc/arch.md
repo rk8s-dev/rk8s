@@ -106,6 +106,36 @@ flowchart TD
 
 Modules communicate primarily using async Tokio; IO and uploads are asynchronous and concurrent.
 
+Consistency semantics (current implementation)
+---------------------------------------------
+This project is still evolving. The current behavior (as of now) is:
+
+- Single-process (one VFS instance):
+  - Read-after-write is enforced by flushing pending writes before each read
+    (best-effort). This means a read may block until pending slices are uploaded
+    and metadata committed.
+  - Writes are append-only slices inside each chunk. Metadata is committed
+    asynchronously by a per-chunk commit loop. Only committed slices are visible
+    to readers.
+  - Flush serializes with writes: while a flush is in progress, new writes to the
+    same file wait.
+
+- Multi-process / multi-client:
+  - There is no cross-client cache coherence yet. Reader caches are only
+    invalidated by the local writer after commit, so other clients may serve
+    stale data.
+  - File size is updated in metadata on write, but data commit is async, so
+    another client may observe size growth before data is fully committed and
+    read zeros.
+
+- Close-to-open:
+  - Not fully implemented. The handle-based open/close APIs are not wired into
+    the main read/write path yet. In other words, there is no "close" event that
+    guarantees a synchronous fsync and global cache invalidation.
+
+These semantics will be tightened as handle lifecycle is integrated and cache
+invalidation is coordinated across clients.
+
 Metadata model (suggested simplified SQL schema)
 -------------------------------------
 The following schema is a suggested example suitable for Postgres or SQLite (fields are simplified):
@@ -165,6 +195,5 @@ CREATE TABLE sessions (
 	last_heartbeat TIMESTAMP
 );
 ```
-
 
 

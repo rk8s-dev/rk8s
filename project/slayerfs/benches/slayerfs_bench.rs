@@ -1,5 +1,5 @@
 use std::env;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,7 +11,6 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use pprof::criterion::{Output, PProfProfiler};
 use tempfile::TempDir;
 use tokio::runtime::{Builder, Runtime};
-use tokio::task::spawn_blocking;
 
 use slayerfs::cadapter::client::ObjectClient;
 use slayerfs::cadapter::localfs::LocalFsBackend;
@@ -82,8 +81,10 @@ impl BenchConfig {
         let block_size_u32 = block_size_bytes
             .try_into()
             .expect("block size must fit into u32");
-        let mut layout = ChunkLayout::default();
-        layout.block_size = block_size_u32;
+        let layout = ChunkLayout {
+            block_size: block_size_u32,
+            ..Default::default()
+        };
 
         let backend = BackendMode::from_env();
         let meta_url =
@@ -219,89 +220,81 @@ impl FuseDriver {
 
     async fn mkdir_p(&self, path: &str) -> Result<()> {
         let full = self.full_path(path);
-        let mount_root = self.mount_dir.clone();
-        spawn_blocking(move || -> Result<()> {
-            if full == *mount_root {
-                return Ok(());
-            }
-            fs::create_dir_all(&full).context("fuse mkdir")?;
-            Ok(())
-        })
-        .await??;
+        if full == *self.mount_dir {
+            return Ok(());
+        }
+        tokio::fs::create_dir_all(&full)
+            .await
+            .context("fuse mkdir")?;
         Ok(())
     }
 
     async fn create_file(&self, path: &str) -> Result<()> {
         let full = self.full_path(path);
-        spawn_blocking(move || -> Result<()> {
-            if let Some(parent) = full.parent() {
-                fs::create_dir_all(parent).context("fuse create mkdir")?;
-            }
-            OpenOptions::new()
-                .create(true)
-                .write(true)
-                .open(&full)
-                .context("fuse create")?;
-            Ok(())
-        })
-        .await??;
+        if let Some(parent) = full.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .context("fuse create mkdir")?;
+        }
+        tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&full)
+            .await
+            .context("fuse create")?;
         Ok(())
     }
 
     async fn write(&self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
+        use tokio::io::{AsyncSeekExt, AsyncWriteExt};
         let full = self.full_path(path);
-        let payload = data.to_vec();
-        spawn_blocking(move || -> Result<()> {
-            use std::io::{Seek, SeekFrom, Write};
-            let mut file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .open(&full)
-                .context("fuse write open")?;
-            file.seek(SeekFrom::Start(offset))
-                .context("fuse write seek")?;
-            file.write_all(&payload).context("fuse write data")?;
-            file.flush().context("fuse write flush")?;
-            Ok(())
-        })
-        .await??;
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(&full)
+            .await
+            .context("fuse write open")?;
+        file.seek(std::io::SeekFrom::Start(offset))
+            .await
+            .context("fuse write seek")?;
+        file.write_all(data).await.context("fuse write data")?;
+        file.flush().await.context("fuse write flush")?;
         Ok(())
     }
 
     async fn read(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>> {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
         let full = self.full_path(path);
-        let buf = spawn_blocking(move || -> Result<Vec<u8>> {
-            use std::io::{Read, Seek, SeekFrom};
-            let mut file = OpenOptions::new()
-                .read(true)
-                .open(&full)
-                .context("fuse read open")?;
-            file.seek(SeekFrom::Start(offset))
-                .context("fuse read seek")?;
-            let mut buf = vec![0u8; len];
-            let mut read = 0usize;
-            while read < len {
-                let n = file.read(&mut buf[read..]).context("fuse read data")?;
-                if n == 0 {
-                    buf.truncate(read);
-                    break;
-                }
-                read += n;
+        let mut file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .open(&full)
+            .await
+            .context("fuse read open")?;
+        file.seek(std::io::SeekFrom::Start(offset))
+            .await
+            .context("fuse read seek")?;
+        let mut buf = vec![0u8; len];
+        let mut read = 0usize;
+        while read < len {
+            let n = file
+                .read(&mut buf[read..])
+                .await
+                .context("fuse read data")?;
+            if n == 0 {
+                buf.truncate(read);
+                break;
             }
-            Ok(buf)
-        })
-        .await?;
-        Ok(buf?)
+            read += n;
+        }
+        Ok(buf)
     }
 
     async fn stat(&self, path: &str) -> Result<u64> {
         let full = self.full_path(path);
-        let size = spawn_blocking(move || -> Result<u64> {
-            let meta = fs::metadata(&full).context("fuse stat")?;
-            Ok(meta.len())
-        })
-        .await?;
-        Ok(size?)
+        let meta = tokio::fs::metadata(&full).await.context("fuse stat")?;
+        Ok(meta.len())
     }
 }
 

@@ -15,14 +15,14 @@
 //! Submodules:
 //! - `handles`: file and directory handle management
 //! - `cache`: caching helpers and policies
+pub mod backend;
 pub mod cache;
-pub mod demo;
+pub mod config;
 pub mod fs;
 pub mod handles;
 pub mod inode;
 pub mod io;
 pub mod sdk;
-pub mod simple;
 
 // Module implementation TODOs remain.
 

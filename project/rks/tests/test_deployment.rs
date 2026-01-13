@@ -397,6 +397,11 @@ async fn test_deployment_hash_collision() -> Result<()> {
                 spec: PodSpec {
                     node_name: None,
                     containers: vec![ContainerSpec {
+                        security_context: None,
+                        env: None,
+                        volume_mounts: None,
+                        command: None,
+                        working_dir: None,
                         name: "blocker".to_string(),
                         image: "./blocker-image".to_string(),
                         ports: Vec::new(),
@@ -705,6 +710,11 @@ fn create_test_deployment(name: &str, replicas: i32) -> Deployment {
                         liveness_probe: None,
                         readiness_probe: None,
                         startup_probe: None,
+                        security_context: None,
+                        env: None,
+                        volume_mounts: None,
+                        command: None,
+                        working_dir: None,
                     }],
                     init_containers: Vec::new(),
                     tolerations: Vec::new(),
