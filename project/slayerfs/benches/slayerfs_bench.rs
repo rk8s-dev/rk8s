@@ -267,7 +267,7 @@ impl BenchEnv {
         self.fs.clone()
     }
 
-    async fn teardown(self) -> Result<()> {
+    fn teardown(self) -> Result<()> {
         Ok(())
     }
 }
@@ -410,7 +410,7 @@ async fn run_big_write(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let fs = env.fs();
     let base = format!("/bench/run-{iter}/big");
     let cost = measure_future(write_big_files(fs, cfg, base)).await?;
-    env.teardown().await?;
+    env.teardown()?;
     Ok(cost)
 }
 
@@ -420,7 +420,7 @@ async fn run_big_read(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let base = format!("/bench/run-{iter}/big");
     write_big_files(fs.clone(), cfg, base.clone()).await?;
     let cost = measure_future(read_big_files(fs, cfg, base)).await?;
-    env.teardown().await?;
+    env.teardown()?;
     Ok(cost)
 }
 
@@ -429,7 +429,7 @@ async fn run_small_write(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let fs = env.fs();
     let base = format!("/bench/run-{iter}/small");
     let cost = measure_future(write_small_files(fs, cfg, base)).await?;
-    env.teardown().await?;
+    env.teardown()?;
     Ok(cost)
 }
 
@@ -439,7 +439,7 @@ async fn run_small_read(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let base = format!("/bench/run-{iter}/small");
     write_small_files(fs.clone(), cfg, base.clone()).await?;
     let cost = measure_future(read_small_files(fs, cfg, base)).await?;
-    env.teardown().await?;
+    env.teardown()?;
     Ok(cost)
 }
 
@@ -449,7 +449,7 @@ async fn run_small_stat(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let base = format!("/bench/run-{iter}/small");
     write_small_files(fs.clone(), cfg, base.clone()).await?;
     let cost = measure_future(stat_small_files(fs, cfg, base)).await?;
-    env.teardown().await?;
+    env.teardown()?;
     Ok(cost)
 }
 

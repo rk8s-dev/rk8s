@@ -49,7 +49,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
             path: PathHint::some(path),
         })?;
-        let fh = self.fs.open(attr.ino, attr, false, true).await;
+        let fh = self.fs.open(attr.ino, attr, false, true).await?;
         let result = self.fs.write(fh, offset, data).await;
         let _ = self.fs.close(fh).await;
         result
@@ -59,7 +59,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
             path: PathHint::some(path),
         })?;
-        let fh = self.fs.open(attr.ino, attr, true, false).await;
+        let fh = self.fs.open(attr.ino, attr, true, false).await?;
         let result = self.fs.read(fh, offset, len).await;
         let _ = self.fs.close(fh).await;
         result
@@ -78,14 +78,14 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         let mut offset = 0u64;
         let mut entries = Vec::new();
         loop {
-            let batch = self.fs.readdir(fh, offset).await.unwrap_or_default();
+            let batch = self.fs.readdir(fh, offset).unwrap_or_default();
             if batch.is_empty() {
                 break;
             }
             offset += batch.len() as u64;
             entries.extend(batch);
         }
-        let _ = self.fs.closedir(fh).await;
+        let _ = self.fs.closedir(fh);
         Ok(entries)
     }
 

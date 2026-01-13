@@ -8,7 +8,7 @@ use tokio::time::{Duration, interval};
 use tracing::{debug, error, info};
 
 #[allow(dead_code)]
-pub(crate) async fn start_upload_workers() {
+pub(crate) fn start_upload_workers() {
     // TODO: implement upload worker pool
 }
 

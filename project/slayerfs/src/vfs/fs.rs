@@ -48,12 +48,7 @@ where
         }
     }
 
-    async fn allocate(
-        &self,
-        ino: i64,
-        attr: FileAttr,
-        flags: HandleFlags,
-    ) -> Arc<FileHandle<B, M>> {
+    fn allocate(&self, ino: i64, attr: FileAttr, flags: HandleFlags) -> Arc<FileHandle<B, M>> {
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
         let handle = Arc::new(FileHandle::new(fh, ino, attr, flags));
         self.handles.insert(fh, handle.clone());
@@ -61,7 +56,7 @@ where
         handle
     }
 
-    async fn release(&self, fh: u64) -> Option<(Arc<FileHandle<B, M>>, bool)> {
+    fn release(&self, fh: u64) -> Option<(Arc<FileHandle<B, M>>, bool)> {
         let handle = self.handles.remove(&fh)?.1;
         let ino = handle.ino;
         let mut last = false;
@@ -79,23 +74,23 @@ where
         Some((handle, last))
     }
 
-    async fn get(&self, fh: u64) -> Option<Arc<FileHandle<B, M>>> {
+    fn get(&self, fh: u64) -> Option<Arc<FileHandle<B, M>>> {
         self.handles.get(&fh).map(|entry| Arc::clone(entry.value()))
     }
 
-    async fn handles_for(&self, ino: i64) -> Vec<u64> {
+    fn handles_for(&self, ino: i64) -> Vec<u64> {
         self.inode_handles
             .get(&ino)
             .map(|entry| entry.value().clone())
             .unwrap_or_default()
     }
 
-    async fn attr_for(&self, fh: u64) -> Option<FileAttr> {
+    fn attr_for(&self, fh: u64) -> Option<FileAttr> {
         self.handles.get(&fh).map(|entry| entry.attr())
     }
 
-    async fn attr_for_inode(&self, ino: i64) -> Option<FileAttr> {
-        let fhs = self.handles_for(ino).await;
+    fn attr_for_inode(&self, ino: i64) -> Option<FileAttr> {
+        let fhs = self.handles_for(ino);
         for fh in fhs {
             if let Some(handle) = self.handles.get(&fh) {
                 return Some(handle.attr());
@@ -104,8 +99,8 @@ where
         None
     }
 
-    async fn update_attr_for_inode(&self, ino: i64, attr: &FileAttr) {
-        let fhs = self.handles_for(ino).await;
+    fn update_attr_for_inode(&self, ino: i64, attr: &FileAttr) {
+        let fhs = self.handles_for(ino);
         for fh in fhs {
             if let Some(handle) = self.handles.get(&fh) {
                 handle.update_attr(attr);
@@ -114,23 +109,27 @@ where
     }
 
     /// Check if any handle for this inode was opened for writing
-    async fn has_write_handle(&self, ino: i64) -> bool {
-        let fhs = self.handles_for(ino).await;
+    fn has_write_handle(&self, ino: i64) -> bool {
+        let fhs = self.handles_for(ino);
         fhs.iter()
             .any(|fh| self.handles.get(fh).map(|h| h.flags.write).unwrap_or(false))
     }
 
-    async fn allocate_dir(&self, handle: DirHandle) -> u64 {
+    fn has_no_handle(&self, ino: i64) -> bool {
+        self.handles_for(ino).is_empty()
+    }
+
+    fn allocate_dir(&self, handle: DirHandle) -> u64 {
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
         self.dir_handles.insert(fh, Arc::new(handle));
         fh
     }
 
-    async fn release_dir(&self, fh: u64) -> Option<Arc<DirHandle>> {
+    fn release_dir(&self, fh: u64) -> Option<Arc<DirHandle>> {
         self.dir_handles.remove(&fh).map(|(_, handle)| handle)
     }
 
-    async fn get_dir(&self, fh: u64) -> Option<Arc<DirHandle>> {
+    fn get_dir(&self, fh: u64) -> Option<Arc<DirHandle>> {
         self.dir_handles
             .get(&fh)
             .map(|entry| Arc::clone(entry.value()))
@@ -272,7 +271,7 @@ where
         Self::with_meta_client_config(layout, store, meta, MetaClientConfig::default()).await
     }
 
-    pub async fn with_config(config: VFSConfig, store: S, meta: M) -> Result<Self, VfsError> {
+    pub fn with_config(config: VFSConfig, store: S, meta: M) -> Result<Self, VfsError> {
         let store = Arc::new(store);
         let meta = Arc::new(meta);
 
@@ -292,7 +291,7 @@ where
         Self::from_components(config, store, meta, meta_client)
     }
 
-    pub(crate) async fn with_meta_layer(
+    pub(crate) fn with_meta_layer(
         layout: ChunkLayout,
         store: S,
         meta: M,
@@ -398,9 +397,9 @@ where
             .map_err(VfsError::from)?;
 
         // Update handle cache if exists
-        if let Some(mut attr) = self.state.handles.attr_for_inode(ino).await {
+        if let Some(mut attr) = self.state.handles.attr_for_inode(ino) {
             attr.atime = now;
-            self.state.handles.update_attr_for_inode(ino, &attr).await;
+            self.state.handles.update_attr_for_inode(ino, &attr);
         }
 
         Ok(())
@@ -430,10 +429,10 @@ where
             .map_err(VfsError::from)?;
 
         // Update handle cache if exists
-        if let Some(mut attr) = self.state.handles.attr_for_inode(ino).await {
+        if let Some(mut attr) = self.state.handles.attr_for_inode(ino) {
             attr.mtime = now;
             attr.ctime = now;
-            self.state.handles.update_attr_for_inode(ino, &attr).await;
+            self.state.handles.update_attr_for_inode(ino, &attr);
         }
 
         Ok(())
@@ -1035,10 +1034,10 @@ where
                 path: PathHint::some(path.clone()),
             })?;
 
-        let fhs = self.state.handles.handles_for(ino).await;
+        let fhs = self.state.handles.handles_for(ino);
         let mut guards = Vec::with_capacity(fhs.len());
         for fh in fhs {
-            if let Some(handle) = self.state.handles.get(fh).await {
+            if let Some(handle) = self.state.handles.get(fh) {
                 guards.push(handle.lock_write().await);
             }
         }
@@ -1054,10 +1053,14 @@ where
         self.state.reader.invalidate_all(ino as u64).await;
         self.state.writer.clear(ino as u64).await;
 
-        self.ensure_inode_cached(ino, size);
-        if let Some(mut attr) = self.state.handles.attr_for_inode(ino).await {
+        let guard = self
+            .lock_inode(ino)
+            .or_insert_with(|| Inode::new(ino, size));
+        guard.update_size(size);
+
+        if let Some(mut attr) = self.state.handles.attr_for_inode(ino) {
             attr.size = size;
-            self.state.handles.update_attr_for_inode(ino, &attr).await;
+            self.state.handles.update_attr_for_inode(ino, &attr);
         }
 
         self.state.modified.touch(ino).await;
@@ -1095,7 +1098,7 @@ where
         }
 
         self.state.modified.touch(ino).await;
-        self.state.handles.update_attr_for_inode(ino, &attr).await;
+        self.state.handles.update_attr_for_inode(ino, &attr);
 
         Ok(attr)
     }
@@ -1110,7 +1113,6 @@ where
             .state
             .handles
             .get(fh)
-            .await
             .ok_or(VfsError::StaleNetworkFileHandle)?;
         if !handle.flags.read {
             return Err(VfsError::PermissionDenied {
@@ -1133,7 +1135,6 @@ where
             .state
             .handles
             .get(fh)
-            .await
             .ok_or(VfsError::StaleNetworkFileHandle)?;
         if !handle.flags.write {
             return Err(VfsError::PermissionDenied {
@@ -1141,7 +1142,6 @@ where
             });
         }
 
-        let _inode = self.ensure_inode_registered(handle.ino).await?;
         let written = handle.write(offset, data).await?;
 
         let target_size = offset + written as u64;
@@ -1156,7 +1156,13 @@ where
     }
 
     /// Allocate a per-file handle, returning the opaque fh id.
-    pub async fn open(&self, ino: i64, attr: FileAttr, read: bool, write: bool) -> u64 {
+    pub async fn open(
+        &self,
+        ino: i64,
+        attr: FileAttr,
+        read: bool,
+        write: bool,
+    ) -> Result<u64, VfsError> {
         let mut latest_attr = attr;
 
         // Retrieve the latest attr for close-to-open semantics.
@@ -1167,15 +1173,22 @@ where
             Ok(None) => {}
             Err(err) => {
                 tracing::warn!("open: stat_fresh failed for ino {}: {}", ino, err);
+                return Err(VfsError::StaleNetworkFileHandle);
             }
         }
 
-        let inode = self.ensure_inode_cached(ino, latest_attr.size);
+        let guard = self
+            .lock_inode(ino)
+            .or_insert_with(|| Inode::new(ino, latest_attr.size));
+        if latest_attr.size > guard.file_size() {
+            guard.update_size(latest_attr.size);
+        }
+
+        let inode = guard.clone();
         let handle = self
             .state
             .handles
-            .allocate(ino, latest_attr, HandleFlags::new(read, write))
-            .await;
+            .allocate(ino, latest_attr, HandleFlags::new(read, write));
 
         let reader = self.state.reader.open_for_handle(inode.clone(), handle.fh);
         handle.reader(reader);
@@ -1183,16 +1196,16 @@ where
             let writer = self.state.writer.ensure_file(inode.clone());
             handle.writer(writer);
         }
-        handle.fh
+        Ok(handle.fh)
     }
 
     /// Release a previously allocated file handle.
     pub async fn close(&self, fh: u64) -> Result<(), VfsError> {
-        let (handle, last) = self
+        // Note that we cannot hold the lock during the entire function, because `handle.flush()` is a I/O operation.
+        let handle = self
             .state
             .handles
-            .release(fh)
-            .await
+            .get(fh)
             .ok_or(VfsError::StaleNetworkFileHandle)?;
 
         if handle.flags.write {
@@ -1200,13 +1213,30 @@ where
             self.update_mtime_ctime(handle.ino).await?;
         }
 
-        self.state.reader.close_for_handle(handle.ino as u64, fh);
-        if !self.state.handles.has_write_handle(handle.ino).await {
-            self.state.writer.release(handle.ino as u64);
+        // Prevent us from TOC-TOU (time of check to time of use) error.
+        // If we release the handle and remove the inode directly, there is
+        // a time windows between checking and releasing. It causes the inode and writer
+        // to be deleted mistakenly.
+        match self.lock_inode(handle.ino) {
+            Entry::Occupied(entry) => {
+                self.state.handles.release(fh);
+                self.state.reader.close_for_handle(handle.ino as u64, fh);
+
+                if !self.state.handles.has_write_handle(handle.ino) {
+                    self.state.writer.release(handle.ino as u64);
+                }
+
+                if self.state.handles.has_no_handle(handle.ino) {
+                    entry.remove();
+                }
+            }
+            Entry::Vacant(_) => {
+                // This is weird/impossible?
+                // It means the inode was deleted while we held a handle to it.
+                unreachable!("Try closing a file that has never been opened");
+            }
         }
-        if last {
-            self.state.inodes.remove(&handle.ino);
-        }
+
         Ok(())
     }
 
@@ -1237,18 +1267,17 @@ where
 
         // Create handle with prefetch task
         let handle = DirHandle::with_prefetch_task(ino, entries, prefetch_task, done_flag);
-        let fh = self.state.handles.allocate_dir(handle).await;
+        let fh = self.state.handles.allocate_dir(handle);
 
         Ok(fh)
     }
 
     /// Close a directory handle
-    pub async fn closedir(&self, fh: u64) -> Result<(), VfsError> {
+    pub fn closedir(&self, fh: u64) -> Result<(), VfsError> {
         let handle = self
             .state
             .handles
             .release_dir(fh)
-            .await
             .ok_or(VfsError::StaleNetworkFileHandle)?;
 
         tracing::info!(
@@ -1273,32 +1302,31 @@ where
     }
 
     /// Read directory entries by handle with pagination
-    pub async fn readdir(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
-        let handle = self.state.handles.get_dir(fh).await?;
+    pub fn readdir(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
+        let handle = self.state.handles.get_dir(fh)?;
         Some(handle.get_entries(offset))
     }
 
     /// Update cached information about a handle (e.g. last observed offset).
-    pub(crate) async fn touch_handle_offset(&self, fh: u64, offset: u64) -> Result<(), VfsError> {
+    pub(crate) fn touch_handle_offset(&self, fh: u64, offset: u64) -> Result<(), VfsError> {
         self.state
             .handles
             .get(fh)
-            .await
             .map(|handle| handle.update_offset(offset))
             .ok_or(VfsError::StaleNetworkFileHandle)
     }
 
     /// List all open handles for an inode.
-    pub(crate) async fn handles_for(&self, ino: i64) -> Vec<u64> {
-        self.state.handles.handles_for(ino).await
+    pub(crate) fn handles_for(&self, ino: i64) -> Vec<u64> {
+        self.state.handles.handles_for(ino)
     }
 
-    pub(crate) async fn handle_attr(&self, fh: u64) -> Option<FileAttr> {
-        self.state.handles.attr_for(fh).await
+    pub(crate) fn handle_attr(&self, fh: u64) -> Option<FileAttr> {
+        self.state.handles.attr_for(fh)
     }
 
-    pub(crate) async fn handle_attr_by_ino(&self, ino: i64) -> Option<FileAttr> {
-        self.state.handles.attr_for_inode(ino).await
+    pub(crate) fn handle_attr_by_ino(&self, ino: i64) -> Option<FileAttr> {
+        self.state.handles.attr_for_inode(ino)
     }
 
     /// Check whether a file has been modified since a given point in time.
@@ -1396,7 +1424,7 @@ where
     /// We only update if the file was opened for writing.
     pub(crate) async fn update_timestamps_on_flush(&self, ino: i64) -> Result<(), VfsError> {
         // Check if any handle for this inode was opened for writing
-        let has_write_handle = self.state.handles.has_write_handle(ino).await;
+        let has_write_handle = self.state.handles.has_write_handle(ino);
 
         if has_write_handle {
             // File was opened for writing, update mtime/ctime to handle potential mmap writes
@@ -1406,36 +1434,12 @@ where
         Ok(())
     }
 
-    fn ensure_inode_cached(&self, ino: i64, size: u64) -> Arc<Inode> {
-        if let Some(inode) = self.state.inodes.get(&ino) {
-            if size != inode.file_size() {
-                inode.update_size(size);
-            }
-            return inode.clone();
-        }
-
-        match self.state.inodes.entry(ino) {
-            Entry::Occupied(entry) => {
-                let inode = Arc::clone(entry.get());
-                if size != inode.file_size() {
-                    inode.update_size(size);
-                }
-                inode
-            }
-            Entry::Vacant(entry) => {
-                let inode = Inode::new(ino, size);
-                entry.insert(inode.clone());
-                inode
-            }
-        }
-    }
-
     async fn ensure_inode_registered(&self, ino: i64) -> Result<Arc<Inode>, VfsError> {
         if let Some(inode) = self.state.inodes.get(&ino) {
             return Ok(inode.clone());
         }
 
-        match self.state.inodes.entry(ino) {
+        match self.lock_inode(ino) {
             Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
             Entry::Vacant(entry) => {
                 let attr = self
@@ -1462,6 +1466,10 @@ where
             }
         }
     }
+
+    fn lock_inode(&self, ino: i64) -> Entry<'_, i64, Arc<Inode>> {
+        self.state.inodes.entry(ino)
+    }
 }
 
 #[cfg(test)]
@@ -1483,7 +1491,7 @@ mod tests {
         M: MetaStore + Send + Sync + 'static,
     {
         let attr = fs.stat(path).await.expect("stat");
-        fs.open(attr.ino, attr, read, write).await
+        fs.open(attr.ino, attr, read, write).await.unwrap()
     }
 
     async fn write_path<S, M>(fs: &VFS<S, M>, path: &str, offset: u64, data: &[u8]) -> usize
@@ -1518,14 +1526,14 @@ mod tests {
         let mut offset = 0u64;
         let mut entries = Vec::new();
         loop {
-            let batch = fs.readdir(fh, offset).await.unwrap_or_default();
+            let batch = fs.readdir(fh, offset).unwrap_or_default();
             if batch.is_empty() {
                 break;
             }
             offset += batch.len() as u64;
             entries.extend(batch);
         }
-        let _ = fs.closedir(fh).await;
+        let _ = fs.closedir(fh);
         entries
     }
 
@@ -1660,7 +1668,7 @@ mod tests {
 
         fs.create_file("/close.bin").await.unwrap();
         let attr = fs.stat("/close.bin").await.unwrap();
-        let fh = fs.open(attr.ino, attr.clone(), false, true).await;
+        let fh = fs.open(attr.ino, attr.clone(), false, true).await.unwrap();
         let data = vec![1u8; 2048];
         fs.write(fh, 0, &data).await.unwrap();
         fs.close(fh).await.unwrap();
@@ -1690,7 +1698,7 @@ mod tests {
         write_path(&fs, "/stale_trunc.bin", 0, &data).await;
 
         let attr = fs.stat("/stale_trunc.bin").await.unwrap();
-        let fh = fs.open(attr.ino, attr.clone(), true, false).await;
+        let fh = fs.open(attr.ino, attr.clone(), true, false).await.unwrap();
 
         let offset = layout.block_size as u64;
         let probe_len = 1024usize;

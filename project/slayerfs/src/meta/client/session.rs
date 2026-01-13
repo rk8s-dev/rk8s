@@ -17,7 +17,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub async fn new(session_id: Uuid, expire: i64, session_info: SessionInfo) -> Self {
+    pub fn new(session_id: Uuid, expire: i64, session_info: SessionInfo) -> Self {
         Session {
             session_id,
             expire,

@@ -721,7 +721,7 @@ impl EtcdMetaStore {
     async fn generate_id(&self, counter_key: &str) -> Result<i64, MetaError> {
         let start = std::time::Instant::now();
 
-        if let Some(id) = self.id_pools.try_alloc(counter_key).await {
+        if let Some(id) = self.id_pools.try_alloc(counter_key) {
             return Ok(id);
         }
 
@@ -755,9 +755,7 @@ impl EtcdMetaStore {
             )
             .await?;
 
-        self.id_pools
-            .update(counter_key, next_start, pool_end)
-            .await;
+        self.id_pools.update(counter_key, next_start, pool_end);
 
         let elapsed = start.elapsed();
         info!(

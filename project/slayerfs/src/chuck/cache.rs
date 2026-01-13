@@ -1409,8 +1409,8 @@ mod tests {
         assert!(temp_dir.path().exists());
     }
 
-    #[tokio::test]
-    async fn test_etag_to_filename_special_characters() {
+    #[test]
+    fn test_etag_to_filename_special_characters() {
         let binding = "a".repeat(1000);
         let etags = vec![
             "normal",
@@ -1571,8 +1571,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_filename_uniqueness() {
+    #[test]
+    fn test_filename_uniqueness() {
         let etag1 = "test1";
         let etag2 = "test2";
 
@@ -1625,8 +1625,8 @@ mod tests {
 
     // ========== AccessStats tests ==========
 
-    #[tokio::test]
-    async fn test_access_stats_basic_functionality() {
+    #[test]
+    fn test_access_stats_basic_functionality() {
         let short_window_size = Duration::from_secs(10);
         let medium_window_size = Duration::from_secs(60);
         let max_entries = 100;
@@ -1755,8 +1755,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_access_stats_frequency_calculation() {
+    #[test]
+    fn test_access_stats_frequency_calculation() {
         let short_window_size = Duration::from_secs(10);
         let medium_window_size = Duration::from_secs(60);
         let max_entries = 100;

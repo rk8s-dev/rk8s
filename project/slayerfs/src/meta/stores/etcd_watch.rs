@@ -136,7 +136,7 @@ impl EtcdWatchWorker {
 
     /// Stop watch worker
     #[allow(dead_code)]
-    pub async fn stop(&mut self) {
+    pub fn stop(&mut self) {
         if let Some(handle) = self.worker_handle.take() {
             handle.abort();
             info!("Etcd watch worker stopped");
@@ -179,9 +179,7 @@ impl EtcdWatchWorker {
                         }
 
                         for event in resp.events() {
-                            if let Err(e) =
-                                Self::handle_watch_event(event, &event_tx, &config).await
-                            {
+                            if let Err(e) = Self::handle_watch_event(event, &event_tx, &config) {
                                 error!("Failed to handle watch event: {}", e);
                             }
                         }
@@ -200,7 +198,7 @@ impl EtcdWatchWorker {
     }
 
     /// Handle single watch event
-    async fn handle_watch_event(
+    fn handle_watch_event(
         event: &etcd_client::Event,
         event_tx: &mpsc::Sender<CacheInvalidationEvent>,
         config: &WatchConfig,

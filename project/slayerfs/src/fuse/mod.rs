@@ -188,7 +188,10 @@ where
         let accmode = flags & (libc::O_ACCMODE as u32);
         let read = accmode != (libc::O_WRONLY as u32);
         let write = accmode != (libc::O_RDONLY as u32);
-        let fh = self.open(ino as i64, attr.clone(), read, write).await;
+        let fh = self
+            .open(ino as i64, attr.clone(), read, write)
+            .await
+            .map_err(Into::<Errno>::into)?;
 
         Ok(ReplyOpen { fh, flags })
     }
@@ -234,7 +237,10 @@ where
                 .stat_ino(ino as i64)
                 .await
                 .ok_or_else(|| Errno::from(libc::ENOENT))?;
-            let tmp_fh = self.open(ino as i64, attr, true, false).await;
+            let tmp_fh = self
+                .open(ino as i64, attr, true, false)
+                .await
+                .map_err(Into::<Errno>::into)?;
             let out = self
                 .read(tmp_fh, offset, size as usize)
                 .await
@@ -279,7 +285,10 @@ where
                 .stat_ino(ino as i64)
                 .await
                 .ok_or_else(|| Errno::from(libc::ENOENT))?;
-            let tmp_fh = self.open(ino as i64, attr, false, true).await;
+            let tmp_fh = self
+                .open(ino as i64, attr, false, true)
+                .await
+                .map_err(Into::<Errno>::into)?;
             let out = self
                 .write(tmp_fh, offset, data)
                 .await
@@ -304,11 +313,10 @@ where
         } else if let Some(fh_value) = fh {
             let mut fallback_attr = self
                 .handle_attr(fh_value)
-                .await
                 .ok_or_else(|| Errno::from(libc::ENOENT))?;
             fallback_attr.nlink = 0;
             fallback_attr
-        } else if let Some(mut fallback_attr) = self.handle_attr_by_ino(ino as i64).await {
+        } else if let Some(mut fallback_attr) = self.handle_attr_by_ino(ino as i64) {
             fallback_attr.nlink = 0;
             fallback_attr
         } else {
@@ -369,7 +377,7 @@ where
         // Try to use handle first
         let entries = if fh != 0 {
             let entries_offset = offset.saturating_sub(3) as u64;
-            self.readdir(fh, entries_offset).await
+            self.readdir(fh, entries_offset)
         } else {
             None
         };
@@ -476,7 +484,7 @@ where
             }
 
             let entries_offset = offset.saturating_sub(2);
-            self.readdir(fh, entries_offset).await
+            self.readdir(fh, entries_offset)
         } else {
             None
         };
@@ -965,7 +973,7 @@ where
             return Ok(()); // No handle to release
         }
 
-        if let Err(e) = self.closedir(fh).await {
+        if let Err(e) = self.closedir(fh) {
             match e {
                 VfsError::StaleNetworkFileHandle => {
                     // Handle not found, but that's ok - might be a stateless readdir
