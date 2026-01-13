@@ -5,6 +5,7 @@ use crate::task::TaskRunner;
 use anyhow::{Result, anyhow};
 use clap::{Args, Subcommand};
 use daemonize::Daemonize;
+use libcontainer::container::Container;
 use libruntime::rootpath;
 use std::env;
 use std::fs::{self, File};
@@ -191,6 +192,20 @@ impl PodInfo {
         let pod_info_path = root_path.join("pods").join(pod_name);
         fs::remove_file(&pod_info_path)?;
         Ok(())
+    }
+
+    pub fn get_pod_containers(&self, root_path: &Path) -> Result<Vec<Container>> {
+        let mut containers = Vec::new();
+        for container_name in &self.container_names {
+            let container = Container::load(root_path.join(container_name))?;
+            containers.push(container);
+        }
+        Ok(containers)
+    }
+
+    pub fn get_pod_sandbox(&self, root_path: &Path) -> Result<Container> {
+        let sandbox = Container::load(root_path.join(&self.pod_sandbox_id))?;
+        Ok(sandbox)
     }
 }
 

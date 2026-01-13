@@ -42,7 +42,9 @@ pub async fn list_pod(addr: &str, tls_cfg: TLSConnectionArgs) -> Result<()> {
     cli.send_msg(&RksMessage::ListPod).await?;
 
     match cli.fetch_msg().await? {
-        RksMessage::ListPodRes(res) => list_print(res),
+        RksMessage::ListPodRes(res) => {
+            list_print(res.into_iter().map(|pod| pod.metadata.name).collect())
+        }
         msg => Err(anyhow!("unexpected response {:?} ", msg)),
     }
 }

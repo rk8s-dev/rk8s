@@ -7077,6 +7077,7 @@ dependencies = [
  "cni-plugin",
  "common",
  "daemonize",
+ "dashmap",
  "derive_more 0.99.20",
  "dotenvy",
  "flate2",

@@ -79,6 +79,7 @@ prost-types = { workspace = true }
 tonic =  "0.13"
 tonic-build = "0.13"
 prost-build = { workspace = true }
+dashmap = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

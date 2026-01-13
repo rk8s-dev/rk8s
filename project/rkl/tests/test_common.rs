@@ -61,10 +61,12 @@ where
             init_containers: vec![],
             tolerations: vec![],
             affinity: None,
+            restart_policy: common::RestartPolicy::Never,
         },
         status: PodStatus {
             pod_ip: None,
             container_statuses: vec![],
+            ..Default::default()
         },
     }
 }

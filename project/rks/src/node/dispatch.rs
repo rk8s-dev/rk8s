@@ -67,10 +67,11 @@ pub async fn dispatch_user(
         }
 
         RksMessage::ListPod => {
-            let pods = xline_store.list_pod_names().await?;
+            let pods = xline_store.list_pods().await?;
             info!(
                 target: "rks::node::user_dispatch",
-                "list current pod: {pods:?}"
+                "list current pods: {} items",
+                pods.len()
             );
             conn.send_msg(&RksMessage::ListPodRes(pods)).await?;
         }
