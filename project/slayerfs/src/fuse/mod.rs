@@ -243,12 +243,6 @@ where
             out
         };
 
-        // Update atime after successful read
-        if let Err(e) = self.update_atime(ino as i64).await {
-            error!("Failed to update atime after read for inode {}: {}", ino, e);
-            return Err(libc::EIO.into());
-        }
-
         Ok(ReplyData {
             data: Bytes::from(data),
         })
