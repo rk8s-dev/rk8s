@@ -2,9 +2,9 @@ use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use futures::future::join_all;
 use futures::future::select_ok;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
-use crate::node::node::NodeId;
+use crate::NodeId;
 
 use super::information_packet::Content;
 
@@ -69,7 +69,7 @@ impl InChannels {
 
     /// Calls `recv` for all the [`InChannel`]s, and applies transformation `f` to
     /// the return values of the call asynchronously.
-    pub async fn map<F, T>(&mut self, mut f: F) -> Vec<T>
+    pub async fn map<F, T>(&mut self, f: F) -> Vec<T>
     where
         F: FnMut(Result<Content, RecvErr>) -> T,
     {
@@ -77,7 +77,7 @@ impl InChannels {
             .0
             .iter_mut()
             .map(|(_, c)| async { c.lock().await.recv().await });
-        join_all(futures).await.into_iter().map(|x| f(x)).collect()
+        join_all(futures).await.into_iter().map(f).collect()
     }
 
     /// Close the channel by the given `NodeId` asynchronously, and remove the channel in this map.
@@ -105,14 +105,11 @@ impl InChannels {
     }
 
     fn get(&self, id: &NodeId) -> Option<Arc<Mutex<InChannel>>> {
-        match self.0.get(id) {
-            Some(c) => Some(c.clone()),
-            None => None,
-        }
+        self.0.get(id).cloned()
     }
 
     fn keys(&self) -> Vec<NodeId> {
-        self.0.keys().map(|x| *x).collect()
+        self.0.keys().copied().collect()
     }
 }
 
@@ -249,7 +246,7 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
 
     /// Calls `recv` for all the [`InChannel`]s, and applies transformation `f` to
     /// the return values of the call asynchronously.
-    pub async fn map<F, U>(&mut self, mut f: F) -> Vec<U>
+    pub async fn map<F, U>(&mut self, f: F) -> Vec<U>
     where
         F: FnMut(Result<Option<Arc<T>>, RecvErr>) -> U,
     {
@@ -257,7 +254,7 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
             let content: Content = c.lock().await.recv().await?;
             Ok(content.into_inner())
         });
-        join_all(futures).await.into_iter().map(|x| f(x)).collect()
+        join_all(futures).await.into_iter().map(f).collect()
     }
 
     /// Close the channel by the given `NodeId` asynchronously, and remove the channel in this map.
@@ -277,14 +274,11 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
     }
 
     fn get(&self, id: &NodeId) -> Option<Arc<Mutex<InChannel>>> {
-        match self.0.get(id) {
-            Some(c) => Some(c.clone()),
-            None => None,
-        }
+        self.0.get(id).cloned()
     }
 
     fn keys(&self) -> Vec<NodeId> {
-        self.0.keys().map(|x| *x).collect()
+        self.0.keys().copied().collect()
     }
 }
 
@@ -292,7 +286,7 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
 /// - NoSuchChannel: try to get a channel with an invalid `NodeId`.
 /// - Closed: the channel to receive messages from is closed and empty already.
 /// - Lagged(x): the channel encounters a cache overflow and `x` information
-/// pakages are dropped on this receiver's side.
+///   pakages are dropped on this receiver's side.
 #[derive(Debug)]
 pub enum RecvErr {
     NoSuchChannel,

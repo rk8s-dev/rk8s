@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use dagrs::{auto_node, EmptyAction, EnvVar, InChannels, Node, NodeTable, OutChannels};
+use dagrs::{EmptyAction, EnvVar, InChannels, Node, NodeTable, OutChannels, auto_node};
 
 #[auto_node]
 struct MyNode {/*Put customized fields here.*/}

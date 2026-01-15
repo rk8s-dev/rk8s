@@ -31,9 +31,9 @@ use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use dagrs::{
+    DefaultNode, EnvVar, Graph, Node, NodeTable, Output,
     connection::{in_channel::TypedInChannels, out_channel::TypedOutChannels},
     node::typed_action::TypedAction,
-    DefaultNode, EnvVar, Graph, Node, NodeTable, Output,
 };
 use tokio::time::sleep;
 

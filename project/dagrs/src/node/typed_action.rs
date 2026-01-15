@@ -1,10 +1,11 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::{
+    EnvVar, InChannels, OutChannels, Output,
+    action::Action,
     connection::{in_channel::TypedInChannels, out_channel::TypedOutChannels},
-    Action, EnvVar, InChannels, OutChannels, Output,
 };
 
 /// A trait that provides typed channel operations
@@ -35,7 +36,7 @@ pub trait TypedAction: Send + Sync {
     ///
     /// Returns a typed input channel with the type specified by the associated type `I`
     fn make_typed_in_channels(&self, in_channels: &InChannels) -> TypedInChannels<Self::I> {
-        TypedInChannels(in_channels.0.clone(), PhantomData::default())
+        TypedInChannels(in_channels.0.clone(), Default::default())
     }
 
     /// Converts raw output channels to typed output channels
@@ -48,7 +49,7 @@ pub trait TypedAction: Send + Sync {
     ///
     /// Returns a typed output channel with the type specified by the associated type `O`
     fn make_typed_out_channels(&self, out_channels: &OutChannels) -> TypedOutChannels<Self::O> {
-        TypedOutChannels(out_channels.0.clone(), PhantomData::default())
+        TypedOutChannels(out_channels.0.clone(), Default::default())
     }
 
     /// The method that users need to implement to define their action logic

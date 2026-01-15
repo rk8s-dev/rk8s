@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicUsize;
 
-use super::node::NodeId;
+use super::NodeId;
 
 /// IDAllocator for Node.
 struct IDAllocator {

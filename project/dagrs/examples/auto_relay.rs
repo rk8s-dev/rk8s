@@ -2,7 +2,7 @@
 //! The macro `dependencies!` simplifies the construction of a `Graph`,
 //! including the addition of nodes and edges.
 
-use dagrs::{auto_node, dependencies, EmptyAction, InChannels, Node, NodeTable, OutChannels};
+use dagrs::{EmptyAction, InChannels, Node, NodeTable, OutChannels, auto_node, dependencies};
 
 #[auto_node]
 struct MyNode {/*Put customized fields here.*/}

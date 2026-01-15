@@ -72,7 +72,7 @@ impl Output {
     /// Get the contents of [`Output`].
     pub fn get_out(&self) -> Option<Content> {
         match self {
-            Self::Out(ref out) => out.clone(),
+            Self::Out(out) => out.clone(),
             Self::Err(_) | Self::ErrWithExitCode(_, _) | Self::ConditionResult(_) => None,
         }
     }

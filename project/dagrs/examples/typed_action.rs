@@ -15,9 +15,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use dagrs::{
+    Content, DefaultNode, EnvVar, Graph, Node, NodeTable, Output,
     connection::{in_channel::TypedInChannels, out_channel::TypedOutChannels},
     node::typed_action::TypedAction,
-    Content, DefaultNode, EnvVar, Graph, Node, NodeTable, Output,
 };
 
 const BASE: &str = "base";

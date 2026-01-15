@@ -1,5 +1,5 @@
-use crate::node::node::NodeId;
-use std::collections::{HashMap, HashSet, VecDeque};
+use crate::node::NodeId;
+use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry};
 
 /// A simplified graph structure used for cycle detection
 pub(crate) struct AbstractGraph {
@@ -26,8 +26,8 @@ impl AbstractGraph {
 
     /// Adds a node to the abstract graph
     pub fn add_node(&mut self, node_id: NodeId) {
-        if !self.in_degree.contains_key(&node_id) {
-            self.in_degree.insert(node_id, 0);
+        if let Entry::Vacant(entry) = self.in_degree.entry(node_id) {
+            entry.insert(0);
             self.edges.insert(node_id, HashSet::new());
         }
     }

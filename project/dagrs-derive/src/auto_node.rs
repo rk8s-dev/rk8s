@@ -90,11 +90,11 @@ pub(crate) fn auto_node(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     };
 
-    return quote! {
+    quote! {
         #item_struct
         #auto_impl
     }
-    .into();
+    .into()
 }
 
 fn auto_impl_node(

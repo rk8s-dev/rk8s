@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     connection::information_packet::Content,
-    node::node::{NodeTable, NODE_TABLE_STR},
+    node::{NODE_TABLE_STR, NodeTable},
 };
 
 pub type Variable = Content;
@@ -17,8 +17,8 @@ pub type Variable = Content;
 ///
 /// Variables that [`EnvVar`] should have:
 /// - [NodeTable] : a mapping from node's name to `NodeId`.
-/// During the runtime of a `Graph`, [`NodeTable`] allows
-/// each `Node` to look up the id of a specific node by its name.
+///   During the runtime of a `Graph`, [`NodeTable`] allows
+///   each `Node` to look up the id of a specific node by its name.
 #[derive(Debug, Clone)]
 pub struct EnvVar {
     variables: HashMap<String, Variable>,

@@ -22,8 +22,8 @@ use std::{env, sync::Arc};
 
 use async_trait::async_trait;
 use dagrs::{
-    node::conditional_node::{Condition, ConditionalNode},
     Action, Content, DefaultNode, EnvVar, Graph, InChannels, Node, NodeTable, OutChannels, Output,
+    node::conditional_node::{Condition, ConditionalNode},
 };
 
 const BASE: &str = "base";

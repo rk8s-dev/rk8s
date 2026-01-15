@@ -1,9 +1,9 @@
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use futures::future::join_all;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
-use crate::node::node::NodeId;
+use crate::node::NodeId;
 
 use super::information_packet::Content;
 
@@ -34,8 +34,8 @@ impl OutChannels {
     pub async fn broadcast(&self, content: Content) -> Vec<Result<(), SendErr>> {
         let futures = self
             .0
-            .iter()
-            .map(|(_, c)| async { c.lock().await.send(content.clone()).await });
+            .values()
+            .map(|c| async { c.lock().await.send(content.clone()).await });
 
         join_all(futures).await
     }
@@ -43,14 +43,14 @@ impl OutChannels {
     /// Blocking broadcasts the `content` to all the [`OutChannel`]s.
     pub fn blocking_broadcast(&self, content: Content) -> Vec<Result<(), SendErr>> {
         self.0
-            .iter()
-            .map(|(_, c)| c.blocking_lock().blocking_send(content.clone()))
+            .values()
+            .map(|c| c.blocking_lock().blocking_send(content.clone()))
             .collect()
     }
 
     /// Close the channel by the given `NodeId`, and remove the channel in this map.
     pub fn close(&mut self, id: &NodeId) {
-        if let Some(_) = self.get(id) {
+        if self.get(id).is_some() {
             self.0.remove(id);
         }
     }
@@ -60,10 +60,7 @@ impl OutChannels {
     }
 
     fn get(&self, id: &NodeId) -> Option<Arc<Mutex<OutChannel>>> {
-        match self.0.get(id) {
-            Some(c) => Some(c.clone()),
-            None => None,
-        }
+        self.0.get(id).cloned()
     }
 
     pub(crate) fn insert(&mut self, node_id: NodeId, channel: Arc<Mutex<OutChannel>>) {
@@ -162,8 +159,8 @@ impl<T: Send + Sync + 'static> TypedOutChannels<T> {
         let content = Content::new(content);
         let futures = self
             .0
-            .iter()
-            .map(|(_, c)| async { c.lock().await.send(content.clone()).await });
+            .values()
+            .map(|c| async { c.lock().await.send(content.clone()).await });
 
         join_all(futures).await
     }
@@ -172,23 +169,20 @@ impl<T: Send + Sync + 'static> TypedOutChannels<T> {
     pub fn blocking_broadcast(&self, content: T) -> Vec<Result<(), SendErr>> {
         let content = Content::new(content);
         self.0
-            .iter()
-            .map(|(_, c)| c.blocking_lock().blocking_send(content.clone()))
+            .values()
+            .map(|c| c.blocking_lock().blocking_send(content.clone()))
             .collect()
     }
 
     /// Close the channel by the given `NodeId`, and remove the channel in this map.
     pub fn close(&mut self, id: &NodeId) {
-        if let Some(_) = self.get(id) {
+        if self.get(id).is_some() {
             self.0.remove(id);
         }
     }
 
     fn get(&self, id: &NodeId) -> Option<Arc<Mutex<OutChannel>>> {
-        match self.0.get(id) {
-            Some(c) => Some(c.clone()),
-            None => None,
-        }
+        self.0.get(id).cloned()
     }
 
     /// Returns a list of all available receiver node IDs.

@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::{
+    Node, NodeId, NodeName, NodeTable,
     action::{Action, EmptyAction},
-    node::{Node, NodeId, NodeName, NodeTable},
 };
 
 /// # Default node type
@@ -32,7 +32,7 @@ use super::{
 /// ```
 ///
 /// - use the method `with_action`. Required attributes: node's name; [`NodeTable`](for id allocation);
-/// execution logic [`Action`].
+///   execution logic [`Action`].
 ///
 /// ```rust
 /// use dagrs::{NodeName, NodeTable, DefaultNode, EmptyAction};

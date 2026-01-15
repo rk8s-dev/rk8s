@@ -36,7 +36,7 @@ mod relay;
 #[proc_macro_attribute]
 pub fn auto_node(args: TokenStream, input: TokenStream) -> TokenStream {
     use crate::auto_node::auto_node;
-    auto_node(args, input).into()
+    auto_node(args, input)
 }
 
 /// The [`dependencies!`] macro allows users to specify all task dependencies in an easy-to-understand

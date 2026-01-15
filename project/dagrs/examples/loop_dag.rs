@@ -13,8 +13,8 @@ use std::{env, fmt::Display, sync::Arc};
 
 use async_trait::async_trait;
 use dagrs::{
-    graph::loop_subgraph::LoopSubgraph, Action, Content, DefaultNode, EnvVar, Graph, InChannels,
-    Node, NodeId, NodeTable, OutChannels, Output,
+    Action, Content, DefaultNode, EnvVar, Graph, InChannels, Node, NodeId, NodeTable, OutChannels,
+    Output, graph::loop_subgraph::LoopSubgraph,
 };
 
 struct InAction;

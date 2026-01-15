@@ -18,7 +18,6 @@ use syn::{parse::Parse, Token};
 /// Step 6: Populate the edges of the graph with the previously processed data and return the graph.
 ///
 /// This code provides the logic to dynamically build a graph based on parsed task relationships, where each task is a node and the successors define directed edges between nodes.
-
 pub(crate) struct Relay {
     pub(crate) task: Ident,
     pub(crate) successors: Vec<Ident>,
