@@ -27,7 +27,7 @@ rust_library(
     rustc_flags = ["@$(location :dagrs-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//project/dagrs-derive:_dagrs_derive",
+        "//project/dagrs-derive:dagrs_derive",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/futures/0.3.31:futures",
         "//third-party/rust/crates/log/0.4.29:log",
