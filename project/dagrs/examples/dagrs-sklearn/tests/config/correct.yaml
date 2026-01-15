@@ -1,0 +1,27 @@
+dagrs:
+  a:
+    name: "Task 1"
+    after: [ b, c ]
+    cmd: echo a
+  b:
+    name: "Task 2"
+    after: [ c, f ]
+    cmd: echo b
+  c:
+    name: "Task 3"
+    after: [ e ]
+    cmd: echo c
+  d:
+    name: "Task 4"
+    after: [ c, e ]
+    cmd: echo d
+  e:
+    name: "Task 5"
+    after: [ h ]
+    cmd: echo e
+  f:
+    name: "Task 6"
+    cmd: python3 ./tests/config/test.py
+  h:
+    name: "Task 8"
+    cmd: echo h

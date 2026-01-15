@@ -1842,6 +1842,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagrs"
+version = "0.5.2"
+dependencies = [
+ "async-trait",
+ "criterion",
+ "dagrs-derive",
+ "env_logger",
+ "futures",
+ "log",
+ "tokio",
+]
+
+[[package]]
+name = "dagrs-derive"
+version = "0.4.3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

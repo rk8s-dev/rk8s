@@ -1,0 +1,2 @@
+SciPy
+numpy

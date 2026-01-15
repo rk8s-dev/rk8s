@@ -1,0 +1,31 @@
+a:
+  name: "Task 1"
+  after: [ b, c ]
+  cmd: sh -c echo a
+b:
+  name: "Task 2"
+  after: [ c, f, g ]
+  cmd: sh -c echo b
+c:
+  name: "Task 3"
+  after: [ e, g ]
+  cmd: sh -c echo c
+d:
+  name: "Task 4"
+  after: [ c, e ]
+  cmd: sh -c echo d
+e:
+  name: "Task 5"
+  after: [ h ]
+  cmd: sh -c echo e
+f:
+  name: "Task 6"
+  after: [ g ]
+  cmd: python3 ./test.py
+g:
+  name: "Task 7"
+  after: [ h ]
+  cmd: node ./test.js
+h:
+  name: "Task 8"
+  cmd: sh -c sh_script.sh
