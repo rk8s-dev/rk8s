@@ -76,12 +76,17 @@ jobs:
         if: ${{ github.event_name == 'pull_request_target' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.name }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          PR_NUMBER=${{ github.event.pull_request.number }}
-          HEAD_REF="${{ github.event.pull_request.head.ref }}"
-          HEAD_OWNER="${{ github.event.pull_request.head.repo.owner.login }}"
-          HEAD_REPO="${{ github.event.pull_request.head.repo.name }}"
-          CURRENT_OWNER="${{ github.repository_owner }}"
+          PR_NUMBER="$PR_NUMBER"
+          HEAD_REF="$PR_HEAD_REF"
+          HEAD_OWNER="$PR_HEAD_OWNER"
+          HEAD_REPO="$PR_HEAD_REPO"
+          CURRENT_OWNER="$REPO_OWNER"
 
           # For forked PRs, temporarily change origin URL to fork repository
           # This allows claude-code-action to fetch the PR branch correctly
@@ -133,7 +138,6 @@ jobs:
 
           # Enable progress tracking and show full Claude output in logs
           track_progress: true
-          show_full_output: true
 
           # Custom review instructions passed to Claude
           prompt: |
@@ -172,3 +176,4 @@ jobs:
           # Restrict tools that Claude can use during the review
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+

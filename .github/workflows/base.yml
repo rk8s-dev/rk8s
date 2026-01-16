@@ -26,11 +26,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-      
+
+      - name: Install nightly toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rustfmt --toolchain nightly
+
       - name: Run rustfmt
         run: |
           cd project
-          cargo fmt --all --check
+          cargo +nightly fmt --all --check
 
   clippy:
     name: Clippy Check
@@ -40,6 +45,7 @@ jobs:
     runs-on: [self-hosted]
     env:
       CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
 
     steps:
       - name: Checkout repository
@@ -80,6 +86,10 @@ jobs:
     name: Buck2 Build
 
     runs-on: [self-hosted]
+    
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
 
     steps:
       - name: Checkout repository
@@ -94,6 +104,10 @@ jobs:
     name: Buck2 Test
 
     runs-on: [self-hosted]
+    
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
 
     steps:
       - name: Checkout repository
