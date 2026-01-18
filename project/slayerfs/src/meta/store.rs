@@ -398,14 +398,33 @@ pub trait MetaStore: Send + Sync {
         self.set_file_size(ino, size).await
     }
 
-    /// get the node's parent inode
-    async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError>;
+    async fn get_dentries(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError> {
+        Ok(self
+            .get_names(ino)
+            .await?
+            .into_iter()
+            .filter_map(|(p, n)| p.map(|p| (p, n)))
+            .collect())
+    }
 
-    /// get the node's name in its parent directory
-    async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError>;
+    async fn get_dir_parent(&self, dir_ino: i64) -> Result<Option<i64>, MetaError> {
+        let Some(attr) = self.stat(dir_ino).await? else {
+            return Ok(None);
+        };
+        if attr.kind != FileType::Dir {
+            return Err(MetaError::NotDirectory(dir_ino));
+        }
+        Ok(self
+            .get_dentries(dir_ino)
+            .await?
+            .into_iter()
+            .next()
+            .map(|(p, _)| p))
+    }
 
-    /// get the inode's full path (from the root directory)
-    async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError>;
+    async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError>;
+
+    async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError>;
 
     fn root_ino(&self) -> i64;
 

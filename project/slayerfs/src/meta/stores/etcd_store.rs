@@ -2028,9 +2028,36 @@ impl MetaStore for EtcdMetaStore {
             .await?
             .ok_or(MetaError::NotFound(entry_ino))?;
 
+        let mut updated_link_parents: Option<Vec<EtcdLinkParent>> = None;
+
         // Prepare updated entry info
-        entry_info.parent_inode = new_parent;
-        entry_info.entry_name = new_name.clone();
+        if entry_info.nlink <= 1 {
+            entry_info.parent_inode = new_parent;
+            entry_info.entry_name = new_name.clone();
+        } else {
+            let link_parent_key = Self::etcd_link_parent_key(entry_ino);
+            let mut link_parents = self
+                .etcd_get_json::<Vec<EtcdLinkParent>>(&link_parent_key)
+                .await?
+                .unwrap_or_default();
+
+            let mut updated = false;
+            for lp in &mut link_parents {
+                if lp.parent_inode == old_parent && lp.entry_name == old_name {
+                    lp.parent_inode = new_parent;
+                    lp.entry_name = new_name.clone();
+                    updated = true;
+                    break;
+                }
+            }
+
+            if !updated {
+                return Err(MetaError::NotFound(entry_ino));
+            }
+
+            updated_link_parents = Some(link_parents);
+        }
+
         entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let updated_reverse_json = serde_json::to_string(&entry_info)?;
 
@@ -2051,16 +2078,24 @@ impl MetaStore for EtcdMetaStore {
 
         // Atomic transaction: rename forward index AND update reverse index
         let mut client = self.client.clone();
+        let mut ops = vec![
+            TxnOp::put(new_forward_key.clone(), new_forward_json, None),
+            TxnOp::delete(old_forward_key.clone(), None),
+            TxnOp::put(reverse_key.clone(), updated_reverse_json, None),
+        ];
+
+        if let Some(link_parents) = &updated_link_parents {
+            let link_parent_key = Self::etcd_link_parent_key(entry_ino);
+            let json = serde_json::to_string(link_parents)?;
+            ops.push(TxnOp::put(link_parent_key, json, None));
+        }
+
         let txn = Txn::new()
             .when([
                 Compare::create_revision(old_forward_key.clone(), CompareOp::NotEqual, 0),
                 Compare::create_revision(new_forward_key.clone(), CompareOp::Equal, 0),
             ])
-            .and_then([
-                TxnOp::put(new_forward_key.clone(), new_forward_json, None),
-                TxnOp::delete(old_forward_key.clone(), None),
-                TxnOp::put(reverse_key.clone(), updated_reverse_json, None),
-            ]);
+            .and_then(ops);
 
         let resp = client
             .txn(txn)
@@ -2269,61 +2304,81 @@ impl MetaStore for EtcdMetaStore {
         Ok(())
     }
 
-    async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
+    async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError> {
         if ino == 1 {
-            return Ok(None);
+            return Ok(vec![(None, "/".to_string())]);
         }
 
         let reverse_key = Self::etcd_reverse_key(ino);
-        if let Some(entry_info) = self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
-            Ok(Some(entry_info.parent_inode))
-        } else {
-            Ok(None)
+        let Some(entry_info) = self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? else {
+            return Ok(vec![]);
+        };
+
+        if entry_info.deleted || entry_info.nlink == 0 {
+            return Ok(vec![]);
         }
+
+        if entry_info.nlink <= 1 {
+            return Ok(vec![(Some(entry_info.parent_inode), entry_info.entry_name)]);
+        }
+
+        let link_parent_key = Self::etcd_link_parent_key(ino);
+        let link_parents = self
+            .etcd_get_json::<Vec<EtcdLinkParent>>(&link_parent_key)
+            .await?
+            .unwrap_or_default();
+
+        let mut out = Vec::with_capacity(link_parents.len());
+        for lp in link_parents {
+            out.push((Some(lp.parent_inode), lp.entry_name));
+        }
+
+        out.sort();
+        out.dedup();
+        Ok(out)
     }
 
-    async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError> {
+    async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError> {
         if ino == 1 {
-            return Ok(Some("/".to_string()));
+            return Ok(vec!["/".to_string()]);
         }
 
-        let reverse_key = Self::etcd_reverse_key(ino);
-        if let Some(entry_info) = self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
-            Ok(Some(entry_info.entry_name))
-        } else {
-            Ok(None)
-        }
-    }
+        let names = self.get_names(ino).await?;
+        let mut out = Vec::with_capacity(names.len());
 
-    async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError> {
-        if ino == 1 {
-            return Ok(Some("/".to_string()));
-        }
-
-        let mut path_parts = Vec::new();
-        let mut current_ino = ino;
-
-        loop {
-            let reverse_key = Self::etcd_reverse_key(current_ino);
-
-            let entry_info = match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
-                Some(info) => info,
-                None => return Ok(None),
+        for (parent_opt, name) in names {
+            let Some(parent) = parent_opt else {
+                continue;
             };
 
-            path_parts.push(entry_info.entry_name);
+            let mut path_parts = vec![name];
+            let mut current_ino = parent;
 
-            let parent = entry_info.parent_inode;
-            if parent == 1 {
-                break;
+            while current_ino != 1 {
+                let reverse_key = Self::etcd_reverse_key(current_ino);
+                let entry_info = match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+                    Some(info) => info,
+                    None => {
+                        path_parts.clear();
+                        break;
+                    }
+                };
+
+                path_parts.push(entry_info.entry_name);
+                current_ino = entry_info.parent_inode;
             }
 
-            current_ino = parent;
+            if path_parts.is_empty() {
+                continue;
+            }
+
+            path_parts.reverse();
+            out.push(format!("/{}", path_parts.join("/")));
         }
 
-        path_parts.reverse();
-        let path = format!("/{}", path_parts.join("/"));
-        Ok(Some(path))
+        out.sort();
+        out.dedup();
+        Ok(out)
     }
 
     fn root_ino(&self) -> i64 {
@@ -2907,6 +2962,77 @@ mod tests {
         fn get_store(&self, index: usize) -> &EtcdMetaStore {
             &self.stores[index]
         }
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn test_hardlink_dentry_binding_cross_dir_rename_unlink() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let dir_a = store.mkdir(root, "a".to_string()).await.unwrap();
+        let dir_b = store.mkdir(root, "b".to_string()).await.unwrap();
+
+        let ino = store.create_file(dir_a, "x".to_string()).await.unwrap();
+        store.link(ino, dir_b, "y").await.unwrap();
+
+        let names = store.get_names(ino).await.unwrap();
+        assert!(names.contains(&(Some(dir_a), "x".to_string())));
+        assert!(names.contains(&(Some(dir_b), "y".to_string())));
+
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), Some(ino));
+
+        store
+            .rename(dir_b, "y", dir_b, "z".to_string())
+            .await
+            .unwrap();
+
+        let names = store.get_names(ino).await.unwrap();
+        assert!(names.contains(&(Some(dir_a), "x".to_string())));
+        assert!(names.contains(&(Some(dir_b), "z".to_string())));
+        assert!(!names.contains(&(Some(dir_b), "y".to_string())));
+
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), None);
+        assert_eq!(store.lookup(dir_b, "z").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
+
+        store.unlink(dir_a, "x").await.unwrap();
+
+        let names = store.get_names(ino).await.unwrap();
+        assert_eq!(names, vec![(Some(dir_b), "z".to_string())]);
+        assert_eq!(store.lookup(dir_b, "z").await.unwrap(), Some(ino));
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn test_hardlink_dentry_binding_cross_dir_move_rename() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let dir_a = store.mkdir(root, "a".to_string()).await.unwrap();
+        let dir_b = store.mkdir(root, "b".to_string()).await.unwrap();
+        let dir_c = store.mkdir(root, "c".to_string()).await.unwrap();
+
+        let ino = store.create_file(dir_a, "x".to_string()).await.unwrap();
+        store.link(ino, dir_b, "y").await.unwrap();
+
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), Some(ino));
+
+        store
+            .rename(dir_b, "y", dir_c, "z".to_string())
+            .await
+            .unwrap();
+
+        let names = store.get_names(ino).await.unwrap();
+        assert!(names.contains(&(Some(dir_a), "x".to_string())));
+        assert!(names.contains(&(Some(dir_c), "z".to_string())));
+        assert!(!names.contains(&(Some(dir_b), "y".to_string())));
+
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), None);
+        assert_eq!(store.lookup(dir_c, "z").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
     }
 
     #[serial]
