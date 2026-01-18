@@ -1566,16 +1566,16 @@ impl MetaStore for EtcdMetaStore {
         entry_info.create_time = now; // Update ctime when creating hard link
         entry_info.deleted = false;
 
-        if old_nlink == 1 {
+        let link_parent_key = Self::etcd_link_parent_key(ino);
+        let link_parent_json = if old_nlink == 1 {
             // First hardlink: transition to LinkParent mode
-
             let old_parent = entry_info.parent_inode;
             let old_entry_name = entry_info.entry_name.clone();
 
             // Use link_parent instead of parent
             entry_info.parent_inode = 0;
             entry_info.entry_name = String::new();
-            let link_parent_key = Self::etcd_link_parent_key(ino);
+
             let link_parents = vec![
                 EtcdLinkParent {
                     parent_inode: old_parent,
@@ -1587,12 +1587,17 @@ impl MetaStore for EtcdMetaStore {
                 },
             ];
 
-            self.etcd_put_json(&link_parent_key, &link_parents, None)
-                .await?;
-        } else if old_nlink > 1 {
-            // Already using LinkParent, just add new entry
-            let link_parent_key = Self::etcd_link_parent_key(ino);
+            Some(serde_json::to_string(&link_parents).map_err(|e| {
+                MetaError::Internal(format!(
+                    "Failed to serialize LinkParent entries during link operation: {e}"
+                ))
+            })?)
+        } else {
+            None
+        };
 
+        if old_nlink > 1 {
+            // Already using LinkParent, just add new entry
             self.atomic_update(
                 &link_parent_key,
                 |mut link_parents: Vec<EtcdLinkParent>| {
@@ -1645,15 +1650,29 @@ impl MetaStore for EtcdMetaStore {
         );
 
         let mut client = self.client.clone();
-        let txn = Txn::new()
-            .when([
-                Compare::version(forward_key.clone(), CompareOp::Equal, 0),
-                Compare::version(reverse_key.clone(), CompareOp::Greater, 0),
-            ])
-            .and_then([
-                TxnOp::put(forward_key.clone(), forward_json, None),
-                TxnOp::put(reverse_key.clone(), updated_json, None),
-            ]);
+        let mut txn = Txn::new().when([
+            Compare::version(forward_key.clone(), CompareOp::Equal, 0),
+            Compare::version(reverse_key.clone(), CompareOp::Greater, 0),
+        ]);
+
+        if old_nlink == 1 {
+            txn = txn.when([Compare::version(
+                link_parent_key.clone(),
+                CompareOp::Equal,
+                0,
+            )]);
+        }
+
+        let mut ops = vec![
+            TxnOp::put(forward_key.clone(), forward_json, None),
+            TxnOp::put(reverse_key.clone(), updated_json, None),
+        ];
+
+        if let Some(link_parent_json) = link_parent_json {
+            ops.push(TxnOp::put(link_parent_key.clone(), link_parent_json, None));
+        }
+
+        let txn = txn.and_then(ops);
 
         let resp = client
             .txn(txn)
@@ -1881,17 +1900,6 @@ impl MetaStore for EtcdMetaStore {
                 entry_info.parent_inode = remaining.parent_inode;
                 entry_info.entry_name = remaining.entry_name.clone();
 
-                // Delete all LinkParent entries
-                client
-                    .delete(link_parent_key.clone(), None)
-                    .await
-                    .map_err(|e| {
-                        MetaError::Internal(format!(
-                            "Failed to delete LinkParent for inode {}: {}",
-                            file_ino, e
-                        ))
-                    })?;
-
                 entry_info.nlink = 1;
                 entry_info.deleted = false;
             } else {
@@ -1938,12 +1946,23 @@ impl MetaStore for EtcdMetaStore {
 
         // Step 1: Perform atomic transaction first (delete forward key, update metadata)
         // This ensures the file is properly marked as deleted before updating parent
-        let txn = Txn::new()
-            .when([Compare::version(forward_key.clone(), CompareOp::Greater, 0)])
-            .and_then([
-                TxnOp::delete(forward_key.clone(), None),
-                TxnOp::put(reverse_key.clone(), updated_json.clone(), None),
-            ]);
+        let mut compares = vec![Compare::version(forward_key.clone(), CompareOp::Greater, 0)];
+        let mut ops = vec![
+            TxnOp::delete(forward_key.clone(), None),
+            TxnOp::put(reverse_key.clone(), updated_json.clone(), None),
+        ];
+
+        if current_nlink == 2 {
+            let link_parent_key = Self::etcd_link_parent_key(file_ino);
+            compares.push(Compare::version(
+                link_parent_key.clone(),
+                CompareOp::Greater,
+                0,
+            ));
+            ops.push(TxnOp::delete(link_parent_key.clone(), None));
+        }
+
+        let txn = Txn::new().when(compares).and_then(ops);
 
         match client.txn(txn).await {
             Ok(resp) if resp.succeeded() => {

@@ -284,11 +284,15 @@ impl RedisMetaStore {
     ) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
         let key = Self::link_parent_key(ino);
-        let _: () = conn.del(&key).await.map_err(redis_err)?;
+
+        let mut pipe = redis::pipe();
+        pipe.atomic();
+        pipe.del(&key);
         for (p, name) in parents {
             let member = format!("{}:{}", p, name);
-            let _: () = conn.sadd(&key, member).await.map_err(redis_err)?;
+            pipe.sadd(&key, member);
         }
+        let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
         Ok(())
     }
 
@@ -847,26 +851,38 @@ impl MetaStore for RedisMetaStore {
 
             node.attr.nlink = node.attr.nlink.saturating_sub(1);
 
+            let now = current_time();
+            node.attr.ctime = now;
+
             if node.attr.nlink <= 1 {
-                let remaining = link_parents
-                    .into_iter()
-                    .next()
-                    .ok_or(MetaError::NotFound(child))?;
+                let remaining = link_parents.into_iter().next().ok_or_else(|| {
+                    MetaError::Internal(format!("missing remaining link parent for inode {child}"))
+                })?;
                 node.parent = remaining.0;
                 node.name = remaining.1;
 
                 let key = Self::link_parent_key(child);
+                let data =
+                    serde_json::to_vec(&node).map_err(|e| MetaError::Internal(e.to_string()))?;
+
                 let mut conn = self.conn.clone();
-                let _: () = conn.del(key).await.map_err(redis_err)?;
+                let _: () = redis::pipe()
+                    .atomic()
+                    .del(key)
+                    .set(self.node_key(node.ino), data)
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(redis_err)?;
             } else {
                 self.save_link_parents(child, &link_parents).await?;
                 node.parent = 0;
                 node.name = String::new();
             }
 
-            let now = current_time();
-            node.attr.ctime = now;
-            self.save_node(&node).await?;
+            if node.attr.nlink > 1 {
+                self.save_node(&node).await?;
+            }
+
             self.bump_dir_times(parent, now).await?;
             return Ok(());
         }
