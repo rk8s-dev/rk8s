@@ -1094,9 +1094,9 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             .ensure_node_in_cache(parent, &self.store, None)
             .await?;
 
-        // Cache the new file node
         if let Ok(Some(attr)) = self.store.stat(ino).await {
-            self.inode_cache.insert_node(ino, attr, None).await;
+            let cache_parent = (attr.nlink <= 1).then_some(parent);
+            self.inode_cache.insert_node(ino, attr, cache_parent).await;
         }
         self.inode_cache.add_child(parent, name, ino).await;
 
@@ -1120,9 +1120,8 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             .ensure_node_in_cache(parent, &self.store, None)
             .await?;
 
-        let cache_parent = (attr.nlink <= 1).then_some(parent);
         self.inode_cache
-            .insert_node(inode, attr.clone(), cache_parent)
+            .insert_node(inode, attr.clone(), None)
             .await;
         self.inode_cache
             .add_child(parent, name.to_string(), inode)
@@ -1154,7 +1153,10 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             .ensure_node_in_cache(parent, &self.store, None)
             .await?;
 
-        self.inode_cache.insert_node(ino, attr.clone(), None).await;
+        let cache_parent = (attr.nlink <= 1).then_some(parent);
+        self.inode_cache
+            .insert_node(ino, attr.clone(), cache_parent)
+            .await;
         self.inode_cache
             .add_child(parent, name.to_string(), ino)
             .await;

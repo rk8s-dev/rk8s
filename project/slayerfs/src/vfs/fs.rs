@@ -369,7 +369,7 @@ where
             .get_paths(ino)
             .await
             .ok()
-            .and_then(|mut paths| paths.pop())
+            .and_then(|paths| paths.into_iter().next())
     }
 
     /// get the node's child inode by name.
