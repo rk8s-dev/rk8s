@@ -1552,7 +1552,13 @@ impl MetaStore for EtcdMetaStore {
 
         if !entry_info.is_file {
             return Err(MetaError::NotSupported(
-                "hard links are only supported for files and symlinks".into(),
+                "cannot create hard links to directories".into(),
+            ));
+        }
+
+        if entry_info.symlink_target.is_some() {
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to symbolic links".into(),
             ));
         }
         if entry_info.deleted || entry_info.nlink == 0 {
@@ -1650,18 +1656,21 @@ impl MetaStore for EtcdMetaStore {
         );
 
         let mut client = self.client.clone();
-        let mut txn = Txn::new().when([
+
+        let mut conditions = vec![
             Compare::version(forward_key.clone(), CompareOp::Equal, 0),
             Compare::version(reverse_key.clone(), CompareOp::Greater, 0),
-        ]);
+        ];
 
         if old_nlink == 1 {
-            txn = txn.when([Compare::version(
+            conditions.push(Compare::version(
                 link_parent_key.clone(),
                 CompareOp::Equal,
                 0,
-            )]);
+            ));
         }
+
+        let txn = Txn::new().when(conditions);
 
         let mut ops = vec![
             TxnOp::put(forward_key.clone(), forward_json, None),
@@ -2337,7 +2346,7 @@ impl MetaStore for EtcdMetaStore {
             return Ok(vec![]);
         }
 
-        if entry_info.nlink <= 1 {
+        if !entry_info.is_file || entry_info.nlink <= 1 {
             return Ok(vec![(Some(entry_info.parent_inode), entry_info.entry_name)]);
         }
 

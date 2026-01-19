@@ -1251,6 +1251,13 @@ impl MetaStore for DatabaseMetaStore {
             return Err(MetaError::NotFound(ino));
         };
 
+        if file.symlink_target.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to symbolic links".into(),
+            ));
+        }
+
         if file.deleted || file.nlink <= 0 {
             txn.rollback().await.map_err(MetaError::Database)?;
             return Err(MetaError::NotSupported(
@@ -1866,6 +1873,23 @@ impl MetaStore for DatabaseMetaStore {
     async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError> {
         if ino == 1 {
             return Ok(vec![(None, "/".to_string())]);
+        }
+
+        if AccessMeta::find_by_id(ino)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?
+            .is_some()
+        {
+            let entry = ContentMeta::find()
+                .filter(content_meta::Column::Inode.eq(ino))
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            return Ok(entry
+                .map(|e| vec![(Some(e.parent_inode), e.entry_name)])
+                .unwrap_or_default());
         }
 
         let entries = ContentMeta::find()

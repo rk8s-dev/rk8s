@@ -794,8 +794,18 @@ impl MetaStore for RedisMetaStore {
         }
 
         let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
-        if node.kind != NodeKind::File {
-            return Err(MetaError::NotSupported(format!("{ino} is not a file")));
+        match node.kind {
+            NodeKind::File => {}
+            NodeKind::Symlink => {
+                return Err(MetaError::NotSupported(
+                    "cannot create hard links to symbolic links".into(),
+                ));
+            }
+            NodeKind::Dir => {
+                return Err(MetaError::NotSupported(
+                    "cannot create hard links to directories".into(),
+                ));
+            }
         }
         if node.deleted || node.attr.nlink == 0 {
             return Err(MetaError::NotFound(ino));
@@ -932,7 +942,9 @@ impl MetaStore for RedisMetaStore {
                 }
             }
             if !updated {
-                return Err(MetaError::NotFound(child));
+                return Err(MetaError::Internal(format!(
+                    "expected link parent binding {old_parent}/{old_name} for inode {child}"
+                )));
             }
             self.save_link_parents(child, &link_parents).await?;
             node.parent = 0;
@@ -1070,7 +1082,7 @@ impl MetaStore for RedisMetaStore {
             return Ok(vec![]);
         }
 
-        if node.attr.nlink <= 1 {
+        if node.kind == NodeKind::Dir || node.attr.nlink <= 1 {
             return Ok(vec![(Some(node.parent), node.name)]);
         }
 
