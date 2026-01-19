@@ -1602,29 +1602,6 @@ impl MetaStore for EtcdMetaStore {
             None
         };
 
-        if old_nlink > 1 {
-            // Already using LinkParent, just add new entry
-            self.atomic_update(
-                &link_parent_key,
-                |mut link_parents: Vec<EtcdLinkParent>| {
-                    link_parents.push(EtcdLinkParent {
-                        parent_inode: parent,
-                        entry_name: name.to_string(),
-                    });
-                    Ok((link_parents, ()))
-                },
-                || {
-                    Err(MetaError::Internal(format!(
-                        "LinkParent key {} not found for inode {}",
-                        link_parent_key, ino
-                    )))
-                },
-                10,
-                &None,
-            )
-            .await?;
-        }
-
         let forward_key = Self::etcd_forward_key(parent, name);
         let entry_type = if entry_info.symlink_target.is_some() {
             EntryType::Symlink
@@ -1650,8 +1627,42 @@ impl MetaStore for EtcdMetaStore {
             ))
         })?;
 
+        let (link_parent_compare, link_parent_update) = if old_nlink > 1 {
+            let mut client = self.client.clone();
+            let resp = client
+                .get(link_parent_key.clone(), None)
+                .await
+                .map_err(|e| MetaError::Internal(format!("Failed to get LinkParent: {e}")))?;
+
+            let kv = resp.kvs().first().ok_or_else(|| {
+                MetaError::Internal(format!(
+                    "LinkParent key {} not found for inode {}",
+                    link_parent_key, ino
+                ))
+            })?;
+
+            let mut link_parents = serde_json::from_slice::<Vec<EtcdLinkParent>>(kv.value())
+                .map_err(|e| {
+                    MetaError::Internal(format!("Failed to deserialize LinkParent: {e}"))
+                })?;
+
+            link_parents.push(EtcdLinkParent {
+                parent_inode: parent,
+                entry_name: name.to_string(),
+            });
+
+            let compare =
+                Compare::mod_revision(link_parent_key.clone(), CompareOp::Equal, kv.mod_revision());
+            let value = serde_json::to_string(&link_parents)
+                .map_err(|e| MetaError::Internal(format!("Failed to serialize LinkParent: {e}")))?;
+
+            (Some(compare), Some(value))
+        } else {
+            (None, None)
+        };
+
         info!(
-            "Creating hard link with atomic transaction: src_inode={}, parent={}, name={}",
+            "Creating hard link with atomic transaction: src_inode={}, parent={}, name={} ",
             ino, parent, name
         );
 
@@ -1670,7 +1681,9 @@ impl MetaStore for EtcdMetaStore {
             ));
         }
 
-        let txn = Txn::new().when(conditions);
+        if let Some(compare) = link_parent_compare {
+            conditions.push(compare);
+        }
 
         let mut ops = vec![
             TxnOp::put(forward_key.clone(), forward_json, None),
@@ -1681,7 +1694,15 @@ impl MetaStore for EtcdMetaStore {
             ops.push(TxnOp::put(link_parent_key.clone(), link_parent_json, None));
         }
 
-        let txn = txn.and_then(ops);
+        if let Some(link_parent_update) = link_parent_update {
+            ops.push(TxnOp::put(
+                link_parent_key.clone(),
+                link_parent_update,
+                None,
+            ));
+        }
+
+        let txn = Txn::new().when(conditions).and_then(ops);
 
         let resp = client
             .txn(txn)
@@ -1702,9 +1723,8 @@ impl MetaStore for EtcdMetaStore {
             {
                 return Err(MetaError::NotFound(ino));
             }
-            return Err(MetaError::Internal(
-                "Atomic link transaction failed unexpected compare".into(),
-            ));
+
+            return Err(MetaError::ContinueRetry);
         }
 
         let name_for_closure = name.to_string();
