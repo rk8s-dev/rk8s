@@ -13,6 +13,7 @@ The linking mechanism uses a **reversible transition strategy** to optimize for 
 
 - **Single-link files (nlink=1)**: Use the `parent` field in `file_meta` for O(1) parent directory lookup
 - **Multi-link files (nlink>1)**: Use `LinkParentMeta` table (or etcd LinkParent keys) to track all parent directories
+- **Directories**: POSIX directories naturally have `nlink >= 2` ("." and ".."), but directories are **never** tracked via LinkParent mode. Directory name/parent is always derived from its single `content_meta` binding.
 - **Revert to single-link mode (nlink: 2→1)**: When the last hard link is removed and nlink drops back to 1, the system
   restores the `parent` field from the remaining `content_meta` entry and deletes all `LinkParent` records
 
@@ -26,6 +27,15 @@ minimizing the overhead of `LinkParentMeta` storage and queries.
 - **Key insight**: LinkParent mode is activated on first hard link (1→2) and deactivated when reverting to single-link (2→1)
 
 ## State Transitions
+
+## Data Integrity
+
+This implementation assumes the following invariants:
+
+- For a file with `nlink == 1`, the inode has exactly one directory entry, and the store can return a single `(parent_inode, entry_name)` binding.
+- For a file with `nlink > 1`, the store must be able to return all parent/name bindings.
+
+If the metadata becomes inconsistent (for example `nlink == 2` but there are no remaining link-parent bindings), the store should return an `Internal` error rather than `NotFound`, since this indicates corruption rather than a missing inode.
 
 ### Creating a File
 
