@@ -353,13 +353,23 @@ where
     }
 
     /// get the node's parent inode.
-    pub(crate) async fn parent_of(&self, ino: i64) -> Option<i64> {
-        self.core.meta_layer.get_parent(ino).await.ok().flatten()
+    pub async fn parent_of(&self, ino: i64) -> Option<i64> {
+        self.core
+            .meta_layer
+            .get_dir_parent(ino)
+            .await
+            .ok()
+            .flatten()
     }
 
     /// get the node's fullpath.
-    pub(crate) async fn path_of(&self, ino: i64) -> Option<String> {
-        self.core.meta_layer.get_path(ino).await.ok().flatten()
+    pub async fn path_of(&self, ino: i64) -> Option<String> {
+        self.core
+            .meta_layer
+            .get_paths(ino)
+            .await
+            .ok()
+            .and_then(|paths| paths.into_iter().next())
     }
 
     /// get the node's child inode by name.

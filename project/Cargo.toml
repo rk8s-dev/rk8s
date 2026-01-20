@@ -10,6 +10,7 @@ members = [
     "rkb",
     "rkl",
     "rks",
+    "libruntime",
     "libscheduler", 
     "common",
     "slayerfs",
@@ -31,6 +32,7 @@ libipam = { path = "libipam" }
 libnetwork = { path = "libnetwork" }
 libscheduler = { path = "libscheduler" }
 libvault = { path = "libvault" }
+libruntime = { path = "libruntime" }
 rkb = { path = "rkb" }
 rkl = { path = "rkl" }
 rks = { path = "rks" }

@@ -1,10 +1,10 @@
 use crate::commands::pod::PodInfo;
 use crate::commands::{Exec, ExecPod};
 use crate::commands::{delete, exec, load_container, start, state};
-use crate::rootpath;
 use crate::task::{self, TaskRunner};
 use anyhow::{Result, anyhow};
 use liboci_cli::{Delete, Start, State};
+use libruntime::rootpath;
 use tracing::{error, info};
 
 use crate::daemon::probe::collect_container_statuses;

@@ -1257,7 +1257,7 @@ mod tests {
         let cid = chunk_id_for(inode.ino(), 0);
         timeout(Duration::from_secs(1), async {
             loop {
-                if meta.get_slices(cid).await.unwrap().len() > 0 {
+                if !meta.get_slices(cid).await.unwrap().is_empty() {
                     break;
                 }
                 sleep(Duration::from_millis(10)).await;

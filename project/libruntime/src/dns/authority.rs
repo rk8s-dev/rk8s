@@ -208,3 +208,8 @@ impl MemStore {
         MemStore(map)
     }
 }
+impl Default for MemStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}

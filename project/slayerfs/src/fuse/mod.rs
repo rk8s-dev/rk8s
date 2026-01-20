@@ -105,7 +105,37 @@ mod mount_tests {
             .collect::<Vec<_>>();
         assert!(list.iter().any(|n| n.to_string_lossy() == "hello.txt"));
 
+        let hard_dir = mnt_path.join("hard");
+        fs::create_dir(&hard_dir).expect("mkdir hard");
+
+        let hard_a = hard_dir.join("a.txt");
+        fs::write(&hard_a, b"x").expect("write hard a");
+        let hard_b = hard_dir.join("b.txt");
+        fs::hard_link(&hard_a, &hard_b).expect("hardlink");
+
+        let sub_dir = hard_dir.join("sub");
+        fs::create_dir(&sub_dir).expect("mkdir sub");
+        let sub_file = sub_dir.join("c.txt");
+        fs::write(&sub_file, b"y").expect("write sub file");
+
+        let sub_list = fs::read_dir(&sub_dir)
+            .expect("readdir sub")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect::<Vec<_>>();
+        assert!(sub_list.iter().any(|n| n.to_string_lossy() == "."));
+        assert!(sub_list.iter().any(|n| n.to_string_lossy() == ".."));
+        assert!(sub_list.iter().any(|n| n.to_string_lossy() == "c.txt"));
+
+        let sub_dotdot = fs::read_link(sub_dir.join(".."));
+        assert!(sub_dotdot.is_err());
+
         // Delete and unmount
+        fs::remove_file(&hard_b).expect("unlink hard b");
+        fs::remove_file(&hard_a).expect("unlink hard a");
+        fs::remove_file(&sub_file).expect("unlink sub file");
+        fs::remove_dir(&sub_dir).expect("rmdir sub");
+        fs::remove_dir(&hard_dir).expect("rmdir hard");
         fs::remove_file(&file_path).expect("unlink");
 
         // Explicitly unmount and wait
@@ -411,7 +441,10 @@ where
                 name: OsString::from("."),
                 offset: 1,
             });
-            let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
+            let parent_ino = self
+                .parent_of(ino as i64)
+                .await
+                .unwrap_or_else(|| self.root_ino()) as u64;
             all.push(DirectoryEntry {
                 inode: parent_ino,
                 kind: FuseFileType::Directory,
@@ -467,7 +500,10 @@ where
                     return Err(libc::ENOENT.into());
                 }
                 // Add ".." entry
-                let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
+                let parent_ino = self
+                    .parent_of(ino as i64)
+                    .await
+                    .unwrap_or_else(|| self.root_ino()) as u64;
                 if let Some(pattr) = self.stat_ino(parent_ino as i64).await {
                     let f = vfs_to_fuse_attr(&pattr, &req);
                     all.push(DirectoryEntryPlus {

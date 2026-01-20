@@ -1,15 +1,10 @@
-use crate::oci;
 use crate::{
     commands::{
         Exec, ExecContainer,
         compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
-        container::config::ContainerConfigBuilder,
         create, delete, exec, list, load_container, start,
-        utils::{ImageType, determine_image, handle_oci_image, parse_key_val},
-        volume::{VolumeManager, VolumePattern, string_to_pattern},
+        volume::parse_key_val,
     },
-    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
-    rootpath,
     task::get_cni,
 };
 use anyhow::{Ok, Result, anyhow};
@@ -23,6 +18,15 @@ use libcontainer::{
     error::LibcontainerError,
 };
 use liboci_cli::{Create, Delete, List, Start};
+use libruntime::cri::config::ContainerConfigBuilder;
+use libruntime::oci;
+use libruntime::rootpath;
+use libruntime::utils::{ImageType, determine_image, handle_oci_image};
+use libruntime::volume::{VolumeManager, VolumePattern, string_to_pattern};
+use libruntime::{
+    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
+    utils::ImagePuller,
+};
 use nix::unistd::Pid;
 use oci_spec::runtime::{LinuxBuilder, ProcessBuilder, RootBuilder, Spec, get_default_namespaces};
 use oci_spec::runtime::{Mount as OciMount, MountBuilder};
@@ -40,7 +44,13 @@ use std::{
 use tabwriter::TabWriter;
 use tracing::{debug, info, warn};
 
-pub mod config;
+struct RkbImagePuller {}
+
+impl ImagePuller for RkbImagePuller {
+    fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        rkb::pull::pull_or_get_image(image_ref, None::<&str>)
+    }
+}
 
 #[derive(Subcommand)]
 pub enum ContainerCommand {
@@ -734,9 +744,10 @@ pub fn setup_network_conf() -> Result<()> {
 pub fn handle_image_typ(
     container_spec: &ContainerSpec,
 ) -> Result<(Option<ContainerConfigBuilder>, String)> {
+    let puller = RkbImagePuller {};
     if let ImageType::OCIImage = determine_image(&container_spec.image)? {
         let (image_config, bundle_path) =
-            handle_oci_image(&container_spec.image, container_spec.name.clone())?;
+            handle_oci_image(&puller, &container_spec.image, container_spec.name.clone())?;
         // handle image_config
         let mut builder = ContainerConfigBuilder::default();
         if let Some(config) = image_config.config() {

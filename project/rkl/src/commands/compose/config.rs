@@ -1,7 +1,7 @@
 use crate::commands::compose::spec::{ComposeSpec, ConfigsSpec};
 use std::collections::HashMap;
 
-use crate::cri::cri_api::Mount;
+use libruntime::cri::cri_api::Mount;
 
 #[derive(Clone, Debug)]
 pub struct ConfigMountInfo {

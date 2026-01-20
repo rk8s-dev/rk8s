@@ -683,8 +683,10 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                         target
                     } else {
                         let parent_path = self
-                            .get_path(current_ino)
+                            .get_paths(current_ino)
                             .await?
+                            .into_iter()
+                            .next()
                             .unwrap_or_else(|| "/".to_string());
                         if parent_path == "/" {
                             format!("/{}", target)
@@ -791,7 +793,9 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                 parent, name, ino
             );
             if let Ok(Some(attr)) = self.store.stat(ino).await {
-                self.inode_cache.insert_node(ino, attr, Some(parent)).await;
+                let cache_parent = matches!(attr.kind, FileType::Dir).then_some(parent);
+
+                self.inode_cache.insert_node(ino, attr, cache_parent).await;
             }
             self.inode_cache
                 .add_child(parent, name.to_string(), ino)
@@ -809,8 +813,10 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         for entry in entries {
             if entry.name.eq_ignore_ascii_case(name) {
                 if let Ok(Some(attr)) = self.store.stat(entry.ino).await {
+                    let cache_parent = matches!(attr.kind, FileType::Dir).then_some(parent);
+
                     self.inode_cache
-                        .insert_node(entry.ino, attr, Some(parent))
+                        .insert_node(entry.ino, attr, cache_parent)
                         .await;
                 }
                 self.inode_cache
@@ -879,7 +885,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             stream::iter(chunks.into_iter().enumerate())
                 .map(|(batch_idx, chunk)| {
                     let client_clone = Arc::clone(&client);
-                    let parent = parent_ino;
                     async move {
                         let batch_start = std::time::Instant::now();
                         match client_clone.store.batch_stat(&chunk).await {
@@ -890,7 +895,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                                     if let Some(attr) = attr_opt {
                                         client_clone
                                             .inode_cache
-                                            .insert_node(*child_ino, attr.clone(), Some(parent))
+                                            .insert_node(*child_ino, attr.clone(), None)
                                             .await;
                                         cached_count += 1;
                                     }
@@ -1089,9 +1094,9 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             .ensure_node_in_cache(parent, &self.store, None)
             .await?;
 
-        // Cache the new file node
         if let Ok(Some(attr)) = self.store.stat(ino).await {
-            self.inode_cache.insert_node(ino, attr, Some(parent)).await;
+            let cache_parent = (attr.nlink <= 1).then_some(parent);
+            self.inode_cache.insert_node(ino, attr, cache_parent).await;
         }
         self.inode_cache.add_child(parent, name, ino).await;
 
@@ -1116,7 +1121,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             .await?;
 
         self.inode_cache
-            .insert_node(inode, attr.clone(), Some(parent))
+            .insert_node(inode, attr.clone(), None)
             .await;
         self.inode_cache
             .add_child(parent, name.to_string(), inode)
@@ -1148,8 +1153,9 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             .ensure_node_in_cache(parent, &self.store, None)
             .await?;
 
+        let cache_parent = (attr.nlink <= 1).then_some(parent);
         self.inode_cache
-            .insert_node(ino, attr.clone(), Some(parent))
+            .insert_node(ino, attr.clone(), cache_parent)
             .await;
         self.inode_cache
             .add_child(parent, name.to_string(), ino)
@@ -1210,8 +1216,14 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
                 .add_child(new_parent, new_name, child_ino)
                 .await;
 
-            if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
-                child_node.set_parent(new_parent).await;
+            if let Ok(Some(attr)) = self.store.stat(child_ino).await {
+                if attr.nlink <= 1 {
+                    if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
+                        child_node.set_parent(new_parent).await;
+                    }
+                } else if let Some(node) = self.inode_cache.get_node(child_ino).await {
+                    node.clear_parent().await;
+                }
             }
         }
 
@@ -1266,88 +1278,41 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.inode_cache.invalidate_inode(inode).await;
         Ok(())
     }
-    async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
-        let inode = self.check_root(ino);
-        if let Some(node) = self.inode_cache.get_node(inode).await
-            && let Some(parent) = node.get_parent().await
-        {
-            return Ok(Some(parent));
-        }
 
-        self.store.get_parent(inode).await
-    }
-
-    async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError> {
-        let inode = self.check_root(ino);
-        if let Some(parent_ino) = self.get_parent(inode).await?
-            && let Some(parent_node) = self.inode_cache.get_node(parent_ino).await
-        {
-            let children_lock = parent_node.children.read().await;
-            if let Some(children_map) = children_lock.get_map() {
-                for (name, child_ino) in children_map.iter() {
-                    if *child_ino == inode {
-                        return Ok(Some(name.clone()));
-                    }
-                }
-            }
-        }
-
-        self.store.get_name(inode).await
-    }
-
-    async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError> {
+    async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError> {
         let inode = self.check_root(ino);
         if inode == self.root() {
-            return Ok(Some("/".to_string()));
+            return Ok(vec![(None, "/".to_string())]);
         }
 
-        let node = self.inode_cache.get_node(inode).await;
-        if node.is_none() {
-            return self.store.get_path(inode).await;
+        self.store.get_names(inode).await
+    }
+
+    async fn get_dentries(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError> {
+        let inode = self.check_root(ino);
+        if inode == self.root() {
+            return Ok(vec![(self.root(), "/".to_string())]);
         }
 
-        let mut path_segments = Vec::new();
-        let mut current_ino = inode;
+        self.store.get_dentries(inode).await
+    }
 
-        while current_ino != self.root() {
-            let current_node = self.inode_cache.get_node(current_ino).await;
-            if current_node.is_none() {
-                return self.store.get_path(inode).await;
-            }
-
-            let parent_ino = current_node.as_ref().unwrap().get_parent().await;
-            if parent_ino.is_none() {
-                return self.store.get_path(inode).await;
-            }
-
-            let parent = parent_ino.unwrap();
-            let parent_node_opt = self.inode_cache.get_node(parent).await;
-            if parent_node_opt.is_none() {
-                return self.store.get_path(inode).await;
-            }
-
-            let parent_node = parent_node_opt.unwrap();
-            let mut found_name = None;
-            let children_lock = parent_node.children.read().await;
-            if let Some(children_map) = children_lock.get_map() {
-                for (name, child_ino) in children_map.iter() {
-                    if *child_ino == current_ino {
-                        found_name = Some(name.clone());
-                        break;
-                    }
-                }
-            }
-
-            if found_name.is_none() {
-                return self.store.get_path(inode).await;
-            }
-
-            path_segments.push(found_name.unwrap());
-            current_ino = parent;
+    async fn get_dir_parent(&self, dir_ino: i64) -> Result<Option<i64>, MetaError> {
+        let inode = self.check_root(dir_ino);
+        if inode == self.root() {
+            return Ok(None);
         }
 
-        path_segments.reverse();
-        Ok(Some(format!("/{}", path_segments.join("/"))))
+        self.store.get_dir_parent(inode).await
+    }
+
+    async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError> {
+        let inode = self.check_root(ino);
+        if inode == self.root() {
+            return Ok(vec!["/".to_string()]);
+        }
+
+        self.store.get_paths(inode).await
     }
 
     async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
@@ -1702,8 +1667,13 @@ mod tests {
         assert_eq!(ino, app_py, "lookup_path should return correct inode");
         assert_eq!(kind, FileType::File, "Should be a file");
 
-        // Test get_path reverse lookup
-        let main_path = client.get_path(main_rs).await.unwrap().unwrap();
+        let main_path = client
+            .get_paths(main_rs)
+            .await
+            .unwrap()
+            .first()
+            .cloned()
+            .unwrap();
         assert_eq!(
             main_path, "/projects/rust/main.rs",
             "Should resolve path from inode"
@@ -1841,8 +1811,13 @@ mod tests {
         let resolved = client.resolve_path("/dir2/moved_file.txt").await.unwrap();
         assert_eq!(resolved, file1, "Path should resolve to correct inode");
 
-        // Verify get_path
-        let path = client.get_path(file1).await.unwrap().unwrap();
+        let path = client
+            .get_paths(file1)
+            .await
+            .unwrap()
+            .first()
+            .cloned()
+            .unwrap();
         assert_eq!(
             path, "/dir2/moved_file.txt",
             "get_path should return new path"
@@ -2116,9 +2091,6 @@ mod tests {
         assert_eq!(entries4.len(), 0, "Should be empty again");
     }
 
-    /// Test scenario: get_parent and get_name functionality
-    ///
-    /// Verify reverse lookup from inode to parent directory and name
     #[tokio::test]
     async fn test_get_parent_and_name() {
         let client = create_test_client().await;
@@ -2129,26 +2101,71 @@ mod tests {
             .await
             .unwrap();
 
-        // Test get_parent
-        let parent = client.get_parent(file1).await.unwrap().unwrap();
-        assert_eq!(parent, dir1, "Parent should be parent_dir");
-
-        let root_parent = client.get_parent(dir1).await.unwrap().unwrap();
+        let root_parent = client.get_dir_parent(dir1).await.unwrap().unwrap();
         assert_eq!(root_parent, 1, "Parent of dir1 should be root");
 
-        // Test get_name
-        let file_name = client.get_name(file1).await.unwrap().unwrap();
-        assert_eq!(file_name, "child_file.txt", "Name should match");
-
-        let dir_name = client.get_name(dir1).await.unwrap().unwrap();
-        assert_eq!(dir_name, "parent_dir", "Directory name should match");
-
-        let root_name = client.get_name(1).await.unwrap();
-        assert_eq!(
-            root_name,
-            Some("/".to_string()),
-            "Root directory name should be '/'"
+        let file_links = client.get_dentries(file1).await.unwrap();
+        assert!(
+            file_links.contains(&(dir1, "child_file.txt".to_string())),
+            "File should have expected (parent,name) link"
         );
+
+        let dir_links = client.get_names(dir1).await.unwrap();
+        assert!(
+            dir_links.contains(&(Some(1), "parent_dir".to_string())),
+            "Directory should have expected (parent,name) link"
+        );
+
+        let root_links = client.get_names(1).await.unwrap();
+        assert_eq!(root_links, vec![(None, "/".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_get_names_and_rename_one_link() {
+        let client = create_test_client().await;
+
+        let links = client.mkdir(1, "links".to_string()).await.unwrap();
+        let file_ino = client
+            .create_file(links, "a.txt".to_string())
+            .await
+            .unwrap();
+
+        client.link(file_ino, links, "b.txt").await.unwrap();
+
+        let names = client.get_names(file_ino).await.unwrap();
+        assert!(names.contains(&(Some(links), "a.txt".to_string())));
+        assert!(names.contains(&(Some(links), "b.txt".to_string())));
+
+        client
+            .rename(links, "b.txt", links, "c.txt".to_string())
+            .await
+            .unwrap();
+
+        let names = client.get_names(file_ino).await.unwrap();
+        assert!(names.contains(&(Some(links), "a.txt".to_string())));
+        assert!(names.contains(&(Some(links), "c.txt".to_string())));
+        assert!(!names.contains(&(Some(links), "b.txt".to_string())));
+
+        client.unlink(links, "c.txt").await.unwrap();
+
+        let names = client.get_names(file_ino).await.unwrap();
+        assert_eq!(names, vec![(Some(links), "a.txt".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn test_hardlink_link_should_not_poison_cached_parent() {
+        let client = create_test_client().await;
+
+        let d1 = client.mkdir(1, "d1".to_string()).await.unwrap();
+        let d2 = client.mkdir(1, "d2".to_string()).await.unwrap();
+
+        let file_ino = client.create_file(d1, "a.txt".to_string()).await.unwrap();
+
+        client.link(file_ino, d2, "b.txt").await.unwrap();
+
+        let dentries = client.get_dentries(file_ino).await.unwrap();
+        assert!(dentries.contains(&(d1, "a.txt".to_string())));
+        assert!(dentries.contains(&(d2, "b.txt".to_string())));
     }
 
     /// Test scenario: Intelligent path cache invalidation

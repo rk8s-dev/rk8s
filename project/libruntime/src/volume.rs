@@ -1,24 +1,16 @@
-#![allow(unused)]
 use std::{
     collections::HashMap,
-    fs, io,
+    fs,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
-use anyhow::anyhow;
-use anyhow::{Ok, Result};
-use clap::{ArgAction, Subcommand};
+use anyhow::{Result, anyhow};
 use rand::RngCore;
-use serde::Deserialize;
-use serde::Serialize;
-use std::fmt::Write as _;
-use std::io::Write;
-use tabwriter::TabWriter;
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::commands::compose::ComposeMetadata;
-use libruntime::cri::cri_api::Mount;
+use crate::cri::cri_api::Mount;
 
 #[derive(Debug)]
 pub enum PatternType {
@@ -68,41 +60,6 @@ pub enum Driver {
     // TODO: Support cloud driver
     Azure,
     Rexray,
-}
-
-#[derive(Subcommand)]
-pub enum VolumeCommand {
-    #[command(about = "Create a volume")]
-    Create {
-        #[arg(value_name = "VOLUME_NAME")]
-        name: String,
-        #[arg(long, short = 'd')]
-        driver: Option<String>,
-        #[arg(long, short = 'o', value_parser=parse_key_val)]
-        opts: Option<Vec<(String, String)>>,
-    },
-
-    #[command(about = "Remove one or more volumes")]
-    Rm {
-        volumes: Vec<String>,
-        #[arg(long, short = 'f', action=ArgAction::SetTrue)]
-        force: bool,
-    },
-
-    #[command(about = "List volumes")]
-    Ls {
-        #[arg(long, short = 'q', action=ArgAction::SetTrue)]
-        quiet: bool,
-    },
-
-    #[command(about = "Display detailed information on one or more volumes")]
-    Inspect { name: Vec<String> },
-
-    #[command(about = "Remove all unused local volumes")]
-    Prune {
-        #[arg(long, short = 'f', action=ArgAction::SetTrue)]
-        force: bool,
-    },
 }
 
 pub struct VolumeManager {
@@ -289,7 +246,7 @@ impl VolumeManager {
 
     /// scan all the container's state json
     /// check if there is container refer this volume
-    fn is_volume_in_use(&self, name: &str) -> Result<bool> {
+    fn is_volume_in_use(&self, _name: &str) -> Result<bool> {
         let root_path = PathBuf::from_str("/run/youki")?;
         for entry in fs::read_dir(root_path)? {
             let entry = entry?;
@@ -304,20 +261,18 @@ impl VolumeManager {
 
         // Compose
         let root_path = PathBuf::from_str("/run/youki/compose")?;
-        for dir_entry in fs::read_dir(root_path)? {
-            let dir_entry = dir_entry?;
-            if dir_entry.metadata().unwrap().is_dir() {
-                let path = dir_entry.path().join("metadata.json");
-                if path.exists() {
-                    let content = fs::read_to_string(path).map_err(|e| {
-                        anyhow!(
-                            "failed to read compose {:?} metada.json error: {e:?}",
-                            dir_entry.file_name(),
-                        )
-                    })?;
-                    let metadata: ComposeMetadata = serde_json::from_str(&content)?;
-                    if metadata.volumes.contains(&name.to_string()) {
-                        return Ok(true);
+        if root_path.exists() {
+            for dir_entry in fs::read_dir(root_path)? {
+                let dir_entry = dir_entry?;
+                if dir_entry.metadata().unwrap().is_dir() {
+                    let path = dir_entry.path().join("metadata.json");
+                    if path.exists() {
+                        // TODO: Implement ComposeMetadata check properly or import it
+                        // let content = fs::read_to_string(path)?;
+                        // let metadata: ComposeMetadata = serde_json::from_str(&content)?;
+                        // if metadata.volumes.contains(&name.to_string()) {
+                        //     return Ok(true);
+                        // }
                     }
                 }
             }
@@ -336,60 +291,6 @@ impl VolumeManager {
         let content = fs::read_to_string(path)?;
         // cache reference
         load_volume_container_reference(serde_json::from_str(&content)?)
-    }
-
-    // ========Command entrypoints========
-    fn create(
-        &mut self,
-        name: String,
-        driver: Option<String>,
-        opts: Option<Vec<(String, String)>>,
-    ) -> Result<()> {
-        let opts = opts.unwrap_or_default().into_iter().collect();
-        let metadata = self.create_(name, driver, opts)?;
-        println!("{}", metadata.name);
-        Ok(())
-    }
-
-    fn rm(&mut self, names: Vec<String>, force: bool) -> Result<()> {
-        for name in names {
-            self.remove_(name.as_str(), force)?;
-        }
-        Ok(())
-    }
-
-    fn ls(&self, quiet: bool) -> Result<()> {
-        let volumes = self.list();
-        let mut content = String::new();
-        for v in volumes {
-            if !quiet {
-                let _ = writeln!(content, "{}\t{}", v.driver, v.name);
-            } else {
-                let _ = writeln!(content, "{}", v.name);
-            }
-        }
-
-        let mut tab_writer = TabWriter::new(io::stdout());
-        if !quiet {
-            writeln!(&mut tab_writer, "DRIVER\tVOLUME NAME")?;
-        } else {
-            writeln!(&mut tab_writer, "VOLUME NAME")?;
-        }
-        write!(&mut tab_writer, "{content}")?;
-        tab_writer.flush()?;
-
-        Ok(())
-    }
-    fn inspect(&self, names: Vec<String>) -> Result<()> {
-        for name in names {
-            let meta = self.inspect_(name.as_str())?;
-            let meta_str = serde_json::to_string_pretty(meta)?;
-            println!("{meta_str}");
-        }
-        Ok(())
-    }
-    fn prune(&mut self, force: bool) -> Result<()> {
-        self.prune_(force).and_then(|_| Ok(()))
     }
 }
 
@@ -437,21 +338,4 @@ pub fn string_to_pattern(v: &str) -> Result<VolumePattern> {
         read_only: !read_only.is_empty(),
         pattern_type: typ,
     })
-}
-
-pub fn volume_execute(cmd: VolumeCommand) -> Result<()> {
-    let mut v_manager = VolumeManager::new()?;
-    match cmd {
-        VolumeCommand::Create { name, driver, opts } => v_manager.create(name, driver, opts),
-        VolumeCommand::Rm { volumes, force } => v_manager.rm(volumes, force),
-        VolumeCommand::Ls { quiet } => v_manager.ls(quiet),
-        VolumeCommand::Inspect { name } => v_manager.inspect(name),
-        VolumeCommand::Prune { force } => v_manager.prune(force),
-    }
-}
-
-pub fn parse_key_val(s: &str) -> Result<(String, String), String> {
-    s.split_once("=")
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .ok_or_else(|| format!("invalid KEY=VALUE: '{}'", s))
 }

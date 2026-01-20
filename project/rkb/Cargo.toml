@@ -7,9 +7,17 @@ description = "Image builder for rk8s"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rkb"
 
 [dependencies]
+common = { workspace = true }
+libnetwork = { workspace = true }
+libipam = { workspace = true }
+libcgroups = { workspace = true }
+libcontainer = { workspace = true }
+libvault = { workspace = true }
+libcni = { workspace = true }
+liboci-cli = { workspace = true }
 libfuse-fs = { workspace = true }
 rfuse3 = { workspace = true, features = ["tokio-runtime", "unprivileged"] }
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 nix = { workspace = true, features = ["fs", "process", "user", "sched", "mount"] }
 tokio = { workspace = true, features = ["full"] }
 libc = { workspace = true }
@@ -19,6 +27,7 @@ tar = { workspace = true }
 flate2 = { workspace = true, features = ["zlib-rs"], default-features = false }
 walkdir = { workspace = true }
 sha2 = { workspace = true }
+sha256 = { workspace = true }
 oci-spec = { workspace = true }
 rand = { workspace = true }
 chrono = { workspace = true }
@@ -31,6 +40,7 @@ indicatif = { workspace = true }
 base64 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 ipc-channel = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 axum = { workspace = true }
@@ -43,3 +53,22 @@ iterator-ext = { workspace = true }
 tempfile = { workspace = true }
 uzers = { workspace = true }
 rayon = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+serial_test = { workspace = true }
+tabwriter = { workspace = true }
+bincode = { workspace = true }
+gethostname = { workspace = true }
+sysinfo = { workspace = true }
+ipnetwork = { workspace = true }
+lazy_static = { workspace = true }
+regex = { workspace = true }
+dotenvy = { workspace = true }
+json = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+cni-plugin = { workspace = true }
+netlink-packet-route = { workspace = true }
+hickory-server = { version = "0.25.2", features=["resolver"] }
+hickory-proto = { workspace = true }
+hickory-resolver = { workspace = true }
+hickory-client = { workspace = true }

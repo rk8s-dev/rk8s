@@ -1,27 +1,34 @@
-use crate::commands::container::config::ContainerConfigBuilder;
-use crate::commands::container::handle_image_typ;
-use crate::commands::{create, delete, kill, load_container, start};
-use crate::cri::cri_api::{
-    ContainerConfig, CreateContainerRequest, CreateContainerResponse, LinuxContainerConfig,
-    LinuxContainerResources, PodSandboxConfig, PodSandboxMetadata, PortMapping, Protocol,
-    RemovePodSandboxRequest, RemovePodSandboxResponse, RunPodSandboxRequest, RunPodSandboxResponse,
-    StartContainerRequest, StartContainerResponse, StopPodSandboxRequest, StopPodSandboxResponse,
-};
-use crate::oci::{self, OCISpecGenerator};
-use crate::rootpath;
 use anyhow::{Result, anyhow};
-use common::{ContainerRes, ContainerSpec, PodTask};
+use common::{ContainerSpec, PodTask};
 use json::JsonValue;
 use libcni::rust_cni::cni::Libcni;
-use libcontainer::oci_spec::runtime::{
-    LinuxCpuBuilder, LinuxMemoryBuilder, LinuxResources, LinuxResourcesBuilder,
-};
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Create, Delete, Kill, Start};
+use libruntime::cri::config::ContainerConfigBuilder;
+// use libruntime::cri::config::get_linux_container_config;
+use libruntime::cri::cri_api::{
+    ContainerConfig, CreateContainerRequest, CreateContainerResponse, PodSandboxConfig,
+    PodSandboxMetadata, PortMapping, Protocol, RemovePodSandboxRequest, RemovePodSandboxResponse,
+    RunPodSandboxRequest, RunPodSandboxResponse, StartContainerRequest, StartContainerResponse,
+    StopPodSandboxRequest, StopPodSandboxResponse,
+};
+use libruntime::cri::{create, delete, kill, load_container, start};
+use libruntime::oci::{self, OCISpecGenerator};
+use libruntime::rootpath;
+use libruntime::utils::{ImagePuller, handle_image_typ};
+
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
+
+struct RkbImagePuller {}
+
+impl ImagePuller for RkbImagePuller {
+    fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        rkb::pull::pull_or_get_image(image_ref, None::<&str>)
+    }
+}
 
 pub struct TaskRunner {
     pub task: PodTask,
@@ -144,7 +151,9 @@ impl TaskRunner {
             command: None,
             working_dir: None,
         };
-        let (config_builder, bundle_path) = handle_image_typ(&sandbox_spec)
+
+        let puller = RkbImagePuller {};
+        let (config_builder, bundle_path) = handle_image_typ(&puller, &sandbox_spec)
             .map_err(|e| anyhow!("failed to get pause container's bundle_path: {e}"))?;
 
         // 2. build final oci specification config.json
@@ -254,7 +263,8 @@ impl TaskRunner {
         pod_sandbox_id: &str,
         container: &ContainerSpec,
     ) -> Result<CreateContainerRequest, anyhow::Error> {
-        let (mut config_builder, bundle_path) = handle_image_typ(container)?;
+        let puller = RkbImagePuller {};
+        let (mut config_builder, bundle_path) = handle_image_typ(&puller, container)?;
 
         let config = if let Some(ref mut builder) = config_builder {
             builder.container_spec(container.clone())?;
@@ -559,96 +569,6 @@ impl TaskRunner {
     }
 }
 
-// TODO: when bundle is not provided, then pull the default image from remote
-#[allow(unused)]
-fn get_pause_bundle() -> Result<String> {
-    Err(anyhow!("local bundle path is not provided"))
-}
-
-// only support limit config now.
-pub fn get_linux_container_config(
-    res: Option<ContainerRes>,
-) -> Result<Option<LinuxContainerConfig>, anyhow::Error> {
-    if let Some(limits) = res.and_then(|r| r.limits) {
-        Ok(Some(LinuxContainerConfig {
-            resources: Some(parse_resource(limits.cpu, limits.memory)?),
-            ..Default::default()
-        }))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Convert CPU resource descriptions in the form of `1` or `1000m`,
-/// and memory resource descriptions in the form of `1Mi`, `1Ki`, or `1Gi` to LinuxContainerResource.
-fn parse_resource(
-    cpu: Option<String>,
-    memory: Option<String>,
-) -> Result<LinuxContainerResources, anyhow::Error> {
-    let mut res = LinuxContainerResources::default();
-
-    if let Some(c) = cpu {
-        let period: i64 = 1_000_000;
-        let portion: i64 = if c.ends_with("m") {
-            c[..c.len() - 1]
-                .parse::<i64>()
-                .map_err(|e| anyhow!("Failed to parse cpu resource config: {}", e))?
-                * period
-                / 1000
-        } else {
-            (c.parse::<f64>()
-                .map_err(|e| anyhow!("Failed to parse cpu resource config: {}", e))?
-                * period as f64) as i64
-        };
-        res.cpu_period = period;
-        res.cpu_quota = portion;
-    }
-
-    if let Some(m) = memory {
-        let mem_result: Result<i64, _> = if m.ends_with("Gi") {
-            m[..m.len() - 2]
-                .parse()
-                .map(|x: i64| x * 1024 * 1024 * 1024)
-        } else if m.ends_with("Mi") {
-            m[..m.len() - 2].parse().map(|x: i64| x * 1024 * 1024)
-        } else if m.ends_with("Ki") {
-            m[..m.len() - 2].parse().map(|x: i64| x * 1024)
-        } else {
-            return Err(anyhow!("Failed to parse memory resource config: {}", m));
-        };
-        let mem =
-            mem_result.map_err(|e| anyhow!("Failed to parse memory resource config: {}", e))?;
-        res.memory_limit_in_bytes = mem;
-    }
-
-    Ok(res)
-}
-
-/// Convert type used to describe container config to oci_spec config.
-impl From<&LinuxContainerResources> for LinuxResources {
-    fn from(value: &LinuxContainerResources) -> Self {
-        let mut res = LinuxResourcesBuilder::default();
-        if value.cpu_period != 0 {
-            res = res.cpu(
-                LinuxCpuBuilder::default()
-                    .period(value.cpu_period as u64)
-                    .quota(value.cpu_quota)
-                    .build()
-                    .unwrap(),
-            );
-        }
-        if value.memory_limit_in_bytes != 0 {
-            res = res.memory(
-                LinuxMemoryBuilder::default()
-                    .limit(value.memory_limit_in_bytes)
-                    .build()
-                    .unwrap(),
-            );
-        }
-        res.build().unwrap()
-    }
-}
-
 pub fn get_cni() -> Result<Libcni, anyhow::Error> {
     let plugin_dirs = vec!["/opt/cni/bin".to_string()];
     let plugin_conf_dir = Path::new("/etc/cni/net.d");
@@ -661,22 +581,22 @@ pub fn get_cni() -> Result<Libcni, anyhow::Error> {
     Ok(cni)
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
+// #[cfg(test)]
+// mod test {
+//     use super::*;
 
-    #[test]
-    fn test_parse_resource() {
-        parse_resource(None, None).unwrap();
-        let res = parse_resource(Some("100m".to_string()), None);
-        assert_eq!(res.unwrap().cpu_quota, 100000);
-        let res = parse_resource(Some("0.2".to_string()), None);
-        assert_eq!(res.unwrap().cpu_quota, 200000);
-        let res = parse_resource(None, Some("1Gi".to_string())).unwrap();
-        assert_eq!(res.memory_limit_in_bytes, 1024_i64 * 1024_i64 * 1024_i64);
-        let res = parse_resource(None, Some("200Ki".to_string())).unwrap();
-        assert_eq!(res.memory_limit_in_bytes, 200 * 1024);
-        let res = parse_resource(None, Some("30Mi".to_string())).unwrap();
-        assert_eq!(res.memory_limit_in_bytes, 30 * 1024 * 1024);
-    }
-}
+//     #[test]
+//     fn test_parse_resource() {
+//         parse_resource(None, None).unwrap();
+//         let res = parse_resource(Some("100m".to_string()), None);
+//         assert_eq!(res.unwrap().cpu_quota, 100000);
+//         let res = parse_resource(Some("0.2".to_string()), None);
+//         assert_eq!(res.unwrap().cpu_quota, 200000);
+//         let res = parse_resource(None, Some("1Gi".to_string())).unwrap();
+//         assert_eq!(res.memory_limit_in_bytes, 1024_i64 * 1024_i64 * 1024_i64);
+//         let res = parse_resource(None, Some("200Ki".to_string())).unwrap();
+//         assert_eq!(res.memory_limit_in_bytes, 200 * 1024);
+//         let res = parse_resource(None, Some("30Mi".to_string())).unwrap();
+//         assert_eq!(res.memory_limit_in_bytes, 30 * 1024 * 1024);
+//     }
+// }

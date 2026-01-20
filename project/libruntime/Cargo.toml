@@ -1,57 +1,32 @@
 [package]
-name = "rkl"
+name = "libruntime"
 version = "0.1.0"
 edition = "2024"
 authors = ["rk8s-dev team"]
-description = "Implementation of CRI interface functionality based on Youki"
-repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rkl"
-
-[lib]
-name = "rkl"
-path = "src/lib.rs"
-
-[[bin]]
-name = "rkl"
-path = "src/main.rs"
+description = "Common runtime logic for rk8s"
 
 [dependencies]
 common = { workspace = true }
-libruntime = { workspace = true }
 libnetwork = { workspace = true }
-rkb = { workspace = true }
 libipam = { workspace = true }
 libcgroups = { workspace = true }
 libcontainer = { workspace = true }
 libvault = { workspace = true }
-clap = { workspace = true, features = ["derive", "env"] }
-tracing = { workspace = true, features = ["attributes"] }
-tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "full"] }
-serde = { workspace = true, features = ["derive"] }
-uuid = { workspace = true, features = ["v4"] }
-nix = { workspace = true, features = ["fs", "mount"] }
 libcni = { workspace = true }
 libfuse-fs = { workspace = true }
-anyhow = { workspace = true }
 liboci-cli = { workspace = true }
-tracing-journald = { workspace = true }
+oci-spec = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "full"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-http-body = { workspace = true }
-hyper = { workspace = true }
-serial_test = { workspace = true }
-oci-spec = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+nix = { workspace = true, features = ["fs", "mount", "sched", "user", "process"] }
 tar = { workspace = true }
 flate2 = { workspace = true }
 sha256 = { workspace = true }
-futures = { workspace = true }
-daemonize = { workspace = true }
-axum = { workspace = true }
-chrono = { workspace = true }
-tabwriter = { workspace = true }
-bincode = { workspace = true }
-quinn = { workspace = true }
-rustls = { workspace = true }
 gethostname = { workspace = true }
 sysinfo = { workspace = true }
 ipnetwork = { workspace = true }
@@ -67,19 +42,23 @@ rand = { workspace = true }
 cni-plugin = { workspace = true }
 derive_more = { workspace = true }
 base64 = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+walkdir = { workspace = true }
 hickory-server = { version = "0.25.2", features=["resolver"] }
 hickory-proto = { workspace = true }
 hickory-resolver = { workspace = true }
-async-trait = { workspace = true }
 hickory-client = { workspace = true }
-
+tabwriter = { workspace = true }
+chrono = { workspace = true }
 protobuf = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 tonic =  "0.13"
 tonic-build = "0.13"
 prost-build = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }
-scopeguard = { workspace = true }
+bincode = { workspace = true }
+quinn = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+hyper = { workspace = true }

@@ -44,6 +44,7 @@ const SESSION_INFOS_KEY: &str = "sessioninfos";
 const PLOCK_PREFIX: &str = "plock";
 const LOCKS_KEY: &str = "locks";
 const LOCKED_KEY: &str = "locked";
+const LINK_PARENT_KEY_PREFIX: &str = "lp:";
 
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
 
@@ -137,6 +138,10 @@ impl RedisMetaStore {
 
     fn locked_key(sid: Uuid) -> String {
         format!("{}{}", LOCKED_KEY, sid)
+    }
+
+    fn link_parent_key(ino: i64) -> String {
+        format!("{LINK_PARENT_KEY_PREFIX}{ino}")
     }
 
     async fn init_root_directory(&self) -> Result<(), MetaError> {
@@ -240,9 +245,55 @@ impl RedisMetaStore {
 
     async fn remove_dir_entry(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
-        conn.hdel(self.dir_key(parent), name)
+        let removed: i64 = conn
+            .hdel(self.dir_key(parent), name)
             .await
-            .map_err(redis_err)
+            .map_err(redis_err)?;
+        if removed == 0 {
+            return Err(MetaError::NotFound(parent));
+        }
+        Ok(())
+    }
+
+    async fn load_link_parents(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError> {
+        let mut conn = self.conn.clone();
+        let members: Vec<String> = conn
+            .smembers(Self::link_parent_key(ino))
+            .await
+            .map_err(redis_err)?;
+
+        let mut out = Vec::with_capacity(members.len());
+        for m in members {
+            let Some((p, name)) = m.split_once(':') else {
+                continue;
+            };
+            if let Ok(parent) = p.parse::<i64>() {
+                out.push((parent, name.to_string()));
+            }
+        }
+
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
+    async fn save_link_parents(
+        &self,
+        ino: i64,
+        parents: &[(i64, String)],
+    ) -> Result<(), MetaError> {
+        let mut conn = self.conn.clone();
+        let key = Self::link_parent_key(ino);
+
+        let mut pipe = redis::pipe();
+        pipe.atomic();
+        pipe.del(&key);
+        for (p, name) in parents {
+            let member = format!("{}:{}", p, name);
+            pipe.sadd(&key, member);
+        }
+        let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+        Ok(())
     }
 
     async fn bump_dir_times(&self, ino: i64, now: i64) -> Result<(), MetaError> {
@@ -733,6 +784,63 @@ impl MetaStore for RedisMetaStore {
         self.create_entry(parent, name, FileType::File).await
     }
 
+    async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
+        self.ensure_parent_dir(parent).await?;
+        if self.directory_child(parent, name).await?.is_some() {
+            return Err(MetaError::AlreadyExists {
+                parent,
+                name: name.to_string(),
+            });
+        }
+
+        let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
+        match node.kind {
+            NodeKind::File => {}
+            NodeKind::Symlink => {
+                return Err(MetaError::NotSupported(
+                    "cannot create hard links to symbolic links".into(),
+                ));
+            }
+            NodeKind::Dir => {
+                return Err(MetaError::NotSupported(
+                    "cannot create hard links to directories".into(),
+                ));
+            }
+        }
+        if node.deleted || node.attr.nlink == 0 {
+            return Err(MetaError::NotFound(ino));
+        }
+
+        if node.attr.nlink <= 1 {
+            let old_parent = node.parent;
+            let old_name = node.name.clone();
+
+            node.attr.nlink = node.attr.nlink.saturating_add(1);
+            node.parent = 0;
+            node.name = String::new();
+            node.attr.ctime = current_time();
+
+            let parents = vec![(old_parent, old_name), (parent, name.to_string())];
+            self.save_link_parents(ino, &parents).await?;
+        } else {
+            let mut parents = self.load_link_parents(ino).await?;
+            parents.push((parent, name.to_string()));
+            parents.sort();
+            parents.dedup();
+            node.attr.nlink = node.attr.nlink.saturating_add(1);
+            node.parent = 0;
+            node.name = String::new();
+            node.attr.ctime = current_time();
+            self.save_link_parents(ino, &parents).await?;
+        }
+
+        self.save_node(&node).await?;
+        self.add_dir_entry(parent, name, ino).await?;
+        let now = current_time();
+        self.bump_dir_times(parent, now).await?;
+        Ok(node.as_file_attr())
+    }
+
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         let Some(child) = self.lookup(parent, name).await? else {
             return Err(MetaError::NotFound(parent));
@@ -744,7 +852,51 @@ impl MetaStore for RedisMetaStore {
         if node.kind != NodeKind::File {
             return Err(MetaError::NotSupported(format!("{child} is not a file")));
         }
+
         self.remove_dir_entry(parent, name).await?;
+
+        if node.attr.nlink > 1 {
+            let mut link_parents = self.load_link_parents(child).await?;
+            link_parents.retain(|(p, n)| !(*p == parent && n.as_str() == name));
+
+            node.attr.nlink = node.attr.nlink.saturating_sub(1);
+
+            let now = current_time();
+            node.attr.ctime = now;
+
+            if node.attr.nlink <= 1 {
+                let remaining = link_parents.into_iter().next().ok_or_else(|| {
+                    MetaError::Internal(format!("missing remaining link parent for inode {child}"))
+                })?;
+                node.parent = remaining.0;
+                node.name = remaining.1;
+
+                let key = Self::link_parent_key(child);
+                let data =
+                    serde_json::to_vec(&node).map_err(|e| MetaError::Internal(e.to_string()))?;
+
+                let mut conn = self.conn.clone();
+                let _: () = redis::pipe()
+                    .atomic()
+                    .del(key)
+                    .set(self.node_key(node.ino), data)
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(redis_err)?;
+            } else {
+                self.save_link_parents(child, &link_parents).await?;
+                node.parent = 0;
+                node.name = String::new();
+            }
+
+            if node.attr.nlink > 1 {
+                self.save_node(&node).await?;
+            }
+
+            self.bump_dir_times(parent, now).await?;
+            return Ok(());
+        }
+
         self.mark_deleted(child, &mut node).await?;
         let now = current_time();
         self.bump_dir_times(parent, now).await?;
@@ -774,8 +926,31 @@ impl MetaStore for RedisMetaStore {
             .ok_or(MetaError::NotFound(child))?;
         self.remove_dir_entry(old_parent, old_name).await?;
         self.add_dir_entry(new_parent, &new_name, child).await?;
-        node.parent = new_parent;
-        node.name = new_name;
+
+        if node.attr.nlink <= 1 {
+            node.parent = new_parent;
+            node.name = new_name;
+        } else {
+            let mut link_parents = self.load_link_parents(child).await?;
+            let mut updated = false;
+            for (p, n) in &mut link_parents {
+                if *p == old_parent && n.as_str() == old_name {
+                    *p = new_parent;
+                    *n = new_name.clone();
+                    updated = true;
+                    break;
+                }
+            }
+            if !updated {
+                return Err(MetaError::Internal(format!(
+                    "expected link parent binding {old_parent}/{old_name} for inode {child}"
+                )));
+            }
+            self.save_link_parents(child, &link_parents).await?;
+            node.parent = 0;
+            node.name = String::new();
+        }
+
         let now = current_time();
         node.attr.mtime = now;
         node.attr.ctime = now;
@@ -894,35 +1069,73 @@ impl MetaStore for RedisMetaStore {
         self.save_node(&node).await
     }
 
-    async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError> {
-        Ok(self.get_node(ino).await?.map(|n| n.parent))
-    }
-
-    async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError> {
-        Ok(self.get_node(ino).await?.map(|n| n.name))
-    }
-
-    async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError> {
-        let mut current = self.get_node(ino).await?;
-        let mut segments = Vec::new();
-        while let Some(node) = current {
-            if node.ino == ROOT_INODE {
-                segments.push(String::new());
-                break;
-            }
-            segments.push(node.name.clone());
-            current = self.get_node(node.parent).await?;
-        }
-        if segments.is_empty() {
-            return Ok(None);
-        }
-        segments.reverse();
-        let path = if segments.len() == 1 {
-            "/".to_string()
-        } else {
-            segments.join("/")
+    async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError> {
+        let Some(node) = self.get_node(ino).await? else {
+            return Ok(vec![]);
         };
-        Ok(Some(path))
+
+        if node.ino == ROOT_INODE {
+            return Ok(vec![(None, "/".to_string())]);
+        }
+
+        if node.deleted || node.attr.nlink == 0 {
+            return Ok(vec![]);
+        }
+
+        if node.kind == NodeKind::Dir || node.attr.nlink <= 1 {
+            return Ok(vec![(Some(node.parent), node.name)]);
+        }
+
+        let link_parents = self.load_link_parents(ino).await?;
+        let mut out = Vec::with_capacity(link_parents.len());
+        for (p, n) in link_parents {
+            out.push((Some(p), n));
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
+    async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError> {
+        if ino == ROOT_INODE {
+            return Ok(vec!["/".to_string()]);
+        }
+
+        let names = self.get_names(ino).await?;
+        let mut out = Vec::with_capacity(names.len());
+
+        for (parent_opt, name) in names {
+            let Some(parent) = parent_opt else {
+                continue;
+            };
+
+            let mut segments = vec![name];
+            let mut current = self.get_node(parent).await?;
+            while let Some(node) = current {
+                if node.ino == ROOT_INODE {
+                    segments.push(String::new());
+                    break;
+                }
+                segments.push(node.name.clone());
+                current = self.get_node(node.parent).await?;
+            }
+
+            if segments.is_empty() {
+                continue;
+            }
+
+            segments.reverse();
+            let path = if segments.len() == 1 {
+                "/".to_string()
+            } else {
+                segments.join("/")
+            };
+            out.push(path);
+        }
+
+        out.sort();
+        out.dedup();
+        Ok(out)
     }
 
     fn root_ino(&self) -> i64 {
@@ -1455,6 +1668,77 @@ mod tests {
         fn get_store(&self, index: usize) -> &RedisMetaStore {
             &self.stores[index]
         }
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn test_hardlink_dentry_binding_cross_dir_rename_unlink() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let dir_a = store.mkdir(root, "a".to_string()).await.unwrap();
+        let dir_b = store.mkdir(root, "b".to_string()).await.unwrap();
+
+        let ino = store.create_file(dir_a, "x".to_string()).await.unwrap();
+        store.link(ino, dir_b, "y").await.unwrap();
+
+        let names = store.get_names(ino).await.unwrap();
+        assert!(names.contains(&(Some(dir_a), "x".to_string())));
+        assert!(names.contains(&(Some(dir_b), "y".to_string())));
+
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), Some(ino));
+
+        store
+            .rename(dir_b, "y", dir_b, "z".to_string())
+            .await
+            .unwrap();
+
+        let names = store.get_names(ino).await.unwrap();
+        assert!(names.contains(&(Some(dir_a), "x".to_string())));
+        assert!(names.contains(&(Some(dir_b), "z".to_string())));
+        assert!(!names.contains(&(Some(dir_b), "y".to_string())));
+
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), None);
+        assert_eq!(store.lookup(dir_b, "z").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
+
+        store.unlink(dir_a, "x").await.unwrap();
+
+        let names = store.get_names(ino).await.unwrap();
+        assert_eq!(names, vec![(Some(dir_b), "z".to_string())]);
+        assert_eq!(store.lookup(dir_b, "z").await.unwrap(), Some(ino));
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn test_hardlink_dentry_binding_cross_dir_move_rename() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let dir_a = store.mkdir(root, "a".to_string()).await.unwrap();
+        let dir_b = store.mkdir(root, "b".to_string()).await.unwrap();
+        let dir_c = store.mkdir(root, "c".to_string()).await.unwrap();
+
+        let ino = store.create_file(dir_a, "x".to_string()).await.unwrap();
+        store.link(ino, dir_b, "y").await.unwrap();
+
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), Some(ino));
+
+        store
+            .rename(dir_b, "y", dir_c, "z".to_string())
+            .await
+            .unwrap();
+
+        let names = store.get_names(ino).await.unwrap();
+        assert!(names.contains(&(Some(dir_a), "x".to_string())));
+        assert!(names.contains(&(Some(dir_c), "z".to_string())));
+        assert!(!names.contains(&(Some(dir_b), "y".to_string())));
+
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), None);
+        assert_eq!(store.lookup(dir_c, "z").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
     }
 
     #[serial]

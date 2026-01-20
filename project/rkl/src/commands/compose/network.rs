@@ -17,8 +17,8 @@ use sysinfo::System;
 use crate::commands::compose::spec::NetworkDriver::Bridge;
 use crate::commands::compose::spec::NetworkDriver::Host;
 use crate::commands::compose::spec::NetworkDriver::Overlay;
-use crate::dns;
-use crate::dns::PID_FILE_PATH;
+use libruntime::dns;
+use libruntime::dns::PID_FILE_PATH;
 
 use cni_plugin::ip_range::IpRange;
 use hickory_proto::rr::LowerName;
@@ -35,9 +35,9 @@ use crate::commands::compose::spec::ComposeSpec;
 use crate::commands::compose::spec::NetworkSpec;
 use crate::commands::compose::spec::ServiceSpec;
 use crate::commands::container::ContainerRunner;
-use crate::dns::DNS_SOCKET_PATH;
 use anyhow::Result;
 use anyhow::anyhow;
+use libruntime::dns::DNS_SOCKET_PATH;
 use serde::{Deserialize, Serialize};
 
 pub const CNI_VERSION: &str = "1.0.0";

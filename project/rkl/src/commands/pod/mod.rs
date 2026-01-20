@@ -1,11 +1,11 @@
 use crate::commands::ExecPod;
 use crate::commands::pod::standalone::{exec_pod, start_pod, state_pod};
 use crate::daemon;
-use crate::rootpath;
 use crate::task::TaskRunner;
 use anyhow::{Result, anyhow};
 use clap::{Args, Subcommand};
 use daemonize::Daemonize;
+use libruntime::rootpath;
 use std::env;
 use std::fs::{self, File};
 use std::io::Read;

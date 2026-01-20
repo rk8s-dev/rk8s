@@ -3,15 +3,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Ok, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use oci_spec::image::{ImageConfiguration, ImageManifest, MediaType};
 use thiserror::Error;
 use tracing::debug;
 
 use crate::bundle;
+use crate::cri::config::ContainerConfigBuilder;
+use common::ContainerSpec;
 
 const RKL_IMAGE_REGISTRY: &str = "/var/lib/rkl/registry";
 const RKL_BUNDLE_STORE: &str = "/var/lib/rkl/bundle";
+
+pub trait ImagePuller {
+    fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)>;
+}
 
 pub enum ImageType {
     Bundle,
@@ -25,8 +31,12 @@ pub enum UtilsError {
 }
 
 #[allow(unused)]
-pub fn get_manifest_from_image_ref(image_ref: impl AsRef<str>) -> Result<String> {
-    let (manifest_path, _) = rkb::pull::pull_or_get_image(image_ref, None::<&str>)
+pub fn get_manifest_from_image_ref(
+    puller: &impl ImagePuller,
+    image_ref: impl AsRef<str>,
+) -> Result<String> {
+    let (manifest_path, _) = puller
+        .pull_or_get_image(image_ref.as_ref())
         .map_err(|e| anyhow!("failed to pull image: {e}"))?;
 
     manifest_path
@@ -36,8 +46,11 @@ pub fn get_manifest_from_image_ref(image_ref: impl AsRef<str>) -> Result<String>
 }
 
 #[allow(unused)]
-pub fn get_bundle_from_image_ref(image_ref: impl AsRef<str>) -> Result<PathBuf> {
-    let manifest_hash = get_manifest_from_image_ref(image_ref)?;
+pub fn get_bundle_from_image_ref(
+    puller: &impl ImagePuller,
+    image_ref: impl AsRef<str>,
+) -> Result<PathBuf> {
+    let manifest_hash = get_manifest_from_image_ref(puller, image_ref)?;
     Ok(PathBuf::from(format!(
         "{RKL_IMAGE_REGISTRY}/{manifest_hash}"
     )))
@@ -67,12 +80,14 @@ fn generate_unique_bundle_path() -> String {
     format!("{RKL_BUNDLE_STORE}/{container_hash}")
 }
 
-/// pull image from rkb's implementation
+/// pull image using the provided puller
 pub fn handle_oci_image(
+    puller: &impl ImagePuller,
     image_ref: impl AsRef<str>,
     _name: String,
 ) -> Result<(ImageConfiguration, String)> {
-    let (manifest_path, layers) = rkb::pull::pull_or_get_image(image_ref, None::<&str>)
+    let (manifest_path, layers) = puller
+        .pull_or_get_image(image_ref.as_ref())
         .map_err(|e| anyhow!("failed to pull image: {e}"))?;
 
     debug!("get manifest_path: {manifest_path:?}");
@@ -133,8 +148,26 @@ pub fn determine_image_path<P: AsRef<Path>>(target: P) -> Result<ImageType> {
     Err(UtilsError::InvalidImagePath.into())
 }
 
-pub fn parse_key_val(s: &str) -> Result<(String, String), String> {
-    s.split_once("=")
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .ok_or_else(|| format!("invalid KEY=VALUE: '{}'", s))
+// Helper to handle image type and pulling
+pub fn handle_image_typ(
+    puller: &impl ImagePuller,
+    container_spec: &ContainerSpec,
+) -> Result<(Option<ContainerConfigBuilder>, String)> {
+    if let ImageType::OCIImage = determine_image(&container_spec.image)? {
+        let (image_config, bundle_path) =
+            handle_oci_image(puller, &container_spec.image, container_spec.name.clone())?;
+        // handle image_config
+        let mut builder = ContainerConfigBuilder::default();
+        if let Some(config) = image_config.config() {
+            // add cmd to config
+            builder.args_from_image_config(config.entrypoint(), config.cmd());
+            // extend env
+            builder.envs_from_image_config(config.env());
+            // set work_dir
+            builder.work_dir(config.working_dir());
+            // builder.users(config.user());
+        }
+        return Ok((Some(builder), bundle_path));
+    }
+    Ok((None, "".to_string()))
 }
