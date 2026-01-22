@@ -37,6 +37,7 @@ mod tests {
         let plugin = SchedulingGates;
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 scheduling_gates: vec![],
@@ -56,6 +57,7 @@ mod tests {
         let plugin = SchedulingGates;
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 scheduling_gates: vec!["gate1".to_string(), "gate2".to_string()],

@@ -272,6 +272,7 @@ mod tests {
 
         let pod = PodInfo {
             name: "test-pod".to_string(),
+            labels: std::collections::HashMap::new(),
             spec: PodSpec {
                 resources: ResourcesRequirements { cpu: 0, memory: 0 },
                 ..Default::default()
@@ -292,6 +293,7 @@ mod tests {
 
         let pod = PodInfo {
             name: "test-pod".to_string(),
+            labels: std::collections::HashMap::new(),
             spec: PodSpec {
                 resources: ResourcesRequirements {
                     cpu: 1000,
@@ -321,6 +323,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 resources: ResourcesRequirements {
@@ -370,6 +373,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
             queued_info: QueuedInfo::default(),

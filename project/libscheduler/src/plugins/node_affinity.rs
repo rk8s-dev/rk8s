@@ -239,6 +239,7 @@ mod tests {
         let plugin = NodeAffinity;
         let mut state = CycleState::default();
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
             queued_info: QueuedInfo::default(),
@@ -259,6 +260,7 @@ mod tests {
         node_selector.insert("disktype".to_string(), "ssd".to_string());
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 node_selector: node_selector.clone(),
@@ -306,6 +308,7 @@ mod tests {
         let plugin = NodeAffinity;
         let mut state = CycleState::default();
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
             queued_info: QueuedInfo::default(),
@@ -322,6 +325,7 @@ mod tests {
         let plugin = NodeAffinity;
         let mut state = CycleState::default();
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
             queued_info: QueuedInfo::default(),
@@ -361,10 +365,13 @@ mod tests {
         };
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 affinity: Some(Affinity {
                     node_affinity: Some(node_affinity),
+                    pod_affinity: None,
+                    pod_anti_affinity: None,
                 }),
                 ..Default::default()
             },

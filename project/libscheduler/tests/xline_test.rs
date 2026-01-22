@@ -5,13 +5,15 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use common::{
-    ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec as XlineNodeSpec,
-    NodeStatus, ObjectMeta, PodSpec as XlinePodSpec, PodStatus, PodTask, Resource,
+    Affinity, ContainerRes, ContainerSpec, LabelSelector, Node, NodeAddress, NodeCondition,
+    NodeSpec as XlineNodeSpec, NodeStatus, ObjectMeta, PodAffinity, PodAffinityTerm,
+    PodSpec as XlinePodSpec, PodStatus, PodTask, Resource,
 };
 use etcd_client::{Client, DeleteOptions};
 use libscheduler::plugins::Plugins;
 use libscheduler::plugins::node_resources_fit::ScoringStrategy;
 use libscheduler::with_xline::run_scheduler_with_xline;
+use libscheduler::with_xline::utils;
 use libvault::storage::xline::XlineOptions;
 
 const ETCD_ENDPOINTS: &[&str] = &["127.0.0.1:2379"];
@@ -158,6 +160,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             }],
             init_containers: vec![],
             tolerations: vec![],
+            affinity: None,
         },
         status: PodStatus {
             pod_ip: None,
@@ -608,6 +611,187 @@ async fn test_scheduler_with_xline_pod_reassume() {
         .expect("Reassignment should be successful");
     assert_eq!(reassignment.pod_name, "reassume-pod");
     assert_eq!(reassignment.node_name, "reassume-node");
+
+    etcd_client.cleanup().await.expect("Failed to cleanup etcd");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_pod_affinity_conversion_from_xline() {
+    // Test that pod affinity is correctly read and converted from Xline
+    let mut etcd_client = EtcdTestClient::new()
+        .await
+        .expect("Failed to connect to etcd");
+    etcd_client.cleanup().await.expect("Failed to cleanup etcd");
+
+    // Create a pod with pod affinity using the standard create_test_pod function
+    let mut pod = create_test_pod("affinity-test-pod", Some("1"), Some("1Gi"));
+
+    // Create a pod affinity term: require pod with label app=web in same zone
+    let pod_affinity_term = PodAffinityTerm {
+        label_selector: Some(LabelSelector {
+            match_labels: {
+                let mut map = HashMap::new();
+                map.insert("app".to_string(), "web".to_string());
+                map
+            },
+            match_expressions: vec![],
+        }),
+        topology_key: "zone".to_string(),
+        namespaces: None,
+    };
+
+    let pod_affinity = PodAffinity {
+        required_during_scheduling_ignored_during_execution: Some(vec![pod_affinity_term]),
+        preferred_during_scheduling_ignored_during_execution: None,
+    };
+
+    let affinity = Affinity {
+        node_affinity: None,
+        pod_affinity: Some(pod_affinity),
+        pod_anti_affinity: None,
+    };
+
+    pod.spec.affinity = Some(affinity);
+
+    // Put the pod to Xline
+    etcd_client.put_pod(&pod).await.expect("Failed to put pod");
+
+    // Get the pod back from Xline using the utility function
+    let mut client = etcd_client.client.clone();
+    let pod_result = utils::get_pod(&mut client, "affinity-test-pod")
+        .await
+        .expect("Failed to get pod");
+    let retrieved_pod: common::PodTask = pod_result.expect("Pod should exist");
+
+    // Convert the pod task to pod info using the conversion function
+    let pod_info = utils::convert_pod_task_to_pod_info(retrieved_pod);
+
+    // Verify that affinity was correctly converted
+    assert!(pod_info.spec.affinity.is_some());
+    let affinity = pod_info.spec.affinity.unwrap();
+    assert!(affinity.pod_affinity.is_some());
+    assert!(affinity.node_affinity.is_none());
+    assert!(affinity.pod_anti_affinity.is_none());
+
+    let pod_affinity = affinity.pod_affinity.unwrap();
+    assert!(
+        pod_affinity
+            .required_during_scheduling_ignored_during_execution
+            .is_some()
+    );
+    let terms = pod_affinity
+        .required_during_scheduling_ignored_during_execution
+        .unwrap();
+    assert_eq!(terms.len(), 1);
+    let term = &terms[0];
+    assert_eq!(term.topology_key, "zone");
+    assert!(term.label_selector.is_some());
+    let selector = term.label_selector.as_ref().unwrap();
+    assert_eq!(selector.match_labels.get("app"), Some(&"web".to_string()));
+    assert!(selector.match_expressions.is_empty());
+
+    etcd_client.cleanup().await.expect("Failed to cleanup etcd");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_scheduler_with_xline_pod_affinity_scheduling() {
+    let mut etcd_client = EtcdTestClient::new()
+        .await
+        .expect("Failed to connect to etcd");
+    etcd_client.cleanup().await.expect("Failed to cleanup etcd");
+
+    // Create two nodes with zone labels
+    let mut node1 = create_test_node("node-zone-a", "4", "4Gi");
+    node1
+        .metadata
+        .labels
+        .insert("zone".to_string(), "zone-a".to_string());
+
+    let mut node2 = create_test_node("node-zone-b", "4", "4Gi");
+    node2
+        .metadata
+        .labels
+        .insert("zone".to_string(), "zone-b".to_string());
+
+    etcd_client
+        .put_node(&node1)
+        .await
+        .expect("Failed to put node1");
+    etcd_client
+        .put_node(&node2)
+        .await
+        .expect("Failed to put node2");
+
+    // Create an existing pod with label app=web scheduled on node-zone-a
+    let mut web_pod = create_test_pod("web-pod", Some("1"), Some("1Gi"));
+    web_pod
+        .metadata
+        .labels
+        .insert("app".to_string(), "web".to_string());
+    web_pod.spec.node_name = Some("node-zone-a".to_string());
+    etcd_client
+        .put_pod(&web_pod)
+        .await
+        .expect("Failed to put web-pod");
+
+    // Create a new pod with required affinity to web app pods in same zone
+    let mut selector_labels = HashMap::new();
+    selector_labels.insert("app".to_string(), "web".to_string());
+    let label_selector = Some(LabelSelector {
+        match_labels: selector_labels,
+        match_expressions: vec![],
+    });
+
+    let pod_affinity_term = PodAffinityTerm {
+        label_selector,
+        topology_key: "zone".to_string(),
+        namespaces: None,
+    };
+
+    let pod_affinity = PodAffinity {
+        required_during_scheduling_ignored_during_execution: Some(vec![pod_affinity_term]),
+        preferred_during_scheduling_ignored_during_execution: None,
+    };
+
+    let affinity = Affinity {
+        node_affinity: None,
+        pod_affinity: Some(pod_affinity),
+        pod_anti_affinity: None,
+    };
+
+    let mut affinity_pod = create_test_pod("affinity-pod", Some("1"), Some("1Gi"));
+    affinity_pod.spec.affinity = Some(affinity);
+
+    etcd_client
+        .put_pod(&affinity_pod)
+        .await
+        .expect("Failed to put affinity-pod");
+
+    let (_unassume_tx, unassume_rx) = mpsc::unbounded_channel();
+    let mut rx = run_scheduler_with_xline(
+        xline_options(),
+        ScoringStrategy::LeastAllocated,
+        Plugins::default(),
+        unassume_rx,
+    )
+    .await
+    .expect("Failed to start scheduler");
+
+    // Wait for assignment - should schedule affinity-pod to node-zone-a
+    let result = timeout(Duration::from_secs(5), rx.recv()).await;
+    assert!(
+        result.is_ok(),
+        "Scheduler should produce assignment within timeout"
+    );
+
+    let assignment = result
+        .unwrap()
+        .unwrap()
+        .expect("Assignment should be successful");
+    assert_eq!(assignment.pod_name, "affinity-pod");
+    assert_eq!(assignment.node_name, "node-zone-a");
 
     etcd_client.cleanup().await.expect("Failed to cleanup etcd");
 }
