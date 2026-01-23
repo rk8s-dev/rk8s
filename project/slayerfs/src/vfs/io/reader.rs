@@ -304,6 +304,7 @@ impl SliceState {
                 }
                 Err(e) => {
                     guard.state = SliceStatus::Invalid;
+                    guard.page = Vec::new();
                     guard.err = Some(e.to_string());
                 }
             }
@@ -429,6 +430,12 @@ where
 
     async fn clean_useless_slices(&self, offset: u64, len: usize) {
         let sessions = *self.sessions.lock();
+        let windows = sessions
+            .iter()
+            .filter(|s| s.total > 0)
+            .map(|s| s.window(self.config.layout.block_size as u64))
+            .collect::<Vec<_>>();
+
         let cur_start = offset;
         let cur_end = offset + len as u64;
 
@@ -445,14 +452,9 @@ where
             let slice_end = base + slice.range.1 as u64;
 
             let overlaps_current = slice_start < cur_end && cur_start < slice_end;
-            let needed_by_session = sessions.iter().any(|session| {
-                if session.total == 0 {
-                    return false;
-                }
-
-                let (win_start, win_end) = session.window(self.config.layout.block_size as u64);
-                slice_start < win_end && win_start < slice_end
-            });
+            let needed_by_session = windows
+                .iter()
+                .any(|(win_start, win_end)| slice_start < *win_end && *win_start < slice_end);
             let need_retain = overlaps_current || needed_by_session;
 
             if !need_retain {
@@ -535,8 +537,8 @@ where
                 match guard.state {
                     SliceStatus::Ready => return Ok(()),
                     SliceStatus::Invalid => {
-                        let err = guard.err.as_deref().unwrap_or("slice invalid").to_string();
-                        return Err(anyhow::anyhow!(err));
+                        let err = guard.err.as_deref().unwrap_or("slice invalid");
+                        return Err(anyhow::anyhow!("Slice fetch failed: {err}"));
                     }
                     _ => guard.notify.clone(),
                 }

@@ -11,7 +11,16 @@ pub const DEFAULT_FLUSH_ALL_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Clone)]
 pub struct ReadConfig {
     pub layout: ChunkLayout,
+    /// Maximum buffer size for read operations (soft limit).
+    /// When exceeded, reads will be throttled. Hard limit is 2x this value.
+    /// Default: 256MB. Increase for high-throughput sequential reads.
+    /// Decrease for memory-constrained environments.
     pub buffer_size: u64,
+
+    /// Maximum readahead distance for sequential reads.
+    /// Limits how far ahead the session will predict. Too large values
+    /// can waste memory on random access patterns.
+    /// Default: 32MB. Adjust based on typical sequential read sizes.
     pub max_ahead: u64,
 }
 

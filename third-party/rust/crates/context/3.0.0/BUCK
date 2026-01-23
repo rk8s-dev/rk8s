@@ -30,6 +30,9 @@ rust_library(
         "@$(location :context-build-script-run[rustc_flags])",
         "@$(location :context-manifest[env_flags])",
     ],
+    os_deps = {
+        "windows": ["//third-party/rust/crates/winapi/0.3.9:winapi"],
+    },
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/libc/0.2.178:libc"],
 )
