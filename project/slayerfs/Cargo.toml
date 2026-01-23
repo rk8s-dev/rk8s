@@ -47,6 +47,12 @@ redis = { workspace = true }
 if-addrs = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 derive_more = { workspace = true }
+parking_lot = { workspace = true }
+tikv-jemallocator = { workspace = true, optional = true }
+
+[features]
+jemalloc = ["dep:tikv-jemallocator"]
+jemalloc-profiling = ["jemalloc", "tikv-jemallocator/profiling"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

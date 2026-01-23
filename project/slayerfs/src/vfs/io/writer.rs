@@ -23,9 +23,10 @@ use crate::vfs::extract_ino_and_chunk_index;
 use crate::vfs::inode::Inode;
 use crate::vfs::io::split_chunk_spans;
 use dashmap::DashMap;
+use parking_lot::Mutex as ParkingMutex;
 use rand::RngCore;
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex as StdMutex, Weak};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::{interval, timeout};
@@ -103,7 +104,7 @@ impl SliceState {
 pub(crate) struct ChunkState {
     /// ID of the chunk.
     chunk_id: u64,
-    slices: VecDeque<Arc<StdMutex<SliceState>>>,
+    slices: VecDeque<Arc<ParkingMutex<SliceState>>>,
     commit_started: bool,
 }
 
@@ -122,7 +123,7 @@ where
     B: BlockStore,
     M: MetaStore,
 {
-    slice: &'a Arc<StdMutex<SliceState>>,
+    slice: &'a Arc<ParkingMutex<SliceState>>,
     shared: &'a Shared<B, M>,
 }
 
@@ -132,18 +133,12 @@ where
     M: MetaStore,
 {
     fn with_mut<T>(&self, f: impl FnOnce(&mut SliceState) -> T) -> T {
-        let mut guard = self
-            .slice
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = self.slice.lock();
         f(&mut guard)
     }
 
     fn with_ref<T>(&self, f: impl FnOnce(&SliceState) -> T) -> T {
-        let guard = self
-            .slice
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = self.slice.lock();
         f(&guard)
     }
 
@@ -284,7 +279,7 @@ impl SliceRuntime {
 
 struct WriteAction {
     start_commit: bool,
-    flush: Vec<Arc<StdMutex<SliceState>>>,
+    flush: Vec<Arc<ParkingMutex<SliceState>>>,
 }
 
 struct ChunkHandle<'a, B, M>
@@ -308,7 +303,7 @@ where
         &mut self,
         offset: u32,
         len: usize,
-    ) -> anyhow::Result<(Arc<StdMutex<SliceState>>, WriteAction)> {
+    ) -> anyhow::Result<(Arc<ParkingMutex<SliceState>>, WriteAction)> {
         let (chunk_id, mut slices) = {
             let chunk = self
                 .inner
@@ -324,7 +319,7 @@ where
             "A write operation cannot exceed the chunk size"
         );
 
-        let mut found: Option<Arc<StdMutex<SliceState>>> = None;
+        let mut found: Option<Arc<ParkingMutex<SliceState>>> = None;
         let mut flush = Vec::new();
         for (idx, slice) in slices.iter().rev().enumerate() {
             let handle = SliceHandle {
@@ -346,7 +341,7 @@ where
         let slice = match found {
             Some(slice) => slice,
             None => {
-                let slice = Arc::new(StdMutex::new(SliceState::new(
+                let slice = Arc::new(ParkingMutex::new(SliceState::new(
                     chunk_id,
                     offset,
                     self.shared.config.clone(),
@@ -565,7 +560,7 @@ where
             let mut to_flush = Vec::new();
             {
                 let guard = self.shared.inner.lock().await;
-                let slices: Vec<Arc<StdMutex<SliceState>>> = guard
+                let slices: Vec<Arc<ParkingMutex<SliceState>>> = guard
                     .chunks
                     .values()
                     .flat_map(|chunk| chunk.slices.iter().cloned())
@@ -624,7 +619,7 @@ where
 
     /// Spawn a background task to upload a frozen slice's data.
     /// Metadata commit is handled separately by commit_chunk.
-    fn spawn_flush_slice(shared: Arc<Shared<B, M>>, slice: Arc<StdMutex<SliceState>>) {
+    fn spawn_flush_slice(shared: Arc<Shared<B, M>>, slice: Arc<ParkingMutex<SliceState>>) {
         let handle = SliceHandle {
             slice: &slice,
             shared: &shared,
@@ -635,7 +630,7 @@ where
         Self::spawn_upload_task(shared, slice);
     }
 
-    fn spawn_upload_task(shared: Arc<Shared<B, M>>, slice: Arc<StdMutex<SliceState>>) {
+    fn spawn_upload_task(shared: Arc<Shared<B, M>>, slice: Arc<ParkingMutex<SliceState>>) {
         tokio::spawn(async move {
             let handle = SliceHandle {
                 slice: &slice,
@@ -1008,7 +1003,7 @@ mod tests {
     use tokio::time::{sleep, timeout};
 
     fn test_config(layout: ChunkLayout) -> Arc<WriteConfig> {
-        Arc::new(WriteConfig::new(layout, 4 * 1024))
+        Arc::new(WriteConfig::new(layout).page_size(4 * 1024))
     }
 
     struct BlockingStore {
@@ -1244,7 +1239,9 @@ mod tests {
             backend.clone(),
         ));
         let write_cfg = Arc::new(
-            WriteConfig::new(layout, 4 * 1024).flush_all_interval(Duration::from_millis(50)),
+            WriteConfig::new(layout)
+                .page_size(4 * 1024)
+                .flush_all_interval(Duration::from_millis(50)),
         );
         let writer_pool = Arc::new(DataWriter::new(write_cfg, backend.clone(), reader));
         writer_pool.start_flush_background();

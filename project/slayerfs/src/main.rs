@@ -6,6 +6,12 @@ mod meta;
 mod utils;
 mod vfs;
 
+#[cfg(all(feature = "jemalloc", target_os = "linux"))]
+use tikv_jemallocator::Jemalloc;
+#[cfg(all(feature = "jemalloc", target_os = "linux"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

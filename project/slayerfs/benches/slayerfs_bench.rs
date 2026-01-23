@@ -398,7 +398,7 @@ async fn open_handle(fs: &SharedFs, path: &str, read: bool, write: bool) -> Resu
         .stat(path)
         .await
         .ok_or_else(|| anyhow!("not found: {path}"))?;
-    Ok(fs.open(attr.ino, attr, read, write).await)
+    Ok(fs.open(attr.ino, attr, read, write).await?)
 }
 
 async fn close_handle(fs: &SharedFs, fh: u64) -> Result<()> {

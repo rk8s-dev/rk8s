@@ -3,18 +3,46 @@ use crate::vfs::fs::MetaClientConfig;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const DEFAULT_PAGE_SIZE: u32 = 64 * 1024;
+pub const DEFAULT_PAGE_SIZE: u32 = 64 * 1024; // 64KB
+pub const DEFAULT_MAX_AHEAD: u64 = 32 * 1024 * 1024; // 32MB
+pub const DEFAULT_BUFFER_SIZE: u64 = 1024 * 1024 * 256; // 256MB
 pub const DEFAULT_FLUSH_ALL_INTERVAL: Duration = Duration::from_secs(5);
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct ReadConfig {
     pub layout: ChunkLayout,
+    pub buffer_size: u64,
+    pub max_ahead: u64,
+}
+
+impl Default for ReadConfig {
+    fn default() -> Self {
+        Self {
+            layout: ChunkLayout::default(),
+            buffer_size: DEFAULT_BUFFER_SIZE,
+            max_ahead: DEFAULT_MAX_AHEAD,
+        }
+    }
 }
 
 #[allow(dead_code)]
 impl ReadConfig {
     pub fn new(layout: ChunkLayout) -> Self {
-        Self { layout }
+        Self {
+            layout,
+            ..Default::default()
+        }
+    }
+
+    pub fn buffer_size(self, buffer_size: u64) -> Self {
+        Self {
+            buffer_size,
+            ..self
+        }
+    }
+
+    pub fn max_ahead(self, max_ahead: u64) -> Self {
+        Self { max_ahead, ..self }
     }
 }
 
@@ -37,12 +65,15 @@ impl Default for WriteConfig {
 
 #[allow(dead_code)]
 impl WriteConfig {
-    pub fn new(layout: ChunkLayout, page_size: u32) -> Self {
+    pub fn new(layout: ChunkLayout) -> Self {
         Self {
             layout,
-            page_size,
-            flush_all_interval: DEFAULT_FLUSH_ALL_INTERVAL,
+            ..Default::default()
         }
+    }
+
+    pub fn page_size(self, page_size: u32) -> Self {
+        Self { page_size, ..self }
     }
 
     pub fn flush_all_interval(self, flush_all_interval: Duration) -> Self {
@@ -50,14 +81,6 @@ impl WriteConfig {
             flush_all_interval,
             ..self
         }
-    }
-
-    pub fn layout(self, layout: ChunkLayout) -> Self {
-        Self { layout, ..self }
-    }
-
-    pub fn page_size(self, page_size: u32) -> Self {
-        Self { page_size, ..self }
     }
 }
 
@@ -70,14 +93,14 @@ pub struct VFSConfig {
 
 #[allow(dead_code)]
 impl VFSConfig {
-    pub fn with_read_config(self, read: ReadConfig) -> Self {
+    pub fn read_config(self, read: ReadConfig) -> Self {
         Self {
             read: Arc::new(read),
             ..self
         }
     }
 
-    pub fn with_write_config(self, write: WriteConfig) -> Self {
+    pub fn write_config(self, write: WriteConfig) -> Self {
         Self {
             write: Arc::new(write),
             ..self
@@ -86,14 +109,13 @@ impl VFSConfig {
 
     pub fn new(layout: ChunkLayout) -> Self {
         let read = Arc::new(ReadConfig::new(layout));
-
         let page_size = if layout.block_size.is_multiple_of(DEFAULT_PAGE_SIZE) {
             DEFAULT_PAGE_SIZE
         } else {
             layout.block_size
         };
 
-        let write = Arc::new(WriteConfig::new(layout, page_size));
+        let write = Arc::new(WriteConfig::new(layout).page_size(page_size));
         Self {
             read,
             write,

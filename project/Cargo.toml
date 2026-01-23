@@ -199,6 +199,7 @@ tokio-stream = "0.1.17"
 tokio-util = "0.7.0"
 toml = "0.8.19"
 aligned_box = "0.3.0"
+tikv-jemallocator = "0.5.4"
 tonic = "0.14.2"
 tower = "0.5.2"
 tower-http = "0.6.6"
@@ -231,6 +232,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 if-addrs = "0.6.0"
 redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
+parking_lot = "0.12.5"
 
 [profile.release]
 debug = true

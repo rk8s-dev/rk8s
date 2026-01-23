@@ -16,14 +16,18 @@ use crate::vfs::config::ReadConfig;
 use crate::vfs::inode::Inode;
 use crate::vfs::io::split_chunk_spans;
 use dashmap::DashMap;
+use parking_lot::Mutex as ParkingMutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
+use tokio::time::Instant;
 
 #[allow(clippy::type_complexity)]
 pub(crate) struct DataReader<B, M> {
     config: Arc<ReadConfig>,
+    buffer_usage: Arc<AtomicU64>,
     // per-handle readers, grouped by inode
     files: DashMap<u64, Vec<(u64, Arc<FileReader<B, M>>)>>, // ino -> (fh, reader)
     backend: Arc<Backend<B, M>>,
@@ -37,6 +41,7 @@ where
     pub(crate) fn new(config: Arc<ReadConfig>, backend: Arc<Backend<B, M>>) -> Self {
         Self {
             config,
+            buffer_usage: Arc::new(AtomicU64::new(0)),
             files: DashMap::new(),
             backend,
         }
@@ -46,6 +51,7 @@ where
         let ino_number = ino.ino();
         let reader = Arc::new(FileReader::new(
             self.config.clone(),
+            self.buffer_usage.clone(),
             ino,
             self.backend.clone(),
         ));
@@ -78,26 +84,78 @@ where
         })
     }
 
-    pub(crate) async fn invalidate(&self, ino: u64, offset: u64, len: usize) -> anyhow::Result<()> {
-        let readers = match self.files.get(&ino) {
+    fn collect_readers(&self, ino: u64) -> Vec<Arc<FileReader<B, M>>> {
+        match self.files.get(&ino) {
             Some(entry) => entry.iter().map(|(_, reader)| reader.clone()).collect(),
-            None => Vec::new(),
-        };
+            None => vec![],
+        }
+    }
 
-        for reader in readers {
+    pub(crate) async fn invalidate(&self, ino: u64, offset: u64, len: usize) -> anyhow::Result<()> {
+        for reader in self.collect_readers(ino) {
             reader.invalidate(offset, len).await;
         }
         Ok(())
     }
 
     pub(crate) async fn invalidate_all(&self, ino: u64) {
-        let readers = match self.files.get(&ino) {
-            Some(entry) => entry.iter().map(|(_, reader)| reader.clone()).collect(),
-            None => Vec::new(),
-        };
-
-        for reader in readers {
+        for reader in self.collect_readers(ino) {
             reader.invalidate_all().await;
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Session {
+    ahead: u64,
+    last_off: u64,
+    total: u64,
+    atime: Instant,
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Self {
+            ahead: 0,
+            last_off: 0,
+            total: 0,
+            atime: Instant::now(),
+        }
+    }
+}
+
+impl Session {
+    fn reset(&mut self, off: u64, _len: u64) {
+        self.last_off = off;
+        self.total = 0;
+        self.ahead = 0;
+        self.atime = Instant::now();
+    }
+
+    fn update(&mut self, off: u64, len: u64) {
+        let end = off + len;
+        if end > self.last_off {
+            self.total += end - self.last_off;
+            self.last_off = end;
+        }
+        self.atime = Instant::now();
+    }
+
+    fn window(&self, block_size: u64) -> (u64, u64) {
+        let back = (self.ahead / 8).max(block_size);
+
+        let win_start = self.last_off.saturating_sub(back);
+        let win_end = self.last_off + self.ahead * 2 + block_size * 2;
+        (win_start, win_end)
+    }
+
+    fn update_ahead(&mut self, cfg: &ReadConfig) {
+        if self.ahead == 0 {
+            self.ahead = cfg.layout.block_size as u64;
+        } else if self.total >= self.ahead && self.ahead < cfg.max_ahead {
+            self.ahead *= 2;
+        } else {
+            self.ahead /= 2;
         }
     }
 }
@@ -132,7 +190,7 @@ struct SliceState {
 }
 
 impl SliceState {
-    fn new(index: u64, range: (u32, u32)) -> Self {
+    fn new(index: u64, range: (u32, u32), refs: u16) -> Self {
         Self {
             index,
             range,
@@ -141,8 +199,15 @@ impl SliceState {
             err: None,
             notify: Arc::new(Notify::new()),
             generation: 0,
-            refs: 0,
+            refs,
         }
+    }
+
+    fn in_flight(&self) -> bool {
+        matches!(
+            self.state,
+            SliceStatus::Refresh | SliceStatus::New | SliceStatus::Busy
+        )
     }
 
     fn overlaps(&self, offset: u32, len: u32) -> bool {
@@ -151,8 +216,9 @@ impl SliceState {
     }
 
     fn background_fetch<B, M>(
-        this: Arc<StdMutex<SliceState>>,
+        this: Arc<ParkingMutex<SliceState>>,
         ino: u64,
+        usage: Arc<AtomicU64>,
         layout: ChunkLayout,
         backend: Arc<Backend<B, M>>,
     ) where
@@ -161,7 +227,7 @@ impl SliceState {
     {
         tokio::spawn(async move {
             let (index, (start, end), generation) = {
-                let mut guard = this.lock().unwrap();
+                let mut guard = this.lock();
                 match guard.state {
                     SliceStatus::Busy | SliceStatus::Invalid => {
                         return;
@@ -183,7 +249,7 @@ impl SliceState {
             };
 
             let result = f().await;
-            let mut guard = this.lock().unwrap();
+            let mut guard = this.lock();
 
             // Stale fetch and needs to drop.
             if guard.generation != generation {
@@ -192,9 +258,18 @@ impl SliceState {
 
             match result {
                 Ok(out) => {
+                    let old_len = guard.page.len() as u64;
+                    let new_len = out.len() as u64;
+
                     guard.state = SliceStatus::Ready;
                     guard.page = out;
                     guard.err = None;
+
+                    if new_len >= old_len {
+                        usage.fetch_add(new_len - old_len, Ordering::Relaxed);
+                    } else {
+                        sub_usage(&usage, old_len - new_len);
+                    }
                 }
                 Err(e) => {
                     guard.state = SliceStatus::Invalid;
@@ -206,31 +281,12 @@ impl SliceState {
     }
 }
 
-/// Slice Reference Guard
-struct SliceRef {
-    slice: Arc<StdMutex<SliceState>>,
-}
-
-impl SliceRef {
-    fn new(slice: Arc<StdMutex<SliceState>>) -> Self {
-        let mut guard = slice.lock().unwrap();
-        guard.refs = guard.refs.saturating_add(1);
-        drop(guard);
-        Self { slice }
-    }
-}
-
-impl Drop for SliceRef {
-    fn drop(&mut self) {
-        let mut guard = self.slice.lock().unwrap();
-        guard.refs = guard.refs.saturating_sub(1);
-    }
-}
-
 pub(crate) struct FileReader<B, M> {
     config: Arc<ReadConfig>,
+    buffer_usage: Arc<AtomicU64>,
     inode: Arc<Inode>,
-    slices: Mutex<VecDeque<Arc<StdMutex<SliceState>>>>,
+    slices: Mutex<VecDeque<Arc<ParkingMutex<SliceState>>>>,
+    sessions: ParkingMutex<[Session; 2]>,
     backend: Arc<Backend<B, M>>,
 }
 
@@ -241,13 +297,16 @@ where
 {
     pub(crate) fn new(
         config: Arc<ReadConfig>,
+        buffer_usage: Arc<AtomicU64>,
         inode: Arc<Inode>,
         backend: Arc<Backend<B, M>>,
     ) -> Self {
         Self {
             config,
             inode,
+            buffer_usage,
             slices: Mutex::new(VecDeque::new()),
+            sessions: ParkingMutex::new([Session::default(); 2]),
             backend,
         }
     }
@@ -260,6 +319,132 @@ where
         let read = self.read_at(offset, &mut buf).await?;
         buf.truncate(read);
         Ok(buf)
+    }
+
+    fn select_forward_session_match(&self, sessions: &[Session; 2], offset: u64) -> Option<usize> {
+        let sat = |s: &Session, offset: u64| {
+            s.last_off <= offset
+                && offset <= s.last_off + s.ahead + self.config.layout.block_size as u64
+        };
+
+        let max_off = if sessions[0].last_off > sessions[1].last_off {
+            0
+        } else {
+            1
+        };
+
+        if sat(&sessions[max_off], offset) {
+            return Some(max_off);
+        }
+        if sat(&sessions[1 - max_off], offset) {
+            return Some(1 - max_off);
+        }
+        None
+    }
+
+    fn select_back_session_match(&self, sessions: &[Session; 2], offset: u64) -> Option<usize> {
+        let sat = |s: &Session, offset: u64| {
+            let back = (s.ahead / 8).max(self.config.layout.block_size as u64);
+            offset < s.last_off && offset >= s.last_off.saturating_sub(back)
+        };
+
+        let min_off = if sessions[0].last_off < sessions[1].last_off {
+            0
+        } else {
+            1
+        };
+
+        if sat(&sessions[min_off], offset) {
+            return Some(min_off);
+        }
+        if sat(&sessions[1 - min_off], offset) {
+            return Some(1 - min_off);
+        }
+        None
+    }
+
+    fn select_session_fallback(
+        &self,
+        sessions: &mut [Session; 2],
+        offset: u64,
+        len: usize,
+    ) -> usize {
+        if sessions[0].total == 0 {
+            return 0;
+        }
+        if sessions[1].total == 0 {
+            return 1;
+        }
+
+        let oldest_atime = if sessions[0].atime < sessions[1].atime {
+            0
+        } else {
+            1
+        };
+        sessions[oldest_atime].reset(offset, len as u64);
+        oldest_atime
+    }
+
+    fn check_session(&self, offset: u64, len: usize) {
+        let mut session = self.sessions.lock();
+
+        let selected = self
+            .select_forward_session_match(&session, offset)
+            .or_else(|| self.select_back_session_match(&session, offset))
+            .unwrap_or(self.select_session_fallback(&mut session, offset, len));
+        session[selected].update(offset, len as u64);
+        session[selected].update_ahead(&self.config);
+    }
+
+    async fn clean_unused_slice(&self, offset: u64, len: usize) {
+        let sessions = *self.sessions.lock();
+        let cur_start = offset;
+        let cur_end = offset + len as u64;
+
+        let mut guard = self.slices.lock().await;
+        guard.retain(|slice| {
+            let slice = slice.lock();
+
+            if slice.refs > 0 || slice.in_flight() {
+                return true;
+            }
+
+            let base = slice.index * self.config.layout.chunk_size;
+            let slice_start = base + slice.range.0 as u64;
+            let slice_end = base + slice.range.1 as u64;
+
+            let overlaps_current = slice_start < cur_end && cur_start < slice_end;
+            let needed_by_session = sessions.iter().any(|session| {
+                if session.total == 0 {
+                    return false;
+                }
+
+                let (win_start, win_end) = session.window(self.config.layout.block_size as u64);
+                slice_start < win_end && win_start < slice_end
+            });
+            let need_retain = overlaps_current || needed_by_session;
+
+            if !need_retain {
+                sub_usage(&self.buffer_usage, slice.page.len() as u64);
+            }
+            need_retain
+        })
+    }
+
+    async fn back_pressure(&self) {
+        tracing::trace!(
+            "Memory usage: {}MiB",
+            self.buffer_usage.load(Ordering::Relaxed) / 1024 / 1024
+        );
+
+        if self.buffer_usage.load(Ordering::Relaxed) > self.config.buffer_size {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+
+            while self.buffer_usage.load(Ordering::Relaxed) > self.config.buffer_size * 2 {
+                tracing::warn!("Reach buffer size hard limit: sleep for 100 millis");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
     }
 
     pub(crate) async fn read_at(&self, offset: u64, buf: &mut [u8]) -> anyhow::Result<usize> {
@@ -277,6 +462,9 @@ where
             return Ok(0);
         }
 
+        self.back_pressure().await;
+        self.clean_unused_slice(offset, actual_len).await;
+
         // Pre-fill with zeros so holes or missing slices read as zeros.
         buf[..actual_len].fill(0);
 
@@ -287,6 +475,8 @@ where
             self.prepare_slices(span.index, (span.offset, span.offset + span.len))
                 .await;
         }
+
+        self.check_session(offset, actual_len);
 
         let mut tail = buf;
         let result = async {
@@ -304,10 +494,10 @@ where
         result
     }
 
-    async fn wait_ready(slice: &Arc<StdMutex<SliceState>>) -> anyhow::Result<()> {
+    async fn wait_ready(slice: &Arc<ParkingMutex<SliceState>>) -> anyhow::Result<()> {
         loop {
             let notify = {
-                let guard = slice.lock().unwrap();
+                let guard = slice.lock();
 
                 match guard.state {
                     SliceStatus::Ready => return Ok(()),
@@ -329,16 +519,15 @@ where
             let guard = self.slices.lock().await;
             guard
                 .iter()
-                .filter(|s| s.lock().unwrap().index == index)
+                .filter(|s| s.lock().index == index)
                 .cloned()
                 .collect::<Vec<_>>()
         };
 
         for slice in slices {
-            let _slice_ref = SliceRef::new(slice.clone());
             Self::wait_ready(&slice).await?;
 
-            let guard = slice.lock().unwrap();
+            let mut guard = slice.lock();
 
             let dst_start = offset.max(guard.range.0);
             let dst_end = guard.range.1.min(offset + buf.len() as u32);
@@ -352,6 +541,7 @@ where
                 buf[dst_local_start as usize..dst_local_end as usize]
                     .copy_from_slice(&guard.page[src_start as usize..src_end as usize]);
             }
+            guard.refs = guard.refs.saturating_sub(1);
         }
         Ok(())
     }
@@ -361,7 +551,7 @@ where
 
         let mut guard = self.slices.lock().await;
         for slice in guard.iter() {
-            let guard = slice.lock().unwrap();
+            let guard = slice.lock();
 
             if guard.index != index {
                 continue;
@@ -376,10 +566,11 @@ where
         }
 
         for range in cutter.collect() {
-            let slice = Arc::new(StdMutex::new(SliceState::new(index, range)));
+            let slice = Arc::new(ParkingMutex::new(SliceState::new(index, range, 1)));
             SliceState::background_fetch(
                 slice.clone(),
                 self.inode.ino() as u64,
+                self.buffer_usage.clone(),
                 self.config.layout,
                 self.backend.clone(),
             );
@@ -404,8 +595,9 @@ where
 
         {
             let mut guard = self.slices.lock().await;
+            let mut freed = 0u64;
             for slice in guard.drain(..) {
-                let mut state = slice.lock().unwrap();
+                let mut state = slice.lock();
                 let Some((span_offset, span_len)) = span_map.get(&state.index) else {
                     new_slices.push_back(slice.clone());
                     continue;
@@ -436,9 +628,12 @@ where
 
                 if !matches!(state.state, SliceStatus::Invalid) || state.refs > 0 {
                     new_slices.push_back(slice.clone());
+                } else {
+                    freed += state.page.len() as u64;
                 }
             }
             *guard = new_slices;
+            sub_usage(&self.buffer_usage, freed);
         }
 
         // Invalidated slices must be re-fetched.
@@ -446,6 +641,7 @@ where
             SliceState::background_fetch(
                 slice,
                 self.inode.ino() as u64,
+                self.buffer_usage.clone(),
                 self.config.layout,
                 self.backend.clone(),
             );
@@ -454,17 +650,33 @@ where
 
     async fn invalidate_all(&self) {
         let mut guard = self.slices.lock().await;
-        guard.clear();
+        let mut freed = 0u64;
+        for slice in guard.drain(..) {
+            let state = slice.lock();
+            freed += state.page.len() as u64;
+        }
+        sub_usage(&self.buffer_usage, freed);
     }
 
     /// Clean all invalid and unused slices.
     async fn cleanup_invalid(&self) {
         let mut guard = self.slices.lock().await;
         guard.retain(|slice| {
-            let state = slice.lock().unwrap();
-            !(matches!(state.state, SliceStatus::Invalid) && state.refs == 0)
+            let state = slice.lock();
+
+            let need_retain = !(matches!(state.state, SliceStatus::Invalid) && state.refs == 0);
+            if !need_retain {
+                sub_usage(&self.buffer_usage, state.page.len() as u64);
+            }
+            need_retain
         });
     }
+}
+
+fn sub_usage(usage: &AtomicU64, delta: u64) {
+    let _ = usage.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |r| {
+        Some(r.saturating_sub(delta))
+    });
 }
 
 #[cfg(test)]
@@ -600,7 +812,7 @@ mod tests {
 
         let writer = Arc::new(FileWriter::new(
             inode,
-            Arc::new(WriteConfig::new(layout, 4 * 1024)),
+            Arc::new(WriteConfig::new(layout).page_size(4 * 1024)),
             backend.clone(),
             reader,
         ));
