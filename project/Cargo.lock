@@ -7136,6 +7136,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "base64 0.22.1",
+ "bincode",
  "bitflags 2.10.0",
  "bytes",
  "chrono",

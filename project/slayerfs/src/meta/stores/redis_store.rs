@@ -213,8 +213,10 @@ impl RedisMetaStore {
         let mut conn = self.conn.clone();
         let data: Option<Vec<u8>> = conn.get(self.node_key(ino)).await.map_err(redis_err)?;
         if let Some(bytes) = data {
-            let node =
-                serde_json::from_slice(&bytes).map_err(|e| MetaError::Internal(e.to_string()))?;
+            // Try bincode first (more efficient), fall back to JSON for compatibility
+            let node = bincode::deserialize(&bytes)
+                .or_else(|_| serde_json::from_slice(&bytes))
+                .map_err(|e| MetaError::Internal(format!("Failed to deserialize node: {}", e)))?;
             Ok(Some(node))
         } else {
             Ok(None)
@@ -223,7 +225,9 @@ impl RedisMetaStore {
 
     async fn save_node(&self, node: &StoredNode) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
-        let data = serde_json::to_vec(node).map_err(|e| MetaError::Internal(e.to_string()))?;
+        // Use bincode for better performance (smaller size, faster ser/deser)
+        let data = bincode::serialize(node)
+            .map_err(|e| MetaError::Internal(format!("Failed to serialize node: {}", e)))?;
         let _: () = conn
             .set(self.node_key(node.ino), data)
             .await

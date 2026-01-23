@@ -47,6 +47,7 @@ redis = { workspace = true }
 if-addrs = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 derive_more = { workspace = true }
+bincode = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
