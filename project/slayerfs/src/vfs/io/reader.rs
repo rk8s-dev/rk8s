@@ -105,6 +105,35 @@ where
     }
 }
 
+/// A Session tracks the read pattern of a specific handle to guide slice eviction.
+///
+/// There are 4 fields:
+/// 1. `ahead`: possible readahead length.
+/// 2. `last_off`: the offset of the last read operation.
+/// 3. `total`: total read length of the session.
+/// 4. `atime`: the last time.
+///
+/// According to the Principle of Locality, when a range is read, its adjacent ranges are
+/// likely to be read soon. The session records the last read offset and predicts a readahead range.
+/// It uses this pattern to evaluate slice utility:
+/// slices outside the predicted range are treated as "useless" and will be cleaned to satisfy the buffer size limit.
+///
+/// A slice `[start, end]` is considered "useful" if it falls within the window:
+/// `[last_off - backward_tolerance, last_off + forward_prediction]`
+/// where:
+/// - `backward_tolerance = max(ahead / 8, block_size)`
+/// - `forward_prediction = 2 * ahead + 2 * block_size`
+///
+/// This windows reflects an aggressive forward readahead strategy while remaining tolerant of small backward seeks.
+///
+/// To adapt to larger sequential reads, the `ahead` length is doubled whenever the total read length reaches the current
+/// `ahead` threshold, effectively expanding the predictive window. In contract, it reduces by half to adapt smaller reads.
+///
+/// A handle generally maintains two independent Sessions to support concurrent read patterns.
+/// This is particularly beneficial for interleaved `pread` operations, as it allows the system to track
+/// two separate read streams simultaneously without their predictive windows interfering with each other.
+///
+/// If these two sessions are both available, it selects the oldest (atime).
 #[derive(Clone, Copy)]
 struct Session {
     ahead: u64,
@@ -153,8 +182,10 @@ impl Session {
         if self.ahead == 0 {
             self.ahead = cfg.layout.block_size as u64;
         } else if self.total >= self.ahead && self.ahead < cfg.max_ahead {
+            // Double the ahead to adapt larger read patterns.
             self.ahead *= 2;
         } else {
+            // Reduce the ahead by half to shrink.
             self.ahead /= 2;
         }
     }
@@ -396,7 +427,7 @@ where
         session[selected].update_ahead(&self.config);
     }
 
-    async fn clean_unused_slice(&self, offset: u64, len: usize) {
+    async fn clean_useless_slices(&self, offset: u64, len: usize) {
         let sessions = *self.sessions.lock();
         let cur_start = offset;
         let cur_end = offset + len as u64;
@@ -437,9 +468,11 @@ where
             self.buffer_usage.load(Ordering::Relaxed) / 1024 / 1024
         );
 
+        // buffer size limit is just a soft limit. It is perfectly normal to see that the current memory usage exceed it.
         if self.buffer_usage.load(Ordering::Relaxed) > self.config.buffer_size {
             tokio::time::sleep(Duration::from_millis(10)).await;
 
+            // `2 * buffer size limit` is a hard limit. A read operation idle until memory pressure is relieved.
             while self.buffer_usage.load(Ordering::Relaxed) > self.config.buffer_size * 2 {
                 tracing::warn!("Reach buffer size hard limit: sleep for 100 millis");
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -463,7 +496,7 @@ where
         }
 
         self.back_pressure().await;
-        self.clean_unused_slice(offset, actual_len).await;
+        self.clean_useless_slices(offset, actual_len).await;
 
         // Pre-fill with zeros so holes or missing slices read as zeros.
         buf[..actual_len].fill(0);
