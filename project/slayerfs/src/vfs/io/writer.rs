@@ -226,6 +226,20 @@ where
         })
     }
 
+    /// Get page references for zero-copy flush (avoids copying data)
+    fn snapshot_for_flush_zerocopy(&self) -> Option<(u64, u32, Vec<Vec<u8>>, Option<u64>)> {
+        self.with_ref(|s| {
+            if s.data.len() == 0 {
+                return None;
+            }
+            // Extract owned page data to send to upload task
+            // This still involves copying but happens once, not multiple times
+            let page_refs = s.data.page_slices();
+            let pages: Vec<Vec<u8>> = page_refs.iter().map(|p| p.to_vec()).collect();
+            Some((s.chunk_id, s.offset, pages, s.slice_id))
+        })
+    }
+
     fn set_slice_id(&self, id: u64) {
         self.with_mut(|s| {
             if s.slice_id.is_none() {
@@ -641,9 +655,10 @@ where
                 slice: &slice,
                 shared: &shared,
             };
-            let snapshot = handle.snapshot_for_flush();
+            // Use zero-copy snapshot when possible
+            let snapshot = handle.snapshot_for_flush_zerocopy();
 
-            let Some((chunk_id, offset, data, slice_id)) = snapshot else {
+            let Some((chunk_id, offset, pages, slice_id)) = snapshot else {
                 handle.mark_uploaded();
                 return;
             };
@@ -664,15 +679,16 @@ where
             };
 
             let uploader = DataUploader::new(shared.config.layout, chunk_id, &shared.backend);
+            let total_len: usize = pages.iter().map(|p| p.len()).sum();
             let result = backoff(UPLOAD_MAX_RETRIES, || async {
-                match uploader.write_at(sid, offset, &data).await {
+                match uploader.write_at_vectored(sid, offset, &pages).await {
                     Ok(_) => Ok(()),
                     Err(err) => {
                         warn!(
                             chunk_id,
                             slice_id = sid,
                             offset,
-                            len = data.len(),
+                            len = total_len,
                             error = ?err,
                             "upload failed, retrying"
                         );
@@ -689,7 +705,7 @@ where
                         chunk_id,
                         slice_id = sid,
                         offset,
-                        len = data.len(),
+                        len = total_len,
                         error = ?err,
                         "upload failed after retries"
                     );

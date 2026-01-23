@@ -61,6 +61,70 @@ where
         }
         Ok(desc)
     }
+
+    /// Write slice data using vectored I/O to avoid intermediate copying.
+    /// Accepts scattered page buffers and writes them efficiently.
+    /// Note: This currently consolidates pages per block span but eliminates
+    /// the initial full-slice consolidation, reducing one copy operation.
+    pub(crate) async fn write_at_vectored(
+        &self,
+        slice_id: u64,
+        offset: u32,
+        pages: &[Vec<u8>],
+    ) -> Result<SliceDesc> {
+        let total_len: u32 = pages.iter().map(|p| p.len() as u32).sum();
+        let desc = SliceDesc {
+            slice_id,
+            chunk_id: self.id,
+            offset,
+            length: total_len,
+        };
+
+        // Collect all span data first
+        let mut spans_data = Vec::new();
+        let mut page_idx = 0;
+        let mut page_offset = 0;
+
+        for span in block_span_iter(desc, self.layout) {
+            let mut span_data = Vec::with_capacity(span.len as usize);
+            let mut remaining = span.len as usize;
+
+            // Collect page data that contributes to this block span
+            while remaining > 0 && page_idx < pages.len() {
+                let page = &pages[page_idx];
+                let available = page.len() - page_offset;
+                let take = remaining.min(available);
+                
+                span_data.extend_from_slice(&page[page_offset..page_offset + take]);
+                
+                remaining -= take;
+                page_offset += take;
+                
+                if page_offset >= page.len() {
+                    page_idx += 1;
+                    page_offset = 0;
+                }
+            }
+
+            spans_data.push((span.index, span.offset, span_data));
+        }
+
+        // Write all spans in parallel - now spans_data lives for the whole function
+        let mut futures = Vec::new();
+        for (index, offset, data) in &spans_data {
+            let future = self.backend.store().write_range(
+                (slice_id, *index as u32),
+                *offset,
+                data.as_slice(),
+            );
+            futures.push(future);
+        }
+
+        for res in join_all(futures).await {
+            res?;
+        }
+        Ok(desc)
+    }
 }
 
 #[cfg(test)]

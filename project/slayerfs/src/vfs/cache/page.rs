@@ -77,6 +77,28 @@ impl CacheSlice {
         buf
     }
 
+    /// Get page references for zero-copy vectored I/O.
+    /// Returns a vector of byte slices representing the actual data pages.
+    /// This avoids the memory copy required by collect_pages().
+    pub(crate) fn page_slices(&self) -> Vec<&[u8]> {
+        let mut slices = Vec::new();
+        let mut remaining = self.len as usize;
+        for block in &self.pages {
+            for page in block {
+                if remaining == 0 {
+                    break;
+                }
+                let take = remaining.min(page.data.len());
+                slices.push(&page.data[..take]);
+                remaining -= take;
+            }
+            if remaining == 0 {
+                break;
+            }
+        }
+        slices
+    }
+
     /// Acquire the next slice that can write into.
     /// The returned slice is empty, belongs to a single page and never overlay.
     fn next_write_slice(&mut self) -> &mut [u8] {

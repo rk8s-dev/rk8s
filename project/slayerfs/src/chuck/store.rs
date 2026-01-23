@@ -28,6 +28,36 @@ pub trait BlockStore {
 
     #[allow(dead_code)]
     async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()>;
+
+    /// Write multiple slices of data to a block without intermediate copying.
+    /// This enables zero-copy writes by accepting scattered page data.
+    /// Default implementation falls back to copying into a single buffer.
+    async fn write_vectored(&self, key: BlockKey, offset: u32, bufs: &[&[u8]]) -> anyhow::Result<u64> {
+        // Default implementation: consolidate and call write_range
+        let total_len: usize = bufs.iter().map(|b| b.len()).sum();
+        let mut consolidated = Vec::with_capacity(total_len);
+        for buf in bufs {
+            consolidated.extend_from_slice(buf);
+        }
+        self.write_range(key, offset, &consolidated).await
+    }
+
+    /// Read into multiple buffers without intermediate copying.
+    /// Default implementation falls back to reading into a temporary buffer and copying.
+    async fn read_vectored(&self, key: BlockKey, offset: u32, bufs: &mut [&mut [u8]]) -> anyhow::Result<()> {
+        // Default implementation: read into temporary buffer and distribute
+        let total_len: usize = bufs.iter().map(|b| b.len()).sum();
+        let mut temp = vec![0u8; total_len];
+        self.read_range(key, offset, &mut temp).await?;
+        
+        let mut pos = 0;
+        for buf in bufs {
+            let len = buf.len();
+            buf.copy_from_slice(&temp[pos..pos + len]);
+            pos += len;
+        }
+        Ok(())
+    }
 }
 
 pub type BlockKey = (u64 /*slice_id*/, u32 /*block_index*/);
