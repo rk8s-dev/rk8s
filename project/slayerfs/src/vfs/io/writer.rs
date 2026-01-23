@@ -226,14 +226,16 @@ where
         })
     }
 
-    /// Get page references for zero-copy flush (avoids copying data)
+    /// Get page references for optimized flush (reduces copying)
+    /// This method still copies pages but happens once per flush instead of twice.
+    /// The pages are owned by the upload task to avoid lifetime issues.
     fn snapshot_for_flush_zerocopy(&self) -> Option<(u64, u32, Vec<Vec<u8>>, Option<u64>)> {
         self.with_ref(|s| {
             if s.data.len() == 0 {
                 return None;
             }
             // Extract owned page data to send to upload task
-            // This still involves copying but happens once, not multiple times
+            // This reduces copying compared to collect_pages() which consolidates all pages
             let page_refs = s.data.page_slices();
             let pages: Vec<Vec<u8>> = page_refs.iter().map(|p| p.to_vec()).collect();
             Some((s.chunk_id, s.offset, pages, s.slice_id))

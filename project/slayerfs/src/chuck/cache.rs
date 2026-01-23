@@ -1394,8 +1394,13 @@ impl ChunksCache {
         let key_owned = key.to_owned();
         let data_owned = data.clone();
         tokio::spawn(async move {
-            if let Err(e) = disk_storage.store(&key_owned, &data_owned).await {
-                warn!("Failed to write cache to disk for key {}: {}", key_owned, e);
+            match disk_storage.store(&key_owned, &data_owned).await {
+                Ok(_) => {
+                    trace!("Successfully wrote cache to disk for key {}", key_owned);
+                }
+                Err(e) => {
+                    warn!("Failed to write cache to disk for key {}: {}", key_owned, e);
+                }
             }
         });
 

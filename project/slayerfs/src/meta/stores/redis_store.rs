@@ -214,9 +214,22 @@ impl RedisMetaStore {
         let data: Option<Vec<u8>> = conn.get(self.node_key(ino)).await.map_err(redis_err)?;
         if let Some(bytes) = data {
             // Try bincode first (more efficient), fall back to JSON for compatibility
-            let node = bincode::deserialize(&bytes)
-                .or_else(|_| serde_json::from_slice(&bytes))
-                .map_err(|e| MetaError::Internal(format!("Failed to deserialize node: {}", e)))?;
+            // Most new data will be in bincode format, so check that first
+            let node = if bytes.len() > 0 && bytes[0] == b'{' {
+                // Likely JSON (starts with '{'), try JSON first for efficiency
+                serde_json::from_slice::<StoredNode>(&bytes)
+                    .or_else(|_| bincode::deserialize::<StoredNode>(&bytes))
+                    .map_err(|e| format!("{:?}", e))
+            } else {
+                // Likely bincode, try that first
+                bincode::deserialize::<StoredNode>(&bytes)
+                    .map_err(|e| format!("{:?}", e))
+                    .or_else(|_| {
+                        serde_json::from_slice::<StoredNode>(&bytes)
+                            .map_err(|e| format!("{:?}", e))
+                    })
+            }
+            .map_err(|e| MetaError::Internal(format!("Failed to deserialize node: {}", e)))?;
             Ok(Some(node))
         } else {
             Ok(None)
