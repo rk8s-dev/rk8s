@@ -183,6 +183,43 @@ impl Default for ChunksCacheConfig {
     }
 }
 
+impl ChunksCacheConfig {
+    /// Creates a memory-aware cache configuration based on block size.
+    /// 
+    /// This prevents excessive memory usage by calculating the number of cache entries
+    /// based on the block size and a target memory limit.
+    ///
+    /// # Arguments
+    /// * `block_size` - Size of each block in bytes
+    /// * `target_memory_mb` - Target memory limit for hot cache in megabytes (default: 1024 MB = 1 GB)
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // For 4MB blocks with 1GB memory limit: 256 entries
+    /// let config = ChunksCacheConfig::from_block_size(4 * 1024 * 1024, 1024);
+    /// 
+    /// // For 1MB blocks with 512MB limit: 512 entries
+    /// let config = ChunksCacheConfig::from_block_size(1024 * 1024, 512);
+    /// ```
+    pub fn from_block_size(block_size: u64, target_memory_mb: u64) -> Self {
+        let target_memory_bytes = target_memory_mb * 1024 * 1024;
+        let entries = (target_memory_bytes / block_size).max(64).min(4096) as usize;
+        
+        info!(
+            "Creating memory-aware cache config: block_size={}MB, target_memory={}MB, entries={}",
+            block_size / (1024 * 1024),
+            target_memory_mb,
+            entries
+        );
+        
+        Self {
+            hot_cache_size: entries,
+            cold_cache_size: entries,
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DiskStorage {
     base_dir: PathBuf,
@@ -1198,6 +1235,10 @@ pub struct ChunksCache {
 
     /// Cache configuration parameters (stored for runtime adjustments)
     config: ChunksCacheConfig,
+
+    /// Sequential access pattern detector
+    /// Tracks the last accessed key to detect sequential reads
+    last_access: Arc<RwLock<Option<String>>>,
 }
 
 impl ChunksCache {
@@ -1253,12 +1294,19 @@ impl ChunksCache {
             cold_cache: cold_cache_builder.build(),
             policy,
             config,
+            last_access: Arc::new(RwLock::new(None)),
         })
     }
 
     pub async fn get(&self, key: &String) -> Option<Vec<u8>> {
         trace!("Cache GET request for key: {}", key);
         self.policy.record_access(key.clone()).await;
+
+        // Update sequential access tracking
+        {
+            let mut last = self.last_access.write().await;
+            *last = Some(key.clone());
+        }
 
         // Check hot cache first
         if let Some(value) = self.hot_cache.get(key).await {
@@ -1341,8 +1389,15 @@ impl ChunksCache {
         trace!("Inserting into hot cache: {}", key);
         self.hot_cache.insert(key.to_owned(), data.clone()).await;
 
-        trace!("Storing on disk: {}", key);
-        self.disk_storage.store(key, data).await?;
+        // Async disk write - don't block on disk I/O
+        let disk_storage = self.disk_storage.clone();
+        let key_owned = key.to_owned();
+        let data_owned = data.clone();
+        tokio::spawn(async move {
+            if let Err(e) = disk_storage.store(&key_owned, &data_owned).await {
+                warn!("Failed to write cache to disk for key {}: {}", key_owned, e);
+            }
+        });
 
         trace!("Adding to cold cache: {}", key);
         self.cold_cache.insert(key.to_owned(), ()).await;
