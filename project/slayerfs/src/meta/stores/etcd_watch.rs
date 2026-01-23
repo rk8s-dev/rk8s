@@ -7,9 +7,10 @@ use crate::meta::entities::etcd::{EtcdDirChildren, EtcdEntryInfo, EtcdForwardEnt
 use crate::meta::store::MetaError;
 use etcd_client::{Client as EtcdClient, EventType, WatchOptions};
 use std::collections::HashMap;
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
-use tokio::time::{self, Duration};
+use tokio::time::{self, Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 /// Cache invalidation events from etcd watch
@@ -57,6 +58,12 @@ pub struct WatchConfig {
 
     /// Enable debug logging
     pub debug: bool,
+
+    /// Session ID to filter out self-originated changes (optional)
+    /// When set, events originating from this session will be ignored
+    /// Note: Currently not used, but kept for future implementation
+    #[allow(dead_code)]
+    pub session_id: Option<String>,
 }
 
 impl Default for WatchConfig {
@@ -65,6 +72,7 @@ impl Default for WatchConfig {
             key_prefix: "".to_string(), // Watch all keys
             event_buffer_size: 1000,
             debug: false,
+            session_id: None, // Don't filter by default
         }
     }
 }
@@ -75,6 +83,7 @@ impl Default for WatchConfig {
 /// 1. Watch etcd key changes (PUT/DELETE events)
 /// 2. Parse changed keys and generate cache invalidation events
 /// 3. Send events to MetaClient for cache invalidation
+/// 4. Filter out self-originated changes to reduce unnecessary cache invalidations
 ///
 /// # Architecture
 /// ```text
@@ -83,6 +92,7 @@ impl Default for WatchConfig {
 ///       ▼
 ///   WatchWorker
 ///       │
+///       ├─ Check Recent Writes Cache → Skip if self-originated
 ///       ├─ Parse Key: f:10:file.txt → parent=10, name=file.txt
 ///       ├─ Parse Key: r:100 → inode=100
 ///       └─ Parse Key: c:10 → parent=10
@@ -98,7 +108,13 @@ pub struct EtcdWatchWorker {
     config: WatchConfig,
     event_tx: mpsc::Sender<CacheInvalidationEvent>,
     worker_handle: Option<JoinHandle<()>>,
+    /// Cache of recently written keys to filter self-originated changes
+    /// Keys are removed after RECENT_WRITE_TTL
+    recent_writes: Arc<RwLock<HashMap<String, Instant>>>,
 }
+
+/// Time to keep recent write records for filtering
+const RECENT_WRITE_TTL: Duration = Duration::from_secs(5);
 
 impl EtcdWatchWorker {
     pub fn new(
@@ -112,9 +128,21 @@ impl EtcdWatchWorker {
             config,
             event_tx,
             worker_handle: None,
+            recent_writes: Arc::new(RwLock::new(HashMap::new())),
         };
 
         (worker, event_rx)
+    }
+
+    /// Record a recent write to filter it from watch notifications
+    /// Call this before performing writes to etcd
+    pub async fn record_write(&self, key: String) {
+        let mut writes = self.recent_writes.write().await;
+        writes.insert(key, Instant::now());
+        
+        // Clean up old entries
+        let now = Instant::now();
+        writes.retain(|_, instant| now.duration_since(*instant) < RECENT_WRITE_TTL);
     }
 
     /// Start watch worker in background
@@ -122,9 +150,10 @@ impl EtcdWatchWorker {
         let client = self.client.clone();
         let config = self.config.clone();
         let event_tx = self.event_tx.clone();
+        let recent_writes = self.recent_writes.clone();
 
         let handle = tokio::spawn(async move {
-            if let Err(e) = Self::watch_loop(client, config, event_tx).await {
+            if let Err(e) = Self::watch_loop(client, config, event_tx, recent_writes).await {
                 error!("Watch worker fatal error: {}", e);
             }
         });
@@ -148,6 +177,7 @@ impl EtcdWatchWorker {
         mut client: EtcdClient,
         config: WatchConfig,
         event_tx: mpsc::Sender<CacheInvalidationEvent>,
+        recent_writes: Arc<RwLock<HashMap<String, Instant>>>,
     ) -> Result<(), MetaError> {
         info!(
             "Starting etcd watch loop with prefix: '{}'",
@@ -179,7 +209,12 @@ impl EtcdWatchWorker {
                         }
 
                         for event in resp.events() {
-                            if let Err(e) = Self::handle_watch_event(event, &event_tx, &config) {
+                            if let Err(e) = Self::handle_watch_event(
+                                event,
+                                &event_tx,
+                                &config,
+                                &recent_writes,
+                            ).await {
                                 error!("Failed to handle watch event: {}", e);
                             }
                         }
@@ -198,10 +233,11 @@ impl EtcdWatchWorker {
     }
 
     /// Handle single watch event
-    fn handle_watch_event(
+    async fn handle_watch_event(
         event: &etcd_client::Event,
         event_tx: &mpsc::Sender<CacheInvalidationEvent>,
         config: &WatchConfig,
+        recent_writes: &Arc<RwLock<HashMap<String, Instant>>>,
     ) -> Result<(), MetaError> {
         let event_type = event.event_type();
         let kv = match event.kv() {
@@ -210,6 +246,21 @@ impl EtcdWatchWorker {
         };
 
         let key = String::from_utf8_lossy(kv.key()).to_string();
+        
+        // Check if this is a self-originated write
+        {
+            let writes = recent_writes.read().await;
+            if let Some(write_time) = writes.get(&key) {
+                let elapsed = Instant::now().duration_since(*write_time);
+                if elapsed < RECENT_WRITE_TTL {
+                    if config.debug {
+                        debug!("Skipping self-originated write for key: {}", key);
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        
         let value = kv.value().to_vec();
 
         if config.debug {

@@ -217,6 +217,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                 key_prefix: "".to_string(),
                 event_buffer_size: 1000,
                 debug: false,
+                session_id: None, // TODO: Pass session ID from store
             };
 
             let (mut worker, invalidation_rx) = EtcdWatchWorker::new(client, config);
