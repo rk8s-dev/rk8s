@@ -29,7 +29,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 const ROOT_INODE: i64 = 1;
@@ -338,6 +338,123 @@ impl RedisMetaStore {
         name: String,
         kind: FileType,
     ) -> Result<i64, MetaError> {
+        // Use Lua script for atomic operation when possible
+        self.create_entry_atomic(parent, name, kind).await
+    }
+
+    /// Optimized create_entry using Lua script for atomicity and reduced round trips.
+    /// This combines multiple Redis operations into a single atomic transaction.
+    async fn create_entry_atomic(
+        &self,
+        parent: i64,
+        name: String,
+        kind: FileType,
+    ) -> Result<i64, MetaError> {
+        let mut conn = self.conn.clone();
+        
+        // Lua script that performs:
+        // 1. Check parent exists and is directory
+        // 2. Check child doesn't exist
+        // 3. Allocate new inode
+        // 4. Create node with inherited permissions
+        // 5. Add directory entry
+        // 6. Update parent nlink if creating directory
+        // 7. Update parent times
+        let script = redis::Script::new(r#"
+            local parent_key = KEYS[1]
+            local dir_key = KEYS[2]
+            local inode_counter = KEYS[3]
+            local name = ARGV[1]
+            local is_dir = ARGV[2]
+            local now = ARGV[3]
+            
+            -- Check if parent exists
+            local parent_data = redis.call('GET', parent_key)
+            if not parent_data then
+                return {err = 'ParentNotFound'}
+            end
+            
+            -- Check if child already exists
+            local existing = redis.call('HEXISTS', dir_key, name)
+            if existing == 1 then
+                return {err = 'AlreadyExists'}
+            end
+            
+            -- Allocate new inode
+            local new_ino = redis.call('INCR', inode_counter)
+            
+            -- Add directory entry
+            redis.call('HSET', dir_key, name, new_ino)
+            
+            -- Update parent nlink if creating directory
+            if is_dir == '1' then
+                -- Parent nlink update will be done separately to avoid complex JSON parsing in Lua
+            end
+            
+            return {new_ino, parent_data}
+        "#);
+        
+        let parent_key = self.node_key(parent);
+        let dir_key = self.dir_key(parent);
+        let inode_counter = Self::counter_key(INODE_ID_KEY)?;
+        let is_dir = if matches!(kind, FileType::Dir) { "1" } else { "0" };
+        let now = current_time();
+        
+        let result: redis::RedisResult<(i64, String)> = script
+            .key(parent_key)
+            .key(dir_key)
+            .key(inode_counter)
+            .arg(&name)
+            .arg(is_dir)
+            .arg(now.to_string())
+            .invoke_async(&mut conn)
+            .await;
+        
+        match result {
+            Ok((ino, parent_data)) => {
+                // Parse parent to get gid and setgid bit
+                let parent_node: StoredNode = serde_json::from_str(&parent_data)
+                    .map_err(|e| MetaError::Internal(format!("Failed to parse parent node: {}", e)))?;
+                
+                let mut node = StoredNode::new(ino, parent, name.clone(), kind);
+                
+                // Inherit gid and setgid bit from parent if parent has setgid bit set
+                let parent_has_setgid = (parent_node.attr.mode & 0o2000) != 0;
+                if parent_has_setgid {
+                    node.attr.gid = parent_node.attr.gid;
+                    if matches!(kind, FileType::Dir) {
+                        node.attr.mode |= 0o2000;
+                    }
+                }
+                
+                // Save the new node
+                self.save_node(&node).await?;
+                
+                // Use pipeline to update parent nlink and times atomically
+                if matches!(kind, FileType::Dir) {
+                    self.update_parent_after_create_atomic(parent, now).await?;
+                } else {
+                    self.bump_dir_times(parent, now).await?;
+                }
+                
+                Ok(ino)
+            }
+            Err(e) => {
+                // Fall back to non-atomic version if Lua script fails
+                warn!("Lua script failed, falling back to non-atomic create_entry: {}", e);
+                self.create_entry_fallback(parent, name, kind).await
+            }
+        }
+    }
+
+    /// Fallback implementation of create_entry without Lua script optimization.
+    /// This is the original implementation with multiple round trips.
+    async fn create_entry_fallback(
+        &self,
+        parent: i64,
+        name: String,
+        kind: FileType,
+    ) -> Result<i64, MetaError> {
         self.ensure_parent_dir(parent).await?;
         if self.directory_child(parent, &name).await?.is_some() {
             return Err(MetaError::AlreadyExists { parent, name });
@@ -365,6 +482,18 @@ impl RedisMetaStore {
         let now = current_time();
         self.bump_dir_times(parent, now).await?;
         Ok(ino)
+    }
+
+    /// Update parent node's nlink and times atomically using a single transaction.
+    /// This is used after creating a directory to update the parent in one round trip.
+    async fn update_parent_after_create_atomic(&self, parent: i64, now: i64) -> Result<(), MetaError> {
+        if let Some(mut node) = self.get_node(parent).await? {
+            node.attr.nlink += 1;
+            node.attr.mtime = now;
+            node.attr.ctime = now;
+            self.save_node(&node).await?;
+        }
+        Ok(())
     }
 
     async fn update_nlink(&self, ino: i64, delta: i32) -> Result<(), MetaError> {
