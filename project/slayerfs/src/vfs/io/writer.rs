@@ -27,6 +27,7 @@ use rand::RngCore;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
+use bytes::Bytes;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::{interval, timeout};
 use tracing::warn;
@@ -159,6 +160,7 @@ where
         self.with_mut(|s| {
             if matches!(s.state, SliceStatus::Writeable) {
                 s.state = SliceStatus::Readonly;
+                s.data.freeze();
                 return true;
             }
             false
@@ -216,7 +218,7 @@ where
         })
     }
 
-    fn snapshot_for_flush(&self) -> Option<(u64, u32, Vec<u8>, Option<u64>)> {
+    fn snapshot_for_flush(&self) -> Option<(u64, u32, Vec<Bytes>, Option<u64>)> {
         self.with_ref(|s| {
             if s.data.len() == 0 {
                 return None;
@@ -647,6 +649,7 @@ where
                 handle.mark_uploaded();
                 return;
             };
+            let data_len: usize = data.iter().map(|b| b.len()).sum();
 
             let sid = match slice_id {
                 Some(id) => id,
@@ -665,14 +668,14 @@ where
 
             let uploader = DataUploader::new(shared.config.layout, chunk_id, &shared.backend);
             let result = backoff(UPLOAD_MAX_RETRIES, || async {
-                match uploader.write_at(sid, offset, &data).await {
+                match uploader.write_at_vectored(sid, offset, &data).await {
                     Ok(_) => Ok(()),
                     Err(err) => {
                         warn!(
                             chunk_id,
                             slice_id = sid,
                             offset,
-                            len = data.len(),
+                            len = data_len,
                             error = ?err,
                             "upload failed, retrying"
                         );
@@ -689,7 +692,7 @@ where
                         chunk_id,
                         slice_id = sid,
                         offset,
-                        len = data.len(),
+                        len = data_len,
                         error = ?err,
                         "upload failed after retries"
                     );

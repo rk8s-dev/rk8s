@@ -1,9 +1,11 @@
 //! Local filesystem backend used to mock an object store (implements `ObjectBackend`).
 
+use std::io::{IoSlice, Write};
 use crate::cadapter::client::ObjectBackend;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
+use bytes::Bytes;
 use tokio::{fs, io::AsyncWriteExt};
 
 #[derive(Clone)]
@@ -24,6 +26,45 @@ impl LocalFsBackend {
 
 #[async_trait]
 impl ObjectBackend for LocalFsBackend {
+    #[tracing::instrument(level = "trace", skip(self, key, chunks))]
+    async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
+        let path = self.path_for(key);
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).await?;
+        }
+
+        // `tokio::fs::File::write_vectored` is another option. However, according the implementation
+        // of it, it performs an extra copy operation during writing. So using `std::fs::File::write_vectored`
+        // + `spawn_blocking` is the best solution for current situation.
+        let res = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            let mut f = std::fs::File::create(path)?;
+            let mut slices = chunks
+                .iter()
+                .map(|e| IoSlice::new(e.as_ref()))
+                .collect::<Vec<_>>();
+
+            let mut slices_ref = slices.as_mut_slice();
+            while !slices_ref.is_empty() {
+                let n = f.write_vectored(slices_ref)?;
+                if n == 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "write zero",
+                    ));
+                }
+                IoSlice::advance_slices(&mut slices_ref, n);
+            }
+
+            f.flush()?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("blocking write failed: {e}"))?;
+        res?;
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, key, data))]
     async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         let path = self.path_for(key);
         if let Some(dir) = path.parent() {

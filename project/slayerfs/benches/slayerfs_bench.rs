@@ -1,16 +1,19 @@
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use bytes::Bytes;
 use clap::{Parser, ValueEnum};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 use tempfile::TempDir;
 use tokio::runtime::{Builder, Runtime};
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::EnvFilter;
 
 use slayerfs::cadapter::client::ObjectClient;
 use slayerfs::cadapter::localfs::LocalFsBackend;
@@ -25,6 +28,17 @@ use slayerfs::vfs::fs::VFS;
 
 const MB: usize = 1024 * 1024;
 const KB: usize = 1024;
+
+static TRACING_INIT: Once = Once::new();
+
+fn init_tracing() {
+    TRACING_INIT.call_once(|| {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_span_events(FmtSpan::CLOSE)
+            .init();
+    });
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -119,6 +133,7 @@ enum MetaBackend {
 
 impl BenchConfig {
     fn from_env() -> Self {
+        init_tracing();
         let args = BenchArgs::parse_from(["slayerfs-bench"]);
         let block_mb = args.block_mb.max(1);
         let big_mb = args.big_file_mb.max(1);
@@ -202,6 +217,13 @@ enum BenchStore {
 
 #[async_trait]
 impl BlockStore for BenchStore {
+    async fn write_vectored(&self, key: BlockKey, offset: u32, chunks: Vec<Bytes>) -> Result<u64> {
+        match self {
+            BenchStore::Local(store) => store.write_vectored(key, offset, chunks).await,
+            BenchStore::S3(store) => store.write_vectored(key, offset, chunks).await,
+        }
+    }
+
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
         match self {
             BenchStore::Local(store) => store.write_range(key, offset, data).await,
@@ -398,7 +420,7 @@ async fn open_handle(fs: &SharedFs, path: &str, read: bool, write: bool) -> Resu
         .stat(path)
         .await
         .ok_or_else(|| anyhow!("not found: {path}"))?;
-    Ok(fs.open(attr.ino, attr, read, write).await)
+    Ok(fs.open(attr.ino, attr, read, write).await?)
 }
 
 async fn close_handle(fs: &SharedFs, fh: u64) -> Result<()> {

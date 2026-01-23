@@ -1,7 +1,7 @@
 use crate::chuck::{ChunkLayout, ChunkSpan, ChunkTag};
 
-mod reader;
-mod writer;
+pub(crate) mod reader;
+pub(crate) mod writer;
 
 pub(crate) use reader::DataReader;
 pub(crate) use reader::FileReader;

@@ -11,17 +11,45 @@ use hex::encode;
 use libc::{KEYCTL_CAPS0_CAPABILITIES, SYS_remap_file_pages, VM_VFS_CACHE_PRESSURE};
 use moka::{Entry, ops::compute::Op};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf};
+use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf, sync::LazyLock};
+use bytes::Bytes;
 use tokio::{
     io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     sync::RwLock,
 };
 use tracing::info;
 
+/// Preallocated zero range to build zero padding without repeated allocations.
+static ZEROS: LazyLock<Bytes> = LazyLock::new(|| Bytes::from(vec![0_u8; 4 * 1024 * 1024]));
+
+fn make_zero_bytes(mut len: usize) -> Vec<Bytes> {
+    let mut result = Vec::new();
+    let size = ZEROS.len();
+
+    while len >= size {
+        result.push(ZEROS.clone());
+        len -= size;
+    }
+
+    if len > 0 {
+        result.push(ZEROS.slice(0..len));
+    }
+    result
+}
+
 /// Abstract block store interface (cadapter/S3/etc. can implement this).
 #[async_trait]
 // ensure offset_in_block + data.len() <= block_size
 pub trait BlockStore {
+    async fn write_vectored(&self, key: BlockKey, offset: u32, chunks: Vec<Bytes>) -> anyhow::Result<u64> {
+        let data = chunks
+            .into_iter()
+            .map(|e| e.to_vec())
+            .flatten()
+            .collect::<Vec<_>>();
+        self.write_range(key, offset, &data).await
+    }
+
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64>;
 
     async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()>;
@@ -51,6 +79,7 @@ impl InMemoryBlockStore {
 
 #[async_trait]
 impl BlockStore for InMemoryBlockStore {
+    #[tracing::instrument(level = "trace", skip(self, key, offset, data))]
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
         let mut guard = self.map.write().await;
         let entry = guard.entry(key).or_insert_with(Vec::new);
@@ -135,6 +164,76 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
 
 #[async_trait]
 impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
+    #[tracing::instrument(level = "trace", skip(self, key, offset, chunks))]
+    async fn write_vectored(
+        &self,
+        key: BlockKey,
+        offset: u32,
+        chunks: Vec<Bytes>,
+    ) -> anyhow::Result<u64> {
+        let key_str = Self::key_for(key);
+        let total_len = chunks.iter().map(|c| c.len()).sum::<usize>();
+        if total_len == 0 {
+            return Ok(0);
+        }
+
+        let existing = self.client.get_object(&key_str).await;
+        let existing = match existing {
+            Ok(Some(data)) => Some(data),
+            Ok(None) => None,
+            Err(e) => {
+                let error_str = format!("{:?}", e);
+                if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
+                    None
+                } else {
+                    return Err(anyhow::anyhow!("object store get failed: {:?}", e));
+                }
+            }
+        };
+
+        let offset_usize = offset as usize;
+        let mut parts: Vec<Bytes> = Vec::new();
+
+        if let Some(existing_vec) = existing {
+            let existing_bytes = Bytes::from(existing_vec);
+            let existing_len = existing_bytes.len();
+
+            let prefix_take = offset_usize.min(existing_len);
+            if prefix_take > 0 {
+                parts.push(existing_bytes.slice(0..prefix_take));
+            }
+            if existing_len < offset_usize {
+                parts.extend(make_zero_bytes(offset_usize - existing_len));
+            }
+
+            parts.extend(chunks.iter().cloned());
+
+            let end = offset_usize + total_len;
+            if existing_len > end {
+                parts.push(existing_bytes.slice(end..existing_len));
+            }
+        } else {
+            if offset_usize > 0 {
+                parts.extend(make_zero_bytes(offset_usize));
+            }
+            parts.extend(chunks.iter().cloned());
+        }
+
+        self.client
+            .put_object_vectored(&key_str, parts)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
+
+        let etag = self
+            .client
+            .get_etag(&key_str)
+            .await
+            .unwrap_or_else(|_| "default_etag".to_string());
+        let cache_key = format!("{}{}", key_str, etag);
+        let _ = self.block_cache.remove(&cache_key).await;
+        Ok(total_len as u64)
+    }
+
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
         let key_str = Self::key_for(key);
         let existing = self.client.get_object(&key_str).await;

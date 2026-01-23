@@ -24,6 +24,7 @@ moka = { workspace = true, features = ["future"] }
 dashmap = { workspace = true }
 dirs = { workspace = true }
 sha2 = { workspace = true }
+hyper = { workspace = true }
 anyhow = { workspace = true }
 env_logger = { workspace = true }
 sea-orm = { workspace = true, features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-chrono", "with-uuid"] }

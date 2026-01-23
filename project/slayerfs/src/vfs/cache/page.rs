@@ -1,10 +1,30 @@
 use std::io::{Cursor, Read};
-use std::sync::Arc;
+use std::mem::take;
+use std::sync::{Arc, LazyLock};
 
-use bytes::BytesMut;
-use derive_more::{Deref, DerefMut};
+use bytes::{Bytes, BytesMut};
 
 use crate::vfs::config::WriteConfig;
+
+/// The backend storage expects a contiguous bytes range, so zero padding is required.
+/// Preallocate a contiguous zero range to avoid repeated allocations.
+static ZEROS: LazyLock<Bytes> = LazyLock::new(|| Bytes::from(vec![0_u8; 4 * 1024 * 1024]));
+
+/// Make continuous zero `Bytes` with specific length.
+pub(crate) fn make_zero_bytes(mut len: usize) -> Vec<Bytes> {
+    let mut result = Vec::new();
+    let size = ZEROS.len();
+
+    while len >= size {
+        result.push(ZEROS.clone());
+        len -= size;
+    }
+
+    if len > 0 {
+        result.push(ZEROS.slice(0..len));
+    }
+    result
+}
 
 pub(crate) struct CacheSlice {
     config: Arc<WriteConfig>,
@@ -61,20 +81,39 @@ impl CacheSlice {
         self.len == offset
     }
 
-    pub(crate) fn collect_pages(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.len as usize);
-        let mut remaining = self.len as usize;
-        for block in &self.pages {
+    pub(crate) fn freeze(&mut self) {
+        for block in &mut self.pages {
             for page in block {
+                page.freeze();
+            }
+        }
+    }
+
+    pub(crate) fn collect_pages(&self) -> Vec<Bytes> {
+        let page_size = self.config.page_size as usize;
+        let block_size = self.config.layout.block_size as usize;
+        let pages_per_block = block_size / page_size;
+
+        let mut remaining = self.len as usize;
+        let mut out = Vec::new();
+
+        for block in &self.pages {
+            for page_idx in 0..pages_per_block {
                 if remaining == 0 {
-                    return buf;
+                    return out;
                 }
-                let take = remaining.min(page.data.len());
-                buf.extend_from_slice(&page.data[..take]);
+
+                let take = remaining.min(page_size);
+                if let Some(page) = block.get(page_idx) {
+                    let bytes = page.bytes();
+                    out.push(bytes.slice(0..take));
+                } else {
+                    out.extend(make_zero_bytes(take));
+                }
                 remaining -= take;
             }
         }
-        buf
+        out
     }
 
     /// Acquire the next slice that can write into.
@@ -95,20 +134,59 @@ impl CacheSlice {
         }
 
         let page = &mut self.pages[block_index][page_index];
-        &mut page[within_page..page_size]
+        page.write_slice(within_page, page_size)
     }
 }
 
-#[derive(Deref, DerefMut, Default, Clone)]
+#[derive(Clone)]
+enum PageBuf {
+    Mutable(BytesMut),
+    Frozen(Bytes),
+}
+
+#[derive(Clone)]
 pub(crate) struct Page {
-    #[deref]
-    data: BytesMut,
+    data: PageBuf,
 }
 
 impl Page {
     pub(crate) fn new(size: usize) -> Self {
+        // SAFETY: We reserve the full page capacity and immediately set the length
+        // so callers can write into the returned slice without extra zeroing.
+        // The cache only reads pages after they are frozen, and collect_pages
+        // slices data using CacheSlice.len (bytes actually written). This ensures
+        // no uninitialized bytes are ever read.
+        let mut buf = BytesMut::with_capacity(size);
+        unsafe {
+            buf.set_len(size);
+        }
         Self {
-            data: BytesMut::zeroed(size),
+            data: PageBuf::Mutable(buf),
+        }
+    }
+
+    fn write_slice(&mut self, start: usize, end: usize) -> &mut [u8] {
+        match &mut self.data {
+            PageBuf::Mutable(buf) => &mut buf[start..end],
+            PageBuf::Frozen(_) => panic!("attempt to write to frozen page"),
+        }
+    }
+
+    fn freeze(&mut self) {
+        if let PageBuf::Mutable(buf) = &mut self.data {
+            let frozen = take(buf).freeze();
+            self.data = PageBuf::Frozen(frozen);
+        }
+    }
+
+    fn bytes(&self) -> Bytes {
+        match &self.data {
+            PageBuf::Frozen(buf) => buf.clone(),
+            PageBuf::Mutable(buf) => {
+                panic!(
+                    "collect_pages called on mutable page (would read uninitialized bytes)"
+                );
+            }
         }
     }
 }
@@ -117,6 +195,7 @@ impl Page {
 mod tests {
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use crate::chuck::ChunkLayout;
     use crate::vfs::cache::page::CacheSlice;
     use crate::vfs::config::WriteConfig;
@@ -139,15 +218,20 @@ mod tests {
         buf
     }
 
+    fn flatten(parts: Vec<Bytes>) -> Vec<u8> {
+        parts.into_iter().flat_map(|b| b.to_vec()).collect()
+    }
+
     #[test]
     fn test_append_single_page() {
         let mut slice = CacheSlice::new(config());
         let data = patterned(512, 1);
         slice.append(&data).unwrap();
+        slice.freeze();
 
         assert_eq!(slice.len, data.len() as u32);
         assert_eq!(slice.pages[0].len(), 1);
-        assert_eq!(slice.collect_pages(), data);
+        assert_eq!(flatten(slice.collect_pages()), data);
     }
 
     #[test]
@@ -155,10 +239,11 @@ mod tests {
         let mut slice = CacheSlice::new(config());
         let data = patterned(1024 + 10, 3);
         slice.append(&data).unwrap();
+        slice.freeze();
 
         assert_eq!(slice.len, data.len() as u32);
         assert_eq!(slice.pages[0].len(), 2);
-        assert_eq!(slice.collect_pages(), data);
+        assert_eq!(flatten(slice.collect_pages()), data);
     }
 
     #[test]
@@ -166,11 +251,12 @@ mod tests {
         let mut slice = CacheSlice::new(config());
         let data = patterned(4 * 1024 + 512, 7);
         slice.append(&data).unwrap();
+        slice.freeze();
 
         let pages_per_block = 4;
         assert_eq!(slice.pages[0].len(), pages_per_block);
         assert_eq!(slice.pages[1].len(), 1);
-        assert_eq!(slice.collect_pages(), data);
+        assert_eq!(flatten(slice.collect_pages()), data);
     }
 
     #[test]
@@ -181,11 +267,12 @@ mod tests {
 
         slice.append(&first).unwrap();
         slice.append(&second).unwrap();
+        slice.freeze();
 
         let mut expected = first.clone();
         expected.extend_from_slice(&second);
 
         assert_eq!(slice.len, expected.len() as u32);
-        assert_eq!(slice.collect_pages(), expected);
+        assert_eq!(flatten(slice.collect_pages()), expected);
     }
 }

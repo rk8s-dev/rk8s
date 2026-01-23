@@ -6,7 +6,9 @@ use super::store::BlockStore;
 use crate::meta::MetaStore;
 use crate::vfs::backend::Backend;
 use anyhow::Result;
+use bytes::Bytes;
 use futures_util::future::join_all;
+use std::time::Instant;
 
 pub(crate) struct DataUploader<'a, B, M> {
     layout: ChunkLayout,
@@ -16,7 +18,7 @@ pub(crate) struct DataUploader<'a, B, M> {
 
 impl<'a, B, M> DataUploader<'a, B, M>
 where
-    B: BlockStore,
+    B: BlockStore + Sync,
     M: MetaStore,
 {
     pub(crate) fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
@@ -28,6 +30,7 @@ where
     }
 
     /// Only write the data of a slice into the object storage. Callers must update metadata.
+    #[tracing::instrument(level = "trace", skip(self, slice_id, offset, buf))]
     pub(crate) async fn write_at(
         &self,
         slice_id: u64,
@@ -61,6 +64,72 @@ where
         }
         Ok(desc)
     }
+
+    /// Write a slice from a set of byte segments without concatenating them.
+    #[tracing::instrument(level = "trace", skip(self, slice_id, offset, chunks))]
+    pub(crate) async fn write_at_vectored(
+        &self,
+        slice_id: u64,
+        offset: u32,
+        chunks: &[Bytes],
+    ) -> Result<SliceDesc> {
+        let total_len = chunks.iter().map(|c| c.len()).sum::<usize>();
+        let desc = SliceDesc {
+            slice_id,
+            chunk_id: self.id,
+            offset,
+            length: total_len as u32,
+        };
+
+        let mut chunk_idx = 0usize;
+        let mut chunk_off = 0usize;
+        let mut futures = Vec::new();
+
+        let build_start = Instant::now();
+        for span in block_span_iter(desc, self.layout) {
+            let mut need = span.len as usize;
+            let mut block_chunks = Vec::new();
+
+            while need > 0 {
+                let chunk = &chunks[chunk_idx];
+                let avail = chunk.len() - chunk_off;
+                let take = need.min(avail);
+                block_chunks.push(chunk.slice(chunk_off..chunk_off + take));
+                chunk_off += take;
+                need -= take;
+
+                if chunk_off == chunk.len() {
+                    chunk_idx += 1;
+                    chunk_off = 0;
+                }
+            }
+
+            let future = self.backend.store().write_vectored(
+                (slice_id, span.index as u32),
+                span.offset,
+                block_chunks,
+            );
+            futures.push(future);
+        }
+        let build_done = Instant::now();
+        tracing::trace!(
+            futures = futures.len(),
+            build_ms = build_done.duration_since(build_start).as_millis(),
+            "write_at_vectored build futures"
+        );
+
+        let join_start = Instant::now();
+        for res in join_all(futures).await {
+            res?;
+        }
+        let join_done = Instant::now();
+        tracing::trace!(
+            join_ms = join_done.duration_since(join_start).as_millis(),
+            total_ms = join_done.duration_since(build_start).as_millis(),
+            "write_at_vectored join futures"
+        );
+        Ok(desc)
+    }
 }
 
 #[cfg(test)]
@@ -72,6 +141,7 @@ mod tests {
     use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;
     use crate::vfs::backend::Backend;
+    use bytes::Bytes;
     use std::sync::Arc;
 
     fn small_layout() -> ChunkLayout {
@@ -111,6 +181,45 @@ mod tests {
         meta.append_slice(1, desc).await.unwrap();
 
         let mut fetcher = DataFetcher::new(layout, 1, backend.as_ref());
+        fetcher.prepare_slices().await.unwrap();
+        let out = fetcher.read_at(offset, data.len()).await.unwrap();
+        assert_eq!(out, data);
+    }
+
+    #[tokio::test]
+    async fn test_data_uploader_vectored_roundtrip() {
+        let layout = small_layout();
+        let store = Arc::new(InMemoryBlockStore::new());
+        let meta = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .unwrap()
+            .store();
+        let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
+
+        let offset = layout.block_size - 128;
+        let part1 = patterned(300, 5);
+        let part2 = patterned(700, 9);
+        let part3 = patterned(500, 2);
+        let mut data = Vec::new();
+        data.extend_from_slice(&part1);
+        data.extend_from_slice(&part2);
+        data.extend_from_slice(&part3);
+
+        let chunks = vec![
+            Bytes::from(part1),
+            Bytes::from(part2),
+            Bytes::from(part3),
+        ];
+
+        let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
+        let uploader = DataUploader::new(layout, 8, backend.as_ref());
+        let desc = uploader
+            .write_at_vectored(slice_id as u64, offset, &chunks)
+            .await
+            .unwrap();
+        meta.append_slice(8, desc).await.unwrap();
+
+        let mut fetcher = DataFetcher::new(layout, 8, backend.as_ref());
         fetcher.prepare_slices().await.unwrap();
         let out = fetcher.read_at(offset, data.len()).await.unwrap();
         assert_eq!(out, data);
