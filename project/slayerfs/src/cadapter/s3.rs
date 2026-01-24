@@ -4,6 +4,7 @@ use crate::cadapter::client::ObjectBackend;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
+use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::{ByteStream, SdkBody};
 use aws_sdk_s3::{Client, config::Region};
 use base64::Engine as _;
@@ -472,12 +473,14 @@ impl Drop for MultipartCleanupGuard {
 impl ObjectBackend for S3Backend {
     async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
         let total_size = chunks.iter().map(|e| e.len()).sum::<usize>();
+
         if total_size == 0 {
             return self.put_object_simple(key, &[]).await;
         }
         if total_size <= self.config.part_size {
             return self.put_object_vectored_simple(key, chunks).await;
         }
+
         self.multipart_upload_vectored(key, chunks).await
     }
 
@@ -499,6 +502,7 @@ impl ObjectBackend for S3Backend {
             .key(key)
             .send()
             .await;
+
         match resp {
             Ok(o) => {
                 use tokio::io::AsyncReadExt;
@@ -507,15 +511,8 @@ impl ObjectBackend for S3Backend {
                 body.read_to_end(&mut buf).await?;
                 Ok(Some(buf))
             }
-            Err(e) => {
-                // Simplified: NoSuchKey returns None, other errors return Err
-                let msg = format!("{e}");
-                if msg.contains("NoSuchKey") || msg.contains("NotFound") {
-                    Ok(None)
-                } else {
-                    Err(e.into())
-                }
-            }
+            Err(SdkError::ServiceError(err)) if err.err().is_no_such_key() => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -532,6 +529,7 @@ impl ObjectBackend for S3Backend {
 
     async fn delete_object(&self, key: &str) -> Result<()> {
         let mut attempt = 0;
+
         loop {
             attempt += 1;
             match self

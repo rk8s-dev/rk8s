@@ -234,3 +234,4 @@ redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
 
 [profile.release]
 debug = true
+strip = false

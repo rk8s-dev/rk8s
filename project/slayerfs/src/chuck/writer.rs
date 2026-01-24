@@ -9,6 +9,42 @@ use anyhow::Result;
 use bytes::Bytes;
 use futures_util::future::join_all;
 
+struct ChunkCursor<'a> {
+    chunks: &'a [Bytes],
+    idx: usize,
+    off: usize,
+}
+
+impl<'a> ChunkCursor<'a> {
+    fn new(chunks: &'a [Bytes]) -> Self {
+        Self {
+            chunks,
+            idx: 0,
+            off: 0,
+        }
+    }
+
+    fn take(&mut self, mut need: usize) -> Vec<Bytes> {
+        let mut out = Vec::new();
+
+        while need > 0 {
+            let chunk = &self.chunks[self.idx];
+            let avail = chunk.len() - self.off;
+            let take = need.min(avail);
+
+            out.push(chunk.slice(self.off..self.off + take));
+            self.off += take;
+            need -= take;
+
+            if self.off == chunk.len() {
+                self.idx += 1;
+                self.off = 0;
+            }
+        }
+        out
+    }
+}
+
 pub(crate) struct DataUploader<'a, B, M> {
     layout: ChunkLayout,
     id: u64,
@@ -51,10 +87,11 @@ where
             let take = span.len as usize;
             let data = &buf[cursor..(cursor + take)];
 
-            let future =
-                self.backend
-                    .store()
-                    .write_range((slice_id, span.index as u32), span.offset, data);
+            let future = self.backend.store().write_fresh_range(
+                (slice_id, span.index as u32),
+                span.offset,
+                data,
+            );
             futures.push(future);
             cursor += take;
         }
@@ -80,29 +117,13 @@ where
             length: total_len as u32,
         };
 
-        let mut chunk_idx = 0usize;
-        let mut chunk_off = 0usize;
+        let mut cursor = ChunkCursor::new(chunks);
         let mut futures = Vec::new();
 
         for span in block_span_iter(desc, self.layout) {
-            let mut need = span.len as usize;
-            let mut block_chunks = Vec::new();
+            let block_chunks = cursor.take(span.len as usize);
 
-            while need > 0 {
-                let chunk = &chunks[chunk_idx];
-                let avail = chunk.len() - chunk_off;
-                let take = need.min(avail);
-                block_chunks.push(chunk.slice(chunk_off..chunk_off + take));
-                chunk_off += take;
-                need -= take;
-
-                if chunk_off == chunk.len() {
-                    chunk_idx += 1;
-                    chunk_off = 0;
-                }
-            }
-
-            let future = self.backend.store().write_vectored(
+            let future = self.backend.store().write_fresh_vectored(
                 (slice_id, span.index as u32),
                 span.offset,
                 block_chunks,
