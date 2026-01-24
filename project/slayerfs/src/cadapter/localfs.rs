@@ -1,11 +1,11 @@
 //! Local filesystem backend used to mock an object store (implements `ObjectBackend`).
 
-use std::io::{IoSlice, Write};
 use crate::cadapter::client::ObjectBackend;
 use anyhow::Result;
 use async_trait::async_trait;
-use std::path::{Path, PathBuf};
 use bytes::Bytes;
+use std::io::{IoSlice, Write};
+use std::path::{Path, PathBuf};
 use tokio::{fs, io::AsyncWriteExt};
 
 #[derive(Clone)]
@@ -26,7 +26,6 @@ impl LocalFsBackend {
 
 #[async_trait]
 impl ObjectBackend for LocalFsBackend {
-    #[tracing::instrument(level = "trace", skip(self, key, chunks))]
     async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
         let path = self.path_for(key);
         if let Some(dir) = path.parent() {
@@ -60,11 +59,11 @@ impl ObjectBackend for LocalFsBackend {
         })
         .await
         .map_err(|e| anyhow::anyhow!("blocking write failed: {e}"))?;
+
         res?;
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, key, data))]
     async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         let path = self.path_for(key);
         if let Some(dir) = path.parent() {

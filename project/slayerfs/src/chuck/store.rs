@@ -1,51 +1,38 @@
 //! Storage backends: asynchronous block-level IO traits and in-memory implementations.
 
+use crate::utils::zero::make_zero_bytes;
 use crate::{
     cadapter::client::{ObjectBackend, ObjectClient},
     chuck::cache::{ChunksCache, ChunksCacheConfig},
 };
 use anyhow::{self, Context};
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::executor::block_on;
 use hex::encode;
 use libc::{KEYCTL_CAPS0_CAPABILITIES, SYS_remap_file_pages, VM_VFS_CACHE_PRESSURE};
 use moka::{Entry, ops::compute::Op};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf, sync::LazyLock};
-use bytes::Bytes;
 use tokio::{
     io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     sync::RwLock,
 };
 use tracing::info;
 
-/// Preallocated zero range to build zero padding without repeated allocations.
-static ZEROS: LazyLock<Bytes> = LazyLock::new(|| Bytes::from(vec![0_u8; 4 * 1024 * 1024]));
-
-fn make_zero_bytes(mut len: usize) -> Vec<Bytes> {
-    let mut result = Vec::new();
-    let size = ZEROS.len();
-
-    while len >= size {
-        result.push(ZEROS.clone());
-        len -= size;
-    }
-
-    if len > 0 {
-        result.push(ZEROS.slice(0..len));
-    }
-    result
-}
-
 /// Abstract block store interface (cadapter/S3/etc. can implement this).
 #[async_trait]
 // ensure offset_in_block + data.len() <= block_size
 pub trait BlockStore {
-    async fn write_vectored(&self, key: BlockKey, offset: u32, chunks: Vec<Bytes>) -> anyhow::Result<u64> {
+    async fn write_vectored(
+        &self,
+        key: BlockKey,
+        offset: u32,
+        chunks: Vec<Bytes>,
+    ) -> anyhow::Result<u64> {
         let data = chunks
             .into_iter()
-            .map(|e| e.to_vec())
-            .flatten()
+            .flat_map(|e| e.to_vec())
             .collect::<Vec<_>>();
         self.write_range(key, offset, &data).await
     }
@@ -79,7 +66,6 @@ impl InMemoryBlockStore {
 
 #[async_trait]
 impl BlockStore for InMemoryBlockStore {
-    #[tracing::instrument(level = "trace", skip(self, key, offset, data))]
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
         let mut guard = self.map.write().await;
         let entry = guard.entry(key).or_insert_with(Vec::new);
@@ -164,7 +150,6 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
 
 #[async_trait]
 impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
-    #[tracing::instrument(level = "trace", skip(self, key, offset, chunks))]
     async fn write_vectored(
         &self,
         key: BlockKey,

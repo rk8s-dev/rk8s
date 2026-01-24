@@ -1,30 +1,10 @@
 use std::io::{Cursor, Read};
 use std::mem::take;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
-use bytes::{Bytes, BytesMut};
-
+use crate::utils::zero::make_zero_bytes;
 use crate::vfs::config::WriteConfig;
-
-/// The backend storage expects a contiguous bytes range, so zero padding is required.
-/// Preallocate a contiguous zero range to avoid repeated allocations.
-static ZEROS: LazyLock<Bytes> = LazyLock::new(|| Bytes::from(vec![0_u8; 4 * 1024 * 1024]));
-
-/// Make continuous zero `Bytes` with specific length.
-pub(crate) fn make_zero_bytes(mut len: usize) -> Vec<Bytes> {
-    let mut result = Vec::new();
-    let size = ZEROS.len();
-
-    while len >= size {
-        result.push(ZEROS.clone());
-        len -= size;
-    }
-
-    if len > 0 {
-        result.push(ZEROS.slice(0..len));
-    }
-    result
-}
+use bytes::{Bytes, BytesMut};
 
 pub(crate) struct CacheSlice {
     config: Arc<WriteConfig>,
@@ -182,10 +162,8 @@ impl Page {
     fn bytes(&self) -> Bytes {
         match &self.data {
             PageBuf::Frozen(buf) => buf.clone(),
-            PageBuf::Mutable(buf) => {
-                panic!(
-                    "collect_pages called on mutable page (would read uninitialized bytes)"
-                );
+            PageBuf::Mutable(_) => {
+                panic!("collect_pages called on mutable page (would read uninitialized bytes)");
             }
         }
     }
@@ -195,10 +173,10 @@ impl Page {
 mod tests {
     use std::sync::Arc;
 
-    use bytes::Bytes;
     use crate::chuck::ChunkLayout;
     use crate::vfs::cache::page::CacheSlice;
     use crate::vfs::config::WriteConfig;
+    use bytes::Bytes;
 
     fn config() -> Arc<WriteConfig> {
         Arc::new(WriteConfig::new(

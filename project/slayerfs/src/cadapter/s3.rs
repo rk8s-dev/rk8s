@@ -8,10 +8,10 @@ use aws_sdk_s3::primitives::{ByteStream, SdkBody};
 use aws_sdk_s3::{Client, config::Region};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
+use bytes::Bytes;
 use hyper::Body;
 use md5;
 use std::sync::Arc;
-use bytes::Bytes;
 use tokio::time::{Duration, sleep};
 
 /// S3 backend configuration options
@@ -115,12 +115,10 @@ impl S3Backend {
 
     fn stream_from_chunks(chunks: &[Bytes]) -> ByteStream {
         let owned = chunks.to_vec();
-        let stream =
-            futures::stream::iter(owned.into_iter().map(Ok::<Bytes, std::io::Error>));
+        let stream = futures::stream::iter(owned.into_iter().map(Ok::<Bytes, std::io::Error>));
         ByteStream::from_body_0_4(Body::wrap_stream(stream))
     }
 
-    #[tracing::instrument(level = "trace", skip(self, key, chunks))]
     async fn put_object_vectored_simple(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
         let total_size = chunks.iter().map(|c| c.len()).sum::<usize>();
         let checksum = if self.config.enable_md5 && total_size > 0 {
@@ -159,7 +157,6 @@ impl S3Backend {
     }
 
     /// Put small objects directly (simpler than multipart upload)
-    #[tracing::instrument(level = "trace", skip(self, key, data))]
     async fn put_object_simple(&self, key: &str, data: &[u8]) -> Result<()> {
         let mut attempt = 0;
         loop {
@@ -190,7 +187,6 @@ impl S3Backend {
     }
 
     /// Handle multipart upload for large objects
-    #[tracing::instrument(level = "trace", skip(self, key, data))]
     async fn multipart_upload(&self, key: &str, data: &[u8]) -> Result<()> {
         // Create multipart upload
         let create = self
@@ -310,7 +306,6 @@ impl S3Backend {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, key, chunks))]
     async fn multipart_upload_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
         let create = self
             .client
@@ -476,7 +471,6 @@ impl Drop for MultipartCleanupGuard {
 #[async_trait]
 impl ObjectBackend for S3Backend {
     async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
-        tracing::trace!(key, total_len = chunks.iter().map(|e| e.len()).sum::<usize>(), "put_object_vectored");
         let total_size = chunks.iter().map(|e| e.len()).sum::<usize>();
         if total_size == 0 {
             return self.put_object_simple(key, &[]).await;

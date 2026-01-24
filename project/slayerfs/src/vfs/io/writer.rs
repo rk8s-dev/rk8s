@@ -22,12 +22,12 @@ use crate::vfs::config::WriteConfig;
 use crate::vfs::extract_ino_and_chunk_index;
 use crate::vfs::inode::Inode;
 use crate::vfs::io::split_chunk_spans;
+use bytes::Bytes;
 use dashmap::DashMap;
 use rand::RngCore;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
-use bytes::Bytes;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::{interval, timeout};
 use tracing::warn;
@@ -521,6 +521,13 @@ where
             let ckey = guard.get_or_create_chunk(cid);
 
             let mut handle = guard.chunk_handle(&self.shared, ckey);
+
+            // This is the last missing piece of zero-copy.
+            // There is a copy operation when appending the user-provide buf to the page cache.
+            // However, the buf is a byte slice, meaning that it is impossible to get the data with ownership
+            // unless "clone" it. So this copy seems to be inevitable.
+            // Alternatively, the API signature could be modified or added to request "Bytes" from users. However,
+            // this would break POSIX compatibility and is not supported by FUSE.
             let action =
                 handle.write_at(span.offset, &buf[position..position + span.len as usize])?;
             drop(guard);

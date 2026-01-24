@@ -12,7 +12,6 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use pprof::criterion::{Output, PProfProfiler};
 use tempfile::TempDir;
 use tokio::runtime::{Builder, Runtime};
-use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
 use slayerfs::cadapter::client::ObjectClient;
@@ -35,7 +34,6 @@ fn init_tracing() {
     TRACING_INIT.call_once(|| {
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
-            .with_span_events(FmtSpan::CLOSE)
             .init();
     });
 }

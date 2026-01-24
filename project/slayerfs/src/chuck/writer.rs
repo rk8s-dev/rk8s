@@ -8,7 +8,6 @@ use crate::vfs::backend::Backend;
 use anyhow::Result;
 use bytes::Bytes;
 use futures_util::future::join_all;
-use std::time::Instant;
 
 pub(crate) struct DataUploader<'a, B, M> {
     layout: ChunkLayout,
@@ -30,7 +29,8 @@ where
     }
 
     /// Only write the data of a slice into the object storage. Callers must update metadata.
-    #[tracing::instrument(level = "trace", skip(self, slice_id, offset, buf))]
+    #[allow(dead_code)]
+    #[deprecated = "Will be removed after enhancing the read-path"]
     pub(crate) async fn write_at(
         &self,
         slice_id: u64,
@@ -66,7 +66,6 @@ where
     }
 
     /// Write a slice from a set of byte segments without concatenating them.
-    #[tracing::instrument(level = "trace", skip(self, slice_id, offset, chunks))]
     pub(crate) async fn write_at_vectored(
         &self,
         slice_id: u64,
@@ -85,7 +84,6 @@ where
         let mut chunk_off = 0usize;
         let mut futures = Vec::new();
 
-        let build_start = Instant::now();
         for span in block_span_iter(desc, self.layout) {
             let mut need = span.len as usize;
             let mut block_chunks = Vec::new();
@@ -111,23 +109,10 @@ where
             );
             futures.push(future);
         }
-        let build_done = Instant::now();
-        tracing::trace!(
-            futures = futures.len(),
-            build_ms = build_done.duration_since(build_start).as_millis(),
-            "write_at_vectored build futures"
-        );
 
-        let join_start = Instant::now();
         for res in join_all(futures).await {
             res?;
         }
-        let join_done = Instant::now();
-        tracing::trace!(
-            join_ms = join_done.duration_since(join_start).as_millis(),
-            total_ms = join_done.duration_since(build_start).as_millis(),
-            "write_at_vectored join futures"
-        );
         Ok(desc)
     }
 }
@@ -205,11 +190,7 @@ mod tests {
         data.extend_from_slice(&part2);
         data.extend_from_slice(&part3);
 
-        let chunks = vec![
-            Bytes::from(part1),
-            Bytes::from(part2),
-            Bytes::from(part3),
-        ];
+        let chunks = vec![Bytes::from(part1), Bytes::from(part2), Bytes::from(part3)];
 
         let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, 8, backend.as_ref());
