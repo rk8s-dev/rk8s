@@ -40,7 +40,6 @@ pub struct NodeAffinity {
 pub struct PodAffinityTerm {
     pub label_selector: Option<common::LabelSelector>,
     pub topology_key: String,
-    pub namespaces: Option<Vec<String>>,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -354,7 +353,6 @@ impl From<common::PodAffinityTerm> for PodAffinityTerm {
         Self {
             label_selector: term.label_selector,
             topology_key: term.topology_key,
-            namespaces: term.namespaces,
         }
     }
 }

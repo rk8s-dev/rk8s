@@ -685,7 +685,6 @@ async fn test_scheduler_pod_affinity_basic() {
     let pod_affinity_term = PodAffinityTerm {
         label_selector,
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     let pod_affinity = PodAffinity {
@@ -762,7 +761,6 @@ async fn test_scheduler_pod_anti_affinity_basic() {
     let pod_affinity_term = PodAffinityTerm {
         label_selector,
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     let pod_anti_affinity = PodAntiAffinity {
@@ -831,7 +829,6 @@ async fn test_scheduler_pod_affinity_no_matching_pods() {
     let pod_affinity_term = PodAffinityTerm {
         label_selector,
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     let pod_affinity = PodAffinity {
@@ -896,7 +893,6 @@ async fn test_scheduler_pod_affinity_weighted_preferred() {
     let pod_affinity_term = PodAffinityTerm {
         label_selector,
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     let weighted_term = WeightedPodAffinityTerm {

@@ -619,7 +619,6 @@ async fn test_scheduler_pod_affinity_edge_cases() {
     let pod_affinity_term = PodAffinityTerm {
         label_selector,
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     let pod_affinity = PodAffinity {
@@ -770,7 +769,6 @@ async fn test_scheduler_pod_affinity_with_node_selector() {
     let pod_affinity_term = PodAffinityTerm {
         label_selector,
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     let pod_affinity = PodAffinity {
@@ -883,7 +881,6 @@ async fn test_scheduler_pod_affinity_complex_match_expressions() {
     let pod_affinity_term = PodAffinityTerm {
         label_selector,
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     let pod_affinity = PodAffinity {
@@ -988,14 +985,12 @@ async fn test_scheduler_pod_affinity_multiple_topology_keys() {
     let zone_term = PodAffinityTerm {
         label_selector: label_selector.clone(),
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     // Second term: require same rack
     let rack_term = PodAffinityTerm {
         label_selector,
         topology_key: "rack".to_string(),
-        namespaces: None,
     };
 
     let pod_affinity = PodAffinity {
@@ -1110,13 +1105,11 @@ async fn test_scheduler_pod_affinity_and_anti_affinity_combined() {
     let affinity_term = PodAffinityTerm {
         label_selector: web_label_selector,
         topology_key: "zone".to_string(),
-        namespaces: None,
     };
 
     let anti_affinity_term = PodAffinityTerm {
         label_selector: api_label_selector,
         topology_key: "rack".to_string(),
-        namespaces: None,
     };
 
     let pod_affinity = PodAffinity {

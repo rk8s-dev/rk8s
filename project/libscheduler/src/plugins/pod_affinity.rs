@@ -45,14 +45,52 @@ fn is_schedulable_after_pod_change(
     event: EventInner,
 ) -> Result<QueueingHint, String> {
     match event {
-        EventInner::Pod(_old_pod, _new_pod) => {
-            // Check if the changed pod affects this pod's affinity/anti-affinity rules
-            // For now, we assume any pod change could affect scheduling
+        EventInner::Pod(old_pod, new_pod) => {
             log::trace!(
                 "pod changed, checking if it affects pod {}'s affinity rules",
                 pod.name
             );
-            Ok(QueueingHint::Queue)
+            
+            let (
+                required_affinity_terms,
+                required_anti_affinity_terms,
+                preferred_affinity_terms,
+                preferred_anti_affinity_terms,
+            ) = extract_pod_affinity_terms(&pod);
+            
+            let mut all_terms = Vec::new();
+            all_terms.extend(required_affinity_terms);
+            all_terms.extend(required_anti_affinity_terms);
+            all_terms.extend(preferred_affinity_terms.iter().map(|w| w.pod_affinity_term.clone()));
+            all_terms.extend(preferred_anti_affinity_terms.iter().map(|w| w.pod_affinity_term.clone()));
+            
+            // Helper to check if a pod matches any term
+            let check_pod = |pod: &PodInfo| -> bool {
+                for term in &all_terms {
+                    if let Some(label_selector) = &term.label_selector
+                        && pod_matches_label_selector(pod, label_selector) {
+                            return true;
+                        }
+                }
+                false
+            };
+            
+            // Check if old pod matches
+            if let Some(old) = old_pod.as_ref()
+                && check_pod(old) {
+                    log::trace!("old pod matches label selector, need to re-evaluate");
+                    return Ok(QueueingHint::Queue);
+                }
+            
+            // Check if new pod matches
+            if let Some(new) = new_pod.as_ref()
+                && check_pod(new) {
+                    log::trace!("new pod matches label selector, need to re-evaluate");
+                    return Ok(QueueingHint::Queue);
+                }
+            
+            log::trace!("changed pod does not affect affinity rules, no need to queue");
+            Ok(QueueingHint::Skip)
         }
         EventInner::Node(_, _) => Err(format!(
             "event inner {event:?} not match event resource pod"
@@ -65,34 +103,49 @@ fn is_schedulable_after_node_change(
     event: EventInner,
 ) -> Result<QueueingHint, String> {
     match event {
-        EventInner::Node(_old_node, _new_node) => {
+        EventInner::Node(old_node, new_node) => {
             log::trace!(
                 "node label changed, checking if it affects pod {}'s affinity rules",
                 pod.name
             );
-            Ok(QueueingHint::Queue)
+            
+            let (
+                required_affinity_terms,
+                required_anti_affinity_terms,
+                preferred_affinity_terms,
+                preferred_anti_affinity_terms,
+            ) = extract_pod_affinity_terms(&pod);
+            
+            let mut topology_keys = std::collections::HashSet::new();
+            for term in &required_affinity_terms {
+                topology_keys.insert(term.topology_key.clone());
+            }
+            for term in &required_anti_affinity_terms {
+                topology_keys.insert(term.topology_key.clone());
+            }
+            for term in &preferred_affinity_terms {
+                topology_keys.insert(term.pod_affinity_term.topology_key.clone());
+            }
+            for term in &preferred_anti_affinity_terms {
+                topology_keys.insert(term.pod_affinity_term.topology_key.clone());
+            }
+            
+            for key in topology_keys {
+                let old_value = (*old_node).as_ref().and_then(|node| node.labels.get(&key));
+                let new_value = new_node.labels.get(&key);
+                if old_value != new_value {
+                    log::trace!("topology key {} changed from {:?} to {:?}, need to re-evaluate", key, old_value, new_value);
+                    return Ok(QueueingHint::Queue);
+                }
+            }
+            
+            log::trace!("node label change does not affect affinity rules, no need to queue");
+            Ok(QueueingHint::Skip)
         }
         EventInner::Pod(_, _) => Err(format!(
             "event inner {event:?} not match event resource node"
         )),
     }
-}
-
-/// Helper to group nodes by topology key
-fn group_nodes_by_topology_key(
-    nodes: &[NodeInfo],
-    topology_key: &str,
-) -> HashMap<String, Vec<NodeInfo>> {
-    let mut groups = HashMap::new();
-    for node in nodes {
-        if let Some(value) = node.labels.get(topology_key) {
-            groups
-                .entry(value.clone())
-                .or_insert_with(Vec::new)
-                .push(node.clone());
-        }
-    }
-    groups
 }
 
 /// Check if a pod matches label selector
@@ -145,14 +198,6 @@ fn pod_matches_label_selector(pod: &PodInfo, label_selector: &LabelSelector) -> 
 /// Get the node where a pod is scheduled or will be scheduled (via node_name)
 fn get_scheduled_node(pod: &PodInfo) -> Option<&str> {
     pod.scheduled.as_deref().or(pod.spec.node_name.as_deref())
-}
-
-/// Get all pods running on a node from cache
-/// This requires access to scheduler cache, which is not available in plugin context.
-/// We need to think about how to get this information.
-/// For now, we'll assume we have a way to get node's pods.
-fn get_pods_on_node(_node: &NodeInfo) -> Vec<PodInfo> {
-    vec![]
 }
 
 /// Extract pod affinity and anti-affinity terms from pod spec
@@ -231,8 +276,7 @@ fn get_matching_pods(pods: &[PodInfo], label_selector: &Option<LabelSelector>) -
 fn evaluate_required_pod_affinity_terms(
     node: &NodeInfo,
     terms: &[PodAffinityTerm],
-    all_pods: &[PodInfo],
-    node_topology_map: &HashMap<String, HashMap<String, String>>,
+    topology_pods_map: &HashMap<String, HashMap<String, Vec<PodInfo>>>,
     is_anti_affinity: bool,
 ) -> bool {
     if terms.is_empty() {
@@ -241,39 +285,42 @@ fn evaluate_required_pod_affinity_terms(
 
     // For each term, check if there's at least one matching pod in the same topology
     for term in terms {
-        let matching_pods = get_matching_pods(all_pods, &term.label_selector);
-        if matching_pods.is_empty() {
-            // No matching pods at all, this term is satisfied for anti-affinity
-            // but not satisfied for affinity
-            if !is_anti_affinity {
-                return false; // Affinity requires at least one matching pod
-            }
-            continue; // Anti-affinity is satisfied if no matching pods
-        }
-
-        // Check if any matching pod is in the same topology as this node
         let node_topology_value = node.labels.get(&term.topology_key);
-        let mut found_in_same_topology = false;
-
-        for pod in &matching_pods {
-            if let Some(scheduled_node) = get_scheduled_node(pod)
-                && let Some(node_topology) = node_topology_map.get(scheduled_node)
-                && let Some(pod_topology_value) = node_topology.get(&term.topology_key)
-                && node_topology_value == Some(pod_topology_value)
-            {
-                found_in_same_topology = true;
+        
+        // If node doesn't have the topology key, it cannot satisfy affinity/anti-affinity
+        if node_topology_value.is_none() {
+            if !is_anti_affinity {
+                return false; // Affinity requires node to have the topology key
+            }
+            // Anti-affinity: node missing topology key means no pods in same topology, so satisfied
+            continue;
+        }
+        let node_topology_value = node_topology_value.unwrap();
+        
+        // Get pods in the same topology value
+        let pods_in_same_topology = topology_pods_map
+            .get(&term.topology_key)
+            .and_then(|value_map| value_map.get(node_topology_value))
+            .map(|pods| pods.as_slice())
+            .unwrap_or(&[]);
+        
+        // Check if any pod in same topology matches the label selector
+        let mut found_matching_pod = false;
+        for pod in pods_in_same_topology {
+            if pod_matches_label_selector(pod, term.label_selector.as_ref().unwrap_or(&LabelSelector::default())) {
+                found_matching_pod = true;
                 break;
             }
         }
-
+        
         if is_anti_affinity {
             // Anti-affinity: should NOT have matching pods in same topology
-            if found_in_same_topology {
+            if found_matching_pod {
                 return false;
             }
         } else {
             // Affinity: should have at least one matching pod in same topology
-            if !found_in_same_topology {
+            if !found_matching_pod {
                 return false;
             }
         }
@@ -301,7 +348,7 @@ fn evaluate_preferred_pod_affinity_terms(
                 continue;
             } else {
                 // Anti-affinity: no matching pods is good, add weight
-                score += term.weight as i64;
+                score += i64::from(term.weight);
                 continue;
             }
         }
@@ -325,12 +372,12 @@ fn evaluate_preferred_pod_affinity_terms(
         if is_anti_affinity {
             // Anti-affinity: prefer nodes without matching pods in same topology
             if !found_in_same_topology {
-                score += term.weight as i64;
+                score += i64::from(term.weight);
             }
         } else {
             // Affinity: prefer nodes with matching pods in same topology
             if found_in_same_topology {
-                score += term.weight as i64;
+                score += i64::from(term.weight);
             }
         }
     }
@@ -345,6 +392,7 @@ struct PreFilterState {
     preferred_affinity_terms: Vec<WeightedPodAffinityTerm>,
     preferred_anti_affinity_terms: Vec<WeightedPodAffinityTerm>,
     node_topology_map: HashMap<String, HashMap<String, String>>, // node_name -> (topology_key -> value)
+    topology_pods_map: HashMap<String, HashMap<String, Vec<PodInfo>>>, // topology_key -> (topology_value -> pods)
 }
 
 #[derive(Clone, Debug)]
@@ -368,6 +416,51 @@ impl PreFilterPlugin for PodAffinityPlugin {
             preferred_anti_affinity_terms,
         ) = extract_pod_affinity_terms(pod);
 
+        for term in &required_affinity_terms {
+            if term.topology_key.is_empty() {
+                return (
+                    PreFilterResult { node_names: vec![] },
+                    Status::new(
+                        Code::UnschedulableAndUnresolvable,
+                        vec!["pod affinity term has empty topology key".to_string()],
+                    ),
+                );
+            }
+        }
+        for term in &required_anti_affinity_terms {
+            if term.topology_key.is_empty() {
+                return (
+                    PreFilterResult { node_names: vec![] },
+                    Status::new(
+                        Code::UnschedulableAndUnresolvable,
+                        vec!["pod anti-affinity term has empty topology key".to_string()],
+                    ),
+                );
+            }
+        }
+        for term in &preferred_affinity_terms {
+            if term.pod_affinity_term.topology_key.is_empty() {
+                return (
+                    PreFilterResult { node_names: vec![] },
+                    Status::new(
+                        Code::UnschedulableAndUnresolvable,
+                        vec!["preferred pod affinity term has empty topology key".to_string()],
+                    ),
+                );
+            }
+        }
+        for term in &preferred_anti_affinity_terms {
+            if term.pod_affinity_term.topology_key.is_empty() {
+                return (
+                    PreFilterResult { node_names: vec![] },
+                    Status::new(
+                        Code::UnschedulableAndUnresolvable,
+                        vec!["preferred pod anti-affinity term has empty topology key".to_string()],
+                    ),
+                );
+            }
+        }
+
         if required_affinity_terms.is_empty()
             && required_anti_affinity_terms.is_empty()
             && preferred_affinity_terms.is_empty()
@@ -381,12 +474,49 @@ impl PreFilterPlugin for PodAffinityPlugin {
 
         let node_topology_map = build_node_topology_map(&nodes);
 
+        let all_pods: Vec<PodInfo> = state
+            .read::<Vec<PodInfo>>("AllScheduledPods")
+            .cloned()
+            .unwrap_or_default();
+
+        let mut topology_keys = std::collections::HashSet::new();
+        for term in &required_affinity_terms {
+            topology_keys.insert(term.topology_key.clone());
+        }
+        for term in &required_anti_affinity_terms {
+            topology_keys.insert(term.topology_key.clone());
+        }
+        for term in &preferred_affinity_terms {
+            topology_keys.insert(term.pod_affinity_term.topology_key.clone());
+        }
+        for term in &preferred_anti_affinity_terms {
+            topology_keys.insert(term.pod_affinity_term.topology_key.clone());
+        }
+
+        let mut topology_pods_map: HashMap<String, HashMap<String, Vec<PodInfo>>> = HashMap::new();
+        for pod in &all_pods {
+            if let Some(scheduled_node) = get_scheduled_node(pod)
+                && let Some(node_topology) = node_topology_map.get(scheduled_node) {
+                    for topology_key in &topology_keys {
+                        if let Some(topology_value) = node_topology.get(topology_key) {
+                            topology_pods_map
+                                .entry(topology_key.clone())
+                                .or_default()
+                                .entry(topology_value.clone())
+                                .or_default()
+                                .push(pod.clone());
+                        }
+                    }
+                }
+        }
+
         let pre_filter_state = PreFilterState {
             required_affinity_terms,
             required_anti_affinity_terms,
             preferred_affinity_terms,
             preferred_anti_affinity_terms,
             node_topology_map,
+            topology_pods_map,
         };
 
         state.write("PreFilterPodAffinity", Box::new(pre_filter_state));
@@ -403,16 +533,10 @@ impl FilterPlugin for PodAffinityPlugin {
             None => return Status::default(),
         };
 
-        let all_pods: Vec<PodInfo> = state
-            .read::<Vec<PodInfo>>("AllScheduledPods")
-            .cloned()
-            .unwrap_or_default();
-
         let affinity_satisfied = evaluate_required_pod_affinity_terms(
             &node_info,
             &pre_filter_state.required_affinity_terms,
-            &all_pods,
-            &pre_filter_state.node_topology_map,
+            &pre_filter_state.topology_pods_map,
             false,
         );
 
@@ -426,8 +550,7 @@ impl FilterPlugin for PodAffinityPlugin {
         let anti_affinity_satisfied = evaluate_required_pod_affinity_terms(
             &node_info,
             &pre_filter_state.required_anti_affinity_terms,
-            &all_pods,
-            &pre_filter_state.node_topology_map,
+            &pre_filter_state.topology_pods_map,
             true,
         );
 
@@ -594,7 +717,6 @@ mod tests {
                 map
             })),
             topology_key: "zone".to_string(),
-            namespaces: None,
         };
 
         let weighted_term = WeightedPodAffinityTerm {
@@ -707,20 +829,19 @@ mod tests {
         let term = PodAffinityTerm {
             label_selector,
             topology_key: "zone".to_string(),
-            namespaces: None,
         };
 
-        // Build node topology map
-        let nodes = vec![node1.clone(), node2.clone()];
-        let node_topology_map = build_node_topology_map(&nodes);
+        // Build topology pods map for optimization
+        let mut topology_pods_map: HashMap<String, HashMap<String, Vec<PodInfo>>> = HashMap::new();
+        let mut zone_map = HashMap::new();
+        zone_map.insert("zone-a".to_string(), vec![existing_pod.clone()]);
+        topology_pods_map.insert("zone".to_string(), zone_map);
 
         // Test affinity: node1 should satisfy (has pod with app=web in same zone)
-        let all_pods = vec![existing_pod.clone()];
         let result = evaluate_required_pod_affinity_terms(
             &node1,
             &[term.clone()],
-            &all_pods,
-            &node_topology_map,
+            &topology_pods_map,
             false,
         );
         assert!(result, "Node1 should satisfy affinity term");
@@ -729,8 +850,7 @@ mod tests {
         let result = evaluate_required_pod_affinity_terms(
             &node2,
             &[term.clone()],
-            &all_pods,
-            &node_topology_map,
+            &topology_pods_map,
             false,
         );
         assert!(!result, "Node2 should not satisfy affinity term");
@@ -739,8 +859,7 @@ mod tests {
         let result = evaluate_required_pod_affinity_terms(
             &node1,
             &[term.clone()],
-            &all_pods,
-            &node_topology_map,
+            &topology_pods_map,
             true,
         );
         assert!(!result, "Node1 should not satisfy anti-affinity term");
@@ -749,8 +868,7 @@ mod tests {
         let result = evaluate_required_pod_affinity_terms(
             &node2,
             &[term],
-            &all_pods,
-            &node_topology_map,
+            &topology_pods_map,
             true,
         );
         assert!(result, "Node2 should satisfy anti-affinity term");
@@ -780,7 +898,6 @@ mod tests {
         let pod_affinity_term = PodAffinityTerm {
             label_selector,
             topology_key: "zone".to_string(),
-            namespaces: None,
         };
 
         let weighted_term = WeightedPodAffinityTerm {
@@ -847,7 +964,6 @@ mod tests {
         let pod_affinity_term = PodAffinityTerm {
             label_selector,
             topology_key: "zone".to_string(),
-            namespaces: None,
         };
 
         let pod_affinity = PodAffinity {
@@ -916,7 +1032,6 @@ mod tests {
         let pod_affinity_term = PodAffinityTerm {
             label_selector,
             topology_key: "zone".to_string(),
-            namespaces: None,
         };
 
         let weighted_term = WeightedPodAffinityTerm {

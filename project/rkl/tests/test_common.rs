@@ -60,6 +60,7 @@ where
             }],
             init_containers: vec![],
             tolerations: vec![],
+            affinity: None,
         },
         status: PodStatus {
             pod_ip: None,
