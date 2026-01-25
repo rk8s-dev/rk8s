@@ -1,15 +1,16 @@
 use common::RksMessage;
 use libcontainer::{container::Container, syscall::syscall::create_syscall};
+use libruntime::rootpath;
 use tracing::warn;
 use uuid::Uuid;
 
 use crate::{
     commands::pod::{PodInfo, TLSConnectionArgs},
-    quic::client::{Daemon, QUICClient},
-    rootpath,
+    quic::client::{Cli, QUICClient},
 };
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct Pod {
     pub id: Uuid,
     pub name: String,
@@ -20,12 +21,11 @@ pub struct Pod {
 
 impl Pod {
     pub fn get_container_by_id(&self, cid: &str) -> Option<&Container> {
-        for container in self.containers.iter().chain(self.sanboxes.iter()) {
-            if container.state.id == cid {
-                return Some(container);
-            }
-        }
-        None
+        self.containers
+            .iter()
+            .chain(self.sanboxes.iter())
+            .find(|container| container.state.id == cid)
+            .map(|c| c as _)
     }
 }
 
@@ -34,7 +34,7 @@ pub async fn get_pods(server_addr: &str, tls_cfg: &TLSConnectionArgs) -> anyhow:
     let root_path = rootpath::determine(None, &*create_syscall())?;
 
     // get pod list from rks server
-    let client = QUICClient::<Daemon>::connect(server_addr, tls_cfg).await?;
+    let client = QUICClient::<Cli>::connect(server_addr, tls_cfg).await?;
     client.send_msg(&RksMessage::ListPod).await?;
     let server_pods = match client.fetch_msg().await? {
         RksMessage::ListPodRes(pods) => pods,

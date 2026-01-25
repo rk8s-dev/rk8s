@@ -1,11 +1,12 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use tokio::sync::OnceCell;
 
 use tokio::time;
 
 use crate::commands::pod;
-use crate::daemon::probe::{build_probe_registrations, deregister_pod_probes, register_pod_probes};
+use crate::daemon::status::probe::probe_manager::PROBE_MANAGER;
 use crate::network::receiver::{NetworkConfigMessage, NetworkReceiver};
 use crate::task::TaskRunner;
 use chrono::Utc;
@@ -21,6 +22,8 @@ use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
 use sysinfo::{Disks, System};
 use tracing::{error, info, warn};
+
+pub static DAEMON_CLIENT: OnceCell<Arc<QUICClient<ClientDaemon>>> = OnceCell::const_new();
 
 fn get_subnet_file_path() -> String {
     if let Ok(path) = env::var("SUBNET_FILE_PATH") {
@@ -137,6 +140,9 @@ pub async fn run_once(
 
     let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string(), &tls_cfg).await?;
     info!("[worker] connected to RKS at {server_addr}");
+    DAEMON_CLIENT
+        .set(Arc::new(client.clone()))
+        .map_err(|_| anyhow::anyhow!("Failed to set DAEMON_CLIENT"))?;
 
     // register to rks by sending RegisterNode(Box<Node>)
     let register_msg = RksMessage::RegisterNode(Box::new(node.clone()));
@@ -262,26 +268,19 @@ pub async fn run_once(
                                 Ok(result) => {
                                     let pod_name = result.pod_task.metadata.name.clone();
 
-                                    match build_probe_registrations(
-                                        &result.pod_task,
-                                        &result.pod_ip,
-                                    ) {
-                                        Ok(registrations) => {
-                                            if let Err(err) =
-                                                register_pod_probes(&pod_name, registrations)
-                                            {
-                                                eprintln!(
-                                                    "[worker] registering probes for pod {} failed: {err:?}",
-                                                    pod_name
-                                                );
-                                            }
-                                        }
-                                        Err(err) => {
-                                            eprintln!(
-                                                "[worker] building probe registrations for pod {} failed: {err:?}",
-                                                pod_name
+                                    if let Some(pm) = PROBE_MANAGER.get() {
+                                        if let Err(e) =
+                                            pm.add_pod(&result.pod_task, &result.pod_ip).await
+                                        {
+                                            error!(
+                                                error = e.to_string(),
+                                                "[worker] failed to add probes for pod"
                                             );
+                                        } else {
+                                            info!("[worker] probes added for pod {}", pod_name);
                                         }
+                                    } else {
+                                        error!("[worker] PROBE_MANAGER not initialized");
                                     }
 
                                     let _ = client
@@ -309,10 +308,19 @@ pub async fn run_once(
                                     // panic or fail silently. Awaiting here surfaces errors and
                                     // ensures cleanup has finished when the controller receives
                                     // the acknowledgement.
-                                    info!(pod = %name, "deregistering probes for pod");
-                                    deregister_pod_probes(&name).await;
-                                    info!(pod = %name, "probes deregistered for pod");
-                                    let _ = client.send_msg(&RksMessage::Ack).await;
+                                    info!(pod = %name, "removing probes for pod");
+                                    if let Some(pm) = PROBE_MANAGER.get() {
+                                        pm.remove_pod(&name).await;
+                                        info!(pod = %name, "probes removed for pod");
+                                        let _ = client.send_msg(&RksMessage::Ack).await;
+                                    } else {
+                                        error!("[worker] PROBE_MANAGER not initialized");
+                                        let _ = client
+                                            .send_msg(&RksMessage::Error(format!(
+                                                "delete probe for pod {name} failed: PROBE_MANAGER not initialized"
+                                            )))
+                                            .await;
+                                    }
                                 }
                                 Err(e) => {
                                     error!("[worker] delete_pod failed: {e:?}");

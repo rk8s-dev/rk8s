@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use anyhow::{anyhow, bail};
 use dashmap::DashMap;
@@ -9,19 +9,8 @@ use uuid::Uuid;
 
 use crate::{
     commands::pod::TLSConnectionArgs,
-    daemon::status::{
-        cache::PodStatusCache,
-        pod::{Pod, get_pods},
-    },
+    daemon::status::pod::{Pod, get_pods},
 };
-
-const POD_LIFECYCLE_DETECT_INTERVAL_SECS: u64 = 10;
-
-#[derive(Debug, Clone)]
-struct RelistDuration {
-    relist_period: std::time::Duration,
-    relist_threshold: std::time::Duration,
-}
 
 #[derive(Debug, Clone)]
 struct PodRecord {
@@ -29,13 +18,12 @@ struct PodRecord {
     current_pod: Option<Arc<Pod>>,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 pub struct PLEG {
     rks_addr: String,
     tls_cfg: Arc<TLSConnectionArgs>,
-    pod_status_cache: Arc<PodStatusCache>,
     pod_records: Arc<DashMap<Uuid, PodRecord>>,
-    // pods_need_reinspect: Arc<DashMap<Uuid, ()>>,
-    relist_duration: RelistDuration,
+    relist_duration: Duration,
     relist_task_handle: Option<tokio::task::JoinHandle<()>>,
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<PodLifecycleEvent>>,
     stop_signal_tx: Option<tokio::sync::oneshot::Sender<()>>,
@@ -46,6 +34,7 @@ struct State {
     rks_addr: String,
     tls_cfg: Arc<TLSConnectionArgs>,
     pod_records: Arc<DashMap<Uuid, PodRecord>>,
+    relist_duration: Duration,
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<PodLifecycleEvent>>,
 }
 
@@ -77,23 +66,23 @@ pub struct PodLifecycleEvent {
 }
 
 impl PLEG {
-    pub fn new(rks_addr: String, tls_cfg: Arc<TLSConnectionArgs>) -> Self {
+    pub fn new(
+        rks_addr: String,
+        tls_cfg: Arc<TLSConnectionArgs>,
+        relist_duration: Duration,
+    ) -> Self {
         Self {
             rks_addr,
             tls_cfg,
-            pod_status_cache: Arc::new(PodStatusCache::new()),
             pod_records: Arc::new(DashMap::new()),
-            relist_duration: RelistDuration {
-                relist_period: std::time::Duration::from_secs(10),
-                relist_threshold: std::time::Duration::from_secs(30),
-            },
+            relist_duration,
             relist_task_handle: None,
             event_tx: None,
             stop_signal_tx: None,
         }
     }
 
-    pub fn start(&mut self) -> UnboundedReceiver<PodLifecycleEvent> {
+    pub fn run(&mut self) -> UnboundedReceiver<PodLifecycleEvent> {
         let (stop_signal_tx, mut stop_signal_rx) = tokio::sync::oneshot::channel();
         self.stop_signal_tx = Some(stop_signal_tx);
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -103,14 +92,12 @@ impl PLEG {
             rks_addr: self.rks_addr.clone(),
             tls_cfg: self.tls_cfg.clone(),
             pod_records: self.pod_records.clone(),
+            relist_duration: self.relist_duration,
             event_tx: self.event_tx.clone(),
         };
         self.relist_task_handle = Some(tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(
-                    POD_LIFECYCLE_DETECT_INTERVAL_SECS,
-                ))
-                .await;
+                tokio::time::sleep(state.relist_duration).await;
 
                 // Check for stop signal
                 // If received, break the loop and end the task
@@ -125,13 +112,13 @@ impl PLEG {
                         if let Ok(events) = relist(&mut state).await {
                             for event in events {
                                 tracing::info!(
-                                    "Detected pod lifecycle event: pod_uid={}, event_type={:?}, container_id={}",
+                                    "[pleg] Detected pod lifecycle event: pod_uid={}, event_type={:?}, container_id={}",
                                     event.pod_uid,
                                     event.event_type,
                                     event.container.id()
                                 );
                                 if let Err(e) = state.event_tx.as_ref().unwrap().send(event) {
-                                    tracing::error!("Failed to send pod lifecycle event: {:?}", e);
+                                    tracing::error!("[pleg] Failed to send pod lifecycle event: {:?}", e);
                                 }
                             }
                         }
@@ -152,8 +139,14 @@ impl PLEG {
     }
 }
 
+impl Drop for PLEG {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 async fn relist(state: &mut State) -> anyhow::Result<Vec<PodLifecycleEvent>> {
-    info!("Relisting pods for lifecycle events detection");
+    info!("[pleg] Relisting pods for lifecycle events detection");
 
     // get all pods from cri
     let pods = get_pods(&state.rks_addr, &state.tls_cfg)
@@ -161,11 +154,14 @@ async fn relist(state: &mut State) -> anyhow::Result<Vec<PodLifecycleEvent>> {
         .into_iter()
         .map(Arc::new)
         .collect::<Vec<_>>();
+    info!("[pleg] get {} pods", pods.len());
     // update cached pod records
     set_current_pod_records(&state.pod_records, &pods)?;
 
     let mut total_events = Vec::new();
+    // let mut updates = Vec::new();
     for entry in state.pod_records.iter() {
+        info!("[pleg] checking pod {:?}: {:?}", entry.key(), entry.value());
         let pod_id = *entry.key();
         let pod_record = entry.value();
 
@@ -193,10 +189,18 @@ async fn relist(state: &mut State) -> anyhow::Result<Vec<PodLifecycleEvent>> {
         } else {
             Vec::new()
         };
+
+        let mut seen_container_ids = HashSet::new();
         let all_containers = old_containers
             .into_iter()
             .chain(current_containers.into_iter())
+            .filter(|c| seen_container_ids.insert(c.state.id.clone()))
             .collect::<Vec<_>>();
+
+        info!(
+            "[pleg] all containers for pod {:?}: {:?}",
+            pod_id, all_containers
+        );
 
         let mut events = Vec::new();
         for container in all_containers {
@@ -204,18 +208,11 @@ async fn relist(state: &mut State) -> anyhow::Result<Vec<PodLifecycleEvent>> {
             let event = generate_event(&old_pod, &current_pod, cid)?;
             events.extend(event);
         }
+        info!("[pleg] generated events: {:?}", events);
 
         if events.is_empty() {
             continue;
         }
-
-        state.pod_records.insert(
-            pod_id,
-            PodRecord {
-                old_pod: current_pod.clone(),
-                current_pod: None,
-            },
-        );
 
         total_events.extend(events);
     }
@@ -227,6 +224,7 @@ fn generate_event(
     current_pod: &Option<Arc<Pod>>,
     cid: &str,
 ) -> anyhow::Result<Vec<PodLifecycleEvent>> {
+    info!("[pleg] Generating event for container id: {}", cid);
     let (pod_uid, pod_name) = if let Some(pod) = old_pod {
         (pod.id, pod.name.clone())
     } else if let Some(pod) = current_pod {
@@ -234,19 +232,23 @@ fn generate_event(
     } else {
         bail!("Both old and current pod are None");
     };
+    info!("[pleg] pod_uid: {}, pod_name: {}", pod_uid, pod_name);
 
-    let old_container = get_container(old_pod, cid).ok_or(anyhow!(
-        "
-        Cannot find container of {cid} in old pod
-    "
-    ))?;
-    let old_container_state = create_container_state(&old_container)?;
-    let current_container = get_container(current_pod, cid).ok_or(anyhow!(
-        "
-        Cannot find container of {cid} in current pod
-    "
-    ))?;
-    let current_container_state = create_container_state(&current_container)?;
+    let old_container = get_container(old_pod, cid);
+    let old_container_state = match old_container.as_ref() {
+        Some(container) => create_container_state(container)?,
+        None => ContainerState::NonExistent,
+    };
+    let current_container = get_container(current_pod, cid);
+    let current_container_state = match current_container.as_ref() {
+        Some(container) => create_container_state(container)?,
+        None => ContainerState::NonExistent,
+    };
+
+    info!(
+        "[pleg] old_container_state: {:?}, current_container_state: {:?}",
+        old_container_state, current_container_state
+    );
 
     if old_container_state == current_container_state {
         return Ok(Vec::new());
@@ -268,11 +270,15 @@ fn generate_event(
 
     let mut events = Vec::new();
     for et in event_type {
+        let container_for_event = current_container
+            .as_ref()
+            .or(old_container.as_ref())
+            .ok_or_else(|| anyhow!("Cannot find container {cid} in both old and current pod"))?;
         let event = PodLifecycleEvent {
             pod_uid,
             pod_name: pod_name.clone(),
             event_type: et,
-            container: current_container.clone(),
+            container: container_for_event.clone(),
         };
         events.push(event);
     }
@@ -310,6 +316,12 @@ fn set_current_pod_records(
                 current_pod: Some(pod.clone()),
             };
             pod_records.insert(pod_id, record);
+        }
+    }
+    for record in pod_records.iter() {
+        let pod_id = *record.key();
+        if !pods.iter().any(|p| p.id == pod_id) {
+            pod_records.remove(&pod_id);
         }
     }
 
@@ -385,6 +397,23 @@ mod tests {
         );
 
         let events = generate_event(&Some(old_pod), &Some(current_pod), "c1").unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event_type,
+            PodLifecycleEventType::ContainerStarted
+        );
+    }
+
+    #[test]
+    fn generate_event_reports_container_started_when_old_missing() {
+        let pod_id = Uuid::new_v4();
+        let current_pod = make_pod(
+            pod_id,
+            "pod-start",
+            vec![make_container("c1", container::ContainerStatus::Running)],
+        );
+
+        let events = generate_event(&None, &Some(current_pod), "c1").unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].event_type,

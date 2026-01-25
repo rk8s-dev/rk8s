@@ -1,0 +1,429 @@
+use std::{any::Any, path::Path, time::Duration};
+
+use libruntime::rootpath;
+use tokio::{
+    io::{AsyncReadExt as _, AsyncWriteExt as _},
+    net::TcpStream,
+};
+use uuid::Uuid;
+
+use crate::{
+    commands::pod::PodInfo,
+    commands::{Exec, exec},
+};
+use libcontainer::syscall::syscall::create_syscall;
+
+#[async_trait::async_trait]
+#[allow(unused)]
+pub trait Prober: Any {
+    async fn probe(&self) -> anyhow::Result<()>;
+    fn probe_kind(&self) -> ProbeKind;
+    fn config(&self) -> &ProbeConfig;
+    fn as_any(&self) -> &dyn Any;
+}
+
+/// Configuration shared by all probe types.
+#[derive(Clone, Debug)]
+pub struct ProbeConfig {
+    pub pod_id: Uuid,
+    pub pod_name: String,
+    pub container_name: String,
+    pub initial_delay: Duration,
+    pub period: Duration,
+    pub timeout: Duration,
+    pub success_threshold: u32,
+    pub failure_threshold: u32,
+}
+
+impl Default for ProbeConfig {
+    fn default() -> Self {
+        Self {
+            pod_id: Uuid::nil(),
+            pod_name: String::new(),
+            container_name: String::new(),
+            initial_delay: Duration::from_secs(0),
+            period: Duration::from_secs(10),
+            timeout: Duration::from_secs(1),
+            success_threshold: 1,
+            failure_threshold: 3,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+#[allow(unused)]
+pub enum ProbeKind {
+    Exec,
+    HttpGet,
+    TcpSocket,
+}
+
+pub struct ExecProber {
+    command: Vec<String>,
+    config: ProbeConfig,
+}
+
+pub struct HttpGetProber {
+    host: String,
+    port: u16,
+    path: String,
+    config: ProbeConfig,
+}
+
+pub struct TcpSocketProber {
+    host: String,
+    port: u16,
+    config: ProbeConfig,
+}
+
+impl ExecProber {
+    pub fn new(command: Vec<String>, config: ProbeConfig) -> Self {
+        Self { command, config }
+    }
+}
+
+fn resolve_container_id(root_path: &Path, config: &ProbeConfig) -> anyhow::Result<String> {
+    if !config.pod_id.is_nil() {
+        let pod_info = PodInfo::load(root_path, &config.pod_name)?;
+        if let Some(container_id) =
+            match_container_name(&config.container_name, &pod_info.container_names)
+        {
+            return Ok(container_id);
+        }
+
+        return Err(anyhow::anyhow!(
+            "container {} not found in pod {} (uid={})",
+            config.container_name,
+            config.pod_name,
+            config.pod_id
+        ));
+    }
+
+    let direct_path = root_path.join(&config.container_name);
+    if direct_path.exists() {
+        return Ok(config.container_name.clone());
+    }
+
+    Err(anyhow::anyhow!(
+        "container {} not found and pod {} could not be resolved",
+        config.container_name,
+        config.pod_id
+    ))
+}
+
+fn match_container_name(name: &str, candidates: &[String]) -> Option<String> {
+    if candidates.iter().any(|candidate| candidate == name) {
+        return Some(name.to_string());
+    }
+
+    let suffix = format!("-{name}");
+    candidates
+        .iter()
+        .find(|candidate| candidate.ends_with(&suffix))
+        .cloned()
+}
+
+#[async_trait::async_trait]
+impl Prober for ExecProber {
+    async fn probe(&self) -> anyhow::Result<()> {
+        if self.command.is_empty() {
+            return Err(anyhow::anyhow!("exec probe command cannot be empty"));
+        }
+
+        let root_path = rootpath::determine(None, &*create_syscall())?;
+        let container_id = resolve_container_id(&root_path, &self.config)?;
+        let command = self.command.clone();
+
+        let exec_args = Exec {
+            pod_name: Some(self.config.pod_name.clone()),
+            container_id: container_id.clone(),
+            command,
+            console_socket: None,
+            cwd: None,
+            env: Vec::new(),
+            tty: false,
+            user: None,
+            additional_gids: Vec::new(),
+            process: None,
+            detach: false,
+            pid_file: None,
+            process_label: None,
+            apparmor: None,
+            no_new_privs: false,
+            cap: Vec::new(),
+            preserve_fds: 0,
+            ignore_paused: false,
+            cgroup: None,
+        };
+
+        let exit_code = exec(exec_args, root_path)
+            .map_err(|e| anyhow::anyhow!("exec probe join error: {e}"))?;
+
+        if exit_code == 0 {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "exec probe failed for container {container_id} with status {exit_code}"
+            ))
+        }
+    }
+
+    fn probe_kind(&self) -> ProbeKind {
+        ProbeKind::Exec
+    }
+
+    fn config(&self) -> &ProbeConfig {
+        &self.config
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[allow(unused)]
+impl HttpGetProber {
+    pub fn new(host: String, port: u16, path: String, config: ProbeConfig) -> Self {
+        Self {
+            host,
+            port,
+            path,
+            config,
+        }
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+}
+
+#[async_trait::async_trait]
+impl Prober for HttpGetProber {
+    async fn probe(&self) -> anyhow::Result<()> {
+        let addr = format!("{}:{}", self.host, self.port);
+        let mut stream = TcpStream::connect(&addr).await?;
+
+        let request = format!(
+            "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: rkl-probe/0.1\r\nConnection: close\r\n\r\n",
+            self.path, self.host
+        );
+
+        stream.write_all(request.as_bytes()).await?;
+
+        // Use a conservative buffer size that accommodates typical HTTP status lines
+        // and essential headers. Probe responses should be minimal - we only need
+        // the status line to determine health.
+        const HTTP_PROBE_BUFFER_SIZE: usize = 512;
+
+        let mut buf = vec![0u8; HTTP_PROBE_BUFFER_SIZE];
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            return Err(anyhow::anyhow!("http probe received empty response"));
+        }
+
+        let response = std::str::from_utf8(&buf[..n])?;
+        if response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200") {
+            Ok(())
+        } else {
+            let line = response.lines().next().unwrap_or("");
+            Err(anyhow::anyhow!("http probe non-success status: {line}"))
+        }
+    }
+
+    fn probe_kind(&self) -> ProbeKind {
+        ProbeKind::HttpGet
+    }
+
+    fn config(&self) -> &ProbeConfig {
+        &self.config
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[allow(unused)]
+impl TcpSocketProber {
+    pub fn new(host: String, port: u16, config: ProbeConfig) -> Self {
+        Self { host, port, config }
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+#[async_trait::async_trait]
+impl Prober for TcpSocketProber {
+    async fn probe(&self) -> anyhow::Result<()> {
+        let addr = format!("{}:{}", self.host, self.port);
+        let mut stream = TcpStream::connect(&addr).await?;
+        stream.shutdown().await?;
+
+        Ok(())
+    }
+
+    fn probe_kind(&self) -> ProbeKind {
+        ProbeKind::TcpSocket
+    }
+
+    fn config(&self) -> &ProbeConfig {
+        &self.config
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+    use uuid::Uuid;
+
+    fn write_pod_info(root: &Path, pod_name: &str, containers: &[&str]) {
+        let pods_dir = root.join("pods");
+        fs::create_dir_all(&pods_dir).expect("create pods dir");
+
+        let mut contents = String::from("PodSandbox ID: sandbox\n");
+        for name in containers {
+            contents.push_str(&format!("- {name}\n"));
+        }
+        fs::write(pods_dir.join(pod_name), contents).expect("write pod info");
+    }
+
+    #[test]
+    fn match_container_name_exact_match() {
+        let candidates = vec!["app".to_string(), "sidecar".to_string()];
+        let matched = match_container_name("app", &candidates);
+        assert_eq!(matched, Some("app".to_string()));
+    }
+
+    #[test]
+    fn match_container_name_suffix_match() {
+        let candidates = vec!["pod-app".to_string(), "pod-sidecar".to_string()];
+        let matched = match_container_name("app", &candidates);
+        assert_eq!(matched, Some("pod-app".to_string()));
+    }
+
+    #[test]
+    fn resolve_container_id_from_pod_info() {
+        let dir = tempdir().expect("tempdir");
+        write_pod_info(dir.path(), "demo", &["pod-app", "pod-sidecar"]);
+
+        let config = ProbeConfig {
+            pod_id: Uuid::new_v4(),
+            pod_name: "demo".to_string(),
+            container_name: "app".to_string(),
+            ..Default::default()
+        };
+        let container_id = resolve_container_id(dir.path(), &config).expect("resolve");
+        assert_eq!(container_id, "pod-app");
+    }
+
+    #[test]
+    fn resolve_container_id_from_direct_path() {
+        let dir = tempdir().expect("tempdir");
+        let direct = dir.path().join("container-123");
+        fs::create_dir_all(&direct).expect("create container dir");
+
+        let config = ProbeConfig {
+            pod_id: Uuid::nil(),
+            pod_name: "ignored".to_string(),
+            container_name: "container-123".to_string(),
+            ..Default::default()
+        };
+        let container_id = resolve_container_id(dir.path(), &config).expect("resolve");
+        assert_eq!(container_id, "container-123");
+    }
+
+    #[test]
+    fn resolve_container_id_errors_when_missing() {
+        let dir = tempdir().expect("tempdir");
+        let config = ProbeConfig {
+            pod_id: Uuid::nil(),
+            pod_name: "missing".to_string(),
+            container_name: "nope".to_string(),
+            ..Default::default()
+        };
+        assert!(resolve_container_id(dir.path(), &config).is_err());
+    }
+
+    #[test]
+    fn resolve_container_id_errors_when_pod_info_missing() {
+        let dir = tempdir().expect("tempdir");
+        let config = ProbeConfig {
+            pod_id: Uuid::new_v4(),
+            pod_name: "missing".to_string(),
+            container_name: "app".to_string(),
+            ..Default::default()
+        };
+        assert!(resolve_container_id(dir.path(), &config).is_err());
+    }
+
+    #[test]
+    fn resolve_container_id_errors_when_container_not_in_pod_info() {
+        let dir = tempdir().expect("tempdir");
+        write_pod_info(dir.path(), "demo", &["pod-sidecar"]);
+
+        let config = ProbeConfig {
+            pod_id: Uuid::new_v4(),
+            pod_name: "demo".to_string(),
+            container_name: "app".to_string(),
+            ..Default::default()
+        };
+        assert!(resolve_container_id(dir.path(), &config).is_err());
+    }
+
+    #[tokio::test]
+    async fn exec_prober_empty_command_errors() {
+        let prober = ExecProber::new(Vec::new(), ProbeConfig::default());
+        let result = prober.probe().await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn exec_prober_stores_command() {
+        let command = vec!["/bin/true".to_string()];
+        let prober = ExecProber::new(command.clone(), ProbeConfig::default());
+        assert_eq!(prober.command, command);
+        assert!(matches!(prober.probe_kind(), ProbeKind::Exec));
+    }
+
+    #[test]
+    fn http_get_prober_stores_fields() {
+        let prober = HttpGetProber::new(
+            "127.0.0.1".to_string(),
+            8080,
+            "/health".to_string(),
+            ProbeConfig::default(),
+        );
+        assert_eq!(prober.host, "127.0.0.1");
+        assert_eq!(prober.port, 8080);
+        assert_eq!(prober.path, "/health");
+        assert!(matches!(prober.probe_kind(), ProbeKind::HttpGet));
+    }
+
+    #[test]
+    fn tcp_socket_prober_stores_fields() {
+        let prober = TcpSocketProber::new("127.0.0.1".to_string(), 9090, ProbeConfig::default());
+        assert_eq!(prober.host, "127.0.0.1");
+        assert_eq!(prober.port, 9090);
+        assert!(matches!(prober.probe_kind(), ProbeKind::TcpSocket));
+    }
+}

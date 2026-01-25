@@ -1,11 +1,11 @@
 pub mod client;
 pub mod pod_worker;
-pub mod probe;
+// pub mod probe;
 pub mod static_pods;
 pub mod status;
 pub mod sync_loop;
 
-use std::{env, sync::Arc};
+use std::{env, sync::Arc, time::Duration};
 
 //mod status_access;
 use crate::{
@@ -14,6 +14,7 @@ use crate::{
         pod_worker::PodWorker,
         status::{
             pleg::PLEG,
+            probe::probe_manager::{PROBE_MANAGER, ProbeManager},
             status_manager::{STATUS_MANAGER, StatusManager},
         },
     },
@@ -39,19 +40,35 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
             let server_addr: String =
                 env::var("RKS_ADDRESS").unwrap_or_else(|_| "192.168.73.128:50051".to_string());
             tokio::spawn(async move {
+                let mut status_manager =
+                    StatusManager::try_new(server_addr.clone(), tls_cfg.clone())
+                        .await
+                        .expect("Failed to construct StatusManager");
+                status_manager.run();
+                let status_manager = Arc::new(status_manager);
                 STATUS_MANAGER
-                    .get_or_init(|| async {
-                        Arc::new(
-                            StatusManager::try_new(server_addr.clone(), tls_cfg.clone())
-                                .await
-                                .expect("Failed to construct StatusManager"),
-                        )
-                    })
-                    .await;
-                let mut pleg = PLEG::new(server_addr.clone(), tls_cfg.clone());
-                let pleg_event_rx = pleg.start();
-                let mut pod_worker =
-                    PodWorker::new(server_addr.clone(), tls_cfg.clone(), pleg_event_rx);
+                    .set(status_manager.clone())
+                    .expect("failed to set global STATUS_MANAGER");
+
+                let mut pleg = PLEG::new(
+                    server_addr.clone(),
+                    tls_cfg.clone(),
+                    Duration::from_secs(10),
+                );
+                let pleg_event_rx = pleg.run();
+
+                let probe_manager = Arc::new(ProbeManager::new());
+                if PROBE_MANAGER.set(probe_manager.clone()).is_err() {
+                    panic!("[daemon] failed to set global PROBE_MANAGER");
+                }
+
+                let mut pod_worker = PodWorker::new(
+                    server_addr.clone(),
+                    tls_cfg.clone(),
+                    pleg_event_rx,
+                    probe_manager.clone(),
+                    status_manager.clone(),
+                );
                 pod_worker.run();
 
                 let sync_loop = SyncLoop::default().register_event(static_pods::handler);

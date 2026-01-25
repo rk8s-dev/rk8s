@@ -12,17 +12,15 @@ use uuid::Uuid;
 
 use crate::{
     commands::pod::TLSConnectionArgs,
-    daemon::{
-        status::get_pod_by_uid,
-        sync_loop::{Event, WithEvent},
-    },
-    quic::client::{Daemon, QUICClient},
+    daemon::status::get_pod_by_uid,
+    quic::client::{Cli, QUICClient},
 };
 
 const SYNC_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub static STATUS_MANAGER: OnceCell<Arc<StatusManager>> = OnceCell::const_new();
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 struct VersionedPodStatus {
     version: u64,
@@ -47,15 +45,21 @@ impl Default for VersionedPodStatus {
 }
 
 pub struct StatusManager {
-    client: QUICClient<Daemon>,
+    client: QUICClient<Cli>,
     pod_statuses: Arc<DashMap<Uuid, VersionedPodStatus>>,
     pod_status_update_signal: Arc<Notify>,
     api_status_versions: Arc<DashMap<Uuid, u64>>,
     sync_loop_handle: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
 }
 
+impl std::fmt::Debug for StatusManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StatusManager").finish()
+    }
+}
+
 struct State {
-    client: QUICClient<Daemon>,
+    client: QUICClient<Cli>,
     pod_statuses: Arc<DashMap<Uuid, VersionedPodStatus>>,
     pod_status_update_signal: Arc<Notify>,
     api_status_versions: Arc<DashMap<Uuid, u64>>,
@@ -66,7 +70,7 @@ impl StatusManager {
         server_addr: String,
         tls_cfg: Arc<TLSConnectionArgs>,
     ) -> anyhow::Result<Self> {
-        let client = QUICClient::<Daemon>::connect(&server_addr, &tls_cfg).await?;
+        let client = QUICClient::<Cli>::connect(&server_addr, &tls_cfg).await?;
         let pod_statuses = Arc::new(DashMap::new());
         let pod_status_update_signal = Arc::new(Notify::new());
         let api_status_versions = Arc::new(DashMap::new());
@@ -79,8 +83,8 @@ impl StatusManager {
         })
     }
 
-    pub async fn start(&mut self) -> anyhow::Result<()> {
-        info!("Starting to sync pod status with rks.");
+    pub fn run(&mut self) {
+        info!("[StatusManager] Starting to sync pod status to rks.");
 
         let state = Arc::new(State {
             client: self.client.clone(),
@@ -95,29 +99,27 @@ impl StatusManager {
                 tokio::select! {
                     _ = state.pod_status_update_signal.notified() => {
                         // Sync on-demand
-                        info!("Syncing updated pod status.");
+                        info!("[StatusManager] Syncing updated pod status.");
                         if let Err(e) = sync_batch(&state, false).await {
-                            error!("Failed to sync updated pod statuses: {e}");
+                            error!("[StatusManager] Failed to sync updated pod statuses: {e}");
                         }
                     }
                     _ = ticker.tick() => {
                         // Periodic sync all
-                        info!("Syncing all pod statuses.");
+                        info!("[StatusManager] Syncing all pod statuses.");
                         if let Err(e) = sync_batch(&state, true).await {
-                            error!("Failed to sync all pod statuses: {e}");
+                            error!("[StatusManager] Failed to sync all pod statuses: {e}");
                         }
                     }
                 }
             }
         }));
-        Ok(())
     }
 
-    fn stop(&mut self) -> anyhow::Result<()> {
+    fn stop(&mut self) {
         if let Some(handle) = self.sync_loop_handle.take() {
             handle.abort();
         }
-        Ok(())
     }
 
     pub async fn set_pod_status(&self, pod: &PodTask, status: &PodStatus) -> anyhow::Result<()> {
@@ -141,11 +143,15 @@ impl StatusManager {
         container_name: &str,
         is_ready: bool,
     ) -> anyhow::Result<()> {
+        info!(
+            "[StatusManager] Setting container '{}' readiness to {}",
+            container_name, is_ready
+        );
         let pod = match get_pod_by_uid(&self.client, &pod_uid).await? {
             Some(p) => p,
             None => {
                 info!(
-                    "Pod with UID '{}' not found on rks, skipping container readiness update.",
+                    "[StatusManager] Pod with UID '{}' not found on rks, skipping container readiness update.",
                     pod_uid
                 );
                 return Ok(());
@@ -158,7 +164,7 @@ impl StatusManager {
         };
 
         if !is_cached {
-            info!("Container readiness changed before pod has synced",);
+            info!("[StatusManager] Container readiness changed before pod has synced",);
             return Ok(());
         }
 
@@ -170,7 +176,7 @@ impl StatusManager {
 
         if container_status.is_none() {
             info!(
-                "Container '{}' not found in pod '{}', skipping container readiness update.",
+                "[StatusManager] Container '{}' not found in pod '{}', skipping container readiness update.",
                 container_name, cached_status.pod_name
             );
             return Ok(());
@@ -180,7 +186,7 @@ impl StatusManager {
 
         if container_status.ready == is_ready {
             info!(
-                "Container readiness for '{}' already set to {}, skipping update.",
+                "[StatusManager] Container readiness for '{}' already set to {}, skipping update.",
                 container_name, is_ready
             );
             return Ok(());
@@ -248,7 +254,7 @@ impl StatusManager {
 
         if let Err(e) = check_container_status_transition(&old_status, &status, &pod.spec) {
             error!(
-                "Illegal container status transition detected for pod '{}': {e}",
+                "[StatusManager] Illegal container status transition detected for pod '{}': {e}",
                 pod.metadata.name
             );
             return Ok(());
@@ -266,8 +272,12 @@ impl StatusManager {
             status.start_time = Some(start_time);
         }
 
-        //
         if is_cached && is_status_owned_by_rkl_equal(&old_status, &status) && !force_update {
+            info!(
+                "[StatusManager] Pod '{}' status unchanged, skipping update.",
+                pod.metadata.name
+            );
+
             return Ok(());
         }
 
@@ -284,6 +294,11 @@ impl StatusManager {
             },
         };
 
+        info!(
+            "[StatusManager] Pod '{}' status updated to version {}: {:?}.",
+            pod.metadata.name, new_status.version, new_status.status
+        );
+
         // Update the status in the cache.
         self.pod_statuses.insert(pod_uid, new_status);
 
@@ -295,7 +310,7 @@ impl StatusManager {
 
 impl Drop for StatusManager {
     fn drop(&mut self) {
-        let _ = self.stop();
+        self.stop();
     }
 }
 
@@ -322,6 +337,10 @@ async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
             if let Some(api_version) = state.api_status_versions.get(&pod_uid)
                 && *api_version.value() >= pod_status.version
             {
+                info!(
+                    "[StatusManager] Pod '{}' status version {} already synced, skipping.",
+                    pod_status.pod_name, pod_status.version
+                );
                 continue;
             }
 
@@ -357,7 +376,7 @@ async fn sync_pod(
         Some(p) => p,
         None => {
             info!(
-                "Pod with UID '{}' not found on server, skipping status sync.",
+                "[StatusManager] Pod with UID '{}' not found on server, skipping status sync.",
                 pod_uid
             );
             return Ok(());
@@ -384,7 +403,7 @@ async fn sync_pod(
 }
 
 async fn update_pod_status(
-    client: &QUICClient<Daemon>,
+    client: &QUICClient<Cli>,
     pod_name: &str,
     pod_namespace: &str,
     pod_status: &PodStatus,
@@ -400,12 +419,12 @@ async fn update_pod_status(
     match client.fetch_msg().await? {
         RksMessage::Ack => Ok(()),
         RksMessage::Error(err_msg) => Err(anyhow::anyhow!(
-            "Failed to upload pod status for '{}': {}",
+            "[StatusManager] Failed to upload pod status for '{}': {}",
             pod_name,
             err_msg
         )),
         _ => Err(anyhow::anyhow!(
-            "Unexpected response when uploading pod status for '{}'",
+            "[StatusManager] Unexpected response when uploading pod status for '{}'",
             pod_name
         )),
     }
@@ -564,10 +583,11 @@ fn check_container_status_transition(
     }
 
     for old_status in &old_status.container_statuses {
-        if let Some(ContainerState::Terminated { exit_code, .. }) = old_status.state
-            && exit_code != 0
-            && pod_spec.restart_policy == RestartPolicy::OnFailure
-        {
+        let Some(ContainerState::Terminated { exit_code, .. }) = old_status.state else {
+            continue;
+        };
+
+        if exit_code != 0 && pod_spec.restart_policy == RestartPolicy::OnFailure {
             continue;
         }
 
@@ -741,6 +761,7 @@ fn is_status_owned_by_rkl_equal(old_status: &PodStatus, status: &PodStatus) -> b
     old_copy == *status
 }
 
+#[allow(unused)]
 fn find_container_status<'a>(
     status: &'a PodStatus,
     container_name: &str,
