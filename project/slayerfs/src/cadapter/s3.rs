@@ -1,7 +1,7 @@
 //! S3 adapter: simplified aws-sdk-s3 implementation with multipart upload, retries, and validation.
 
 use crate::cadapter::client::ObjectBackend;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::error::SdkError;
@@ -235,7 +235,10 @@ impl S3Backend {
 
             let fut = async move {
                 // Concurrency control
-                let _permit = sem_cloned.acquire_owned().await.unwrap();
+                let _permit = sem_cloned
+                    .acquire_owned()
+                    .await
+                    .with_context(|| "Multipart upload semaphore closed unexpectedly");
                 let mut attempt = 0;
 
                 loop {
@@ -375,7 +378,7 @@ impl S3Backend {
             let retry_base_delay = self.config.retry_base_delay;
 
             let fut = async move {
-                let _permit = sem_cloned.acquire_owned().await.unwrap();
+                let _permit = sem_cloned.acquire_owned().await;
                 let mut attempt = 0;
 
                 loop {

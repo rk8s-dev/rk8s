@@ -97,7 +97,13 @@ impl SliceState {
     }
 
     pub(crate) fn can_append(&self, offset: u32) -> bool {
-        matches!(self.state, SliceStatus::Writeable) && self.data.can_append(offset)
+        if !matches!(self.state, SliceStatus::Writeable) || offset < self.offset {
+            return false;
+        }
+
+        // For this function, the `offset` is relative to the chunk start,
+        // whereas in `CacheSlice.append`, it is relative to the slice start.
+        self.data.can_append(offset - self.offset)
     }
 }
 
@@ -152,8 +158,17 @@ where
         self.with_ref(|s| s.can_append(offset))
     }
 
-    fn append(&self, buf: &[u8]) -> anyhow::Result<()> {
-        self.with_mut(|s| s.append(buf))
+    /// Check whether the slice is appendable and append buf atomically.
+    /// The offset is relative to chunk start.
+    fn try_append(&self, offset: u32, buf: &[u8]) -> anyhow::Result<bool> {
+        self.with_mut(|s| {
+            if !s.can_append(offset) {
+                return Ok(false);
+            }
+
+            s.append(buf)?;
+            Ok(true)
+        })
     }
 
     fn freeze(&self) -> bool {
@@ -218,13 +233,14 @@ where
         })
     }
 
-    fn snapshot_for_flush(&self) -> Option<(u64, u32, Vec<Bytes>, Option<u64>)> {
+    #[allow(clippy::type_complexity)]
+    fn snapshot_for_flush(&self) -> anyhow::Result<Option<(u64, u32, Vec<Bytes>, Option<u64>)>> {
         self.with_ref(|s| {
             if s.data.len() == 0 {
-                return None;
+                return Ok(None);
             }
-            let data = s.data.collect_pages();
-            Some((s.chunk_id, s.offset, data, s.slice_id))
+            let data = s.data.collect_pages()?;
+            Ok(Some((s.chunk_id, s.offset, data, s.slice_id)))
         })
     }
 
@@ -384,18 +400,45 @@ where
 
     // Append data to a writable slice. If the slice reaches chunk end, freeze + flush it.
     fn write_at(&mut self, offset: u32, buf: &[u8]) -> anyhow::Result<WriteAction> {
-        let (slice, mut action) = self.find_slice_or_create(offset, buf.len())?;
-        let handle = SliceHandle {
-            slice: &slice,
-            shared: self.shared,
-        };
+        let mut start_commit = false;
+        let mut flush = Vec::new();
 
-        handle.append(buf)?;
+        // There is a potential race condition in the time window between `find_slice_or_create` and `try_append`.
+        // `find_slice_or_create` checks and returns a slice that can be appended, but after it selects the slice,
+        // it releases the lock. `auto_flush` and `commit_chunk` can freeze a slice without holding the lock,
+        // so when handle trying appending buf, the slice may have become readonly. This is highly unlikely to happen,
+        // therefore, it is ok to retry until success.
+        let mut failed_cnt = 0;
+        loop {
+            let (slice, action) = self.find_slice_or_create(offset, buf.len())?;
+            start_commit |= action.start_commit;
+            flush.extend(action.flush);
 
-        if handle.should_freeze() && handle.freeze() {
-            action.flush.push(slice);
+            let handle = SliceHandle {
+                slice: &slice,
+                shared: self.shared,
+            };
+
+            if handle.try_append(offset, buf)? {
+                if handle.should_freeze() && handle.freeze() {
+                    flush.push(slice);
+                }
+                return Ok(WriteAction {
+                    start_commit,
+                    flush,
+                });
+            }
+
+            failed_cnt += 1;
+            if failed_cnt >= 10 {
+                warn!(
+                    chunk_id = self.chunk_id,
+                    offset,
+                    len = buf.len(),
+                    "write_at retried {failed_cnt} times due to concurrent slice freezing"
+                );
+            }
         }
-        Ok(action)
     }
 }
 
@@ -522,8 +565,8 @@ where
 
             let mut handle = guard.chunk_handle(&self.shared, ckey);
 
-            // This is the last missing piece of zero-copy.
-            // There is a copy operation when appending the user-provide buf to the page cache.
+            // This is the last missing piece of the attempt to implement real zero-copy.
+            // There is a copy operation when appending the user-provided buf to the page cache.
             // However, the buf is a byte slice, meaning that it is impossible to get the data with ownership
             // unless "clone" it. So this copy seems to be inevitable.
             // Alternatively, the API signature could be modified or added to request "Bytes" from users. However,
@@ -650,12 +693,19 @@ where
                 slice: &slice,
                 shared: &shared,
             };
-            let snapshot = handle.snapshot_for_flush();
-
-            let Some((chunk_id, offset, data, slice_id)) = snapshot else {
-                handle.mark_uploaded();
-                return;
+            let snapshot = match handle.snapshot_for_flush() {
+                Ok(Some(snapshot)) => snapshot,
+                Ok(None) => {
+                    handle.mark_uploaded();
+                    return;
+                }
+                Err(err) => {
+                    handle.mark_failed(err);
+                    return;
+                }
             };
+
+            let (chunk_id, offset, data, slice_id) = snapshot;
             let data_len: usize = data.iter().map(|b| b.len()).sum();
 
             let sid = match slice_id {
