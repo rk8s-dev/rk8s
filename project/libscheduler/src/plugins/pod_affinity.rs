@@ -50,45 +50,56 @@ fn is_schedulable_after_pod_change(
                 "pod changed, checking if it affects pod {}'s affinity rules",
                 pod.name
             );
-            
+
             let (
                 required_affinity_terms,
                 required_anti_affinity_terms,
                 preferred_affinity_terms,
                 preferred_anti_affinity_terms,
             ) = extract_pod_affinity_terms(&pod);
-            
+
             let mut all_terms = Vec::new();
             all_terms.extend(required_affinity_terms);
             all_terms.extend(required_anti_affinity_terms);
-            all_terms.extend(preferred_affinity_terms.iter().map(|w| w.pod_affinity_term.clone()));
-            all_terms.extend(preferred_anti_affinity_terms.iter().map(|w| w.pod_affinity_term.clone()));
-            
+            all_terms.extend(
+                preferred_affinity_terms
+                    .iter()
+                    .map(|w| w.pod_affinity_term.clone()),
+            );
+            all_terms.extend(
+                preferred_anti_affinity_terms
+                    .iter()
+                    .map(|w| w.pod_affinity_term.clone()),
+            );
+
             // Helper to check if a pod matches any term
             let check_pod = |pod: &PodInfo| -> bool {
                 for term in &all_terms {
                     if let Some(label_selector) = &term.label_selector
-                        && pod_matches_label_selector(pod, label_selector) {
-                            return true;
-                        }
+                        && pod_matches_label_selector(pod, label_selector)
+                    {
+                        return true;
+                    }
                 }
                 false
             };
-            
+
             // Check if old pod matches
             if let Some(old) = old_pod.as_ref()
-                && check_pod(old) {
-                    log::trace!("old pod matches label selector, need to re-evaluate");
-                    return Ok(QueueingHint::Queue);
-                }
-            
+                && check_pod(old)
+            {
+                log::trace!("old pod matches label selector, need to re-evaluate");
+                return Ok(QueueingHint::Queue);
+            }
+
             // Check if new pod matches
             if let Some(new) = new_pod.as_ref()
-                && check_pod(new) {
-                    log::trace!("new pod matches label selector, need to re-evaluate");
-                    return Ok(QueueingHint::Queue);
-                }
-            
+                && check_pod(new)
+            {
+                log::trace!("new pod matches label selector, need to re-evaluate");
+                return Ok(QueueingHint::Queue);
+            }
+
             log::trace!("changed pod does not affect affinity rules, no need to queue");
             Ok(QueueingHint::Skip)
         }
@@ -108,14 +119,14 @@ fn is_schedulable_after_node_change(
                 "node label changed, checking if it affects pod {}'s affinity rules",
                 pod.name
             );
-            
+
             let (
                 required_affinity_terms,
                 required_anti_affinity_terms,
                 preferred_affinity_terms,
                 preferred_anti_affinity_terms,
             ) = extract_pod_affinity_terms(&pod);
-            
+
             let mut topology_keys = std::collections::HashSet::new();
             for term in &required_affinity_terms {
                 topology_keys.insert(term.topology_key.clone());
@@ -129,16 +140,21 @@ fn is_schedulable_after_node_change(
             for term in &preferred_anti_affinity_terms {
                 topology_keys.insert(term.pod_affinity_term.topology_key.clone());
             }
-            
+
             for key in topology_keys {
                 let old_value = (*old_node).as_ref().and_then(|node| node.labels.get(&key));
                 let new_value = new_node.labels.get(&key);
                 if old_value != new_value {
-                    log::trace!("topology key {} changed from {:?} to {:?}, need to re-evaluate", key, old_value, new_value);
+                    log::trace!(
+                        "topology key {} changed from {:?} to {:?}, need to re-evaluate",
+                        key,
+                        old_value,
+                        new_value
+                    );
                     return Ok(QueueingHint::Queue);
                 }
             }
-            
+
             log::trace!("node label change does not affect affinity rules, no need to queue");
             Ok(QueueingHint::Skip)
         }
@@ -286,7 +302,7 @@ fn evaluate_required_pod_affinity_terms(
     // For each term, check if there's at least one matching pod in the same topology
     for term in terms {
         let node_topology_value = node.labels.get(&term.topology_key);
-        
+
         // If node doesn't have the topology key, it cannot satisfy affinity/anti-affinity
         if node_topology_value.is_none() {
             if !is_anti_affinity {
@@ -296,23 +312,28 @@ fn evaluate_required_pod_affinity_terms(
             continue;
         }
         let node_topology_value = node_topology_value.unwrap();
-        
+
         // Get pods in the same topology value
         let pods_in_same_topology = topology_pods_map
             .get(&term.topology_key)
             .and_then(|value_map| value_map.get(node_topology_value))
             .map(|pods| pods.as_slice())
             .unwrap_or(&[]);
-        
+
         // Check if any pod in same topology matches the label selector
         let mut found_matching_pod = false;
         for pod in pods_in_same_topology {
-            if pod_matches_label_selector(pod, term.label_selector.as_ref().unwrap_or(&LabelSelector::default())) {
+            if pod_matches_label_selector(
+                pod,
+                term.label_selector
+                    .as_ref()
+                    .unwrap_or(&LabelSelector::default()),
+            ) {
                 found_matching_pod = true;
                 break;
             }
         }
-        
+
         if is_anti_affinity {
             // Anti-affinity: should NOT have matching pods in same topology
             if found_matching_pod {
@@ -496,18 +517,19 @@ impl PreFilterPlugin for PodAffinityPlugin {
         let mut topology_pods_map: HashMap<String, HashMap<String, Vec<PodInfo>>> = HashMap::new();
         for pod in &all_pods {
             if let Some(scheduled_node) = get_scheduled_node(pod)
-                && let Some(node_topology) = node_topology_map.get(scheduled_node) {
-                    for topology_key in &topology_keys {
-                        if let Some(topology_value) = node_topology.get(topology_key) {
-                            topology_pods_map
-                                .entry(topology_key.clone())
-                                .or_default()
-                                .entry(topology_value.clone())
-                                .or_default()
-                                .push(pod.clone());
-                        }
+                && let Some(node_topology) = node_topology_map.get(scheduled_node)
+            {
+                for topology_key in &topology_keys {
+                    if let Some(topology_value) = node_topology.get(topology_key) {
+                        topology_pods_map
+                            .entry(topology_key.clone())
+                            .or_default()
+                            .entry(topology_value.clone())
+                            .or_default()
+                            .push(pod.clone());
                     }
                 }
+            }
         }
 
         let pre_filter_state = PreFilterState {
@@ -856,21 +878,13 @@ mod tests {
         assert!(!result, "Node2 should not satisfy affinity term");
 
         // Test anti-affinity: node1 should not satisfy (has pod with app=web in same zone)
-        let result = evaluate_required_pod_affinity_terms(
-            &node1,
-            &[term.clone()],
-            &topology_pods_map,
-            true,
-        );
+        let result =
+            evaluate_required_pod_affinity_terms(&node1, &[term.clone()], &topology_pods_map, true);
         assert!(!result, "Node1 should not satisfy anti-affinity term");
 
         // Test anti-affinity: node2 should satisfy (no pod with app=web in zone-b)
-        let result = evaluate_required_pod_affinity_terms(
-            &node2,
-            &[term],
-            &topology_pods_map,
-            true,
-        );
+        let result =
+            evaluate_required_pod_affinity_terms(&node2, &[term], &topology_pods_map, true);
         assert!(result, "Node2 should satisfy anti-affinity term");
     }
 
