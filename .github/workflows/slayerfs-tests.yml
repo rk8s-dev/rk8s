@@ -1,0 +1,82 @@
+name: slayerfs tests
+
+on:
+  pull_request:
+    paths:
+      - 'project/slayerfs/**'
+      - 'project/rfuse3/**'
+      - 'project/libfuse-fs/**'
+      - 'project/Cargo.toml'
+      - 'project/Cargo.lock'
+  push:
+    branches:
+      - main
+    paths:
+      - 'project/slayerfs/**'
+      - 'project/rfuse3/**'
+      - 'project/libfuse-fs/**'
+      - 'project/Cargo.toml'
+      - 'project/Cargo.lock'
+
+jobs:
+  unit-and-integration:
+    name: cargo test -p slayerfs
+    runs-on: [self-hosted]
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fuse3 \
+            pkg-config \
+            libssl-dev
+
+      - name: Run tests
+        run: |
+          cd project
+          cargo test -p slayerfs
+
+  kvm-qlean:
+    name: KVM integration (qlean)
+    runs-on: [self-hosted]
+    needs: [unit-and-integration]
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install KVM/qlean dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fuse3 \
+            qemu-system-x86 \
+            qemu-utils \
+            libguestfs-tools \
+            libvirt-clients \
+            pkg-config \
+            libssl-dev
+
+      - name: Verify /dev/kvm exists
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo '/dev/kvm is not available on this runner'
+            exit 1
+          fi
+
+      - name: Run qlean integration test (smoke)
+        run: |
+          cd project
+          cargo test -p slayerfs --test test_slayerfs_kvm_integration test_slayerfs_kvm_smoke -- --nocapture
