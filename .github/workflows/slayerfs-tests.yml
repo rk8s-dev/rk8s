@@ -37,42 +37,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             fuse3 \
             pkg-config \
-            libssl-dev \
-            qemu-system-x86 \
-            qemu-utils \
-            libguestfs-tools \
-            xorriso \
-            libvirt-clients
-
-      - name: Preflight qlean / QEMU-KVM requirements
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "== Tool versions =="
-          qemu-system-x86_64 --version
-          qemu-img --version
-          guestfish --version
-          virt-copy-out --version
-          xorriso --version
-          sha256sum --version
-          sha512sum --version
-          virsh --version
-
-          echo "== /dev/kvm =="
-          if [ ! -e /dev/kvm ]; then
-            echo "ERROR: /dev/kvm is missing. This runner must support KVM for qlean-based tests." >&2
-            exit 1
-          fi
-          ls -l /dev/kvm
-          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo "ERROR: Runner user lacks read/write access to /dev/kvm (consider adding it to the kvm group)." >&2
-            id
-            exit 1
-          fi
-
+            libssl-dev
       - name: Run tests
         run: |
           cd project
           cargo test -p slayerfs
-

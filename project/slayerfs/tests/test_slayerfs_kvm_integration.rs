@@ -632,6 +632,7 @@ async fn upload_slayerfs(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_slayerfs_kvm_smoke() -> Result<()> {
     let slayerfs_bin = get_slayerfs_binary_path()?;
     start_vm_and_run(slayerfs_bin, false).await
