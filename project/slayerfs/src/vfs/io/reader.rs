@@ -191,7 +191,7 @@ impl Session {
             self.ahead *= 2;
         } else if self.total.saturating_mul(4) < self.ahead {
             // Only shrink when the current sequential progress is much smaller than
-            // the prediction window
+            // the prediction window.
             self.ahead /= 2;
         }
     }
