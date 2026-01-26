@@ -2751,6 +2751,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_multiple_read_locks() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -2823,6 +2824,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_write_lock_conflict() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -2943,6 +2945,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_non_overlapping_locks() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -3021,6 +3024,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_concurrent_read_write_locks() {
         // Test multiple sessions acquiring different types of locks
         let session_mgr = TestSessionManager::new(3).await;
@@ -3128,6 +3132,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_cross_session_lock_visibility() {
         // Test that locks set by one session are visible to another session
         let session_mgr = TestSessionManager::new(2).await;

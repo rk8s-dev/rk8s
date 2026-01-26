@@ -3,20 +3,20 @@ name: slayerfs tests
 on:
   pull_request:
     paths:
-      - 'project/slayerfs/**'
-      - 'project/rfuse3/**'
-      - 'project/libfuse-fs/**'
-      - 'project/Cargo.toml'
-      - 'project/Cargo.lock'
+      - "project/slayerfs/**"
+      - "project/rfuse3/**"
+      - "project/libfuse-fs/**"
+      - "project/Cargo.toml"
+      - "project/Cargo.lock"
   push:
     branches:
       - main
     paths:
-      - 'project/slayerfs/**'
-      - 'project/rfuse3/**'
-      - 'project/libfuse-fs/**'
-      - 'project/Cargo.toml'
-      - 'project/Cargo.lock'
+      - "project/slayerfs/**"
+      - "project/rfuse3/**"
+      - "project/libfuse-fs/**"
+      - "project/Cargo.toml"
+      - "project/Cargo.lock"
 
 jobs:
   unit-and-integration:
