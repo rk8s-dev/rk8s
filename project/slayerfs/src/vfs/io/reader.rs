@@ -302,7 +302,7 @@ impl SliceState {
 
                     guard.state = SliceStatus::Ready;
                     guard.page = out;
-                    guard.err = None;                    
+                    guard.err = None;
                 }
                 Err(e) => {
                     sub_usage(&usage, guard.page.len() as u64);
@@ -592,7 +592,7 @@ where
                 buf[dst_local_start as usize..dst_local_end as usize]
                     .copy_from_slice(&guard.page[src_start as usize..src_end as usize]);
             }
-            
+
             // The refs was set to 1 when `prepare_slices`.
             guard.refs = guard.refs.saturating_sub(1);
         }
