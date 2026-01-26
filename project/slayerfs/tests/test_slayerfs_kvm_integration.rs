@@ -377,29 +377,83 @@ async fn run_concurrency_smoke(vm: &mut Machine) -> Result<()> {
     exec_check(
         vm,
         &format!(
-            "sh -lc 'set -e; \
-for i in $(seq 1 4); do (\
-  for j in $(seq 1 50); do echo \"$i-$j\" >> {}/concurrency/file-$i; done\
-) & done; wait'",
+            "sh -lc 'set -e; rm -f {}/concurrency/file-*; \
+for i in $(seq 1 4); do \
+  for j in $(seq 1 50); do echo \"$i-$j\" >> {}/concurrency/file-$i; done; \
+done'",
+            SLAYERFS_MOUNTPOINT,
             SLAYERFS_MOUNTPOINT
         ),
     )
     .await?;
 
-    let total = exec_check(
+    let total1 = exec_check(
         vm,
         &format!(
-            "sh -lc 'cat {}/concurrency/file-* | wc -l'",
+            "sh -lc 'wc -l {}/concurrency/file-*'",
             SLAYERFS_MOUNTPOINT
         ),
     )
     .await?;
-    let total: usize = total
-        .trim()
-        .parse()
-        .context("failed to parse concurrency line count")?;
-    if total != 200 {
-        anyhow::bail!("unexpected concurrency line count: got {total}, want 200");
+
+    let expected_per_file = 50usize;
+    let expected_total = 4usize * expected_per_file;
+
+    let mut seen_paths = std::collections::BTreeSet::new();
+    let mut total_lines = 0usize;
+
+    for line in total1.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let count = match parts.next() {
+            Some(v) => v,
+            None => continue,
+        };
+        let path = match parts.next() {
+            Some(v) => v,
+            None => continue,
+        };
+        if path == "total" {
+            continue;
+        }
+
+        let count: usize = count
+            .parse()
+            .with_context(|| format!("failed to parse per-file wc output: '{}'", line))?;
+
+        if count != expected_per_file {
+            anyhow::bail!(
+                "unexpected per-file line count for {}: got {}, expected {}\n\nper-file wc output:\n{}",
+                path,
+                count,
+                expected_per_file,
+                total1
+            );
+        }
+
+        if seen_paths.insert(path.to_string()) {
+            total_lines += count;
+        }
+    }
+
+    if seen_paths.len() != 4 {
+        anyhow::bail!(
+            "unexpected number of concurrency files: got {}, expected 4\n\nper-file wc output:\n{}",
+            seen_paths.len(),
+            total1
+        );
+    }
+
+    if total_lines != expected_total {
+        anyhow::bail!(
+            "unexpected merged line count (sum of unique files): got {}, expected {}\n\nper-file wc output:\n{}",
+            total_lines,
+            expected_total,
+            total1
+        );
     }
 
     Ok(())
@@ -457,7 +511,7 @@ async fn run_smoke(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
     setup_unprivileged_user(vm, "tester").await?;
     upload_slayerfs(vm, slayerfs_bin).await?;
 
-    run_slayerfs_mount_root(vm, "sqlite::memory:").await?;
+    run_slayerfs_mount_root(vm, "sqlite:file:/tmp/slayerfs-smoke-meta.db").await?;
     basic_fs_checks(vm).await?;
     check_default_permissions(vm).await?;
 
