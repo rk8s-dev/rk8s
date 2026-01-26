@@ -630,7 +630,7 @@ impl DeploymentController {
         }
 
         // Sort by replicas descending (scale down largest first)
-        active_old.sort_by(|a, b| b.spec.replicas.cmp(&a.spec.replicas));
+        active_old.sort_by_key(|b| std::cmp::Reverse(b.spec.replicas));
 
         let mut remaining = scale_down_count;
         for rs in active_old {
