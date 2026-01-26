@@ -24,6 +24,8 @@ use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::Instant;
 
+const MAX_WAIT: Duration = Duration::from_secs(30);
+
 #[allow(clippy::type_complexity)]
 pub(crate) struct DataReader<B, M> {
     config: Arc<ReadConfig>,
@@ -292,17 +294,18 @@ impl SliceState {
                     let old_len = guard.page.len() as u64;
                     let new_len = out.len() as u64;
 
-                    guard.state = SliceStatus::Ready;
-                    guard.page = out;
-                    guard.err = None;
-
                     if new_len >= old_len {
                         usage.fetch_add(new_len - old_len, Ordering::Relaxed);
                     } else {
                         sub_usage(&usage, old_len - new_len);
                     }
+
+                    guard.state = SliceStatus::Ready;
+                    guard.page = out;
+                    guard.err = None;                    
                 }
                 Err(e) => {
+                    sub_usage(&usage, guard.page.len() as u64);
                     guard.state = SliceStatus::Invalid;
                     guard.page = Vec::new();
                     guard.err = Some(e.to_string());
@@ -428,7 +431,7 @@ where
         session[selected].update_ahead(&self.config);
     }
 
-    async fn clean_useless_slices(&self, offset: u64, len: usize) {
+    async fn clean_evictable_slices(&self, offset: u64, len: usize) {
         let sessions = *self.sessions.lock();
         let windows = sessions
             .iter()
@@ -464,22 +467,35 @@ where
         })
     }
 
-    async fn back_pressure(&self) {
+    async fn back_pressure(&self) -> anyhow::Result<()> {
         tracing::trace!(
             "Memory usage: {}MiB",
             self.buffer_usage.load(Ordering::Relaxed) / 1024 / 1024
         );
 
+        let mut total_wait = Duration::ZERO;
+        let hard_limit = self.config.buffer_size * 2;
         // buffer size limit is just a soft limit. It is perfectly normal to see that the current memory usage exceed it.
         if self.buffer_usage.load(Ordering::Relaxed) > self.config.buffer_size {
             tokio::time::sleep(Duration::from_millis(10)).await;
 
             // `2 * buffer size limit` is a hard limit. A read operation idle until memory pressure is relieved.
-            while self.buffer_usage.load(Ordering::Relaxed) > self.config.buffer_size * 2 {
+            while self.buffer_usage.load(Ordering::Relaxed) > hard_limit {
+                if total_wait >= MAX_WAIT {
+                    return Err(anyhow::anyhow!(
+                        "Timeout waiting for buffer space after {:?}. Current usage: {} bytes, limit: {} bytes",
+                        total_wait,
+                        self.buffer_usage.load(Ordering::Relaxed),
+                        hard_limit,
+                    ));
+                }
+
                 tracing::warn!("Reach buffer size hard limit: sleep for 100 millis");
                 tokio::time::sleep(Duration::from_millis(100)).await;
+                total_wait += Duration::from_millis(100);
             }
         }
+        Ok(())
     }
 
     pub(crate) async fn read_at(&self, offset: u64, buf: &mut [u8]) -> anyhow::Result<usize> {
@@ -497,8 +513,8 @@ where
             return Ok(0);
         }
 
-        self.back_pressure().await;
-        self.clean_useless_slices(offset, actual_len).await;
+        self.back_pressure().await?;
+        self.clean_evictable_slices(offset, actual_len).await;
 
         // Pre-fill with zeros so holes or missing slices read as zeros.
         buf[..actual_len].fill(0);
@@ -576,6 +592,8 @@ where
                 buf[dst_local_start as usize..dst_local_end as usize]
                     .copy_from_slice(&guard.page[src_start as usize..src_end as usize]);
             }
+            
+            // The refs was set to 1 when `prepare_slices`.
             guard.refs = guard.refs.saturating_sub(1);
         }
         Ok(())
