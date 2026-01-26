@@ -1,7 +1,7 @@
 use clippy_utilities::NumericCast;
 use opentelemetry::{
-    metrics::{Counter, MetricsError},
     KeyValue,
+    metrics::{Counter, MetricsError},
 };
 use tracing::error;
 use utils::define_metrics;

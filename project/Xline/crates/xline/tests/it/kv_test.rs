@@ -2,11 +2,11 @@ use std::{error::Error, time::Duration};
 
 use test_macros::abort_on_panic;
 use xline_test_utils::{
+    Client, ClientOptions, Cluster,
     types::kv::{
         Compare, CompareResult, DeleteRangeOptions, PutOptions, RangeOptions, Response, SortOrder,
         SortTarget, TxnOp, TxnRequest,
     },
-    Client, ClientOptions, Cluster,
 };
 
 #[tokio::test(flavor = "multi_thread")]

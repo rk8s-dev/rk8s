@@ -5,19 +5,19 @@ use std::{
 };
 
 use dashmap::{
+    DashMap,
     mapref::{
         multiple::RefMulti,
         one::{Ref, RefMut},
     },
-    DashMap,
 };
 use event_listener::Event;
-use futures::{future, Future};
-use madsim::rand::{thread_rng, Rng};
+use futures::{Future, future};
+use madsim::rand::{Rng, thread_rng};
 use tracing::{debug, warn};
 
 use super::Role;
-use crate::{members::ServerId, quorum, rpc::PoolEntry, LogIndex};
+use crate::{LogIndex, members::ServerId, quorum, rpc::PoolEntry};
 
 /// Curp state
 #[derive(Debug)]
@@ -279,7 +279,7 @@ impl LeaderState {
     }
 
     /// Waits for the no-op log to be applied
-    pub(super) fn wait_no_op_applied(&self) -> impl Future<Output = ()> + Send {
+    pub(super) fn wait_no_op_applied(&self) -> impl Future<Output = ()> + Send + use<> {
         self.no_op_state.wait()
     }
 }

@@ -1,22 +1,22 @@
-use curp_test_utils::{mock_role_change, test_cmd::TestCommand, TestRoleChange, TEST_CLIENT_ID};
+use curp_test_utils::{TEST_CLIENT_ID, TestRoleChange, mock_role_change, test_cmd::TestCommand};
 use test_macros::abort_on_panic;
-use tokio::time::{sleep, Instant};
+use tokio::time::{Instant, sleep};
 use tracing_test::traced_test;
 use utils::config::{
-    default_candidate_timeout_ticks, default_follower_timeout_ticks, default_heartbeat_interval,
-    CurpConfigBuilder,
+    CurpConfigBuilder, default_candidate_timeout_ticks, default_follower_timeout_ticks,
+    default_heartbeat_interval,
 };
 
 use super::*;
 use crate::{
-    rpc::{connect::MockInnerConnectApi, Redirect},
+    LogIndex,
+    rpc::{Redirect, connect::MockInnerConnectApi},
     server::{
         cmd_board::CommandBoard,
         conflict::test_pools::{TestSpecPool, TestUncomPool},
         lease_manager::LeaseManager,
     },
     tracker::Tracker,
-    LogIndex,
 };
 
 // Hooks for tests
@@ -148,9 +148,10 @@ fn leader_handle_propose_will_succeed() {
     let task_manager = Arc::new(TaskManager::new());
     let curp = { RawCurp::new_test(3, mock_role_change(), task_manager) };
     let cmd = Arc::new(TestCommand::default());
-    assert!(curp
-        .handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd, 0)
-        .unwrap());
+    assert!(
+        curp.handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd, 0)
+            .unwrap()
+    );
 }
 
 // TODO: rewrite this test for propose_stream
@@ -162,9 +163,10 @@ fn leader_handle_propose_will_reject_conflicted() {
     let curp = { RawCurp::new_test(3, mock_role_change(), task_manager) };
 
     let cmd1 = Arc::new(TestCommand::new_put(vec![1], 0));
-    assert!(curp
-        .handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd1, 0)
-        .unwrap());
+    assert!(
+        curp.handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd1, 0)
+            .unwrap()
+    );
 
     let cmd2 = Arc::new(TestCommand::new_put(vec![1, 2], 1));
     let res = curp.handle_propose(ProposeId(TEST_CLIENT_ID, 1), cmd2, 1);
@@ -184,9 +186,10 @@ fn leader_handle_propose_will_reject_duplicated() {
     let task_manager = Arc::new(TaskManager::new());
     let curp = { RawCurp::new_test(3, mock_role_change(), task_manager) };
     let cmd = Arc::new(TestCommand::default());
-    assert!(curp
-        .handle_propose(ProposeId(TEST_CLIENT_ID, 0), Arc::clone(&cmd), 0)
-        .unwrap());
+    assert!(
+        curp.handle_propose(ProposeId(TEST_CLIENT_ID, 0), Arc::clone(&cmd), 0)
+            .unwrap()
+    );
 
     let res = curp.handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd, 0);
     assert!(matches!(res, Err(CurpError::Duplicated(()))));
@@ -201,9 +204,11 @@ fn follower_handle_propose_will_succeed() {
     let curp = { Arc::new(RawCurp::new_test(3, mock_role_change(), task_manager)) };
     curp.update_to_term_and_become_follower(&mut *curp.st.write(), 1);
     let cmd = Arc::new(TestCommand::new_get(vec![1]));
-    assert!(!curp
-        .handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd, 0)
-        .unwrap());
+    assert!(
+        !curp
+            .handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd, 0)
+            .unwrap()
+    );
 }
 
 // TODO: rewrite this test for propose_stream
@@ -216,9 +221,11 @@ fn follower_handle_propose_will_reject_conflicted() {
     curp.update_to_term_and_become_follower(&mut *curp.st.write(), 1);
 
     let cmd1 = Arc::new(TestCommand::new_get(vec![1]));
-    assert!(!curp
-        .handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd1, 0)
-        .unwrap());
+    assert!(
+        !curp
+            .handle_propose(ProposeId(TEST_CLIENT_ID, 0), cmd1, 0)
+            .unwrap()
+    );
 
     let cmd2 = Arc::new(TestCommand::new_get(vec![1]));
     let res = curp.handle_propose(ProposeId(TEST_CLIENT_ID, 1), cmd2, 1);

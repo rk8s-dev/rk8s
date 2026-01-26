@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{Debug, Formatter},
     ops::Deref,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
 
@@ -26,24 +26,24 @@ use utils::{build_endpoint, tracing::Inject};
 use crate::{
     members::ServerId,
     rpc::{
-        proto::{
-            commandpb::protocol_client::ProtocolClient,
-            inner_messagepb::inner_protocol_client::InnerProtocolClient,
-        },
         AppendEntriesRequest, AppendEntriesResponse, CurpError, FetchClusterRequest,
         FetchClusterResponse, FetchReadStateRequest, FetchReadStateResponse,
         InstallSnapshotRequest, InstallSnapshotResponse, LeaseKeepAliveMsg, MoveLeaderRequest,
         MoveLeaderResponse, ProposeConfChangeRequest, ProposeConfChangeResponse, ProposeRequest,
         Protocol, PublishRequest, PublishResponse, ShutdownRequest, ShutdownResponse,
         TriggerShutdownRequest, TryBecomeLeaderNowRequest, VoteRequest, VoteResponse,
+        proto::{
+            commandpb::protocol_client::ProtocolClient,
+            inner_messagepb::inner_protocol_client::InnerProtocolClient,
+        },
     },
     snapshot::Snapshot,
 };
 
 use super::{
+    OpResponse, RecordRequest, RecordResponse,
     proto::commandpb::{ReadIndexRequest, ReadIndexResponse},
     reconnect::Reconnect,
-    OpResponse, RecordRequest, RecordResponse,
 };
 
 /// Install snapshot chunk size: 64KB
@@ -120,7 +120,7 @@ pub(crate) fn connect(
 pub(crate) fn connects(
     members: HashMap<ServerId, Vec<String>>,
     tls_config: Option<&ClientTlsConfig>,
-) -> impl Iterator<Item = (ServerId, Arc<dyn ConnectApi>)> {
+) -> impl Iterator<Item = (ServerId, Arc<dyn ConnectApi>)> + use<> {
     let tls_config = tls_config.cloned();
     members
         .into_iter()
@@ -131,7 +131,7 @@ pub(crate) fn connects(
 pub(crate) fn inner_connects(
     members: HashMap<ServerId, Vec<String>>,
     tls_config: Option<&ClientTlsConfig>,
-) -> impl Iterator<Item = (ServerId, InnerConnectApiWrapper)> {
+) -> impl Iterator<Item = (ServerId, InnerConnectApiWrapper)> + use<> {
     let tls_config = tls_config.cloned();
     members.into_iter().map(move |(id, addrs)| {
         (
@@ -342,7 +342,7 @@ impl<C> Connect<C> {
     #[cfg(feature = "client-metrics")]
     fn before_rpc<Req>(&self) -> std::time::Instant {
         super::metrics::get().peer_sent_bytes_total.add(
-            std::mem::size_of::<Req>().max(1).numeric_cast(),
+            size_of::<Req>().max(1).numeric_cast(),
             &[opentelemetry::KeyValue::new("to", self.id.to_string())],
         );
         std::time::Instant::now()
@@ -379,7 +379,7 @@ impl<C> Connect<C> {
 
 /// Sets timeout for a client connection
 macro_rules! with_timeout {
-    ($timeout:expr, $client_op:expr) => {
+    ($timeout:expr_2021, $client_op:expr_2021) => {
         tokio::time::timeout($timeout, $client_op)
             .await
             .map_err(|_| tonic::Status::deadline_exceeded("timeout"))?
@@ -881,7 +881,7 @@ fn install_snapshot_stream(
 mod tests {
     use bytes::Bytes;
     use engine::{EngineType, Snapshot as EngineSnapshot};
-    use futures::{pin_mut, StreamExt};
+    use futures::{StreamExt, pin_mut};
     use test_macros::abort_on_panic;
     use tracing_test::traced_test;
 

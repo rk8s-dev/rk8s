@@ -6,9 +6,9 @@ use thiserror::Error;
 #[cfg(test)]
 use xline_client::types::kv::{RangeOptions, RangeResponse};
 use xline_client::{
+    Client, ClientOptions,
     error::XlineClientError,
     types::kv::{PutOptions, PutResponse},
-    Client, ClientOptions,
 };
 use xlineapi::command::Command;
 

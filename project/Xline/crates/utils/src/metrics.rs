@@ -2,7 +2,7 @@
 #[macro_export]
 #[allow(clippy::module_name_repetitions)] // exported macros
 macro_rules! define_metrics {
-    ($com:expr, $($field:ident : $ki:ty = $init:expr),*) => {
+    ($com:expr_2021, $($field:ident : $ki:ty = $init:expr_2021),*) => {
 
         pub(crate) struct Metrics {
             $(pub(crate) $field: $ki),*,

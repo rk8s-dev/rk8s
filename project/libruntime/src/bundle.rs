@@ -217,6 +217,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
 
     let lower_dirs = layers
         .iter()
+        .rev()
         .map(|dir| {
             Path::new(dir)
                 .canonicalize()

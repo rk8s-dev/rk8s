@@ -1,7 +1,7 @@
 use std::pin::Pin;
 
 use curp_external_api::cmd::Command;
-use futures::{future, stream, FutureExt, Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt, future, stream};
 
 use crate::{
     client::ProposeResponse,

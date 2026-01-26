@@ -10,16 +10,16 @@ use utils::config::{
 };
 use xline::server::XlineServer;
 use xline_client::{
+    Client, ClientOptions,
     error::XlineClientError,
     types::{
         kv::{CompactionResponse, PutOptions, PutResponse, RangeOptions, RangeResponse},
         watch::{WatchOptions, WatchStreaming, Watcher},
     },
-    Client, ClientOptions,
 };
 use xlineapi::{
-    command::Command, ClusterClient, KvClient, MemberAddResponse, MemberListResponse, RequestUnion,
-    WatchClient,
+    ClusterClient, KvClient, MemberAddResponse, MemberListResponse, RequestUnion, WatchClient,
+    command::Command,
 };
 
 pub struct XlineNode {

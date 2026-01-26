@@ -1,7 +1,7 @@
 use std::{collections::HashMap, hash::Hash};
 
 use event_listener::Event;
-use futures::{stream::FuturesOrdered, Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt, StreamExt, stream::FuturesOrdered};
 use parking_lot::Mutex;
 
 /// Barrier for id
@@ -36,7 +36,7 @@ where
 
     /// Wait for a collection of ids.
     #[inline]
-    pub fn wait_all(&self, ids: Vec<Id>) -> impl Future<Output = ()> + Send {
+    pub fn wait_all(&self, ids: Vec<Id>) -> impl Future<Output = ()> + Send + use<Id> {
         let mut barriers_l = self.barriers.lock();
         let listeners: FuturesOrdered<_> = ids
             .into_iter()
@@ -49,7 +49,7 @@ where
     #[inline]
     pub fn trigger(&self, id: &Id) {
         if let Some(event) = self.barriers.lock().remove(id) {
-            let _ignore = event.notify(usize::MAX);
+            let _: usize = event.notify(usize::MAX);
         }
     }
 }

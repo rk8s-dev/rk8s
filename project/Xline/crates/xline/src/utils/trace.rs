@@ -5,11 +5,11 @@ use opentelemetry_contrib::trace::exporter::jaeger_json::JaegerJsonExporter;
 use opentelemetry_sdk::runtime::Tokio;
 use tracing::warn;
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::{fmt::format, Layer};
-use utils::config::{file_appender, LogConfig, RotationConfig, TraceConfig};
+use tracing_subscriber::{Layer, fmt::format};
+use utils::config::{LogConfig, RotationConfig, TraceConfig, file_appender};
 
 /// Return a Box trait from the config
 fn generate_writer(name: &str, log_config: &LogConfig) -> Box<dyn std::io::Write + Send> {
@@ -64,8 +64,8 @@ pub fn init_subscriber(
             .install_batch(),
         )
     });
-    let jaeger_fmt_layer = tracing_subscriber::fmt::layer()
-        .with_filter(tracing_subscriber::EnvFilter::from_default_env());
+    let jaeger_fmt_layer =
+        tracing_subscriber::fmt::layer().with_filter(EnvFilter::from_default_env());
     let writer = generate_writer(name, log_config);
     let (non_blocking, guard) = tracing_appender::non_blocking(writer);
     let filter = EnvFilter::try_from_default_env()

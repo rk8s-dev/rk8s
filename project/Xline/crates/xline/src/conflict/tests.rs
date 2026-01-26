@@ -3,8 +3,8 @@ use std::sync::Arc;
 use curp::rpc::{PoolEntry, ProposeId};
 use curp_external_api::conflict::{ConflictPoolOp, SpeculativePoolOp, UncommittedPoolOp};
 use xlineapi::{
-    command::Command, AuthEnableRequest, AuthRoleAddRequest, DeleteRangeRequest, LeaseGrantRequest,
-    LeaseRevokeRequest, PutRequest, RequestWrapper,
+    AuthEnableRequest, AuthRoleAddRequest, DeleteRangeRequest, LeaseGrantRequest,
+    LeaseRevokeRequest, PutRequest, RequestWrapper, command::Command,
 };
 
 use super::spec_pool::{KvSpecPool, LeaseSpecPool};
@@ -19,11 +19,11 @@ use crate::{
 #[test]
 fn kv_sp_operations_are_ok() {
     let mut sp = KvSpecPool::default();
-    let mut gen = EntryGenerator::default();
-    let entry1 = gen.gen_put("a");
-    let entry2 = gen.gen_put("b");
-    let entry3 = gen.gen_delete_range("a", "d");
-    let entry4 = gen.gen_delete_range("c", "e");
+    let mut r#gen = EntryGenerator::default();
+    let entry1 = r#gen.gen_put("a");
+    let entry2 = r#gen.gen_put("b");
+    let entry3 = r#gen.gen_delete_range("a", "d");
+    let entry4 = r#gen.gen_delete_range("c", "e");
     assert!(sp.insert_if_not_conflict(entry1.clone()).is_none());
     assert!(sp.insert_if_not_conflict(entry1.clone()).is_some());
     assert!(sp.insert_if_not_conflict(entry2.clone()).is_none());
@@ -48,13 +48,13 @@ fn kv_sp_operations_are_ok() {
 #[test]
 fn kv_ucp_operations_are_ok() {
     let mut ucp = KvUncomPool::default();
-    let mut gen = EntryGenerator::default();
-    let entry1 = gen.gen_put("a");
-    let entry2 = gen.gen_put("a");
-    let entry3 = gen.gen_put("b");
-    let entry4 = gen.gen_delete_range("a", "d");
-    let entry5 = gen.gen_delete_range("c", "e");
-    let entry6 = gen.gen_delete_range("c", "f");
+    let mut r#gen = EntryGenerator::default();
+    let entry1 = r#gen.gen_put("a");
+    let entry2 = r#gen.gen_put("a");
+    let entry3 = r#gen.gen_put("b");
+    let entry4 = r#gen.gen_delete_range("a", "d");
+    let entry5 = r#gen.gen_delete_range("c", "e");
+    let entry6 = r#gen.gen_delete_range("c", "f");
     assert!(!ucp.insert(entry1.clone()));
     assert!(ucp.insert(entry2.clone()));
     assert!(!ucp.insert(entry3.clone()));
@@ -90,11 +90,11 @@ fn kv_ucp_operations_are_ok() {
 #[test]
 fn lease_sp_operations_are_ok() {
     let mut sp = LeaseSpecPool::default();
-    let mut gen = EntryGenerator::default();
-    let entry1 = gen.gen_lease_grant(0);
-    let entry2 = gen.gen_lease_grant(1);
-    let entry3 = gen.gen_lease_revoke(0);
-    let entry4 = gen.gen_lease_revoke(1);
+    let mut r#gen = EntryGenerator::default();
+    let entry1 = r#gen.gen_lease_grant(0);
+    let entry2 = r#gen.gen_lease_grant(1);
+    let entry3 = r#gen.gen_lease_revoke(0);
+    let entry4 = r#gen.gen_lease_revoke(1);
     assert!(sp.insert_if_not_conflict(entry1.clone()).is_none());
     assert!(sp.insert_if_not_conflict(entry1.clone()).is_some());
     assert!(sp.insert_if_not_conflict(entry2.clone()).is_none());
@@ -114,12 +114,12 @@ fn lease_sp_operations_are_ok() {
 #[test]
 fn lease_ucp_operations_are_ok() {
     let mut ucp = LeaseUncomPool::default();
-    let mut gen = EntryGenerator::default();
-    let entry1 = gen.gen_lease_grant(0);
-    let entry2 = gen.gen_lease_grant(0);
-    let entry3 = gen.gen_lease_grant(1);
-    let entry4 = gen.gen_lease_revoke(0);
-    let entry5 = gen.gen_lease_revoke(1);
+    let mut r#gen = EntryGenerator::default();
+    let entry1 = r#gen.gen_lease_grant(0);
+    let entry2 = r#gen.gen_lease_grant(0);
+    let entry3 = r#gen.gen_lease_grant(1);
+    let entry4 = r#gen.gen_lease_revoke(0);
+    let entry5 = r#gen.gen_lease_revoke(1);
     assert!(!ucp.insert(entry1.clone()));
     assert!(ucp.insert(entry2.clone()));
     assert!(!ucp.insert(entry3.clone()));
@@ -155,9 +155,9 @@ fn lease_ucp_operations_are_ok() {
 #[test]
 fn exclusive_sp_operations_are_ok() {
     let mut sp = ExclusiveSpecPool::default();
-    let mut gen = EntryGenerator::default();
-    let entry1 = gen.gen_auth_enable();
-    let entry2 = gen.gen_role_add();
+    let mut r#gen = EntryGenerator::default();
+    let entry1 = r#gen.gen_auth_enable();
+    let entry2 = r#gen.gen_role_add();
     assert!(sp.insert_if_not_conflict(entry1.clone()).is_some());
     assert!(sp.insert_if_not_conflict(entry1.clone()).is_some());
     assert!(sp.insert_if_not_conflict(entry2.clone()).is_some());
@@ -173,9 +173,9 @@ fn exclusive_sp_operations_are_ok() {
 #[test]
 fn exclusive_ucp_operations_are_ok() {
     let mut ucp = ExclusiveUncomPool::default();
-    let mut gen = EntryGenerator::default();
-    let entry1 = gen.gen_auth_enable();
-    let entry2 = gen.gen_role_add();
+    let mut r#gen = EntryGenerator::default();
+    let entry1 = r#gen.gen_auth_enable();
+    let entry2 = r#gen.gen_role_add();
     assert!(ucp.insert(entry1.clone()));
     assert!(ucp.insert(entry2.clone()));
     compare_commands(ucp.all(), vec![entry1.clone(), entry2.clone()]);
@@ -197,16 +197,16 @@ fn sp_kv_then_revoke_conflict_ok() {
     let lease_collection = Arc::new(LeaseCollection::new(60));
     let mut sp = KvSpecPool::new(Arc::clone(&lease_collection));
 
-    let mut gen = EntryGenerator::default();
+    let mut r#gen = EntryGenerator::default();
     // suppose initially we have a key "foo" associated with lease id 1
     lease_collection.grant(1, 60, true);
     lease_collection
         .attach(1, "foo".as_bytes().to_vec())
         .unwrap();
 
-    let kv_put = gen.gen_put("foo");
-    let kv_delete = gen.gen_delete_range("foo", "foz");
-    let lease_revoke = gen.gen_lease_revoke(1);
+    let kv_put = r#gen.gen_put("foo");
+    let kv_delete = r#gen.gen_delete_range("foo", "foz");
+    let lease_revoke = r#gen.gen_lease_revoke(1);
 
     // put conflicts with lease revoke
     assert!(sp.insert_if_not_conflict(kv_put.clone()).is_none());
@@ -228,16 +228,16 @@ fn sp_revoke_then_kv_conflict_ok() {
     let lease_collection = Arc::new(LeaseCollection::new(60));
     let mut sp = LeaseSpecPool::new(Arc::clone(&lease_collection));
 
-    let mut gen = EntryGenerator::default();
+    let mut r#gen = EntryGenerator::default();
     // suppose initially we have a key "foo" associated with lease id 1
     lease_collection.grant(1, 60, true);
     lease_collection
         .attach(1, "foo".as_bytes().to_vec())
         .unwrap();
 
-    let kv_put = gen.gen_put("foo");
-    let kv_delete = gen.gen_delete_range("foo", "foz");
-    let lease_revoke = gen.gen_lease_revoke(1);
+    let kv_put = r#gen.gen_put("foo");
+    let kv_delete = r#gen.gen_delete_range("foo", "foz");
+    let lease_revoke = r#gen.gen_lease_revoke(1);
 
     // lease revoke conflicts with put
     assert!(sp.insert_if_not_conflict(lease_revoke.clone()).is_none());
@@ -259,16 +259,16 @@ fn ucp_kv_then_revoke_conflict_ok() {
     let lease_collection = Arc::new(LeaseCollection::new(60));
     let mut ucp = KvUncomPool::new(Arc::clone(&lease_collection));
 
-    let mut gen = EntryGenerator::default();
+    let mut r#gen = EntryGenerator::default();
     // suppose initially we have a key "foo" associated with lease id 1
     lease_collection.grant(1, 60, true);
     lease_collection
         .attach(1, "foo".as_bytes().to_vec())
         .unwrap();
 
-    let kv_put = gen.gen_put("foo");
-    let kv_delete = gen.gen_delete_range("foo", "foz");
-    let lease_revoke = gen.gen_lease_revoke(1);
+    let kv_put = r#gen.gen_put("foo");
+    let kv_delete = r#gen.gen_delete_range("foo", "foz");
+    let lease_revoke = r#gen.gen_lease_revoke(1);
 
     // put conflicts with lease revoke
     assert!(!ucp.insert(kv_put.clone()));
@@ -291,16 +291,16 @@ fn ucp_revoke_then_kv_conflict_ok() {
     let lease_collection = Arc::new(LeaseCollection::new(60));
     let mut ucp = LeaseUncomPool::new(Arc::clone(&lease_collection));
 
-    let mut gen = EntryGenerator::default();
+    let mut r#gen = EntryGenerator::default();
     // suppose initially we have a key "foo" associated with lease id 1
     lease_collection.grant(1, 60, true);
     lease_collection
         .attach(1, "foo".as_bytes().to_vec())
         .unwrap();
 
-    let kv_put = gen.gen_put("foo");
-    let kv_delete = gen.gen_delete_range("foo", "foz");
-    let lease_revoke = gen.gen_lease_revoke(1);
+    let kv_put = r#gen.gen_put("foo");
+    let kv_delete = r#gen.gen_delete_range("foo", "foz");
+    let lease_revoke = r#gen.gen_lease_revoke(1);
 
     // lease revoke conflicts with put
     assert!(!ucp.insert(lease_revoke.clone()));
@@ -331,14 +331,14 @@ a remove, potentially leading to an inconsist state in our conflict pool.
 fn kv_sp_mutation_no_side_effect() {
     let lease_collection = Arc::new(LeaseCollection::new(60));
     let mut sp = KvSpecPool::new(Arc::clone(&lease_collection));
-    let mut gen = EntryGenerator::default();
+    let mut r#gen = EntryGenerator::default();
 
     lease_collection.grant(1, 60, true);
     lease_collection
         .attach(1, "foo".as_bytes().to_vec())
         .unwrap();
-    let kv_put = gen.gen_put("foo");
-    let lease_revoke = gen.gen_lease_revoke(1);
+    let kv_put = r#gen.gen_put("foo");
+    let lease_revoke = r#gen.gen_lease_revoke(1);
 
     sp.insert_if_not_conflict(lease_revoke.clone());
     assert!(sp.insert_if_not_conflict(kv_put.clone()).is_some());
@@ -354,14 +354,14 @@ fn kv_sp_mutation_no_side_effect() {
 fn lease_sp_mutation_no_side_effect() {
     let lease_collection = Arc::new(LeaseCollection::new(60));
     let mut sp = LeaseSpecPool::new(Arc::clone(&lease_collection));
-    let mut gen = EntryGenerator::default();
+    let mut r#gen = EntryGenerator::default();
 
     lease_collection.grant(1, 60, true);
     lease_collection
         .attach(1, "foo".as_bytes().to_vec())
         .unwrap();
-    let kv_put = gen.gen_put("foo");
-    let lease_revoke = gen.gen_lease_revoke(1);
+    let kv_put = r#gen.gen_put("foo");
+    let lease_revoke = r#gen.gen_lease_revoke(1);
 
     sp.insert_if_not_conflict(kv_put.clone());
     assert!(sp.insert_if_not_conflict(lease_revoke.clone()).is_some());
@@ -374,14 +374,14 @@ fn lease_sp_mutation_no_side_effect() {
 fn kv_ucp_mutation_no_side_effect() {
     let lease_collection = Arc::new(LeaseCollection::new(60));
     let mut ucp = KvUncomPool::new(Arc::clone(&lease_collection));
-    let mut gen = EntryGenerator::default();
+    let mut r#gen = EntryGenerator::default();
 
     lease_collection.grant(1, 60, true);
     lease_collection
         .attach(1, "foo".as_bytes().to_vec())
         .unwrap();
-    let kv_put = gen.gen_put("foo");
-    let lease_revoke = gen.gen_lease_revoke(1);
+    let kv_put = r#gen.gen_put("foo");
+    let lease_revoke = r#gen.gen_lease_revoke(1);
 
     ucp.insert(lease_revoke.clone());
     assert!(!ucp.all_conflict(&kv_put).is_empty());
@@ -394,14 +394,14 @@ fn kv_ucp_mutation_no_side_effect() {
 fn lease_ucp_mutation_no_side_effect() {
     let lease_collection = Arc::new(LeaseCollection::new(60));
     let mut ucp = LeaseUncomPool::new(Arc::clone(&lease_collection));
-    let mut gen = EntryGenerator::default();
+    let mut r#gen = EntryGenerator::default();
 
     lease_collection.grant(1, 60, true);
     lease_collection
         .attach(1, "foo".as_bytes().to_vec())
         .unwrap();
-    let kv_put = gen.gen_put("foo");
-    let lease_revoke = gen.gen_lease_revoke(1);
+    let kv_put = r#gen.gen_put("foo");
+    let lease_revoke = r#gen.gen_lease_revoke(1);
 
     ucp.insert(kv_put.clone());
     assert!(!ucp.all_conflict(&lease_revoke).is_empty());

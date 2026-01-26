@@ -8,7 +8,7 @@ use std::{
     io::{Cursor, Error as IoError, ErrorKind},
     iter::repeat,
     path::{Path, PathBuf},
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -23,9 +23,9 @@ use tokio_util::io::read_buf;
 use tracing::warn;
 
 use crate::{
+    StorageOps, WriteOperation,
     api::{engine_api::StorageEngine, snapshot_api::SnapshotApi},
     error::EngineError,
-    StorageOps, WriteOperation,
 };
 
 pub(super) use self::transaction::RocksTransaction;
@@ -136,7 +136,7 @@ impl RocksEngine {
     where
         P: AsRef<Path>,
     {
-        let mut snapshot_f = tokio::fs::File::open(snap_path).await?;
+        let mut snapshot_f = File::open(snap_path).await?;
         let tmp_path = temp_dir().join(format!("snapshot-{}", uuid::Uuid::new_v4()));
         let mut rocks_snapshot = RocksSnapshot::new_for_receiving(tmp_path)?;
         let mut buf = BytesMut::with_capacity(SNAPSHOT_CHUNK_SIZE);
@@ -174,7 +174,9 @@ impl RocksEngine {
                     if matches!(err.kind(), RocksErrorKind::Busy | RocksErrorKind::TryAgain) =>
                 {
                     if retry_count > max_retry_count {
-                        warn!("Oops, txn commit retry count reach the max_retry_count: {max_retry_count}");
+                        warn!(
+                            "Oops, txn commit retry count reach the max_retry_count: {max_retry_count}"
+                        );
                         return Err(EngineError::UnderlyingError(err.to_string()));
                     }
                     warn!("Rocksdb txn commit failed, retrying after {retry_interval}ms");
@@ -246,16 +248,16 @@ impl StorageEngine for RocksEngine {
 
     #[inline]
     fn get_all(&self, table: &str) -> Result<Vec<(Vec<u8>, Vec<u8>)>, EngineError> {
-        if let Some(cf) = self.inner.cf_handle(table) {
-            self.inner
+        match self.inner.cf_handle(table) {
+            Some(cf) => self
+                .inner
                 .iterator_cf(&cf, IteratorMode::Start)
                 .map(|v| {
                     v.map(|(key, value)| (key.to_vec(), value.to_vec()))
                         .map_err(EngineError::from)
                 })
-                .collect()
-        } else {
-            Err(EngineError::TableNotFound(table.to_owned()))
+                .collect(),
+            _ => Err(EngineError::TableNotFound(table.to_owned())),
         }
     }
 
@@ -333,10 +335,9 @@ impl StorageEngine for RocksEngine {
 impl StorageOps for RocksEngine {
     #[inline]
     fn get(&self, table: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>, EngineError> {
-        if let Some(cf) = self.inner.cf_handle(table) {
-            Ok(self.inner.get_cf(&cf, key)?)
-        } else {
-            Err(EngineError::TableNotFound(table.to_owned()))
+        match self.inner.cf_handle(table) {
+            Some(cf) => Ok(self.inner.get_cf(&cf, key)?),
+            _ => Err(EngineError::TableNotFound(table.to_owned())),
         }
     }
 
@@ -346,14 +347,14 @@ impl StorageOps for RocksEngine {
         table: &str,
         keys: &[impl AsRef<[u8]>],
     ) -> Result<Vec<Option<Vec<u8>>>, EngineError> {
-        if let Some(cf) = self.inner.cf_handle(table) {
-            self.inner
+        match self.inner.cf_handle(table) {
+            Some(cf) => self
+                .inner
                 .multi_get_cf(repeat(&cf).zip(keys.iter()))
                 .into_iter()
                 .map(|res| res.map_err(EngineError::from))
-                .collect::<Result<Vec<_>, EngineError>>()
-        } else {
-            Err(EngineError::TableNotFound(table.to_owned()))
+                .collect::<Result<Vec<_>, EngineError>>(),
+            _ => Err(EngineError::TableNotFound(table.to_owned())),
         }
     }
 
@@ -691,12 +692,12 @@ impl SnapshotApi for RocksSnapshot {
     }
 
     #[inline]
-    async fn read_buf(&mut self, buf: &mut BytesMut) -> std::io::Result<()> {
+    async fn read_buf(&mut self, buf: &mut BytesMut) -> io::Result<()> {
         self.read(buf).await.map(|_n| ())
     }
 
     #[inline]
-    async fn write_all(&mut self, mut buf: Bytes) -> std::io::Result<()> {
+    async fn write_all(&mut self, mut buf: Bytes) -> io::Result<()> {
         let buf_size = buf.remaining();
         while buf.has_remaining() {
             let prev_rem = buf.remaining();
@@ -707,7 +708,7 @@ impl SnapshotApi for RocksSnapshot {
                 if written_size == size {
                     break;
                 }
-                return Err(io::ErrorKind::WriteZero.into());
+                return Err(ErrorKind::WriteZero.into());
             }
         }
         Ok(())

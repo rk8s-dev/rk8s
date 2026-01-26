@@ -50,7 +50,7 @@ mod tests {
     use curp_test_utils::test_cmd::{TestCommand, TestCommandResult};
     use parking_lot::{Mutex, RwLock};
     use test_macros::abort_on_panic;
-    use utils::task_manager::{tasks::TaskName, TaskManager};
+    use utils::task_manager::{TaskManager, tasks::TaskName};
 
     use crate::{
         rpc::{PoolEntry, ProposeId},

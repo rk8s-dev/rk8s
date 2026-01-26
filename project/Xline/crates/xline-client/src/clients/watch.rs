@@ -5,9 +5,9 @@ use tonic::transport::Channel;
 use xlineapi::{self, RequestUnion};
 
 use crate::{
+    AuthService,
     error::{Result, XlineClientError},
     types::watch::{WatchOptions, WatchStreaming, Watcher},
-    AuthService,
 };
 
 /// Channel size for watch request stream

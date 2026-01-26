@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn, Stmt};
+use syn::{ItemFn, Stmt, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn abort_on_panic(_attr: TokenStream, item: TokenStream) -> TokenStream {

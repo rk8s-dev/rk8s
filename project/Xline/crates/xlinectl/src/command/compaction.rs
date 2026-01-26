@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{arg, value_parser, ArgMatches, Command};
+use clap::{ArgMatches, Command, arg, value_parser};
 use xline_client::Client;
 
 use crate::utils::printer::Printer;

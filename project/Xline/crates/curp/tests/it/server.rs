@@ -13,13 +13,13 @@ use curp_test_utils::{
     test_cmd::{TestCommand, TestCommandResult, TestCommandType},
 };
 use futures::stream::FuturesUnordered;
-use madsim::rand::{thread_rng, Rng};
+use madsim::rand::{Rng, thread_rng};
 use test_macros::abort_on_panic;
 use tokio::net::TcpListener;
 use tokio_stream::StreamExt;
 use utils::{config::ClientConfig, timestamp};
 
-use crate::common::curp_group::{CurpGroup, FetchClusterRequest, DEFAULT_SHUTDOWN_TIMEOUT};
+use crate::common::curp_group::{CurpGroup, DEFAULT_SHUTDOWN_TIMEOUT, FetchClusterRequest};
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
@@ -383,12 +383,14 @@ async fn propose_remove_follower_should_success() {
     assert_eq!(members.len(), 4);
     assert!(members.iter().all(|m| m.id != follower_id));
     sleep_secs(7).await; // wait the removed node start election and detect it is removed
-    assert!(group
-        .nodes
-        .get(&follower_id)
-        .unwrap()
-        .task_manager
-        .is_finished());
+    assert!(
+        group
+            .nodes
+            .get(&follower_id)
+            .unwrap()
+            .task_manager
+            .is_finished()
+    );
     // check if the old client can propose to the new cluster
     client
         .propose(&TestCommand::new_get(vec![1]), None, true)
@@ -410,12 +412,14 @@ async fn propose_remove_leader_should_success() {
     assert_eq!(members.len(), 4);
     assert!(members.iter().all(|m| m.id != leader_id));
     sleep_secs(7).await; // wait for the new leader to be elected
-    assert!(group
-        .nodes
-        .get(&leader_id)
-        .unwrap()
-        .task_manager
-        .is_finished());
+    assert!(
+        group
+            .nodes
+            .get(&leader_id)
+            .unwrap()
+            .task_manager
+            .is_finished()
+    );
     let new_leader_id = group.get_leader().await.0;
     assert_ne!(new_leader_id, leader_id);
     // check if the old client can propose to the new cluster
@@ -529,10 +533,11 @@ async fn check_new_node(is_learner: bool) {
         .unwrap()
         .into_inner();
     assert_eq!(res.members.len(), 4);
-    assert!(res
-        .members
-        .iter()
-        .any(|m| m.id == node_id && m.name == "new_node" && is_learner == m.is_learner));
+    assert!(
+        res.members
+            .iter()
+            .any(|m| m.id == node_id && m.name == "new_node" && is_learner == m.is_learner)
+    );
 
     // 4. check if the new node syncs the command from old cluster
     let new_node = group.nodes.get_mut(&node_id).unwrap();

@@ -1,6 +1,6 @@
 use anyhow::Result;
-use clap::{arg, value_parser, ArgMatches, Command};
-use xline_client::{types::kv::RangeOptions, Client};
+use clap::{ArgMatches, Command, arg, value_parser};
+use xline_client::{Client, types::kv::RangeOptions};
 use xlineapi::{SortOrder, SortTarget};
 
 use crate::utils::printer::Printer;

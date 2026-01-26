@@ -1,7 +1,7 @@
 #![allow(clippy::arithmetic_side_effects)] // u64 is large enough and won't overflow
 
 use std::{
-    cmp::{min, Ordering},
+    cmp::{Ordering, min},
     collections::{HashMap, HashSet, VecDeque},
     fmt::Debug,
     ops::{Bound, Range, RangeBounds, RangeInclusive},
@@ -14,12 +14,12 @@ use itertools::Itertools;
 use tracing::warn;
 
 use crate::{
+    LogIndex,
     cmd::Command,
     log_entry::{EntryData, LogEntry},
     rpc::ProposeId,
     server::metrics,
     snapshot::SnapshotMeta,
-    LogIndex,
 };
 
 /// A `LogEntry` wrapper
@@ -238,19 +238,20 @@ impl<C: Command> Log<C> {
 
     /// pop a log entry from the front of queue
     fn pop_front(&mut self) -> Option<Arc<LogEntry<C>>> {
-        if let Some(entry) = self.entries.pop_front() {
-            if self.first_idx_in_cur_batch == 0 {
-                self.cur_batch_size -= entry.size;
-            } else {
-                self.first_idx_in_cur_batch -= 1;
+        match self.entries.pop_front() {
+            Some(entry) => {
+                if self.first_idx_in_cur_batch == 0 {
+                    self.cur_batch_size -= entry.size;
+                } else {
+                    self.first_idx_in_cur_batch -= 1;
+                }
+                let _ = self
+                    .batch_end
+                    .pop_front()
+                    .unwrap_or_else(|| unreachable!("The batch_end cannot be empty"));
+                Some(entry.inner)
             }
-            let _ = self
-                .batch_end
-                .pop_front()
-                .unwrap_or_else(|| unreachable!("The batch_end cannot be empty"));
-            Some(entry.inner)
-        } else {
-            None
+            _ => None,
         }
     }
 

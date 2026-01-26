@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env::temp_dir, iter, path::PathBuf, sync::Arc};
 
 use futures::future::join_all;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::{Rng, distributions::Alphanumeric, thread_rng};
 use tokio::{
     net::TcpListener,
     runtime::Handle,
@@ -10,12 +10,12 @@ use tokio::{
 };
 use tonic::transport::ClientTlsConfig;
 use utils::config::{
-    default_quota, AuthConfig, ClusterConfig, CompactConfig, EngineConfig, InitialClusterState,
-    LogConfig, MetricsConfig, StorageConfig, TlsConfig, TraceConfig, XlineServerConfig,
+    AuthConfig, ClusterConfig, CompactConfig, EngineConfig, InitialClusterState, LogConfig,
+    MetricsConfig, StorageConfig, TlsConfig, TraceConfig, XlineServerConfig, default_quota,
 };
 use xline::server::XlineServer;
 use xline_client::types::{auth::PermissionType, range_end::RangeOption};
-pub use xline_client::{clients, types, Client, ClientOptions};
+pub use xline_client::{Client, ClientOptions, clients, types};
 
 /// Cluster
 pub struct Cluster {

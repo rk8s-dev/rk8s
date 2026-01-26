@@ -6,13 +6,13 @@ use clippy_utilities::OverflowArithmetic;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::{Channel, Endpoint};
 use tracing::debug;
-use utils::build_endpoint;
 #[cfg(madsim)]
 use utils::ClientTlsConfig;
+use utils::build_endpoint;
 use xlineapi::{
+    AuthInfo, EventType,
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
-    AuthInfo, EventType,
 };
 
 use crate::{

@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use clap::{arg, value_parser, ArgMatches, Command};
+use clap::{ArgMatches, Command, arg, value_parser};
 use tokio::signal::ctrl_c;
 use tonic::Streaming;
 use xline_client::{
+    Client,
     error::{Result, XlineClientError},
     types::lease::LeaseKeeper,
-    Client,
 };
 use xlineapi::LeaseKeepAliveResponse;
 

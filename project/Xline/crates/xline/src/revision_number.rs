@@ -26,7 +26,7 @@ impl RevisionNumberGenerator {
     }
 
     /// Gets a temporary state
-    pub(crate) fn state(&self) -> RevisionNumberGeneratorState {
+    pub(crate) fn state(&self) -> RevisionNumberGeneratorState<'_> {
         RevisionNumberGeneratorState {
             current: &self.current,
             next: AtomicI64::new(self.get()),

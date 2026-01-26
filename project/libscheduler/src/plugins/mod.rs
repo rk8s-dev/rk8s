@@ -25,6 +25,7 @@ pub mod node_affinity;
 pub mod node_name;
 pub mod node_resources_fit;
 pub mod node_unschedulable;
+pub mod pod_affinity;
 pub mod scheduling_gates;
 pub mod taint_toleration;
 
@@ -81,17 +82,19 @@ impl Default for Plugins {
         let scheduling_gates = PluginInfo::new("SchedulingGates");
         let taint_toleration = PluginInfo::with_weight("TaintToleration", 3);
         let balanced_allocation = PluginInfo::with_weight("NodeResourcesBalancedAllocation", 1);
+        let pod_affinity = PluginInfo::with_weight("PodAffinity", 2);
 
         Self {
             pre_enqueue: vec![scheduling_gates.clone()],
             queue_sort: PluginInfo::new("PrioritySort"),
-            pre_filter: vec![node_affinity.clone(), fit.clone()],
+            pre_filter: vec![node_affinity.clone(), fit.clone(), pod_affinity.clone()],
             filter: vec![
                 node_affinity.clone(),
                 fit.clone(),
                 taint_toleration.clone(),
                 node_name.clone(),
                 node_unschedulable.clone(),
+                pod_affinity.clone(),
             ],
             post_filter: vec![],
             pre_score: vec![
@@ -99,12 +102,14 @@ impl Default for Plugins {
                 fit.clone(),
                 balanced_allocation.clone(),
                 taint_toleration.clone(),
+                pod_affinity.clone(),
             ],
             score: vec![
                 node_affinity.clone(),
                 fit.clone(),
                 balanced_allocation.clone(),
                 taint_toleration.clone(),
+                pod_affinity.clone(),
             ],
             reserve: vec![],
             permit: vec![],
@@ -117,6 +122,7 @@ impl Default for Plugins {
                 node_name.clone(),
                 fit.clone(),
                 taint_toleration.clone(),
+                pod_affinity.clone(),
             ],
         }
     }
@@ -386,16 +392,18 @@ impl Default for Registry {
         let scheduling_gates = Arc::new(SchedulingGates {});
         let taint_toleration = Arc::new(TaintToleration {});
         let balanced_allocation = Arc::new(BalancedAllocation::default());
+        let pod_affinity = Arc::new(pod_affinity::PodAffinityPlugin);
 
         Self {
             pre_enqueue: vec![scheduling_gates.clone()],
-            pre_filter: vec![node_affinity.clone(), fit.clone()],
+            pre_filter: vec![node_affinity.clone(), fit.clone(), pod_affinity.clone()],
             filter: vec![
                 node_affinity.clone(),
                 fit.clone(),
                 taint_toleration.clone(),
                 node_name.clone(),
                 node_unschedulable.clone(),
+                pod_affinity.clone(),
             ],
             post_filter: vec![],
             pre_score: vec![
@@ -403,12 +411,14 @@ impl Default for Registry {
                 fit.clone(),
                 balanced_allocation.clone(),
                 taint_toleration.clone(),
+                pod_affinity.clone(),
             ],
             score: vec![
                 node_affinity.clone(),
                 fit.clone(),
                 balanced_allocation.clone(),
                 taint_toleration.clone(),
+                pod_affinity.clone(),
             ],
             // below features are unimplemented
             reserve: vec![],
@@ -422,6 +432,7 @@ impl Default for Registry {
                 node_name.clone(),
                 fit.clone(),
                 taint_toleration.clone(),
+                pod_affinity.clone(),
             ],
         }
     }

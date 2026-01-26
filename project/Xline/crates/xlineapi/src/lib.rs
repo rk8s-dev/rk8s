@@ -18,7 +18,6 @@
     non_ascii_idents,
     // non_exhaustive_omitted_patterns, unstable
     noop_method_call,
-    pointer_structural_match,
     rust_2021_incompatible_closure_captures,
     rust_2021_incompatible_or_patterns,
     rust_2021_prefixes_incompatible_syntax,
@@ -178,30 +177,37 @@ pub mod execute_error;
 pub mod interval;
 pub mod request_validation;
 
+#[allow(dead_code)]
 mod etcdserverpb {
     tonic::include_proto!("etcdserverpb");
 }
 
+#[allow(dead_code)]
 mod authpb {
     tonic::include_proto!("authpb");
 }
 
+#[allow(dead_code)]
 mod mvccpb {
     tonic::include_proto!("mvccpb");
 }
 
+#[allow(dead_code)]
 mod v3lockpb {
     tonic::include_proto!("v3lockpb");
 }
 
+#[allow(dead_code)]
 mod leasepb {
     tonic::include_proto!("leasepb");
 }
 
+#[allow(dead_code)]
 mod commandpb {
     tonic::include_proto!("commandpb");
 }
 
+#[allow(dead_code)]
 mod errorpb {
     tonic::include_proto!("errorpb");
 }
@@ -213,36 +219,18 @@ use command::KeyRange;
 use utils::write_vec;
 
 pub use self::{
-    authpb::{permission::Type, Permission, Role, User, UserAddOptions},
+    authpb::{Permission, Role, User, UserAddOptions, permission::Type},
     commandpb::{
-        command::{AuthInfo, RequestWrapper},
-        command_response::ResponseWrapper,
         Command as PbCommand, CommandResponse as PbCommandResponse, KeyRange as PbKeyRange,
         SyncResponse as PbSyncResponse,
+        command::{AuthInfo, RequestWrapper},
+        command_response::ResponseWrapper,
     },
     errorpb::{
-        execute_error::Error as PbExecuteError, ExecuteError as PbExecuteErrorOuter,
-        Revisions as PbRevisions, UserRole as PbUserRole,
+        ExecuteError as PbExecuteErrorOuter, Revisions as PbRevisions, UserRole as PbUserRole,
+        execute_error::Error as PbExecuteError,
     },
     etcdserverpb::{
-        alarm_request::AlarmAction,
-        auth_client::AuthClient,
-        auth_server::{Auth, AuthServer},
-        cluster_client::ClusterClient,
-        cluster_server::{Cluster, ClusterServer},
-        compare::{CompareResult, CompareTarget, TargetUnion},
-        kv_client::KvClient,
-        kv_server::{Kv, KvServer},
-        lease_client::LeaseClient,
-        lease_server::{Lease, LeaseServer},
-        maintenance_client::MaintenanceClient,
-        maintenance_server::{Maintenance, MaintenanceServer},
-        range_request::{SortOrder, SortTarget},
-        request_op::Request,
-        response_op::Response,
-        watch_client::WatchClient,
-        watch_request::RequestUnion,
-        watch_server::{Watch, WatchServer},
         AlarmMember, AlarmRequest, AlarmResponse, AlarmType, AuthDisableRequest,
         AuthDisableResponse, AuthEnableRequest, AuthEnableResponse, AuthRoleAddRequest,
         AuthRoleAddResponse, AuthRoleDeleteRequest, AuthRoleDeleteResponse, AuthRoleGetRequest,
@@ -266,12 +254,30 @@ pub use self::{
         RangeRequest, RangeResponse, RequestOp, ResponseHeader, ResponseOp, SnapshotRequest,
         SnapshotResponse, StatusRequest, StatusResponse, TxnRequest, TxnResponse,
         WatchCancelRequest, WatchCreateRequest, WatchProgressRequest, WatchRequest, WatchResponse,
+        alarm_request::AlarmAction,
+        auth_client::AuthClient,
+        auth_server::{Auth, AuthServer},
+        cluster_client::ClusterClient,
+        cluster_server::{Cluster, ClusterServer},
+        compare::{CompareResult, CompareTarget, TargetUnion},
+        kv_client::KvClient,
+        kv_server::{Kv, KvServer},
+        lease_client::LeaseClient,
+        lease_server::{Lease, LeaseServer},
+        maintenance_client::MaintenanceClient,
+        maintenance_server::{Maintenance, MaintenanceServer},
+        range_request::{SortOrder, SortTarget},
+        request_op::Request,
+        response_op::Response,
+        watch_client::WatchClient,
+        watch_request::RequestUnion,
+        watch_server::{Watch, WatchServer},
     },
     leasepb::Lease as PbLease,
-    mvccpb::{event::EventType, Event, KeyValue},
+    mvccpb::{Event, KeyValue, event::EventType},
     v3lockpb::{
-        lock_server::{Lock, LockServer},
         LockRequest, LockResponse, UnlockRequest, UnlockResponse,
+        lock_server::{Lock, LockServer},
     },
 };
 
@@ -707,9 +713,11 @@ impl Display for PutRequest {
             "PutRequest {{ key: {:?}, value: {:?}, lease: {:?}, prev_kv: {:?}, ignore_value: {:?}, ignore_lease: {:?} }}",
             String::from_utf8_lossy(&self.key),
             String::from_utf8_lossy(&self.value),
-            self.lease, self.prev_kv,
+            self.lease,
+            self.prev_kv,
             self.ignore_value,
-            self.ignore_lease)
+            self.ignore_lease
+        )
     }
 }
 

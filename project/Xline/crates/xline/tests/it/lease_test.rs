@@ -2,7 +2,7 @@ use std::{error::Error, time::Duration};
 
 use test_macros::abort_on_panic;
 use tracing::info;
-use xline_test_utils::{types::kv::PutOptions, Client, ClientOptions, Cluster};
+use xline_test_utils::{Client, ClientOptions, Cluster, types::kv::PutOptions};
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]

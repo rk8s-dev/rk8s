@@ -1,6 +1,6 @@
 use anyhow::Result;
-use clap::{arg, ArgMatches, Command};
-use xline_client::{types::kv::DeleteRangeOptions, Client};
+use clap::{ArgMatches, Command, arg};
+use xline_client::{Client, types::kv::DeleteRangeOptions};
 
 use crate::utils::printer::Printer;
 

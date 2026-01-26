@@ -7,7 +7,7 @@ use utils::config::{
     AuthConfig, ClusterConfig, CompactConfig, LogConfig, MetricsConfig, StorageConfig, TlsConfig,
     TraceConfig, XlineServerConfig,
 };
-use xline_test_utils::{enable_auth, set_user, Cluster};
+use xline_test_utils::{Cluster, enable_auth, set_user};
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]

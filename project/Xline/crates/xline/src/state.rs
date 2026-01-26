@@ -3,8 +3,8 @@ use std::{sync::Arc, time::Duration};
 use curp::role_change::RoleChange;
 
 use crate::storage::{
-    compact::{Compactable, Compactor},
     LeaseStore,
+    compact::{Compactable, Compactor},
 };
 
 /// State of current node

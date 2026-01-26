@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::execute_error::ExecuteError;
 
-use super::{lease_queue::LeaseQueue, Lease};
+use super::{Lease, lease_queue::LeaseQueue};
 use crate::rpc::PbLease;
 
 /// Collection of lease related data

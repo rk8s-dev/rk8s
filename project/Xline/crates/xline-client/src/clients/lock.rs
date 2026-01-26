@@ -6,18 +6,18 @@ use clippy_utilities::OverflowArithmetic;
 use tokio::{task::JoinHandle, time::sleep};
 use tonic::transport::Channel;
 use xlineapi::{
-    command::{Command, CommandResponse, KeyRange, SyncResponse},
     Compare, CompareResult, CompareTarget, DeleteRangeRequest, EventType, PutRequest, RangeRequest,
     RangeResponse, Request, RequestOp, RequestWrapper, Response, ResponseHeader, SortOrder,
     SortTarget, TargetUnion, TxnRequest, TxnResponse,
+    command::{Command, CommandResponse, KeyRange, SyncResponse},
 };
 
 use crate::{
-    clients::{lease::LeaseClient, watch::WatchClient, DEFAULT_SESSION_TTL},
+    CurpClient,
+    clients::{DEFAULT_SESSION_TTL, lease::LeaseClient, watch::WatchClient},
     error::{Result, XlineClientError},
     lease_gen::LeaseIdGenerator,
     types::kv::TxnRequest as KvTxnRequest,
-    CurpClient,
 };
 
 /// Session represents a lease kept alive for the lifetime of a client.
@@ -221,7 +221,10 @@ impl Xutex {
             if let Some(Response::ResponseRange(ref res)) = resp.responses[0].response {
                 res.kvs[0].create_revision
             } else {
-                unreachable!("The first response in txn responses should be a RangeResponse when txn failed: {:?}", resp);
+                unreachable!(
+                    "The first response in txn responses should be a RangeResponse when txn failed: {:?}",
+                    resp
+                );
             }
         };
         Ok(resp)

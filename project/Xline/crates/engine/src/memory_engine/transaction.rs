@@ -6,8 +6,8 @@ use std::{cmp::Ordering, collections::HashMap};
 use parking_lot::{RwLock, RwLockWriteGuard};
 
 use crate::{
-    api::transaction_api::TransactionApi, error::EngineError, memory_engine::MemoryEngine,
-    StorageOps, WriteOperation,
+    StorageOps, WriteOperation, api::transaction_api::TransactionApi, error::EngineError,
+    memory_engine::MemoryEngine,
 };
 
 /// The memory table used in transaction state

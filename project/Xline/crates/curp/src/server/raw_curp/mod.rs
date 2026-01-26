@@ -14,8 +14,8 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     sync::{
-        atomic::{AtomicU64, AtomicU8, Ordering},
         Arc,
+        atomic::{AtomicU8, AtomicU64, Ordering},
     },
 };
 
@@ -32,7 +32,7 @@ use tokio::sync::{broadcast, oneshot};
 use tonic::transport::ClientTlsConfig;
 use tracing::{
     debug, error,
-    log::{log_enabled, Level},
+    log::{Level, log_enabled},
     trace, warn,
 };
 #[cfg(madsim)]
@@ -49,14 +49,15 @@ use self::{
     state::{CandidateState, LeaderState, State},
 };
 use super::{
+    DB,
     cmd_board::CommandBoard,
     conflict::{spec_pool_new::SpeculativePool, uncommitted_pool::UncommittedPool},
     curp_node::TaskType,
     lease_manager::LeaseManagerRef,
     storage::StorageApi,
-    DB,
 };
 use crate::{
+    LogIndex,
     cmd::Command,
     log_entry::{EntryData, LogEntry},
     members::{ClusterInfo, ServerId},
@@ -64,9 +65,9 @@ use crate::{
     response::ResponseSender,
     role_change::RoleChange,
     rpc::{
-        connect::{InnerConnectApi, InnerConnectApiWrapper},
         ConfChange, ConfChangeType, CurpError, IdSet, Member, PoolEntry, ProposeId, PublishRequest,
         ReadState, Redirect,
+        connect::{InnerConnectApi, InnerConnectApiWrapper},
     },
     server::{
         cmd_board::CmdBoardRef,
@@ -74,7 +75,6 @@ use crate::{
         raw_curp::{log::FallbackContext, state::VoteResult},
     },
     snapshot::{Snapshot, SnapshotMeta},
-    LogIndex,
 };
 
 /// Curp state
@@ -591,7 +591,10 @@ impl<C: Command, RC: RoleChange> RawCurp<C, RC> {
     }
 
     /// Wait synced for all conflict commands
-    pub(super) fn wait_conflicts_synced(&self, cmd: Arc<C>) -> impl Future<Output = ()> + Send {
+    pub(super) fn wait_conflicts_synced(
+        &self,
+        cmd: Arc<C>,
+    ) -> impl Future<Output = ()> + Send + use<C, RC> {
         let conflict_cmds: Vec<_> = self
             .ctx
             .uncommitted_pool
@@ -754,34 +757,43 @@ impl<C: Command, RC: RoleChange> RawCurp<C, RC> {
         if entries.is_empty() {
             trace!(
                 "{} received heartbeat from {}: term({}), commit({}), prev_log_index({}), prev_log_term({})",
-                self.id(), leader_id, term, leader_commit, prev_log_index, prev_log_term
+                self.id(),
+                leader_id,
+                term,
+                leader_commit,
+                prev_log_index,
+                prev_log_term
             );
         } else {
             debug!(
                 "{} received append_entries from {}: term({}), commit({}), prev_log_index({}), prev_log_term({}), {} entries",
-                self.id(), leader_id, term, leader_commit, prev_log_index, prev_log_term, entries.len()
+                self.id(),
+                leader_id,
+                term,
+                leader_commit,
+                prev_log_index,
+                prev_log_term,
+                entries.len()
             );
         }
 
         // validate term and set leader id
         let st_r = self.st.upgradable_read();
         match st_r.term.cmp(&term) {
-            std::cmp::Ordering::Less => {
+            cmp::Ordering::Less => {
                 let mut st_w = RwLockUpgradableReadGuard::upgrade(st_r);
                 self.update_to_term_and_become_follower(&mut st_w, term);
                 st_w.leader_id = Some(leader_id);
                 let _ig = self.ctx.leader_tx.send(Some(leader_id)).ok();
             }
-            std::cmp::Ordering::Equal => {
+            cmp::Ordering::Equal => {
                 if st_r.leader_id.is_none() {
                     let mut st_w = RwLockUpgradableReadGuard::upgrade(st_r);
                     st_w.leader_id = Some(leader_id);
                     let _ig = self.ctx.leader_tx.send(Some(leader_id)).ok();
                 }
             }
-            std::cmp::Ordering::Greater => {
-                return Err((st_r.term, self.log.read().commit_index + 1))
-            }
+            cmp::Ordering::Greater => return Err((st_r.term, self.log.read().commit_index + 1)),
         }
         self.reset_election_tick();
 

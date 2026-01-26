@@ -1,16 +1,16 @@
 use std::{
     fmt::Display,
     sync::{
-        atomic::{AtomicI64, Ordering},
         Arc,
+        atomic::{AtomicI64, Ordering},
     },
     time::Duration,
 };
 
 use async_trait::async_trait;
 use curp_external_api::{
-    cmd::{AfterSyncCmd, AfterSyncOk, Command, CommandExecutor, ConflictCheck, PbCodec},
     InflightId, LogIndex,
+    cmd::{AfterSyncCmd, AfterSyncOk, Command, CommandExecutor, ConflictCheck, PbCodec},
 };
 use engine::{
     Engine, EngineType, Snapshot, SnapshotApi, StorageEngine, StorageOps, WriteOperation,

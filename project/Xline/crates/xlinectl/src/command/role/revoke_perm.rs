@@ -1,5 +1,5 @@
-use clap::{arg, ArgMatches, Command};
-use xline_client::{error::Result, types::range_end::RangeOption, Client};
+use clap::{ArgMatches, Command, arg};
+use xline_client::{Client, error::Result, types::range_end::RangeOption};
 
 use crate::utils::printer::Printer;
 

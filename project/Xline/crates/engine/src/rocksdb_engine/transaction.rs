@@ -3,8 +3,8 @@
 use std::{
     iter::repeat,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 
@@ -12,7 +12,7 @@ use clippy_utilities::NumericCast;
 use parking_lot::Mutex;
 use rocksdb::{Direction, IteratorMode, OptimisticTransactionDB, Transaction};
 
-use crate::{api::transaction_api::TransactionApi, error::EngineError, StorageOps, WriteOperation};
+use crate::{StorageOps, WriteOperation, api::transaction_api::TransactionApi, error::EngineError};
 
 use super::RocksEngine;
 

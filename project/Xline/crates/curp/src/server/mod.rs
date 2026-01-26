@@ -21,13 +21,13 @@ use crate::{
     members::{ClusterInfo, ServerId},
     role_change::RoleChange,
     rpc::{
-        connect::Bypass, AppendEntriesRequest, AppendEntriesResponse, FetchClusterRequest,
-        FetchClusterResponse, FetchReadStateRequest, FetchReadStateResponse,
-        InstallSnapshotRequest, InstallSnapshotResponse, LeaseKeepAliveMsg, MoveLeaderRequest,
-        MoveLeaderResponse, ProposeConfChangeRequest, ProposeConfChangeResponse, ProposeRequest,
-        PublishRequest, PublishResponse, ShutdownRequest, ShutdownResponse, TriggerShutdownRequest,
+        AppendEntriesRequest, AppendEntriesResponse, FetchClusterRequest, FetchClusterResponse,
+        FetchReadStateRequest, FetchReadStateResponse, InstallSnapshotRequest,
+        InstallSnapshotResponse, LeaseKeepAliveMsg, MoveLeaderRequest, MoveLeaderResponse,
+        ProposeConfChangeRequest, ProposeConfChangeResponse, ProposeRequest, PublishRequest,
+        PublishResponse, ShutdownRequest, ShutdownResponse, TriggerShutdownRequest,
         TriggerShutdownResponse, TryBecomeLeaderNowRequest, TryBecomeLeaderNowResponse,
-        VoteRequest, VoteResponse,
+        VoteRequest, VoteResponse, connect::Bypass,
     },
 };
 use crate::{
@@ -62,7 +62,7 @@ mod lease_manager;
 /// Curp metrics
 mod metrics;
 
-pub use storage::{db::DB, StorageApi, StorageError};
+pub use storage::{StorageApi, StorageError, db::DB};
 
 /// The Rpc Server to handle rpc requests
 ///

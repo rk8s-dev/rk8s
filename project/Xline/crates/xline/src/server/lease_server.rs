@@ -13,7 +13,7 @@ use tracing::{debug, warn};
 use utils::ClientTlsConfig;
 use utils::{
     build_endpoint,
-    task_manager::{tasks::TaskName, Listener, TaskManager},
+    task_manager::{Listener, TaskManager, tasks::TaskName},
 };
 use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},

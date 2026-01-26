@@ -18,7 +18,6 @@
     non_ascii_idents,
     // non_exhaustive_omitted_patterns, unstable
     noop_method_call,
-    pointer_structural_match,
     rust_2021_incompatible_closure_captures,
     rust_2021_incompatible_or_patterns,
     rust_2021_prefixes_incompatible_syntax,

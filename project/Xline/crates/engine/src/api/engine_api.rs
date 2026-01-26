@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{api::snapshot_api::SnapshotApi, error::EngineError, TransactionApi};
+use crate::{TransactionApi, api::snapshot_api::SnapshotApi, error::EngineError};
 
 /// The `StorageEngine` trait
 #[async_trait::async_trait]

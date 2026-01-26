@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Result;
-use clap::{arg, ArgMatches, Command};
+use clap::{ArgMatches, Command, arg};
 use engine::{Engine, EngineType, StorageEngine};
 use serde::Serialize;
 use tempfile::tempdir;

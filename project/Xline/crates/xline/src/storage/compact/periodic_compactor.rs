@@ -1,7 +1,7 @@
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering::Relaxed},
         Arc,
+        atomic::{AtomicBool, Ordering::Relaxed},
     },
     time::{Duration, Instant},
 };
@@ -45,11 +45,7 @@ impl RevisionWindow {
     #[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     fn expired_revision(&self) -> Option<i64> {
         let target = self.ring_buf[(self.cursor + 1) % self.retention];
-        if target == 0 {
-            None
-        } else {
-            Some(target)
-        }
+        if target == 0 { None } else { Some(target) }
     }
 }
 
@@ -249,15 +245,19 @@ mod test {
         );
         periodic_compactor.pause();
         revision_window.sample(13);
-        assert!(periodic_compactor
-            .do_compact(Some(2), &revision_window)
-            .await
-            .is_none());
+        assert!(
+            periodic_compactor
+                .do_compact(Some(2), &revision_window)
+                .await
+                .is_none()
+        );
         revision_window.sample(14);
-        assert!(periodic_compactor
-            .do_compact(Some(2), &revision_window)
-            .await
-            .is_none());
+        assert!(
+            periodic_compactor
+                .do_compact(Some(2), &revision_window)
+                .await
+                .is_none()
+        );
         periodic_compactor.resume();
         // revision_window: [12, 13, 14, 4, 5, 6, 7, 8, 9, 10, 11]
         assert_eq!(
@@ -268,9 +268,11 @@ mod test {
         );
 
         // auto compactor should skip those revisions which have been auto compacted.
-        assert!(periodic_compactor
-            .do_compact(Some(4), &revision_window)
-            .await
-            .is_none());
+        assert!(
+            periodic_compactor
+                .do_compact(Some(4), &revision_window)
+                .await
+                .is_none()
+        );
     }
 }

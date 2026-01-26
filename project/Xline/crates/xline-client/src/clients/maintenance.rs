@@ -1,12 +1,12 @@
 use std::{fmt::Debug, sync::Arc};
 
-use tonic::{transport::Channel, Streaming};
+use tonic::{Streaming, transport::Channel};
 use xlineapi::{
     AlarmAction, AlarmRequest, AlarmResponse, AlarmType, SnapshotRequest, SnapshotResponse,
     StatusRequest, StatusResponse,
 };
 
-use crate::{error::Result, AuthService};
+use crate::{AuthService, error::Result};
 
 /// Client for Maintenance operations.
 #[derive(Clone, Debug)]

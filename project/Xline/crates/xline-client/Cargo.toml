@@ -1,7 +1,7 @@
 [package]
 name = "xline-client"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 authors = ["DatenLord <dev@datenlord.io>"]
 description = "Client for Xline"
 license = "Apache-2.0"
@@ -24,8 +24,7 @@ thiserror = "1.0.61"
 tokio = { version = "0.2.25", package = "madsim-tokio", features = ["sync"] }
 tonic = { version = "0.5.0", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["discover"] }
-utils = { path = "../utils", features = ["parking_lot"] }
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+utils = { path = "../utils" }
 xlineapi = { path = "../xlineapi" }
 
 [dev-dependencies]
@@ -35,3 +34,6 @@ xline-test-utils = { path = "../xline-test-utils" }
 
 [build-dependencies]
 tonic-build = { version = "0.5.0", package = "madsim-tonic-build" }
+
+[lints]
+workspace = true

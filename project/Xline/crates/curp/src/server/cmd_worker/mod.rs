@@ -165,7 +165,7 @@ async fn after_sync_others<C: Command, CE: CommandExecutor<C>, RC: RoleChange>(
                 }
                 cb.write().notify_shutdown();
             }
-            (EntryData::ConfChange(ref conf_change), _) => {
+            (EntryData::ConfChange(conf_change), _) => {
                 if let Err(e) = ce.set_last_applied(entry.index) {
                     error!("failed to set last_applied, {e}");
                     return;
@@ -206,14 +206,14 @@ async fn after_sync_others<C: Command, CE: CommandExecutor<C>, RC: RoleChange>(
                         }
                     } else {
                         info!(
-                        "the old leader {} will shutdown, but no other node can be the leader now",
-                        id
-                    );
+                            "the old leader {} will shutdown, but no other node can be the leader now",
+                            id
+                        );
                     }
                     curp.task_manager().shutdown(false).await;
                 }
             }
-            (EntryData::SetNodeState(node_id, ref name, ref client_urls), _) => {
+            (EntryData::SetNodeState(node_id, name, client_urls), _) => {
                 info!("setting node state: {node_id}, urls: {:?}", client_urls);
                 if let Err(e) = ce.set_last_applied(entry.index) {
                     error!("failed to set last_applied, {e}");
@@ -256,20 +256,23 @@ pub(super) async fn worker_reset<C: Command, CE: CommandExecutor<C>, RC: RoleCha
     if let Some(snapshot) = snapshot {
         let meta = snapshot.meta;
         #[allow(clippy::expect_used)] // only in debug
-        if let Err(e) = ce
+        match ce
             .reset(Some((snapshot.into_inner(), meta.last_included_index)))
             .await
         {
-            error!("reset failed, {e}");
-        } else {
-            debug_assert_eq!(
-                ce.last_applied()
-                    .expect("failed to get last_applied from ce"),
-                meta.last_included_index,
-                "inconsistent last_applied"
-            );
-            debug!("{id}'s command executor has been reset by a snapshot");
-            curp.reset_by_snapshot(meta);
+            Err(e) => {
+                error!("reset failed, {e}");
+            }
+            _ => {
+                debug_assert_eq!(
+                    ce.last_applied()
+                        .expect("failed to get last_applied from ce"),
+                    meta.last_included_index,
+                    "inconsistent last_applied"
+                );
+                debug!("{id}'s command executor has been reset by a snapshot");
+                curp.reset_by_snapshot(meta);
+            }
         }
     } else {
         if let Err(e) = ce.reset(None).await {

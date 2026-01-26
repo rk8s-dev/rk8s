@@ -3,8 +3,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicI32, Ordering},
         Arc,
+        atomic::{AtomicI32, Ordering},
     },
 };
 
@@ -13,12 +13,12 @@ use parking_lot::RwLock;
 use prost::Message;
 use utils::table_names::ALARM_TABLE;
 use xlineapi::{
+    AlarmAction, AlarmMember, AlarmResponse, AlarmType, RequestWrapper, ResponseWrapper,
     command::{CommandResponse, SyncResponse},
     execute_error::ExecuteError,
-    AlarmAction, AlarmMember, AlarmResponse, AlarmType, RequestWrapper, ResponseWrapper,
 };
 
-use super::db::{WriteOp, DB};
+use super::db::{DB, WriteOp};
 use crate::{header_gen::HeaderGenerator, revision_number::RevisionNumberGeneratorState};
 
 /// Alarm store
@@ -65,7 +65,7 @@ impl AlarmStore {
         &self,
         request: &RequestWrapper,
         revision_gen: &RevisionNumberGeneratorState<'_>,
-    ) -> (SyncResponse, Vec<WriteOp>) {
+    ) -> (SyncResponse, Vec<WriteOp<'_>>) {
         #[allow(clippy::wildcard_enum_match_arm)]
         let ops = match *request {
             RequestWrapper::AlarmRequest(ref req) => match req.action() {
@@ -189,7 +189,7 @@ impl AlarmStore {
     }
 
     /// Sync alarm activate request
-    fn sync_alarm_activate(&self, member_id: ServerId, alarm: AlarmType) -> Vec<WriteOp> {
+    fn sync_alarm_activate(&self, member_id: ServerId, alarm: AlarmType) -> Vec<WriteOp<'_>> {
         let new_alarm = AlarmMember::new(member_id, alarm);
         let mut types_w = self.types.write();
         let e = types_w.entry(alarm).or_default();
@@ -203,7 +203,7 @@ impl AlarmStore {
     }
 
     /// Sync alarm deactivate request
-    fn sync_alarm_deactivate(&self, member_id: ServerId, alarm: AlarmType) -> Vec<WriteOp> {
+    fn sync_alarm_deactivate(&self, member_id: ServerId, alarm: AlarmType) -> Vec<WriteOp<'_>> {
         let mut types_w = self.types.write();
         let e = types_w.entry(alarm).or_default();
         let mut ops = vec![];

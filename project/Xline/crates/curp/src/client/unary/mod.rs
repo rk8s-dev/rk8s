@@ -4,7 +4,7 @@ mod propose_impl;
 use std::{
     cmp::Ordering,
     marker::PhantomData,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
 
@@ -16,16 +16,16 @@ use tonic::Response;
 use tracing::{debug, warn};
 
 use super::{
-    state::State, ClientApi, LeaderStateUpdate, ProposeIdGuard, ProposeResponse,
-    RepeatableClientApi,
+    ClientApi, LeaderStateUpdate, ProposeIdGuard, ProposeResponse, RepeatableClientApi,
+    state::State,
 };
 use crate::{
     members::ServerId,
     quorum,
     rpc::{
-        connect::ConnectApi, ConfChange, CurpError, FetchClusterRequest, FetchClusterResponse,
-        FetchReadStateRequest, Member, MoveLeaderRequest, ProposeConfChangeRequest, ProposeId,
-        PublishRequest, ReadState, ShutdownRequest,
+        ConfChange, CurpError, FetchClusterRequest, FetchClusterResponse, FetchReadStateRequest,
+        Member, MoveLeaderRequest, ProposeConfChangeRequest, ProposeId, PublishRequest, ReadState,
+        ShutdownRequest, connect::ConnectApi,
     },
     tracker::Tracker,
 };

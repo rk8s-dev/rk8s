@@ -1,8 +1,8 @@
 use anyhow::Result;
 use xline_client::{
+    Client, ClientOptions,
     clients::Xutex,
     types::kv::{Compare, CompareResult, PutOptions, TxnOp},
-    Client, ClientOptions,
 };
 
 #[tokio::main]

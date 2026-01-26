@@ -1,14 +1,14 @@
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicU64, Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicU64},
     time::{Duration, Instant},
 };
 
 use curp_test_utils::test_cmd::{LogIndexResult, TestCommand, TestCommandResult};
-use futures::{future::BoxFuture, Stream};
+use futures::{Stream, future::BoxFuture};
+use tonic::Status;
 #[cfg(not(madsim))]
 use tonic::transport::ClientTlsConfig;
-use tonic::Status;
 use tracing_test::traced_test;
 #[cfg(madsim)]
 use utils::ClientTlsConfig;
@@ -20,17 +20,17 @@ use super::{
 };
 use crate::{
     client::{
-        retry::{Retry, RetryConfig},
         ClientApi,
+        retry::{Retry, RetryConfig},
     },
     members::ServerId,
     rpc::{
-        connect::{ConnectApi, MockConnectApi},
         CurpError, FetchClusterRequest, FetchClusterResponse, FetchReadStateRequest,
         FetchReadStateResponse, Member, MoveLeaderRequest, MoveLeaderResponse, OpResponse,
         ProposeConfChangeRequest, ProposeConfChangeResponse, ProposeRequest, ProposeResponse,
         PublishRequest, PublishResponse, ReadIndexResponse, RecordRequest, RecordResponse,
         ResponseOp, ShutdownRequest, ShutdownResponse, SyncedResponse,
+        connect::{ConnectApi, MockConnectApi},
     },
 };
 
@@ -478,7 +478,7 @@ async fn test_retry_propose_return_no_retry_error() {
             .propose(&TestCommand::new_put(vec![1], 1), None, false)
             .await
             .unwrap_err();
-        assert_eq!(err.message(), tonic::Status::from(early_err).message());
+        assert_eq!(err.message(), Status::from(early_err).message());
         assert_eq!(*counter.lock().unwrap(), 1);
     }
 }

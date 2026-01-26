@@ -1,15 +1,15 @@
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::{HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
 
-use dashmap::{mapref::one::Ref, DashMap};
-use futures::{stream::FuturesUnordered, StreamExt};
+use dashmap::{DashMap, mapref::one::Ref};
+use futures::{StreamExt, stream::FuturesUnordered};
 use itertools::Itertools;
 #[cfg(not(madsim))]
 use tonic::transport::ClientTlsConfig;
@@ -341,7 +341,7 @@ impl ClusterInfo {
 
     /// cluster version decrease
     pub(crate) fn cluster_version_update(&self) {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = DefaultHasher::new();
         self.all_members_peer_urls()
             .into_iter()
             .sorted()

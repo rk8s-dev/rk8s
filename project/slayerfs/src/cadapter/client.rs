@@ -2,9 +2,18 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use bytes::Bytes;
 
 #[async_trait]
 pub trait ObjectBackend: Send + Sync {
+    async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
+        let data = chunks
+            .into_iter()
+            .flat_map(|e| e.to_vec())
+            .collect::<Vec<_>>();
+        self.put_object(key, &data).await
+    }
+
     async fn put_object(&self, key: &str, data: &[u8]) -> Result<()>;
 
     async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>>;
@@ -27,6 +36,10 @@ impl<B: ObjectBackend> ObjectClient<B> {
 
     pub async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         self.backend.put_object(key, data).await
+    }
+
+    pub async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
+        self.backend.put_object_vectored(key, chunks).await
     }
 
     pub async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>> {

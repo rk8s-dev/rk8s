@@ -5,7 +5,7 @@ use std::{
 };
 
 use fs2::FileExt;
-use sha2::{digest::Output, Digest, Sha256};
+use sha2::{Digest, Sha256, digest::Output};
 use tokio::fs::File as TokioFile;
 
 /// File that is exclusively locked
@@ -194,9 +194,11 @@ mod tests {
         let mut paths = get_file_paths_with_ext(dir.path(), ".test").unwrap();
         paths.sort();
         assert_eq!(paths.len(), num_paths);
-        assert!(paths
-            .into_iter()
-            .zip(paths_create.into_iter())
-            .all(|(x, y)| x.as_path() == y.as_path()));
+        assert!(
+            paths
+                .into_iter()
+                .zip(paths_create.into_iter())
+                .all(|(x, y)| x.as_path() == y.as_path())
+        );
     }
 }

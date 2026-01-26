@@ -1,7 +1,7 @@
 [package]
 name = "xlinectl"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 authors = ["DatenLord <dev@datenlord.io>"]
 repository = "https://github.com/xline-kv/Xline/tree/master/xlinectl"
 description = "Command line client for Xline"
@@ -20,6 +20,8 @@ shlex = "1.3.0"
 tokio = "1"
 tonic = { version = "0.5.0", package = "madsim-tonic" }
 utils = { path = "../utils" }
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 xline-client = { path = "../xline-client" }
 xlineapi = { path = "../xlineapi" }
+
+[lints]
+workspace = true

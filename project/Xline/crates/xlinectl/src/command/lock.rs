@@ -1,7 +1,7 @@
-use clap::{arg, ArgMatches, Command};
+use clap::{ArgMatches, Command, arg};
 use std::process::Command as StdCommand;
 use tokio::signal;
-use xline_client::{clients::Xutex, error::Result, Client};
+use xline_client::{Client, clients::Xutex, error::Result};
 
 /// Definition of `lock` command
 pub(crate) fn command() -> Command {

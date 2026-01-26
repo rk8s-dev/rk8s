@@ -1,5 +1,5 @@
 use clap::{ArgMatches, Command};
-use xline_client::{error::Result, Client};
+use xline_client::{Client, error::Result};
 
 use crate::handle_matches;
 

@@ -1,8 +1,8 @@
 use std::{
     env,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
@@ -51,7 +51,8 @@ impl TestRoleChangeInner {
 
 pub fn init_logger() {
     if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "curp=debug,xline=debug");
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { env::set_var("RUST_LOG", "curp=debug,xline=debug") };
     }
     _ = tracing_subscriber::fmt()
         .with_timer(uptime())

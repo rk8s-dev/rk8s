@@ -18,7 +18,6 @@
     non_ascii_idents,
     // non_exhaustive_omitted_patterns, unstable
     noop_method_call,
-    pointer_structural_match,
     rust_2021_incompatible_closure_captures,
     rust_2021_incompatible_or_patterns,
     rust_2021_prefixes_incompatible_syntax,
@@ -160,7 +159,7 @@ extern crate utils as ext_utils;
 use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;
-use clap::{arg, value_parser, Command};
+use clap::{Command, arg, value_parser};
 use command::compaction;
 use ext_utils::config::ClientConfig;
 use tokio::fs;
@@ -171,7 +170,7 @@ use crate::{
     command::{auth, delete, get, lease, lock, member, put, role, snapshot, txn, user, watch},
     utils::{
         parser::parse_user,
-        printer::{set_printer_type, PrinterType},
+        printer::{PrinterType, set_printer_type},
     },
 };
 

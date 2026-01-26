@@ -1,5 +1,5 @@
-use clap::{arg, value_parser, ArgMatches, Command};
-use xline_client::{error::Result, Client};
+use clap::{ArgMatches, Command, arg, value_parser};
+use xline_client::{Client, error::Result};
 
 use super::parse_peer_urls;
 use crate::utils::printer::Printer;

@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package errorpb;
+
+import "google/protobuf/empty.proto";
+
+option go_package = ".;xlineapi";
+option java_package = "com.xline.protobuf";
+option java_outer_classname = "ErrorProto";
+option java_multiple_files = true;
+
+// Command::Error
+message ExecuteError {
+    oneof error {
+        google.protobuf.Empty key_not_found = 1;
+        Revisions revision_too_large = 2;
+        Revisions revision_compacted = 3;
+        int64 lease_not_found = 4;
+        int64 lease_expired = 5;
+        int64 lease_ttl_too_large = 6;
+        int64 lease_already_exists = 7;
+        google.protobuf.Empty auth_not_enabled = 8;
+        google.protobuf.Empty auth_failed = 9;
+        string user_not_found = 10;
+        string user_already_exists = 11;
+        UserRole user_already_has_role = 12;
+        google.protobuf.Empty no_password_user = 13;
+        string role_not_found = 14;
+        string role_already_exists = 15;
+        string role_not_granted = 16;
+        google.protobuf.Empty root_role_not_exist = 17;
+        google.protobuf.Empty permission_not_granted = 18;
+        google.protobuf.Empty permission_not_given = 19;
+        google.protobuf.Empty invalid_auth_management = 20;
+        google.protobuf.Empty invalid_auth_token = 21;
+        google.protobuf.Empty token_manager_not_init = 22;
+        google.protobuf.Empty token_not_provided = 23;
+        Revisions token_old_revision = 24;
+        string db_error = 25;
+        google.protobuf.Empty permission_denied = 26;
+        google.protobuf.Empty nospace = 27;
+    }
+}
+
+message Revisions {
+    int64 required_revision = 1;
+    int64 current_revision = 2;
+}
+
+message UserRole {
+    string user = 1;
+    string role = 2;
+}

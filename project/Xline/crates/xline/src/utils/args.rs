@@ -4,24 +4,25 @@ use anyhow::Result;
 use clap::Parser;
 use tokio::fs;
 use utils::{
+    ConfigFileError,
     config::{
-        default_batch_max_size, default_batch_timeout, default_candidate_timeout_ticks,
-        default_client_id_keep_alive_interval, default_client_wait_synced_timeout,
-        default_cmd_workers, default_compact_batch_size, default_compact_sleep_interval,
-        default_compact_timeout, default_follower_timeout_ticks, default_gc_interval,
-        default_heartbeat_interval, default_initial_retry_timeout, default_log_entries_cap,
-        default_log_level, default_max_retry_timeout, default_metrics_enable, default_metrics_path,
-        default_metrics_port, default_metrics_push_endpoint, default_metrics_push_protocol,
-        default_propose_timeout, default_quota, default_range_retry_timeout, default_retry_count,
-        default_rotation, default_rpc_timeout, default_server_wait_synced_timeout,
-        default_sync_victims_interval, default_watch_progress_notify_interval, AuthConfig,
-        AutoCompactConfig, ClientConfig, ClusterConfig, CompactConfig, CurpConfigBuilder,
-        EngineConfig, InitialClusterState, LevelConfig, LogConfig, MetricsConfig,
-        MetricsPushProtocol, RotationConfig, ServerTimeout, StorageConfig, TlsConfig, TraceConfig,
-        XlineServerConfig,
+        AuthConfig, AutoCompactConfig, ClientConfig, ClusterConfig, CompactConfig,
+        CurpConfigBuilder, EngineConfig, InitialClusterState, LevelConfig, LogConfig,
+        MetricsConfig, MetricsPushProtocol, RotationConfig, ServerTimeout, StorageConfig,
+        TlsConfig, TraceConfig, XlineServerConfig, default_batch_max_size, default_batch_timeout,
+        default_candidate_timeout_ticks, default_client_id_keep_alive_interval,
+        default_client_wait_synced_timeout, default_cmd_workers, default_compact_batch_size,
+        default_compact_sleep_interval, default_compact_timeout, default_follower_timeout_ticks,
+        default_gc_interval, default_heartbeat_interval, default_initial_retry_timeout,
+        default_log_entries_cap, default_log_level, default_max_retry_timeout,
+        default_metrics_enable, default_metrics_path, default_metrics_port,
+        default_metrics_push_endpoint, default_metrics_push_protocol, default_propose_timeout,
+        default_quota, default_range_retry_timeout, default_retry_count, default_rotation,
+        default_rpc_timeout, default_server_wait_synced_timeout, default_sync_victims_interval,
+        default_watch_progress_notify_interval,
     },
     parse_batch_bytes, parse_duration, parse_log_file, parse_log_level, parse_members,
-    parse_metrics_push_protocol, parse_rotation, parse_state, ConfigFileError,
+    parse_metrics_push_protocol, parse_rotation, parse_state,
 };
 
 /// Xline server config path env name

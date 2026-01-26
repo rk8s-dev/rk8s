@@ -2,15 +2,16 @@ use std::{io, marker::PhantomData, ops::Mul};
 
 use clippy_utilities::OverflowArithmetic;
 use curp_external_api::LogIndex;
-use futures::{future::join_all, Future, SinkExt, StreamExt};
+use futures::{Future, SinkExt, StreamExt, future::join_all};
 use itertools::Itertools;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
 use crate::log_entry::LogEntry;
 
 use super::{
+    WAL_FILE_EXT, WALStorageOps,
     codec::{DataFrame, DataFrameOwned, WAL},
     config::PersistentConfig,
     error::{CorruptType, WALError},
@@ -18,7 +19,6 @@ use super::{
     remover::SegmentRemover,
     segment::WALSegment,
     util::{self, LockedFile},
-    WALStorageOps, WAL_FILE_EXT,
 };
 
 /// The WAL storage

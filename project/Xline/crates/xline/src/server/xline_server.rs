@@ -1,12 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clippy_utilities::{NumericCast, OverflowArithmetic};
 use curp::{
     client::ClientBuilder as CurpClientBuilder,
-    members::{get_cluster_info_from_remote, ClusterInfo},
+    members::{ClusterInfo, get_cluster_info_from_remote},
     rpc::{InnerProtocolServer, ProtocolServer},
-    server::{Rpc, StorageApi as _, DB as CurpDB},
+    server::{DB as CurpDB, Rpc, StorageApi as _},
 };
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
@@ -18,20 +18,20 @@ use tokio::fs;
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(not(madsim))]
 use tonic::transport::{
-    server::Connected, Certificate, ClientTlsConfig, Identity, ServerTlsConfig,
+    Certificate, ClientTlsConfig, Identity, ServerTlsConfig, server::Connected,
 };
-use tonic::transport::{server::Router, Server};
+use tonic::transport::{Server, server::Router};
 use tracing::{info, warn};
+#[cfg(madsim)]
+use utils::{ClientTlsConfig, ServerTlsConfig};
 use utils::{
     barrier::IdBarrier,
     config::{
         AuthConfig, ClusterConfig, CompactConfig, EngineConfig, InitialClusterState, StorageConfig,
         TlsConfig,
     },
-    task_manager::{tasks::TaskName, TaskManager},
+    task_manager::{TaskManager, tasks::TaskName},
 };
-#[cfg(madsim)]
-use utils::{ClientTlsConfig, ServerTlsConfig};
 use xlineapi::command::{Command, CurpClient};
 
 use super::{
@@ -43,7 +43,7 @@ use super::{
     lease_server::LeaseServer,
     lock_server::LockServer,
     maintenance::MaintenanceServer,
-    watch_server::{WatchServer, CHANNEL_SIZE},
+    watch_server::{CHANNEL_SIZE, WatchServer},
 };
 use crate::{
     conflict::{XlineSpeculativePools, XlineUncommittedPools},
@@ -57,13 +57,13 @@ use crate::{
     },
     state::State,
     storage::{
-        compact::{auto_compactor, compact_bg_task, COMPACT_CHANNEL_SIZE},
+        AlarmStore, AuthStore, KvStore, LeaseStore,
+        compact::{COMPACT_CHANNEL_SIZE, auto_compactor, compact_bg_task},
         db::DB,
         index::Index,
         kv_store::KvStoreInner,
         kvwatcher::KvWatcher,
         lease_store::LeaseCollection,
-        AlarmStore, AuthStore, KvStore, LeaseStore,
     },
 };
 
@@ -652,7 +652,7 @@ impl XlineServer {
             (_, Some(_), None) | (_, None, Some(_)) => {
                 return Err(anyhow!(
                     "client_cert_path and client_key_path must be both set"
-                ))
+                ));
             }
             _ => None,
         };
@@ -677,7 +677,7 @@ impl XlineServer {
                 Some(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
             }
             (_, Some(_), None) | (_, None, Some(_)) => {
-                return Err(anyhow!("peer_cert_path and peer_key_path must be both set"))
+                return Err(anyhow!("peer_cert_path and peer_key_path must be both set"));
             }
             _ => None,
         };
@@ -689,7 +689,7 @@ impl XlineServer {
 #[cfg(not(madsim))]
 fn bind_addrs(
     addrs: &[String],
-) -> Result<impl Stream<Item = Result<tokio::net::TcpStream, std::io::Error>>> {
+) -> Result<impl Stream<Item = Result<tokio::net::TcpStream, std::io::Error>> + use<>> {
     use std::net::ToSocketAddrs;
     if addrs.is_empty() {
         return Err(anyhow!("No address to bind"));

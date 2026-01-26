@@ -1,6 +1,6 @@
 use anyhow::Result;
-use clap::{arg, value_parser, ArgMatches, Command};
-use xline_client::{types::kv::PutOptions, Client};
+use clap::{ArgMatches, Command, arg, value_parser};
+use xline_client::{Client, types::kv::PutOptions};
 
 use crate::utils::printer::Printer;
 

@@ -3,7 +3,7 @@ use std::{fmt::Debug, hash::Hash};
 use async_trait::async_trait;
 use engine::Snapshot;
 use prost::DecodeError;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{InflightId, LogIndex};
 

@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use curp_external_api::{cmd::Command, InflightId, LogIndex};
+use curp_external_api::{InflightId, LogIndex, cmd::Command};
 use serde::{Deserialize, Serialize};
 
 use crate::{

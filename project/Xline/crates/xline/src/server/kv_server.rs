@@ -1,7 +1,7 @@
 use std::{
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -12,9 +12,9 @@ use futures::future::Either;
 use tokio::time::timeout;
 use tracing::{debug, instrument};
 use xlineapi::{
+    AuthInfo, ResponseWrapper,
     command::{Command, CurpClient},
     request_validation::RequestValidator,
-    AuthInfo, ResponseWrapper,
 };
 
 use crate::{

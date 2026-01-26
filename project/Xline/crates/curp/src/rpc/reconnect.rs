@@ -1,5 +1,5 @@
 use std::{
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
 
@@ -10,11 +10,11 @@ use futures::Stream;
 use crate::{
     members::ServerId,
     rpc::{
-        connect::ConnectApi, CurpError, FetchClusterRequest, FetchClusterResponse,
-        FetchReadStateRequest, FetchReadStateResponse, MoveLeaderRequest, MoveLeaderResponse,
-        OpResponse, ProposeConfChangeRequest, ProposeConfChangeResponse, ProposeRequest,
-        PublishRequest, PublishResponse, ReadIndexResponse, RecordRequest, RecordResponse,
-        ShutdownRequest, ShutdownResponse,
+        CurpError, FetchClusterRequest, FetchClusterResponse, FetchReadStateRequest,
+        FetchReadStateResponse, MoveLeaderRequest, MoveLeaderResponse, OpResponse,
+        ProposeConfChangeRequest, ProposeConfChangeResponse, ProposeRequest, PublishRequest,
+        PublishResponse, ReadIndexResponse, RecordRequest, RecordResponse, ShutdownRequest,
+        ShutdownResponse, connect::ConnectApi,
     },
 };
 
@@ -69,7 +69,7 @@ impl<C: ConnectApi> Reconnect<C> {
 
 /// Execute with reconnect
 macro_rules! execute_with_reconnect {
-    ($self:expr, $trait_method:path, $($arg:expr),*) => {{
+    ($self:expr_2021, $trait_method:path, $($arg:expr_2021),*) => {{
         let result = {
             let connect = $self.connect.read().await;
             let connect_ref = connect.as_ref().unwrap();

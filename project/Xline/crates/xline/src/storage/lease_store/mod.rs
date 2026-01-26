@@ -10,8 +10,8 @@ mod lease_queue;
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
@@ -29,7 +29,7 @@ use xlineapi::{
 
 pub(crate) use self::{lease::Lease, lease_collection::LeaseCollection};
 use super::{
-    db::{WriteOp, DB},
+    db::{DB, WriteOp},
     index::IndexOperate,
     storage_api::XlineStorageOps,
 };
@@ -102,7 +102,7 @@ impl LeaseStore {
         revision_gen: &RevisionNumberGeneratorState<'_>,
         txn_db: &T,
         index: &I,
-    ) -> Result<(SyncResponse, Vec<WriteOp>), ExecuteError>
+    ) -> Result<(SyncResponse, Vec<WriteOp<'_>>), ExecuteError>
     where
         T: XlineStorageOps + TransactionApi,
         I: IndexOperate,

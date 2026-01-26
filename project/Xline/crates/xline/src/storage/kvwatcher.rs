@@ -2,8 +2,8 @@ use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
     sync::{
-        atomic::{AtomicI64, Ordering},
         Arc,
+        atomic::{AtomicI64, Ordering},
     },
     time::Duration,
 };
@@ -17,7 +17,7 @@ use tokio::{
 use tracing::{debug, warn};
 use utils::{
     parking_lot_lock::RwLockMap,
-    task_manager::{tasks::TaskName, Listener, TaskManager},
+    task_manager::{Listener, TaskManager, tasks::TaskName},
     write_vec,
 };
 use xlineapi::command::KeyRange;
@@ -247,30 +247,33 @@ impl WatcherMap {
 
     /// Remove a watcher
     fn remove(&mut self, watch_id: WatchId) {
-        if let Some(watcher) = self.watchers.remove(&watch_id) {
-            let key_range = watcher.key_range();
-            let is_empty = {
-                let Some(watch_ids) = self.index.get_mut(watcher.key_range()) else {
-                    unreachable!("watch_ids should exist")
+        match self.watchers.remove(&watch_id) {
+            Some(watcher) => {
+                let key_range = watcher.key_range();
+                let is_empty = {
+                    let Some(watch_ids) = self.index.get_mut(watcher.key_range()) else {
+                        unreachable!("watch_ids should exist")
+                    };
+                    assert!(
+                        watch_ids.remove(&watcher.watch_id()),
+                        "no such watcher in index"
+                    );
+                    watch_ids.is_empty()
                 };
-                assert!(
-                    watch_ids.remove(&watcher.watch_id()),
-                    "no such watcher in index"
-                );
-                watch_ids.is_empty()
-            };
-            if is_empty {
-                assert!(
-                    self.index.remove(key_range).is_some(),
-                    "watch_ids should exist"
-                );
+                if is_empty {
+                    assert!(
+                        self.index.remove(key_range).is_some(),
+                        "watch_ids should exist"
+                    );
+                }
             }
-        } else {
-            self.victims = self
-                .victims
-                .drain()
-                .filter(|pair| pair.0.watch_id() != watch_id)
-                .collect();
+            _ => {
+                self.victims = self
+                    .victims
+                    .drain()
+                    .filter(|pair| pair.0.watch_id() != watch_id)
+                    .collect();
+            }
         };
     }
 }
@@ -603,8 +606,8 @@ mod test {
         header_gen::HeaderGenerator,
         rpc::PutRequest,
         storage::{
-            compact::COMPACT_CHANNEL_SIZE, db::DB, index::Index, lease_store::LeaseCollection,
-            KvStore,
+            KvStore, compact::COMPACT_CHANNEL_SIZE, db::DB, index::Index,
+            lease_store::LeaseCollection,
         },
     };
 

@@ -2,8 +2,8 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicBool, Ordering as AtomicOrdering},
         Arc,
+        atomic::{AtomicBool, Ordering as AtomicOrdering},
     },
 };
 
@@ -13,14 +13,14 @@ use jsonwebtoken::{DecodingKey, EncodingKey};
 use log::debug;
 use parking_lot::RwLock;
 use pbkdf2::{
-    password_hash::{PasswordHash, PasswordVerifier},
     Pbkdf2,
+    password_hash::{PasswordHash, PasswordVerifier},
 };
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
+    AuthInfo,
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
-    AuthInfo,
 };
 
 use super::{
@@ -47,7 +47,7 @@ use crate::{
     server::get_token,
     storage::{
         auth_store::backend::AuthStoreBackend,
-        db::{WriteOp, DB},
+        db::{DB, WriteOp},
         lease_store::{Lease, LeaseCollection},
     },
 };
@@ -641,7 +641,7 @@ impl AuthStore {
     }
 
     /// Sync `AuthUserAddRequest` and return whether authstore is changed.
-    fn sync_user_add_request(req: &AuthUserAddRequest, revision: i64) -> Vec<WriteOp> {
+    fn sync_user_add_request(req: &AuthUserAddRequest, revision: i64) -> Vec<WriteOp<'_>> {
         let mut ops = Vec::new();
         let user = User {
             name: req.name.as_str().into(),
@@ -759,7 +759,7 @@ impl AuthStore {
     }
 
     /// Sync `AuthRoleAddRequest` and return whether authstore is changed.
-    fn sync_role_add_request(req: &AuthRoleAddRequest, revision: i64) -> Vec<WriteOp> {
+    fn sync_role_add_request(req: &AuthRoleAddRequest, revision: i64) -> Vec<WriteOp<'_>> {
         let mut ops = Vec::new();
         let role = Role {
             name: req.name.as_str().into(),

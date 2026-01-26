@@ -7,9 +7,10 @@ use crate::mock_rocksdb_engine::{RocksEngine, RocksSnapshot, RocksTransaction};
 #[cfg(not(madsim))]
 use crate::rocksdb_engine::{RocksEngine, RocksSnapshot, RocksTransaction};
 use crate::{
+    SnapshotApi, StorageEngine, StorageOps, TransactionApi, WriteOperation,
     error::EngineError,
     memory_engine::{MemoryEngine, MemorySnapshot, MemoryTransaction},
-    metrics, SnapshotApi, StorageEngine, StorageOps, TransactionApi, WriteOperation,
+    metrics,
 };
 
 #[derive(Debug)]
@@ -498,10 +499,12 @@ mod test {
 
             received_snapshot.write_all(buf.freeze()).await.unwrap();
 
-            assert!(recover_engine
-                .apply_snapshot(received_snapshot, &TESTTABLES)
-                .await
-                .is_ok());
+            assert!(
+                recover_engine
+                    .apply_snapshot(received_snapshot, &TESTTABLES)
+                    .await
+                    .is_ok()
+            );
 
             let value = recover_engine.get("kv", "key").unwrap();
             assert_eq!(value, Some("value".into()));

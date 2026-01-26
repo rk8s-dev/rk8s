@@ -1,12 +1,12 @@
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry, HashMap, HashSet},
-    sync::{atomic::AtomicU64, Arc},
+    collections::{HashMap, HashSet, hash_map::Entry},
+    sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
 
 use event_listener::Event;
-use futures::{stream::FuturesUnordered, Future};
+use futures::{Future, stream::FuturesUnordered};
 use rand::seq::IteratorRandom;
 use tokio::sync::RwLock;
 #[cfg(not(madsim))]
@@ -18,9 +18,8 @@ use utils::ClientTlsConfig;
 use crate::{
     members::ServerId,
     rpc::{
-        self,
+        self, CurpError, FetchClusterRequest, FetchClusterResponse, Protocol,
         connect::{BypassedConnect, ConnectApi},
-        CurpError, FetchClusterRequest, FetchClusterResponse, Protocol,
     },
 };
 
@@ -249,7 +248,9 @@ impl State {
                 // If a server loses contact with its leader, it will update its term for election. Since other servers are all right, the election will not succeed.
                 // But if the client learns about the new term and updates its term to it, it will never get the true leader.
                 if let Some(new_leader_id) = leader_id {
-                    info!("client term updates to {term}, client leader id updates to {new_leader_id}");
+                    info!(
+                        "client term updates to {term}, client leader id updates to {new_leader_id}"
+                    );
                     state.term = term;
                     state.leader = Some(new_leader_id);
                     let _ignore = self.immutable.leader_notifier.notify(usize::MAX);

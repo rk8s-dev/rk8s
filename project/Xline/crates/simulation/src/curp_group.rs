@@ -2,16 +2,17 @@ use std::{
     collections::HashMap,
     error::Error,
     path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
 
 use async_trait::async_trait;
 pub use curp::rpc::{
-    protocol_client::ProtocolClient, PbProposeId, ProposeRequest, ProposeResponse, RecordRequest,
-    RecordResponse,
+    PbProposeId, ProposeRequest, ProposeResponse, RecordRequest, RecordResponse,
+    protocol_client::ProtocolClient,
 };
 use curp::{
+    LogIndex,
     client::{ClientApi, ClientBuilder},
     cmd::Command,
     members::{ClusterInfo, ServerId},
@@ -20,14 +21,13 @@ use curp::{
         ProposeConfChangeRequest, ProposeConfChangeResponse, ReadState,
     },
     server::{
+        DB, Rpc, StorageApi,
         conflict::test_pools::{TestSpecPool, TestUncomPool},
-        Rpc, StorageApi, DB,
     },
-    LogIndex,
 };
 use curp_test_utils::{
-    test_cmd::{TestCE, TestCommand, TestCommandResult},
     TestRoleChange, TestRoleChangeInner,
+    test_cmd::{TestCE, TestCommand, TestCommandResult},
 };
 use engine::{Engine, EngineType, Snapshot, SnapshotAllocator};
 use itertools::Itertools;

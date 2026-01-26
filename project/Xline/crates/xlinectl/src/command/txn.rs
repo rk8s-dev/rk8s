@@ -1,11 +1,11 @@
 use std::io;
 
-use anyhow::{anyhow, bail, Result};
-use clap::{arg, ArgMatches, Command};
+use anyhow::{Result, anyhow, bail};
+use clap::{ArgMatches, Command, arg};
 use regex::Regex;
 use xline_client::{
-    types::kv::{Compare, TxnOp, TxnRequest},
     Client,
+    types::kv::{Compare, TxnOp, TxnRequest},
 };
 use xlineapi::CompareResult;
 
@@ -30,7 +30,7 @@ pub(crate) fn build_request(matches: &ArgMatches) -> Result<TxnRequest> {
                     line.as_ref()
                         .map_or_else(|_| false, |l| !l.trim().is_empty())
                 })
-                .collect::<std::io::Result<_>>()?)
+                .collect::<io::Result<_>>()?)
         }
 
         println!("Type an empty line to finish input");

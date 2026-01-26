@@ -2,11 +2,11 @@ use std::{fmt::Debug, iter, sync::Arc};
 
 use clippy_utilities::OverflowArithmetic;
 use curp::{
+    InflightId, LogIndex,
     cmd::{
         AfterSyncCmd, AfterSyncOk, Command as CurpCommand, CommandExecutor as CurpCommandExecutor,
     },
     members::ServerId,
-    InflightId, LogIndex,
 };
 use dashmap::DashMap;
 use engine::{Snapshot, TransactionApi};
@@ -15,20 +15,20 @@ use parking_lot::RwLock;
 use tracing::warn;
 use utils::{barrier::IdBarrier, table_names::META_TABLE};
 use xlineapi::{
+    AlarmAction, AlarmRequest, AlarmType,
     classifier::RequestClassifier,
     command::{Command, CurpClient, SyncResponse},
     execute_error::ExecuteError,
-    AlarmAction, AlarmRequest, AlarmType,
 };
 
 use crate::{
     revision_number::RevisionNumberGeneratorState,
     rpc::RequestWrapper,
     storage::{
-        db::{WriteOp, DB},
+        AlarmStore, AuthStore, KvStore, LeaseStore,
+        db::{DB, WriteOp},
         index::IndexOperate,
         storage_api::XlineStorageOps,
-        AlarmStore, AuthStore, KvStore, LeaseStore,
     },
 };
 

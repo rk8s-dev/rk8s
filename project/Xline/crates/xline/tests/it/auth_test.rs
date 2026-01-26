@@ -6,7 +6,7 @@ use utils::config::{
     TraceConfig, XlineServerConfig,
 };
 use xline_test_utils::{
-    enable_auth, set_user, types::kv::RangeOptions, Client, ClientOptions, Cluster,
+    Client, ClientOptions, Cluster, enable_auth, set_user, types::kv::RangeOptions,
 };
 
 #[tokio::test(flavor = "multi_thread")]

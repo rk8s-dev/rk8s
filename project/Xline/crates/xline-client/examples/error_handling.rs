@@ -1,6 +1,6 @@
 //! An example to show how the errors are organized in `xline-client`
 use anyhow::Result;
-use xline_client::{error::XlineClientError, types::kv::PutOptions, Client, ClientOptions};
+use xline_client::{Client, ClientOptions, error::XlineClientError, types::kv::PutOptions};
 use xlineapi::execute_error::ExecuteError;
 
 #[tokio::main]

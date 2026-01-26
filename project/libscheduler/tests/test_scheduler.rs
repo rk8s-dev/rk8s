@@ -1,8 +1,9 @@
-use common::{Taint, TaintEffect, TaintKey, Toleration, TolerationOperator};
+use common::{LabelSelector, Taint, TaintEffect, TaintKey, Toleration, TolerationOperator};
 use libscheduler::models::{
     Affinity, NodeAffinity, NodeInfo, NodeSelector, NodeSelectorOperator, NodeSelectorRequirement,
-    NodeSelectorTerm, NodeSpec, PodInfo, PodSpec, PreferredSchedulingTerm,
-    PreferredSchedulingTerms, QueuedInfo, ResourcesRequirements,
+    NodeSelectorTerm, NodeSpec, PodAffinity, PodAffinityTerm, PodAntiAffinity, PodInfo, PodSpec,
+    PreferredSchedulingTerm, PreferredSchedulingTerms, ResourcesRequirements,
+    WeightedPodAffinityTerm,
 };
 use libscheduler::plugins::Plugins;
 use libscheduler::plugins::node_resources_fit::ScoringStrategy;
@@ -12,16 +13,15 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 fn make_pod(name: &str, priority: u64, cpu: u64, memory: u64) -> PodInfo {
-    PodInfo {
-        name: name.to_string(),
-        spec: PodSpec {
+    PodInfo::new(
+        name.to_string(),
+        HashMap::new(),
+        PodSpec {
             resources: ResourcesRequirements { cpu, memory },
             priority,
             ..Default::default()
         },
-        queued_info: QueuedInfo::default(),
-        scheduled: None,
-    }
+    )
 }
 
 fn make_node(name: &str, cpu: u64, memory: u64) -> NodeInfo {
@@ -199,6 +199,8 @@ async fn test_scheduler_node_affinity_required() {
             }),
             ..Default::default()
         }),
+        pod_affinity: None,
+        pod_anti_affinity: None,
     });
 
     scheduler.update_cache_pod(pod).await;
@@ -241,6 +243,8 @@ async fn test_scheduler_node_affinity_preferred() {
             }),
             ..Default::default()
         }),
+        pod_affinity: None,
+        pod_anti_affinity: None,
     });
 
     scheduler.update_cache_pod(pod).await;
@@ -617,6 +621,8 @@ async fn test_scheduler_complex_scenario() {
             }),
             ..Default::default()
         }),
+        pod_affinity: None,
+        pod_anti_affinity: None,
     });
 
     let regular_pod = make_pod("regular-pod", 10, 2, 2000);
@@ -641,4 +647,294 @@ async fn test_scheduler_complex_scenario() {
         ("regular-pod".to_string(), "dev-node".to_string()),
     ];
     assert_eq!(assignments, expected);
+}
+
+#[tokio::test]
+async fn test_scheduler_pod_affinity_basic() {
+    let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+
+    // Create nodes with topology labels
+    let mut node1 = make_node("node1", 10, 10000);
+    node1
+        .labels
+        .insert("zone".to_string(), "zone-a".to_string());
+    let mut node2 = make_node("node2", 10, 10000);
+    node2
+        .labels
+        .insert("zone".to_string(), "zone-b".to_string());
+
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
+
+    // Create an existing pod with label app=web on node1
+    let mut existing_pod_labels = HashMap::new();
+    existing_pod_labels.insert("app".to_string(), "web".to_string());
+    let mut existing_pod = make_pod("web-pod", 10, 1, 1000);
+    existing_pod.labels = existing_pod_labels;
+    existing_pod.spec.node_name = Some("node1".to_string());
+    scheduler.update_cache_pod(existing_pod).await;
+
+    // Create a new pod with required affinity to web app pods in same zone
+    let mut selector_labels = HashMap::new();
+    selector_labels.insert("app".to_string(), "web".to_string());
+    let label_selector = Some(LabelSelector {
+        match_labels: selector_labels,
+        match_expressions: vec![],
+    });
+
+    let pod_affinity_term = PodAffinityTerm {
+        label_selector,
+        topology_key: "zone".to_string(),
+    };
+
+    let pod_affinity = PodAffinity {
+        required_during_scheduling_ignored_during_execution: Some(vec![pod_affinity_term]),
+        preferred_during_scheduling_ignored_during_execution: None,
+    };
+
+    let affinity = Affinity {
+        node_affinity: None,
+        pod_affinity: Some(pod_affinity),
+        pod_anti_affinity: None,
+    };
+
+    let mut pod_labels = HashMap::new();
+    pod_labels.insert("app".to_string(), "api".to_string());
+    let mut pod = make_pod("affinity-pod", 10, 1, 1000);
+    pod.labels = pod_labels;
+    pod.spec.affinity = Some(affinity);
+    scheduler.update_cache_pod(pod).await;
+
+    let mut rx = scheduler.run();
+    let mut assignment = None;
+    for _ in 0..2 {
+        let res = timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let a = res.unwrap();
+        if a.pod_name == "affinity-pod" {
+            assignment = Some(a);
+            break;
+        }
+    }
+    let assignment = assignment.expect("Should have received affinity-pod assignment");
+
+    // The pod should be scheduled in zone-a (node1) because web-pod is there
+    assert_eq!(assignment.pod_name, "affinity-pod");
+    assert_eq!(assignment.node_name, "node1");
+}
+
+#[tokio::test]
+async fn test_scheduler_pod_anti_affinity_basic() {
+    let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+
+    // Create nodes with topology labels
+    let mut node1 = make_node("node1", 10, 10000);
+    node1
+        .labels
+        .insert("zone".to_string(), "zone-a".to_string());
+    let mut node2 = make_node("node2", 10, 10000);
+    node2
+        .labels
+        .insert("zone".to_string(), "zone-b".to_string());
+
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
+
+    // Create an existing pod with label app=web on node1
+    let mut existing_pod_labels = HashMap::new();
+    existing_pod_labels.insert("app".to_string(), "web".to_string());
+    let mut existing_pod = make_pod("web-pod", 10, 1, 1000);
+    existing_pod.labels = existing_pod_labels;
+    existing_pod.spec.node_name = Some("node1".to_string());
+    scheduler.update_cache_pod(existing_pod).await;
+
+    // Create a new pod with required anti-affinity to web app pods in same zone
+    let mut selector_labels = HashMap::new();
+    selector_labels.insert("app".to_string(), "web".to_string());
+    let label_selector = Some(LabelSelector {
+        match_labels: selector_labels,
+        match_expressions: vec![],
+    });
+
+    let pod_affinity_term = PodAffinityTerm {
+        label_selector,
+        topology_key: "zone".to_string(),
+    };
+
+    let pod_anti_affinity = PodAntiAffinity {
+        required_during_scheduling_ignored_during_execution: Some(vec![pod_affinity_term]),
+        preferred_during_scheduling_ignored_during_execution: None,
+    };
+
+    let anti_affinity = Affinity {
+        node_affinity: None,
+        pod_affinity: None,
+        pod_anti_affinity: Some(pod_anti_affinity),
+    };
+
+    let mut pod_labels = HashMap::new();
+    pod_labels.insert("app".to_string(), "db".to_string());
+    let mut pod = make_pod("anti-affinity-pod", 10, 1, 1000);
+    pod.labels = pod_labels;
+    pod.spec.affinity = Some(anti_affinity);
+    scheduler.update_cache_pod(pod).await;
+
+    let mut rx = scheduler.run();
+    let mut assignment = None;
+    for _ in 0..2 {
+        let res = timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let a = res.unwrap();
+        if a.pod_name == "anti-affinity-pod" {
+            assignment = Some(a);
+            break;
+        }
+    }
+    let assignment = assignment.expect("Should have received anti-affinity-pod assignment");
+
+    // The pod should be scheduled in zone-b (node2) because web-pod is in zone-a
+    assert_eq!(assignment.pod_name, "anti-affinity-pod");
+    assert_eq!(assignment.node_name, "node2");
+}
+
+#[tokio::test]
+async fn test_scheduler_pod_affinity_no_matching_pods() {
+    let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+
+    // Create nodes with topology labels
+    let mut node1 = make_node("node1", 10, 10000);
+    node1
+        .labels
+        .insert("zone".to_string(), "zone-a".to_string());
+    let mut node2 = make_node("node2", 10, 10000);
+    node2
+        .labels
+        .insert("zone".to_string(), "zone-b".to_string());
+
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
+
+    // Create a pod with required affinity to app=web pods, but no such pods exist
+    let mut selector_labels = HashMap::new();
+    selector_labels.insert("app".to_string(), "web".to_string());
+    let label_selector = Some(LabelSelector {
+        match_labels: selector_labels,
+        match_expressions: vec![],
+    });
+
+    let pod_affinity_term = PodAffinityTerm {
+        label_selector,
+        topology_key: "zone".to_string(),
+    };
+
+    let pod_affinity = PodAffinity {
+        required_during_scheduling_ignored_during_execution: Some(vec![pod_affinity_term]),
+        preferred_during_scheduling_ignored_during_execution: None,
+    };
+
+    let affinity = Affinity {
+        node_affinity: None,
+        pod_affinity: Some(pod_affinity),
+        pod_anti_affinity: None,
+    };
+
+    let mut pod_labels = HashMap::new();
+    pod_labels.insert("app".to_string(), "api".to_string());
+    let mut pod = make_pod("affinity-pod", 10, 1, 1000);
+    pod.labels = pod_labels;
+    pod.spec.affinity = Some(affinity);
+    scheduler.update_cache_pod(pod).await;
+
+    let mut rx = scheduler.run();
+    let res = timeout(Duration::from_secs(1), rx.recv()).await;
+
+    // Pod should not be schedulable because no matching pods exist for affinity
+    assert!(res.is_err() || res.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn test_scheduler_pod_affinity_weighted_preferred() {
+    let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+
+    // Create nodes with topology labels
+    let mut node1 = make_node("node1", 10, 10000);
+    node1
+        .labels
+        .insert("zone".to_string(), "zone-a".to_string());
+
+    let mut node2 = make_node("node2", 10, 10000);
+    node2
+        .labels
+        .insert("zone".to_string(), "zone-b".to_string());
+
+    scheduler.update_cache_node(node1).await;
+    scheduler.update_cache_node(node2).await;
+
+    // Create an existing pod with label app=web on node1
+    let mut existing_pod_labels = HashMap::new();
+    existing_pod_labels.insert("app".to_string(), "web".to_string());
+    let mut existing_pod = make_pod("web-pod", 10, 1, 1000);
+    existing_pod.labels = existing_pod_labels;
+    existing_pod.spec.node_name = Some("node1".to_string());
+    scheduler.update_cache_pod(existing_pod).await;
+
+    // Create a new pod with preferred affinity to web app pods in same zone (weight=50)
+    let mut selector_labels = HashMap::new();
+    selector_labels.insert("app".to_string(), "web".to_string());
+    let label_selector = Some(LabelSelector {
+        match_labels: selector_labels,
+        match_expressions: vec![],
+    });
+
+    let pod_affinity_term = PodAffinityTerm {
+        label_selector,
+        topology_key: "zone".to_string(),
+    };
+
+    let weighted_term = WeightedPodAffinityTerm {
+        weight: 50,
+        pod_affinity_term,
+    };
+
+    let pod_affinity = PodAffinity {
+        required_during_scheduling_ignored_during_execution: None,
+        preferred_during_scheduling_ignored_during_execution: Some(vec![weighted_term]),
+    };
+
+    let affinity = Affinity {
+        node_affinity: None,
+        pod_affinity: Some(pod_affinity),
+        pod_anti_affinity: None,
+    };
+
+    let mut pod_labels = HashMap::new();
+    pod_labels.insert("app".to_string(), "api".to_string());
+    let mut pod = make_pod("preferred-affinity-pod", 10, 1, 1000);
+    pod.labels = pod_labels;
+    pod.spec.affinity = Some(affinity);
+
+    scheduler.update_cache_pod(pod).await;
+
+    let mut rx = scheduler.run();
+    let mut assignment = None;
+    for _ in 0..2 {
+        let res = timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let a = res.unwrap();
+        if a.pod_name == "preferred-affinity-pod" {
+            assignment = Some(a);
+            break;
+        }
+    }
+    let assignment = assignment.expect("Should have received preferred-affinity-pod assignment");
+
+    // The pod should prefer zone-a (node1) because web-pod is there (higher score)
+    assert_eq!(assignment.pod_name, "preferred-affinity-pod");
+    assert_eq!(assignment.node_name, "node1");
 }

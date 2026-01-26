@@ -1,13 +1,16 @@
 //! S3 adapter: simplified aws-sdk-s3 implementation with multipart upload, retries, and validation.
 
 use crate::cadapter::client::ObjectBackend;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::primitives::SdkBody;
+use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::primitives::{ByteStream, SdkBody};
 use aws_sdk_s3::{Client, config::Region};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
+use bytes::Bytes;
+use hyper::Body;
 use md5;
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
@@ -103,6 +106,57 @@ impl S3Backend {
         B64.encode(sum.0)
     }
 
+    fn md5_base64_chunks(chunks: &[Bytes]) -> String {
+        let mut ctx = md5::Context::new();
+        for chunk in chunks {
+            ctx.consume(chunk);
+        }
+        B64.encode(ctx.compute().0)
+    }
+
+    fn stream_from_chunks(chunks: &[Bytes]) -> ByteStream {
+        let owned = chunks.to_vec();
+        let stream = futures::stream::iter(owned.into_iter().map(Ok::<Bytes, std::io::Error>));
+        ByteStream::from_body_0_4(Body::wrap_stream(stream))
+    }
+
+    async fn put_object_vectored_simple(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
+        let total_size = chunks.iter().map(|c| c.len()).sum::<usize>();
+        let checksum = if self.config.enable_md5 && total_size > 0 {
+            Some(Self::md5_base64_chunks(&chunks))
+        } else {
+            None
+        };
+
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+
+            let body = Self::stream_from_chunks(&chunks);
+            let mut request = self
+                .client
+                .put_object()
+                .bucket(&self.config.bucket)
+                .key(key)
+                .body(body)
+                .content_length(total_size as i64);
+
+            if let Some(sum) = checksum.as_ref() {
+                request = request.content_md5(sum.clone());
+            }
+
+            match request.send().await {
+                Ok(_) => return Ok(()),
+                Err(_e) if attempt < self.config.max_retries => {
+                    let delay = self.config.retry_base_delay * (1 << (attempt - 1));
+                    sleep(Duration::from_millis(delay)).await;
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
     /// Put small objects directly (simpler than multipart upload)
     async fn put_object_simple(&self, key: &str, data: &[u8]) -> Result<()> {
         let mut attempt = 0;
@@ -181,7 +235,10 @@ impl S3Backend {
 
             let fut = async move {
                 // Concurrency control
-                let _permit = sem_cloned.acquire_owned().await.unwrap();
+                let _permit = sem_cloned
+                    .acquire_owned()
+                    .await
+                    .with_context(|| "Multipart upload semaphore closed unexpectedly");
                 let mut attempt = 0;
 
                 loop {
@@ -252,6 +309,140 @@ impl S3Backend {
 
         Ok(())
     }
+
+    async fn multipart_upload_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
+        let create = self
+            .client
+            .create_multipart_upload()
+            .bucket(&self.config.bucket)
+            .key(key)
+            .send()
+            .await?;
+
+        let upload_id = create
+            .upload_id()
+            .ok_or_else(|| anyhow!("Missing upload_id in create_multipart_upload response"))?
+            .to_string();
+
+        let cleanup_on_drop = MultipartCleanupGuard {
+            client: self.client.clone(),
+            bucket: self.config.bucket.clone(),
+            key: key.to_string(),
+            upload_id: upload_id.clone(),
+        };
+
+        let mut parts: Vec<Vec<Bytes>> = Vec::new();
+        let mut cur_part: Vec<Bytes> = Vec::new();
+        let mut cur_len: usize = 0;
+
+        for chunk in chunks.into_iter() {
+            let mut offset = 0usize;
+            while offset < chunk.len() {
+                let remaining_part = self.config.part_size - cur_len;
+                let remaining_chunk = chunk.len() - offset;
+                let take = remaining_part.min(remaining_chunk);
+                cur_part.push(chunk.slice(offset..offset + take));
+                cur_len += take;
+                offset += take;
+
+                if cur_len == self.config.part_size {
+                    parts.push(cur_part);
+                    cur_part = Vec::new();
+                    cur_len = 0;
+                }
+            }
+        }
+
+        if cur_len > 0 {
+            parts.push(cur_part);
+        }
+
+        let sem = Arc::new(tokio::sync::Semaphore::new(self.config.max_concurrency));
+        let mut futures = Vec::new();
+
+        for (idx, part_chunks) in parts.into_iter().enumerate() {
+            let part_len = part_chunks.iter().map(|c| c.len()).sum::<usize>();
+            let part_md5 = if self.config.enable_md5 && part_len > 0 {
+                Some(Self::md5_base64_chunks(&part_chunks))
+            } else {
+                None
+            };
+
+            let client = self.client.clone();
+            let bucket = self.config.bucket.clone();
+            let key = key.to_string();
+            let upload_id_cloned = upload_id.clone();
+            let pn = (idx + 1) as i32;
+            let sem_cloned = sem.clone();
+            let max_retries = self.config.max_retries;
+            let retry_base_delay = self.config.retry_base_delay;
+
+            let fut = async move {
+                let _permit = sem_cloned.acquire_owned().await;
+                let mut attempt = 0;
+
+                loop {
+                    attempt += 1;
+                    let body = S3Backend::stream_from_chunks(&part_chunks);
+                    let mut request = client
+                        .upload_part()
+                        .bucket(&bucket)
+                        .key(&key)
+                        .upload_id(&upload_id_cloned)
+                        .part_number(pn)
+                        .body(body)
+                        .content_length(part_len as i64);
+
+                    if let Some(md5) = part_md5.as_ref() {
+                        request = request.content_md5(md5.clone());
+                    }
+
+                    match request.send().await {
+                        Ok(ok) => break Ok((pn, ok.e_tag().map(|s| s.to_string()))),
+                        Err(_e) if attempt < max_retries => {
+                            let delay = retry_base_delay * (1 << (attempt - 1));
+                            sleep(Duration::from_millis(delay)).await;
+                            continue;
+                        }
+                        Err(e) => break Err(e),
+                    }
+                }
+            };
+            futures.push(fut);
+        }
+
+        let results: Vec<(i32, Option<String>)> = match futures::future::try_join_all(futures).await
+        {
+            Ok(v) => v,
+            Err(e) => return Err(e.into()),
+        };
+
+        let completed_parts = results
+            .into_iter()
+            .map(|(pn, etag)| {
+                aws_sdk_s3::types::CompletedPart::builder()
+                    .part_number(pn)
+                    .set_e_tag(etag)
+                    .build()
+            })
+            .collect::<Vec<_>>();
+
+        let completed = aws_sdk_s3::types::CompletedMultipartUpload::builder()
+            .set_parts(Some(completed_parts))
+            .build();
+
+        self.client
+            .complete_multipart_upload()
+            .bucket(&self.config.bucket)
+            .key(key)
+            .upload_id(upload_id)
+            .multipart_upload(completed)
+            .send()
+            .await?;
+
+        std::mem::forget(cleanup_on_drop);
+        Ok(())
+    }
 }
 
 /// Guard to automatically clean up multipart uploads if they fail
@@ -283,6 +474,19 @@ impl Drop for MultipartCleanupGuard {
 
 #[async_trait]
 impl ObjectBackend for S3Backend {
+    async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
+        let total_size = chunks.iter().map(|e| e.len()).sum::<usize>();
+
+        if total_size == 0 {
+            return self.put_object_simple(key, &[]).await;
+        }
+        if total_size <= self.config.part_size {
+            return self.put_object_vectored_simple(key, chunks).await;
+        }
+
+        self.multipart_upload_vectored(key, chunks).await
+    }
+
     async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         // Small objects use direct put_object; large objects use multipart upload
         if data.len() <= self.config.part_size {
@@ -301,6 +505,7 @@ impl ObjectBackend for S3Backend {
             .key(key)
             .send()
             .await;
+
         match resp {
             Ok(o) => {
                 use tokio::io::AsyncReadExt;
@@ -309,15 +514,8 @@ impl ObjectBackend for S3Backend {
                 body.read_to_end(&mut buf).await?;
                 Ok(Some(buf))
             }
-            Err(e) => {
-                // Simplified: NoSuchKey returns None, other errors return Err
-                let msg = format!("{e}");
-                if msg.contains("NoSuchKey") || msg.contains("NotFound") {
-                    Ok(None)
-                } else {
-                    Err(e.into())
-                }
-            }
+            Err(SdkError::ServiceError(err)) if err.err().is_no_such_key() => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -334,6 +532,7 @@ impl ObjectBackend for S3Backend {
 
     async fn delete_object(&self, key: &str) -> Result<()> {
         let mut attempt = 0;
+
         loop {
             attempt += 1;
             match self

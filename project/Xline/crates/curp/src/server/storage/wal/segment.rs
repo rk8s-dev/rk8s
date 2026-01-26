@@ -9,8 +9,8 @@ use std::{
 
 use clippy_utilities::{NumericCast, OverflowArithmetic};
 use curp_external_api::LogIndex;
-use futures::{ready, FutureExt, SinkExt};
-use serde::{de::DeserializeOwned, Serialize};
+use futures::{FutureExt, SinkExt, ready};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
     sync::Mutex,
@@ -18,11 +18,11 @@ use tokio::{
 use tokio_stream::StreamExt;
 
 use super::{
+    WAL_FILE_EXT,
     codec::{DataFrame, DataFrameOwned, WAL},
     error::{CorruptType, WALError},
     framed::{Decoder, Encoder},
-    util::{get_checksum, parse_u64, validate_data, LockedFile},
-    WAL_FILE_EXT,
+    util::{LockedFile, get_checksum, parse_u64, validate_data},
 };
 use crate::log_entry::LogEntry;
 
@@ -100,7 +100,7 @@ impl WALSegment {
     /// Recover log entries from a `WALSegment`
     pub(super) fn recover_segment_logs<C>(
         &mut self,
-    ) -> Result<impl Iterator<Item = LogEntry<C>>, WALError>
+    ) -> Result<impl Iterator<Item = LogEntry<C>> + use<C>, WALError>
     where
         C: Serialize + DeserializeOwned + std::fmt::Debug,
     {

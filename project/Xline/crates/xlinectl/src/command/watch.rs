@@ -1,16 +1,16 @@
 use std::io;
 use std::{collections::HashMap, ffi::OsString};
 
-use anyhow::{anyhow, Result};
-use clap::{arg, value_parser, ArgMatches, Command};
+use anyhow::{Result, anyhow};
+use clap::{ArgMatches, Command, arg, value_parser};
 use std::process::Command as StdCommand;
 use xline_client::{
+    Client,
     error::XlineClientError,
     types::watch::{WatchOptions, Watcher},
-    Client,
 };
-use xlineapi::command::Command as XlineCommand;
 use xlineapi::WatchResponse;
+use xlineapi::command::Command as XlineCommand;
 
 use crate::utils::printer::Printer;
 
@@ -195,7 +195,7 @@ async fn exec_interactive(client: &mut Client, matches: &ArgMatches) -> Result<(
     loop {
         /// Macro for printing error and continue
         macro_rules! failed {
-            ($line:expr) => {
+            ($line:expr_2021) => {
                 let err = anyhow!(format!("parse failed in: `{}`", $line));
                 eprintln!("{err}");
                 continue;

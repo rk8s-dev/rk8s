@@ -27,7 +27,7 @@ use std::{collections::HashMap, fmt::Debug, ops::Deref, sync::Arc, time::Duratio
 
 use async_trait::async_trait;
 use curp_external_api::cmd::Command;
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use parking_lot::RwLock;
 use tokio::task::JoinHandle;
 #[cfg(not(madsim))]
@@ -45,8 +45,8 @@ use self::{
 use crate::{
     members::ServerId,
     rpc::{
-        protocol_client::ProtocolClient, ConfChange, FetchClusterRequest, FetchClusterResponse,
-        Member, ProposeId, Protocol, ReadState,
+        ConfChange, FetchClusterRequest, FetchClusterResponse, Member, ProposeId, Protocol,
+        ReadState, protocol_client::ProtocolClient,
     },
     tracker::Tracker,
 };
@@ -430,8 +430,10 @@ impl ClientBuilder {
     #[inline]
     pub fn build<C: Command>(
         &self,
-    ) -> Result<impl ClientApi<Error = tonic::Status, Cmd = C> + Send + Sync + 'static, tonic::Status>
-    {
+    ) -> Result<
+        impl ClientApi<Error = tonic::Status, Cmd = C> + Send + Sync + 'static + use<C>,
+        tonic::Status,
+    > {
         let state = Arc::new(self.init_state_builder().build());
         let client = Retry::new(
             Unary::new(Arc::clone(&state), self.init_unary_config()),

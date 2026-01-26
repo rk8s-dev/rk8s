@@ -1,9 +1,9 @@
 use std::{fs::File, io::Write, path::PathBuf};
 
-use clap::{arg, ArgMatches, Command};
+use clap::{ArgMatches, Command, arg};
 use xline_client::{
-    error::{Result, XlineClientError},
     Client,
+    error::{Result, XlineClientError},
 };
 
 /// Definition of `snapshot` command

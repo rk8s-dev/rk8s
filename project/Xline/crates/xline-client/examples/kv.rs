@@ -1,7 +1,7 @@
 use anyhow::Result;
 use xline_client::{
-    types::kv::{Compare, CompareResult, DeleteRangeOptions, PutOptions, TxnOp, TxnRequest},
     Client, ClientOptions,
+    types::kv::{Compare, CompareResult, DeleteRangeOptions, PutOptions, TxnOp, TxnRequest},
 };
 
 #[tokio::main]

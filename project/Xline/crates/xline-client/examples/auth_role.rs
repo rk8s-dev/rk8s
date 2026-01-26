@@ -1,5 +1,5 @@
 use anyhow::Result;
-use xline_client::{types::auth::PermissionType, Client, ClientOptions};
+use xline_client::{Client, ClientOptions, types::auth::PermissionType};
 
 #[tokio::main]
 async fn main() -> Result<()> {

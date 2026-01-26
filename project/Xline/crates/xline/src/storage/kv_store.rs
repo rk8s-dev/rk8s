@@ -4,8 +4,8 @@ use std::{
     cmp::Ordering,
     collections::HashMap,
     sync::{
-        atomic::{AtomicI64, Ordering::Relaxed},
         Arc,
+        atomic::{AtomicI64, Ordering::Relaxed},
     },
 };
 
@@ -36,7 +36,7 @@ use crate::{
         SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse,
     },
     storage::{
-        db::{WriteOp, FINISHED_COMPACT_REVISION},
+        db::{FINISHED_COMPACT_REVISION, WriteOp},
         storage_api::XlineStorageOps,
     },
 };
@@ -1254,7 +1254,7 @@ mod test {
     use tokio::{runtime::Handle, task::block_in_place};
     use utils::{
         config::EngineConfig,
-        task_manager::{tasks::TaskName, TaskManager},
+        task_manager::{TaskManager, tasks::TaskName},
     };
 
     use super::*;
@@ -1262,7 +1262,7 @@ mod test {
         revision_number::RevisionNumberGenerator,
         rpc::{Request as UniRequest, RequestOp},
         storage::{
-            compact::{compact_bg_task, COMPACT_CHANNEL_SIZE},
+            compact::{COMPACT_CHANNEL_SIZE, compact_bg_task},
             db::DB,
             kvwatcher::KvWatcher,
         },
@@ -1623,7 +1623,7 @@ mod test {
                 }
             }
         });
-        tokio::time::sleep(std::time::Duration::from_micros(50)).await;
+        tokio::time::sleep(Duration::from_micros(50)).await;
         let revs = store.inner.index.get_from_rev(b"foo", b"", 1);
         let kvs = KvStoreInner::get_values(&db.transaction(), &revs).unwrap();
         assert_eq!(

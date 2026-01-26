@@ -11,9 +11,9 @@ use itertools::Itertools;
 use tonic::{Request, Response, Status};
 use utils::timestamp;
 use xlineapi::{
-    command::CurpClient, Cluster, Member, MemberAddRequest, MemberAddResponse, MemberListRequest,
-    MemberListResponse, MemberPromoteRequest, MemberPromoteResponse, MemberRemoveRequest,
-    MemberRemoveResponse, MemberUpdateRequest, MemberUpdateResponse,
+    Cluster, Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
+    MemberPromoteRequest, MemberPromoteResponse, MemberRemoveRequest, MemberRemoveResponse,
+    MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
 
 use crate::header_gen::HeaderGenerator;

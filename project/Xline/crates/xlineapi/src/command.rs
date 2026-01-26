@@ -11,8 +11,8 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    classifier::RequestClassifier, execute_error::ExecuteError, AuthInfo, PbCommand,
-    PbCommandResponse, PbKeyRange, PbSyncResponse, RequestWrapper, ResponseWrapper,
+    AuthInfo, PbCommand, PbCommandResponse, PbKeyRange, PbSyncResponse, RequestWrapper,
+    ResponseWrapper, classifier::RequestClassifier, execute_error::ExecuteError,
 };
 
 /// The curp client trait object on the command of xline
@@ -272,7 +272,7 @@ macro_rules! swap_match {
 ///
 /// `Fn(x, y) -> Option<bool>` indicates the swap_map result.
 macro_rules! swap_map {
-    ($cls1:ident :: $tag1:ident, $cls2:ident :: $tag2:ident, |$x:ident, $y:ident| $body:expr) => {
+    ($cls1:ident :: $tag1:ident, $cls2:ident :: $tag2:ident, |$x:ident, $y:ident| $body:expr_2021) => {
         (|_self, _other| match (_self, _other) {
             (&$cls1::$tag1(ref $x), &$cls2::$tag2(ref $y))
             | (&$cls2::$tag2(ref $y), &$cls1::$tag1(ref $x)) => Some($body),
@@ -287,7 +287,7 @@ macro_rules! swap_map {
 ///
 /// `Fn(x, y) -> Option<bool>` indicates the conflict result.
 macro_rules! is_conflict {
-    ($(($body:expr, $($func:ident)&*, $($pat:tt)*)),*) => {
+    ($(($body:expr_2021, $($func:ident)&*, $($pat:tt)*)),*) => {
         |_self, _other| match (_self, _other) {
             $((x, y) if swap_match!($($func)&*, $($pat)*)(x, y) => Some($body),)*
             _ => None,

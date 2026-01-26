@@ -13,7 +13,7 @@ use utils::{
         XLINE_TABLES,
     },
 };
-use xlineapi::{execute_error::ExecuteError, AlarmMember};
+use xlineapi::{AlarmMember, execute_error::ExecuteError};
 
 use super::{
     auth_store::{AUTH_ENABLE_KEY, AUTH_REVISION_KEY},
@@ -97,7 +97,7 @@ impl StorageOps for DB {
 impl DB {
     /// Creates a transaction
     #[allow(unused)] // TODO: use this in the following refactor
-    pub(crate) fn transaction(&self) -> Transaction {
+    pub(crate) fn transaction(&self) -> Transaction<'_> {
         self.engine.transaction()
     }
 

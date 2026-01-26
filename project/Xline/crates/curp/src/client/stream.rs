@@ -4,7 +4,7 @@ use futures::Future;
 use tracing::{debug, info, warn};
 
 use super::state::State;
-use crate::rpc::{connect::ConnectApi, CurpError, Redirect};
+use crate::rpc::{CurpError, Redirect, connect::ConnectApi};
 
 /// Stream client config
 #[derive(Debug)]

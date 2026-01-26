@@ -1,17 +1,18 @@
 //! Storage backends: asynchronous block-level IO traits and in-memory implementations.
 
+use crate::utils::zero::make_zero_bytes;
 use crate::{
     cadapter::client::{ObjectBackend, ObjectClient},
     chuck::cache::{ChunksCache, ChunksCacheConfig},
 };
 use anyhow::{self, Context};
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::executor::block_on;
 use hex::encode;
-use libc::{KEYCTL_CAPS0_CAPABILITIES, SYS_remap_file_pages, VM_VFS_CACHE_PRESSURE};
 use moka::{Entry, ops::compute::Op};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf};
+use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf, sync::LazyLock};
 use tokio::{
     io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     sync::RwLock,
@@ -22,7 +23,47 @@ use tracing::info;
 #[async_trait]
 // ensure offset_in_block + data.len() <= block_size
 pub trait BlockStore {
+    /// Write a new block from a set of byte segments without concatenating them.
+    /// The result of it should be equal to concatenate these bytes and call [`write_range`].
+    async fn write_vectored(
+        &self,
+        key: BlockKey,
+        offset: u32,
+        chunks: Vec<Bytes>,
+    ) -> anyhow::Result<u64> {
+        let data = chunks
+            .into_iter()
+            .flat_map(|e| e.to_vec())
+            .collect::<Vec<_>>();
+        self.write_range(key, offset, &data).await
+    }
+
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64>;
+
+    /// Write a new block without reading any existing data.
+    ///
+    /// This exists to support COW-style writes where every write targets a fresh object/key.
+    /// In that model, read-modify-write is wasted IO because there is no old data to preserve.
+    /// Callers must ensure the target key is fresh; using this on an existing object would
+    /// drop any previous content outside the written range.
+    async fn write_fresh_vectored(
+        &self,
+        key: BlockKey,
+        offset: u32,
+        chunks: Vec<Bytes>,
+    ) -> anyhow::Result<u64> {
+        self.write_vectored(key, offset, chunks).await
+    }
+
+    /// Write a new block without reading any existing data. See write_fresh_vectored for details.
+    async fn write_fresh_range(
+        &self,
+        key: BlockKey,
+        offset: u32,
+        data: &[u8],
+    ) -> anyhow::Result<u64> {
+        self.write_range(key, offset, data).await
+    }
 
     async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()>;
 
@@ -135,21 +176,110 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
 
 #[async_trait]
 impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
+    async fn write_vectored(
+        &self,
+        key: BlockKey,
+        offset: u32,
+        chunks: Vec<Bytes>,
+    ) -> anyhow::Result<u64> {
+        let key_str = Self::key_for(key);
+        let total_len = chunks.iter().map(|c| c.len()).sum::<usize>();
+        if total_len == 0 {
+            return Ok(0);
+        }
+
+        let existing = self
+            .client
+            .get_object(&key_str)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store get failed: {:?}", e))?;
+
+        let offset_usize = offset as usize;
+        let mut parts: Vec<Bytes> = Vec::new();
+
+        if let Some(existing_vec) = existing {
+            let existing_bytes = Bytes::from(existing_vec);
+            let existing_len = existing_bytes.len();
+
+            let prefix_take = offset_usize.min(existing_len);
+            if prefix_take > 0 {
+                parts.push(existing_bytes.slice(0..prefix_take));
+            }
+            if existing_len < offset_usize {
+                parts.extend(make_zero_bytes(offset_usize - existing_len));
+            }
+
+            parts.extend(chunks.iter().cloned());
+
+            let end = offset_usize + total_len;
+            if existing_len > end {
+                parts.push(existing_bytes.slice(end..existing_len));
+            }
+        } else {
+            if offset_usize > 0 {
+                parts.extend(make_zero_bytes(offset_usize));
+            }
+            parts.extend(chunks.iter().cloned());
+        }
+
+        self.client
+            .put_object_vectored(&key_str, parts)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
+
+        let etag = self
+            .client
+            .get_etag(&key_str)
+            .await
+            .unwrap_or_else(|_| "default_etag".to_string());
+        let cache_key = format!("{}{}", key_str, etag);
+        let _ = self.block_cache.remove(&cache_key).await;
+        Ok(total_len as u64)
+    }
+
+    async fn write_fresh_vectored(
+        &self,
+        key: BlockKey,
+        offset: u32,
+        chunks: Vec<Bytes>,
+    ) -> anyhow::Result<u64> {
+        let key_str = Self::key_for(key);
+        let total_len = chunks.iter().map(|c| c.len()).sum::<usize>();
+        if total_len == 0 {
+            return Ok(0);
+        }
+
+        let offset_usize = offset as usize;
+        let mut parts: Vec<Bytes> = Vec::new();
+        if offset_usize > 0 {
+            parts.extend(make_zero_bytes(offset_usize));
+        }
+        parts.extend(chunks);
+
+        self.client
+            .put_object_vectored(&key_str, parts)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
+
+        let etag = self
+            .client
+            .get_etag(&key_str)
+            .await
+            .unwrap_or_else(|_| "default_etag".to_string());
+        let cache_key = format!("{}{}", key_str, etag);
+        let _ = self.block_cache.remove(&cache_key).await;
+        Ok(total_len as u64)
+    }
+
     async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
         let key_str = Self::key_for(key);
-        let existing = self.client.get_object(&key_str).await;
-        let mut buf = match existing {
-            Ok(Some(data)) => data,
-            Ok(None) => Vec::new(),
-            Err(e) => {
-                let error_str = format!("{:?}", e);
-                if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
-                    Vec::new()
-                } else {
-                    return Err(anyhow::anyhow!("object store get failed: {:?}", e));
-                }
-            }
-        };
+        let mut buf = self
+            .client
+            .get_object(&key_str)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store get failed: {:?}", e))?
+            .unwrap_or_default();
+
         let start = offset as usize;
         let end = start + data.len();
         if buf.len() < end {
@@ -158,6 +288,39 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         buf[start..end].copy_from_slice(data);
         self.client
             .put_object(&key_str, &buf)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
+
+        let etag = self
+            .client
+            .get_etag(&key_str)
+            .await
+            .unwrap_or_else(|_| "default_etag".to_string());
+        let cache_key = format!("{}{}", key_str, etag);
+        let _ = self.block_cache.remove(&cache_key).await;
+        Ok(data.len() as u64)
+    }
+
+    async fn write_fresh_range(
+        &self,
+        key: BlockKey,
+        offset: u32,
+        data: &[u8],
+    ) -> anyhow::Result<u64> {
+        let key_str = Self::key_for(key);
+        if data.is_empty() {
+            return Ok(0);
+        }
+
+        let offset_usize = offset as usize;
+        let mut parts = Vec::new();
+        if offset_usize > 0 {
+            parts.extend(make_zero_bytes(offset_usize));
+        }
+        parts.push(Bytes::copy_from_slice(data));
+
+        self.client
+            .put_object_vectored(&key_str, parts)
             .await
             .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
 
@@ -193,17 +356,14 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             return Ok(());
         }
 
-        let block = match self.client.get_object(&key_str).await {
-            Ok(Some(data)) => data,
-            Ok(None) => vec![0u8; end],
-            Err(e) => {
-                let error_str = format!("{:?}", e);
-                if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
-                    vec![0u8; end]
-                } else {
-                    return Err(anyhow::anyhow!("object store get failed: {:?}", e));
-                }
-            }
+        let block = match self
+            .client
+            .get_object(&key_str)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store get failed: {:?}", e))?
+        {
+            Some(data) => data,
+            None => vec![0u8; end],
         };
         let copy_end = end.min(block.len());
         if copy_end > start {

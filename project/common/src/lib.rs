@@ -201,6 +201,101 @@ pub enum DeletePropagationPolicy {
     Orphan,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct Affinity {
+    #[serde(default)]
+    pub node_affinity: Option<NodeAffinity>,
+    #[serde(default)]
+    pub pod_affinity: Option<PodAffinity>,
+    #[serde(default)]
+    pub pod_anti_affinity: Option<PodAntiAffinity>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct NodeAffinity {
+    #[serde(default, rename = "requiredDuringSchedulingIgnoredDuringExecution")]
+    pub required_during_scheduling_ignored_during_execution: Option<NodeSelector>,
+    #[serde(default, rename = "preferredDuringSchedulingIgnoredDuringExecution")]
+    pub preferred_during_scheduling_ignored_during_execution: Option<PreferredSchedulingTerms>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct PodAffinityTerm {
+    #[serde(default, rename = "labelSelector")]
+    pub label_selector: Option<LabelSelector>,
+    #[serde(rename = "topologyKey")]
+    pub topology_key: String,
+    #[serde(default)]
+    pub namespaces: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct WeightedPodAffinityTerm {
+    pub weight: i32,
+    #[serde(rename = "podAffinityTerm")]
+    pub pod_affinity_term: PodAffinityTerm,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct PodAffinity {
+    #[serde(default, rename = "requiredDuringSchedulingIgnoredDuringExecution")]
+    pub required_during_scheduling_ignored_during_execution: Option<Vec<PodAffinityTerm>>,
+    #[serde(default, rename = "preferredDuringSchedulingIgnoredDuringExecution")]
+    pub preferred_during_scheduling_ignored_during_execution: Option<Vec<WeightedPodAffinityTerm>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct PodAntiAffinity {
+    #[serde(default, rename = "requiredDuringSchedulingIgnoredDuringExecution")]
+    pub required_during_scheduling_ignored_during_execution: Option<Vec<PodAffinityTerm>>,
+    #[serde(default, rename = "preferredDuringSchedulingIgnoredDuringExecution")]
+    pub preferred_during_scheduling_ignored_during_execution: Option<Vec<WeightedPodAffinityTerm>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct PreferredSchedulingTerms {
+    #[serde(default)]
+    pub terms: Vec<PreferredSchedulingTerm>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct PreferredSchedulingTerm {
+    pub weight: i64,
+    #[serde(rename = "preference")]
+    pub preference: NodeSelectorTerm,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct NodeSelector {
+    #[serde(rename = "nodeSelectorTerms")]
+    pub node_selector_terms: Vec<NodeSelectorTerm>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct NodeSelectorTerm {
+    #[serde(rename = "matchExpressions")]
+    pub match_expressions: Vec<NodeSelectorRequirement>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct NodeSelectorRequirement {
+    pub key: String,
+    pub operator: NodeSelectorOperator,
+    #[serde(default)]
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub enum NodeSelectorOperator {
+    In,
+    NotIn,
+    #[default]
+    Exists,
+    DoesNotExist,
+    Gt,
+    Lt,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
@@ -212,6 +307,8 @@ pub struct PodSpec {
     pub init_containers: Vec<ContainerSpec>,
     #[serde(default)]
     pub tolerations: Vec<Toleration>,
+    #[serde(default)]
+    pub affinity: Option<Affinity>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

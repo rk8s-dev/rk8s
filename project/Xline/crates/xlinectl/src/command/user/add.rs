@@ -1,6 +1,6 @@
 use crate::utils::printer::Printer;
-use clap::{arg, ArgMatches, Command};
-use xline_client::{error::Result, Client};
+use clap::{ArgMatches, Command, arg};
+use xline_client::{Client, error::Result};
 
 /// Parameters of `AuthClient::user_add`.
 ///

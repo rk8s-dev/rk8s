@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tonic::transport::Channel;
 
-use crate::{error::Result, AuthService};
+use crate::{AuthService, error::Result};
 use xlineapi::{
     MemberAddResponse, MemberListResponse, MemberPromoteResponse, MemberRemoveResponse,
     MemberUpdateResponse,

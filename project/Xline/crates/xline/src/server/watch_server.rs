@@ -6,9 +6,9 @@ use std::{
 
 use event_listener::Event;
 use tokio::sync::mpsc;
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
+use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tracing::{debug, warn};
-use utils::task_manager::{tasks::TaskName, Listener, TaskManager};
+use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
 
 use crate::{
@@ -424,15 +424,15 @@ mod test {
         sync::mpsc,
         time::{sleep, timeout},
     };
-    use utils::config::{default_watch_progress_notify_interval, EngineConfig};
+    use utils::config::{EngineConfig, default_watch_progress_notify_interval};
     use xlineapi::RequestWrapper;
 
     use super::*;
     use crate::{
         rpc::{PutRequest, WatchProgressRequest},
         storage::{
-            compact::COMPACT_CHANNEL_SIZE, db::DB, index::Index, kv_store::KvStoreInner,
-            kvwatcher::MockKvWatcherOps, lease_store::LeaseCollection, KvStore,
+            KvStore, compact::COMPACT_CHANNEL_SIZE, db::DB, index::Index, kv_store::KvStoreInner,
+            kvwatcher::MockKvWatcherOps, lease_store::LeaseCollection,
         },
     };
 
@@ -719,8 +719,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn watch_task_should_terminate_when_response_tx_closed(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn watch_task_should_terminate_when_response_tx_closed()
+    -> Result<(), Box<dyn std::error::Error>> {
         let task_manager = Arc::new(TaskManager::new());
         let (req_tx, req_rx) = mpsc::channel(CHANNEL_SIZE);
         let (res_tx, res_rx) = mpsc::channel(CHANNEL_SIZE);

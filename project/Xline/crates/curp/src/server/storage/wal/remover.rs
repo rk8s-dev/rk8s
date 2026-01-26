@@ -13,7 +13,7 @@ use tokio::{
 
 use super::{
     segment::WALSegment,
-    util::{get_checksum, get_file_paths_with_ext, is_exist, parse_u64, validate_data, LockedFile},
+    util::{LockedFile, get_checksum, get_file_paths_with_ext, is_exist, parse_u64, validate_data},
 };
 
 /// Utilize thread-local variables because the tests are running concurrently,

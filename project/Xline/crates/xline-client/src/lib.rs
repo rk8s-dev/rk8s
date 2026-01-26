@@ -18,7 +18,6 @@
     non_ascii_idents,
     // non_exhaustive_omitted_patterns, unstable
     noop_method_call,
-    pointer_structural_match,
     rust_2021_incompatible_closure_captures,
     rust_2021_incompatible_or_patterns,
     rust_2021_prefixes_incompatible_syntax,
@@ -167,7 +166,7 @@ use std::{
 };
 
 use curp::client::ClientBuilder as CurpClientBuilder;
-use http::{header::AUTHORIZATION, HeaderValue, Request};
+use http::{HeaderValue, Request, header::AUTHORIZATION};
 use tonic::transport::Channel;
 #[cfg(not(madsim))]
 use tonic::transport::ClientTlsConfig;

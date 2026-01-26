@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use curp_external_api::{
+    InflightId,
     cmd::{ConflictCheck, PbCodec, PbSerializeError},
     conflict::EntryId,
-    InflightId,
 };
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -11,22 +11,14 @@ use serde::{Deserialize, Serialize};
 pub(crate) use self::proto::{
     commandpb::CurpError as CurpErrorWrapper,
     inner_messagepb::{
-        inner_protocol_server::InnerProtocol, AppendEntriesRequest, AppendEntriesResponse,
-        InstallSnapshotRequest, InstallSnapshotResponse, TriggerShutdownRequest,
-        TriggerShutdownResponse, TryBecomeLeaderNowRequest, TryBecomeLeaderNowResponse,
-        VoteRequest, VoteResponse,
+        AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest,
+        InstallSnapshotResponse, TriggerShutdownRequest, TriggerShutdownResponse,
+        TryBecomeLeaderNowRequest, TryBecomeLeaderNowResponse, VoteRequest, VoteResponse,
+        inner_protocol_server::InnerProtocol,
     },
 };
 pub use self::proto::{
     commandpb::{
-        cmd_result::Result as CmdResultInner,
-        curp_error::Err as CurpError, // easy for match
-        curp_error::Redirect,
-        fetch_read_state_response::{IdSet, ReadState},
-        op_response::Op as ResponseOp,
-        propose_conf_change_request::{ConfChange, ConfChangeType},
-        protocol_client,
-        protocol_server::{Protocol, ProtocolServer},
         CmdResult,
         FetchClusterRequest,
         FetchClusterResponse,
@@ -54,10 +46,18 @@ pub use self::proto::{
         SyncedResponse,
         WaitSyncedRequest,
         WaitSyncedResponse,
+        cmd_result::Result as CmdResultInner,
+        curp_error::Err as CurpError, // easy for match
+        curp_error::Redirect,
+        fetch_read_state_response::{IdSet, ReadState},
+        op_response::Op as ResponseOp,
+        propose_conf_change_request::{ConfChange, ConfChangeType},
+        protocol_client,
+        protocol_server::{Protocol, ProtocolServer},
     },
     inner_messagepb::inner_protocol_server::InnerProtocolServer,
 };
-use crate::{cmd::Command, log_entry::LogEntry, members::ServerId, LogIndex};
+use crate::{LogIndex, cmd::Command, log_entry::LogEntry, members::ServerId};
 
 /// Metrics
 #[cfg(feature = "client-metrics")]

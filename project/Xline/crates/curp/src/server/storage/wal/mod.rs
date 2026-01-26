@@ -43,7 +43,7 @@ use std::io;
 use codec::DataFrame;
 use config::WALConfig;
 use curp_external_api::LogIndex;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::log_entry::LogEntry;
 

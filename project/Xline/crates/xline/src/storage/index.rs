@@ -1,10 +1,10 @@
 #![allow(clippy::multiple_inherent_impl)]
 #![allow(unused)] // Remove this when `IndexState` is used in xline
 
-use std::collections::{btree_map, BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, btree_map};
 
 use clippy_utilities::OverflowArithmetic;
-use crossbeam_skiplist::{map::Entry, SkipMap};
+use crossbeam_skiplist::{SkipMap, map::Entry};
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use utils::parking_lot_lock::RwLockMap;

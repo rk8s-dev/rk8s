@@ -6,32 +6,31 @@ use std::{
 use async_trait::async_trait;
 use clippy_utilities::NumericCast;
 use curp::{
+    LogIndex,
     client::{ClientApi, ClientBuilder},
     error::ServerError,
     members::{ClusterInfo, ServerId},
     rpc::{InnerProtocolServer, Member, ProtocolServer},
     server::{
+        DB, Rpc,
         conflict::test_pools::{TestSpecPool, TestUncomPool},
-        Rpc, DB,
     },
-    LogIndex,
 };
 use curp_test_utils::{
-    sleep_secs,
+    TestRoleChange, TestRoleChangeInner, sleep_secs,
     test_cmd::{TestCE, TestCommand, TestCommandResult},
-    TestRoleChange, TestRoleChangeInner,
 };
 use engine::{
     Engine, EngineType, MemorySnapshotAllocator, RocksSnapshotAllocator, Snapshot,
     SnapshotAllocator,
 };
-use futures::{future::join_all, stream::FuturesUnordered, Future};
+use futures::{Future, future::join_all, stream::FuturesUnordered};
 use itertools::Itertools;
 use tokio::{
     net::TcpListener,
     runtime::{Handle, Runtime},
     sync::{mpsc, watch},
-    task::{block_in_place, JoinHandle},
+    task::{JoinHandle, block_in_place},
     time::timeout,
 };
 use tokio_stream::wrappers::TcpListenerStream;
@@ -40,17 +39,17 @@ use tracing::debug;
 use utils::{
     build_endpoint,
     config::{
-        default_quota, ClientConfig, CurpConfig, CurpConfigBuilder, EngineConfig, StorageConfig,
+        ClientConfig, CurpConfig, CurpConfigBuilder, EngineConfig, StorageConfig, default_quota,
     },
-    task_manager::{tasks::TaskName, Listener, TaskManager},
+    task_manager::{Listener, TaskManager, tasks::TaskName},
 };
 pub mod commandpb {
     tonic::include_proto!("commandpb");
 }
 
 pub use commandpb::{
-    protocol_client::ProtocolClient, FetchClusterRequest, FetchClusterResponse, ProposeRequest,
-    ProposeResponse,
+    FetchClusterRequest, FetchClusterResponse, ProposeRequest, ProposeResponse,
+    protocol_client::ProtocolClient,
 };
 
 /// `BOTTOM_TASKS` are tasks which not dependent on other tasks in the task group.
@@ -316,7 +315,9 @@ impl CurpGroup {
         self.nodes.get_mut(id).unwrap()
     }
 
-    pub async fn new_client(&self) -> impl ClientApi<Error = tonic::Status, Cmd = TestCommand> {
+    pub async fn new_client(
+        &self,
+    ) -> impl ClientApi<Error = tonic::Status, Cmd = TestCommand> + use<> {
         let addrs = self.all_addrs().cloned().collect();
         ClientBuilder::new(ClientConfig::default(), true)
             .discover_from(addrs)
@@ -421,10 +422,11 @@ impl CurpGroup {
 
             let FetchClusterResponse {
                 leader_id, term, ..
-            } = if let Ok(resp) = client.fetch_cluster(FetchClusterRequest::default()).await {
-                resp.into_inner()
-            } else {
-                continue;
+            } = match client.fetch_cluster(FetchClusterRequest::default()).await {
+                Ok(resp) => resp.into_inner(),
+                _ => {
+                    continue;
+                }
             };
             if term > max_term {
                 max_term = term;
@@ -462,10 +464,11 @@ impl CurpGroup {
 
             let FetchClusterResponse {
                 leader_id, term, ..
-            } = if let Ok(resp) = client.fetch_cluster(FetchClusterRequest::default()).await {
-                resp.into_inner()
-            } else {
-                continue;
+            } = match client.fetch_cluster(FetchClusterRequest::default()).await {
+                Ok(resp) => resp.into_inner(),
+                _ => {
+                    continue;
+                }
             };
 
             if let Some(max_term) = max_term {

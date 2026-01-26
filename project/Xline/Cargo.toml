@@ -14,7 +14,6 @@ members = [
     "crates/xlineapi",
     "crates/xlinectl",
     "crates/xlineutl",
-    "workspace-hack",
 ]
 resolver = "2"
 
@@ -28,3 +27,8 @@ madsim-tonic = { git = "https://github.com/LucienY01/madsim.git", branch = "bz/t
 madsim-tonic-build = { git = "https://github.com/LucienY01/madsim.git", branch = "bz/tonic-0-12" }
 madsim-tokio = { git = "https://github.com/LucienY01/madsim.git", branch = "bz/tonic-0-12" }
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)', 'cfg(ignore)'] }
+
+[workspace.package]
+edition = "2024"

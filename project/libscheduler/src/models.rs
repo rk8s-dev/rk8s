@@ -26,12 +26,38 @@ pub struct PodSpec {
 #[derive(Clone, Default, Debug)]
 pub struct Affinity {
     pub node_affinity: Option<NodeAffinity>,
+    pub pod_affinity: Option<PodAffinity>,
+    pub pod_anti_affinity: Option<PodAntiAffinity>,
 }
 
 #[derive(Clone, Default, Debug)]
 pub struct NodeAffinity {
     pub required_during_scheduling_ignored_during_execution: Option<NodeSelector>,
     pub preferred_during_scheduling_ignored_during_execution: Option<PreferredSchedulingTerms>,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct PodAffinityTerm {
+    pub label_selector: Option<common::LabelSelector>,
+    pub topology_key: String,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct WeightedPodAffinityTerm {
+    pub weight: i32,
+    pub pod_affinity_term: PodAffinityTerm,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct PodAffinity {
+    pub required_during_scheduling_ignored_during_execution: Option<Vec<PodAffinityTerm>>,
+    pub preferred_during_scheduling_ignored_during_execution: Option<Vec<WeightedPodAffinityTerm>>,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct PodAntiAffinity {
+    pub required_during_scheduling_ignored_during_execution: Option<Vec<PodAffinityTerm>>,
+    pub preferred_during_scheduling_ignored_during_execution: Option<Vec<WeightedPodAffinityTerm>>,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -185,12 +211,13 @@ impl Default for QueuedInfo {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PodInfo {
     pub name: String,
+    pub labels: HashMap<String, String>,
     pub spec: PodSpec,
-    pub queued_info: QueuedInfo,
-    pub scheduled: Option<String>,
+    pub(crate) queued_info: QueuedInfo,
+    pub(crate) scheduled: Option<String>,
 }
 impl PartialEq for PodInfo {
     fn eq(&self, other: &Self) -> bool {
@@ -209,6 +236,18 @@ impl PartialOrd for PodInfo {
 impl Ord for PodInfo {
     fn cmp(&self, other: &Self) -> Ordering {
         self.spec.priority.cmp(&other.spec.priority)
+    }
+}
+
+impl PodInfo {
+    pub fn new(name: String, labels: HashMap<String, String>, spec: PodSpec) -> Self {
+        Self {
+            name,
+            labels,
+            spec,
+            queued_info: QueuedInfo::default(),
+            scheduled: None,
+        }
     }
 }
 
@@ -258,4 +297,150 @@ impl Ord for BackOffPod {
 pub struct Assignment {
     pub pod_name: String,
     pub node_name: String,
+}
+
+impl From<common::Affinity> for Affinity {
+    fn from(affinity: common::Affinity) -> Self {
+        Self {
+            node_affinity: affinity.node_affinity.map(Into::into),
+            pod_affinity: affinity.pod_affinity.map(Into::into),
+            pod_anti_affinity: affinity.pod_anti_affinity.map(Into::into),
+        }
+    }
+}
+
+impl From<common::NodeAffinity> for NodeAffinity {
+    fn from(affinity: common::NodeAffinity) -> Self {
+        Self {
+            required_during_scheduling_ignored_during_execution: affinity
+                .required_during_scheduling_ignored_during_execution
+                .map(Into::into),
+            preferred_during_scheduling_ignored_during_execution: affinity
+                .preferred_during_scheduling_ignored_during_execution
+                .map(Into::into),
+        }
+    }
+}
+
+impl From<common::PodAffinity> for PodAffinity {
+    fn from(affinity: common::PodAffinity) -> Self {
+        Self {
+            required_during_scheduling_ignored_during_execution: affinity
+                .required_during_scheduling_ignored_during_execution
+                .map(|v| v.into_iter().map(Into::into).collect()),
+            preferred_during_scheduling_ignored_during_execution: affinity
+                .preferred_during_scheduling_ignored_during_execution
+                .map(|v| v.into_iter().map(Into::into).collect()),
+        }
+    }
+}
+
+impl From<common::PodAntiAffinity> for PodAntiAffinity {
+    fn from(affinity: common::PodAntiAffinity) -> Self {
+        Self {
+            required_during_scheduling_ignored_during_execution: affinity
+                .required_during_scheduling_ignored_during_execution
+                .map(|v| v.into_iter().map(Into::into).collect()),
+            preferred_during_scheduling_ignored_during_execution: affinity
+                .preferred_during_scheduling_ignored_during_execution
+                .map(|v| v.into_iter().map(Into::into).collect()),
+        }
+    }
+}
+
+impl From<common::PodAffinityTerm> for PodAffinityTerm {
+    fn from(term: common::PodAffinityTerm) -> Self {
+        Self {
+            label_selector: term.label_selector,
+            topology_key: term.topology_key,
+        }
+    }
+}
+
+impl From<common::WeightedPodAffinityTerm> for WeightedPodAffinityTerm {
+    fn from(term: common::WeightedPodAffinityTerm) -> Self {
+        Self {
+            weight: term.weight,
+            pod_affinity_term: term.pod_affinity_term.into(),
+        }
+    }
+}
+
+impl From<common::NodeSelector> for NodeSelector {
+    fn from(selector: common::NodeSelector) -> Self {
+        Self {
+            node_selector_terms: selector
+                .node_selector_terms
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<common::NodeSelectorTerm> for NodeSelectorTerm {
+    fn from(term: common::NodeSelectorTerm) -> Self {
+        Self {
+            match_expressions: term.match_expressions.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<common::NodeSelectorRequirement> for NodeSelectorRequirement {
+    fn from(req: common::NodeSelectorRequirement) -> Self {
+        Self {
+            key: req.key,
+            operator: req.operator.into(),
+            values: req.values,
+        }
+    }
+}
+
+impl From<common::NodeSelectorOperator> for NodeSelectorOperator {
+    fn from(op: common::NodeSelectorOperator) -> Self {
+        match op {
+            common::NodeSelectorOperator::In => NodeSelectorOperator::NodeSelectorOpIn,
+            common::NodeSelectorOperator::NotIn => NodeSelectorOperator::NodeSelectorOpNotIn,
+            common::NodeSelectorOperator::Exists => NodeSelectorOperator::NodeSelectorOpExists,
+            common::NodeSelectorOperator::DoesNotExist => {
+                NodeSelectorOperator::NodeSelectorOpDoesNotExist
+            }
+            common::NodeSelectorOperator::Gt => NodeSelectorOperator::NodeSelectorOpGt,
+            common::NodeSelectorOperator::Lt => NodeSelectorOperator::NodeSelectorOpLt,
+        }
+    }
+}
+
+impl From<common::PreferredSchedulingTerms> for PreferredSchedulingTerms {
+    fn from(terms: common::PreferredSchedulingTerms) -> Self {
+        Self {
+            terms: terms.terms.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<common::PreferredSchedulingTerm> for PreferredSchedulingTerm {
+    fn from(term: common::PreferredSchedulingTerm) -> Self {
+        // Convert NodeSelectorTerm to NodeSelectorRequirement by taking the first match expression
+        // If there are no match expressions, create a default one that matches nothing
+        let match_label = if term.preference.match_expressions.is_empty() {
+            NodeSelectorRequirement {
+                key: String::new(),
+                operator: NodeSelectorOperator::NodeSelectorOpExists,
+                values: vec![],
+            }
+        } else {
+            // Take the first match expression
+            term.preference
+                .match_expressions
+                .into_iter()
+                .next()
+                .unwrap()
+                .into()
+        };
+        Self {
+            match_label,
+            weight: term.weight,
+        }
+    }
 }

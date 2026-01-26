@@ -6,7 +6,7 @@ use tokio::io::AsyncWriteExt;
 use xline::restore::restore;
 use xline_client::error::XlineClientError;
 use xline_test_utils::{Client, ClientOptions, Cluster};
-use xlineapi::{execute_error::ExecuteError, AlarmAction, AlarmType};
+use xlineapi::{AlarmAction, AlarmType, execute_error::ExecuteError};
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]

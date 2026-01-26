@@ -2,14 +2,14 @@ use std::{fmt::Debug, sync::Arc};
 
 use tonic::transport::Channel;
 use xlineapi::{
-    command::Command, CompactionResponse, DeleteRangeResponse, PutResponse, RangeResponse,
-    RequestWrapper, TxnResponse,
+    CompactionResponse, DeleteRangeResponse, PutResponse, RangeResponse, RequestWrapper,
+    TxnResponse, command::Command,
 };
 
 use crate::{
+    AuthService, CurpClient,
     error::Result,
     types::kv::{DeleteRangeOptions, PutOptions, RangeOptions, TxnRequest},
-    AuthService, CurpClient,
 };
 
 /// Client for KV operations.

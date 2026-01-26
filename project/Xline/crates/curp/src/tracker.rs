@@ -8,7 +8,7 @@ use std::{
 use clippy_utilities::NumericCast;
 
 /// Bits of usize
-const USIZE_BITS: usize = std::mem::size_of::<usize>() * 8;
+const USIZE_BITS: usize = size_of::<usize>() * 8;
 
 /// Default bit vec queue capacity, this is the number of inflight requests that a client expects.
 const DEFAULT_BIT_VEC_QUEUE_CAP: usize = 1024;

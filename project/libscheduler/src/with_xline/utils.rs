@@ -63,7 +63,7 @@ pub fn get_node_from_kv(kv: &KeyValue) -> Result<NodeInfo, anyhow::Error> {
     Ok(convert_k8s_node_to_node_info(pod_task))
 }
 
-fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
+pub fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
     let mut total_cpu = 0;
     let mut total_memory = 0;
 
@@ -101,11 +101,12 @@ fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
         tolerations: pod_task.spec.tolerations,
         node_name: pod_task.spec.node_name.clone(),
         node_selector: HashMap::new(),
-        affinity: None,
+        affinity: pod_task.spec.affinity.map(crate::models::Affinity::from),
     };
 
     PodInfo {
         name: pod_task.metadata.name,
+        labels: pod_task.metadata.labels,
         spec,
         queued_info: QueuedInfo::default(),
         scheduled: pod_task.spec.node_name.clone(),

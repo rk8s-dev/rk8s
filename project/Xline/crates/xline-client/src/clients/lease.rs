@@ -1,17 +1,17 @@
 use std::{fmt::Debug, sync::Arc};
 
 use futures::channel::mpsc::channel;
-use tonic::{transport::Channel, Streaming};
+use tonic::{Streaming, transport::Channel};
 use xlineapi::{
-    command::Command, LeaseGrantResponse, LeaseKeepAliveResponse, LeaseLeasesResponse,
-    LeaseRevokeResponse, LeaseTimeToLiveResponse, RequestWrapper,
+    LeaseGrantResponse, LeaseKeepAliveResponse, LeaseLeasesResponse, LeaseRevokeResponse,
+    LeaseTimeToLiveResponse, RequestWrapper, command::Command,
 };
 
 use crate::{
+    AuthService, CurpClient,
     error::{Result, XlineClientError},
     lease_gen::LeaseIdGenerator,
     types::lease::LeaseKeeper,
-    AuthService, CurpClient,
 };
 
 /// Client for Lease operations.

@@ -428,6 +428,16 @@ impl Scheduler {
             let mut cycle_state = CycleState::default();
             cycle_state.write(SCORING_STRATEGY_CONFIG_KEY, Box::new(strategy));
 
+            // Get all scheduled pods for pod affinity plugins
+            let cache_read = cache.read().await;
+            let all_scheduled_pods: Vec<PodInfo> = cache_read
+                .get_pods()
+                .into_values()
+                .filter(|p| p.scheduled.is_some() || p.spec.node_name.is_some())
+                .collect();
+            drop(cache_read);
+            cycle_state.write("AllScheduledPods", Box::new(all_scheduled_pods));
+
             let (passed_prefilter, sta) = Self::run_prefilter_plugin(
                 &enabled_plugins.pre_filter,
                 &mut cycle_state,
@@ -684,6 +694,7 @@ mod tests {
     fn make_pod(pod_name: &str, priority: u64) -> PodInfo {
         PodInfo {
             name: pod_name.to_owned(),
+            labels: std::collections::HashMap::new(),
             spec: PodSpec {
                 resources: ResourcesRequirements { cpu: 1, memory: 1 },
                 priority,
@@ -698,6 +709,7 @@ mod tests {
     async fn test_push_backoff_and_unschedulable() {
         let queue = SchedulingQueue::new(vec![]);
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "pod".to_owned(),
             spec: PodSpec {
                 resources: ResourcesRequirements { cpu: 1, memory: 1 },
@@ -719,6 +731,7 @@ mod tests {
     async fn test_backoff_queue_flush() {
         let queue = SchedulingQueue::new(vec![]);
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "pod".to_string(),
             spec: PodSpec {
                 resources: ResourcesRequirements { cpu: 1, memory: 1 },
@@ -800,6 +813,7 @@ mod tests {
 
         cache.update_pod(PodInfo {
             name: "pod".to_string(),
+            labels: std::collections::HashMap::new(),
             spec: PodSpec {
                 resources: ResourcesRequirements { cpu: 1, memory: 3 },
                 priority: 1,

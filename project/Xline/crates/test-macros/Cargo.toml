@@ -8,7 +8,7 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/xline-kv/Xline/tree/master/test-macros"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [lib]
 proc-macro = true
@@ -17,7 +17,9 @@ proc-macro = true
 quote = "1.0"
 syn = { version = "2.0", features = ["full"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 assert_cmd = "2.0.15"
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@ use std::{io, marker::PhantomData};
 
 use clippy_utilities::NumericCast;
 use curp_external_api::LogIndex;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 

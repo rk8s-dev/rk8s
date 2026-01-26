@@ -9,8 +9,8 @@ use futures::stream::Stream;
 use sha2::{Digest, Sha256};
 use tracing::{debug, error};
 use xlineapi::{
-    command::{Command, CommandResponse, CurpClient, SyncResponse},
     RequestWrapper,
+    command::{Command, CommandResponse, CurpClient, SyncResponse},
 };
 
 use super::command::CommandExecutor;
@@ -23,7 +23,7 @@ use crate::{
         StatusResponse,
     },
     state::State,
-    storage::{db::DB, AlarmStore, AuthStore, KvStore},
+    storage::{AlarmStore, AuthStore, KvStore, db::DB},
 };
 
 /// Minimum page size
@@ -221,7 +221,7 @@ impl Maintenance for MaintenanceServer {
 fn snapshot_stream(
     header_gen: &HeaderGenerator,
     db: &DB,
-) -> Result<impl Stream<Item = Result<SnapshotResponse, tonic::Status>>, tonic::Status> {
+) -> Result<impl Stream<Item = Result<SnapshotResponse, tonic::Status>> + use<>, tonic::Status> {
     let tmp_path = format!("/tmp/snapshot-{}", uuid::Uuid::new_v4());
     let mut snapshot = db.get_snapshot(tmp_path).map_err(|e| {
         error!("get snapshot failed, {e}");

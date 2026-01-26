@@ -7,9 +7,9 @@ use curp::{
 };
 use utils::interval_map::Interval;
 use xlineapi::{
+    RequestWrapper,
     command::{Command, KeyRange},
     interval::BytesAffine,
-    RequestWrapper,
 };
 
 use crate::storage::lease_store::{Lease, LeaseCollection};
@@ -40,7 +40,7 @@ where
 }
 
 /// Gets KV intervals of a kv request
-fn intervals_kv<C>(entry: &C) -> impl IntoIterator<Item = Interval<BytesAffine>>
+fn intervals_kv<C>(entry: &C) -> impl IntoIterator<Item = Interval<BytesAffine>> + use<C>
 where
     C: AsRef<Command>,
 {
@@ -55,7 +55,7 @@ where
 fn intervals_lease<C>(
     lease_collection: &LeaseCollection,
     entry: &C,
-) -> impl IntoIterator<Item = Interval<BytesAffine>>
+) -> impl IntoIterator<Item = Interval<BytesAffine>> + use<C>
 where
     C: AsRef<Command>,
 {

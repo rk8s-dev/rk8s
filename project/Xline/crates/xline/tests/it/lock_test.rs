@@ -1,8 +1,8 @@
 use std::{error::Error, sync::Arc, time::Duration};
 
 use test_macros::abort_on_panic;
-use tokio::time::{sleep, Instant};
-use xline_test_utils::{clients::Xutex, Cluster};
+use tokio::time::{Instant, sleep};
+use xline_test_utils::{Cluster, clients::Xutex};
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]

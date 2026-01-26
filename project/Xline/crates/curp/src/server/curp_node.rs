@@ -8,8 +8,8 @@ use std::{
 use clippy_utilities::{NumericCast, OverflowArithmetic};
 use engine::{SnapshotAllocator, SnapshotApi};
 use event_listener::Event;
-use futures::{pin_mut, stream::FuturesUnordered, Stream, StreamExt};
-use madsim::rand::{thread_rng, Rng};
+use futures::{Stream, StreamExt, pin_mut, stream::FuturesUnordered};
+use madsim::rand::{Rng, thread_rng};
 use opentelemetry::KeyValue;
 use parking_lot::{Mutex, RwLock};
 use tokio::{
@@ -24,7 +24,7 @@ use utils::ClientTlsConfig;
 use utils::{
     barrier::IdBarrier,
     config::CurpConfig,
-    task_manager::{tasks::TaskName, Listener, State, TaskManager},
+    task_manager::{Listener, State, TaskManager, tasks::TaskName},
 };
 
 use super::{
@@ -44,9 +44,7 @@ use crate::{
     response::ResponseSender,
     role_change::RoleChange,
     rpc::{
-        self,
-        connect::{InnerConnectApi, InnerConnectApiWrapper},
-        AppendEntriesRequest, AppendEntriesResponse, ConfChange, ConfChangeType, CurpError,
+        self, AppendEntriesRequest, AppendEntriesResponse, ConfChange, ConfChangeType, CurpError,
         FetchClusterRequest, FetchClusterResponse, FetchReadStateRequest, FetchReadStateResponse,
         InstallSnapshotRequest, InstallSnapshotResponse, LeaseKeepAliveMsg, MoveLeaderRequest,
         MoveLeaderResponse, PoolEntry, ProposeConfChangeRequest, ProposeConfChangeResponse,
@@ -54,6 +52,7 @@ use crate::{
         ReadIndexResponse, RecordRequest, RecordResponse, ShutdownRequest, ShutdownResponse,
         SyncedResponse, TriggerShutdownRequest, TriggerShutdownResponse, TryBecomeLeaderNowRequest,
         TryBecomeLeaderNowResponse, VoteRequest, VoteResponse,
+        connect::{InnerConnectApi, InnerConnectApiWrapper},
     },
     server::{
         cmd_worker::{after_sync, worker_reset, worker_snapshot},
@@ -1177,10 +1176,13 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
                                 && ((curp.is_synced(connect_id) && is_empty)
                                     || (!curp.is_synced(connect_id) && is_commit_shutdown))
                             {
-                                if let Err(e) = connect.trigger_shutdown().await {
-                                    warn!("trigger shutdown to {} failed, {e}", connect_id);
-                                } else {
-                                    debug!("trigger shutdown to {} success", connect_id);
+                                match connect.trigger_shutdown().await {
+                                    Err(e) => {
+                                        warn!("trigger shutdown to {} failed, {e}", connect_id);
+                                    }
+                                    _ => {
+                                        debug!("trigger shutdown to {} success", connect_id);
+                                    }
                                 }
                                 return true;
                             }
@@ -1234,7 +1236,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::rpc::{connect::MockInnerConnectApi, ConfChange};
+    use crate::rpc::{ConfChange, connect::MockInnerConnectApi};
 
     #[traced_test]
     #[tokio::test]

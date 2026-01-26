@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration, vec};
 
 use curp::rpc::{ConfChange, ProposeConfChangeRequest, RecordRequest};
-use curp_test_utils::{init_logger, sleep_secs, test_cmd::TestCommand, TEST_TABLE};
+use curp_test_utils::{TEST_TABLE, init_logger, sleep_secs, test_cmd::TestCommand};
 use engine::{StorageEngine, StorageOps};
 use itertools::Itertools;
 use simulation::curp_group::{CurpGroup, PbProposeId, ProposeRequest};
@@ -419,10 +419,12 @@ async fn recovery_after_compaction() {
 
     // since the log entries cap is set to 10, 50 commands will trigger log compactions
     for i in 0..50 {
-        assert!(client
-            .propose(TestCommand::new_put(vec![i], i), true)
-            .await
-            .is_ok());
+        assert!(
+            client
+                .propose(TestCommand::new_put(vec![i], i), true)
+                .await
+                .is_ok()
+        );
     }
 
     // wait for log compactions

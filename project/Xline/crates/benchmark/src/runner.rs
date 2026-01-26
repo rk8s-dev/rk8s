@@ -2,8 +2,8 @@ use std::{
     collections::HashMap,
     fmt::Write as _,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 
@@ -14,8 +14,8 @@ use indicatif::ProgressBar;
 use rand::RngCore;
 use tokio::{
     sync::{
-        mpsc::{self, Receiver},
         Barrier,
+        mpsc::{self, Receiver},
     },
     time::{Duration, Instant},
 };
@@ -23,7 +23,7 @@ use tracing::debug;
 use utils::config::ClientConfig;
 use xline_client::ClientOptions;
 
-use crate::{args::Commands, bench_client::BenchClient, Benchmark};
+use crate::{Benchmark, args::Commands, bench_client::BenchClient};
 
 /// Result of request
 #[derive(Debug)]
@@ -271,7 +271,7 @@ impl CommandRunner {
             let bar_clone = Arc::clone(&bar);
             let _handle = tokio::spawn(async move {
                 while !bar_clone.is_finished() {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                     debug!("progress: {}/{}", bar_clone.position(), bar_len);
                 }
             });

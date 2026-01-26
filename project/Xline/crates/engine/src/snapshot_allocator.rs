@@ -1,6 +1,6 @@
 use std::{env::temp_dir, error::Error};
 
-use crate::{api::snapshot_api::SnapshotAllocator, EngineType, Snapshot};
+use crate::{EngineType, Snapshot, api::snapshot_api::SnapshotAllocator};
 
 /// Rocks snapshot allocator
 #[derive(Debug, Copy, Clone, Default)]

@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, hash_map::Entry};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -6,9 +6,9 @@ use utils::interval_map::{Interval, IntervalMap};
 use utils::lca_tree::LCATree;
 
 use crate::{
-    interval::BytesAffine, AuthRoleAddRequest, AuthRoleGrantPermissionRequest, AuthUserAddRequest,
-    DeleteRangeRequest, PutRequest, RangeRequest, Request, RequestOp, SortOrder, SortTarget,
-    TxnRequest,
+    AuthRoleAddRequest, AuthRoleGrantPermissionRequest, AuthUserAddRequest, DeleteRangeRequest,
+    PutRequest, RangeRequest, Request, RequestOp, SortOrder, SortTarget, TxnRequest,
+    interval::BytesAffine,
 };
 
 /// Default max txn ops

@@ -8,11 +8,11 @@ use revision_compactor::RevisionCompactor;
 use tokio::time::sleep;
 use utils::{
     config::AutoCompactConfig,
-    task_manager::{tasks::TaskName, Listener, TaskManager},
+    task_manager::{Listener, TaskManager, tasks::TaskName},
 };
-use xlineapi::{command::Command, execute_error::ExecuteError, RequestWrapper};
+use xlineapi::{RequestWrapper, command::Command, execute_error::ExecuteError};
 
-use super::{index::Index, KvStore};
+use super::{KvStore, index::Index};
 use crate::{revision_number::RevisionNumberGenerator, rpc::CompactionRequest};
 
 /// mod revision compactor;

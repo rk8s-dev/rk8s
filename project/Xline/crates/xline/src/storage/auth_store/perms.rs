@@ -1,12 +1,12 @@
 use std::{collections::HashMap, fmt::Debug};
 
 use jsonwebtoken::{
-    errors::Error as JwtError, Algorithm, DecodingKey, EncodingKey, Header, Validation,
+    Algorithm, DecodingKey, EncodingKey, Header, Validation, errors::Error as JwtError,
 };
 use merged_range::MergedRange;
 use serde::{Deserialize, Serialize};
 use utils::timestamp;
-use xlineapi::{command::KeyRange, AuthInfo};
+use xlineapi::{AuthInfo, command::KeyRange};
 
 use crate::rpc::{Permission, Type};
 

@@ -2,8 +2,8 @@ use std::{
     collections::VecDeque,
     future::Future,
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
 };
 
@@ -12,7 +12,7 @@ use dashmap::DashMap;
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::{debug, info, warn};
 
-use self::tasks::{TaskName, ALL_EDGES};
+use self::tasks::{ALL_EDGES, TaskName};
 
 /// Task names and edges
 pub mod tasks;
@@ -271,7 +271,6 @@ impl TaskManager {
 }
 
 impl Default for TaskManager {
-    #[must_use]
     #[inline]
     fn default() -> Self {
         Self::new()

@@ -3,19 +3,19 @@ use std::{fmt::Debug, sync::Arc};
 use tonic::transport::Channel;
 use utils::hash_password;
 use xlineapi::{
-    command::Command, AuthDisableResponse, AuthEnableResponse, AuthRoleAddResponse,
-    AuthRoleDeleteResponse, AuthRoleGetResponse, AuthRoleGrantPermissionResponse,
-    AuthRoleListResponse, AuthRoleRevokePermissionResponse, AuthStatusResponse,
-    AuthUserAddResponse, AuthUserChangePasswordResponse, AuthUserDeleteResponse,
-    AuthUserGetResponse, AuthUserGrantRoleResponse, AuthUserListResponse,
-    AuthUserRevokeRoleResponse, AuthenticateResponse, RequestWrapper, ResponseWrapper,
-    Type as PermissionType,
+    AuthDisableResponse, AuthEnableResponse, AuthRoleAddResponse, AuthRoleDeleteResponse,
+    AuthRoleGetResponse, AuthRoleGrantPermissionResponse, AuthRoleListResponse,
+    AuthRoleRevokePermissionResponse, AuthStatusResponse, AuthUserAddResponse,
+    AuthUserChangePasswordResponse, AuthUserDeleteResponse, AuthUserGetResponse,
+    AuthUserGrantRoleResponse, AuthUserListResponse, AuthUserRevokeRoleResponse,
+    AuthenticateResponse, RequestWrapper, ResponseWrapper, Type as PermissionType,
+    command::Command,
 };
 
 use crate::{
+    AuthService, CurpClient,
     error::{Result, XlineClientError},
     types::{auth::Permission, range_end::RangeOption},
-    AuthService, CurpClient,
 };
 
 /// Client for Auth operations.

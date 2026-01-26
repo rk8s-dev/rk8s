@@ -4,7 +4,7 @@
 //! operation.
 
 use std::{
-    collections::{hash_map, HashMap},
+    collections::{HashMap, hash_map},
     sync::Arc,
 };
 

@@ -5,9 +5,9 @@ use benchmark::{Benchmark, CommandRunner};
 use clap::Parser;
 use tracing::info;
 use tracing_subscriber::{
+    Layer,
     filter::{LevelFilter, Targets},
     prelude::*,
-    Layer,
 };
 
 fn tracing_init(stdout: bool) {

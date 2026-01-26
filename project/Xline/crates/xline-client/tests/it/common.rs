@@ -1,4 +1,4 @@
-use xline_client::{error::XlineClientBuildError, Client, ClientOptions};
+use xline_client::{Client, ClientOptions, error::XlineClientBuildError};
 use xline_test_utils::Cluster;
 
 pub async fn get_cluster_client() -> Result<(Cluster, Client), XlineClientBuildError> {

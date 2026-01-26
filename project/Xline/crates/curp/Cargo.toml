@@ -2,7 +2,7 @@
 authors = ["DatenLord <dev@datenlord.io>"]
 categories = ["Algorithms"]
 description = "Curp consensus protocol"
-edition = "2021"
+edition.workspace = true
 keywords = ["consensus", "distributed"]
 license = "Apache-2.0"
 name = "curp"
@@ -47,8 +47,7 @@ tokio-util = "0.7.11"
 tonic = { version = "0.5.0", package = "madsim-tonic", features = ["tls"] }
 tower = { version = "0.4.13", features = ["filter"] }
 tracing = { version = "0.1.37", features = ["std", "log", "attributes"] }
-utils = { path = "../utils", version = "0.1.0", features = ["parking_lot"] }
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+utils = { path = "../utils", version = "0.1.0" }
 
 [dev-dependencies]
 anyhow = "1.0.90"
@@ -67,3 +66,6 @@ tonic-build = { version = "0.5.0", package = "madsim-tonic-build" }
 
 [features]
 client-metrics = []
+
+[lints]
+workspace = true

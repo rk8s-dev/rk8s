@@ -18,7 +18,6 @@
     non_ascii_idents,
     // non_exhaustive_omitted_patterns, unstable
     noop_method_call,
-    pointer_structural_match,
     rust_2021_incompatible_closure_captures,
     rust_2021_incompatible_or_patterns,
     rust_2021_prefixes_incompatible_syntax,
@@ -193,7 +192,6 @@ pub mod lca_tree;
 /// utils for metrics
 pub mod metrics;
 /// utils of `parking_lot` lock
-#[cfg(feature = "parking_lot")]
 pub mod parking_lot_lock;
 /// utils for parse config
 pub mod parser;
@@ -215,14 +213,14 @@ use ::tracing::debug;
 pub use interval_map;
 pub use parser::*;
 use pbkdf2::{
-    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
     Params, Pbkdf2,
+    password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
 };
 
 /// display all elements for the given vector
 #[macro_export]
 macro_rules! write_vec {
-    ($f:expr, $name:expr, $vector:expr) => {
+    ($f:expr_2021, $name:expr_2021, $vector:expr_2021) => {
         write!($f, "{}: [ ", { $name })?;
         let last_idx = if $vector.is_empty() {
             0
