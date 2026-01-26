@@ -826,7 +826,11 @@ mod tests {
         let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, chunk_id_for(ino, 0), backend.as_ref());
         let desc1 = uploader
-            .write_at(slice_id1 as u64, offset as u32, head)
+            .write_at_vectored(
+                slice_id1 as u64,
+                offset as u32,
+                &[bytes::Bytes::copy_from_slice(head)],
+            )
             .await
             .unwrap();
         meta.append_slice(chunk_id_for(ino, 0), desc1)
@@ -835,7 +839,10 @@ mod tests {
 
         let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, chunk_id_for(ino, 1), backend.as_ref());
-        let desc2 = uploader.write_at(slice_id2 as u64, 0, tail).await.unwrap();
+        let desc2 = uploader
+            .write_at_vectored(slice_id2 as u64, 0, &[bytes::Bytes::copy_from_slice(tail)])
+            .await
+            .unwrap();
         meta.append_slice(chunk_id_for(ino, 1), desc2)
             .await
             .unwrap();
@@ -867,7 +874,7 @@ mod tests {
         let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, chunk_id_for(ino, 0), backend.as_ref());
         let desc1 = uploader
-            .write_at(slice_id1 as u64, 0, &data1)
+            .write_at_vectored(slice_id1 as u64, 0, &[bytes::Bytes::copy_from_slice(&data1)])
             .await
             .unwrap();
         meta.append_slice(chunk_id_for(ino, 0), desc1)
@@ -882,7 +889,7 @@ mod tests {
 
         let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let desc2 = uploader
-            .write_at(slice_id2 as u64, 0, &data2)
+            .write_at_vectored(slice_id2 as u64, 0, &[bytes::Bytes::copy_from_slice(&data2)])
             .await
             .unwrap();
         meta.append_slice(chunk_id_for(ino, 0), desc2)

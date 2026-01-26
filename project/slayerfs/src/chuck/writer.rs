@@ -182,7 +182,7 @@ mod tests {
 
         let uploader = DataUploader::new(layout, 1, backend.as_ref());
         let desc = uploader
-            .write_at(slice_id as u64, offset, &data)
+            .write_at_vectored(slice_id as u64, offset, &[Bytes::copy_from_slice(&data)])
             .await
             .unwrap();
         meta.append_slice(1, desc).await.unwrap();
