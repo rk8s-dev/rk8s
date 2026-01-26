@@ -11,6 +11,7 @@ const SLAYERFS_BIN_IN_VM: &str = "/usr/local/bin/slayerfs";
 const SLAYERFS_MOUNTPOINT: &str = "/mnt/slayerfs";
 const SLAYERFS_DATA_DIR: &str = "/tmp/slayerfs-data";
 const SLAYERFS_LOG_PATH: &str = "/var/log/slayerfs.log";
+const SLAYERFS_META_DIR: &str = "/tmp/slayerfs-meta";
 
 fn tracing_subscriber_init() {
     static INIT: Once = Once::new();
@@ -214,6 +215,53 @@ async fn run_slayerfs_mount_root(vm: &mut Machine, meta_url: &str) -> Result<()>
 
     exec_check(
         vm,
+        &format!("rm -rf {d} && mkdir -p {d}", d = SLAYERFS_META_DIR),
+    )
+    .await?;
+    exec_check(vm, &format!("chmod 1777 {d}", d = SLAYERFS_META_DIR)).await?;
+
+    exec_check(
+        vm,
+        &format!(
+            "stat -c '%A %U:%G %n' /tmp {d} || true; sh -lc 'touch {d}/.probe_root && rm {d}/.probe_root'",
+            d = SLAYERFS_META_DIR
+        ),
+    )
+    .await?;
+    exec_check(
+        vm,
+        &format!(
+            "su - tester -c 'sh -lc \"touch {d}/.probe_tester && rm {d}/.probe_tester\"'",
+            d = SLAYERFS_META_DIR
+        ),
+    )
+    .await?;
+
+    let db_path = meta_url
+        .strip_prefix("sqlite:///")
+        .or_else(|| meta_url.strip_prefix("sqlite://"))
+        .map(|s| s.split('?').next().unwrap_or(s))
+        .filter(|s| !s.starts_with(':'))
+        .map(|p| {
+            if p.starts_with('/') {
+                p.to_string()
+            } else {
+                format!("/{p}")
+            }
+        });
+    if let Some(db_path) = db_path {
+        exec_check(
+            vm,
+            &format!(
+                "rm -f '{p}' && touch '{p}' && chmod 666 '{p}' && stat -c '%A %U:%G %n' '{p}'",
+                p = db_path
+            ),
+        )
+        .await?;
+    }
+
+    exec_check(
+        vm,
         &format!(
             "nohup {bin} mount {mp} --data-dir {data} --meta-backend sqlx --meta-url '{meta_url}' > {log} 2>&1 &",
             bin = SLAYERFS_BIN_IN_VM,
@@ -381,18 +429,14 @@ async fn run_concurrency_smoke(vm: &mut Machine) -> Result<()> {
 for i in $(seq 1 4); do \
   for j in $(seq 1 50); do echo \"$i-$j\" >> {}/concurrency/file-$i; done; \
 done'",
-            SLAYERFS_MOUNTPOINT,
-            SLAYERFS_MOUNTPOINT
+            SLAYERFS_MOUNTPOINT, SLAYERFS_MOUNTPOINT
         ),
     )
     .await?;
 
     let total1 = exec_check(
         vm,
-        &format!(
-            "sh -lc 'wc -l {}/concurrency/file-*'",
-            SLAYERFS_MOUNTPOINT
-        ),
+        &format!("sh -lc 'wc -l {}/concurrency/file-*'", SLAYERFS_MOUNTPOINT),
     )
     .await?;
 
@@ -408,13 +452,11 @@ done'",
             continue;
         }
         let mut parts = line.split_whitespace();
-        let count = match parts.next() {
-            Some(v) => v,
-            None => continue,
+        let Some(count) = parts.next() else {
+            continue;
         };
-        let path = match parts.next() {
-            Some(v) => v,
-            None => continue,
+        let Some(path) = parts.next() else {
+            continue;
         };
         if path == "total" {
             continue;
@@ -511,7 +553,7 @@ async fn run_smoke(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
     setup_unprivileged_user(vm, "tester").await?;
     upload_slayerfs(vm, slayerfs_bin).await?;
 
-    run_slayerfs_mount_root(vm, "sqlite:file:/tmp/slayerfs-smoke-meta.db").await?;
+    run_slayerfs_mount_root(vm, "sqlite:///tmp/slayerfs-meta/smoke-meta.db?mode=rwc").await?;
     basic_fs_checks(vm).await?;
     check_default_permissions(vm).await?;
 
