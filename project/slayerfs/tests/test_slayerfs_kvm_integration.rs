@@ -486,9 +486,7 @@ async fn run_full(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
 
     exec_check(
         vm,
-        &format!(
-            "rm -f {db_path} && touch {db_path} && stat -c '%A %U:%G %n' {db_path}",
-        ),
+        &format!("rm -f {db_path} && touch {db_path} && stat -c '%A %U:%G %n' {db_path}",),
     )
     .await?;
 
