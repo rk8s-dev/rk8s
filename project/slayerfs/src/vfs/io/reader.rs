@@ -176,7 +176,10 @@ impl Session {
         let back = (self.ahead / 8).max(block_size);
 
         let win_start = self.last_off.saturating_sub(back);
-        let win_end = self.last_off + self.ahead * 2 + block_size * 2;
+        let win_end = self
+            .last_off
+            .saturating_add(self.ahead.saturating_mul(2))
+            .saturating_add(block_size.saturating_mul(2));
         (win_start, win_end)
     }
 
@@ -186,8 +189,9 @@ impl Session {
         } else if self.total >= self.ahead && self.ahead < cfg.max_ahead {
             // Double the ahead to adapt larger read patterns.
             self.ahead *= 2;
-        } else {
-            // Reduce the ahead by half to shrink.
+        } else if self.total.saturating_mul(4) < self.ahead {
+            // Only shrink when the current sequential progress is much smaller than
+            // the prediction window
             self.ahead /= 2;
         }
     }
@@ -316,6 +320,29 @@ impl SliceState {
     }
 }
 
+struct SlicePinGuard {
+    slices: Vec<Arc<ParkingMutex<SliceState>>>,
+}
+
+impl SlicePinGuard {
+    pub fn new() -> Self {
+        Self { slices: Vec::new() }
+    }
+
+    pub fn add(&mut self, slice: Arc<ParkingMutex<SliceState>>) {
+        self.slices.push(slice);
+    }
+}
+
+impl Drop for SlicePinGuard {
+    fn drop(&mut self) {
+        for slice in self.slices.drain(..) {
+            let mut guard = slice.lock();
+            guard.refs = guard.refs.saturating_sub(1);
+        }
+    }
+}
+
 pub(crate) struct FileReader<B, M> {
     config: Arc<ReadConfig>,
     buffer_usage: Arc<AtomicU64>,
@@ -432,6 +459,11 @@ where
     }
 
     async fn clean_evictable_slices(&self, offset: u64, len: usize) {
+        // Early exit if memory usage is acceptable
+        if self.buffer_usage.load(Ordering::Relaxed) <= self.config.buffer_size {
+            return;
+        }
+
         let sessions = *self.sessions.lock();
         let windows = sessions
             .iter()
@@ -521,10 +553,13 @@ where
 
         let spans = split_chunk_spans(self.config.layout, offset, actual_len);
 
+        let mut pin_guard = Vec::new();
         for span in spans.iter().copied() {
             // `prepare_slices` don't wait for all data is ready.
-            self.prepare_slices(span.index, (span.offset, span.offset + span.len))
-                .await;
+            pin_guard.push(
+                self.prepare_slices(span.index, (span.offset, span.offset + span.len))
+                    .await,
+            );
         }
 
         self.check_session(offset, actual_len);
@@ -539,6 +574,8 @@ where
             Ok::<_, anyhow::Error>(actual_len)
         }
         .await;
+
+        drop(pin_guard);
 
         // Do a cleanup each read.
         self.cleanup_invalid().await;
@@ -576,35 +613,42 @@ where
         };
 
         for slice in slices {
-            Self::wait_ready(&slice).await?;
+            // There locks the slice twice, but it is still worth it
+            // as the parking_lot::Mutex is lightweight.
+            let (dst_start, dst_end) = {
+                let guard = slice.lock();
+                (
+                    offset.max(guard.range.0),
+                    guard.range.1.min(offset + buf.len() as u32),
+                )
+            };
 
-            let mut guard = slice.lock();
-
-            let dst_start = offset.max(guard.range.0);
-            let dst_end = guard.range.1.min(offset + buf.len() as u32);
-
-            if dst_start < dst_end {
-                let dst_local_start = dst_start - offset;
-                let dst_local_end = dst_end - offset;
-                let src_start = dst_start - guard.range.0;
-                let src_end = dst_end - guard.range.0;
-
-                buf[dst_local_start as usize..dst_local_end as usize]
-                    .copy_from_slice(&guard.page[src_start as usize..src_end as usize]);
+            if dst_start >= dst_end {
+                continue;
             }
 
-            // The refs was set to 1 when `prepare_slices`.
-            guard.refs = guard.refs.saturating_sub(1);
+            Self::wait_ready(&slice).await?;
+
+            let guard = slice.lock();
+
+            let dst_local_start = dst_start - offset;
+            let dst_local_end = dst_end - offset;
+            let src_start = dst_start - guard.range.0;
+            let src_end = dst_end - guard.range.0;
+
+            buf[dst_local_start as usize..dst_local_end as usize]
+                .copy_from_slice(&guard.page[src_start as usize..src_end as usize]);
         }
         Ok(())
     }
 
-    async fn prepare_slices(&self, index: u64, (start, end): (u32, u32)) {
+    async fn prepare_slices(&self, index: u64, (start, end): (u32, u32)) -> SlicePinGuard {
+        let mut pinned = SlicePinGuard::new();
         let mut cutter = Intervals::new(start, end);
 
         let mut guard = self.slices.lock().await;
         for slice in guard.iter() {
-            let guard = slice.lock();
+            let mut guard = slice.lock();
 
             if guard.index != index {
                 continue;
@@ -612,6 +656,12 @@ where
 
             if matches!(guard.state, SliceStatus::Invalid) {
                 continue;
+            }
+
+            // The "reservation" needs to read this slice.
+            if guard.overlaps(start, end.saturating_sub(start)) {
+                guard.refs = guard.refs.saturating_add(1);
+                pinned.add(slice.clone());
             }
 
             let (l, r) = guard.range;
@@ -627,8 +677,11 @@ where
                 self.config.layout,
                 self.backend.clone(),
             );
+            pinned.add(slice.clone());
             guard.push_back(slice);
         }
+
+        pinned
     }
 
     async fn invalidate(&self, offset: u64, len: usize) {
