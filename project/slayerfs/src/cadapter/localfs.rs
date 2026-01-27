@@ -26,6 +26,7 @@ impl LocalFsBackend {
 
 #[async_trait]
 impl ObjectBackend for LocalFsBackend {
+    #[tracing::instrument(level = "trace", skip(self, chunks), fields(key, chunk_count = chunks.len()))]
     async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
         let path = self.path_for(key);
         if let Some(dir) = path.parent() {

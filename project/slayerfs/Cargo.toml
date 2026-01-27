@@ -7,7 +7,7 @@ description = "High-performance Rust & Layers-aware Distributed Filesystem"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/slayerfs"
 
 [dependencies]
-tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "time", "net", "signal"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "time", "net", "signal", "tracing"] }
 async-trait = { workspace = true }
 async-recursion = { workspace = true }
 aws-config = { workspace = true }
@@ -40,6 +40,8 @@ clap = { workspace = true, features = ["derive", "env"] }
 auto_impl = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-flame = { workspace = true }
+console-subscriber = { workspace = true }
 dotenv = { workspace = true }
 rand = { workspace = true }
 hostname = { workspace = true }

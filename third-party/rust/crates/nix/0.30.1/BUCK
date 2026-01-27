@@ -26,7 +26,12 @@ rust_library(
     env = {
         "OUT_DIR": "$(location :nix-build-script-run[out_dir])",
     },
-    features = ["default"],
+    features = [
+        "default",
+        "ioctl",
+        "memoffset",
+        "socket",
+    ],
     rustc_flags = [
         "@$(location :nix-build-script-run[rustc_flags])",
         "@$(location :nix-manifest[env_flags])",
@@ -36,6 +41,7 @@ rust_library(
         "//third-party/rust/crates/bitflags/2.10.0:bitflags",
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
         "//third-party/rust/crates/libc/0.2.178:libc",
+        "//third-party/rust/crates/memoffset/0.9.1:memoffset",
     ],
 )
 
@@ -45,7 +51,12 @@ rust_binary(
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    features = ["default"],
+    features = [
+        "default",
+        "ioctl",
+        "memoffset",
+        "socket",
+    ],
     rustc_flags = ["@$(location :nix-manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/cfg_aliases/0.2.1:cfg_aliases"],
@@ -56,7 +67,12 @@ buildscript_run(
     package_name = "nix",
     buildscript_rule = ":nix-build-script-build",
     env_srcs = [":nix-manifest[env_dict]"],
-    features = ["default"],
+    features = [
+        "default",
+        "ioctl",
+        "memoffset",
+        "socket",
+    ],
     version = "0.30.1",
     manifest_dir = ":nix-vendor",
     visibility = ["PUBLIC"],

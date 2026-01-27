@@ -26,6 +26,7 @@ rust_library(
     env = {
         "OUT_DIR": "$(location :typenum-build-script-run[out_dir])",
     },
+    features = ["const-generics"],
     rustc_flags = [
         "@$(location :typenum-build-script-run[rustc_flags])",
         "@$(location :typenum-manifest[env_flags])",
@@ -39,6 +40,7 @@ rust_binary(
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
+    features = ["const-generics"],
     rustc_flags = ["@$(location :typenum-manifest[env_flags])"],
     visibility = [],
 )
@@ -48,6 +50,7 @@ buildscript_run(
     package_name = "typenum",
     buildscript_rule = ":typenum-build-script-build",
     env_srcs = [":typenum-manifest[env_dict]"],
+    features = ["const-generics"],
     version = "1.19.0",
     manifest_dir = ":typenum-vendor",
     visibility = ["PUBLIC"],

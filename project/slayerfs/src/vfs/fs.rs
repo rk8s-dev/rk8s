@@ -140,6 +140,36 @@ struct ModifiedTracker {
     entries: Mutex<HashMap<i64, Instant>>,
 }
 
+struct ExtendFileSizeStats {
+    calls: AtomicU64,
+    total_us: AtomicU64,
+    max_us: AtomicU64,
+}
+
+impl ExtendFileSizeStats {
+    fn new() -> Self {
+        Self {
+            calls: AtomicU64::new(0),
+            total_us: AtomicU64::new(0),
+            max_us: AtomicU64::new(0),
+        }
+    }
+
+    fn record(&self, elapsed: Duration) -> Option<(u64, u64, u64)> {
+        let us = elapsed.as_micros() as u64;
+        let calls = self.calls.fetch_add(1, Ordering::Relaxed) + 1;
+        self.total_us.fetch_add(us, Ordering::Relaxed);
+        self.max_us.fetch_max(us, Ordering::Relaxed);
+        if calls.is_multiple_of(1024) {
+            let total = self.total_us.load(Ordering::Relaxed);
+            let max = self.max_us.load(Ordering::Relaxed);
+            let avg = total / calls.max(1);
+            return Some((calls, avg, max));
+        }
+        None
+    }
+}
+
 impl ModifiedTracker {
     fn new() -> Self {
         Self {
@@ -175,6 +205,7 @@ where
     reader: Arc<DataReader<S, M>>,
     writer: Arc<DataWriter<S, M>>,
     modified: ModifiedTracker,
+    extend_stats: ExtendFileSizeStats,
 }
 
 impl<S, M> VfsState<S, M>
@@ -196,6 +227,7 @@ where
             reader,
             writer,
             modified: ModifiedTracker::new(),
+            extend_stats: ExtendFileSizeStats::new(),
         }
     }
 }
@@ -1114,6 +1146,7 @@ where
     }
 
     /// Read data by file handle and offset.
+    #[tracing::instrument(level = "trace", skip(self), fields(fh, offset, len))]
     pub async fn read(&self, fh: u64, offset: u64, len: usize) -> Result<Vec<u8>, VfsError> {
         if len == 0 {
             return Ok(Vec::new());
@@ -1136,6 +1169,7 @@ where
     }
 
     /// Write data by file handle and offset.
+    #[tracing::instrument(level = "trace", skip(self, data), fields(fh, offset, len = data.len()))]
     pub async fn write(&self, fh: u64, offset: u64, data: &[u8]) -> Result<usize, VfsError> {
         if data.is_empty() {
             return Ok(0);
@@ -1157,10 +1191,16 @@ where
         let target_size = offset + written as u64;
 
         // POSIX semantic for `write`: it is unable to shorten the file.
+        let extend_start = Instant::now();
         self.core
             .meta_layer
             .extend_file_size(handle.ino, target_size)
             .await?;
+        if let Some((calls, avg_us, max_us)) =
+            self.state.extend_stats.record(extend_start.elapsed())
+        {
+            tracing::info!(calls, avg_us, max_us, "VFS::extend_file_size stats");
+        }
         self.state.modified.touch(handle.ino).await;
         Ok(written)
     }

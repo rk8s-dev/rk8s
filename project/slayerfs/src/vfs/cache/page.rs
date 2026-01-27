@@ -33,6 +33,7 @@ impl CacheSlice {
     }
 
     /// Append a buffer behind the latest page. The buffer length must not exceed the remaining length.
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(len = buf.len()))]
     pub(crate) fn append(&mut self, buf: &[u8]) -> anyhow::Result<()> {
         let max_len = self.config.layout.chunk_size;
         let next_len = self.len as u64 + buf.len() as u64;

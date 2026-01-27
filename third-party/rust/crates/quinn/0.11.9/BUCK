@@ -27,6 +27,7 @@ rust_library(
         "OUT_DIR": "$(location :quinn-build-script-run[out_dir])",
     },
     features = [
+        "aws-lc-rs",
         "bloom",
         "default",
         "log",
@@ -34,6 +35,7 @@ rust_library(
         "ring",
         "runtime-tokio",
         "rustls",
+        "rustls-aws-lc-rs",
         "rustls-ring",
     ],
     rustc_flags = [
@@ -44,13 +46,17 @@ rust_library(
         "proto": "//third-party/rust/crates/quinn-proto/0.11.13:quinn-proto",
         "udp": "//third-party/rust/crates/quinn-udp/0.5.14:quinn-udp",
     },
+    os_deps = {
+        "linux": ["//third-party/rust/crates/socket2/0.6.1:socket2"],
+        "macos": ["//third-party/rust/crates/socket2/0.6.1:socket2"],
+        "windows": ["//third-party/rust/crates/socket2/0.6.1:socket2"],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.11.0:bytes",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/rustc-hash/2.1.1:rustc-hash",
         "//third-party/rust/crates/rustls/0.23.35:rustls",
-        "//third-party/rust/crates/socket2/0.6.1:socket2",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
         "//third-party/rust/crates/tokio/1.48.0:tokio",
         "//third-party/rust/crates/tracing/0.1.43:tracing",
@@ -64,6 +70,7 @@ rust_binary(
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = [
+        "aws-lc-rs",
         "bloom",
         "default",
         "log",
@@ -71,6 +78,7 @@ rust_binary(
         "ring",
         "runtime-tokio",
         "rustls",
+        "rustls-aws-lc-rs",
         "rustls-ring",
     ],
     rustc_flags = ["@$(location :quinn-manifest[env_flags])"],
@@ -84,6 +92,7 @@ buildscript_run(
     buildscript_rule = ":quinn-build-script-build",
     env_srcs = [":quinn-manifest[env_dict]"],
     features = [
+        "aws-lc-rs",
         "bloom",
         "default",
         "log",
@@ -91,6 +100,7 @@ buildscript_run(
         "ring",
         "runtime-tokio",
         "rustls",
+        "rustls-aws-lc-rs",
         "rustls-ring",
     ],
     version = "0.11.9",

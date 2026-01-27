@@ -1256,6 +1256,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);

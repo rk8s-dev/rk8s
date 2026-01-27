@@ -530,6 +530,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(offset, len = buf.len()))]
     pub(crate) async fn read_at(&self, offset: u64, buf: &mut [u8]) -> anyhow::Result<usize> {
         if buf.is_empty() {
             return Ok(0);

@@ -474,6 +474,7 @@ impl Drop for MultipartCleanupGuard {
 
 #[async_trait]
 impl ObjectBackend for S3Backend {
+    #[tracing::instrument(level = "trace", skip(self, chunks), fields(key, chunk_count = chunks.len()))]
     async fn put_object_vectored(&self, key: &str, chunks: Vec<Bytes>) -> Result<()> {
         let total_size = chunks.iter().map(|e| e.len()).sum::<usize>();
 

@@ -346,12 +346,16 @@ fn tokio_runtime(thread_num: usize) -> Runtime {
 async fn create_meta_store(cfg: &BenchConfig) -> Result<Arc<dyn MetaStore>> {
     match &cfg.meta_backend {
         MetaBackend::Sqlx { url } => {
+            let client = ClientOptions {
+                no_background_jobs: true,
+                ..ClientOptions::default()
+            };
             let config = Config {
                 database: DatabaseConfig {
                     db_config: database_type_from_url(url),
                 },
                 cache: CacheConfig::default(),
-                client: ClientOptions::default(),
+                client,
             };
             let handle = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config)
                 .await
@@ -359,12 +363,16 @@ async fn create_meta_store(cfg: &BenchConfig) -> Result<Arc<dyn MetaStore>> {
             Ok(handle.store() as Arc<dyn MetaStore>)
         }
         MetaBackend::Etcd { urls } => {
+            let client = ClientOptions {
+                no_background_jobs: true,
+                ..ClientOptions::default()
+            };
             let config = Config {
                 database: DatabaseConfig {
                     db_config: DatabaseType::Etcd { urls: urls.clone() },
                 },
                 cache: CacheConfig::default(),
-                client: ClientOptions::default(),
+                client,
             };
             let handle = MetaStoreFactory::<EtcdMetaStore>::create_from_config(config)
                 .await

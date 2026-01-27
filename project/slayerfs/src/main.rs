@@ -6,6 +6,8 @@ mod meta;
 mod utils;
 mod vfs;
 
+use std::fs::File;
+use std::io::BufWriter;
 #[cfg(all(feature = "jemalloc", target_os = "linux"))]
 use tikv_jemallocator::Jemalloc;
 #[cfg(all(feature = "jemalloc", target_os = "linux"))]
@@ -13,9 +15,11 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
@@ -80,16 +84,46 @@ enum MetaBackendKind {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "slayerfs=info".to_string()))
-        .init();
+    init_tracing();
 
     let cli = Cli::parse();
-    match cli.cmd {
-        Command::Mount(args) => mount_cmd(args).await?,
-    }
+    let result = match cli.cmd {
+        Command::Mount(args) => mount_cmd(args).await,
+    };
+    shutdown_flame();
+    result
+}
 
-    Ok(())
+fn init_tracing() {
+    let flame_layer = std::env::var("SLAYERFS_TRACE_FLAME").ok().and_then(|path| {
+        let path_for_log = path.clone();
+        match tracing_flame::FlameLayer::with_file(path) {
+            Ok((layer, guard)) => {
+                let layer = layer.with_empty_samples(false).with_threads_collapsed(true);
+                eprintln!("[slayerfs] tracing-flame enabled: {}", path_for_log);
+                register_flame_guard(guard);
+                Some(layer)
+            }
+            Err(err) => {
+                eprintln!(
+                    "[slayerfs] failed to enable tracing-flame for {}: {err}",
+                    path_for_log
+                );
+                None
+            }
+        }
+    });
+    let env_filter = tracing_subscriber::EnvFilter::new(
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "slayerfs=info".to_string()),
+    );
+    let console_layer = std::env::var_os("TOKIO_CONSOLE").map(|_| console_subscriber::spawn());
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().pretty())
+        .with(env_filter)
+        .with(flame_layer)
+        .with(console_layer)
+        .init();
 }
 
 async fn mount_cmd(args: MountArgs) -> anyhow::Result<()> {
@@ -132,15 +166,35 @@ async fn mount_cmd(args: MountArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+static FLAME_GUARD: LazyLock<StdMutex<Option<tracing_flame::FlushGuard<BufWriter<File>>>>> =
+    LazyLock::new(|| StdMutex::new(None));
+
+fn register_flame_guard(guard: tracing_flame::FlushGuard<BufWriter<File>>) {
+    if let Ok(mut slot) = FLAME_GUARD.lock() {
+        *slot = Some(guard);
+    }
+}
+
+fn shutdown_flame() {
+    if let Ok(mut slot) = FLAME_GUARD.lock()
+        && let Some(guard) = slot.take()
+        && let Err(err) = guard.flush()
+    {
+        eprintln!("tracing-flame flush failed: {err}");
+    }
+}
+
 async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore>> {
     match args.meta_backend {
         MetaBackendKind::Sqlx => {
+            let client = ClientOptions::default();
+
             let config = Config {
                 database: DatabaseConfig {
                     db_config: database_type_from_url(&args.meta_url),
                 },
                 cache: CacheConfig::default(),
-                client: ClientOptions::default(),
+                client,
             };
             let handle = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)
@@ -149,6 +203,8 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
             if args.meta_etcd_urls.is_empty() {
                 anyhow::bail!("--meta-etcd-urls must be set when --meta-backend etcd");
             }
+            let client = ClientOptions::default();
+
             let config = Config {
                 database: DatabaseConfig {
                     db_config: DatabaseType::Etcd {
@@ -156,7 +212,7 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
                     },
                 },
                 cache: CacheConfig::default(),
-                client: ClientOptions::default(),
+                client,
             };
             let handle = MetaStoreFactory::<EtcdMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)

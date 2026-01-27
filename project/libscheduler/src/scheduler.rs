@@ -480,7 +480,7 @@ impl Scheduler {
                 &pod_info,
                 &filtered,
             );
-            scores.sort_by(|a, b| b.0.cmp(&a.0));
+            scores.sort_by_key(|b| std::cmp::Reverse(b.0));
             let mut cache_write = cache.write().await;
             if cache_write.assume(&pod_name, &scores[0].1.name) {
                 res_sx

@@ -794,7 +794,10 @@ impl SystemMetrics {
         let total = self.total_requests.load(Ordering::Relaxed);
         if total > 0 {
             let hits = self.cache_hits.load(Ordering::Relaxed);
-            let rate = (hits * 10000) / total; // Scale to 0-10000 for 0.0-1.0
+            let rate = hits
+                .checked_mul(10000)
+                .and_then(|value| value.checked_div(total))
+                .unwrap_or(0); // Scale to 0-10000 for 0.0-1.0
             self.hit_rate.store(rate, Ordering::Relaxed);
         }
     }
@@ -815,7 +818,10 @@ impl SystemMetrics {
 
     fn update_cache_utilization(&self, current_size: u64, max_size: u64) {
         if max_size > 0 {
-            let utilization = (current_size * 10000) / max_size;
+            let utilization = current_size
+                .checked_mul(10000)
+                .and_then(|value| value.checked_div(max_size))
+                .unwrap_or(0);
             self.hot_cache_utilization
                 .store(utilization, Ordering::Relaxed);
         }

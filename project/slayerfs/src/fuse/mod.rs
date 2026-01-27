@@ -179,8 +179,8 @@ where
     M: MetaStore + Send + Sync + 'static,
 {
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
-        // Use a conservative max write size (1 MiB). Tune per backend or make configurable.
-        let max_write = NonZeroU32::new(1024 * 1024).unwrap();
+        // Default to 4 MiB for higher throughput while keeping memory usage reasonable.
+        let max_write = NonZeroU32::new(4 * 1024 * 1024).unwrap();
         Ok(ReplyInit { max_write })
     }
 

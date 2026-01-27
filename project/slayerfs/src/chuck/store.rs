@@ -46,6 +46,7 @@ pub trait BlockStore {
     /// In that model, read-modify-write is wasted IO because there is no old data to preserve.
     /// Callers must ensure the target key is fresh; using this on an existing object would
     /// drop any previous content outside the written range.
+    #[tracing::instrument(level = "trace", skip(self, chunks), fields(key = ?key, offset, chunk_count = chunks.len()))]
     async fn write_fresh_vectored(
         &self,
         key: BlockKey,
@@ -237,6 +238,37 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         Ok(total_len as u64)
     }
 
+    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
+        let key_str = Self::key_for(key);
+        let mut buf = self
+            .client
+            .get_object(&key_str)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store get failed: {:?}", e))?
+            .unwrap_or_default();
+
+        let start = offset as usize;
+        let end = start + data.len();
+        if buf.len() < end {
+            buf.resize(end, 0);
+        }
+        buf[start..end].copy_from_slice(data);
+        self.client
+            .put_object(&key_str, &buf)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
+
+        let etag = self
+            .client
+            .get_etag(&key_str)
+            .await
+            .unwrap_or_else(|_| "default_etag".to_string());
+        let cache_key = format!("{}{}", key_str, etag);
+        let _ = self.block_cache.remove(&cache_key).await;
+        Ok(data.len() as u64)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, chunks), fields(key = ?key, offset, chunk_count = chunks.len()))]
     async fn write_fresh_vectored(
         &self,
         key: BlockKey,
@@ -269,36 +301,6 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         let cache_key = format!("{}{}", key_str, etag);
         let _ = self.block_cache.remove(&cache_key).await;
         Ok(total_len as u64)
-    }
-
-    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
-        let key_str = Self::key_for(key);
-        let mut buf = self
-            .client
-            .get_object(&key_str)
-            .await
-            .map_err(|e| anyhow::anyhow!("object store get failed: {:?}", e))?
-            .unwrap_or_default();
-
-        let start = offset as usize;
-        let end = start + data.len();
-        if buf.len() < end {
-            buf.resize(end, 0);
-        }
-        buf[start..end].copy_from_slice(data);
-        self.client
-            .put_object(&key_str, &buf)
-            .await
-            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
-
-        let etag = self
-            .client
-            .get_etag(&key_str)
-            .await
-            .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key_str, etag);
-        let _ = self.block_cache.remove(&cache_key).await;
-        Ok(data.len() as u64)
     }
 
     async fn write_fresh_range(
@@ -334,6 +336,7 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         Ok(data.len() as u64)
     }
 
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(len = buf.len()))]
     async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
         let key_str = Self::key_for(key);
         let len = buf.len();

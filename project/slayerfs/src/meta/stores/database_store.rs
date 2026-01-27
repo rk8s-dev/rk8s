@@ -1625,6 +1625,7 @@ impl MetaStore for DatabaseMetaStore {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         let now = Self::now_nanos();
         let result = file_meta::Entity::update_many()

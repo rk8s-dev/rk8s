@@ -776,6 +776,11 @@ impl EtcdMetaStore {
     /// from the old state. `init` lazily provides the same tuple when the key is absent to avoid a
     /// separate create path. Both closures can error so domain-level failures propagate cleanly.
     /// Retries use exponential backoff on compare failures.
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, f, init, options),
+        fields(key, max_retries)
+    )]
     async fn atomic_update<F, I, T, R>(
         &self,
         key: &str,
@@ -2299,6 +2304,7 @@ impl MetaStore for EtcdMetaStore {
         .map(|_| ())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
         self.atomic_update(

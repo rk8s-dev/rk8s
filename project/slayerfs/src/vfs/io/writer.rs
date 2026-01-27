@@ -539,6 +539,7 @@ where
 
     // Write path: split into chunk spans, append to per-chunk slices, and possibly
     // trigger background flush/commit. Updates in-memory inode size at the end.
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(offset, len = buf.len()))]
     pub(crate) async fn write_at(&self, offset: u64, buf: &[u8]) -> anyhow::Result<usize> {
         let mut guard = self.shared.inner.lock().await;
 
@@ -592,6 +593,7 @@ where
 
     // Flush: freeze all slices, upload them, and wait for commit threads to drain.
     // This blocks new writes until flushing completes (flush_waiting gate).
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn flush(&self) -> anyhow::Result<()> {
         {
             let mut guard = self.shared.inner.lock().await;

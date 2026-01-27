@@ -1043,6 +1043,7 @@ impl MetaStore for RedisMetaStore {
         self.save_node(&node).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         // TODO: Use a Lua script for atomic update.
         let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
