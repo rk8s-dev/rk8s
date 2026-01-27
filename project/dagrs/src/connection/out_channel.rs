@@ -154,7 +154,7 @@ impl<T: Send + Sync + 'static> TypedOutChannels<T> {
         }
     }
 
-    /// Broadcasts the `content` to all the [`TypedOutChannel`]s asynchronously.
+    /// Broadcasts the `content` to all the [`TypedOutChannels`] asynchronously.
     pub async fn broadcast(&self, content: T) -> Vec<Result<(), SendErr>> {
         let content = Content::new(content);
         let futures = self
@@ -165,7 +165,7 @@ impl<T: Send + Sync + 'static> TypedOutChannels<T> {
         join_all(futures).await
     }
 
-    /// Blocking broadcasts the `content` to all the [`TypedOutChannel`]s.
+    /// Blocking broadcasts the `content` to all the [`TypedOutChannels`].
     pub fn blocking_broadcast(&self, content: T) -> Vec<Result<(), SendErr>> {
         let content = Content::new(content);
         self.0

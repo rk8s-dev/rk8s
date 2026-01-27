@@ -12,6 +12,7 @@ libnetwork = { workspace = true }
 libipam = { workspace = true }
 libcgroups = { workspace = true }
 libcontainer = { workspace = true }
+libruntime = { workspace = true }
 libvault = { workspace = true }
 libcni = { workspace = true }
 liboci-cli = { workspace = true }

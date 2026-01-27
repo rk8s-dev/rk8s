@@ -5,7 +5,7 @@ use clap::Parser;
 use std::{ffi::CString, path::Path};
 
 #[derive(Debug, Parser, Clone)]
-pub struct RunArgs {
+pub struct ExecInternalArgs {
     #[arg(long)]
     pub mountpoint: String,
     #[arg(long)]
@@ -16,7 +16,7 @@ pub struct RunArgs {
     pub commands_base64: String,
 }
 
-pub fn run(args: RunArgs) -> Result<()> {
+pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
     let mount_pid = std::env::var("MOUNT_PID")?.parse::<u32>()?;
     switch_namespace(mount_pid)?;
 

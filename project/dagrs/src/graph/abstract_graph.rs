@@ -91,6 +91,7 @@ impl AbstractGraph {
 
     /// Check if the graph contains any cycles/loops using a topological sorting approach.
     /// Returns true if the graph contains a cycle, false otherwise.
+    #[allow(dead_code)]
     pub fn check_loop(&self) -> bool {
         let mut in_degree = self.in_degree.clone();
         let mut visited_count = 0;
@@ -122,6 +123,36 @@ impl AbstractGraph {
         // If we haven't visited all nodes, there must be a cycle (visited_count != size)
         log::debug!("Visited count: {}, Size: {}", visited_count, self.size());
         visited_count != self.size()
+    }
+
+    /// Get topological sort of the graph.
+    /// Returns None if cycle detected.
+    pub fn get_topological_sort(&self) -> Option<Vec<NodeId>> {
+        let mut in_degree = self.in_degree.clone();
+        let mut queue: VecDeque<NodeId> = in_degree
+            .iter()
+            .filter_map(|(&node, &degree)| if degree == 0 { Some(node) } else { None })
+            .collect();
+        let mut sorted = Vec::new();
+
+        while let Some(node) = queue.pop_front() {
+            sorted.push(node);
+            if let Some(nexts) = self.edges.get(&node) {
+                for next in nexts {
+                    let degree = in_degree.get_mut(next).unwrap();
+                    *degree -= 1;
+                    if *degree == 0 {
+                        queue.push_back(*next);
+                    }
+                }
+            }
+        }
+
+        if sorted.len() == self.size() {
+            Some(sorted)
+        } else {
+            None
+        }
     }
 }
 

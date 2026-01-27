@@ -28,6 +28,7 @@ rust_binary(
         "//project/libfuse-fs:libfuse_fs",
         "//project/libipam:libipam-lib",
         "//project/libnetwork:libnetwork-lib",
+        "//project/libruntime:libruntime",
         "//project/libvault:libvault",
         "//third-party/rust/crates/anyhow/1.0.100:anyhow",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
@@ -88,7 +89,7 @@ rust_binary(
         "//third-party/rust/crates/uuid/1.19.0:uuid",
         "//third-party/rust/crates/uzers/0.12.1:uzers",
         "//third-party/rust/crates/walkdir/2.5.0:walkdir",
-        ":librkb",
+        ":rkb-lib",
     ],
 )
 
@@ -106,6 +107,7 @@ rust_library(
         "//project/libfuse-fs:libfuse_fs",
         "//project/libipam:libipam-lib",
         "//project/libnetwork:libnetwork-lib",
+        "//project/libruntime:libruntime",
         "//project/libvault:libvault",
         "//third-party/rust/crates/anyhow/1.0.100:anyhow",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",

@@ -104,6 +104,11 @@ impl InChannels {
         self.0.values_mut().for_each(|c| c.blocking_lock().close());
     }
 
+    /// Returns a list of all available sender node IDs.
+    pub fn get_sender_ids(&self) -> Vec<NodeId> {
+        self.keys()
+    }
+
     fn get(&self, id: &NodeId) -> Option<Arc<Mutex<InChannel>>> {
         self.0.get(id).cloned()
     }

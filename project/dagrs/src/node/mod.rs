@@ -2,8 +2,17 @@ pub mod action;
 pub mod conditional_node;
 pub mod default_node;
 pub mod id_allocate;
+pub mod loop_node;
+pub mod router_node;
 
 pub mod typed_action;
+
+pub use action::{Action, EmptyAction};
+pub use conditional_node::ConditionalNode;
+pub use default_node::DefaultNode;
+pub use loop_node::{LoopCondition, LoopNode};
+pub use router_node::{Router, RouterNode};
+
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
@@ -62,6 +71,48 @@ pub trait Node: Send + Sync {
     fn has_typed_output(&self) -> bool {
         false
     }
+
+    /// Returns the maximum number of retry attempts for this node.
+    ///
+    /// When a node fails (returns `Output::Err`), the graph executor will
+    /// retry the node up to this many times before marking it as failed.
+    ///
+    /// # Default
+    /// Returns 0 by default, meaning no retries (fail immediately).
+    ///
+    /// # Example
+    /// Override this method to enable retries:
+    /// ```ignore
+    /// fn max_retries(&self) -> u32 {
+    ///     3 // Retry up to 3 times
+    /// }
+    /// ```
+    fn max_retries(&self) -> u32 {
+        0
+    }
+
+    /// Returns the delay between retry attempts in milliseconds.
+    ///
+    /// This can be used to implement backoff strategies.
+    /// The default implementation returns a fixed 100ms delay.
+    ///
+    /// # Arguments
+    /// * `attempt` - The current retry attempt number (1-indexed)
+    ///
+    /// # Returns
+    /// Delay in milliseconds before the next retry attempt.
+    fn retry_delay_ms(&self, _attempt: u32) -> u64 {
+        100
+    }
+
+    /// Reset the node state to its initial state.
+    ///
+    /// # Behavior
+    /// - This method is **optional**. The default implementation does nothing.
+    /// - It is **ONLY** called when `Graph::reset()` is invoked. The node should not call this itself.
+    /// - Nodes with internal state (e.g., counters, buffers) **MUST** implement this method
+    ///   to ensure correct behavior when the graph is re-executed.
+    fn reset(&mut self) {}
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Ord, PartialOrd)]
