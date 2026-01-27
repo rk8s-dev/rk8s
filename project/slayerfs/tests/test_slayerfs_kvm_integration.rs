@@ -13,6 +13,8 @@ const SLAYERFS_DATA_DIR: &str = "/tmp/slayerfs-data";
 const SLAYERFS_LOG_PATH: &str = "/var/log/slayerfs.log";
 const SLAYERFS_META_DIR: &str = "/tmp/slayerfs-meta";
 
+// NOTE: the qlean integration test is not implemented yet for the kvm reseaon
+// but qlean use qemu, waiting for qlean skipping kvm acceleration when kvm is not available
 fn tracing_subscriber_init() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
