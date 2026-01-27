@@ -83,7 +83,7 @@ Run:
 ```bash
 cd project
 cargo build -p slayerfs
-RUST_LOG=info cargo test -p slayerfs --test test_slayerfs_kvm_integration test_slayerfs_kvm_smoke -- --nocapture
+RUST_LOG=info cargo test -p slayerfs --test test_slayerfs_kvm_integration test_slayerfs_kvm_smoke -- --nocapture --ignored
 ```
 
 ---

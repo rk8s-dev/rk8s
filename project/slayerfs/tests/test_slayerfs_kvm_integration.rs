@@ -502,10 +502,7 @@ done'",
 }
 
 async fn kill_slayerfs_best_effort(vm: &mut Machine) -> Result<()> {
-    let _ = vm
-
-        .exec("pkill -TERM slayerfs >/dev/null 2>&1 || true; sleep 1; pkill -KILL slayerfs >/dev/null 2>&1 || true")
-        .await;
+    let _ = vm.exec("pkill -TERM slayerfs >/dev/null 2>&1 || true; sleep 1; pkill -KILL slayerfs >/dev/null 2>&1 || true").await;
     Ok(())
 }
 

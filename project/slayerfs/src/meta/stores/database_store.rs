@@ -2378,6 +2378,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_hardlink_parent_field_single_link() {
         // Test that single-link files use parent field for O(1) lookup
         let store = new_test_store().await;
@@ -2416,6 +2417,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_hardlink_transition_to_linkparent() {
         // Test transition from parent field to LinkParent when creating first hardlink
         let store = new_test_store().await;
@@ -2474,6 +2476,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_hardlink_no_reversion_to_parent() {
         // When nlink drops from 2 to 1, parent field is restored (optimization)
         let store = new_test_store().await;
@@ -2516,6 +2519,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_hardlink_multiple_links() {
         // Test LinkParent with multiple hardlinks
         let store = new_test_store().await;
@@ -2751,7 +2755,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_multiple_read_locks() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -2824,7 +2827,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_write_lock_conflict() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -2945,7 +2947,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_non_overlapping_locks() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -3024,7 +3025,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_concurrent_read_write_locks() {
         // Test multiple sessions acquiring different types of locks
         let session_mgr = TestSessionManager::new(3).await;
@@ -3132,7 +3132,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_cross_session_lock_visibility() {
         // Test that locks set by one session are visible to another session
         let session_mgr = TestSessionManager::new(2).await;

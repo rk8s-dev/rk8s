@@ -5,7 +5,6 @@ on:
     paths:
       - "project/slayerfs/**"
       - "project/rfuse3/**"
-      - "project/libfuse-fs/**"
       - "project/Cargo.toml"
       - "project/Cargo.lock"
   push:
@@ -14,7 +13,6 @@ on:
     paths:
       - "project/slayerfs/**"
       - "project/rfuse3/**"
-      - "project/libfuse-fs/**"
       - "project/Cargo.toml"
       - "project/Cargo.lock"
 
@@ -33,11 +31,13 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
             fuse3 \
             pkg-config \
-            libssl-dev
+            libssl-dev \
+            protobuf-compiler
+
       - name: Run tests
         run: |
           cd project
