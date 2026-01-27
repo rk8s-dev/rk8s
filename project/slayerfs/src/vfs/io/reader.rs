@@ -373,6 +373,7 @@ where
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn read(&self, offset: u64, len: usize) -> anyhow::Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
@@ -603,6 +604,7 @@ where
 
     // Read from cached slices for a chunk. This waits for slice readiness and copies
     // overlapping ranges into the provided buffer.
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(index, offset, len = buf.len()))]
     async fn read_from_slice(&self, index: u64, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
         let slices = {
             let guard = self.slices.lock().await;
@@ -643,6 +645,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(index, start, end))]
     async fn prepare_slices(&self, index: u64, (start, end): (u32, u32)) -> SlicePinGuard {
         let mut pinned = SlicePinGuard::new();
         let mut cutter = Intervals::new(start, end);

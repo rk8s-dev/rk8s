@@ -91,6 +91,7 @@ impl SliceState {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(len = buf.len()))]
     pub(crate) fn append(&mut self, buf: &[u8]) -> anyhow::Result<()> {
         self.data.append(buf)?;
         self.last_mod = Instant::now();
@@ -155,6 +156,7 @@ where
 
     /// Check whether the slice is appendable and append buf atomically.
     /// The offset is relative to chunk start.
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(len = buf.len()))]
     fn try_append(&self, offset: u32, buf: &[u8]) -> anyhow::Result<bool> {
         self.with_mut(|s| {
             if !s.can_append(offset) {
@@ -393,7 +395,8 @@ where
         ))
     }
 
-    // Append data to a writable slice. If the slice reaches chunk end, freeze + flush it.
+    /// Append data to a writable slice. If the slice reaches chunk end, freeze + flush it.
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(len = buf.len()))]
     fn write_at(&mut self, offset: u32, buf: &[u8]) -> anyhow::Result<WriteAction> {
         let mut start_commit = false;
         let mut flush = Vec::new();
@@ -759,6 +762,7 @@ where
     /// The background thread for committing a chunk.
     /// It waits for Uploaded slices, appends metadata, and marks them Committed.
     /// Each chunk will have a unique committing thread.
+    #[tracing::instrument(level = "trace", skip(shared), fields(chunk_id))]
     async fn commit_chunk(shared: Arc<Shared<B, M>>, chunk_id: u64) {
         loop {
             let slice = {
@@ -1037,6 +1041,7 @@ where
         self.files.contains_key(&ino)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn flush_once(&self) {
         let writers: Vec<Arc<FileWriter<B, M>>> = self
             .files

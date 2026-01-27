@@ -589,6 +589,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// * `Ok(i64)` - The inode number of the file/directory/symlink
     /// * `Err(MetaError::NotFound)` - If any component in the path doesn't exist
     /// * `Err(MetaError::...)` - Other metadata errors
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn resolve_path(&self, path: &str) -> Result<i64, MetaError> {
         self.resolve_path_impl(path, false).await
     }
@@ -597,6 +598,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// This method is similar to [`resolve_path`], but follows all symlinks
     /// including the final path component.
     #[allow(dead_code)]
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn resolve_path_follow(&self, path: &str) -> Result<i64, MetaError> {
         self.resolve_path_impl(path, true).await
     }
@@ -607,6 +609,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// * `path` - The absolute path to resolve
     /// * `follow_final` - If true, follow stat semantics, false for lstat semantics
+    #[tracing::instrument(level = "trace", skip(self), fields(path, follow_final))]
     async fn resolve_path_impl(&self, path: &str, follow_final: bool) -> Result<i64, MetaError> {
         info!("MetaClient: Resolving path: {}", path);
 
@@ -736,6 +739,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// * `Ok(Some(FileAttr))` - The file attributes if the inode exists
     /// * `Ok(None)` - If the inode doesn't exist
     /// * `Err(MetaError)` - On storage errors
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn cached_stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         let inode = self.check_root(ino);
         info!("MetaClient: stat request for inode {}", inode);
@@ -771,6 +775,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// * `Ok(Some(i64))` - The inode number of the child entry if found
     /// * `Ok(None)` - If no entry with the given name exists in the parent
     /// * `Err(MetaError)` - On storage errors
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn cached_lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         let parent = self.check_root(parent);
         info!("MetaClient: lookup request for ({}, '{}')", parent, name);
@@ -808,6 +813,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn resolve_case(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         let entries = self.store.readdir(parent).await?;
         for entry in entries {
@@ -953,18 +959,22 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         MetaClient::chroot(self, inode);
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn initialize(&self) -> Result<(), MetaError> {
         self.store.initialize().await
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
         self.store.stat_fs().await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         self.cached_stat(ino).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn stat_fresh(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         let inode = self.check_root(ino);
         self.inode_cache.invalidate_inode(inode).await;
@@ -976,10 +986,12 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(attr)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         self.cached_lookup(parent, name).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError> {
         let ino = match self.resolve_path(path).await {
             Ok(ino) => ino,
@@ -995,6 +1007,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(Some((ino, attr.kind)))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError> {
         let inode = self.check_root(ino);
         info!("MetaClient: readdir request for inode {}", inode);
@@ -1034,6 +1047,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(entries)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
@@ -1059,6 +1073,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(ino)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
@@ -1074,6 +1089,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
@@ -1105,6 +1121,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(ino)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, parent, name))]
     async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);
@@ -1132,6 +1149,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(attr)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name, target))]
     async fn symlink(
         &self,
         parent: i64,
@@ -1166,6 +1184,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok((ino, attr))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
@@ -1181,6 +1200,11 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(old_parent, old_name, new_parent, new_name)
+    )]
     async fn rename(
         &self,
         old_parent: i64,
@@ -1242,6 +1266,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);
@@ -1272,6 +1297,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size, chunk_size))]
     async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);
@@ -1280,6 +1306,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError> {
         let inode = self.check_root(ino);
         if inode == self.root() {
@@ -1289,6 +1316,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_names(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn get_dentries(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError> {
         let inode = self.check_root(ino);
         if inode == self.root() {
@@ -1298,6 +1326,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_dentries(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(dir_ino))]
     async fn get_dir_parent(&self, dir_ino: i64) -> Result<Option<i64>, MetaError> {
         let inode = self.check_root(dir_ino);
         if inode == self.root() {
@@ -1307,6 +1336,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_dir_parent(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError> {
         let inode = self.check_root(ino);
         if inode == self.root() {
@@ -1316,12 +1346,18 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_paths(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
         let inode = self.check_root(ino);
         info!("MetaClient: read_symlink request for inode {}", inode);
         self.store.read_symlink(inode).await
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, req),
+        fields(ino, size = req.size, flags = ?flags)
+    )]
     async fn set_attr(
         &self,
         ino: i64,
@@ -1337,25 +1373,30 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(attr)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, flags = ?flags))]
     async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
         let inode = self.check_root(ino);
         self.store.open(inode, flags).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn close(&self, ino: i64) -> Result<(), MetaError> {
         let inode = self.check_root(ino);
         self.store.close(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
         self.store.get_deleted_files().await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
         self.ensure_writable()?;
         self.store.remove_file_metadata(ino).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(chunk_id))]
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
         let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
         if let Some(slices) = self.inode_cache.get_slices(inode, chunk_index).await {
@@ -1364,6 +1405,11 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_slices(chunk_id).await
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length)
+    )]
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         self.ensure_writable()?;
 
@@ -1375,20 +1421,24 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(key))]
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
         self.ensure_writable()?;
         self.store.next_id(key).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(pid = session_info.process_id))]
     async fn start_session(&self, session_info: SessionInfo) -> Result<(), MetaError> {
         MetaClient::start_session(self, session_info).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn shutdown_session(&self) -> Result<(), MetaError> {
         MetaClient::shutdown_session(self).await;
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self, query), fields(inode, owner = query.owner))]
     async fn get_plock(
         &self,
         inode: i64,
@@ -1397,6 +1447,11 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_plock(inode, query).await
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(inode, owner, block, lock_type = ?lock_type, pid)
+    )]
     async fn set_plock(
         &self,
         inode: i64,

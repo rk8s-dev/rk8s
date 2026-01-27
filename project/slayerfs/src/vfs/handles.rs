@@ -236,6 +236,7 @@ where
         self.state.lock().unwrap().last_offset
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn read(&self, offset: u64, len: usize) -> anyhow::Result<Vec<u8>> {
         let _guard = self.gate.read_lock().await;
         let reader = {

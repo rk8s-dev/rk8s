@@ -63,6 +63,7 @@ pub struct SetAttrRequest {
 bitflags::bitflags! {
     /// Additional flags that control set-attribute semantics.
     #[allow(dead_code)]
+    #[derive(Debug)]
     pub struct SetAttrFlags: u32 {
         const CLEAR_SUID = 0b0001;
         const CLEAR_SGID = 0b0010;
@@ -74,6 +75,7 @@ bitflags::bitflags! {
 bitflags::bitflags! {
     /// POSIX-style open flags translated for the metadata store.
     #[allow(dead_code)]
+    #[derive(Debug)]
     pub struct OpenFlags: u32 {
         const RDONLY = 0b0001;
         const WRONLY = 0b0010;
@@ -206,9 +208,11 @@ pub struct LoadOption {
     pub allow_conflicts: bool,
 }
 
+#[derive(Debug)]
 pub enum LockName {
     CleanupSessionsLock,
 }
+
 impl fmt::Display for LockName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

@@ -91,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Mount(args) => mount_cmd(args).await,
     };
     shutdown_flame();
+    shutdown_chrome();
     result
 }
 
@@ -113,6 +114,16 @@ fn init_tracing() {
             }
         }
     });
+    let chrome_layer = std::env::var("SLAYERFS_TRACE_CHROME").ok().map(|path| {
+        let path_for_log = path.clone();
+        let builder = tracing_chrome::ChromeLayerBuilder::new()
+            .file(path)
+            .trace_style(tracing_chrome::TraceStyle::Async);
+        let (layer, guard) = builder.build();
+        eprintln!("[slayerfs] tracing-chrome enabled: {}", path_for_log);
+        register_chrome_guard(guard);
+        layer
+    });
     let env_filter = tracing_subscriber::EnvFilter::new(
         std::env::var("RUST_LOG").unwrap_or_else(|_| "slayerfs=info".to_string()),
     );
@@ -122,6 +133,7 @@ fn init_tracing() {
         .with(tracing_subscriber::fmt::layer().pretty())
         .with(env_filter)
         .with(flame_layer)
+        .with(chrome_layer)
         .with(console_layer)
         .init();
 }
@@ -168,6 +180,8 @@ async fn mount_cmd(args: MountArgs) -> anyhow::Result<()> {
 
 static FLAME_GUARD: LazyLock<StdMutex<Option<tracing_flame::FlushGuard<BufWriter<File>>>>> =
     LazyLock::new(|| StdMutex::new(None));
+static CHROME_GUARD: LazyLock<StdMutex<Option<tracing_chrome::FlushGuard>>> =
+    LazyLock::new(|| StdMutex::new(None));
 
 fn register_flame_guard(guard: tracing_flame::FlushGuard<BufWriter<File>>) {
     if let Ok(mut slot) = FLAME_GUARD.lock() {
@@ -181,6 +195,18 @@ fn shutdown_flame() {
         && let Err(err) = guard.flush()
     {
         eprintln!("tracing-flame flush failed: {err}");
+    }
+}
+
+fn register_chrome_guard(guard: tracing_chrome::FlushGuard) {
+    if let Ok(mut slot) = CHROME_GUARD.lock() {
+        *slot = Some(guard);
+    }
+}
+
+fn shutdown_chrome() {
+    if let Ok(mut slot) = CHROME_GUARD.lock() {
+        slot.take();
     }
 }
 

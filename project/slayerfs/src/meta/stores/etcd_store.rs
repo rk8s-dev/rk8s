@@ -1255,6 +1255,7 @@ impl MetaStore for EtcdMetaStore {
         "etcd"
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         // Query reverse index once to get all metadata
         let reverse_key = Self::etcd_reverse_key(ino);
@@ -1270,6 +1271,11 @@ impl MetaStore for EtcdMetaStore {
 
     /// Batch stat implementation for Etcd using Transaction batch GET
     /// Uses single transaction to fetch multiple keys - much faster than sequential queries
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, inodes),
+        fields(inode_count = inodes.len())
+    )]
     async fn batch_stat(&self, inodes: &[i64]) -> Result<Vec<Option<FileAttr>>, MetaError> {
         if inodes.is_empty() {
             return Ok(Vec::new());
@@ -1342,6 +1348,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(results)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         let forward_key = Self::etcd_forward_key(parent, name);
         if let Some(entry) = self.etcd_get_json::<EtcdForwardEntry>(&forward_key).await? {
@@ -1351,6 +1358,7 @@ impl MetaStore for EtcdMetaStore {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError> {
         if path == "/" {
             return Ok(Some((1, FileType::Dir)));
@@ -1398,6 +1406,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(Some((current_inode, FileType::Dir)))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError> {
         let access_meta = self
             .get_access_meta(ino)
@@ -1431,10 +1440,12 @@ impl MetaStore for EtcdMetaStore {
         Ok(entries)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError> {
         self.create_directory(parent, name).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         let forward_key = Self::etcd_forward_key(parent, name);
         let forward_entry: EtcdForwardEntry =
@@ -1523,10 +1534,12 @@ impl MetaStore for EtcdMetaStore {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
         self.create_file_internal(parent, name).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, parent, name))]
     async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
         if ino == 1 {
             return Err(MetaError::NotSupported(
@@ -1753,6 +1766,7 @@ impl MetaStore for EtcdMetaStore {
         self.stat(ino).await?.ok_or(MetaError::NotFound(ino))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name, target))]
     async fn symlink(
         &self,
         parent: i64,
@@ -1860,6 +1874,7 @@ impl MetaStore for EtcdMetaStore {
         Ok((inode, attr))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
         let entry_info = self
@@ -1876,6 +1891,7 @@ impl MetaStore for EtcdMetaStore {
             .ok_or_else(|| MetaError::NotSupported(format!("inode {ino} is not a symbolic link")))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         let mut client = self.client.clone();
 
@@ -2058,6 +2074,11 @@ impl MetaStore for EtcdMetaStore {
         }
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(old_parent, old_name, new_parent, new_name)
+    )]
     async fn rename(
         &self,
         old_parent: i64,
@@ -2281,6 +2302,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
         self.atomic_update(
@@ -2331,6 +2353,7 @@ impl MetaStore for EtcdMetaStore {
         .map(|_| ())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size, chunk_size))]
     async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
         let old_size = self
@@ -2358,6 +2381,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError> {
         if ino == 1 {
             return Ok(vec![(None, "/".to_string())]);
@@ -2392,6 +2416,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(out)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError> {
         if ino == 1 {
             return Ok(vec!["/".to_string()]);
@@ -2439,10 +2464,12 @@ impl MetaStore for EtcdMetaStore {
         1
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn initialize(&self) -> Result<(), MetaError> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
         let mut client = self.client.clone();
 
@@ -2475,6 +2502,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(deleted_files)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
         let mut client = self.client.clone();
 
@@ -2508,6 +2536,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(chunk_id))]
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
         let key = key_for_slice(chunk_id);
         self.etcd_get_json(&key)
@@ -2515,6 +2544,11 @@ impl MetaStore for EtcdMetaStore {
             .map(|e| e.unwrap_or_default())
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length)
+    )]
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         let key = key_for_slice(chunk_id);
 
@@ -2533,12 +2567,14 @@ impl MetaStore for EtcdMetaStore {
         .map(|_| ())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(key))]
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
         self.generate_id(key).await
     }
 
     // ---------- Session lifecycle implementation ----------
 
+    #[tracing::instrument(level = "trace", skip(self), fields(pid = session_info.process_id))]
     async fn start_session(
         &self,
         session_info: SessionInfo,
@@ -2579,6 +2615,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(session)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn shutdown_session(&self) -> Result<(), MetaError> {
         let session_id = *self.get_sid()?;
         self.shutdown_session_by_id(session_id).await?;
@@ -2586,9 +2623,11 @@ impl MetaStore for EtcdMetaStore {
     }
 
     // Etcd cleanup is performed by the lease keeper
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn cleanup_sessions(&self) -> Result<(), MetaError> {
         return Ok(());
     }
+    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
     async fn get_global_lock(&self, lock_name: LockName) -> bool {
         let result = self
             .atomic_update::<_, _, i64, bool>(
@@ -2619,6 +2658,11 @@ impl MetaStore for EtcdMetaStore {
         }
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, req),
+        fields(ino, size = req.size, flags = ?flags)
+    )]
     async fn set_attr(
         &self,
         ino: i64,
@@ -2811,6 +2855,7 @@ impl MetaStore for EtcdMetaStore {
     }
 
     // returns the current lock owner for a range on a file.
+    #[tracing::instrument(level = "trace", skip(self, query), fields(inode, owner = query.owner))]
     async fn get_plock(
         &self,
         inode: i64,
@@ -2839,6 +2884,11 @@ impl MetaStore for EtcdMetaStore {
     }
 
     // sets a file range lock on given file.
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(inode, owner, block, lock_type = ?lock_type, pid)
+    )]
     async fn set_plock(
         &self,
         inode: i64,

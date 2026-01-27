@@ -205,7 +205,6 @@ where
     reader: Arc<DataReader<S, M>>,
     writer: Arc<DataWriter<S, M>>,
     modified: ModifiedTracker,
-    extend_stats: ExtendFileSizeStats,
 }
 
 impl<S, M> VfsState<S, M>
@@ -227,7 +226,6 @@ where
             reader,
             writer,
             modified: ModifiedTracker::new(),
-            extend_stats: ExtendFileSizeStats::new(),
         }
     }
 }
@@ -414,6 +412,7 @@ where
             .flatten()
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     pub(crate) async fn stat_ino(&self, ino: i64) -> Option<FileAttr> {
         self.core.meta_layer.stat(ino).await.ok().flatten()
     }
@@ -481,6 +480,7 @@ where
     }
 
     /// List directory entries by inode
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     pub(crate) async fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
         let meta_entries = self.core.meta_layer.readdir(ino).await.ok()?;
 
@@ -521,6 +521,7 @@ where
     /// - If an intermediate component exists as a file, return "not a directory".
     /// - Idempotent: existing directories simply return their inode.
     /// - Returns the inode of the target directory.
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn mkdir_p(&self, path: &str) -> Result<i64, VfsError> {
         let path = Self::norm_path(path);
         if &path == "/" {
@@ -564,6 +565,7 @@ where
     /// Create a regular file (running `mkdir_p` on its parent if needed).
     /// - If a directory with the same name exists, returns "is a directory".
     /// - If the file already exists, returns its inode instead of creating a new one.
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn create_file(&self, path: &str) -> Result<i64, VfsError> {
         let path = Self::norm_path(path);
         let (dir, name) = Self::split_dir_file(&path);
@@ -594,6 +596,7 @@ where
     }
 
     /// Create a hard link at `link_path` that references `existing_path`.
+    #[tracing::instrument(level = "trace", skip(self), fields(existing_path, link_path))]
     pub async fn link(&self, existing_path: &str, link_path: &str) -> Result<FileAttr, VfsError> {
         let existing_path = Self::norm_path(existing_path);
         let link_path = Self::norm_path(link_path);
@@ -684,6 +687,7 @@ where
     }
 
     /// Create a symbolic link at `link_path` pointing to `target`.
+    #[tracing::instrument(level = "trace", skip(self), fields(link_path, target))]
     pub async fn create_symlink(
         &self,
         link_path: &str,
@@ -754,6 +758,7 @@ where
     }
 
     /// Fetch a file's attributes (kind/size come from the MetaStore); returns None when missing.
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn stat(&self, path: &str) -> Option<FileAttr> {
         let path = Self::norm_path(path);
         let (ino, _) = self.core.meta_layer.lookup_path(&path).await.ok()??;
@@ -762,6 +767,7 @@ where
     }
 
     /// Read a symlink target by inode.
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     pub(crate) async fn readlink_ino(&self, ino: i64) -> Result<String, VfsError> {
         let attr = self
             .core
@@ -784,6 +790,7 @@ where
     }
 
     /// Read a symlink target by path.
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn readlink(&self, path: &str) -> Result<String, VfsError> {
         let path = Self::norm_path(path);
         let (ino, kind) = self
@@ -809,6 +816,7 @@ where
     }
 
     /// Remove a regular file or symlink (directories are not supported here).
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn unlink(&self, path: &str) -> Result<(), VfsError> {
         let path = Self::norm_path(path);
         let (dir, name) = Self::split_dir_file(&path);
@@ -865,6 +873,7 @@ where
     }
 
     /// Remove an empty directory (root cannot be removed; non-empty dirs error out).
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn rmdir(&self, path: &str) -> Result<(), VfsError> {
         let path = Self::norm_path(path);
         if path == "/" {
@@ -943,6 +952,7 @@ where
     /// Implements POSIX rename semantics: if the destination exists, it will be replaced,
     /// subject to appropriate checks (e.g., file/directory type compatibility, non-empty directories).
     /// Parent directories are created as needed.
+    #[tracing::instrument(level = "trace", skip(self), fields(old, new))]
     pub async fn rename(&self, old: &str, new: &str) -> Result<(), VfsError> {
         let old = Self::norm_path(old);
         let new = Self::norm_path(new);
@@ -1064,6 +1074,7 @@ where
 
     /// Truncate/extend file size (metadata only; holes are read as zeros).
     /// Shrinking does not eagerly reclaim block data.
+    #[tracing::instrument(level = "trace", skip(self), fields(path, size))]
     pub async fn truncate(&self, path: &str, size: u64) -> Result<(), VfsError> {
         let path = Self::norm_path(path);
         let (ino, _) = self
@@ -1110,6 +1121,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self, req), fields(ino, flags = ?flags))]
     pub async fn set_attr(
         &self,
         ino: i64,
@@ -1191,21 +1203,17 @@ where
         let target_size = offset + written as u64;
 
         // POSIX semantic for `write`: it is unable to shorten the file.
-        let extend_start = Instant::now();
         self.core
             .meta_layer
             .extend_file_size(handle.ino, target_size)
             .await?;
-        if let Some((calls, avg_us, max_us)) =
-            self.state.extend_stats.record(extend_start.elapsed())
-        {
-            tracing::info!(calls, avg_us, max_us, "VFS::extend_file_size stats");
-        }
+
         self.state.modified.touch(handle.ino).await;
         Ok(written)
     }
 
     /// Allocate a per-file handle, returning the opaque fh id.
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, read, write))]
     pub async fn open(
         &self,
         ino: i64,
@@ -1292,6 +1300,7 @@ where
 
     /// Open a directory handle for reading. Returns the file handle ID.
     /// This pre-loads all directory entries and starts background batch prefetch for attributes.
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     pub async fn opendir(&self, ino: i64) -> Result<u64, VfsError> {
         // Verify directory exists
         let attr = self
