@@ -1320,7 +1320,6 @@ impl ChunksCache {
                 hot_bytes.fetch_add(value.len() as u64, Ordering::Relaxed);
             } else {
                 trace!("Key not eligible for promotion: {}", key_owned);
-                hot_bytes.fetch_add(value.len() as u64, Ordering::Relaxed);
             }
 
             value
