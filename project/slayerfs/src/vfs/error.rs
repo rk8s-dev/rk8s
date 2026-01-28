@@ -135,6 +135,12 @@ pub enum VfsError {
     #[error("crosses devices")]
     CrossesDevices,
 
+    #[error("circular rename{path}")]
+    CircularRename { path: PathHint },
+
+    #[error("invalid rename target{path}")]
+    InvalidRenameTarget { path: PathHint },
+
     #[error("too many links")]
     TooManyLinks,
 

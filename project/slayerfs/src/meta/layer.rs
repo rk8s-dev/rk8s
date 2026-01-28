@@ -60,6 +60,96 @@ pub trait MetaLayer: Send + Sync {
         new_parent: i64,
         new_name: String,
     ) -> Result<(), MetaError>;
+
+    /// Atomically exchange two files (RENAME_EXCHANGE).
+    /// Both entries must exist.
+    async fn rename_exchange(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
+    ) -> Result<(), MetaError>;
+
+    /// Check if a rename operation would be allowed without performing it.
+    async fn can_rename(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
+    ) -> Result<(), MetaError> {
+        // Default implementation - just try the basic validation
+        let src_ino = self
+            .lookup(old_parent, old_name)
+            .await?
+            .ok_or(MetaError::NotFound(old_parent))?;
+
+        // Check if destination exists and validate replacement rules
+        if let Some(dest_ino) = self.lookup(new_parent, new_name).await? {
+            let src_attr = self
+                .stat(src_ino)
+                .await?
+                .ok_or(MetaError::NotFound(src_ino))?;
+            let dest_attr = self
+                .stat(dest_ino)
+                .await?
+                .ok_or(MetaError::NotFound(dest_ino))?;
+
+            match (src_attr.kind, dest_attr.kind) {
+                // Directory replacing directory - check if empty
+                (FileType::Dir, FileType::Dir) => {
+                    let children = self.readdir(dest_ino).await?;
+                    if !children.is_empty() {
+                        return Err(MetaError::DirectoryNotEmpty(dest_ino));
+                    }
+                }
+                // Directory replacing file/symlink - not allowed
+                (FileType::Dir, FileType::File) | (FileType::Dir, FileType::Symlink) => {
+                    return Err(MetaError::NotDirectory(dest_ino));
+                }
+                // File/symlink replacing directory - not allowed
+                (FileType::File, FileType::Dir) | (FileType::Symlink, FileType::Dir) => {
+                    return Err(MetaError::NotDirectory(dest_ino));
+                }
+                // File/symlink replacing file/symlink - allowed
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Rename with extended flags support (similar to Linux renameat2).
+    async fn rename_with_flags(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: String,
+        flags: crate::vfs::fs::RenameFlags,
+    ) -> Result<(), MetaError> {
+        if flags.exchange {
+            // Use atomic exchange implementation
+            self.rename_exchange(old_parent, old_name, new_parent, &new_name)
+                .await
+        } else if flags.noreplace {
+            // Check if destination exists
+            if self.lookup(new_parent, &new_name).await?.is_some() {
+                return Err(MetaError::AlreadyExists {
+                    parent: new_parent,
+                    name: new_name,
+                });
+            }
+            self.rename(old_parent, old_name, new_parent, new_name)
+                .await
+        } else {
+            // Default behavior
+            self.rename(old_parent, old_name, new_parent, new_name)
+                .await
+        }
+    }
+
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
     async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError>;

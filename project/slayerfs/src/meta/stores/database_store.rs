@@ -116,7 +116,7 @@ impl DatabaseMetaStore {
             .await
             .map_err(MetaError::Database)?
             .map(|r| r.inode as u64)
-            .unwrap_or(1);
+            .unwrap_or(0); // Changed from 1 to 0 - root directory is inode 1
 
         let max_file = FileMeta::find()
             .order_by_desc(file_meta::Column::Inode)
@@ -124,9 +124,10 @@ impl DatabaseMetaStore {
             .await
             .map_err(MetaError::Database)?
             .map(|r| r.inode as u64)
-            .unwrap_or(1);
+            .unwrap_or(0); // Changed from 1 to 0
 
-        let next = max_access.max(max_file) + 1;
+        // Ensure next inode is at least 2 (root is 1)
+        let next = max_access.max(max_file).max(1) + 1;
         info!("Initialized next inode counter to: {}", next);
         Ok(next)
     }
@@ -274,10 +275,15 @@ impl DatabaseMetaStore {
     /// Initialize root directory
     async fn init_root_directory(&self) -> Result<(), MetaError> {
         // Check if root directory exists
-        if (self.get_access_meta(1).await?).is_some() {
+        if let Some(root) = self.get_access_meta(1).await? {
+            info!(
+                "Root directory already exists with inode 1, nlink={}",
+                root.nlink
+            );
             return Ok(());
         }
 
+        info!("Creating root directory with inode 1...");
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let root_permission = Permission::new(0o40755, 0, 0); // Directory bits: 0o40000 (dir flag) + 0o755 (mode)
         let root_dir = access_meta::ActiveModel {
@@ -293,7 +299,7 @@ impl DatabaseMetaStore {
             .insert(&self.db)
             .await
             .map_err(MetaError::Database)?;
-        info!("Root directory initialized");
+        info!("Root directory created successfully with inode 1");
 
         Ok(())
     }
@@ -1538,6 +1544,29 @@ impl MetaStore for DatabaseMetaStore {
             });
         }
 
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Get metadata to check nlink and type
+        // Try FileMeta first (for files), then AccessMeta (for directories)
+        let file_meta_opt = FileMeta::find_by_id(target_entry.inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let access_meta_opt = AccessMeta::find_by_id(target_entry.inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Determine nlink based on entry type
+        let nlink = if let Some(ref file_meta) = file_meta_opt {
+            file_meta.nlink
+        } else if let Some(ref access_meta) = access_meta_opt {
+            access_meta.nlink
+        } else {
+            return Err(MetaError::NotFound(target_entry.inode));
+        };
+
         // Delete old content_meta entry
         ContentMeta::delete_many()
             .filter(content_meta::Column::ParentInode.eq(old_parent))
@@ -1550,7 +1579,7 @@ impl MetaStore for DatabaseMetaStore {
         let new_content_meta = content_meta::ActiveModel {
             inode: Set(target_entry.inode),
             parent_inode: Set(new_parent),
-            entry_name: Set(new_name),
+            entry_name: Set(new_name.clone()),
             entry_type: Set(target_entry.entry_type),
         };
 
@@ -1559,9 +1588,43 @@ impl MetaStore for DatabaseMetaStore {
             .await
             .map_err(MetaError::Database)?;
 
-        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        // Handle LinkParentMeta updates for hardlinked files
+        // Note: Directories are stored in AccessMeta only, not FileMeta
+        if nlink > 1 {
+            // For hardlinked files (nlink > 1), update LinkParentMeta
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(target_entry.inode))
+                .filter(link_parent_meta::Column::ParentInode.eq(old_parent))
+                .filter(link_parent_meta::Column::EntryName.eq(old_name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
 
-        // Update old parent mtime and ctime
+            let new_link_parent = link_parent_meta::ActiveModel {
+                inode: Set(target_entry.inode),
+                parent_inode: Set(new_parent),
+                entry_name: Set(new_name.clone()),
+            };
+            new_link_parent
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if nlink == 1 && file_meta_opt.is_some() {
+            // For regular files with single link, update file_meta.parent directly
+            let file_meta = file_meta_opt.unwrap();
+            let mut file_active: file_meta::ActiveModel = file_meta.into();
+            file_active.parent = Set(new_parent);
+            file_active.modify_time = Set(now);
+            // Note: create_time should not be updated during rename
+            file_active
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+        // For directories (nlink >= 2, no FileMeta), no additional updates needed
+        // The ContentMeta update above is sufficient
+
+        // Update old parent mtime (not ctime, which should only change on metadata changes)
         let mut old_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(old_parent)
             .one(&txn)
             .await
@@ -1569,13 +1632,12 @@ impl MetaStore for DatabaseMetaStore {
             .ok_or(MetaError::ParentNotFound(old_parent))?
             .into();
         old_parent_meta.modify_time = Set(now);
-        old_parent_meta.create_time = Set(now);
         old_parent_meta
             .update(&txn)
             .await
             .map_err(MetaError::Database)?;
 
-        // Update new parent mtime and ctime (if different)
+        // Update new parent mtime (if different)
         if old_parent != new_parent {
             let mut new_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(new_parent)
                 .one(&txn)
@@ -1584,7 +1646,189 @@ impl MetaStore for DatabaseMetaStore {
                 .ok_or(MetaError::NotFound(new_parent))?
                 .into();
             new_parent_meta.modify_time = Set(now);
-            new_parent_meta.create_time = Set(now);
+            new_parent_meta
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(())
+    }
+
+    async fn rename_exchange(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
+    ) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        // Find both entries to exchange
+        let old_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(old_parent))
+            .filter(content_meta::Column::EntryName.eq(old_name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or_else(|| {
+                MetaError::Internal(format!(
+                    "Entry '{}' not found in parent {} for exchange",
+                    old_name, old_parent
+                ))
+            })?;
+
+        let new_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(new_parent))
+            .filter(content_meta::Column::EntryName.eq(new_name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or_else(|| {
+                MetaError::Internal(format!(
+                    "Entry '{}' not found in parent {} for exchange",
+                    new_name, new_parent
+                ))
+            })?;
+
+        let old_ino = old_entry.inode;
+        let new_ino = new_entry.inode;
+
+        // Get file metadata for both files
+        let old_file_meta = FileMeta::find_by_id(old_ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(old_ino))?;
+
+        let new_file_meta = FileMeta::find_by_id(new_ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(new_ino))?;
+
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Delete both content_meta entries
+        ContentMeta::delete_many()
+            .filter(content_meta::Column::ParentInode.eq(old_parent))
+            .filter(content_meta::Column::EntryName.eq(old_name))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        ContentMeta::delete_many()
+            .filter(content_meta::Column::ParentInode.eq(new_parent))
+            .filter(content_meta::Column::EntryName.eq(new_name))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Insert swapped content_meta entries
+        let swapped_old_content = content_meta::ActiveModel {
+            inode: Set(new_ino),
+            parent_inode: Set(old_parent),
+            entry_name: Set(old_name.to_string()),
+            entry_type: Set(new_entry.entry_type),
+        };
+        swapped_old_content
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let swapped_new_content = content_meta::ActiveModel {
+            inode: Set(old_ino),
+            parent_inode: Set(new_parent),
+            entry_name: Set(new_name.to_string()),
+            entry_type: Set(old_entry.entry_type),
+        };
+        swapped_new_content
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Handle LinkParentMeta updates for hardlinked files
+        // Update old file (now at new location)
+        if old_file_meta.nlink > 1 {
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(old_ino))
+                .filter(link_parent_meta::Column::ParentInode.eq(old_parent))
+                .filter(link_parent_meta::Column::EntryName.eq(old_name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            let new_link_parent = link_parent_meta::ActiveModel {
+                inode: Set(old_ino),
+                parent_inode: Set(new_parent),
+                entry_name: Set(new_name.to_string()),
+            };
+            new_link_parent
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if old_file_meta.nlink == 1 {
+            let mut file_active: file_meta::ActiveModel = old_file_meta.into();
+            file_active.parent = Set(new_parent);
+            file_active.modify_time = Set(now);
+            file_active
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        // Update new file (now at old location)
+        if new_file_meta.nlink > 1 {
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(new_ino))
+                .filter(link_parent_meta::Column::ParentInode.eq(new_parent))
+                .filter(link_parent_meta::Column::EntryName.eq(new_name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            let old_link_parent = link_parent_meta::ActiveModel {
+                inode: Set(new_ino),
+                parent_inode: Set(old_parent),
+                entry_name: Set(old_name.to_string()),
+            };
+            old_link_parent
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if new_file_meta.nlink == 1 {
+            let mut file_active: file_meta::ActiveModel = new_file_meta.into();
+            file_active.parent = Set(old_parent);
+            file_active.modify_time = Set(now);
+            file_active
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        // Update parent directories' mtime
+        let mut old_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(old_parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(old_parent))?
+            .into();
+        old_parent_meta.modify_time = Set(now);
+        old_parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if old_parent != new_parent {
+            let mut new_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(new_parent)
+                .one(&txn)
+                .await
+                .map_err(MetaError::Database)?
+                .ok_or(MetaError::NotFound(new_parent))?
+                .into();
+            new_parent_meta.modify_time = Set(now);
             new_parent_meta
                 .update(&txn)
                 .await

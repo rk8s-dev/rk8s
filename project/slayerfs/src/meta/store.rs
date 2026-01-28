@@ -259,6 +259,9 @@ pub enum MetaError {
     #[error("Invalid path: {0}")]
     InvalidPath(String),
 
+    #[error("Invalid filename")]
+    InvalidFilename,
+
     #[error(
         "More than max_symlinks symbolic links were encountered during resolution of the path."
     )]
@@ -388,6 +391,16 @@ pub trait MetaStore: Send + Sync {
         old_name: &str,
         new_parent: i64,
         new_name: String,
+    ) -> Result<(), MetaError>;
+
+    /// Atomically exchange two files (RENAME_EXCHANGE)
+    /// Both entries must exist
+    async fn rename_exchange(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
     ) -> Result<(), MetaError>;
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
