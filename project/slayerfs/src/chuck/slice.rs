@@ -27,7 +27,6 @@ use super::{
     span::{BlockTag, ChunkTag, Span},
 };
 use crate::chuck::BlockStore;
-use crate::meta::MetaStore;
 use anyhow::Context;
 use std::marker::PhantomData;
 

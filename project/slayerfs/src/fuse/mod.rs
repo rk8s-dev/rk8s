@@ -15,7 +15,7 @@
 pub(crate) mod adapter;
 pub mod mount;
 use crate::chuck::store::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
 use crate::vfs::error::VfsError;
@@ -148,7 +148,7 @@ mod mount_tests {
 impl<S, M> VFS<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     async fn apply_new_entry_attrs(
         &self,
@@ -176,7 +176,7 @@ where
 impl<S, M> Filesystem for VFS<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
         // Default to 4 MiB for higher throughput while keeping memory usage reasonable.
@@ -927,11 +927,33 @@ where
     ) -> FuseResult<()> {
         let name = name.to_string_lossy();
         let new_name = new_name.to_string_lossy();
+
+        // Validate input parameters
+        if name.is_empty() || new_name.is_empty() {
+            return Err(libc::EINVAL.into());
+        }
+
+        // Check for invalid characters in names
+        if name.contains('/')
+            || name.contains('\0')
+            || new_name.contains('/')
+            || new_name.contains('\0')
+        {
+            return Err(libc::EINVAL.into());
+        }
+
+        // Prevent renaming to the same location
+        if parent == new_parent && name == new_name {
+            return Err(libc::EINVAL.into());
+        }
+
         // Ensure the source exists
         let Some(src_ino) = self.child_of(parent as i64, name.as_ref()).await else {
             return Err(libc::ENOENT.into());
         };
-        let Some(_src_attr) = self.stat_ino(src_ino).await else {
+
+        // Get source attributes for validation
+        let Some(src_attr) = self.stat_ino(src_ino).await else {
             return Err(libc::ENOENT.into());
         };
 
@@ -951,6 +973,7 @@ where
             oldp.push('/');
         }
         oldp.push_str(&name);
+
         let Some(mut newp) = self.path_of(new_parent as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -958,7 +981,27 @@ where
             newp.push('/');
         }
         newp.push_str(&new_name);
-        VFS::rename(self, &oldp, &newp).await.map_err(Errno::from)
+
+        // Check for circular rename at FUSE level
+        if newp.starts_with(&(oldp.clone() + "/")) && matches!(src_attr.kind, VfsFileType::Dir) {
+            return Err(libc::EINVAL.into());
+        }
+
+        VFS::rename(self, &oldp, &newp).await.map_err(|e| {
+            match e {
+                VfsError::NotFound { .. } => libc::ENOENT,
+                VfsError::AlreadyExists { .. } => libc::EEXIST,
+                VfsError::NotADirectory { .. } => libc::ENOTDIR,
+                VfsError::IsADirectory { .. } => libc::EISDIR,
+                VfsError::DirectoryNotEmpty { .. } => libc::ENOTEMPTY,
+                VfsError::PermissionDenied { .. } => libc::EACCES,
+                VfsError::CircularRename { .. } => libc::EINVAL,
+                VfsError::InvalidRenameTarget { .. } => libc::EINVAL,
+                VfsError::CrossesDevices => libc::EXDEV,
+                _ => libc::EIO,
+            }
+            .into()
+        })
     }
 
     // ===== Resource release & sync: stateless implementation, return success =====

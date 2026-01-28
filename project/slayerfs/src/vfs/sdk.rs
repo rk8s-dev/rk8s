@@ -2,27 +2,29 @@
 //!
 //! Goals:
 //! - Path-level APIs: mkdir_p/create/read/write/readdir/stat
-//! - Pluggable backend: reuse Fs-level BlockStore and MetaStore
+//! - Pluggable backend: reuse Fs-level BlockStore and metadata layer
 //! - Provide a convenient LocalFs constructor
 
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
+use crate::meta::client::MetaClient;
 use crate::meta::factory::create_meta_store_from_url;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::vfs::error::{PathHint, VfsError};
 use crate::vfs::fs::{DirEntry, FileAttr, FileType, VFS};
 use std::path::Path;
+use std::sync::Arc;
 
 /// SDK client parametrized by its backend.
-pub struct Client<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static> {
+pub struct Client<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static> {
     fs: VFS<S, M>,
 }
 
 #[allow(unused)]
-impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static> Client<S, M> {
-    pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, VfsError> {
-        let fs = VFS::new(layout, store, meta).await?;
+impl<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static> Client<S, M> {
+    pub async fn new(layout: ChunkLayout, store: S, meta_layer: Arc<M>) -> Result<Self, VfsError> {
+        let fs = VFS::with_meta_layer(layout, store, meta_layer)?;
         Ok(Self { fs })
     }
 
@@ -46,9 +48,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
         offset: u64,
         data: &[u8],
     ) -> Result<usize, VfsError> {
-        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
-            path: PathHint::some(path),
-        })?;
+        let attr = self.fs.stat(path).await?;
         let fh = self.fs.open(attr.ino, attr, false, true).await?;
         let result = self.fs.write(fh, offset, data).await;
         let _ = self.fs.close(fh).await;
@@ -56,9 +56,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
     }
 
     pub async fn read_at(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, VfsError> {
-        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
-            path: PathHint::some(path),
-        })?;
+        let attr = self.fs.stat(path).await?;
         let fh = self.fs.open(attr.ino, attr, true, false).await?;
         let result = self.fs.read(fh, offset, len).await;
         let _ = self.fs.close(fh).await;
@@ -66,9 +64,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
     }
 
     pub async fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, VfsError> {
-        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
-            path: PathHint::some(path),
-        })?;
+        let attr = self.fs.stat(path).await?;
         if attr.kind != FileType::Dir {
             return Err(VfsError::NotADirectory {
                 path: PathHint::some(path),
@@ -90,9 +86,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
     }
 
     pub async fn stat(&self, path: &str) -> Result<FileAttr, VfsError> {
-        self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
-            path: PathHint::some(path),
-        })
+        self.fs.stat(path).await
     }
 
     pub async fn link(&self, existing: &str, link_path: &str) -> Result<FileAttr, VfsError> {
@@ -155,10 +149,10 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + Send + Sync + 'static
 use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
 use crate::chuck::store::ObjectBlockStore;
-use std::sync::Arc;
+use crate::meta::stores::database_store::DatabaseMetaStore;
 
 #[allow(dead_code)]
-pub type LocalClient = Client<ObjectBlockStore<LocalFsBackend>, Arc<dyn MetaStore>>;
+pub type LocalClient = Client<ObjectBlockStore<LocalFsBackend>, MetaClient<DatabaseMetaStore>>;
 
 #[allow(dead_code)]
 impl LocalClient {
@@ -166,9 +160,9 @@ impl LocalClient {
     pub async fn new_local<P: AsRef<Path>>(root: P, layout: ChunkLayout) -> Result<Self, VfsError> {
         let client = ObjectClient::new(LocalFsBackend::new(root));
         let meta_handle = create_meta_store_from_url("sqlite::memory:").await?;
-        let metadata: Arc<dyn MetaStore> = meta_handle.store();
+        let metadata = meta_handle.layer();
         let store = ObjectBlockStore::new(client);
-        let fs = VFS::new(layout, store, metadata).await?;
+        let fs = VFS::with_meta_layer(layout, store, metadata)?;
         Ok(Client { fs })
     }
 }

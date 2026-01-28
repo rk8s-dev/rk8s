@@ -3,7 +3,7 @@
 use super::chunk::ChunkLayout;
 use super::slice::{SliceDesc, block_span_iter};
 use super::store::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::utils::Intervals;
 use crate::vfs::backend::Backend;
 use anyhow::{Result, ensure};
@@ -22,7 +22,7 @@ pub(crate) struct DataFetcher<'a, B, M> {
 impl<'a, B, M> DataFetcher<'a, B, M>
 where
     B: BlockStore,
-    M: MetaStore,
+    M: MetaLayer,
 {
     pub(crate) fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
         Self {
@@ -126,7 +126,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         // Only write the first half of the second block
         {
@@ -134,7 +134,11 @@ mod tests {
             let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
             let uploader = DataUploader::new(layout, 7, backend.as_ref());
             let desc = uploader
-                .write_at(slice_id as u64, layout.block_size, &buf)
+                .write_at_vectored(
+                    slice_id as u64,
+                    layout.block_size,
+                    &[bytes::Bytes::copy_from_slice(&buf)],
+                )
                 .await
                 .unwrap();
             meta.append_slice(7, desc).await.unwrap();
@@ -168,7 +172,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let offset = layout.block_size - 512;
@@ -176,7 +180,11 @@ mod tests {
         let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, 3, backend.as_ref());
         let desc = uploader
-            .write_at(slice_id as u64, offset, &data)
+            .write_at_vectored(
+                slice_id as u64,
+                offset,
+                &[bytes::Bytes::copy_from_slice(&data)],
+            )
             .await
             .unwrap();
         meta.append_slice(3, desc).await.unwrap();
@@ -197,7 +205,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let data1 = vec![1u8; 2048];
@@ -206,14 +214,22 @@ mod tests {
         let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, 9, backend.as_ref());
         let desc1 = uploader
-            .write_at(slice_id1 as u64, 0, &data1)
+            .write_at_vectored(
+                slice_id1 as u64,
+                0,
+                &[bytes::Bytes::copy_from_slice(&data1)],
+            )
             .await
             .unwrap();
         meta.append_slice(9, desc1).await.unwrap();
 
         let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let desc2 = uploader
-            .write_at(slice_id2 as u64, 1024, &data2)
+            .write_at_vectored(
+                slice_id2 as u64,
+                1024,
+                &[bytes::Bytes::copy_from_slice(&data2)],
+            )
             .await
             .unwrap();
         meta.append_slice(9, desc2).await.unwrap();

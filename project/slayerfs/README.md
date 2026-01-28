@@ -72,6 +72,20 @@ More: see `doc/sdk.md` and inline rustdoc.
 - SDK: `doc/sdk.md`
 - Benchmarks: `doc/bench.md`
 
+## 🧪 Integration Tests (QEMU/KVM)
+
+`project/slayerfs/tests/test_slayerfs_kvm_integration.rs` uses the `qlean` crate to run a small end-to-end validation inside a QEMU/KVM VM.
+
+Requirements (host machine): `qemu-system-x86_64`, `qemu-img`, `guestfish`/libguestfs tools, and a working `/dev/kvm`.
+
+Run:
+
+```bash
+cd project
+cargo build -p slayerfs
+RUST_LOG=info cargo test -p slayerfs --test test_slayerfs_kvm_integration test_slayerfs_kvm_smoke -- --nocapture --ignored
+```
+
 ---
 
 

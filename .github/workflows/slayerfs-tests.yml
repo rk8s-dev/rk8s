@@ -1,0 +1,44 @@
+name: slayerfs tests
+
+on:
+  pull_request:
+    paths:
+      - "project/slayerfs/**"
+      - "project/rfuse3/**"
+      - "project/Cargo.toml"
+      - "project/Cargo.lock"
+  push:
+    branches:
+      - main
+    paths:
+      - "project/slayerfs/**"
+      - "project/rfuse3/**"
+      - "project/Cargo.toml"
+      - "project/Cargo.lock"
+
+jobs:
+  unit-and-integration:
+    name: cargo test -p slayerfs
+    runs-on: [self-hosted]
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            fuse3 \
+            pkg-config \
+            libssl-dev \
+            protobuf-compiler
+
+      - name: Run tests
+        run: |
+          cd project
+          cargo test -p slayerfs

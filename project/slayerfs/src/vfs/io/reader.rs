@@ -8,7 +8,7 @@
 
 use crate::chuck::reader::DataFetcher;
 use crate::chuck::{BlockStore, ChunkLayout};
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::utils::Intervals;
 use crate::vfs::backend::Backend;
 use crate::vfs::chunk_id_for;
@@ -38,7 +38,7 @@ pub(crate) struct DataReader<B, M> {
 impl<B, M> DataReader<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fn new(config: Arc<ReadConfig>, backend: Arc<Backend<B, M>>) -> Self {
         Self {
@@ -260,7 +260,7 @@ impl SliceState {
         backend: Arc<Backend<B, M>>,
     ) where
         B: BlockStore + Send + Sync + 'static,
-        M: MetaStore + Send + Sync + 'static,
+        M: MetaLayer + Send + Sync + 'static,
     {
         tokio::spawn(async move {
             let (index, (start, end), generation) = {
@@ -355,7 +355,7 @@ pub(crate) struct FileReader<B, M> {
 impl<B, M> FileReader<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fn new(
         config: Arc<ReadConfig>,
@@ -817,7 +817,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let ino: i64 = 11;
@@ -829,7 +829,11 @@ mod tests {
         let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, chunk_id_for(ino, 0), backend.as_ref());
         let desc1 = uploader
-            .write_at(slice_id1 as u64, offset as u32, head)
+            .write_at_vectored(
+                slice_id1 as u64,
+                offset as u32,
+                &[bytes::Bytes::copy_from_slice(head)],
+            )
             .await
             .unwrap();
         meta.append_slice(chunk_id_for(ino, 0), desc1)
@@ -838,7 +842,10 @@ mod tests {
 
         let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, chunk_id_for(ino, 1), backend.as_ref());
-        let desc2 = uploader.write_at(slice_id2 as u64, 0, tail).await.unwrap();
+        let desc2 = uploader
+            .write_at_vectored(slice_id2 as u64, 0, &[bytes::Bytes::copy_from_slice(tail)])
+            .await
+            .unwrap();
         meta.append_slice(chunk_id_for(ino, 1), desc2)
             .await
             .unwrap();
@@ -860,7 +867,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let ino: i64 = 22;
@@ -870,7 +877,11 @@ mod tests {
         let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, chunk_id_for(ino, 0), backend.as_ref());
         let desc1 = uploader
-            .write_at(slice_id1 as u64, 0, &data1)
+            .write_at_vectored(
+                slice_id1 as u64,
+                0,
+                &[bytes::Bytes::copy_from_slice(&data1)],
+            )
             .await
             .unwrap();
         meta.append_slice(chunk_id_for(ino, 0), desc1)
@@ -885,7 +896,11 @@ mod tests {
 
         let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let desc2 = uploader
-            .write_at(slice_id2 as u64, 0, &data2)
+            .write_at_vectored(
+                slice_id2 as u64,
+                0,
+                &[bytes::Bytes::copy_from_slice(&data2)],
+            )
             .await
             .unwrap();
         meta.append_slice(chunk_id_for(ino, 0), desc2)
@@ -907,7 +922,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let ino: i64 = 66;
