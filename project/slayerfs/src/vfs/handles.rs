@@ -1,7 +1,7 @@
 //! File and directory handle management
 
 use crate::chuck::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::meta::store::FileAttr;
 use crate::vfs::fs::DirEntry;
 use crate::vfs::io::{FileReader, FileWriter};
@@ -166,7 +166,7 @@ impl Drop for HandleWriteWaiter<'_> {
 struct FileHandleState<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     attr: FileAttr,
     last_offset: u64,
@@ -178,7 +178,7 @@ where
 pub(crate) struct FileHandle<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fh: u64,
     pub(crate) ino: i64,
@@ -191,7 +191,7 @@ where
 impl<B, M> FileHandle<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fn new(fh: u64, ino: i64, attr: FileAttr, flags: HandleFlags) -> Self {
         Self {
@@ -301,7 +301,7 @@ impl HandleFlags {
 }
 
 /// Directory handle for caching directory listing during opendir-releasedir lifecycle
-pub(crate) struct DirHandle {
+pub struct DirHandle {
     pub(crate) ino: i64,
     pub(crate) entries: Vec<DirEntry>,
     #[allow(dead_code)]

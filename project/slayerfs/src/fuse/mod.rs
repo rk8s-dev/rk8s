@@ -15,7 +15,7 @@
 pub(crate) mod adapter;
 pub mod mount;
 use crate::chuck::store::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
 use crate::vfs::error::VfsError;
@@ -148,7 +148,7 @@ mod mount_tests {
 impl<S, M> VFS<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     async fn apply_new_entry_attrs(
         &self,
@@ -176,7 +176,7 @@ where
 impl<S, M> Filesystem for VFS<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
         // Default to 4 MiB for higher throughput while keeping memory usage reasonable.

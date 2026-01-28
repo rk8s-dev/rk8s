@@ -7,6 +7,7 @@ use crate::meta::store::{
     DirEntry, FileAttr, FileType, MetaError, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
+use crate::vfs::handles::DirHandle;
 
 /// High-level metadata facade used by the VFS and daemon layers.
 ///
@@ -40,6 +41,7 @@ pub trait MetaLayer: Send + Sync {
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError>;
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError>;
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError>;
+    async fn opendir(&self, ino: i64) -> Result<DirHandle, MetaError>;
     async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError>;
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError>;
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError>;

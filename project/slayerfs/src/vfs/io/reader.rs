@@ -8,7 +8,7 @@
 
 use crate::chuck::reader::DataFetcher;
 use crate::chuck::{BlockStore, ChunkLayout};
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::utils::Intervals;
 use crate::vfs::backend::Backend;
 use crate::vfs::chunk_id_for;
@@ -38,7 +38,7 @@ pub(crate) struct DataReader<B, M> {
 impl<B, M> DataReader<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fn new(config: Arc<ReadConfig>, backend: Arc<Backend<B, M>>) -> Self {
         Self {
@@ -260,7 +260,7 @@ impl SliceState {
         backend: Arc<Backend<B, M>>,
     ) where
         B: BlockStore + Send + Sync + 'static,
-        M: MetaStore + Send + Sync + 'static,
+        M: MetaLayer + Send + Sync + 'static,
     {
         tokio::spawn(async move {
             let (index, (start, end), generation) = {
@@ -355,7 +355,7 @@ pub(crate) struct FileReader<B, M> {
 impl<B, M> FileReader<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fn new(
         config: Arc<ReadConfig>,
@@ -814,7 +814,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let ino: i64 = 11;
@@ -864,7 +864,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let ino: i64 = 22;
@@ -919,7 +919,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let ino: i64 = 66;

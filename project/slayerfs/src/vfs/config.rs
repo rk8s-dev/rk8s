@@ -1,5 +1,4 @@
 use crate::chuck::ChunkLayout;
-use crate::vfs::fs::MetaClientConfig;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -97,7 +96,6 @@ impl WriteConfig {
 pub struct VFSConfig {
     pub read: Arc<ReadConfig>,
     pub write: Arc<WriteConfig>,
-    pub(crate) meta: MetaClientConfig,
 }
 
 #[allow(dead_code)]
@@ -125,10 +123,6 @@ impl VFSConfig {
         };
 
         let write = Arc::new(WriteConfig::new(layout).page_size(page_size));
-        Self {
-            read,
-            write,
-            meta: MetaClientConfig::default(),
-        }
+        Self { read, write }
     }
 }

@@ -3,7 +3,7 @@
 use super::chunk::ChunkLayout;
 use super::slice::{SliceDesc, block_span_iter};
 use super::store::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::vfs::backend::Backend;
 use anyhow::Result;
 use bytes::Bytes;
@@ -54,7 +54,7 @@ pub(crate) struct DataUploader<'a, B, M> {
 impl<'a, B, M> DataUploader<'a, B, M>
 where
     B: BlockStore + Sync,
-    M: MetaStore,
+    M: MetaLayer,
 {
     pub(crate) fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
         Self {
@@ -173,7 +173,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let data = patterned(layout.block_size as usize + 512, 7);
@@ -200,7 +200,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let offset = layout.block_size - 128;

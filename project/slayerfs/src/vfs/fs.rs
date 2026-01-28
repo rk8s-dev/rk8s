@@ -2,11 +2,11 @@
 
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
+use crate::meta::MetaLayer;
 use crate::meta::client::{MetaClient, MetaClientOptions};
 use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
-use crate::meta::store::{SetAttrFlags, SetAttrRequest};
-use crate::meta::{MetaLayer, MetaStore};
+use crate::meta::store::{MetaError, MetaStore, SetAttrFlags, SetAttrRequest};
 use dashmap::{DashMap, Entry};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ use crate::vfs::io::{DataReader, DataWriter};
 struct HandleRegistry<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     handles: DashMap<u64, Arc<FileHandle<B, M>>>,
     inode_handles: DashMap<i64, Vec<u64>>,
@@ -37,7 +37,7 @@ where
 impl<B, M> HandleRegistry<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     fn new() -> Self {
         Self {
@@ -198,7 +198,7 @@ impl ModifiedTracker {
 struct VfsState<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     handles: HandleRegistry<S, M>,
     inodes: DashMap<i64, Arc<Inode>>,
@@ -211,7 +211,7 @@ where
 impl<S, M> VfsState<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     fn new(config: Arc<VFSConfig>, backend: Arc<Backend<S, M>>) -> Self {
         let reader = Arc::new(DataReader::new(config.read.clone(), backend.clone()));
@@ -236,23 +236,23 @@ where
 pub(crate) struct VfsCore<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     layout: ChunkLayout,
     backend: Arc<Backend<S, M>>,
-    meta_layer: Arc<MetaClient<M>>,
+    meta_layer: Arc<M>,
     root: i64,
 }
 
 impl<S, M> VfsCore<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fn new(
         layout: ChunkLayout,
         backend: Arc<Backend<S, M>>,
-        meta_layer: Arc<MetaClient<M>>,
+        meta_layer: Arc<M>,
         root: i64,
     ) -> Self {
         Self {
@@ -287,74 +287,25 @@ impl Default for MetaClientConfig {
 pub struct VFS<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     core: Arc<VfsCore<S, M>>,
     state: Arc<VfsState<S, M>>,
 }
 
-#[allow(dead_code)]
-impl<S, M> VFS<S, M>
+impl<S, R> VFS<S, MetaClient<R>>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    R: MetaStore + Send + Sync + 'static,
 {
-    pub async fn new(layout: ChunkLayout, store: S, meta: M) -> Result<Self, VfsError> {
+    pub async fn new(layout: ChunkLayout, store: S, meta: R) -> Result<Self, VfsError> {
         Self::with_meta_client_config(layout, store, meta, MetaClientConfig::default()).await
-    }
-
-    pub fn with_config(config: VFSConfig, store: S, meta: M) -> Result<Self, VfsError> {
-        let store = Arc::new(store);
-        let meta = Arc::new(meta);
-
-        let ttl = if config.meta.ttl.is_zero() {
-            CacheTtl::for_sqlite()
-        } else {
-            config.meta.ttl.clone()
-        };
-
-        let meta_client = MetaClient::with_options(
-            Arc::clone(&meta),
-            config.meta.capacity.clone(),
-            ttl,
-            config.meta.options.clone(),
-        );
-
-        Self::from_components(config, store, meta, meta_client)
-    }
-
-    pub(crate) fn with_meta_layer(
-        layout: ChunkLayout,
-        store: S,
-        meta: M,
-        meta_layer: Arc<MetaClient<M>>,
-    ) -> Result<Self, VfsError> {
-        let config = VFSConfig::new(layout);
-        let store = Arc::new(store);
-        let meta = Arc::new(meta);
-        Self::from_components(config, store, meta, meta_layer)
-    }
-
-    fn from_components(
-        config: VFSConfig,
-        store: Arc<S>,
-        meta: Arc<M>,
-        meta_layer: Arc<MetaClient<M>>,
-    ) -> Result<Self, VfsError> {
-        let layout = config.write.layout;
-        let root_ino = meta_layer.root_ino();
-        let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
-        let core = Arc::new(VfsCore::new(layout, backend.clone(), meta_layer, root_ino));
-        let config = Arc::new(VFSConfig::new(layout));
-        let state = Arc::new(VfsState::new(config, backend));
-
-        Ok(Self { core, state })
     }
 
     pub(crate) async fn with_meta_client_config(
         layout: ChunkLayout,
         store: S,
-        meta: M,
+        meta: R,
         config: MetaClientConfig,
     ) -> Result<Self, VfsError> {
         let store = Arc::new(store);
@@ -375,9 +326,39 @@ where
 
         meta_client.initialize().await.map_err(VfsError::from)?;
 
-        let meta_layer: Arc<MetaClient<M>> = meta_client.clone();
+        Self::from_components(VFSConfig::new(layout), store, meta_client)
+    }
+}
 
-        Self::from_components(VFSConfig::new(layout), store, meta, meta_layer)
+#[allow(dead_code)]
+impl<S, M> VFS<S, M>
+where
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
+{
+    pub(crate) fn with_meta_layer(
+        layout: ChunkLayout,
+        store: S,
+        meta_layer: Arc<M>,
+    ) -> Result<Self, VfsError> {
+        let config = VFSConfig::new(layout);
+        let store = Arc::new(store);
+        Self::from_components(config, store, meta_layer)
+    }
+
+    fn from_components(
+        config: VFSConfig,
+        store: Arc<S>,
+        meta_layer: Arc<M>,
+    ) -> Result<Self, VfsError> {
+        let layout = config.write.layout;
+        let root_ino = meta_layer.root_ino();
+        let backend = Arc::new(Backend::new(store.clone(), meta_layer.clone()));
+        let core = Arc::new(VfsCore::new(layout, backend.clone(), meta_layer, root_ino));
+        let config = Arc::new(config);
+        let state = Arc::new(VfsState::new(config, backend));
+
+        Ok(Self { core, state })
     }
 
     pub(crate) fn root_ino(&self) -> i64 {
@@ -753,7 +734,7 @@ where
         Ok((ino, attr))
     }
 
-    /// Fetch a file's attributes (kind/size come from the MetaStore); returns None when missing.
+    /// Fetch a file's attributes (kind/size come from the metadata layer); returns None when missing.
     pub async fn stat(&self, path: &str) -> Option<FileAttr> {
         let path = Self::norm_path(path);
         let (ino, _) = self.core.meta_layer.lookup_path(&path).await.ok()??;
@@ -1291,32 +1272,21 @@ where
     }
 
     /// Open a directory handle for reading. Returns the file handle ID.
-    /// This pre-loads all directory entries and starts background batch prefetch for attributes.
     pub async fn opendir(&self, ino: i64) -> Result<u64, VfsError> {
-        // Verify directory exists
-        let attr = self
-            .core
-            .meta_layer
-            .stat(ino)
-            .await?
-            .ok_or(VfsError::NotFound {
-                path: PathHint::none(),
-            })?;
-
-        if attr.kind != FileType::Dir {
-            return Err(VfsError::NotADirectory {
-                path: PathHint::none(),
-            });
-        }
-
-        // Load all directory entries
-        let entries = self.core.meta_layer.readdir(ino).await?;
-
-        // Start background batch prefetch task
-        let (done_flag, prefetch_task) = self.core.meta_layer.spawn_batch_prefetch(ino, &entries);
-
-        // Create handle with prefetch task
-        let handle = DirHandle::with_prefetch_task(ino, entries, prefetch_task, done_flag);
+        let handle = match self.core.meta_layer.opendir(ino).await {
+            Ok(handle) => handle,
+            Err(MetaError::NotFound(_)) => {
+                return Err(VfsError::NotFound {
+                    path: PathHint::none(),
+                });
+            }
+            Err(MetaError::NotDirectory(_)) => {
+                return Err(VfsError::NotADirectory {
+                    path: PathHint::none(),
+                });
+            }
+            Err(err) => return Err(VfsError::from(err)),
+        };
         let fh = self.state.handles.allocate_dir(handle);
 
         Ok(fh)
@@ -1538,7 +1508,7 @@ mod tests {
     async fn open_file<S, M>(fs: &VFS<S, M>, path: &str, read: bool, write: bool) -> u64
     where
         S: BlockStore + Send + Sync + 'static,
-        M: MetaStore + Send + Sync + 'static,
+        M: MetaLayer + Send + Sync + 'static,
     {
         let attr = fs.stat(path).await.expect("stat");
         fs.open(attr.ino, attr, read, write).await.unwrap()
@@ -1547,7 +1517,7 @@ mod tests {
     async fn write_path<S, M>(fs: &VFS<S, M>, path: &str, offset: u64, data: &[u8]) -> usize
     where
         S: BlockStore + Send + Sync + 'static,
-        M: MetaStore + Send + Sync + 'static,
+        M: MetaLayer + Send + Sync + 'static,
     {
         let fh = open_file(fs, path, false, true).await;
         let result = fs.write(fh, offset, data).await.expect("write");
@@ -1558,7 +1528,7 @@ mod tests {
     async fn read_path<S, M>(fs: &VFS<S, M>, path: &str, offset: u64, len: usize) -> Vec<u8>
     where
         S: BlockStore + Send + Sync + 'static,
-        M: MetaStore + Send + Sync + 'static,
+        M: MetaLayer + Send + Sync + 'static,
     {
         let fh = open_file(fs, path, true, false).await;
         let result = fs.read(fh, offset, len).await.expect("read");
@@ -1569,7 +1539,7 @@ mod tests {
     async fn readdir_path<S, M>(fs: &VFS<S, M>, path: &str) -> Vec<DirEntry>
     where
         S: BlockStore + Send + Sync + 'static,
-        M: MetaStore + Send + Sync + 'static,
+        M: MetaLayer + Send + Sync + 'static,
     {
         let attr = fs.stat(path).await.expect("stat");
         let fh = fs.opendir(attr.ino).await.expect("opendir");

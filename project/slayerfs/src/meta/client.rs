@@ -13,6 +13,7 @@ use crate::meta::store::{
 };
 use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker, WatchConfig};
 use crate::vfs::fs::FileType;
+use crate::vfs::handles::DirHandle;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::stream;
@@ -146,7 +147,7 @@ pub struct MetaClient<T: MetaStore> {
     root: AtomicI64,
     #[allow(dead_code)]
     umounting: AtomicBool,
-    inode_cache: InodeCache,
+    inode_cache: Arc<InodeCache>,
     /// it's absolute path.
     /// Used for quick lookups and invalidation
     path_cache: Cache<String, i64>,
@@ -244,7 +245,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             options,
             root: AtomicI64::new(root_ino),
             umounting: AtomicBool::new(false),
-            inode_cache: InodeCache::new(capacity.inode as u64, ttl.inode_ttl),
+            inode_cache: Arc::new(InodeCache::new(capacity.inode as u64, ttl.inode_ttl)),
             path_cache: Cache::builder()
                 .max_capacity(capacity.path as u64)
                 .time_to_live(ttl.path_ttl)
@@ -838,11 +839,11 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// Returns a tuple of (done_flag, task_handle)
     pub fn spawn_batch_prefetch(
-        self: &Arc<Self>,
+        &self,
         ino: i64,
         entries: &[DirEntry],
     ) -> (Arc<AtomicBool>, tokio::task::JoinHandle<()>) {
-        let config = &self.options.batch_prefetch;
+        let config = self.options.batch_prefetch.clone();
 
         if !config.enabled || entries.is_empty() {
             let done = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -858,7 +859,8 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         let done_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let done_flag_clone = Arc::clone(&done_flag);
 
-        let client = Arc::clone(self);
+        let store = Arc::clone(&self.store);
+        let inode_cache = Arc::clone(&self.inode_cache);
         let parent_ino = ino; // Capture parent directory inode for the async block
 
         let task = tokio::spawn(async move {
@@ -884,17 +886,17 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             use futures::stream::StreamExt;
             stream::iter(chunks.into_iter().enumerate())
                 .map(|(batch_idx, chunk)| {
-                    let client_clone = Arc::clone(&client);
+                    let store = Arc::clone(&store);
+                    let inode_cache = Arc::clone(&inode_cache);
                     async move {
                         let batch_start = std::time::Instant::now();
-                        match client_clone.store.batch_stat(&chunk).await {
+                        match store.batch_stat(&chunk).await {
                             Ok(attrs) => {
                                 let mut cached_count = 0;
                                 // Insert results into cache
                                 for (child_ino, attr_opt) in chunk.iter().zip(attrs.iter()) {
                                     if let Some(attr) = attr_opt {
-                                        client_clone
-                                            .inode_cache
+                                        inode_cache
                                             .insert_node(*child_ino, attr.clone(), None)
                                             .await;
                                         cached_count += 1;
@@ -1032,6 +1034,26 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         // Note: We shouldn't pre-fetch attributes here; use batch prefetch instead.
         Ok(entries)
+    }
+
+    async fn opendir(&self, ino: i64) -> Result<DirHandle, MetaError> {
+        let inode = self.check_root(ino);
+        let attr = self
+            .cached_stat(inode)
+            .await?
+            .ok_or(MetaError::NotFound(inode))?;
+        if attr.kind != FileType::Dir {
+            return Err(MetaError::NotDirectory(inode));
+        }
+
+        let entries = self.readdir(inode).await?;
+        let (done_flag, prefetch_task) = MetaClient::spawn_batch_prefetch(self, inode, &entries);
+        Ok(DirHandle::with_prefetch_task(
+            inode,
+            entries,
+            prefetch_task,
+            done_flag,
+        ))
     }
 
     async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError> {

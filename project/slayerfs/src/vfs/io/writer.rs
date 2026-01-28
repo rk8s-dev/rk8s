@@ -5,7 +5,7 @@
 //   flush() can freeze slices. spawn_flush_slice performs the upload:
 //     Readonly -> Uploading -> Uploaded/Failed
 // - commit_chunk runs per-chunk and waits for Uploaded slices. It appends metadata (SliceDesc)
-//   to MetaStore and marks them Committed. Only Committed slices are visible to readers.
+//   to the metadata layer and marks them Committed. Only Committed slices are visible to readers.
 // - FileWriter::flush() freezes all slices and waits until commit threads drain the chunks.
 //   While flushing, new writes are blocked via flush_waiting/write_waiting gates.
 
@@ -14,7 +14,7 @@ use crate::chuck::writer::DataUploader;
 use crate::chuck::{BlockStore, SliceDesc};
 use crate::meta::backoff::backoff;
 use crate::meta::store::MetaError;
-use crate::meta::{MetaStore, SLICE_ID_KEY};
+use crate::meta::{MetaLayer, SLICE_ID_KEY};
 use crate::vfs::backend::Backend;
 use crate::vfs::cache::page::CacheSlice;
 use crate::vfs::chunk_id_for;
@@ -128,7 +128,7 @@ impl ChunkState {
 struct SliceHandle<'a, B, M>
 where
     B: BlockStore,
-    M: MetaStore,
+    M: MetaLayer,
 {
     slice: &'a Arc<ParkingMutex<SliceState>>,
     shared: &'a Shared<B, M>,
@@ -137,7 +137,7 @@ where
 impl<'a, B, M> SliceHandle<'a, B, M>
 where
     B: BlockStore,
-    M: MetaStore,
+    M: MetaLayer,
 {
     fn with_mut<T>(&self, f: impl FnOnce(&mut SliceState) -> T) -> T {
         let mut guard = self.slice.lock();
@@ -303,7 +303,7 @@ struct WriteAction {
 struct ChunkHandle<'a, B, M>
 where
     B: BlockStore,
-    M: MetaStore,
+    M: MetaLayer,
 {
     chunk_id: u64,
     inner: &'a mut Inner,
@@ -313,7 +313,7 @@ where
 impl<'a, B, M> ChunkHandle<'a, B, M>
 where
     B: BlockStore,
-    M: MetaStore,
+    M: MetaLayer,
 {
     /// Find or create the next slice which can be written.
     /// A slice is append-only.
@@ -452,7 +452,7 @@ struct Shared<B, M> {
 impl<B, M> Shared<B, M>
 where
     B: BlockStore,
-    M: MetaStore,
+    M: MetaLayer,
 {
     pub(crate) fn new(
         inode: Arc<Inode>,
@@ -490,7 +490,7 @@ impl Inner {
     ) -> ChunkHandle<'a, B, M>
     where
         B: BlockStore,
-        M: MetaStore,
+        M: MetaLayer,
     {
         ChunkHandle {
             chunk_id,
@@ -523,7 +523,7 @@ pub(crate) struct FileWriter<B, M> {
 impl<B, M> FileWriter<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fn new(
         inode: Arc<Inode>,
@@ -968,7 +968,7 @@ pub(crate) struct DataWriter<B, M> {
 impl<B, M> DataWriter<B, M>
 where
     B: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     pub(crate) fn new(
         config: Arc<WriteConfig>,
@@ -1124,7 +1124,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let inode = Inode::new(11, 0);
         let reader = Arc::new(DataReader::new(
@@ -1161,7 +1161,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let inode = Inode::new(22, 0);
         let reader = Arc::new(DataReader::new(
@@ -1199,7 +1199,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let inode = Inode::new(33, 0);
 
@@ -1236,7 +1236,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let inode = Inode::new(44, 0);
 
@@ -1293,7 +1293,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let reader = Arc::new(DataReader::new(

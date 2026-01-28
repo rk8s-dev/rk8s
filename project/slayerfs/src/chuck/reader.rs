@@ -3,7 +3,7 @@
 use super::chunk::ChunkLayout;
 use super::slice::{SliceDesc, block_span_iter};
 use super::store::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::utils::Intervals;
 use crate::vfs::backend::Backend;
 use anyhow::{Result, ensure};
@@ -22,7 +22,7 @@ pub(crate) struct DataFetcher<'a, B, M> {
 impl<'a, B, M> DataFetcher<'a, B, M>
 where
     B: BlockStore,
-    M: MetaStore,
+    M: MetaLayer,
 {
     pub(crate) fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
         Self {
@@ -126,7 +126,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         // Only write the first half of the second block
         {
@@ -172,7 +172,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let offset = layout.block_size - 512;
@@ -205,7 +205,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let data1 = vec![1u8; 2048];
