@@ -507,7 +507,13 @@ where
         if &path == "/" {
             return Ok(self.core.root);
         }
-        if let Ok(Some((ino, _attr))) = self.core.meta_layer.lookup_path(&path).await {
+        if let Some((ino, _attr)) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(VfsError::from)?
+        {
             return Ok(ino);
         }
         let mut cur_ino = self.core.root;
@@ -515,18 +521,31 @@ where
             if part.is_empty() {
                 continue;
             }
-            match self.core.meta_layer.lookup(cur_ino, part).await {
-                Ok(Some(ino)) => {
-                    if let Ok(Some(attr)) = self.core.meta_layer.stat(ino).await
-                        && attr.kind != FileType::Dir
-                    {
+            let child = self
+                .core
+                .meta_layer
+                .lookup(cur_ino, part)
+                .await
+                .map_err(VfsError::from)?;
+            match child {
+                Some(ino) => {
+                    let attr = self
+                        .core
+                        .meta_layer
+                        .stat(ino)
+                        .await
+                        .map_err(VfsError::from)?
+                        .ok_or_else(|| VfsError::NotFound {
+                            path: PathHint::some(path.clone()),
+                        })?;
+                    if attr.kind != FileType::Dir {
                         return Err(VfsError::NotADirectory {
                             path: PathHint::some(path.clone()),
                         });
                     }
                     cur_ino = ino;
                 }
-                _ => {
+                None => {
                     let ino = self
                         .core
                         .meta_layer
@@ -551,9 +570,22 @@ where
         let dir_ino = self.mkdir_p(&dir).await?;
 
         // check the file exists and then return.
-        if let Ok(Some(ino)) = self.core.meta_layer.lookup(dir_ino, &name).await
-            && let Ok(Some(attr)) = self.core.meta_layer.stat(ino).await
+        if let Some(ino) = self
+            .core
+            .meta_layer
+            .lookup(dir_ino, &name)
+            .await
+            .map_err(VfsError::from)?
         {
+            let attr = self
+                .core
+                .meta_layer
+                .stat(ino)
+                .await
+                .map_err(VfsError::from)?
+                .ok_or_else(|| VfsError::NotFound {
+                    path: PathHint::some(path.clone()),
+                })?;
             return if attr.kind == FileType::Dir {
                 Err(VfsError::IsADirectory {
                     path: PathHint::some(path),
@@ -734,12 +766,30 @@ where
         Ok((ino, attr))
     }
 
-    /// Fetch a file's attributes (kind/size come from the metadata layer); returns None when missing.
-    pub async fn stat(&self, path: &str) -> Option<FileAttr> {
+    /// Fetch a file's attributes (kind/size come from the metadata layer).
+    pub async fn stat(&self, path: &str) -> Result<FileAttr, VfsError> {
         let path = Self::norm_path(path);
-        let (ino, _) = self.core.meta_layer.lookup_path(&path).await.ok()??;
-        let meta_attr = self.core.meta_layer.stat(ino).await.ok().flatten()?;
-        Some(meta_attr)
+
+        let (ino, _) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(VfsError::from)?
+            .ok_or_else(|| VfsError::NotFound {
+                path: PathHint::some(path.clone()),
+            })?;
+
+        let meta_attr = self
+            .core
+            .meta_layer
+            .stat(ino)
+            .await
+            .map_err(VfsError::from)?
+            .ok_or_else(|| VfsError::NotFound {
+                path: PathHint::some(path.clone()),
+            })?;
+        Ok(meta_attr)
     }
 
     /// Read a symlink target by inode.
@@ -767,6 +817,7 @@ where
     /// Read a symlink target by path.
     pub async fn readlink(&self, path: &str) -> Result<String, VfsError> {
         let path = Self::norm_path(path);
+
         let (ino, kind) = self
             .core
             .meta_layer
@@ -968,7 +1019,13 @@ where
         // If destination exists, apply replace semantics:
         // - If dest is file/symlink: unlink it
         // - If dest is dir: source must be dir and dest must be empty; rmdir it
-        if let Ok(Some((dest_ino, dest_kind))) = self.core.meta_layer.lookup_path(&new).await {
+        let dest = self
+            .core
+            .meta_layer
+            .lookup_path(&new)
+            .await
+            .map_err(VfsError::from)?;
+        if let Some((dest_ino, dest_kind)) = dest {
             // resolve parent directory ino for destination
             let new_dir_ino = if &new_dir == "/" {
                 self.core.root
@@ -1000,6 +1057,7 @@ where
                     .readdir(dest_ino)
                     .await
                     .map_err(VfsError::from)?;
+
                 if !children.is_empty() {
                     return Err(VfsError::DirectoryNotEmpty {
                         path: PathHint::some(new.clone()),
@@ -1018,6 +1076,7 @@ where
                         path: PathHint::some(new.clone()),
                     });
                 }
+
                 // dest is a file or symlink: unlink it to allow replace
                 self.core
                     .meta_layer

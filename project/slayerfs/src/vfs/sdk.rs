@@ -48,9 +48,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static
         offset: u64,
         data: &[u8],
     ) -> Result<usize, VfsError> {
-        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
-            path: PathHint::some(path),
-        })?;
+        let attr = self.fs.stat(path).await?;
         let fh = self.fs.open(attr.ino, attr, false, true).await?;
         let result = self.fs.write(fh, offset, data).await;
         let _ = self.fs.close(fh).await;
@@ -58,9 +56,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static
     }
 
     pub async fn read_at(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, VfsError> {
-        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
-            path: PathHint::some(path),
-        })?;
+        let attr = self.fs.stat(path).await?;
         let fh = self.fs.open(attr.ino, attr, true, false).await?;
         let result = self.fs.read(fh, offset, len).await;
         let _ = self.fs.close(fh).await;
@@ -68,9 +64,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static
     }
 
     pub async fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, VfsError> {
-        let attr = self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
-            path: PathHint::some(path),
-        })?;
+        let attr = self.fs.stat(path).await?;
         if attr.kind != FileType::Dir {
             return Err(VfsError::NotADirectory {
                 path: PathHint::some(path),
@@ -92,9 +86,7 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static
     }
 
     pub async fn stat(&self, path: &str) -> Result<FileAttr, VfsError> {
-        self.fs.stat(path).await.ok_or_else(|| VfsError::NotFound {
-            path: PathHint::some(path),
-        })
+        self.fs.stat(path).await
     }
 
     pub async fn link(&self, existing: &str, link_path: &str) -> Result<FileAttr, VfsError> {
