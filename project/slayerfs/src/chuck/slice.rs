@@ -35,7 +35,18 @@ use std::marker::PhantomData;
 pub type BlockSpan = Span<BlockTag>;
 
 /// Basic slice descriptor for a chunk-local contiguous range.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct SliceDesc {
     pub slice_id: u64,
     pub chunk_id: u64,
@@ -51,7 +62,7 @@ pub fn block_span_iter(desc: SliceDesc, layout: ChunkLayout) -> impl Iterator<It
 }
 
 pub fn key_for_slice(chunk_id: u64) -> String {
-    format!("slices/{chunk_id}")
+    format!("slayerfs/slices/{chunk_id}")
 }
 
 #[allow(dead_code)]

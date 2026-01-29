@@ -14,6 +14,7 @@
 //!
 pub(crate) mod backoff;
 pub mod client;
+pub(crate) mod codec;
 pub mod config;
 pub(crate) mod entities;
 pub mod factory;
