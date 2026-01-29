@@ -4,6 +4,7 @@ use crate::meta::Permission;
 use crate::meta::entities::content_meta::EntryType;
 use crate::meta::file_lock::PlockRecord;
 use crate::meta::store::{FileAttr, FileType};
+use rkyv::{Archive, Deserialize, Serialize};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -27,7 +28,7 @@ pub struct EtcdEntryInfo {
 }
 
 /// Etcd forward index entry ((parent_id, name) -> inode)
-#[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
+#[derive(Debug, Clone, Archive, Serialize, Deserialize, SerdeSerialize, SerdeDeserialize)]
 pub struct EtcdForwardEntry {
     pub parent_inode: i64,
     pub name: String,
@@ -38,7 +39,7 @@ pub struct EtcdForwardEntry {
 }
 
 /// Etcd directory children collection (dir_id -> name to inode mapping)
-#[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
+#[derive(Debug, Clone, Archive, Serialize, Deserialize, SerdeSerialize, SerdeDeserialize)]
 pub struct EtcdDirChildren {
     pub inode: i64,
     pub children: HashMap<String, i64>,
