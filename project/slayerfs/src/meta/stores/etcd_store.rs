@@ -5,7 +5,6 @@ use crate::chuck::SliceDesc;
 use crate::chuck::slice::key_for_slice;
 use crate::meta::backoff::backoff;
 use crate::meta::client::session::{Session, SessionInfo};
-use crate::meta::codec;
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::EtcdLinkParent;
 use crate::meta::entities::etcd::*;
@@ -823,11 +822,15 @@ impl EtcdMetaStore {
     }
 
     /// Get a clone of the etcd client (for Watch Worker)
-    pub fn get_client(&self) -> EtcdClient {
-        self.client.clone()
-    }
+     pub fn get_client(&self) -> EtcdClient {
+         self.client.clone()
+     }
 
-    async fn create_entry(
+     pub fn set_sid(&self, sid: Uuid) -> Result<(), MetaError> {
+         self.sid.set(sid).map_err(|_| MetaError::Internal("SID already set".to_string()))
+     }
+
+     async fn create_entry(
         &self,
         check_key: &str,
         entries: &[(&str, &[u8])],
@@ -958,7 +961,7 @@ impl EtcdMetaStore {
                         // Find the lock record for this owner and sid
                         let pos = plocks
                             .iter()
-                            .position(|p| p.sid == sid.as_u128() && p.owner == owner);
+                            .position(|p| p.sid == *sid && p.owner == owner);
 
                         if let Some(pos) = pos {
                             let plock = &mut plocks[pos];
@@ -996,13 +999,13 @@ impl EtcdMetaStore {
                     10,
                     |mut plocks: Vec<EtcdPlock>| {
                         // Build a hashmap of locks for easier lookup
-                        let mut locks = HashMap::new();
-                        for item in &plocks {
-                            let key = (item.sid, item.owner);
-                            locks.insert(key, item.records.clone());
-                        }
+                         let mut locks = HashMap::new();
+                         for item in &plocks {
+                             let key = (item.sid, item.owner);
+                             locks.insert(key, item.records.clone());
+                         }
 
-                        let lkey = (sid.as_u128(), owner);
+                         let lkey = (*sid, owner);
 
                          // Check for conflicts with other owners/sessions
                          let mut conflict_found = false;
@@ -1033,36 +1036,36 @@ impl EtcdMetaStore {
                         let ls = PlockRecord::update_locks(ls, *new_lock);
 
                         // Check if we need to update the record
-                        if locks.get(&lkey).map(|r| r != &ls).unwrap_or(true) {
-                            // Find existing plock entry and update it, or add new one
-                            if let Some(plock) = plocks
-                                .iter_mut()
-                                .find(|p| p.sid == sid.as_u128() && p.owner == owner)
-                            {
-                                plock.records = ls;
-                            } else {
-                                let new_plock = EtcdPlock {
-                                    sid: sid.as_u128(),
-                                    owner,
-                                    records: ls,
-                                };
-                                plocks.push(new_plock);
-                            }
+                         if locks.get(&lkey).map(|r| r != &ls).unwrap_or(true) {
+                             // Find existing plock entry and update it, or add new one
+                             if let Some(plock) = plocks
+                                 .iter_mut()
+                                 .find(|p| p.sid == *sid && p.owner == owner)
+                             {
+                                 plock.records = ls;
+                             } else {
+                                 let new_plock = EtcdPlock {
+                                     sid: *sid,
+                                     owner,
+                                     records: ls,
+                                 };
+                                 plocks.push(new_plock);
+                             }
                         }
 
                         Ok((plocks, ()))
                     },
                     || {
                         // No existing locks, create new one
-                        let ls = PlockRecord::update_locks(vec![], *new_lock);
+                         let ls = PlockRecord::update_locks(vec![], *new_lock);
 
-                        let new_plock = EtcdPlock {
-                            sid: sid.as_u128(),
-                            owner,
-                            records: ls,
-                        };
+                         let new_plock = EtcdPlock {
+                             sid: *sid,
+                             owner,
+                             records: ls,
+                         };
 
-                        Ok((vec![new_plock], ()))
+                         Ok((vec![new_plock], ()))
                     },
                 )
                 .await
@@ -1142,18 +1145,7 @@ impl EtcdMetaStore {
                         4096
                     };
 
-                    return Ok(FileAttr {
-                        ino,
-                        size,
-                        kind,
-                        mode: entry_info.permission.mode,
-                        uid: entry_info.permission.uid,
-                        gid: entry_info.permission.gid,
-                        atime: entry_info.access_time,
-                        mtime: entry_info.modify_time,
-                        ctime: entry_info.create_time,
-                        nlink: entry_info.nlink,
-                    });
+                    return Ok(());
                 }
                 Ok(_) => {
                     // Transaction failed (CAS conflict), retry

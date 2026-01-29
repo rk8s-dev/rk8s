@@ -275,7 +275,7 @@ impl EtcdWatchWorker {
 
                     match event_type {
                         EventType::Put => {
-                            if let Ok(forward_entry) = codec::decode::<EtcdForwardEntry>(value) {
+                            if let Ok(forward_entry) = serde_json::from_slice::<EtcdForwardEntry>(value) {
                                 events.push(CacheInvalidationEvent::AddChild {
                                     parent_ino,
                                     name,
@@ -363,16 +363,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_forward_key_put() {
-        // PUT event with child_ino in value
-        let value = codec::encode(&EtcdForwardEntry {
-            parent_inode: 10,
-            name: "file.txt".to_string(),
-            inode: 100,
-            is_file: true,
-            entry_type: None,
-        })
-        .unwrap();
+     fn test_parse_forward_key_put() {
+         // PUT event with child_ino in value
+         let value = serde_json::to_vec(&EtcdForwardEntry {
+             parent_inode: 10,
+             name: "file.txt".to_string(),
+             inode: 100,
+             is_file: true,
+             entry_type: None,
+         })
+         .unwrap();
         let events = EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Put, &value);
         assert_eq!(events.len(), 1);
         match &events[0] {
