@@ -134,6 +134,7 @@ pub struct EtcdPlock {
 }
 
 #[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
+#[allow(dead_code)]
 pub struct EtcdLinkParent {
     pub parent_inode: i64,
     pub entry_name: String,

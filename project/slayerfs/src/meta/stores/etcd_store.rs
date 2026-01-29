@@ -4,16 +4,15 @@ use super::{apply_truncate_plan, trim_slices_in_place};
 use crate::chuck::SliceDesc;
 use crate::chuck::slice::key_for_slice;
 use crate::meta::backoff::backoff;
-use crate::meta::client::session::{Session, SessionInfo};
+
 use crate::meta::config::{Config, DatabaseType};
-use crate::meta::entities::etcd::EtcdLinkParent;
 use crate::meta::entities::etcd::*;
 use crate::meta::entities::*;
 use crate::meta::file_lock::{
     FileLockInfo, FileLockQuery, FileLockRange, FileLockType, PlockRecord,
 };
 use crate::meta::store::{
-    DirEntry, FileAttr, LockName, MetaError, MetaStore, SetAttrFlags, SetAttrRequest,
+    DirEntry, FileAttr, MetaError, MetaStore,
 };
 use crate::meta::stores::pool::IdPool;
 use crate::meta::{INODE_ID_KEY, Permission};
@@ -21,16 +20,14 @@ use crate::meta::codec;
 use crate::vfs::chunk_id_for;
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use etcd_client::{
-    Client as EtcdClient, Compare, CompareOp, LeaseKeeper, PutOptions, Txn, TxnOp, TxnOpResponse,
+    Client as EtcdClient, Compare, CompareOp, PutOptions, Txn, TxnOp,
 };
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
-use tokio::select;
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -1130,7 +1127,7 @@ impl EtcdMetaStore {
             match client.txn(txn).await {
                 Ok(resp) if resp.succeeded() => {
                     // Success - convert to FileAttr and return
-                    let kind = if entry_info.symlink_target.is_some() {
+                    let _kind = if entry_info.symlink_target.is_some() {
                         FileType::Symlink
                     } else if entry_info.is_file {
                         FileType::File
@@ -1138,7 +1135,7 @@ impl EtcdMetaStore {
                         FileType::Dir
                     };
 
-                    let size = if let Some(target) = &entry_info.symlink_target {
+                    let _size = if let Some(target) = &entry_info.symlink_target {
                         target.len() as u64
                     } else if entry_info.is_file {
                         entry_info.size.unwrap_or(0).max(0) as u64
@@ -1340,12 +1337,10 @@ impl MetaStore for EtcdMetaStore {
 
         let children_key = Self::etcd_children_key(entry.inode);
         let children: Option<EtcdDirChildren> = self.etcd_get(&children_key).await?;
-        if let Some(children) = children {
-            if !children.children.is_empty() {
-                return Err(MetaError::DirectoryNotEmpty(entry.inode));
-            }
+        if let Some(children) = children
+            && !children.children.is_empty() {
+            return Err(MetaError::DirectoryNotEmpty(entry.inode));
         }
-
         let reverse_key = Self::etcd_reverse_key(entry.inode);
         let link_parent_key = Self::etcd_link_parent_key(entry.inode);
 

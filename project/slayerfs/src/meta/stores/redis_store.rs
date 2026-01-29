@@ -441,6 +441,7 @@ impl RedisMetaStore {
         conn.incr(redis_key, 1).await.map_err(redis_err)
     }
 
+    #[allow(dead_code)]
     async fn mark_deleted(&self, ino: i64, node: &mut StoredNode) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
         node.deleted = true;

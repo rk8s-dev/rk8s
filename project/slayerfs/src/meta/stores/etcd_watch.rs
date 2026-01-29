@@ -3,7 +3,6 @@
 //! Monitors etcd changes and invalidates local cache to maintain consistency
 //! across multiple clients.
 
-use crate::meta::codec;
 use crate::meta::entities::etcd::{EtcdDirChildren, EtcdEntryInfo, EtcdForwardEntry};
 use crate::meta::store::MetaError;
 use etcd_client::{Client as EtcdClient, EventType, WatchOptions};
