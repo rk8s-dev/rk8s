@@ -17,6 +17,7 @@ use crate::meta::store::{
 };
 use crate::meta::stores::pool::IdPool;
 use crate::meta::{INODE_ID_KEY, Permission};
+use crate::meta::codec;
 use crate::vfs::chunk_id_for;
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
@@ -251,9 +252,9 @@ impl EtcdMetaStore {
     async fn init_root_directory(&self) -> Result<(), MetaError> {
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
-        let children_key = Self::etcd_children_key(1);
-        let root_children = EtcdDirChildren::new(1, HashMap::new());
-        let children_bytes = serde_json::to_vec(&root_children).map_err(MetaError::from)?;
+         let children_key = Self::etcd_children_key(1);
+         let root_children = EtcdDirChildren::new(1, HashMap::new());
+         let children_bytes = codec::encode(&root_children)?;
 
         let reverse_key = Self::etcd_reverse_key(1);
         let root_entry = EtcdEntryInfo {
@@ -360,11 +361,11 @@ impl EtcdMetaStore {
         {
             Ok(resp) => {
                 let mut map = HashMap::new();
-                for kv in resp.kvs() {
-                    if let Ok(entry) = serde_json::from_slice::<EtcdForwardEntry>(kv.value()) {
-                        let key_str = String::from_utf8_lossy(kv.key());
-                        if let Some(name) = key_str.strip_prefix(&forward_prefix) {
-                            map.insert(name.to_string(), entry);
+                 for kv in resp.kvs() {
+                     if let Ok(entry) = codec::decode::<EtcdForwardEntry>(kv.value()) {
+                         let key_str = String::from_utf8_lossy(kv.key());
+                         if let Some(name) = key_str.strip_prefix(&forward_prefix) {
+                             map.insert(name.to_string(), entry);
                         }
                     }
                 }
@@ -497,12 +498,12 @@ impl EtcdMetaStore {
             inode,
             is_file: false,
             entry_type: Some(EntryType::Directory),
-        };
-        let children = EtcdDirChildren::new(inode, HashMap::new());
+         };
+         let children = EtcdDirChildren::new(inode, HashMap::new());
 
-        let forward_value = serde_json::to_vec(&forward_entry).map_err(MetaError::from)?;
-        let reverse_value = serde_json::to_vec(&entry_info).map_err(MetaError::from)?;
-        let children_value = serde_json::to_vec(&children).map_err(MetaError::from)?;
+         let forward_value = codec::encode(&forward_entry)?;
+         let reverse_value = serde_json::to_vec(&entry_info).map_err(MetaError::from)?;
+         let children_value = codec::encode(&children)?;
 
         // Step 2: Atomic transaction - create all keys only if forward key doesn't exist
         info!(
@@ -632,11 +633,11 @@ impl EtcdMetaStore {
             parent_inode,
             name: name.clone(),
             inode,
-            is_file: true,
-            entry_type: Some(EntryType::File),
-        };
-        let forward_value = serde_json::to_vec(&forward_entry).map_err(MetaError::from)?;
-        let reverse_value = serde_json::to_vec(&entry_info).map_err(MetaError::from)?;
+             is_file: true,
+             entry_type: Some(EntryType::File),
+         };
+         let forward_value = codec::encode(&forward_entry)?;
+         let reverse_value = serde_json::to_vec(&entry_info).map_err(MetaError::from)?;
 
 
         // Step 2: Atomic transaction - create keys only if forward key doesn't exist
@@ -1420,10 +1421,10 @@ impl MetaStore for EtcdMetaStore {
             entry_type: entry.entry_type.clone(),
         };
 
-        self.create_entry(
-            &new_key,
-            &[(new_key.as_str(), serde_json::to_vec(&new_forward).map_err(MetaError::from)?.as_slice())],
-            new_parent,
+         self.create_entry(
+             &new_key,
+             &[(new_key.as_str(), codec::encode(&new_forward)?.as_slice())],
+             new_parent,
             &new_name,
         )
         .await?;
