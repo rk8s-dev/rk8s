@@ -349,40 +349,80 @@ impl RedisMetaStore {
         name: String,
         kind: FileType,
     ) -> Result<i64, MetaError> {
-        self.ensure_parent_dir(parent).await?;
-        if self.directory_child(parent, &name).await?.is_some() {
-            return Err(MetaError::AlreadyExists { parent, name });
-        }
         let ino = self.alloc_id(INODE_ID_KEY).await?;
-        {
-            let mut conn = self.conn.clone();
-            let _: () = conn
-                .set_nx(self.inode_version_key(ino), 0u64)
-                .await
-                .map_err(redis_err)?;
-        }
+        
         let mut node = StoredNode::new(ino, parent, name.clone(), kind);
-
-        // Inherit gid and setgid bit from parent if parent has setgid bit set
         if let Some(parent_node) = self.get_node(parent).await? {
             let parent_has_setgid = (parent_node.attr.mode & 0o2000) != 0;
             if parent_has_setgid {
                 node.attr.gid = parent_node.attr.gid;
-                // Directories inherit setgid bit from parent
                 if matches!(kind, FileType::Dir) {
                     node.attr.mode |= 0o2000;
                 }
             }
         }
 
-        self.save_node(&node).await?;
-        self.add_dir_entry(parent, &name, ino).await?;
+        let mut parent_node = self.get_node(parent).await?.ok_or(MetaError::ParentNotFound(parent))?;
         if matches!(kind, FileType::Dir) {
-            self.update_nlink(parent, 1).await?;
+            parent_node.attr.nlink = parent_node.attr.nlink.saturating_add(1);
         }
         let now = current_time();
-        self.bump_dir_times(parent, now).await?;
-        Ok(ino)
+        parent_node.attr.mtime = now;
+        parent_node.attr.ctime = now;
+
+        let new_node_blob = codec::encode(&node)?;
+        let updated_parent_blob = codec::encode(&parent_node)?;
+
+        let script = redis::Script::new(r#"
+            local dir_key = KEYS[1]
+            local new_node_key = KEYS[2]
+            local version_key = KEYS[3]
+            local parent_key = KEYS[4]
+            local name = ARGV[1]
+            local new_blob = ARGV[2]
+            local parent_blob = ARGV[3]
+            local child_ino = ARGV[4]
+
+            if redis.call("EXISTS", parent_key) == 0 then
+                return redis.error_reply("ENOENT")
+            end
+            if redis.call("HEXISTS", dir_key, name) == 1 then
+                return redis.error_reply("EEXIST")
+            end
+            redis.call("SETNX", version_key, 0)
+            redis.call("SET", new_node_key, new_blob)
+            redis.call("HSET", dir_key, name, child_ino)
+            redis.call("SET", parent_key, parent_blob)
+            return "OK"
+        "#);
+
+        let mut conn = self.conn.clone();
+        let resp: Result<String, redis::RedisError> = script
+            .key(self.dir_key(parent))
+            .key(self.node_key(ino))
+            .key(self.inode_version_key(ino))
+            .key(self.node_key(parent))
+            .arg(&name)
+            .arg(&new_node_blob)
+            .arg(&updated_parent_blob)
+            .arg(ino.to_string())
+            .invoke_async(&mut conn)
+            .await;
+
+        match resp {
+            Ok(s) if s == "OK" => Ok(ino),
+            Ok(s) => Err(MetaError::Internal(format!("Unexpected response: {s}"))),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("ENOENT") {
+                    Err(MetaError::ParentNotFound(parent))
+                } else if msg.contains("EEXIST") {
+                    Err(MetaError::AlreadyExists { parent, name })
+                } else {
+                    Err(redis_err(e))
+                }
+            }
+        }
     }
 
     async fn update_nlink(&self, ino: i64, delta: i32) -> Result<(), MetaError> {
@@ -868,15 +908,13 @@ impl MetaStore for RedisMetaStore {
             return Err(MetaError::NotSupported(format!("{child} is not a file")));
         }
 
-        self.remove_dir_entry(parent, name).await?;
+        let now = current_time();
 
         if node.attr.nlink > 1 {
             let mut link_parents = self.load_link_parents(child).await?;
             link_parents.retain(|(p, n)| !(*p == parent && n.as_str() == name));
 
             node.attr.nlink = node.attr.nlink.saturating_sub(1);
-
-            let now = current_time();
             node.attr.ctime = now;
 
             if node.attr.nlink <= 1 {
@@ -901,9 +939,6 @@ impl MetaStore for RedisMetaStore {
                 self.save_link_parents(child, &link_parents).await?;
                 node.parent = 0;
                 node.name = String::new();
-            }
-
-            if node.attr.nlink > 1 {
                 self.save_node(&node).await?;
             }
 
@@ -911,10 +946,62 @@ impl MetaStore for RedisMetaStore {
             return Ok(());
         }
 
-        self.mark_deleted(child, &mut node).await?;
-        let now = current_time();
-        self.bump_dir_times(parent, now).await?;
-        Ok(())
+        let mut parent_node = self.get_node(parent).await?.ok_or(MetaError::ParentNotFound(parent))?;
+        parent_node.attr.mtime = now;
+        parent_node.attr.ctime = now;
+
+        node.deleted = true;
+        node.attr.nlink = 0;
+        node.attr.ctime = now;
+
+        let updated_parent_blob = codec::encode(&parent_node)?;
+        let updated_child_blob = codec::encode(&node)?;
+
+        let script = redis::Script::new(r#"
+            local dir_key = KEYS[1]
+            local child_key = KEYS[2]
+            local parent_key = KEYS[3]
+            local deleted_set = KEYS[4]
+            local name = ARGV[1]
+            local child_ino = ARGV[2]
+            local updated_parent_blob = ARGV[3]
+            local updated_child_blob = ARGV[4]
+
+            if redis.call("HEXISTS", dir_key, name) == 0 then
+                return redis.error_reply("ENOENT")
+            end
+            redis.call("HDEL", dir_key, name)
+            redis.call("SET", child_key, updated_child_blob)
+            redis.call("SADD", deleted_set, child_ino)
+            redis.call("SET", parent_key, updated_parent_blob)
+            return "OK"
+        "#);
+
+        let mut conn = self.conn.clone();
+        let resp: Result<String, redis::RedisError> = script
+            .key(self.dir_key(parent))
+            .key(self.node_key(child))
+            .key(self.node_key(parent))
+            .key(self.deleted_set_key())
+            .arg(name)
+            .arg(child.to_string())
+            .arg(&updated_parent_blob)
+            .arg(&updated_child_blob)
+            .invoke_async(&mut conn)
+            .await;
+
+        match resp {
+            Ok(s) if s == "OK" => Ok(()),
+            Ok(s) => Err(MetaError::Internal(format!("Unexpected response: {s}"))),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("ENOENT") {
+                    Err(MetaError::NotFound(parent))
+                } else {
+                    Err(redis_err(e))
+                }
+            }
+        }
     }
 
     async fn rename(
@@ -927,23 +1014,15 @@ impl MetaStore for RedisMetaStore {
         let Some(child) = self.lookup(old_parent, old_name).await? else {
             return Err(MetaError::NotFound(old_parent));
         };
-        self.ensure_parent_dir(new_parent).await?;
-        if self.lookup(new_parent, &new_name).await?.is_some() {
-            return Err(MetaError::AlreadyExists {
-                parent: new_parent,
-                name: new_name,
-            });
-        }
+        
         let mut node = self
             .get_node(child)
             .await?
             .ok_or(MetaError::NotFound(child))?;
-        self.remove_dir_entry(old_parent, old_name).await?;
-        self.add_dir_entry(new_parent, &new_name, child).await?;
 
         if node.attr.nlink <= 1 {
             node.parent = new_parent;
-            node.name = new_name;
+            node.name = new_name.clone();
         } else {
             let mut link_parents = self.load_link_parents(child).await?;
             let mut updated = false;
@@ -968,10 +1047,86 @@ impl MetaStore for RedisMetaStore {
         let now = current_time();
         node.attr.mtime = now;
         node.attr.ctime = now;
-        self.save_node(&node).await?;
-        self.bump_dir_times(old_parent, now).await?;
-        self.bump_dir_times(new_parent, now).await?;
-        Ok(())
+
+        let mut old_parent_node = self.get_node(old_parent).await?.ok_or(MetaError::ParentNotFound(old_parent))?;
+        old_parent_node.attr.mtime = now;
+        old_parent_node.attr.ctime = now;
+
+        let mut new_parent_node = self.get_node(new_parent).await?.ok_or(MetaError::ParentNotFound(new_parent))?;
+        new_parent_node.attr.mtime = now;
+        new_parent_node.attr.ctime = now;
+
+        let updated_child_blob = codec::encode(&node)?;
+        let updated_old_parent_blob = codec::encode(&old_parent_node)?;
+        let updated_new_parent_blob = codec::encode(&new_parent_node)?;
+
+        let script = redis::Script::new(r#"
+            local old_dir = KEYS[1]
+            local new_dir = KEYS[2]
+            local child_key = KEYS[3]
+            local old_parent_key = KEYS[4]
+            local new_parent_key = KEYS[5]
+            local old_name = ARGV[1]
+            local new_name = ARGV[2]
+            local child_ino = ARGV[3]
+            local updated_child_blob = ARGV[4]
+            local updated_old_parent_blob = ARGV[5]
+            local updated_new_parent_blob = ARGV[6]
+
+            if redis.call("HEXISTS", old_dir, old_name) == 0 then
+                return redis.error_reply("ENOENT")
+            end
+            if redis.call("EXISTS", new_parent_key) == 0 then
+                return redis.error_reply("ENOTDIR")
+            end
+            if redis.call("HEXISTS", new_dir, new_name) == 1 then
+                return redis.error_reply("EEXIST")
+            end
+            redis.call("HDEL", old_dir, old_name)
+            redis.call("HSET", new_dir, new_name, child_ino)
+            redis.call("SET", child_key, updated_child_blob)
+            redis.call("SET", old_parent_key, updated_old_parent_blob)
+            if old_parent_key ~= new_parent_key then
+                redis.call("SET", new_parent_key, updated_new_parent_blob)
+            end
+            return "OK"
+        "#);
+
+        let mut conn = self.conn.clone();
+        let resp: Result<String, redis::RedisError> = script
+            .key(self.dir_key(old_parent))
+            .key(self.dir_key(new_parent))
+            .key(self.node_key(child))
+            .key(self.node_key(old_parent))
+            .key(self.node_key(new_parent))
+            .arg(old_name)
+            .arg(&new_name)
+            .arg(child.to_string())
+            .arg(&updated_child_blob)
+            .arg(&updated_old_parent_blob)
+            .arg(&updated_new_parent_blob)
+            .invoke_async(&mut conn)
+            .await;
+
+        match resp {
+            Ok(s) if s == "OK" => Ok(()),
+            Ok(s) => Err(MetaError::Internal(format!("Unexpected response: {s}"))),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("ENOENT") {
+                    Err(MetaError::NotFound(old_parent))
+                } else if msg.contains("ENOTDIR") {
+                    Err(MetaError::NotDirectory(new_parent))
+                } else if msg.contains("EEXIST") {
+                    Err(MetaError::AlreadyExists {
+                        parent: new_parent,
+                        name: new_name,
+                    })
+                } else {
+                    Err(redis_err(e))
+                }
+            }
+        }
     }
 
     async fn set_attr(
