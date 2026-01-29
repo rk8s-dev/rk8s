@@ -886,6 +886,7 @@ mod tests {
     use crate::chuck::ChunkLayout;
     use crate::chuck::store::InMemoryBlockStore;
     use crate::chuck::writer::DataUploader;
+    use crate::meta::MetaLayer;
     use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;
     use crate::vfs::config::{ReadConfig, WriteConfig};
@@ -1016,7 +1017,10 @@ mod tests {
             .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
-        let ino: i64 = 66;
+        let ino = meta
+            .create_file(1, "reader_write_eventual.txt".to_string())
+            .await
+            .unwrap();
         let data = vec![5u8; 2048];
         let inode = Inode::new(ino, 0);
 

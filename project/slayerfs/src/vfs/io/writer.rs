@@ -1036,6 +1036,7 @@ where
     pub(crate) fn start_flush_background(self: &Arc<Self>) {
         let flush_interval = self.config.flush_all_interval;
         let weak = Arc::downgrade(self);
+
         tokio::spawn(async move {
             let mut ticker = interval(flush_interval);
             loop {
@@ -1096,6 +1097,7 @@ mod tests {
     use crate::chuck::reader::DataFetcher;
     use crate::chuck::store::{BlockKey, BlockStore, InMemoryBlockStore};
     use crate::meta::factory::create_meta_store_from_url;
+    use crate::meta::MetaLayer;
     use crate::vfs::config::ReadConfig;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1152,6 +1154,10 @@ mod tests {
         async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
             self.inner.delete_range(key, len).await
         }
+
+        async fn sync_all(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -1163,7 +1169,8 @@ mod tests {
             .unwrap()
             .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
-        let inode = Inode::new(11, 0);
+        let ino = meta.create_file(1, "flush_reads.txt".to_string()).await.unwrap();
+        let inode = Inode::new(ino, 0);
         let reader = Arc::new(DataReader::new(
             Arc::new(ReadConfig::new(layout)),
             backend.clone(),
@@ -1200,7 +1207,11 @@ mod tests {
             .unwrap()
             .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
-        let inode = Inode::new(22, 0);
+        let ino = meta
+            .create_file(1, "overwrite.txt".to_string())
+            .await
+            .unwrap();
+        let inode = Inode::new(ino, 0);
         let reader = Arc::new(DataReader::new(
             Arc::new(ReadConfig::new(layout)),
             backend.clone(),
@@ -1238,7 +1249,11 @@ mod tests {
             .unwrap()
             .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
-        let inode = Inode::new(33, 0);
+        let ino = meta
+            .create_file(1, "cross_chunks.txt".to_string())
+            .await
+            .unwrap();
+        let inode = Inode::new(ino, 0);
 
         let reader_cfg = Arc::new(ReadConfig::new(layout));
         let reader = Arc::new(DataReader::new(reader_cfg, backend.clone()));
@@ -1275,7 +1290,11 @@ mod tests {
             .unwrap()
             .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
-        let inode = Inode::new(44, 0);
+        let ino = meta
+            .create_file(1, "flush_blocking.txt".to_string())
+            .await
+            .unwrap();
+        let inode = Inode::new(ino, 0);
 
         let reader = Arc::new(DataReader::new(
             Arc::new(ReadConfig::new(layout)),
@@ -1345,7 +1364,11 @@ mod tests {
         let writer_pool = Arc::new(DataWriter::new(write_cfg, backend.clone(), reader));
         writer_pool.start_flush_background();
 
-        let inode = Inode::new(55, 0);
+        let ino = meta
+            .create_file(1, "background_flush.txt".to_string())
+            .await
+            .unwrap();
+        let inode = Inode::new(ino, 0);
         let writer = writer_pool.ensure_file(inode.clone());
         let data = vec![7u8; 1024];
         writer.write_at(0, &data).await.unwrap();

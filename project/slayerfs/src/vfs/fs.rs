@@ -1830,6 +1830,45 @@ where
         Ok(())
     }
 
+    /// Flush pending writes for a file handle.
+    pub async fn flush(&self, fh: u64) -> Result<(), VfsError> {
+        let handle = self
+            .state
+            .handles
+            .get(fh)
+            .ok_or(VfsError::StaleNetworkFileHandle)?;
+
+        if handle.flags.write {
+            handle.flush().await.map_err(|_| VfsError::Other)?;
+        }
+
+        self.update_timestamps_on_flush(handle.ino).await?;
+        Ok(())
+    }
+
+    /// Sync file content to backend (fsync).
+    pub async fn fsync(&self, fh: u64, _datasync: bool) -> Result<(), VfsError> {
+        let handle = self
+            .state
+            .handles
+            .get(fh)
+            .ok_or(VfsError::StaleNetworkFileHandle)?;
+
+        if handle.flags.write {
+            handle.flush().await.map_err(|_| VfsError::Other)?;
+        }
+
+        self.core
+            .backend
+            .store()
+            .sync_all()
+            .await
+            .map_err(|_| VfsError::Other)?;
+
+        self.update_timestamps_on_flush(handle.ino).await?;
+        Ok(())
+    }
+
     /// Open a directory handle for reading. Returns the file handle ID.
     /// This pre-loads all directory entries and starts background batch prefetch for attributes.
     #[tracing::instrument(level = "trace", skip(self), fields(ino))]

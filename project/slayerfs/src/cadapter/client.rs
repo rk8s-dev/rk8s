@@ -22,6 +22,10 @@ pub trait ObjectBackend: Send + Sync {
 
     #[allow(dead_code)]
     async fn delete_object(&self, key: &str) -> Result<()>;
+
+    async fn sync_all(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -53,5 +57,9 @@ impl<B: ObjectBackend> ObjectClient<B> {
     #[allow(dead_code)]
     pub async fn delete_object(&self, key: &str) -> Result<()> {
         self.backend.delete_object(key).await
+    }
+
+    pub async fn sync_all(&self) -> Result<()> {
+        self.backend.sync_all().await
     }
 }

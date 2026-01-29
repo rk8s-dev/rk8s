@@ -69,6 +69,8 @@ pub trait BlockStore {
 
     #[allow(dead_code)]
     async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()>;
+
+    async fn sync_all(&self) -> anyhow::Result<()>;
 }
 
 pub type BlockKey = (u64 /*slice_id*/, u32 /*block_index*/);
@@ -127,6 +129,10 @@ impl BlockStore for InMemoryBlockStore {
         for i in start..end {
             guard.remove(&(chunk_id, i));
         }
+        Ok(())
+    }
+
+    async fn sync_all(&self) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -325,6 +331,7 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             Some(data) => data,
             None => vec![0u8; end],
         };
+
         tracing::Span::current().record("block_len", block.len());
         let copy_end = end.min(block.len());
         if copy_end > start {
@@ -345,6 +352,10 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
                 .map_err(|e| anyhow::anyhow!("object store delete failed: {key_str}, {e:?}"))?;
         }
         Ok(())
+    }
+
+    async fn sync_all(&self) -> anyhow::Result<()> {
+        self.client.sync_all().await
     }
 }
 

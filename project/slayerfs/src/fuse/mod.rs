@@ -1020,30 +1020,13 @@ where
     }
 
     // Flush file (close path callback)
-    async fn flush(&self, _req: Request, inode: u64, _fh: u64, _lock_owner: u64) -> FuseResult<()> {
-        // Update mtime/ctime for files that may have been modified via mmap
-        // The kernel doesn't call write() for mmap writes, so we update timestamps here
-        let ino = inode as i64;
-        if let Err(e) = self.update_timestamps_on_flush(ino).await {
-            error!(
-                "Failed to update timestamps on flush for inode {}: {}",
-                ino, e
-            );
-        }
-        Ok(())
+    async fn flush(&self, _req: Request, _inode: u64, fh: u64, _lock_owner: u64) -> FuseResult<()> {
+        self.flush(fh).await.map_err(Errno::from)
     }
 
     // Sync file content to backend
-    async fn fsync(&self, _req: Request, inode: u64, _fh: u64, _datasync: bool) -> FuseResult<()> {
-        // Update mtime/ctime for files that may have been modified via mmap
-        let ino = inode as i64;
-        if let Err(e) = self.update_timestamps_on_flush(ino).await {
-            error!(
-                "Failed to update timestamps on fsync for inode {}: {}",
-                ino, e
-            );
-        }
-        Ok(())
+    async fn fsync(&self, _req: Request, _inode: u64, fh: u64, datasync: bool) -> FuseResult<()> {
+        self.fsync(fh, datasync).await.map_err(Errno::from)
     }
 
     // Close directory handle
