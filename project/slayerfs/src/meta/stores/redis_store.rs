@@ -9,6 +9,7 @@
 use super::{apply_truncate_plan, trim_slices_in_place};
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
+use crate::meta::codec;
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::file_lock::{
     FileLockInfo, FileLockQuery, FileLockRange, FileLockType, PlockRecord,
@@ -21,6 +22,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::path::Path;
@@ -36,6 +38,7 @@ const ROOT_INODE: i64 = 1;
 const COUNTER_INODE_KEY: &str = "nextinode";
 const COUNTER_SLICE_KEY: &str = "nextchunk";
 const NODE_KEY_PREFIX: &str = "i";
+const INODE_VERSION_KEY_PREFIX: &str = "iv";
 const DIR_KEY_PREFIX: &str = "d";
 const CHUNK_KEY_PREFIX: &str = "c";
 const DELETED_SET_KEY: &str = "delslices";
@@ -94,6 +97,10 @@ impl RedisMetaStore {
     }
     fn node_key(&self, ino: i64) -> String {
         format!("{NODE_KEY_PREFIX}{ino}")
+    }
+
+    fn inode_version_key(&self, ino: i64) -> String {
+        format!("{INODE_VERSION_KEY_PREFIX}{ino}")
     }
 
     fn dir_key(&self, ino: i64) -> String {
@@ -172,9 +179,14 @@ impl RedisMetaStore {
             deleted: false,
         };
 
-        let data = serde_json::to_vec(&root).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let data = codec::encode(&root)?;
         let _: () = conn
             .set(self.node_key(ROOT_INODE), data)
+            .await
+            .map_err(redis_err)?;
+
+        let _: () = conn
+            .set(self.inode_version_key(ROOT_INODE), 0u64)
             .await
             .map_err(redis_err)?;
         // Ensure the root directory hash exists for emptiness checks.
@@ -213,8 +225,7 @@ impl RedisMetaStore {
         let mut conn = self.conn.clone();
         let data: Option<Vec<u8>> = conn.get(self.node_key(ino)).await.map_err(redis_err)?;
         if let Some(bytes) = data {
-            let node =
-                serde_json::from_slice(&bytes).map_err(|e| MetaError::Internal(e.to_string()))?;
+            let node = codec::decode::<StoredNode>(&bytes)?;
             Ok(Some(node))
         } else {
             Ok(None)
@@ -223,7 +234,7 @@ impl RedisMetaStore {
 
     async fn save_node(&self, node: &StoredNode) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
-        let data = serde_json::to_vec(node).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let data = codec::encode(node)?;
         let _: () = conn
             .set(self.node_key(node.ino), data)
             .await
@@ -343,6 +354,13 @@ impl RedisMetaStore {
             return Err(MetaError::AlreadyExists { parent, name });
         }
         let ino = self.alloc_id(INODE_ID_KEY).await?;
+        {
+            let mut conn = self.conn.clone();
+            let _: () = conn
+                .set_nx(self.inode_version_key(ino), 0u64)
+                .await
+                .map_err(redis_err)?;
+        }
         let mut node = StoredNode::new(ino, parent, name.clone(), kind);
 
         // Inherit gid and setgid bit from parent if parent has setgid bit set
@@ -427,11 +445,11 @@ impl RedisMetaStore {
         match lock_type {
             FileLockType::UnLock => {
                 // Handle unlock
-                let current_json: Option<String> =
+                let current_data: Option<Vec<u8>> =
                     conn.hget(&plock_key, &field).await.map_err(redis_err)?;
 
-                if let Some(json) = current_json {
-                    let records: Vec<PlockRecord> = serde_json::from_str(&json).unwrap_or_default();
+                if let Some(data) = current_data {
+                    let records: Vec<PlockRecord> = codec::decode::<Vec<PlockRecord>>(&data)?;
 
                     if records.is_empty() {
                         // Remove the field if no records
@@ -451,11 +469,9 @@ impl RedisMetaStore {
                         // Remove the field if no records after update
                         let _: () = conn.hdel(&plock_key, &field).await.map_err(redis_err)?;
                     } else {
-                        let new_json = serde_json::to_string(&new_records).map_err(|e| {
-                            MetaError::Internal(format!("Serialization error: {e}"))
-                        })?;
+                        let new_data = codec::encode(&new_records)?;
                         let _: () = conn
-                            .hset(&plock_key, &field, new_json)
+                            .hset(&plock_key, &field, new_data)
                             .await
                             .map_err(redis_err)?;
                     }
@@ -464,12 +480,12 @@ impl RedisMetaStore {
             }
             _ => {
                 // Handle lock request (ReadLock or WriteLock)
-                let current_json: Option<String> =
+                let current_data: Option<Vec<u8>> =
                     conn.hget(&plock_key, &field).await.map_err(redis_err)?;
 
                 // Get current locks for this owner/session
-                let current_records = if let Some(json) = current_json {
-                    serde_json::from_str(&json).unwrap_or_default()
+                let current_records = if let Some(data) = current_data {
+                    codec::decode::<Vec<PlockRecord>>(&data)?
                 } else {
                     Vec::new()
                 };
@@ -483,12 +499,12 @@ impl RedisMetaStore {
                         continue;
                     }
 
-                    let other_records_json: String = conn
+                    let other_records_data: Vec<u8> = conn
                         .hget(&plock_key, &other_field)
                         .await
                         .map_err(redis_err)?;
                     let other_records: Vec<PlockRecord> =
-                        serde_json::from_str(&other_records_json).unwrap_or_default();
+                        codec::decode::<Vec<PlockRecord>>(&other_records_data)?;
 
                     conflict_found =
                         PlockRecord::check_conflict(&lock_type, &range, &other_records);
@@ -507,12 +523,11 @@ impl RedisMetaStore {
 
                 // Update locks
                 let new_records = PlockRecord::update_locks(current_records, new_lock);
-                let new_json = serde_json::to_string(&new_records)
-                    .map_err(|e| MetaError::Internal(format!("Serialization error: {e}")))?;
+                let new_data = codec::encode(&new_records)?;
 
                 let _: () = redis::pipe()
                     .atomic()
-                    .hset(&plock_key, &field, new_json)
+                    .hset(&plock_key, &field, new_data)
                     .sadd(Self::locked_key(*sid), inode)
                     .exec_async(&mut conn)
                     .await
@@ -528,7 +543,7 @@ impl RedisMetaStore {
         let mut pipe = redis::pipe();
         pipe.cmd("DEL").arg(&key);
         for slice in slices {
-            let data = serde_json::to_vec(slice).map_err(|e| MetaError::Internal(e.to_string()))?;
+            let data = codec::encode(slice)?;
             pipe.cmd("RPUSH").arg(&key).arg(data);
         }
         pipe.query_async::<()>(&mut conn).await.map_err(redis_err)?;
@@ -687,13 +702,13 @@ impl MetaStore for RedisMetaStore {
 
         // Use MGET to fetch all nodes in a single round trip
         let mut conn = self.conn.clone();
-        let values: Vec<Option<String>> = conn.get(&keys).await.map_err(redis_err)?;
+        let values: Vec<Option<Vec<u8>>> = conn.get(&keys).await.map_err(redis_err)?;
 
         // Parse results and convert to FileAttr
         let mut results = Vec::with_capacity(inodes.len());
         for value in values {
             match value {
-                Some(json_str) => match serde_json::from_str::<StoredNode>(&json_str) {
+                Some(bytes) => match codec::decode::<StoredNode>(&bytes) {
                     Ok(node) => results.push(Some(node.as_file_attr())),
                     Err(e) => {
                         error!("Failed to deserialize node from Redis: {}", e);
@@ -872,8 +887,7 @@ impl MetaStore for RedisMetaStore {
                 node.name = remaining.1;
 
                 let key = Self::link_parent_key(child);
-                let data =
-                    serde_json::to_vec(&node).map_err(|e| MetaError::Internal(e.to_string()))?;
+                let data = codec::encode(&node)?;
 
                 let mut conn = self.conn.clone();
                 let _: () = redis::pipe()
@@ -1185,8 +1199,7 @@ impl MetaStore for RedisMetaStore {
             .map_err(redis_err)?;
         let mut slices = Vec::new();
         for entry in raw {
-            let desc: SliceDesc =
-                serde_json::from_slice(&entry).map_err(|e| MetaError::Internal(e.to_string()))?;
+            let desc: SliceDesc = codec::decode::<SliceDesc>(&entry)?;
             slices.push(desc);
         }
         Ok(slices)
@@ -1194,7 +1207,7 @@ impl MetaStore for RedisMetaStore {
 
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
-        let data = serde_json::to_vec(&slice).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let data = codec::encode(&slice)?;
         let _: () = redis::cmd("RPUSH")
             .arg(self.chunk_key(chunk_id))
             .arg(data)
@@ -1221,17 +1234,16 @@ impl MetaStore for RedisMetaStore {
             session_id,
             session_info: session_info.clone(),
             expire,
-        };
+         };
 
-        let session_info_json = serde_json::to_string(&session_info)
-            .map_err(|err| MetaError::Internal(err.to_string()))?;
+         let session_info_data = serde_json::to_vec(&session_info).map_err(MetaError::from)?;
 
-        let session_id_string = session_id.to_string();
+         let session_id_string = session_id.to_string();
 
         redis::pipe()
             .atomic()
             .zadd(ALL_SESSIONS_KEY, &session_id_string, expire)
-            .hset(SESSION_INFOS_KEY, &session_id_string, session_info_json)
+            .hset(SESSION_INFOS_KEY, &session_id_string, session_info_data)
             .exec_async(&mut conn)
             .await
             .map_err(|err| MetaError::Internal(err.to_string()))?;
@@ -1334,9 +1346,9 @@ impl MetaStore for RedisMetaStore {
 
         // First, try to get locks from current session's field
         let current_field = format!("{}:{}", sid, query.owner);
-        let records_json: Result<String, _> = conn.hget(&plock_key, &current_field).await;
-        if let Ok(records_json) = records_json {
-            let records: Vec<PlockRecord> = serde_json::from_str(&records_json).unwrap_or_default();
+        let records_data: Result<Vec<u8>, _> = conn.hget(&plock_key, &current_field).await;
+        if let Ok(records_data) = records_data {
+            let records: Vec<PlockRecord> = codec::decode::<Vec<PlockRecord>>(&records_data)?;
             if let Some(v) = PlockRecord::get_plock(&records, query, sid, sid) {
                 return Ok(v);
             }
@@ -1362,8 +1374,8 @@ impl MetaStore for RedisMetaStore {
                 .parse()
                 .map_err(|_| MetaError::Internal("Invalid owner in plock field".to_string()))?;
 
-            let records_json: String = conn.hget(&plock_key, &field).await.map_err(redis_err)?;
-            let records: Vec<PlockRecord> = serde_json::from_str(&records_json).unwrap_or_default();
+            let records_data: Vec<u8> = conn.hget(&plock_key, &field).await.map_err(redis_err)?;
+            let records: Vec<PlockRecord> = codec::decode::<Vec<PlockRecord>>(&records_data)?;
 
             if let Some(v) = PlockRecord::get_plock(&records, query, sid, &lock_sid) {
                 return Ok(v);
@@ -1410,7 +1422,7 @@ impl MetaStore for RedisMetaStore {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 struct StoredNode {
     ino: i64,
     parent: i64,
@@ -1438,7 +1450,7 @@ impl StoredNode {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 struct StoredAttr {
     size: u64,
     mode: u32,
@@ -1486,7 +1498,18 @@ impl StoredAttr {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 enum NodeKind {
     File,
     Dir,

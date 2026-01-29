@@ -3,6 +3,7 @@
 //! Monitors etcd changes and invalidates local cache to maintain consistency
 //! across multiple clients.
 
+use crate::meta::codec;
 use crate::meta::entities::etcd::{EtcdDirChildren, EtcdEntryInfo, EtcdForwardEntry};
 use crate::meta::store::MetaError;
 use etcd_client::{Client as EtcdClient, EventType, WatchOptions};
@@ -259,7 +260,8 @@ impl EtcdWatchWorker {
     ) -> Vec<CacheInvalidationEvent> {
         let mut events = Vec::new();
 
-        // Parse key prefix
+        let key = key.strip_prefix("slayerfs/").unwrap_or(key);
+
         let parts: Vec<&str> = key.split(':').collect();
         if parts.is_empty() {
             return events;
@@ -273,26 +275,15 @@ impl EtcdWatchWorker {
 
                     match event_type {
                         EventType::Put => {
-                            // Try to extract child_ino from EtcdForwardEntry JSON
-                            // Value format: {"parent_inode":1,"name":"file","inode":123,"is_file":true}
-                            if let Ok(value_str) = std::str::from_utf8(value) {
-                                // Parse as EtcdForwardEntry
-                                if let Ok(forward_entry) =
-                                    serde_json::from_str::<EtcdForwardEntry>(value_str)
-                                {
-                                    events.push(CacheInvalidationEvent::AddChild {
-                                        parent_ino,
-                                        name,
-                                        child_ino: forward_entry.inode,
-                                    });
-                                    return events;
-                                }
+                            if let Ok(forward_entry) = codec::decode::<EtcdForwardEntry>(value) {
+                                events.push(CacheInvalidationEvent::AddChild {
+                                    parent_ino,
+                                    name,
+                                    child_ino: forward_entry.inode,
+                                });
+                                return events;
                             }
 
-                            // Fallback: value parse failed
-                            warn!(
-                                "Failed to parse EtcdForwardEntry JSON from f: key PUT, using coarse-grained invalidation"
-                            );
                             events
                                 .push(CacheInvalidationEvent::InvalidateParentChildren(parent_ino));
                         }
@@ -307,11 +298,7 @@ impl EtcdWatchWorker {
                 if let Ok(inode) = parts[1].parse::<i64>() {
                     match event_type {
                         EventType::Put => {
-                            // Try to parse EtcdEntryInfo JSON from value
-                            if let Ok(value_str) = std::str::from_utf8(value)
-                                && let Ok(metadata) =
-                                    serde_json::from_str::<EtcdEntryInfo>(value_str)
-                            {
+                            if let Ok(metadata) = serde_json::from_slice::<EtcdEntryInfo>(value) {
                                 events.push(CacheInvalidationEvent::UpdateInodeMetadata {
                                     ino: inode,
                                     metadata,
@@ -319,10 +306,6 @@ impl EtcdWatchWorker {
                                 return events;
                             }
 
-                            // Fallback: JSON parse failed
-                            warn!(
-                                "Failed to parse EtcdEntryInfo JSON from r: key PUT, using invalidate"
-                            );
                             events.push(CacheInvalidationEvent::InvalidateInode(inode));
                         }
                         EventType::Delete => {
@@ -338,11 +321,7 @@ impl EtcdWatchWorker {
                 if let Ok(parent_ino) = parts[1].parse::<i64>() {
                     match event_type {
                         EventType::Put => {
-                            // Parse EtcdDirChildren from JSON and extract children HashMap
-                            if let Ok(value_str) = std::str::from_utf8(value)
-                                && let Ok(dir_children) =
-                                    serde_json::from_str::<EtcdDirChildren>(value_str)
-                            {
+                            if let Ok(dir_children) = serde_json::from_slice::<EtcdDirChildren>(value) {
                                 events.push(CacheInvalidationEvent::UpdateChildren {
                                     parent_ino,
                                     children: dir_children.children,
@@ -350,10 +329,6 @@ impl EtcdWatchWorker {
                                 return events;
                             }
 
-                            // Fallback: JSON parse failed
-                            warn!(
-                                "Failed to parse EtcdDirChildren JSON from c: key PUT, using invalidate"
-                            );
                             events
                                 .push(CacheInvalidationEvent::InvalidateParentChildren(parent_ino));
                         }
@@ -390,8 +365,15 @@ mod tests {
     #[test]
     fn test_parse_forward_key_put() {
         // PUT event with child_ino in value
-        let json = br#"{"parent_inode":10,"name":"file.txt","inode":100,"is_file":true}"#;
-        let events = EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Put, json);
+        let value = codec::encode(&EtcdForwardEntry {
+            parent_inode: 10,
+            name: "file.txt".to_string(),
+            inode: 100,
+            is_file: true,
+            entry_type: None,
+        })
+        .unwrap();
+        let events = EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Put, &value);
         assert_eq!(events.len(), 1);
         match &events[0] {
             CacheInvalidationEvent::AddChild {
@@ -435,19 +417,37 @@ mod tests {
 
     #[test]
     fn test_parse_reverse_key() {
-        let events = EtcdWatchWorker::parse_key_to_events("r:100", EventType::Put, b"");
+        let value = serde_json::to_vec(&EtcdEntryInfo {
+            is_file: true,
+            size: Some(0),
+            version: Some(0),
+            permission: crate::meta::Permission::new(0o100644, 0, 0),
+            access_time: 0,
+            modify_time: 0,
+            create_time: 0,
+            nlink: 1,
+            parent_inode: 1,
+            entry_name: "x".to_string(),
+            deleted: false,
+            symlink_target: None,
+        })
+        .unwrap();
+        let events = EtcdWatchWorker::parse_key_to_events("r:100", EventType::Put, &value);
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
-            CacheInvalidationEvent::InvalidateInode(100)
+            CacheInvalidationEvent::UpdateInodeMetadata { .. }
         ));
     }
 
     #[test]
     fn test_parse_children_key_put() {
-        // PUT event with HashMap<String, i64> generates UpdateChildren
-        let json = r#"{"inode":50,"children":{"file.txt":100,"dir":200}}"#;
-        let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, json.as_bytes());
+        let value = serde_json::to_vec(&EtcdDirChildren {
+            inode: 50,
+            children: HashMap::from([("file.txt".to_string(), 100), ("dir".to_string(), 200)]),
+        })
+        .unwrap();
+        let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, &value);
         assert_eq!(events.len(), 1);
         match &events[0] {
             CacheInvalidationEvent::UpdateChildren {
@@ -475,8 +475,7 @@ mod tests {
 
     #[test]
     fn test_parse_children_key_invalid_json() {
-        // PUT with invalid JSON falls back to coarse-grained
-        let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, b"invalid json");
+        let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, b"invalid");
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
