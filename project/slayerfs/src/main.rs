@@ -118,7 +118,8 @@ fn init_tracing() {
         let path_for_log = path.clone();
         let builder = tracing_chrome::ChromeLayerBuilder::new()
             .file(path)
-            .trace_style(tracing_chrome::TraceStyle::Async);
+            .trace_style(tracing_chrome::TraceStyle::Async)
+            .include_args(true);
         let (layer, guard) = builder.build();
         eprintln!("[slayerfs] tracing-chrome enabled: {}", path_for_log);
         register_chrome_guard(guard);

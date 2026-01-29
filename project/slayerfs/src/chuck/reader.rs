@@ -10,6 +10,7 @@ use anyhow::{Result, ensure};
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use std::cmp::{max, min};
+use tracing::Instrument;
 
 pub(crate) struct DataFetcher<'a, B, M> {
     layout: ChunkLayout,
@@ -34,12 +35,30 @@ where
         }
     }
 
-    pub(crate) async fn prepare_slices(&mut self) -> anyhow::Result<()> {
-        self.slices = self.backend.meta().get_slices(self.id).await?;
+    pub(crate) async fn prepare_slices(&mut self) -> Result<()> {
+        let chunk_id = self.id;
+        let backend = self.backend;
+        let slices = async {
+            let slices = backend.meta().get_slices(chunk_id).await?;
+            tracing::Span::current().record("slice_count", slices.len());
+            Ok::<_, anyhow::Error>(slices)
+        }
+        .instrument(tracing::trace_span!(
+            "fetch.prepare_slices",
+            chunk_id,
+            slice_count = tracing::field::Empty
+        ))
+        .await?;
+        self.slices = slices;
         self.prepared = true;
         Ok(())
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(chunk_id = self.id, offset, len, need_reads = tracing::field::Empty)
+    )]
     pub(crate) async fn read_at(&mut self, offset: u32, len: usize) -> Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
@@ -51,14 +70,21 @@ where
 
         let mut buf = vec![0; len];
 
-        let mut intervals = Intervals::new(offset, offset + len as u32);
-        let mut need_read = Vec::new();
-        for slice in self.slices.iter().copied().rev() {
-            for (l, r) in intervals.cut(slice.offset, slice.offset + slice.length) {
-                need_read.push((l, r, slice));
-            }
-        }
-        need_read.sort_by_key(|(l, _, _)| *l);
+        let need_read = tracing::trace_span!("fetch.read_at.build_need_read", offset, len)
+            .in_scope(|| {
+                let mut intervals = Intervals::new(offset, offset + len as u32);
+                let mut need_read = Vec::new();
+
+                for slice in self.slices.iter().copied().rev() {
+                    for (l, r) in intervals.cut(slice.offset, slice.offset + slice.length) {
+                        need_read.push((l, r, slice));
+                    }
+                }
+
+                need_read.sort_by_key(|(l, _, _)| *l);
+                need_read
+            });
+        tracing::Span::current().record("need_reads", need_read.len());
 
         let layout = self.layout;
         let backend = self.backend;
@@ -86,19 +112,33 @@ where
                     ..slice
                 };
 
-                futures.push(async move {
-                    let mut pos = 0_usize;
-                    for span in block_span_iter(desc, layout) {
-                        let take = span.len as usize;
-                        let out = &mut seg[pos..pos + take];
-                        backend
-                            .store()
-                            .read_range((desc.slice_id, span.index as u32), span.offset, out)
-                            .await?;
-                        pos += take;
+                let span = tracing::trace_span!(
+                    "fetch.read_slice",
+                    slice_id = desc.slice_id,
+                    offset = desc.offset,
+                    len = desc.length,
+                    blocks = tracing::field::Empty
+                );
+
+                futures.push(
+                    async move {
+                        let mut pos = 0_usize;
+                        let mut blocks = 0usize;
+                        for span in block_span_iter(desc, layout) {
+                            blocks += 1;
+                            let take = span.len as usize;
+                            let out = &mut seg[pos..pos + take];
+                            backend
+                                .store()
+                                .read_range((desc.slice_id, span.index as u32), span.offset, out)
+                                .await?;
+                            pos += take;
+                        }
+                        tracing::Span::current().record("blocks", blocks);
+                        Ok::<_, anyhow::Error>(())
                     }
-                    Ok::<_, anyhow::Error>(())
-                });
+                    .instrument(span),
+                );
             }
 
             while let Some(res) = futures.next().await {

@@ -29,7 +29,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
-use tracing::error;
+use tracing::{Instrument, error};
 use uuid::Uuid;
 
 const ROOT_INODE: i64 = 1;
@@ -1293,7 +1293,11 @@ impl MetaStore for RedisMetaStore {
         self.delete_node(ino).await
     }
 
-    #[tracing::instrument(level = "trace", skip(self), fields(chunk_id))]
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(chunk_id, slice_count = tracing::field::Empty)
+    )]
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
         let mut conn = self.conn.clone();
         let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
@@ -1301,6 +1305,7 @@ impl MetaStore for RedisMetaStore {
             .arg(0)
             .arg(-1)
             .query_async(&mut conn)
+            .instrument(tracing::trace_span!("get_slices.redis_lrange", chunk_id))
             .await
             .map_err(redis_err)?;
         let mut slices = Vec::new();
@@ -1309,6 +1314,7 @@ impl MetaStore for RedisMetaStore {
                 serde_json::from_slice(&entry).map_err(|e| MetaError::Internal(e.to_string()))?;
             slices.push(desc);
         }
+        tracing::Span::current().record("slice_count", slices.len());
         Ok(slices)
     }
 
@@ -1327,6 +1333,22 @@ impl MetaStore for RedisMetaStore {
             .await
             .map_err(redis_err)?;
         Ok(())
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(ino, chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length, new_size)
+    )]
+    async fn write(
+        &self,
+        ino: i64,
+        chunk_id: u64,
+        slice: SliceDesc,
+        new_size: u64,
+    ) -> Result<(), MetaError> {
+        self.append_slice(chunk_id, slice).await?;
+        self.extend_file_size(ino, new_size).await
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(key))]

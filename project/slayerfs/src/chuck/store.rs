@@ -17,7 +17,6 @@ use tokio::{
     io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     sync::RwLock,
 };
-use tracing::info;
 
 /// Abstract block store interface (cadapter/S3/etc. can implement this).
 #[async_trait]
@@ -135,6 +134,7 @@ impl BlockStore for InMemoryBlockStore {
 /// BlockStore backed by cadapter::client (key space `chunks/{chunk_id}/{block_index}`).
 pub struct ObjectBlockStore<B: ObjectBackend> {
     client: ObjectClient<B>,
+    #[allow(dead_code)]
     block_cache: ChunksCache,
 }
 
@@ -228,13 +228,6 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             .await
             .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
 
-        let etag = self
-            .client
-            .get_etag(&key_str)
-            .await
-            .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key_str, etag);
-        let _ = self.block_cache.remove(&cache_key).await;
         Ok(total_len as u64)
     }
 
@@ -258,13 +251,6 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             .await
             .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
 
-        let etag = self
-            .client
-            .get_etag(&key_str)
-            .await
-            .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key_str, etag);
-        let _ = self.block_cache.remove(&cache_key).await;
         Ok(data.len() as u64)
     }
 
@@ -293,13 +279,6 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             .await
             .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
 
-        let etag = self
-            .client
-            .get_etag(&key_str)
-            .await
-            .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key_str, etag);
-        let _ = self.block_cache.remove(&cache_key).await;
         Ok(total_len as u64)
     }
 
@@ -326,38 +305,16 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             .await
             .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
 
-        let etag = self
-            .client
-            .get_etag(&key_str)
-            .await
-            .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key_str, etag);
-        let _ = self.block_cache.remove(&cache_key).await;
         Ok(data.len() as u64)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, buf), fields(len = buf.len()))]
+    #[tracing::instrument(level = "trace", skip(self, buf), fields(key = ?key, offset, len = buf.len(), block_len = tracing::field::Empty))]
     async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
         let key_str = Self::key_for(key);
         let len = buf.len();
         buf.fill(0);
         let start = offset as usize;
         let end = start + len;
-
-        let etag = self
-            .client
-            .get_etag(&key_str)
-            .await
-            .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key_str, etag);
-        if let Some(block) = self.block_cache.get(&cache_key).await {
-            let copy_end = end.min(block.len());
-            if copy_end > start {
-                buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
-            }
-            info!("Read block range from cache");
-            return Ok(());
-        }
 
         let block = match self
             .client
@@ -368,11 +325,11 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             Some(data) => data,
             None => vec![0u8; end],
         };
+        tracing::Span::current().record("block_len", block.len());
         let copy_end = end.min(block.len());
         if copy_end > start {
             buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
         }
-        let _ = self.block_cache.insert(&cache_key, &block).await;
         Ok(())
     }
 

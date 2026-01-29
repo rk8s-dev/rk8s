@@ -31,7 +31,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::{interval, timeout};
-use tracing::warn;
+use tracing::{Instrument, warn};
 
 const FLUSH_DURATION: Duration = Duration::from_secs(5);
 const COMMIT_WAIT_SLICE: Duration = Duration::from_millis(100);
@@ -778,9 +778,11 @@ where
             let Some(slice) = slice else {
                 let mut guard = shared.inner.lock().await;
                 guard.chunks.remove(&chunk_id);
+
                 if !guard.has_chunks() && guard.flush_waiting > 0 {
                     shared.flush_notify.notify_waiters();
                 }
+
                 return;
             };
 
@@ -795,12 +797,15 @@ where
 
             if matches!(runtime.status, SliceStatus::Failed) {
                 Self::spawn_flush_slice(shared.clone(), slice.clone());
-                tokio::time::sleep(COMMIT_WAIT_SLICE).await;
+                tokio::time::sleep(COMMIT_WAIT_SLICE)
+                    .instrument(tracing::trace_span!("commit_chunk.wait_retry"))
+                    .await;
                 continue;
             }
 
             if !runtime.upload_done() {
                 if timeout(COMMIT_WAIT_SLICE, runtime.notify.notified())
+                    .instrument(tracing::trace_span!("commit_chunk.wait_upload"))
                     .await
                     .is_ok()
                 {
@@ -809,12 +814,16 @@ where
 
                 // If the slice is too old, it will be frozen and flushed.
                 if !runtime.frozen && runtime.started.elapsed() > FLUSH_DURATION * 2 {
+                    let _span = tracing::trace_span!("commit_chunk.freeze").entered();
                     let froze = SliceHandle {
                         slice: &slice,
                         shared: &shared,
                     }
                     .freeze();
+
                     if froze {
+                        let _spawn_span =
+                            tracing::trace_span!("commit_chunk.spawn_flush").entered();
                         Self::spawn_flush_slice(shared.clone(), slice.clone());
                     }
                 }
@@ -831,12 +840,26 @@ where
                 .desc_for_commit();
 
                 if let Some(desc) = desc {
+                    let (ino, chunk_index) = extract_ino_and_chunk_index(desc.chunk_id);
+                    let file_offset =
+                        chunk_index * shared.config.layout.chunk_size + desc.offset as u64;
+                    let new_size = file_offset + desc.length as u64;
                     let ok = shared
                         .backend
                         .meta()
-                        .append_slice(desc.chunk_id, desc)
+                        .write(ino, desc.chunk_id, desc, new_size)
+                        .instrument(tracing::trace_span!(
+                            "commit_chunk.meta_write",
+                            ino,
+                            chunk_id = desc.chunk_id,
+                            slice_id = desc.slice_id,
+                            offset = desc.offset,
+                            len = desc.length,
+                            new_size
+                        ))
                         .await
                         .is_ok();
+
                     if ok {
                         SliceHandle {
                             slice: &slice,
@@ -844,12 +867,15 @@ where
                         }
                         .mark_committed();
 
-                        let (ino, chunk_index) = extract_ino_and_chunk_index(desc.chunk_id);
-                        let file_offset =
-                            chunk_index * shared.config.layout.chunk_size + desc.offset as u64;
                         let _ = shared
                             .reader
                             .invalidate(ino as u64, file_offset, desc.length as usize)
+                            .instrument(tracing::trace_span!(
+                                "commit_chunk.invalidate",
+                                ino,
+                                offset = file_offset,
+                                len = desc.length
+                            ))
                             .await;
                         should_pop = true;
                     }
@@ -861,11 +887,17 @@ where
             }
 
             if !should_pop {
-                tokio::time::sleep(COMMIT_WAIT_SLICE).await;
+                tokio::time::sleep(COMMIT_WAIT_SLICE)
+                    .instrument(tracing::trace_span!("commit_chunk.wait_retry"))
+                    .await;
                 continue;
             }
 
-            let mut guard = shared.inner.lock().await;
+            let mut guard = shared
+                .inner
+                .lock()
+                .instrument(tracing::trace_span!("commit_chunk.pop_lock"))
+                .await;
             if let Some(chunk) = guard.chunks.get_mut(&chunk_id) {
                 let _ = chunk.slices.pop_front();
             }

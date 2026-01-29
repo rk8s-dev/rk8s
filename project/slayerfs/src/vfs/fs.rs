@@ -1740,14 +1740,6 @@ where
         }
 
         let written = handle.write(offset, data).await?;
-
-        let target_size = offset + written as u64;
-
-        // POSIX semantic for `write`: it is unable to shorten the file.
-        self.core
-            .meta_layer
-            .extend_file_size(handle.ino, target_size)
-            .await?;
         self.state.modified.touch(handle.ino).await;
         Ok(written)
     }

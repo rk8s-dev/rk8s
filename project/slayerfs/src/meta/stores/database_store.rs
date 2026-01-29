@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::error;
+use tracing::{Instrument, error};
 
 #[derive(Eq, Hash, PartialEq)]
 struct PlockHashMapKey {
@@ -2383,16 +2383,23 @@ impl MetaStore for DatabaseMetaStore {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self), fields(chunk_id))]
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(chunk_id, slice_count = tracing::field::Empty)
+    )]
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
         let rows = SliceMeta::find()
             .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
             .order_by_asc(slice_meta::Column::Id)
             .all(&self.db)
+            .instrument(tracing::trace_span!("get_slices.query", chunk_id))
             .await
             .map_err(MetaError::Database)?;
 
-        Ok(rows.into_iter().map(Into::into).collect())
+        let slices: Vec<SliceDesc> = rows.into_iter().map(Into::into).collect();
+        tracing::Span::current().record("slice_count", slices.len());
+        Ok(slices)
     }
 
     #[tracing::instrument(
@@ -2410,6 +2417,64 @@ impl MetaStore for DatabaseMetaStore {
         };
 
         model.insert(&self.db).await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(ino, chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length, new_size)
+    )]
+    async fn write(
+        &self,
+        ino: i64,
+        chunk_id: u64,
+        slice: SliceDesc,
+        new_size: u64,
+    ) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let model = slice_meta::ActiveModel {
+            chunk_id: Set(chunk_id as i64),
+            slice_id: Set(slice.slice_id as i64),
+            offset: Set(slice.offset as i32),
+            length: Set(slice.length as i32),
+            ..Default::default()
+        };
+
+        if let Err(err) = model.insert(&txn).await {
+            let _ = txn.rollback().await;
+            return Err(MetaError::Database(err));
+        }
+
+        let now = Self::now_nanos();
+        let result = file_meta::Entity::update_many()
+            .col_expr(
+                file_meta::Column::Size,
+                sea_query::Expr::val(new_size as i64).into(),
+            )
+            .col_expr(
+                file_meta::Column::ModifyTime,
+                sea_query::Expr::val(now).into(),
+            )
+            .filter(file_meta::Column::Inode.eq(ino))
+            .filter(file_meta::Column::Size.lt(new_size as i64))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if result.rows_affected == 0 {
+            let exists = FileMeta::find_by_id(ino)
+                .one(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+            if exists.is_none() {
+                let _ = txn.rollback().await;
+                return Err(MetaError::NotFound(ino));
+            }
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
     }
 

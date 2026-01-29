@@ -27,10 +27,12 @@ pub trait MetaLayer: Send + Sync {
 
     /// Returns / mutates the logical root inode alias used by chroot.
     fn root_ino(&self) -> i64;
+
     fn chroot(&self, inode: i64);
 
     /// Performs backend initialization / schema checks.
     async fn initialize(&self) -> Result<(), MetaError>;
+
     async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError>;
 
     // ---------- Core path operations ----------
@@ -38,21 +40,32 @@ pub trait MetaLayer: Send + Sync {
 
     /// Do `stat` but bypass the inode cache.
     async fn stat_fresh(&self, ino: i64) -> Result<Option<FileAttr>, MetaError>;
+
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError>;
+
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError>;
+
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError>;
+
     async fn opendir(&self, ino: i64) -> Result<DirHandle, MetaError>;
+
     async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError>;
+
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError>;
+
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError>;
+
     async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError>;
+
     async fn symlink(
         &self,
         parent: i64,
         name: &str,
         target: &str,
     ) -> Result<(i64, FileAttr), MetaError>;
+
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError>;
+
     async fn rename(
         &self,
         old_parent: i64,
@@ -151,12 +164,19 @@ pub trait MetaLayer: Send + Sync {
     }
 
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
+
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
+
     async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError>;
+
     async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError>;
+
     async fn get_dentries(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError>;
+
     async fn get_dir_parent(&self, dir_ino: i64) -> Result<Option<i64>, MetaError>;
+
     async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError>;
+
     async fn read_symlink(&self, ino: i64) -> Result<String, MetaError>;
 
     // ---------- Attribute + handle helpers ----------
@@ -166,23 +186,39 @@ pub trait MetaLayer: Send + Sync {
         req: &SetAttrRequest,
         flags: SetAttrFlags,
     ) -> Result<FileAttr, MetaError>;
+
     async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError>;
+
     async fn close(&self, ino: i64) -> Result<(), MetaError>;
 
-    // ---------- Chunk + ID utilities ----------
+    async fn write(
+        &self,
+        ino: i64,
+        chunk_id: u64,
+        slice: SliceDesc,
+        new_size: u64,
+    ) -> Result<(), MetaError>;
+
+    // ---------- Metadata + ID utilities ----------
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError>;
+
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError>;
+
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError>;
+
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError>;
+
     async fn next_id(&self, key: &str) -> Result<i64, MetaError>;
 
     // ---------- Session lifecycle ----------
     async fn start_session(&self, session_info: SessionInfo) -> Result<(), MetaError>;
+
     async fn shutdown_session(&self) -> Result<(), MetaError>;
 
     // ---------- File lock operations ----------
     async fn get_plock(&self, inode: i64, query: &FileLockQuery)
     -> Result<FileLockInfo, MetaError>;
+
     async fn set_plock(
         &self,
         inode: i64,

@@ -243,11 +243,11 @@ impl CacheTtl {
         }
     }
 
-    /// Etcd backend defaults (100ms TTL for distributed consistency)
+    /// Etcd backend defaults (longer TTL improves slice cache reuse)
     pub fn for_etcd() -> Self {
         Self {
-            inode_ttl: Duration::from_millis(100),
-            path_ttl: Duration::from_millis(100),
+            inode_ttl: Duration::from_secs(2),
+            path_ttl: Duration::from_secs(2),
         }
     }
 

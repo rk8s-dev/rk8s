@@ -27,7 +27,10 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static
         let fs = VFS::with_meta_layer(layout, store, meta_layer)?;
         Ok(Self { fs })
     }
+}
 
+#[allow(unused)]
+impl<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static> Client<S, M> {
     pub fn from_vfs(fs: VFS<S, M>) -> Self {
         Self { fs }
     }
@@ -160,9 +163,9 @@ impl LocalClient {
     pub async fn new_local<P: AsRef<Path>>(root: P, layout: ChunkLayout) -> Result<Self, VfsError> {
         let client = ObjectClient::new(LocalFsBackend::new(root));
         let meta_handle = create_meta_store_from_url("sqlite::memory:").await?;
-        let metadata = meta_handle.layer();
+        let meta_layer = meta_handle.layer();
         let store = ObjectBlockStore::new(client);
-        let fs = VFS::with_meta_layer(layout, store, metadata)?;
+        let fs = VFS::with_meta_layer(layout, store, meta_layer)?;
         Ok(Client { fs })
     }
 }

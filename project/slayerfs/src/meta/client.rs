@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 use std::{collections::HashSet, process};
 use tokio::sync::{Mutex, mpsc};
-use tracing::{debug, info, trace, warn};
+use tracing::{Instrument, debug, info, trace, warn};
 use uuid::Uuid;
 
 use crate::vfs::extract_ino_and_chunk_index;
@@ -710,8 +710,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                     let resolved_target = if target.starts_with('/') {
                         target
                     } else {
-                        let parent_path = self
-                            .get_paths(current_ino)
+                        let parent_path = MetaLayer::get_paths(self, current_ino)
                             .await?
                             .into_iter()
                             .next()
@@ -1704,6 +1703,44 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.close(inode).await
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(
+            ino,
+            chunk_id,
+            slice_id = slice.slice_id,
+            offset = slice.offset,
+            len = slice.length,
+            new_size
+        )
+    )]
+    async fn write(
+        &self,
+        ino: i64,
+        chunk_id: u64,
+        slice: SliceDesc,
+        new_size: u64,
+    ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        self.store.write(inode, chunk_id, slice, new_size).await?;
+
+        let (inode_from_chunk, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        self.inode_cache
+            .append_slice(inode_from_chunk, chunk_index, slice)
+            .await;
+
+        if let Some(node) = self.inode_cache.get_node(inode).await {
+            let mut attr = node.attr.write().await;
+            if new_size > attr.size {
+                attr.size = new_size;
+            }
+        }
+
+        Ok(())
+    }
+
     #[tracing::instrument(level = "trace", skip(self))]
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
         self.store.get_deleted_files().await
@@ -1715,13 +1752,38 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.remove_file_metadata(ino).await
     }
 
-    #[tracing::instrument(level = "trace", skip(self), fields(chunk_id))]
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(chunk_id, cache_hit = tracing::field::Empty, slice_count = tracing::field::Empty)
+    )]
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
         let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
-        if let Some(slices) = self.inode_cache.get_slices(inode, chunk_index).await {
+        if let Some(slices) = self
+            .inode_cache
+            .get_slices(inode, chunk_index)
+            .instrument(tracing::trace_span!(
+                "get_slices.cache_lookup",
+                inode,
+                chunk_index
+            ))
+            .await
+        {
+            tracing::Span::current().record("cache_hit", true);
+            tracing::Span::current().record("slice_count", slices.len());
             return Ok(slices);
         }
-        self.store.get_slices(chunk_id).await
+        tracing::Span::current().record("cache_hit", false);
+        let slices = self
+            .store
+            .get_slices(chunk_id)
+            .instrument(tracing::trace_span!("get_slices.store", chunk_id))
+            .await?;
+        self.inode_cache
+            .replace_slices(inode, chunk_index, &slices)
+            .await;
+        tracing::Span::current().record("slice_count", slices.len());
+        Ok(slices)
     }
 
     #[tracing::instrument(
@@ -1740,7 +1802,6 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self), fields(key))]
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
         self.ensure_writable()?;
         self.store.next_id(key).await
