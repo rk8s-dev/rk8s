@@ -57,6 +57,9 @@ pub struct MetaClientOptions {
     pub max_symlinks: usize,
     /// Batch attribute prefetch configuration
     pub batch_prefetch: BatchPrefetchConfig,
+    /// Enable etcd watch worker for real-time cache invalidation.
+    /// Default: false (close-to-open consistency preferred)
+    pub watch_enabled: bool,
 }
 
 /// Configuration for batch attribute prefetching during opendir
@@ -129,6 +132,7 @@ impl Default for MetaClientOptions {
             case_insensitive: false,
             max_symlinks: 40,
             batch_prefetch: BatchPrefetchConfig::default(),
+            watch_enabled: false,
         }
     }
 }
@@ -204,7 +208,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         );
 
         // Detect if this is an etcd backend and start Watch Worker
-        let watch_worker = if options.no_background_jobs {
+        let watch_worker = if options.no_background_jobs || !options.watch_enabled {
             None
         } else if let Some(etcd_store) = store.as_any().downcast_ref::<EtcdMetaStore>() {
             let client = etcd_store.get_client();
@@ -2230,5 +2234,11 @@ mod tests {
         // Verify new file is accessible
         let ino_file3 = client.resolve_path("/dira/file3.txt").await.unwrap();
         assert_eq!(ino_file3, _file3);
+    }
+
+    #[test]
+    fn test_meta_client_options_default_watch_disabled() {
+        let opts = MetaClientOptions::default();
+        assert!(!opts.watch_enabled, "watch should be disabled by default");
     }
 }

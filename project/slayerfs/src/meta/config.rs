@@ -150,6 +150,11 @@ pub struct ClientOptions {
     /// Maximum symlink follow depth.
     #[serde(default = "default_max_symlinks")]
     pub max_symlinks: usize,
+    /// Enable etcd watch for real-time cache invalidation.
+    /// Default: false (close-to-open consistency is sufficient for most use cases)
+    /// When true AND database is etcd, watch worker will be started.
+    #[serde(default)]
+    pub watch_enabled: bool,
 }
 
 fn default_max_symlinks() -> usize {
@@ -343,5 +348,16 @@ impl DatabaseType {
             DatabaseType::Etcd { .. } => "etcd",
             DatabaseType::Redis { .. } => "redis",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_options_default_watch_disabled() {
+        let opts = ClientOptions::default();
+        assert!(!opts.watch_enabled, "watch should be disabled by default");
     }
 }
