@@ -528,7 +528,7 @@ impl RedisMetaStore {
         let mut pipe = redis::pipe();
         pipe.cmd("DEL").arg(&key);
         for slice in slices {
-            let data = serde_json::to_vec(slice).map_err(|e| MetaError::Internal(e.to_string()))?;
+            let data = crate::meta::serialization::serialize_meta(slice)?;
             pipe.cmd("RPUSH").arg(&key).arg(data);
         }
         pipe.query_async::<()>(&mut conn).await.map_err(redis_err)?;
@@ -1310,8 +1310,7 @@ impl MetaStore for RedisMetaStore {
             .map_err(redis_err)?;
         let mut slices = Vec::new();
         for entry in raw {
-            let desc: SliceDesc =
-                serde_json::from_slice(&entry).map_err(|e| MetaError::Internal(e.to_string()))?;
+            let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
             slices.push(desc);
         }
         tracing::Span::current().record("slice_count", slices.len());
@@ -1325,7 +1324,7 @@ impl MetaStore for RedisMetaStore {
     )]
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
-        let data = serde_json::to_vec(&slice).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let data = crate::meta::serialization::serialize_meta(&slice)?;
         let _: () = redis::cmd("RPUSH")
             .arg(self.chunk_key(chunk_id))
             .arg(data)
