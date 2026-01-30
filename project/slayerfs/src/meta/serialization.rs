@@ -21,6 +21,7 @@
 //! - Else → JSON fallback
 
 use crate::meta::store::MetaError;
+#[cfg_attr(feature = "rkyv-serialization", allow(unused_imports))]
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
 /// Current schema version for rkyv serialization format.
@@ -45,15 +46,15 @@ pub fn serialize_meta<T>(value: &T) -> Result<Vec<u8>, MetaError>
 where
     T: rkyv::Archive,
     for<'a> T: rkyv::Serialize<
-        rkyv::rancor::Strategy<
-            rkyv::ser::Serializer<
-                rkyv::util::AlignedVec,
-                rkyv::ser::allocator::ArenaHandle<'a>,
-                rkyv::ser::sharing::Share,
+            rkyv::rancor::Strategy<
+                rkyv::ser::Serializer<
+                    rkyv::util::AlignedVec,
+                    rkyv::ser::allocator::ArenaHandle<'a>,
+                    rkyv::ser::sharing::Share,
+                >,
+                rkyv::rancor::Error,
             >,
-            rkyv::rancor::Error,
         >,
-    >,
 {
     // Serialize with rkyv
     let payload = rkyv::to_bytes::<rkyv::rancor::Error>(value)

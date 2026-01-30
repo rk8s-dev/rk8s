@@ -169,6 +169,7 @@ const SAVE_LINK_PARENTS_LUA: &str = r#"
 
 /// Response structure for Lua script results
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LuaResponse {
     ok: bool,
     #[serde(default)]
@@ -420,18 +421,18 @@ impl RedisMetaStore {
         parents: &[(i64, String)],
     ) -> Result<(), MetaError> {
         let key = Self::link_parent_key(ino);
-        
+
         if parents.is_empty() {
             let mut conn = self.conn.clone();
             let _: () = conn.del(&key).await.map_err(redis_err)?;
             return Ok(());
         }
-        
+
         let members: Vec<String> = parents
             .iter()
             .map(|(p, name)| format!("{}:{}", p, name))
             .collect();
-        
+
         let mut conn = self.conn.clone();
         let result: String = redis::cmd("EVAL")
             .arg(SAVE_LINK_PARENTS_LUA)
@@ -441,15 +442,17 @@ impl RedisMetaStore {
             .query_async(&mut conn)
             .await
             .map_err(redis_err)?;
-        
+
         let response: LuaResponse = serde_json::from_str(&result)
             .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
-        
+
         if !response.ok {
-            let err = response.error.unwrap_or_else(|| "unknown error".to_string());
+            let err = response
+                .error
+                .unwrap_or_else(|| "unknown error".to_string());
             return Err(MetaError::Internal(format!("Lua error: {err}")));
         }
-        
+
         Ok(())
     }
 
@@ -956,12 +959,12 @@ impl MetaStore for RedisMetaStore {
     #[tracing::instrument(level = "trace", skip(self), fields(ino, parent, name))]
     async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
         self.ensure_parent_dir(parent).await?;
-        
+
         let node_key = self.node_key(ino);
         let lp_key = Self::link_parent_key(ino);
         let dir_key = self.dir_key(parent);
         let now = current_time();
-        
+
         let script = redis::Script::new(LINK_LUA);
         let result: String = script
             .key(&node_key)
@@ -973,10 +976,10 @@ impl MetaStore for RedisMetaStore {
             .invoke_async(&mut self.conn.clone())
             .await
             .map_err(redis_err)?;
-        
+
         let response: LuaResponse = serde_json::from_str(&result)
             .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
-        
+
         match response.error.as_deref() {
             Some("node_not_found") => Err(MetaError::NotFound(ino)),
             Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
@@ -986,12 +989,12 @@ impl MetaStore for RedisMetaStore {
             }),
             Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
             None if response.ok => {
-                let attr_json = response.attr.ok_or_else(|| {
-                    MetaError::Internal("missing attr in link response".into())
-                })?;
+                let attr_json = response
+                    .attr
+                    .ok_or_else(|| MetaError::Internal("missing attr in link response".into()))?;
                 let stored_attr: StoredAttr = serde_json::from_value(attr_json)
                     .map_err(|e| MetaError::Internal(format!("attr parse error: {e}")))?;
-                
+
                 self.bump_dir_times(parent, now).await?;
                 Ok(stored_attr.to_file_attr(ino, FileType::File))
             }
@@ -1004,8 +1007,11 @@ impl MetaStore for RedisMetaStore {
         let Some(child) = self.lookup(parent, name).await? else {
             return Err(MetaError::NotFound(parent));
         };
-        
-        let node = self.get_node(child).await?.ok_or(MetaError::NotFound(child))?;
+
+        let node = self
+            .get_node(child)
+            .await?
+            .ok_or(MetaError::NotFound(child))?;
         if node.kind != NodeKind::File {
             return Err(MetaError::NotSupported(format!("{child} is not a file")));
         }
@@ -1014,7 +1020,7 @@ impl MetaStore for RedisMetaStore {
         let lp_key = Self::link_parent_key(child);
         let dir_key = self.dir_key(parent);
         let now = current_time();
-        
+
         let script = redis::Script::new(UNLINK_LUA);
         let result: String = script
             .key(&node_key)
@@ -1026,36 +1032,38 @@ impl MetaStore for RedisMetaStore {
             .invoke_async(&mut self.conn.clone())
             .await
             .map_err(redis_err)?;
-        
+
         let response: LuaResponse = serde_json::from_str(&result)
             .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
-        
+
         if !response.ok {
-            let err = response.error.unwrap_or_else(|| "unknown error".to_string());
+            let err = response
+                .error
+                .unwrap_or_else(|| "unknown error".to_string());
             return Err(MetaError::Internal(format!("Lua error: {err}")));
         }
-        
+
         let nlink = response.nlink.unwrap_or(0);
         let deleted = response.deleted.unwrap_or(false);
-        
+
         if deleted {
             let mut node_mut = node;
             self.mark_deleted(child, &mut node_mut).await?;
         } else if nlink <= 1 {
             let mut link_parents = self.load_link_parents(child).await?;
             link_parents.retain(|(p, n)| !(*p == parent && n.as_str() == name));
-            
+
             if let Some(remaining) = link_parents.into_iter().next() {
                 let mut node_mut = node;
                 node_mut.parent = remaining.0;
                 node_mut.name = remaining.1;
                 node_mut.attr.nlink = nlink;
                 node_mut.attr.ctime = now;
-                
+
                 let key = Self::link_parent_key(child);
                 let data = serde_json::to_vec(&node_mut)
                     .map_err(|e| MetaError::Internal(e.to_string()))?;
-                
+
                 let mut conn = self.conn.clone();
                 let _: () = redis::pipe()
                     .atomic()
@@ -1066,7 +1074,7 @@ impl MetaStore for RedisMetaStore {
                     .map_err(redis_err)?;
             }
         }
-        
+
         self.bump_dir_times(parent, now).await?;
         Ok(())
     }
@@ -1315,7 +1323,7 @@ impl MetaStore for RedisMetaStore {
         let script = redis::Script::new(EXTEND_FILE_SIZE_LUA);
         let node_key = self.node_key(ino);
         let now = current_time();
-        
+
         let result: String = script
             .key(&node_key)
             .arg(size)
@@ -1323,10 +1331,10 @@ impl MetaStore for RedisMetaStore {
             .invoke_async(&mut self.conn.clone())
             .await
             .map_err(redis_err)?;
-        
+
         let response: LuaResponse = serde_json::from_str(&result)
             .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
-        
+
         match response.error.as_deref() {
             Some("node_not_found") => Err(MetaError::NotFound(ino)),
             Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
@@ -2594,30 +2602,27 @@ mod tests {
     #[ignore]
     async fn test_extend_file_size_lua_concurrent() {
         use crate::meta::MetaStore;
-        
+
         let store = new_test_store().await;
         let root = store.root_ino();
-        let ino = store.create_file(root, "test.txt".to_string()).await.unwrap();
-        
+        let ino = store
+            .create_file(root, "test.txt".to_string())
+            .await
+            .unwrap();
+
         let store1 = std::sync::Arc::new(store);
         let store2 = store1.clone();
         let store3 = store1.clone();
         let store4 = store1.clone();
-        
-        let h1 = tokio::spawn(async move {
-            store2.extend_file_size(ino, 1000).await
-        });
-        let h2 = tokio::spawn(async move {
-            store3.extend_file_size(ino, 2000).await
-        });
-        let h3 = tokio::spawn(async move {
-            store4.extend_file_size(ino, 1500).await
-        });
-        
+
+        let h1 = tokio::spawn(async move { store2.extend_file_size(ino, 1000).await });
+        let h2 = tokio::spawn(async move { store3.extend_file_size(ino, 2000).await });
+        let h3 = tokio::spawn(async move { store4.extend_file_size(ino, 1500).await });
+
         h1.await.unwrap().unwrap();
         h2.await.unwrap().unwrap();
         h3.await.unwrap().unwrap();
-        
+
         let attr = store1.stat(ino).await.unwrap().unwrap();
         assert_eq!(attr.size, 2000);
     }
@@ -2627,19 +2632,22 @@ mod tests {
     #[ignore]
     async fn test_extend_file_size_lua_idempotent() {
         use crate::meta::MetaStore;
-        
+
         let store = new_test_store().await;
         let root = store.root_ino();
-        let ino = store.create_file(root, "test.txt".to_string()).await.unwrap();
-        
+        let ino = store
+            .create_file(root, "test.txt".to_string())
+            .await
+            .unwrap();
+
         store.extend_file_size(ino, 1000).await.unwrap();
         let attr1 = store.stat(ino).await.unwrap().unwrap();
         assert_eq!(attr1.size, 1000);
-        
+
         store.extend_file_size(ino, 500).await.unwrap();
         let attr2 = store.stat(ino).await.unwrap().unwrap();
         assert_eq!(attr2.size, 1000);
-        
+
         store.extend_file_size(ino, 1000).await.unwrap();
         let attr3 = store.stat(ino).await.unwrap().unwrap();
         assert_eq!(attr3.size, 1000);
@@ -2650,10 +2658,10 @@ mod tests {
     #[ignore]
     async fn test_extend_file_size_lua_missing_node() {
         use crate::meta::MetaStore;
-        
+
         let store = new_test_store().await;
         let result = store.extend_file_size(99999, 1000).await;
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
             MetaError::NotFound(ino) => assert_eq!(ino, 99999),
@@ -2666,21 +2674,21 @@ mod tests {
     #[ignore]
     async fn test_link_unlink_lua_atomicity() {
         use crate::meta::MetaStore;
-        
+
         let store = new_test_store().await;
         let root = store.root_ino();
-        
+
         let dir_a = store.mkdir(root, "a".to_string()).await.unwrap();
         let dir_b = store.mkdir(root, "b".to_string()).await.unwrap();
-        
+
         let ino = store.create_file(dir_a, "x".to_string()).await.unwrap();
-        
+
         let attr1 = store.link(ino, dir_b, "y").await.unwrap();
         assert_eq!(attr1.nlink, 2);
-        
+
         assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
         assert_eq!(store.lookup(dir_b, "y").await.unwrap(), Some(ino));
-        
+
         let result = store.link(ino, dir_b, "y").await;
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -2690,17 +2698,17 @@ mod tests {
             }
             other => panic!("expected AlreadyExists error, got {:?}", other),
         }
-        
+
         store.unlink(dir_a, "x").await.unwrap();
         assert_eq!(store.lookup(dir_a, "x").await.unwrap(), None);
         assert_eq!(store.lookup(dir_b, "y").await.unwrap(), Some(ino));
-        
+
         let attr2 = store.stat(ino).await.unwrap().unwrap();
         assert_eq!(attr2.nlink, 1);
-        
+
         store.unlink(dir_b, "y").await.unwrap();
         assert_eq!(store.lookup(dir_b, "y").await.unwrap(), None);
-        
+
         let deleted = store.get_deleted_files().await.unwrap();
         assert!(deleted.contains(&ino));
     }

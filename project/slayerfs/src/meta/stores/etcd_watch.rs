@@ -184,13 +184,9 @@ impl EtcdWatchWorker {
             let prefix_clone = prefix.clone();
 
             let handle = tokio::spawn(async move {
-                if let Err(e) = Self::watch_loop_for_prefix(
-                    client,
-                    prefix_clone.clone(),
-                    config,
-                    event_tx,
-                )
-                .await
+                if let Err(e) =
+                    Self::watch_loop_for_prefix(client, prefix_clone.clone(), config, event_tx)
+                        .await
                 {
                     error!(prefix = %prefix_clone, "Watch worker fatal error: {}", e);
                 }
@@ -200,7 +196,10 @@ impl EtcdWatchWorker {
             info!(prefix = %prefix, "Etcd watch worker started for prefix");
         }
 
-        info!(count = self.worker_handles.len(), "All etcd watch workers started");
+        info!(
+            count = self.worker_handles.len(),
+            "All etcd watch workers started"
+        );
         Ok(())
     }
 
@@ -226,15 +225,14 @@ impl EtcdWatchWorker {
 
         loop {
             let options = WatchOptions::new().with_prefix();
-            let (_watcher, mut stream) =
-                match client.watch(prefix.clone(), Some(options)).await {
-                    Ok((w, s)) => (w, s),
-                    Err(e) => {
-                        error!(prefix = %prefix, "Failed to create watch stream: {}", e);
-                        time::sleep(Duration::from_secs(1)).await;
-                        continue;
-                    }
-                };
+            let (_watcher, mut stream) = match client.watch(prefix.clone(), Some(options)).await {
+                Ok((w, s)) => (w, s),
+                Err(e) => {
+                    error!(prefix = %prefix, "Failed to create watch stream: {}", e);
+                    time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
 
             info!(prefix = %prefix, "Watch stream established");
 
@@ -260,60 +258,6 @@ impl EtcdWatchWorker {
             }
 
             warn!(prefix = %prefix, "Watch stream closed, reconnecting in 1s...");
-            time::sleep(Duration::from_secs(1)).await;
-        }
-    }
-
-    /// Main watch loop (runs in background task)
-    async fn watch_loop(
-        mut client: EtcdClient,
-        config: WatchConfig,
-        event_tx: mpsc::Sender<CacheInvalidationEvent>,
-    ) -> Result<(), MetaError> {
-        info!(
-            "Starting etcd watch loop with prefix: '{}'",
-            config.key_prefix
-        );
-
-        loop {
-            // Create watch stream with prefix
-            let options = WatchOptions::new().with_prefix();
-            let (_watcher, mut stream) =
-                match client.watch(config.key_prefix.clone(), Some(options)).await {
-                    Ok((w, s)) => (w, s),
-                    Err(e) => {
-                        error!("Failed to create watch stream: {}", e);
-                        time::sleep(Duration::from_secs(1)).await;
-                        continue;
-                    }
-                };
-
-            info!("Watch stream established");
-
-            // Process watch events
-            while let Some(resp) = stream.message().await.transpose() {
-                match resp {
-                    Ok(resp) => {
-                        if resp.canceled() {
-                            warn!("Watch canceled, reconnecting...");
-                            break;
-                        }
-
-                        for event in resp.events() {
-                            if let Err(e) = Self::handle_watch_event(event, &event_tx, &config) {
-                                error!("Failed to handle watch event: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Watch stream error: {}", e);
-                        break;
-                    }
-                }
-            }
-
-            // Reconnect on stream close
-            warn!("Watch stream closed, reconnecting in 1s...");
             time::sleep(Duration::from_secs(1)).await;
         }
     }
@@ -395,10 +339,9 @@ impl EtcdWatchWorker {
                     match event_type {
                         EventType::Put => {
                             // Parse EtcdForwardEntry using deserialize_meta (binary-safe)
-                            if let Ok(forward_entry) =
-                                crate::meta::serialization::deserialize_meta::<EtcdForwardEntry>(
-                                    value,
-                                )
+                            if let Ok(forward_entry) = crate::meta::serialization::deserialize_meta::<
+                                EtcdForwardEntry,
+                            >(value)
                             {
                                 events.push(CacheInvalidationEvent::AddChild {
                                     parent_ino,
@@ -458,10 +401,9 @@ impl EtcdWatchWorker {
                     match event_type {
                         EventType::Put => {
                             // Parse EtcdDirChildren using deserialize_meta (binary-safe)
-                            if let Ok(dir_children) =
-                                crate::meta::serialization::deserialize_meta::<EtcdDirChildren>(
-                                    value,
-                                )
+                            if let Ok(dir_children) = crate::meta::serialization::deserialize_meta::<
+                                EtcdDirChildren,
+                            >(value)
                             {
                                 events.push(CacheInvalidationEvent::UpdateChildren {
                                     parent_ino,

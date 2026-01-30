@@ -418,7 +418,8 @@ impl EtcdMetaStore {
     async fn etcd_get_json<T>(&self, key: &str) -> Result<Option<T>, MetaError>
     where
         T: rkyv::Archive,
-        T::Archived: rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+        T::Archived:
+            rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
         for<'de> T: serde::de::DeserializeOwned,
     {
         let mut client = self.client.clone();
@@ -490,15 +491,15 @@ impl EtcdMetaStore {
     where
         T: rkyv::Archive,
         for<'a> T: rkyv::Serialize<
-            rkyv::rancor::Strategy<
-                rkyv::ser::Serializer<
-                    rkyv::util::AlignedVec,
-                    rkyv::ser::allocator::ArenaHandle<'a>,
-                    rkyv::ser::sharing::Share,
+                rkyv::rancor::Strategy<
+                    rkyv::ser::Serializer<
+                        rkyv::util::AlignedVec,
+                        rkyv::ser::allocator::ArenaHandle<'a>,
+                        rkyv::ser::sharing::Share,
+                    >,
+                    rkyv::rancor::Error,
                 >,
-                rkyv::rancor::Error,
             >,
-        >,
         T: serde::Serialize,
     {
         let mut client = self.client.clone();
@@ -540,8 +541,7 @@ impl EtcdMetaStore {
     ) -> Result<(), MetaError> {
         let mut client = self.client.clone();
 
-        let json = serde_json::to_string(obj)
-            .map_err(|e| MetaError::Internal(e.to_string()))?;
+        let json = serde_json::to_string(obj).map_err(|e| MetaError::Internal(e.to_string()))?;
         let key = key.as_ref();
 
         client
@@ -594,13 +594,11 @@ impl EtcdMetaStore {
     }
 
     #[cfg(feature = "rkyv-serialization")]
-    async fn etcd_get_json_lenient<T>(
-        &self,
-        key: &str,
-    ) -> Result<Option<T>, MetaError>
+    async fn etcd_get_json_lenient<T>(&self, key: &str) -> Result<Option<T>, MetaError>
     where
         T: rkyv::Archive,
-        T::Archived: rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+        T::Archived:
+            rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
         for<'de> T: serde::de::DeserializeOwned,
     {
         match self.etcd_get_json::<T>(key).await {
@@ -646,7 +644,8 @@ impl EtcdMetaStore {
         // Create children key for root directory
         let children_key = Self::etcd_children_key(1);
         let root_children = EtcdDirChildren::new(1, HashMap::new());
-        let children_json = serde_json::to_string(&root_children).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let children_json = serde_json::to_string(&root_children)
+            .map_err(|e| MetaError::Internal(e.to_string()))?;
 
         // Create reverse key (metadata) for root directory
         let reverse_key = Self::etcd_reverse_key(1);
@@ -664,7 +663,8 @@ impl EtcdMetaStore {
             deleted: false,
             symlink_target: None,
         };
-        let reverse_json = serde_json::to_string(&root_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let reverse_json =
+            serde_json::to_string(&root_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let mut client = self.client.clone();
 
@@ -896,14 +896,17 @@ impl EtcdMetaStore {
             is_file: false,
             entry_type: Some(EntryType::Directory),
         };
-        let forward_json = serde_json::to_string(&forward_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let forward_json = serde_json::to_string(&forward_entry)
+            .map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let reverse_key = Self::etcd_reverse_key(inode);
-        let reverse_json = serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let reverse_json =
+            serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let children_key = Self::etcd_children_key(inode);
         let children = EtcdDirChildren::new(inode, HashMap::new());
-        let children_json = serde_json::to_string(&children).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let children_json =
+            serde_json::to_string(&children).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         // Step 2: Atomic transaction - create all keys only if forward key doesn't exist
         info!(
@@ -1034,10 +1037,12 @@ impl EtcdMetaStore {
             is_file: true,
             entry_type: Some(EntryType::File),
         };
-        let forward_json = serde_json::to_string(&forward_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let forward_json = serde_json::to_string(&forward_entry)
+            .map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let reverse_key = Self::etcd_reverse_key(inode);
-        let reverse_json = serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let reverse_json =
+            serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         // Step 2: Atomic transaction - create keys only if forward key doesn't exist
         info!(
@@ -1207,7 +1212,8 @@ impl EtcdMetaStore {
                         (value, r, 0)
                     }
                 };
-                let current = serde_json::to_string(&updated).map_err(|e| MetaError::Internal(e.to_string()))?;
+                let current = serde_json::to_string(&updated)
+                    .map_err(|e| MetaError::Internal(e.to_string()))?;
 
                 let compare = if mod_revision == 0 {
                     Compare::version(key, CompareOp::Equal, 0)
@@ -2295,11 +2301,13 @@ impl MetaStore for EtcdMetaStore {
 
         // Get current file metadata
         let reverse_key = Self::etcd_reverse_key(file_ino);
-        let mut entry_info: EtcdEntryInfo =
-            match self.etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key).await? {
-                Some(info) => info,
-                None => return Err(MetaError::NotFound(file_ino)),
-            };
+        let mut entry_info: EtcdEntryInfo = match self
+            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
+            .await?
+        {
+            Some(info) => info,
+            None => return Err(MetaError::NotFound(file_ino)),
+        };
 
         let current_nlink = entry_info.nlink;
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -2518,7 +2526,8 @@ impl MetaStore for EtcdMetaStore {
         }
 
         entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let updated_reverse_json = serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let updated_reverse_json =
+            serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let new_forward_key = Self::etcd_forward_key(new_parent, &new_name);
         let new_forward_entry = EtcdForwardEntry {
@@ -2528,7 +2537,8 @@ impl MetaStore for EtcdMetaStore {
             is_file,
             entry_type,
         };
-        let new_forward_json = serde_json::to_string(&new_forward_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let new_forward_json = serde_json::to_string(&new_forward_entry)
+            .map_err(|e| MetaError::Internal(e.to_string()))?;
 
         info!(
             "Renaming with atomic transaction: {} (parent={}) -> {} (parent={}), inode={}",
@@ -2545,7 +2555,8 @@ impl MetaStore for EtcdMetaStore {
 
         if let Some(link_parents) = &updated_link_parents {
             let link_parent_key = Self::etcd_link_parent_key(entry_ino);
-            let json = serde_json::to_string(link_parents).map_err(|e| MetaError::Internal(e.to_string()))?;
+            let json = serde_json::to_string(link_parents)
+                .map_err(|e| MetaError::Internal(e.to_string()))?;
             ops.push(TxnOp::put(link_parent_key, json, None));
         }
 
@@ -2867,7 +2878,10 @@ impl MetaStore for EtcdMetaStore {
         }
 
         let reverse_key = Self::etcd_reverse_key(ino);
-        let Some(entry_info) = self.etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key).await? else {
+        let Some(entry_info) = self
+            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
+            .await?
+        else {
             return Ok(vec![]);
         };
 
@@ -2914,7 +2928,10 @@ impl MetaStore for EtcdMetaStore {
 
             while current_ino != 1 {
                 let reverse_key = Self::etcd_reverse_key(current_ino);
-                let entry_info = match self.etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key).await? {
+                let entry_info = match self
+                    .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
+                    .await?
+                {
                     Some(info) => info,
                     None => {
                         path_parts.clear();
@@ -2988,11 +3005,13 @@ impl MetaStore for EtcdMetaStore {
         let reverse_key = Self::etcd_reverse_key(ino);
 
         // Check if the file exists and is marked as deleted
-        let entry_info: EtcdEntryInfo =
-            match self.etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key).await? {
-                Some(info) => info,
-                None => return Err(MetaError::NotFound(ino)),
-            };
+        let entry_info: EtcdEntryInfo = match self
+            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
+            .await?
+        {
+            Some(info) => info,
+            None => return Err(MetaError::NotFound(ino)),
+        };
 
         if !entry_info.is_file {
             return Err(MetaError::Internal(
@@ -3414,7 +3433,10 @@ impl MetaStore for EtcdMetaStore {
             .get()
             .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
 
-        let plocks: Vec<EtcdPlock> = self.etcd_get_json_serde_only(&key).await?.unwrap_or_default();
+        let plocks: Vec<EtcdPlock> = self
+            .etcd_get_json_serde_only(&key)
+            .await?
+            .unwrap_or_default();
 
         for plock in plocks {
             let locks = &plock.records;

@@ -35,7 +35,10 @@ pub type BlockSpan = Span<BlockTag>;
 
 /// Basic slice descriptor for a chunk-local contiguous range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "rkyv-serialization", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 #[cfg_attr(feature = "rkyv-serialization", rkyv(compare(PartialEq)))]
 pub struct SliceDesc {
     pub slice_id: u64,
