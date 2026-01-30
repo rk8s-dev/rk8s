@@ -6,6 +6,7 @@
 use crate::meta::entities::etcd::{EtcdDirChildren, EtcdEntryInfo, EtcdForwardEntry};
 use crate::meta::store::MetaError;
 use etcd_client::{Client as EtcdClient, EventType, WatchOptions};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -47,24 +48,76 @@ pub enum CacheInvalidationEvent {
 }
 
 /// Etcd watch worker configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchConfig {
+    /// Enable watch worker (default: false for backward compatibility)
+    #[serde(default)]
+    pub enabled: bool,
+
     /// Watch key prefix (default: all metadata keys)
+    /// DEPRECATED: Use `prefixes` instead. Kept for backward compatibility.
+    #[serde(default)]
     pub key_prefix: String,
 
+    /// Watch key prefixes (default: empty, falls back to key_prefix)
+    #[serde(default)]
+    pub prefixes: Vec<String>,
+
     /// Buffer size for event channel
+    #[serde(default = "default_buffer_size")]
     pub event_buffer_size: usize,
 
     /// Enable debug logging
+    #[serde(default)]
     pub debug: bool,
+}
+
+fn default_buffer_size() -> usize {
+    1000
 }
 
 impl Default for WatchConfig {
     fn default() -> Self {
         Self {
-            key_prefix: "".to_string(), // Watch all keys
+            enabled: false,
+            key_prefix: "".to_string(),
+            prefixes: vec![],
             event_buffer_size: 1000,
             debug: false,
+        }
+    }
+}
+
+impl WatchConfig {
+    pub fn effective_prefixes(&self) -> Vec<String> {
+        if !self.prefixes.is_empty() {
+            self.prefixes.clone()
+        } else {
+            vec![self.key_prefix.clone()]
+        }
+    }
+
+    pub fn from_env_or_default() -> Self {
+        Self {
+            enabled: std::env::var("SLAYERFS_WATCH_ENABLED")
+                .map(|v| v.to_lowercase() == "true")
+                .unwrap_or(false),
+            key_prefix: String::new(),
+            prefixes: std::env::var("SLAYERFS_WATCH_PREFIXES")
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            event_buffer_size: std::env::var("SLAYERFS_WATCH_BUFFER_SIZE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1000),
+            debug: std::env::var("SLAYERFS_WATCH_DEBUG")
+                .map(|v| v.to_lowercase() == "true")
+                .unwrap_or(false),
         }
     }
 }

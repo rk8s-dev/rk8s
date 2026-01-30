@@ -206,32 +206,28 @@ impl<T: MetaStore + 'static> MetaClient<T> {
 
         // Detect if this is an etcd backend and start Watch Worker
         let watch_worker = if options.no_background_jobs {
+            debug!("Watch Worker disabled: no_background_jobs=true");
             None
         } else if let Some(etcd_store) = store.as_any().downcast_ref::<EtcdMetaStore>() {
             let client = etcd_store.get_client();
+            let config = WatchConfig::from_env_or_default();
 
-            // Create Watch Worker configuration
-            // Watch all metadata keys
-            // TODO: Consider watching only specific prefixes?
-            // For now, watch everything for simplicity
-            let config = WatchConfig {
-                key_prefix: "".to_string(),
-                event_buffer_size: 1000,
-                debug: false,
-            };
-
-            let (mut worker, invalidation_rx) = EtcdWatchWorker::new(client, config);
-
-            if let Err(e) = worker.start() {
-                warn!("Failed to start Watch Worker: {}", e);
+            if !config.enabled {
+                debug!("Watch Worker disabled: SLAYERFS_WATCH_ENABLED=false or default");
                 None
             } else {
-                debug!("Watch Worker started for etcd backend");
+                let (mut worker, invalidation_rx) = EtcdWatchWorker::new(client, config);
 
-                // Start the invalidation handler after creating MetaClient
-                let worker_arc = Arc::new(worker);
-                let rx = Arc::new(Mutex::new(invalidation_rx));
-                Some((worker_arc, rx))
+                if let Err(e) = worker.start() {
+                    warn!("Failed to start Watch Worker: {}", e);
+                    None
+                } else {
+                    debug!("Watch Worker started for etcd backend");
+
+                    let worker_arc = Arc::new(worker);
+                    let rx = Arc::new(Mutex::new(invalidation_rx));
+                    Some((worker_arc, rx))
+                }
             }
         } else {
             None
