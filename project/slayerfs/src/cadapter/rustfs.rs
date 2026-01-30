@@ -67,32 +67,4 @@ impl ObjectBackend for RustfsLikeBackend {
         }
     }
 
-    async fn sync_all(&self) -> Result<()> {
-        let root = self.root.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            fn sync_tree(path: &Path) -> Result<()> {
-                if !path.exists() {
-                    return Ok(());
-                }
-                if path.is_dir() {
-                    for entry in std::fs::read_dir(path)? {
-                        let entry = entry?;
-                        sync_tree(&entry.path())?;
-                    }
-                    if let Ok(dir) = std::fs::File::open(path) {
-                        let _ = dir.sync_all();
-                    }
-                } else {
-                    let file = std::fs::File::open(path)?;
-                    file.sync_all()?;
-                }
-                Ok(())
-            }
-
-            sync_tree(&root)
-        })
-        .await
-        .map_err(|e| anyhow!("sync_all task failed: {e}"))??;
-        Ok(())
-    }
 }

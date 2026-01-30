@@ -103,15 +103,6 @@ impl CacheSlice {
         Ok(out)
     }
 
-    /// Drop page buffers after data has been uploaded.
-    /// The length metadata is preserved for commit.
-    pub(crate) fn release_pages(&mut self) {
-        for block in &mut self.pages {
-            block.clear();
-            block.shrink_to_fit();
-        }
-    }
-
     /// Acquire the next writable slot (block, page, offset).
     /// The returned slot belongs to a single page and never overlaps existing writes.
     fn next_write_slot(&mut self) -> (usize, usize, usize) {

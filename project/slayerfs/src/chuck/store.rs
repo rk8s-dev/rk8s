@@ -70,7 +70,6 @@ pub trait BlockStore {
     #[allow(dead_code)]
     async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()>;
 
-    async fn sync_all(&self) -> anyhow::Result<()>;
 }
 
 pub type BlockKey = (u64 /*slice_id*/, u32 /*block_index*/);
@@ -132,9 +131,6 @@ impl BlockStore for InMemoryBlockStore {
         Ok(())
     }
 
-    async fn sync_all(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
 }
 
 /// BlockStore backed by cadapter::client (key space `chunks/{chunk_id}/{block_index}`).
@@ -354,9 +350,6 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         Ok(())
     }
 
-    async fn sync_all(&self) -> anyhow::Result<()> {
-        self.client.sync_all().await
-    }
 }
 
 /// Convenience alias: BlockStore backed by the real S3 backend.

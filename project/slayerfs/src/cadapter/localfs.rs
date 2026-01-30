@@ -4,8 +4,10 @@ use crate::cadapter::client::ObjectBackend;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
+use dashmap::DashSet;
 use std::io::{IoSlice, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::{Instrument, field};
@@ -13,16 +15,30 @@ use tracing::{Instrument, field};
 #[derive(Clone)]
 pub struct LocalFsBackend {
     root: PathBuf,
+    created_dirs: Arc<DashSet<PathBuf>>,
 }
 
 impl LocalFsBackend {
     pub fn new<P: AsRef<Path>>(root: P) -> Self {
         Self {
             root: root.as_ref().to_path_buf(),
+            created_dirs: Arc::new(DashSet::new()),
         }
     }
     fn path_for(&self, key: &str) -> PathBuf {
         self.root.join(key)
+    }
+
+    async fn ensure_dir(&self, dir: &Path) -> Result<()> {
+        let dir_buf = dir.to_path_buf();
+
+        if self.created_dirs.insert(dir_buf.clone())
+            && let Err(err) = fs::create_dir_all(&dir_buf).await
+        {
+            self.created_dirs.remove(&dir_buf);
+            return Err(err.into());
+        }
+        Ok(())
     }
 }
 
@@ -48,10 +64,9 @@ impl ObjectBackend for LocalFsBackend {
         tracing::Span::current().record("total_bytes", total_bytes);
 
         let path = self.path_for(key);
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir)
-                .instrument(tracing::trace_span!("put_object_vectored.create_dir"))
-                .await?;
+
+        if let Some(parent) = path.parent() {
+            self.ensure_dir(parent).await?;
         }
 
         // `tokio::fs::File::write_vectored` is another option. However, according the implementation
@@ -129,7 +144,7 @@ impl ObjectBackend for LocalFsBackend {
     async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         let path = self.path_for(key);
         if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).await?;
+            self.ensure_dir(dir).await?;
         }
         let mut f = fs::File::create(path).await?;
         f.write_all(data).await?;
@@ -167,33 +182,4 @@ impl ObjectBackend for LocalFsBackend {
         }
     }
 
-    async fn sync_all(&self) -> Result<()> {
-        let root = self.root.clone();
-
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            fn sync_tree(path: &Path) -> Result<()> {
-                if !path.exists() {
-                    return Ok(());
-                }
-                if path.is_dir() {
-                    for entry in std::fs::read_dir(path)? {
-                        let entry = entry?;
-                        sync_tree(&entry.path())?;
-                    }
-                    if let Ok(dir) = std::fs::File::open(path) {
-                        let _ = dir.sync_all();
-                    }
-                } else {
-                    let file = std::fs::File::open(path)?;
-                    file.sync_all()?;
-                }
-                Ok(())
-            }
-
-            sync_tree(&root)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("sync_all task failed: {e}"))??;
-        Ok(())
-    }
 }

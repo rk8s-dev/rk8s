@@ -1096,8 +1096,8 @@ mod tests {
     use crate::chuck::ChunkLayout;
     use crate::chuck::reader::DataFetcher;
     use crate::chuck::store::{BlockKey, BlockStore, InMemoryBlockStore};
-    use crate::meta::factory::create_meta_store_from_url;
     use crate::meta::MetaLayer;
+    use crate::meta::factory::create_meta_store_from_url;
     use crate::vfs::config::ReadConfig;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1154,10 +1154,6 @@ mod tests {
         async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
             self.inner.delete_range(key, len).await
         }
-
-        async fn sync_all(&self) -> anyhow::Result<()> {
-            Ok(())
-        }
     }
 
     #[tokio::test]
@@ -1169,7 +1165,10 @@ mod tests {
             .unwrap()
             .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
-        let ino = meta.create_file(1, "flush_reads.txt".to_string()).await.unwrap();
+        let ino = meta
+            .create_file(1, "flush_reads.txt".to_string())
+            .await
+            .unwrap();
         let inode = Inode::new(ino, 0);
         let reader = Arc::new(DataReader::new(
             Arc::new(ReadConfig::new(layout)),

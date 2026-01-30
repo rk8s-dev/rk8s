@@ -1846,7 +1846,7 @@ where
         Ok(())
     }
 
-    /// Sync file content to backend (fsync).
+    /// Sync file content (fsync): flush pending writes.
     pub async fn fsync(&self, fh: u64, _datasync: bool) -> Result<(), VfsError> {
         let handle = self
             .state
@@ -1857,13 +1857,6 @@ where
         if handle.flags.write {
             handle.flush().await.map_err(|_| VfsError::Other)?;
         }
-
-        self.core
-            .backend
-            .store()
-            .sync_all()
-            .await
-            .map_err(|_| VfsError::Other)?;
 
         self.update_timestamps_on_flush(handle.ino).await?;
         Ok(())

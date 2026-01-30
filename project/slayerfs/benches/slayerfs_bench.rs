@@ -11,18 +11,21 @@ use clap::{Parser, ValueEnum};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 use tempfile::TempDir;
+use tokio::io::AsyncWriteExt;
 use tokio::runtime::{Builder, Runtime};
-use tracing_subscriber::EnvFilter;
+use tracing_chrome::{ChromeLayerBuilder, TraceStyle};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use slayerfs::cadapter::client::ObjectClient;
 use slayerfs::cadapter::localfs::LocalFsBackend;
 use slayerfs::cadapter::s3::{S3Backend, S3Config};
 use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::chuck::store::{BlockKey, BlockStore, ObjectBlockStore};
-use slayerfs::meta::MetaStore;
+use slayerfs::meta::client::MetaClient;
 use slayerfs::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
 use slayerfs::meta::factory::MetaStoreFactory;
 use slayerfs::meta::stores::{DatabaseMetaStore, EtcdMetaStore};
+use slayerfs::meta::{MetaLayer, MetaStore};
 use slayerfs::vfs::fs::VFS;
 
 const MB: usize = 1024 * 1024;
@@ -30,11 +33,36 @@ const KB: usize = 1024;
 
 static TRACING_INIT: Once = Once::new();
 
-fn init_tracing() {
+fn init_tracing(chrome_trace: Option<&Path>) {
     TRACING_INIT.call_once(|| {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
+        let filter = EnvFilter::from_default_env();
+        let fmt_layer = tracing_subscriber::fmt::layer();
+
+        if let Some(path) = chrome_trace {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let (chrome_layer, guard) = ChromeLayerBuilder::new()
+                .file(path)
+                .include_args(true)
+                .trace_style(TraceStyle::Async)
+                .build();
+            let _ = Box::leak(Box::new(guard));
+            eprintln!(
+                "[slayerfs_bench] Chrome trace enabled: {}",
+                path.display()
+            );
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt_layer)
+                .with(chrome_layer)
+                .init();
+        } else {
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt_layer)
+                .init();
+        }
     });
 }
 
@@ -80,6 +108,8 @@ struct BenchArgs {
     s3_force_path_style: Option<String>,
     #[arg(long, env = "SLAYERFS_BENCH_FLAMEGRAPH")]
     flamegraph: Option<String>,
+    #[arg(long, env = "SLAYERFS_BENCH_CHROME")]
+    chrome: Option<String>,
 }
 
 #[derive(ValueEnum, Debug, Clone)]
@@ -131,8 +161,15 @@ enum MetaBackend {
 
 impl BenchConfig {
     fn from_env() -> Self {
-        init_tracing();
         let args = BenchArgs::parse_from(["slayerfs-bench"]);
+        let chrome_trace = match args.chrome.as_deref() {
+            Some(value) if parse_env_bool(Some(value)) => {
+                Some(PathBuf::from("slayerfs_bench_trace.json"))
+            }
+            Some(value) => Some(PathBuf::from(value)),
+            None => None,
+        };
+        init_tracing(chrome_trace.as_deref());
         let block_mb = args.block_mb.max(1);
         let big_mb = args.big_file_mb.max(1);
         let small_kb = args.small_file_kb.max(1);
@@ -242,9 +279,10 @@ impl BlockStore for BenchStore {
             BenchStore::S3(store) => store.delete_range(key, len).await,
         }
     }
+
 }
 
-type BenchFs = VFS<BenchStore, Arc<dyn MetaStore>>;
+type BenchFs = VFS<BenchStore, MetaClient<Arc<dyn MetaStore>>>;
 type SharedFs = Arc<BenchFs>;
 
 enum BenchRoot {
@@ -305,6 +343,23 @@ fn create_root_dir(cfg: &BenchConfig) -> Result<BenchRoot> {
         Ok(BenchRoot::Managed(run_dir))
     } else {
         let tmp = TempDir::new().context("create temp dir for bench object store")?;
+        Ok(BenchRoot::Temp(tmp))
+    }
+}
+
+fn create_baseline_root(cfg: &BenchConfig) -> Result<BenchRoot> {
+    if let Some(dir) = cfg.data_dir.as_ref() {
+        let base = dir.to_path_buf();
+        fs::create_dir_all(&base).context("create bench data dir")?;
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let run_dir = base.join(format!("slayerfs_baseline_{}", stamp));
+        fs::create_dir(&run_dir).context("create baseline run dir")?;
+        Ok(BenchRoot::Managed(run_dir))
+    } else {
+        let tmp = TempDir::new().context("create temp dir for baseline")?;
         Ok(BenchRoot::Temp(tmp))
     }
 }
@@ -424,8 +479,7 @@ where
 async fn open_handle(fs: &SharedFs, path: &str, read: bool, write: bool) -> Result<u64> {
     let attr = fs
         .stat(path)
-        .await
-        .ok_or_else(|| anyhow!("not found: {path}"))?;
+        .await?;
     Ok(fs.open(attr.ino, attr, read, write).await?)
 }
 
@@ -439,6 +493,16 @@ async fn run_big_write(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let base = format!("/bench/run-{iter}/big");
     let cost = measure_future(write_big_files(fs, cfg, base)).await?;
     env.teardown()?;
+    Ok(cost)
+}
+
+async fn run_big_write_baseline(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
+    let root = create_baseline_root(cfg)?;
+    let base = root
+        .path()
+        .join(format!("baseline-run-{iter}/big"));
+    let cost = measure_future(write_big_files_baseline(cfg, base)).await?;
+    drop(root);
     Ok(cost)
 }
 
@@ -506,6 +570,39 @@ async fn write_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Resul
                 written += len;
             }
             close_handle(&fs, fh).await?;
+            Result::<()>::Ok(())
+        }));
+    }
+    for handle in handles {
+        handle.await??;
+    }
+    flush_os_caches();
+    Ok(())
+}
+
+async fn write_big_files_baseline(cfg: &BenchConfig, base: PathBuf) -> Result<()> {
+    if cfg.big_file_bytes == 0 {
+        return Ok(());
+    }
+    tokio::fs::create_dir_all(&base)
+        .await
+        .context("create baseline base dir")?;
+
+    let mut handles = Vec::with_capacity(cfg.threads);
+    for tid in 0..cfg.threads {
+        let path = base.join(format!("big-{tid}.dat"));
+        let block_size = cfg.block_size_bytes;
+        let total = cfg.big_file_bytes;
+        handles.push(tokio::spawn(async move {
+            let mut f = tokio::fs::File::create(&path).await?;
+            let mut written = 0usize;
+            let payload = make_block_payload(block_size, tid);
+            while written < total {
+                let len = (total - written).min(block_size);
+                f.write_all(&payload[..len]).await?;
+                written += len;
+            }
+            f.sync_all().await?;
             Result::<()>::Ok(())
         }));
     }
@@ -625,8 +722,7 @@ async fn stat_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Resu
             for idx in 0..file_cnt {
                 let path = small_file_path(&base, tid, idx);
                 fs.stat(&path)
-                    .await
-                    .ok_or_else(|| anyhow!("stat missing: {path}"))?;
+                    .await?;
             }
             Result::<()>::Ok(())
         }));
@@ -671,6 +767,19 @@ fn bench_big_files(c: &mut Criterion) {
                 let elapsed = runtime
                     .block_on(run_big_write(&cfg, i as usize))
                     .expect("big write bench");
+                total += elapsed;
+            }
+            total
+        })
+    });
+
+    group.bench_function(BenchmarkId::new("write_baseline", cfg.threads), |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for i in 0..iters {
+                let elapsed = runtime
+                    .block_on(run_big_write_baseline(&cfg, i as usize))
+                    .expect("big write baseline bench");
                 total += elapsed;
             }
             total
