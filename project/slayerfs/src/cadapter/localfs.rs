@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::{fs, io::AsyncWriteExt};
-use tracing::{Instrument, field};
+use tracing::field;
 
 #[derive(Clone)]
 pub struct LocalFsBackend {

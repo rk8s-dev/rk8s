@@ -1,7 +1,7 @@
 //! Minimal rustfs adapter placeholder: also uses a local directory to mock object storage.
 
 use crate::cadapter::client::ObjectBackend;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use tokio::{fs, io::AsyncWriteExt};

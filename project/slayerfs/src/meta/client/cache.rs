@@ -279,12 +279,12 @@ impl InodeCache {
         }
     }
 
-    pub(crate) async fn replace_slices(&self, inode: i64, chunk_index: u64, desc: &Vec<SliceDesc>) {
+    pub(crate) async fn replace_slices(&self, inode: i64, chunk_index: u64, desc: &[SliceDesc]) {
         if let Some(node) = self.ttl_manager.get(&inode).await {
             node.slices
                 .entry(chunk_index)
-                .and_modify(|slices| *slices = desc.clone())
-                .or_insert_with(|| desc.clone());
+                .and_modify(|slices| *slices = desc.to_owned())
+                .or_insert_with(|| desc.to_owned());
         }
     }
 

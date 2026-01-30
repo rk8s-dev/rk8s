@@ -223,7 +223,6 @@ impl TxnBuilder {
 
         let attempt = || {
             let deps = deps.clone();
-            let stages = stages;
             let mut client = client.clone();
 
             async move {
@@ -2927,7 +2926,9 @@ impl MetaStore for EtcdMetaStore {
                 Some(raw) => serde_json::from_slice(raw)?,
                 None => Vec::new(),
             };
+
             slices.push(slice_for_update);
+
             let slices_payload = serde_json::to_vec(&slices)?;
             plans.push(UpdatePlan::write(
                 ctx,
@@ -2938,12 +2939,15 @@ impl MetaStore for EtcdMetaStore {
             let entry_raw = ctx
                 .value(&inode_key_for_stage)
                 .ok_or(MetaError::NotFound(ino))?;
+
             let mut entry_info: EtcdEntryInfo = serde_json::from_slice(entry_raw)?;
+
             if !entry_info.is_file {
                 return Err(MetaError::Internal(
                     "Cannot set size for directory".to_string(),
                 ));
             }
+
             let current = entry_info.size.unwrap_or(0).max(0) as u64;
             if new_size > current {
                 entry_info.size = Some(new_size as i64);

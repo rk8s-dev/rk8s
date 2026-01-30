@@ -18,6 +18,7 @@ pub trait ObjectBackend: Send + Sync {
 
     async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>>;
 
+    #[allow(dead_code)]
     async fn get_etag(&self, key: &str) -> Result<String>;
 
     #[allow(dead_code)]
@@ -46,6 +47,7 @@ impl<B: ObjectBackend> ObjectClient<B> {
         self.backend.get_object(key).await
     }
 
+    #[allow(dead_code)]
     pub async fn get_etag(&self, key: &str) -> Result<String> {
         self.backend.get_etag(key).await
     }
