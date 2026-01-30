@@ -293,7 +293,7 @@ pub enum MetaError {
     Io(#[from] std::io::Error),
 
     #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+    Serialization(String),
 
     #[error("Config error: {0}")]
     Config(String),

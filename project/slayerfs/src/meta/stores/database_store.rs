@@ -2526,7 +2526,8 @@ impl MetaStore for DatabaseMetaStore {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
         let session_id = Uuid::now_v7();
         let expire = (Utc::now() + ChronoDuration::minutes(5)).timestamp_millis();
-        let payload = serde_json::to_vec(&session_info).map_err(MetaError::Serialization)?;
+        let payload = serde_json::to_vec(&session_info)
+            .map_err(|e| MetaError::Serialization(e.to_string()))?;
         let session = session_meta::ActiveModel {
             session_id: Set(session_id),
             session_info: Set(payload),

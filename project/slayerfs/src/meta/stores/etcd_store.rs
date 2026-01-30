@@ -442,7 +442,8 @@ impl EtcdMetaStore {
     ) -> Result<(), MetaError> {
         let mut client = self.client.clone();
 
-        let json = serde_json::to_string(obj)?;
+        let json = serde_json::to_string(obj)
+            .map_err(|e| MetaError::Internal(e.to_string()))?;
         let key = key.as_ref();
 
         client
@@ -515,7 +516,7 @@ impl EtcdMetaStore {
         // Create children key for root directory
         let children_key = Self::etcd_children_key(1);
         let root_children = EtcdDirChildren::new(1, HashMap::new());
-        let children_json = serde_json::to_string(&root_children)?;
+        let children_json = serde_json::to_string(&root_children).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         // Create reverse key (metadata) for root directory
         let reverse_key = Self::etcd_reverse_key(1);
@@ -533,7 +534,7 @@ impl EtcdMetaStore {
             deleted: false,
             symlink_target: None,
         };
-        let reverse_json = serde_json::to_string(&root_entry)?;
+        let reverse_json = serde_json::to_string(&root_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let mut client = self.client.clone();
 
@@ -765,14 +766,14 @@ impl EtcdMetaStore {
             is_file: false,
             entry_type: Some(EntryType::Directory),
         };
-        let forward_json = serde_json::to_string(&forward_entry)?;
+        let forward_json = serde_json::to_string(&forward_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let reverse_key = Self::etcd_reverse_key(inode);
-        let reverse_json = serde_json::to_string(&entry_info)?;
+        let reverse_json = serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let children_key = Self::etcd_children_key(inode);
         let children = EtcdDirChildren::new(inode, HashMap::new());
-        let children_json = serde_json::to_string(&children)?;
+        let children_json = serde_json::to_string(&children).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         // Step 2: Atomic transaction - create all keys only if forward key doesn't exist
         info!(
@@ -903,10 +904,10 @@ impl EtcdMetaStore {
             is_file: true,
             entry_type: Some(EntryType::File),
         };
-        let forward_json = serde_json::to_string(&forward_entry)?;
+        let forward_json = serde_json::to_string(&forward_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let reverse_key = Self::etcd_reverse_key(inode);
-        let reverse_json = serde_json::to_string(&entry_info)?;
+        let reverse_json = serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         // Step 2: Atomic transaction - create keys only if forward key doesn't exist
         info!(
@@ -1064,7 +1065,8 @@ impl EtcdMetaStore {
 
                 let (updated, ret, mod_revision) = match resp.kvs().first() {
                     Some(kv) => {
-                        let current = serde_json::from_slice::<T>(kv.value())?;
+                        let current = serde_json::from_slice::<T>(kv.value())
+                            .map_err(|e| MetaError::Internal(e.to_string()))?;
                         let (value, r) = f(current)?;
                         (value, r, kv.mod_revision())
                     }
@@ -1075,7 +1077,7 @@ impl EtcdMetaStore {
                         (value, r, 0)
                     }
                 };
-                let current = serde_json::to_string(&updated)?;
+                let current = serde_json::to_string(&updated).map_err(|e| MetaError::Internal(e.to_string()))?;
 
                 let compare = if mod_revision == 0 {
                     Compare::version(key, CompareOp::Equal, 0)
@@ -2386,7 +2388,7 @@ impl MetaStore for EtcdMetaStore {
         }
 
         entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let updated_reverse_json = serde_json::to_string(&entry_info)?;
+        let updated_reverse_json = serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         let new_forward_key = Self::etcd_forward_key(new_parent, &new_name);
         let new_forward_entry = EtcdForwardEntry {
@@ -2396,7 +2398,7 @@ impl MetaStore for EtcdMetaStore {
             is_file,
             entry_type,
         };
-        let new_forward_json = serde_json::to_string(&new_forward_entry)?;
+        let new_forward_json = serde_json::to_string(&new_forward_entry).map_err(|e| MetaError::Internal(e.to_string()))?;
 
         info!(
             "Renaming with atomic transaction: {} (parent={}) -> {} (parent={}), inode={}",
@@ -2413,7 +2415,7 @@ impl MetaStore for EtcdMetaStore {
 
         if let Some(link_parents) = &updated_link_parents {
             let link_parent_key = Self::etcd_link_parent_key(entry_ino);
-            let json = serde_json::to_string(link_parents)?;
+            let json = serde_json::to_string(link_parents).map_err(|e| MetaError::Internal(e.to_string()))?;
             ops.push(TxnOp::put(link_parent_key, json, None));
         }
 
@@ -2612,12 +2614,14 @@ impl MetaStore for EtcdMetaStore {
         let ops = vec![
             TxnOp::put(
                 old_forward_key.clone(),
-                serde_json::to_string(&swapped_old_forward)?,
+                serde_json::to_string(&swapped_old_forward)
+                    .map_err(|e| MetaError::Internal(e.to_string()))?,
                 None,
             ),
             TxnOp::put(
                 new_forward_key.clone(),
-                serde_json::to_string(&swapped_new_forward)?,
+                serde_json::to_string(&swapped_new_forward)
+                    .map_err(|e| MetaError::Internal(e.to_string()))?,
                 None,
             ),
         ];

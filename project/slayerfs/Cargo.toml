@@ -52,11 +52,13 @@ if-addrs = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 parking_lot = { workspace = true }
 tikv-jemallocator = { workspace = true, optional = true }
+rkyv = { version = "0.8", optional = true }
 
 [features]
 profiling = ["dep:tracing-flame", "dep:tracing-chrome", "dep:console-subscriber"]
 jemalloc = ["dep:tikv-jemallocator"]
 jemalloc-profiling = ["jemalloc", "tikv-jemallocator/profiling"]
+rkyv-serialization = ["dep:rkyv"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
