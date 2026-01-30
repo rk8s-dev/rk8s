@@ -25,12 +25,15 @@ use crate::meta::store::MetaError;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
 /// Current schema version for rkyv serialization format.
+#[cfg(feature = "rkyv-serialization")]
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Magic bytes identifying rkyv-serialized data.
+#[cfg(feature = "rkyv-serialization")]
 pub const RKYV_MAGIC: &[u8; 4] = b"RKYV";
 
 /// Header size: 4 bytes magic + 4 bytes schema version.
+#[cfg(feature = "rkyv-serialization")]
 pub const HEADER_SIZE: usize = 8;
 
 /// Serialize metadata to bytes using the configured format.
