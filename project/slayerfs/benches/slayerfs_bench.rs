@@ -48,10 +48,7 @@ fn init_tracing(chrome_trace: Option<&Path>) {
                 .trace_style(TraceStyle::Async)
                 .build();
             let _ = Box::leak(Box::new(guard));
-            eprintln!(
-                "[slayerfs_bench] Chrome trace enabled: {}",
-                path.display()
-            );
+            eprintln!("[slayerfs_bench] Chrome trace enabled: {}", path.display());
             tracing_subscriber::registry()
                 .with(filter)
                 .with(fmt_layer)
@@ -279,7 +276,6 @@ impl BlockStore for BenchStore {
             BenchStore::S3(store) => store.delete_range(key, len).await,
         }
     }
-
 }
 
 type BenchFs = VFS<BenchStore, MetaClient<Arc<dyn MetaStore>>>;
@@ -477,9 +473,7 @@ where
 }
 
 async fn open_handle(fs: &SharedFs, path: &str, read: bool, write: bool) -> Result<u64> {
-    let attr = fs
-        .stat(path)
-        .await?;
+    let attr = fs.stat(path).await?;
     Ok(fs.open(attr.ino, attr, read, write).await?)
 }
 
@@ -498,9 +492,7 @@ async fn run_big_write(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
 
 async fn run_big_write_baseline(cfg: &BenchConfig, iter: usize) -> Result<Duration> {
     let root = create_baseline_root(cfg)?;
-    let base = root
-        .path()
-        .join(format!("baseline-run-{iter}/big"));
+    let base = root.path().join(format!("baseline-run-{iter}/big"));
     let cost = measure_future(write_big_files_baseline(cfg, base)).await?;
     drop(root);
     Ok(cost)
@@ -721,8 +713,7 @@ async fn stat_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Resu
         handles.push(tokio::spawn(async move {
             for idx in 0..file_cnt {
                 let path = small_file_path(&base, tid, idx);
-                fs.stat(&path)
-                    .await?;
+                fs.stat(&path).await?;
             }
             Result::<()>::Ok(())
         }));

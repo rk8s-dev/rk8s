@@ -66,5 +66,4 @@ impl ObjectBackend for RustfsLikeBackend {
             Err(e) => Err(e.into()),
         }
     }
-
 }

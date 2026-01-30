@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::BufWriter;
 #[cfg(all(feature = "jemalloc", target_os = "linux"))]
 use tikv_jemallocator::Jemalloc;
+
 #[cfg(all(feature = "jemalloc", target_os = "linux"))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
