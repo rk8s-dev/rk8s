@@ -15,6 +15,10 @@ bitflags! {
         Serialize,
         Deserialize
     )]
+    #[cfg_attr(
+        feature = "rkyv-serialization",
+        derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+    )]
     pub struct AclFlags: u8 {
         const READ  = 0b001;
         const WRITE = 0b010;
@@ -23,6 +27,10 @@ bitflags! {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 pub enum AclSubject {
     User(u32),
     Group(u32),
@@ -30,12 +38,20 @@ pub enum AclSubject {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 pub struct AclEntry {
     pub subject: AclSubject,
     pub flags: AclFlags,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 pub struct Acl {
     pub entries: Vec<AclEntry>,
 }
@@ -67,6 +83,10 @@ impl Acl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 pub struct Permission {
     pub mode: u32,
     pub uid: u32,
