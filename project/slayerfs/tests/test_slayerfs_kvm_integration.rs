@@ -13,8 +13,8 @@ const SLAYERFS_DATA_DIR: &str = "/tmp/slayerfs-data";
 const SLAYERFS_LOG_PATH: &str = "/var/log/slayerfs.log";
 const SLAYERFS_META_DIR: &str = "/tmp/slayerfs-meta";
 
-// NOTE: the qlean integration test is not implemented yet for the kvm reseaon
-// but qlean use qemu, waiting for qlean skipping kvm acceleration when kvm is not available
+// NOTE: These tests use qlean for QEMU-based VM testing.
+// qlean 0.2.1+ supports TCG fallback when KVM is unavailable.
 fn tracing_subscriber_init() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
@@ -631,14 +631,12 @@ async fn upload_slayerfs(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_slayerfs_kvm_smoke() -> Result<()> {
     let slayerfs_bin = get_slayerfs_binary_path()?;
     start_vm_and_run(slayerfs_bin, false).await
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_slayerfs_kvm_full() -> Result<()> {
     let slayerfs_bin = get_slayerfs_binary_path()?;
     start_vm_and_run(slayerfs_bin, true).await
