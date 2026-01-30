@@ -52,7 +52,7 @@ if-addrs = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 parking_lot = { workspace = true }
 tikv-jemallocator = { workspace = true, optional = true }
-rkyv = { version = "0.8", optional = true }
+rkyv = { version = "0.8", optional = true, features = ["uuid-1"] }
 
 [features]
 profiling = ["dep:tracing-flame", "dep:tracing-chrome", "dep:console-subscriber"]

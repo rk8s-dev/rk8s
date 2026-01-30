@@ -414,7 +414,53 @@ impl EtcdMetaStore {
     /// Helper: get key from etcd and deserialize JSON into T.
     ///
     /// Strict variant: returns Err(MetaError::Internal) when etcd client returns error.
+    #[cfg(feature = "rkyv-serialization")]
+    async fn etcd_get_json<T>(&self, key: &str) -> Result<Option<T>, MetaError>
+    where
+        T: rkyv::Archive,
+        T::Archived: rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+        for<'de> T: serde::de::DeserializeOwned,
+    {
+        let mut client = self.client.clone();
+        match client.get(key.to_string(), None).await {
+            Ok(resp) => {
+                if let Some(kv) = resp.kvs().first() {
+                    let obj: T = crate::meta::serialization::deserialize_meta(kv.value())?;
+                    Ok(Some(obj))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => Err(MetaError::Internal(format!(
+                "Failed to get key {}: {}",
+                key, e
+            ))),
+        }
+    }
+
+    #[cfg(not(feature = "rkyv-serialization"))]
     async fn etcd_get_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, MetaError> {
+        let mut client = self.client.clone();
+        match client.get(key.to_string(), None).await {
+            Ok(resp) => {
+                if let Some(kv) = resp.kvs().first() {
+                    let obj: T = crate::meta::serialization::deserialize_meta(kv.value())?;
+                    Ok(Some(obj))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => Err(MetaError::Internal(format!(
+                "Failed to get key {}: {}",
+                key, e
+            ))),
+        }
+    }
+
+    async fn etcd_get_json_serde_only<T: DeserializeOwned>(
+        &self,
+        key: &str,
+    ) -> Result<Option<T>, MetaError> {
         let mut client = self.client.clone();
         match client.get(key.to_string(), None).await {
             Ok(resp) => {
@@ -434,7 +480,59 @@ impl EtcdMetaStore {
         }
     }
 
+    #[cfg(feature = "rkyv-serialization")]
+    async fn etcd_put_json<T>(
+        &self,
+        key: impl AsRef<str>,
+        obj: &T,
+        options: Option<PutOptions>,
+    ) -> Result<(), MetaError>
+    where
+        T: rkyv::Archive,
+        for<'a> T: rkyv::Serialize<
+            rkyv::rancor::Strategy<
+                rkyv::ser::Serializer<
+                    rkyv::util::AlignedVec,
+                    rkyv::ser::allocator::ArenaHandle<'a>,
+                    rkyv::ser::sharing::Share,
+                >,
+                rkyv::rancor::Error,
+            >,
+        >,
+        T: serde::Serialize,
+    {
+        let mut client = self.client.clone();
+
+        let bytes = crate::meta::serialization::serialize_meta(obj)?;
+        let key = key.as_ref();
+
+        client
+            .put(key, bytes, options)
+            .await
+            .map(|_| ())
+            .map_err(|e| MetaError::Internal(format!("Failed to put key {key}: {e}")))
+    }
+
+    #[cfg(not(feature = "rkyv-serialization"))]
     async fn etcd_put_json<T: Serialize>(
+        &self,
+        key: impl AsRef<str>,
+        obj: &T,
+        options: Option<PutOptions>,
+    ) -> Result<(), MetaError> {
+        let mut client = self.client.clone();
+
+        let bytes = crate::meta::serialization::serialize_meta(obj)?;
+        let key = key.as_ref();
+
+        client
+            .put(key, bytes, options)
+            .await
+            .map(|_| ())
+            .map_err(|e| MetaError::Internal(format!("Failed to put key {key}: {e}")))
+    }
+
+    async fn etcd_put_json_serde_only<T: Serialize>(
         &self,
         key: impl AsRef<str>,
         obj: &T,
@@ -495,12 +593,44 @@ impl EtcdMetaStore {
         .await
     }
 
-    /// Lenient variant: on etcd client error, log and return Ok(None).
+    #[cfg(feature = "rkyv-serialization")]
+    async fn etcd_get_json_lenient<T>(
+        &self,
+        key: &str,
+    ) -> Result<Option<T>, MetaError>
+    where
+        T: rkyv::Archive,
+        T::Archived: rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+        for<'de> T: serde::de::DeserializeOwned,
+    {
+        match self.etcd_get_json::<T>(key).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                error!("Etcd get failed for {}: {}", key, e);
+                Ok(None)
+            }
+        }
+    }
+
+    #[cfg(not(feature = "rkyv-serialization"))]
     async fn etcd_get_json_lenient<T: DeserializeOwned>(
         &self,
         key: &str,
     ) -> Result<Option<T>, MetaError> {
         match self.etcd_get_json::<T>(key).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                error!("Etcd get failed for {}: {}", key, e);
+                Ok(None)
+            }
+        }
+    }
+
+    async fn etcd_get_json_lenient_serde_only<T: DeserializeOwned>(
+        &self,
+        key: &str,
+    ) -> Result<Option<T>, MetaError> {
+        match self.etcd_get_json_serde_only::<T>(key).await {
             Ok(v) => Ok(v),
             Err(e) => {
                 error!("Etcd get failed for {}: {}", key, e);
@@ -577,7 +707,7 @@ impl EtcdMetaStore {
         let reverse_key = Self::etcd_reverse_key(inode);
         // lenient: if etcd client fails, treat as not found (caller expects Option)
         if let Ok(Some(entry_info)) = self
-            .etcd_get_json_lenient::<EtcdEntryInfo>(&reverse_key)
+            .etcd_get_json_lenient_serde_only::<EtcdEntryInfo>(&reverse_key)
             .await
             && !entry_info.is_file
         {
@@ -680,7 +810,7 @@ impl EtcdMetaStore {
     async fn get_file_meta(&self, inode: i64) -> Result<Option<FileMetaModel>, MetaError> {
         let reverse_key = Self::etcd_reverse_key(inode);
         if let Ok(Some(entry_info)) = self
-            .etcd_get_json_lenient::<EtcdEntryInfo>(&reverse_key)
+            .etcd_get_json_lenient_serde_only::<EtcdEntryInfo>(&reverse_key)
             .await
             && entry_info.is_file
         {
@@ -1217,7 +1347,7 @@ impl EtcdMetaStore {
     async fn file_is_existing(&self, inode: i64) -> Result<bool, MetaError> {
         let key = Self::etcd_reverse_key(inode);
 
-        let entry_info: Option<EtcdEntryInfo> = self.etcd_get_json(&key).await?;
+        let entry_info: Option<EtcdEntryInfo> = self.etcd_get_json_serde_only(&key).await?;
         match entry_info {
             Some(entry) => Ok(entry.is_file),
             None => Ok(false),
@@ -1514,7 +1644,7 @@ impl MetaStore for EtcdMetaStore {
         // Query reverse index once to get all metadata
         let reverse_key = Self::etcd_reverse_key(ino);
         if let Ok(Some(entry_info)) = self
-            .etcd_get_json_lenient::<EtcdEntryInfo>(&reverse_key)
+            .etcd_get_json_lenient_serde_only::<EtcdEntryInfo>(&reverse_key)
             .await
         {
             return Ok(Some(entry_info.to_file_attr(ino)));
@@ -1819,7 +1949,7 @@ impl MetaStore for EtcdMetaStore {
 
         let reverse_key = Self::etcd_reverse_key(ino);
         let mut entry_info = self
-            .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
             .await?
             .ok_or(MetaError::NotFound(ino))?;
 
@@ -1990,7 +2120,7 @@ impl MetaStore for EtcdMetaStore {
                 });
             }
             if self
-                .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+                .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
                 .await?
                 .is_none()
             {
@@ -2133,7 +2263,7 @@ impl MetaStore for EtcdMetaStore {
     async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
         let entry_info = self
-            .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
             .await?
             .ok_or(MetaError::NotFound(ino))?;
 
@@ -2166,7 +2296,7 @@ impl MetaStore for EtcdMetaStore {
         // Get current file metadata
         let reverse_key = Self::etcd_reverse_key(file_ino);
         let mut entry_info: EtcdEntryInfo =
-            match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+            match self.etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key).await? {
                 Some(info) => info,
                 None => return Err(MetaError::NotFound(file_ino)),
             };
@@ -2353,7 +2483,7 @@ impl MetaStore for EtcdMetaStore {
 
         let reverse_key = Self::etcd_reverse_key(entry_ino);
         let mut entry_info = self
-            .etcd_get_json::<EtcdEntryInfo>(&reverse_key)
+            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
             .await?
             .ok_or(MetaError::NotFound(entry_ino))?;
 
@@ -2737,7 +2867,7 @@ impl MetaStore for EtcdMetaStore {
         }
 
         let reverse_key = Self::etcd_reverse_key(ino);
-        let Some(entry_info) = self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? else {
+        let Some(entry_info) = self.etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key).await? else {
             return Ok(vec![]);
         };
 
@@ -2784,7 +2914,7 @@ impl MetaStore for EtcdMetaStore {
 
             while current_ino != 1 {
                 let reverse_key = Self::etcd_reverse_key(current_ino);
-                let entry_info = match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+                let entry_info = match self.etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key).await? {
                     Some(info) => info,
                     None => {
                         path_parts.clear();
@@ -2859,7 +2989,7 @@ impl MetaStore for EtcdMetaStore {
 
         // Check if the file exists and is marked as deleted
         let entry_info: EtcdEntryInfo =
-            match self.etcd_get_json::<EtcdEntryInfo>(&reverse_key).await? {
+            match self.etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key).await? {
                 Some(info) => info,
                 None => return Err(MetaError::NotFound(ino)),
             };
@@ -3016,7 +3146,7 @@ impl MetaStore for EtcdMetaStore {
 
         self.etcd_put_json(session_key, &expire, Some(options.clone()))
             .await?;
-        self.etcd_put_json(session_info_key, &session_info, Some(options.clone()))
+        self.etcd_put_json_serde_only(session_info_key, &session_info, Some(options.clone()))
             .await?;
         let (keeper, _) = conn
             .lease_keep_alive(lease.id())
@@ -3284,7 +3414,7 @@ impl MetaStore for EtcdMetaStore {
             .get()
             .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
 
-        let plocks: Vec<EtcdPlock> = self.etcd_get_json(&key).await?.unwrap_or_default();
+        let plocks: Vec<EtcdPlock> = self.etcd_get_json_serde_only(&key).await?.unwrap_or_default();
 
         for plock in plocks {
             let locks = &plock.records;

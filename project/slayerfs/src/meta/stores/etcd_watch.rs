@@ -273,25 +273,23 @@ impl EtcdWatchWorker {
 
                     match event_type {
                         EventType::Put => {
-                            // Try to extract child_ino from EtcdForwardEntry JSON
-                            // Value format: {"parent_inode":1,"name":"file","inode":123,"is_file":true}
-                            if let Ok(value_str) = std::str::from_utf8(value) {
-                                // Parse as EtcdForwardEntry
-                                if let Ok(forward_entry) =
-                                    serde_json::from_str::<EtcdForwardEntry>(value_str)
-                                {
-                                    events.push(CacheInvalidationEvent::AddChild {
-                                        parent_ino,
-                                        name,
-                                        child_ino: forward_entry.inode,
-                                    });
-                                    return events;
-                                }
+                            // Parse EtcdForwardEntry using deserialize_meta (binary-safe)
+                            if let Ok(forward_entry) =
+                                crate::meta::serialization::deserialize_meta::<EtcdForwardEntry>(
+                                    value,
+                                )
+                            {
+                                events.push(CacheInvalidationEvent::AddChild {
+                                    parent_ino,
+                                    name,
+                                    child_ino: forward_entry.inode,
+                                });
+                                return events;
                             }
 
                             // Fallback: value parse failed
                             warn!(
-                                "Failed to parse EtcdForwardEntry JSON from f: key PUT, using coarse-grained invalidation"
+                                "Failed to parse EtcdForwardEntry from f: key PUT, using coarse-grained invalidation"
                             );
                             events
                                 .push(CacheInvalidationEvent::InvalidateParentChildren(parent_ino));
@@ -307,7 +305,7 @@ impl EtcdWatchWorker {
                 if let Ok(inode) = parts[1].parse::<i64>() {
                     match event_type {
                         EventType::Put => {
-                            // Try to parse EtcdEntryInfo JSON from value
+                            // Parse EtcdEntryInfo using serde_json (EtcdEntryInfo NOT migrated - has bitflags)
                             if let Ok(value_str) = std::str::from_utf8(value)
                                 && let Ok(metadata) =
                                     serde_json::from_str::<EtcdEntryInfo>(value_str)
@@ -338,10 +336,11 @@ impl EtcdWatchWorker {
                 if let Ok(parent_ino) = parts[1].parse::<i64>() {
                     match event_type {
                         EventType::Put => {
-                            // Parse EtcdDirChildren from JSON and extract children HashMap
-                            if let Ok(value_str) = std::str::from_utf8(value)
-                                && let Ok(dir_children) =
-                                    serde_json::from_str::<EtcdDirChildren>(value_str)
+                            // Parse EtcdDirChildren using deserialize_meta (binary-safe)
+                            if let Ok(dir_children) =
+                                crate::meta::serialization::deserialize_meta::<EtcdDirChildren>(
+                                    value,
+                                )
                             {
                                 events.push(CacheInvalidationEvent::UpdateChildren {
                                     parent_ino,
@@ -350,9 +349,9 @@ impl EtcdWatchWorker {
                                 return events;
                             }
 
-                            // Fallback: JSON parse failed
+                            // Fallback: parse failed
                             warn!(
-                                "Failed to parse EtcdDirChildren JSON from c: key PUT, using invalidate"
+                                "Failed to parse EtcdDirChildren from c: key PUT, using invalidate"
                             );
                             events
                                 .push(CacheInvalidationEvent::InvalidateParentChildren(parent_ino));
