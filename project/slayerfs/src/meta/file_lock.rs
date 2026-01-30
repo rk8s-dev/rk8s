@@ -7,10 +7,6 @@ use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u32)]
-#[cfg_attr(
-    feature = "rkyv-serialization",
-    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
-)]
 pub enum FileLockType {
     Read = libc::F_RDLCK as u32,
     Write = libc::F_WRLCK as u32,
@@ -76,10 +72,6 @@ impl sea_query::ValueType for FileLockType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv-serialization",
-    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
-)]
 pub struct PlockRecord {
     pub lock_type: FileLockType,
     pub pid: u32,
