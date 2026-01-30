@@ -150,7 +150,8 @@ pub struct EtcdWatchWorker {
     client: EtcdClient,
     config: WatchConfig,
     event_tx: mpsc::Sender<CacheInvalidationEvent>,
-    worker_handle: Option<JoinHandle<()>>,
+    /// One JoinHandle per prefix watch task (empty prefix = watch all)
+    worker_handles: Vec<JoinHandle<()>>,
 }
 
 impl EtcdWatchWorker {
@@ -164,35 +165,102 @@ impl EtcdWatchWorker {
             client,
             config,
             event_tx,
-            worker_handle: None,
+            worker_handles: Vec::new(),
         };
 
         (worker, event_rx)
     }
 
-    /// Start watch worker in background
+    /// Start watch worker(s) in background
     pub fn start(&mut self) -> Result<(), MetaError> {
-        let client = self.client.clone();
-        let config = self.config.clone();
-        let event_tx = self.event_tx.clone();
+        self.stop();
 
-        let handle = tokio::spawn(async move {
-            if let Err(e) = Self::watch_loop(client, config, event_tx).await {
-                error!("Watch worker fatal error: {}", e);
-            }
-        });
+        let prefixes = self.config.effective_prefixes();
 
-        self.worker_handle = Some(handle);
-        info!("Etcd watch worker started");
+        for prefix in prefixes {
+            let client = self.client.clone();
+            let config = self.config.clone();
+            let event_tx = self.event_tx.clone();
+            let prefix_clone = prefix.clone();
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) = Self::watch_loop_for_prefix(
+                    client,
+                    prefix_clone.clone(),
+                    config,
+                    event_tx,
+                )
+                .await
+                {
+                    error!(prefix = %prefix_clone, "Watch worker fatal error: {}", e);
+                }
+            });
+
+            self.worker_handles.push(handle);
+            info!(prefix = %prefix, "Etcd watch worker started for prefix");
+        }
+
+        info!(count = self.worker_handles.len(), "All etcd watch workers started");
         Ok(())
     }
 
     /// Stop watch worker
     #[allow(dead_code)]
     pub fn stop(&mut self) {
-        if let Some(handle) = self.worker_handle.take() {
+        let count = self.worker_handles.len();
+        for handle in self.worker_handles.drain(..) {
             handle.abort();
-            info!("Etcd watch worker stopped");
+        }
+        if count > 0 {
+            info!(count = count, "Etcd watch workers stopped");
+        }
+    }
+
+    async fn watch_loop_for_prefix(
+        mut client: EtcdClient,
+        prefix: String,
+        config: WatchConfig,
+        event_tx: mpsc::Sender<CacheInvalidationEvent>,
+    ) -> Result<(), MetaError> {
+        info!(prefix = %prefix, "Starting etcd watch loop for prefix");
+
+        loop {
+            let options = WatchOptions::new().with_prefix();
+            let (_watcher, mut stream) =
+                match client.watch(prefix.clone(), Some(options)).await {
+                    Ok((w, s)) => (w, s),
+                    Err(e) => {
+                        error!(prefix = %prefix, "Failed to create watch stream: {}", e);
+                        time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    }
+                };
+
+            info!(prefix = %prefix, "Watch stream established");
+
+            while let Some(resp) = stream.message().await.transpose() {
+                match resp {
+                    Ok(resp) => {
+                        if resp.canceled() {
+                            warn!(prefix = %prefix, "Watch canceled, reconnecting...");
+                            break;
+                        }
+
+                        for event in resp.events() {
+                            if let Err(e) = Self::handle_watch_event(event, &event_tx, &config) {
+                                error!(prefix = %prefix, "Failed to handle watch event: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(prefix = %prefix, "Watch stream error: {}", e);
+                        break;
+                    }
+                }
+            }
+
+            warn!(prefix = %prefix, "Watch stream closed, reconnecting in 1s...");
+            time::sleep(Duration::from_secs(1)).await;
         }
     }
 
@@ -429,7 +497,7 @@ impl EtcdWatchWorker {
 
 impl Drop for EtcdWatchWorker {
     fn drop(&mut self) {
-        if let Some(handle) = self.worker_handle.take() {
+        for handle in self.worker_handles.drain(..) {
             handle.abort();
         }
     }
@@ -440,8 +508,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_watch_config_effective_prefixes_new_style() {
+        let config = WatchConfig {
+            enabled: true,
+            key_prefix: "old:".into(),
+            prefixes: vec!["f:".into(), "r:".into()],
+            ..Default::default()
+        };
+        assert_eq!(config.effective_prefixes(), vec!["f:", "r:"]);
+    }
+
+    #[test]
+    fn test_watch_config_effective_prefixes_backward_compat() {
+        let config = WatchConfig {
+            enabled: true,
+            key_prefix: "legacy:".into(),
+            prefixes: vec![],
+            ..Default::default()
+        };
+        assert_eq!(config.effective_prefixes(), vec!["legacy:"]);
+    }
+
+    #[test]
+    fn test_watch_config_default() {
+        let config = WatchConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.effective_prefixes(), vec![""]);
+    }
+
+    #[test]
+    fn test_watch_config_from_env() {
+        unsafe {
+            std::env::set_var("SLAYERFS_WATCH_ENABLED", "true");
+            std::env::set_var("SLAYERFS_WATCH_PREFIXES", "f:, r: , c:");
+        }
+        let config = WatchConfig::from_env_or_default();
+        assert!(config.enabled);
+        assert_eq!(config.prefixes, vec!["f:", "r:", "c:"]);
+        unsafe {
+            std::env::remove_var("SLAYERFS_WATCH_ENABLED");
+            std::env::remove_var("SLAYERFS_WATCH_PREFIXES");
+        }
+    }
+
+    #[test]
     fn test_parse_forward_key_put() {
-        // PUT event with child_ino in value
         let json = br#"{"parent_inode":10,"name":"file.txt","inode":100,"is_file":true}"#;
         let events = EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Put, json);
         assert_eq!(events.len(), 1);
@@ -461,7 +572,6 @@ mod tests {
 
     #[test]
     fn test_parse_forward_key_delete() {
-        // DELETE event generates RemoveChild
         let events = EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Delete, b"");
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -475,7 +585,6 @@ mod tests {
 
     #[test]
     fn test_parse_forward_key_invalid_value() {
-        // PUT with invalid value falls back to coarse-grained
         let events =
             EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Put, b"invalid");
         assert_eq!(events.len(), 1);
@@ -497,7 +606,6 @@ mod tests {
 
     #[test]
     fn test_parse_children_key_put() {
-        // PUT event with HashMap<String, i64> generates UpdateChildren
         let json = r#"{"inode":50,"children":{"file.txt":100,"dir":200}}"#;
         let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, json.as_bytes());
         assert_eq!(events.len(), 1);
@@ -527,7 +635,6 @@ mod tests {
 
     #[test]
     fn test_parse_children_key_invalid_json() {
-        // PUT with invalid JSON falls back to coarse-grained
         let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, b"invalid json");
         assert_eq!(events.len(), 1);
         assert!(matches!(
