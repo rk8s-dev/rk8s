@@ -167,11 +167,75 @@ const SAVE_LINK_PARENTS_LUA: &str = r#"
     return cjson.encode({ok=true, count=count})
 "#;
 
+// Lua script for atomically removing directory entry and updating parent nlink
+const RMDIR_LUA: &str = r#"
+    local cjson = require "cjson"
+    
+    local parent_dir_key = KEYS[1]
+    local child_node_key = KEYS[2]
+    local parent_node_key = KEYS[3]
+    local child_dir_key = KEYS[4]
+    local name = ARGV[1]
+    local child_ino = tonumber(ARGV[2])
+    local parent_ino = tonumber(ARGV[3])
+    local timestamp = tonumber(ARGV[4])
+    
+    -- 1. Check dentry exists
+    local dentry_ino = redis.call('HGET', parent_dir_key, name)
+    if not dentry_ino then
+        return cjson.encode({ok=false, error="not_found", ino=parent_ino})
+    end
+    
+    -- 2. Get child node
+    local child_json = redis.call('GET', child_node_key)
+    if not child_json then
+        return cjson.encode({ok=false, error="node_not_found", ino=child_ino})
+    end
+    
+    -- 3. Decode child node with pcall
+    local ok, child_node = pcall(cjson.decode, child_json)
+    if not ok or not child_node or not child_node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+    
+    -- 4. Check is directory
+    if child_node.kind ~= "Dir" then
+        return cjson.encode({ok=false, error="not_directory", ino=child_ino})
+    end
+    
+    -- 5. Check empty
+    local child_len = redis.call('HLEN', child_dir_key)
+    if child_len > 0 then
+        return cjson.encode({ok=false, error="dir_not_empty", ino=child_ino})
+    end
+    
+    -- 6. Get parent node and update
+    local parent_json = redis.call('GET', parent_node_key)
+    if parent_json then
+        local ok_p, parent_node = pcall(cjson.decode, parent_json)
+        if ok_p and parent_node and parent_node.attr then
+            parent_node.attr.nlink = parent_node.attr.nlink - 1
+            parent_node.attr.mtime = timestamp
+            parent_node.attr.ctime = timestamp
+            redis.call('SET', parent_node_key, cjson.encode(parent_node))
+        end
+    end
+    
+    -- 7. Atomic delete
+    redis.call('HDEL', parent_dir_key, name)
+    redis.call('DEL', child_node_key)
+    redis.call('DEL', child_dir_key)
+    
+    return cjson.encode({ok=true})
+"#;
+
 /// Response structure for Lua script results
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct LuaResponse {
     ok: bool,
+    #[serde(default)]
+    ino: Option<i64>,
     #[serde(default)]
     updated: Option<bool>,
     #[serde(default)]
@@ -476,6 +540,7 @@ impl RedisMetaStore {
         Ok(value)
     }
 
+    #[allow(dead_code)]
     async fn directory_len(&self, ino: i64) -> Result<i64, MetaError> {
         let mut conn = self.conn.clone();
         conn.hlen(self.dir_key(ino)).await.map_err(redis_err)
@@ -929,26 +994,49 @@ impl MetaStore for RedisMetaStore {
 
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        // Step 1: Lookup child ino first (preserves NotFound(parent) behavior)
         let Some(child) = self.lookup(parent, name).await? else {
             return Err(MetaError::NotFound(parent));
         };
-        let node = self
-            .get_node(child)
-            .await?
-            .ok_or(MetaError::NotFound(child))?;
-        if node.kind != NodeKind::Dir {
-            return Err(MetaError::NotDirectory(child));
-        }
-        let len = self.directory_len(child).await?;
-        if len > 0 {
-            return Err(MetaError::DirectoryNotEmpty(child));
-        }
-        self.remove_dir_entry(parent, name).await?;
-        self.delete_node(child).await?;
-        self.update_nlink(parent, -1).await?;
+
+        // Step 2: Construct Redis keys
+        let parent_dir_key = self.dir_key(parent);
+        let child_node_key = self.node_key(child);
+        let parent_node_key = self.node_key(parent);
+        let child_dir_key = self.dir_key(child);
         let now = current_time();
-        self.bump_dir_times(parent, now).await?;
-        Ok(())
+
+        // Step 3: Invoke Lua script atomically
+        let script = redis::Script::new(RMDIR_LUA);
+        let result: String = script
+            .key(&parent_dir_key)
+            .key(&child_node_key)
+            .key(&parent_node_key)
+            .key(&child_dir_key)
+            .arg(name)
+            .arg(child)
+            .arg(parent)
+            .arg(now)
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        // Step 4: Parse response and map errors
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
+
+        match response.error.as_deref() {
+            Some("not_found") => Err(MetaError::NotFound(response.ino.unwrap_or(parent))),
+            Some("node_not_found") => Err(MetaError::NotFound(response.ino.unwrap_or(child))),
+            Some("not_directory") => Err(MetaError::NotDirectory(response.ino.unwrap_or(child))),
+            Some("dir_not_empty") => {
+                Err(MetaError::DirectoryNotEmpty(response.ino.unwrap_or(child)))
+            }
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => Ok(()),
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
+        }
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
@@ -1870,6 +1958,7 @@ mod tests {
     use crate::meta::store::MetaError;
     use crate::meta::stores::RedisMetaStore;
     use serial_test::serial;
+    use std::sync::Arc;
     use tokio::time;
     use uuid::Uuid;
 
@@ -2711,5 +2800,103 @@ mod tests {
 
         let deleted = store.get_deleted_files().await.unwrap();
         assert!(deleted.contains(&ino));
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rmdir_lua_concurrent() {
+        let store = Arc::new(new_test_store().await);
+        let root = store.root_ino();
+
+        let _test_dir = store.mkdir(root, "testdir".to_string()).await.unwrap();
+
+        let store1 = store.clone();
+        let store2 = store.clone();
+        let store3 = store.clone();
+        let store4 = store.clone();
+
+        let h1 = tokio::spawn(async move { store1.rmdir(root, "testdir").await });
+        let h2 = tokio::spawn(async move { store2.rmdir(root, "testdir").await });
+        let h3 = tokio::spawn(async move { store3.rmdir(root, "testdir").await });
+        let h4 = tokio::spawn(async move { store4.rmdir(root, "testdir").await });
+
+        let r1 = h1.await.unwrap();
+        let r2 = h2.await.unwrap();
+        let r3 = h3.await.unwrap();
+        let r4 = h4.await.unwrap();
+
+        let results = vec![r1, r2, r3, r4];
+        let success_count = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(
+            success_count, 1,
+            "Exactly one rmdir should succeed, got {} successes",
+            success_count
+        );
+
+        let not_found_count = results
+            .iter()
+            .filter(|r| matches!(r, Err(MetaError::NotFound(ino)) if ino == &root))
+            .count();
+        assert_eq!(
+            not_found_count, 3,
+            "Three rmdir should return NotFound(parent), got {}",
+            not_found_count
+        );
+
+        assert_eq!(store.lookup(root, "testdir").await.unwrap(), None);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rmdir_lua_not_empty() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let parent_dir = store.mkdir(root, "parent".to_string()).await.unwrap();
+        let _child_dir = store
+            .mkdir(parent_dir, "child".to_string())
+            .await
+            .unwrap();
+
+        let result = store.rmdir(root, "parent").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::DirectoryNotEmpty(ino) => assert_eq!(ino, parent_dir),
+            other => panic!("expected DirectoryNotEmpty error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rmdir_lua_not_found() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let result = store.rmdir(root, "nonexistent").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::NotFound(ino) => assert_eq!(ino, root),
+            other => panic!("expected NotFound(parent) error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rmdir_lua_not_directory() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let file_ino = store.create_file(root, "file.txt".to_string()).await.unwrap();
+
+        let result = store.rmdir(root, "file.txt").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::NotDirectory(ino) => assert_eq!(ino, file_ino),
+            other => panic!("expected NotDirectory error, got {:?}", other),
+        }
     }
 }
