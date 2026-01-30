@@ -229,6 +229,103 @@ const RMDIR_LUA: &str = r#"
     return cjson.encode({ok=true})
 "#;
 
+// Lua script for atomically creating directory entry with inode allocation
+const CREATE_ENTRY_LUA: &str = r#"
+    local cjson = require "cjson"
+    
+    local parent_dir_key = KEYS[1]
+    local parent_node_key = KEYS[2]
+    local counter_key = KEYS[3]
+    local name = ARGV[1]
+    local kind = ARGV[2]
+    local timestamp = tonumber(ARGV[3])
+    local parent_ino = tonumber(ARGV[4])
+    local default_mode = tonumber(ARGV[5])
+    local uid = tonumber(ARGV[6])
+    local gid = tonumber(ARGV[7])
+    local parent_gid = tonumber(ARGV[8])
+    local parent_has_setgid = tonumber(ARGV[9])
+    
+    -- 1. Get parent node
+    local parent_json = redis.call('GET', parent_node_key)
+    if not parent_json then
+        return cjson.encode({ok=false, error="parent_not_found"})
+    end
+    
+    -- 2. Decode parent node with pcall
+    local ok, parent_node = pcall(cjson.decode, parent_json)
+    if not ok or not parent_node or not parent_node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+    
+    -- 3. Check parent is directory
+    if parent_node.kind ~= "Dir" then
+        return cjson.encode({ok=false, error="parent_not_directory"})
+    end
+    
+    -- 4. Check entry doesn't already exist
+    local existing = redis.call('HEXISTS', parent_dir_key, name)
+    if existing == 1 then
+        return cjson.encode({ok=false, error="already_exists"})
+    end
+    
+    -- 5. Allocate new inode atomically
+    local new_ino = redis.call('INCR', counter_key)
+    
+    -- 6. Apply setgid inheritance
+    local final_gid = gid
+    local final_mode = default_mode
+    if parent_has_setgid == 1 then
+        final_gid = parent_gid
+        if kind == "Dir" then
+            final_mode = bit.bor(final_mode, 2048)  -- 0o2000 setgid bit
+        end
+    end
+    
+    -- 7. Determine nlink based on kind
+    local nlink = 1
+    if kind == "Dir" then
+        nlink = 2
+    end
+    
+    -- 8. Create new node
+    local new_node = {
+        ino = new_ino,
+        parent = parent_ino,
+        name = name,
+        kind = kind,
+        attr = {
+            size = 0,
+            mode = final_mode,
+            uid = uid,
+            gid = final_gid,
+            atime = timestamp,
+            mtime = timestamp,
+            ctime = timestamp,
+            nlink = nlink
+        },
+        deleted = false
+    }
+    
+    -- 9. Save new node
+    redis.call('SET', 'i' .. new_ino, cjson.encode(new_node))
+    
+    -- 10. Add directory entry
+    redis.call('HSET', parent_dir_key, name, new_ino)
+    
+    -- 11. Update parent if creating directory (nlink++)
+    if kind == "Dir" then
+        parent_node.attr.nlink = parent_node.attr.nlink + 1
+    end
+    
+    -- 12. Update parent timestamps
+    parent_node.attr.mtime = timestamp
+    parent_node.attr.ctime = timestamp
+    redis.call('SET', parent_node_key, cjson.encode(parent_node))
+    
+    return cjson.encode({ok=true, ino=new_ino})
+"#;
+
 /// Response structure for Lua script results
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -563,35 +660,81 @@ impl RedisMetaStore {
         name: String,
         kind: FileType,
     ) -> Result<i64, MetaError> {
-        self.ensure_parent_dir(parent).await?;
-        if self.directory_child(parent, &name).await?.is_some() {
-            return Err(MetaError::AlreadyExists { parent, name });
-        }
-        let ino = self.alloc_id(INODE_ID_KEY).await?;
-        let mut node = StoredNode::new(ino, parent, name.clone(), kind);
-
-        // Inherit gid and setgid bit from parent if parent has setgid bit set
-        if let Some(parent_node) = self.get_node(parent).await? {
-            let parent_has_setgid = (parent_node.attr.mode & 0o2000) != 0;
-            if parent_has_setgid {
-                node.attr.gid = parent_node.attr.gid;
-                // Directories inherit setgid bit from parent
-                if matches!(kind, FileType::Dir) {
-                    node.attr.mode |= 0o2000;
-                }
-            }
+        // Step 1: Get parent node for setgid check
+        let parent_node = self
+            .get_node(parent)
+            .await?
+            .ok_or(MetaError::ParentNotFound(parent))?;
+        if parent_node.kind != NodeKind::Dir {
+            return Err(MetaError::NotDirectory(parent));
         }
 
-        self.save_node(&node).await?;
-        self.add_dir_entry(parent, &name, ino).await?;
-        if matches!(kind, FileType::Dir) {
-            self.update_nlink(parent, 1).await?;
-        }
+        // Step 2: Construct Redis keys
+        let parent_dir_key = self.dir_key(parent);
+        let parent_node_key = self.node_key(parent);
+        let counter_key = COUNTER_INODE_KEY;
+
+        // Step 3: Prepare ARGV parameters
+        let kind_str = match kind {
+            FileType::File => "File",
+            FileType::Dir => "Dir",
+            FileType::Symlink => "Symlink",
+        };
+        let default_mode = if kind == FileType::Dir {
+            0o040755
+        } else if kind == FileType::Symlink {
+            0o120777
+        } else {
+            0o100644
+        };
         let now = current_time();
-        self.bump_dir_times(parent, now).await?;
-        Ok(ino)
+        let parent_gid = parent_node.attr.gid;
+        let parent_has_setgid = if (parent_node.attr.mode & 0o2000) != 0 {
+            1
+        } else {
+            0
+        };
+
+        // Step 4: Invoke Lua script atomically
+        let script = redis::Script::new(CREATE_ENTRY_LUA);
+        let result: String = script
+            .key(&parent_dir_key) // KEYS[1]
+            .key(&parent_node_key) // KEYS[2]
+            .key(counter_key) // KEYS[3]
+            .arg(&name) // ARGV[1]
+            .arg(kind_str) // ARGV[2]
+            .arg(now) // ARGV[3]
+            .arg(parent) // ARGV[4]
+            .arg(default_mode) // ARGV[5]
+            .arg(0u32) // ARGV[6] - uid (default 0)
+            .arg(0u32) // ARGV[7] - gid (default 0)
+            .arg(parent_gid) // ARGV[8]
+            .arg(parent_has_setgid) // ARGV[9]
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        // Step 5: Parse response and map errors
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
+
+        match response.error.as_deref() {
+            Some("parent_not_found") => Err(MetaError::ParentNotFound(parent)),
+            Some("parent_not_directory") => Err(MetaError::NotDirectory(parent)),
+            Some("already_exists") => Err(MetaError::AlreadyExists { parent, name }),
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt parent node".into())),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => {
+                let new_ino = response
+                    .ino
+                    .ok_or_else(|| MetaError::Internal("missing ino in response".into()))?;
+                Ok(new_ino)
+            }
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
+        }
     }
 
+    #[allow(dead_code)]
     async fn update_nlink(&self, ino: i64, delta: i32) -> Result<(), MetaError> {
         if let Some(mut node) = self.get_node(ino).await? {
             let value = node.attr.nlink as i64 + delta as i64;
@@ -1839,6 +1982,7 @@ struct StoredNode {
 }
 
 impl StoredNode {
+    #[allow(dead_code)]
     fn new(ino: i64, parent: i64, name: String, kind: FileType) -> Self {
         let attr = StoredAttr::new(kind);
         Self {
@@ -1869,6 +2013,7 @@ struct StoredAttr {
 }
 
 impl StoredAttr {
+    #[allow(dead_code)]
     fn new(kind: FileType) -> Self {
         let now = current_time();
         let (mode, nlink) = match kind {
@@ -2893,6 +3038,101 @@ mod tests {
         let file_ino = store.create_file(root, "file.txt".to_string()).await.unwrap();
 
         let result = store.rmdir(root, "file.txt").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::NotDirectory(ino) => assert_eq!(ino, file_ino),
+            other => panic!("expected NotDirectory error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_entry_lua_concurrent() {
+        let store = Arc::new(new_test_store().await);
+        let root = store.root_ino();
+
+        let store1 = store.clone();
+        let store2 = store.clone();
+        let store3 = store.clone();
+        let store4 = store.clone();
+
+        let h1 = tokio::spawn(async move { store1.mkdir(root, "newdir".to_string()).await });
+        let h2 = tokio::spawn(async move { store2.mkdir(root, "newdir".to_string()).await });
+        let h3 = tokio::spawn(async move { store3.mkdir(root, "newdir".to_string()).await });
+        let h4 = tokio::spawn(async move { store4.mkdir(root, "newdir".to_string()).await });
+
+        let r1 = h1.await.unwrap();
+        let r2 = h2.await.unwrap();
+        let r3 = h3.await.unwrap();
+        let r4 = h4.await.unwrap();
+
+        let results = vec![r1, r2, r3, r4];
+        let success_count = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(
+            success_count, 1,
+            "Exactly one mkdir should succeed, got {} successes",
+            success_count
+        );
+
+        let already_exists_count = results
+            .iter()
+            .filter(|r| matches!(r, Err(MetaError::AlreadyExists { parent, name }) if parent == &root && name == "newdir"))
+            .count();
+        assert_eq!(
+            already_exists_count, 3,
+            "Three mkdir should return AlreadyExists, got {}",
+            already_exists_count
+        );
+
+        let ino = store.lookup(root, "newdir").await.unwrap();
+        assert!(ino.is_some());
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_entry_lua_already_exists() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        store.mkdir(root, "existing".to_string()).await.unwrap();
+
+        let result = store.mkdir(root, "existing".to_string()).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::AlreadyExists { parent, name } => {
+                assert_eq!(parent, root);
+                assert_eq!(name, "existing");
+            }
+            other => panic!("expected AlreadyExists error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_entry_lua_parent_not_found() {
+        let store = new_test_store().await;
+
+        let result = store.mkdir(999999, "newdir".to_string()).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::ParentNotFound(ino) => assert_eq!(ino, 999999),
+            other => panic!("expected ParentNotFound error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_entry_lua_parent_not_directory() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let file_ino = store.create_file(root, "file.txt".to_string()).await.unwrap();
+
+        let result = store.mkdir(file_ino, "newdir".to_string()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             MetaError::NotDirectory(ino) => assert_eq!(ino, file_ino),
