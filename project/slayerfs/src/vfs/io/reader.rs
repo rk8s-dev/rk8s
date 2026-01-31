@@ -10,6 +10,7 @@ use crate::chuck::reader::DataFetcher;
 use crate::chuck::{BlockStore, ChunkLayout};
 use crate::meta::MetaLayer;
 use crate::utils::{Intervals, NumCastExt};
+use crate::vfs::Inode;
 use crate::vfs::backend::Backend;
 use crate::vfs::chunk_id_for;
 use crate::vfs::config::ReadConfig;
@@ -899,6 +900,7 @@ mod tests {
     use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;
     use crate::meta::store::MetaStore;
+    use crate::vfs::Inode;
     use crate::vfs::config::{ReadConfig, WriteConfig};
     use crate::vfs::io::writer::FileWriter;
     use bytes::Bytes;

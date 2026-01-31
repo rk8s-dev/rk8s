@@ -16,6 +16,7 @@ use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLoc
 use crate::meta::store::{
     DirEntry, FileAttr, FileType, SetAttrFlags, SetAttrRequest, StatFsSnapshot,
 };
+use crate::meta::stores::DatabaseMetaStore;
 use std::future::Future;
 use std::io;
 use std::path::Path;
@@ -51,8 +52,8 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + 'static> VfsClient<S,
 }
 
 #[allow(unused)]
-impl<S: BlockStore + Send + Sync + 'static, M: MetaLayer + Send + Sync + 'static> Client<S, M> {
-    pub fn from_vfs(fs: VFS<S, M>) -> Self {
+impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + 'static> VfsClient<S, M> {
+    pub fn from_filesystem(fs: FileSystem<S, M>) -> Self {
         Self { fs }
     }
 
@@ -242,18 +243,44 @@ use crate::chuck::store::ObjectBlockStore;
 use std::sync::Arc;
 
 #[allow(dead_code)]
-pub type LocalClient = VfsClient<ObjectBlockStore<LocalFsBackend>, Arc<dyn MetaStore>>;
+pub type LocalClient = VfsClient<ObjectBlockStore<LocalFsBackend>, DatabaseMetaStore>;
 
 #[allow(dead_code)]
 impl LocalClient {
     #[allow(dead_code)]
     pub async fn new_local<P: AsRef<Path>>(root: P, layout: ChunkLayout) -> io::Result<Self> {
         let client = ObjectClient::new(LocalFsBackend::new(root));
-        let meta_handle = create_meta_store_from_url("sqlite::memory:").await?;
+        let meta_handle = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .map_err(io::Error::other)?;
+        let meta = meta_handle.store();
         let meta_layer = meta_handle.layer();
-        let store = ObjectBlockStore::new(client);
-        let fs = VFS::with_meta_layer(layout, store, meta_layer)?;
-        Ok(Client { fs })
+        let store = Arc::new(ObjectBlockStore::new(client));
+        let fs = FileSystem::from_components(
+            layout,
+            Arc::clone(&store),
+            meta,
+            meta_layer,
+            FileSystemConfig::default(),
+        )?;
+        Ok(VfsClient { fs })
+    }
+
+    #[allow(dead_code)]
+    pub async fn new_local_with_config<P: AsRef<Path>>(
+        root: P,
+        layout: ChunkLayout,
+        config: FileSystemConfig,
+    ) -> io::Result<Self> {
+        let client = ObjectClient::new(LocalFsBackend::new(root));
+        let meta_handle = create_meta_store_from_url("sqlite::memory:")
+            .await
+            .map_err(io::Error::other)?;
+        let meta = meta_handle.store();
+        let meta_layer = meta_handle.layer();
+        let store = Arc::new(ObjectBlockStore::new(client));
+        let fs = FileSystem::from_components(layout, Arc::clone(&store), meta, meta_layer, config)?;
+        Ok(VfsClient { fs })
     }
 }
 

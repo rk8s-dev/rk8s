@@ -404,7 +404,6 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + 'static,
 {
-    meta_layer: Arc<MetaClient<M>>,
     vfs: VFS<S, MetaClient<M>>,
     config: FileSystemConfig,
     access_log_tx: Option<mpsc::Sender<AccessLogEntry>>,
@@ -482,8 +481,7 @@ where
             .initialize()
             .await
             .map_err(|e| io::Error::other(format!("meta init failed: {e}")))?;
-        let meta_layer: Arc<MetaClient<M>> = meta_client.clone();
-        Self::from_components(layout, store, meta, meta_layer, config)
+        Self::from_components(layout, store, meta, meta_client, config)
     }
 
     /// Create a new FileSystem from components and an existing meta layer.
@@ -499,12 +497,15 @@ where
         let vfs = VFS::with_meta_layer(layout, Arc::clone(&store), Arc::clone(&meta_layer))
             .map_err(std::io::Error::from)?;
         Ok(Self {
-            meta_layer,
             vfs,
             config,
             access_log_tx,
             next_file_id: AtomicU64::new(1),
         })
+    }
+
+    fn meta_layer(&self) -> &MetaClient<M> {
+        self.vfs.meta_layer()
     }
 
     /// Log an access entry if access logging is enabled.
@@ -551,7 +552,7 @@ where
     /// Get file system statistics.
     pub async fn stat_fs(&self) -> io::Result<StatFs> {
         let snapshot = self
-            .meta_layer
+            .meta_layer()
             .stat_fs()
             .await
             .map_err(|e| meta_error_to_io("stat_fs", e))?;
@@ -579,19 +580,19 @@ where
     /// Internal path resolution with symlink handling.
     async fn resolve(&self, path: &str, follow_last: bool) -> io::Result<FileStat> {
         let ino = if follow_last {
-            self.meta_layer
+            self.meta_layer()
                 .resolve_path_follow(path)
                 .await
                 .map_err(|e| meta_error_to_io(path, e))?
         } else {
-            self.meta_layer
+            self.meta_layer()
                 .resolve_path(path)
                 .await
                 .map_err(|e| meta_error_to_io(path, e))?
         };
 
         let attr = self
-            .meta_layer
+            .meta_layer()
             .stat(ino)
             .await
             .map_err(|e| meta_error_to_io(path, e))?
@@ -690,7 +691,7 @@ where
             gid: Some(gid),
             ..Default::default()
         };
-        self.meta_layer
+        self.meta_layer()
             .set_attr(ino, &req, SetAttrFlags::empty())
             .await
             .map_err(|e| meta_error_to_io(path, e))?;
@@ -766,7 +767,6 @@ where
                 info: fi,
                 flags,
                 offset: AtomicU64::new(0),
-                meta_layer: Arc::clone(&self.meta_layer),
                 vfs: self.vfs.clone(),
                 access_log_tx: self.access_log_tx.clone(),
             })
@@ -815,7 +815,6 @@ where
                 info: fi,
                 flags,
                 offset: AtomicU64::new(0),
-                meta_layer: Arc::clone(&self.meta_layer),
                 vfs: self.vfs.clone(),
                 access_log_tx: self.access_log_tx.clone(),
             })
@@ -859,10 +858,10 @@ where
             }
 
             let parent_ino = if dir == "/" {
-                self.meta_layer.root_ino()
+                self.meta_layer().root_ino()
             } else {
                 let (ino, kind) = self
-                    .meta_layer
+                    .meta_layer()
                     .lookup_path(&dir)
                     .await
                     .map_err(|e| meta_error_to_io(&dir, e))?
@@ -873,7 +872,7 @@ where
                 ino
             };
             let parent_attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(parent_ino)
                 .await
                 .map_err(|e| meta_error_to_io(&dir, e))?
@@ -884,13 +883,13 @@ where
             self.check_access(&parent_attr, AccessMask::WRITE | AccessMask::EXEC, &dir)?;
 
             if let Some(ino) = self
-                .meta_layer
+                .meta_layer()
                 .lookup(parent_ino, &name)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
             {
                 let attr = self
-                    .meta_layer
+                    .meta_layer()
                     .stat(ino)
                     .await
                     .map_err(|e| meta_error_to_io(&path, e))?
@@ -902,7 +901,7 @@ where
             }
 
             let ino = self
-                .meta_layer
+                .meta_layer()
                 .mkdir(parent_ino, name)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?;
@@ -930,10 +929,10 @@ where
         let result = async {
             let (dir, name) = Self::split_dir_file(&path);
             let parent_ino = if dir == "/" {
-                self.meta_layer.root_ino()
+                self.meta_layer().root_ino()
             } else {
                 let (ino, kind) = self
-                    .meta_layer
+                    .meta_layer()
                     .lookup_path(&dir)
                     .await
                     .map_err(|e| meta_error_to_io(&dir, e))?
@@ -945,13 +944,13 @@ where
             };
 
             let ino = self
-                .meta_layer
+                .meta_layer()
                 .lookup(parent_ino, &name)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.clone()))?;
             let attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(ino)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
@@ -959,7 +958,7 @@ where
             if attr.kind == FileType::Dir {
                 return Err(io::Error::new(io::ErrorKind::IsADirectory, path.clone()));
             }
-            self.meta_layer
+            self.meta_layer()
                 .unlink(parent_ino, &name)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?;
@@ -983,10 +982,10 @@ where
             }
             let (dir, name) = Self::split_dir_file(&path);
             let parent_ino = if dir == "/" {
-                self.meta_layer.root_ino()
+                self.meta_layer().root_ino()
             } else {
                 let (ino, kind) = self
-                    .meta_layer
+                    .meta_layer()
                     .lookup_path(&dir)
                     .await
                     .map_err(|e| meta_error_to_io(&dir, e))?
@@ -998,13 +997,13 @@ where
             };
 
             let ino = self
-                .meta_layer
+                .meta_layer()
                 .lookup(parent_ino, &name)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.clone()))?;
             let attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(ino)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
@@ -1013,7 +1012,7 @@ where
                 return Err(io::Error::new(io::ErrorKind::NotADirectory, path.clone()));
             }
             let children = self
-                .meta_layer
+                .meta_layer()
                 .readdir(ino)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?;
@@ -1023,7 +1022,7 @@ where
                     path.clone(),
                 ));
             }
-            self.meta_layer
+            self.meta_layer()
                 .rmdir(parent_ino, &name)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?;
@@ -1056,9 +1055,9 @@ where
             let (new_dir, new_name) = Self::split_dir_file(&new);
 
             let old_parent_ino = if &old_dir == "/" {
-                self.meta_layer.root_ino()
+                self.meta_layer().root_ino()
             } else {
-                self.meta_layer
+                self.meta_layer()
                     .lookup_path(&old_dir)
                     .await
                     .map_err(|e| meta_error_to_io(&old_dir, e))?
@@ -1066,7 +1065,7 @@ where
                     .0
             };
             let old_parent_attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(old_parent_ino)
                 .await
                 .map_err(|e| meta_error_to_io(&old_dir, e))?
@@ -1084,23 +1083,23 @@ where
             )?;
 
             let src_ino = self
-                .meta_layer
+                .meta_layer()
                 .lookup(old_parent_ino, &old_name)
                 .await
                 .map_err(|e| meta_error_to_io(&old, e))?
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, old.clone()))?;
             let src_attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(src_ino)
                 .await
                 .map_err(|e| meta_error_to_io(&old, e))?
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, old.clone()))?;
 
-            if let Ok(Some((dest_ino, dest_kind))) = self.meta_layer.lookup_path(&new).await {
+            if let Ok(Some((dest_ino, dest_kind))) = self.meta_layer().lookup_path(&new).await {
                 let new_dir_ino = if &new_dir == "/" {
-                    self.meta_layer.root_ino()
+                    self.meta_layer().root_ino()
                 } else {
-                    self.meta_layer
+                    self.meta_layer()
                         .lookup_path(&new_dir)
                         .await
                         .map_err(|e| meta_error_to_io(&new_dir, e))?
@@ -1108,7 +1107,7 @@ where
                         .0
                 };
                 let new_parent_attr = self
-                    .meta_layer
+                    .meta_layer()
                     .stat(new_dir_ino)
                     .await
                     .map_err(|e| meta_error_to_io(&new_dir, e))?
@@ -1130,7 +1129,7 @@ where
                         return Err(io::Error::new(io::ErrorKind::NotADirectory, new.clone()));
                     }
                     let children = self
-                        .meta_layer
+                        .meta_layer()
                         .readdir(dest_ino)
                         .await
                         .map_err(|e| meta_error_to_io(&new, e))?;
@@ -1140,7 +1139,7 @@ where
                             new.clone(),
                         ));
                     }
-                    self.meta_layer
+                    self.meta_layer()
                         .rmdir(new_dir_ino, &new_name)
                         .await
                         .map_err(|e| meta_error_to_io(&new, e))?;
@@ -1148,7 +1147,7 @@ where
                     if src_attr.kind == FileType::Dir {
                         return Err(io::Error::new(io::ErrorKind::NotADirectory, new.clone()));
                     }
-                    self.meta_layer
+                    self.meta_layer()
                         .unlink(new_dir_ino, &new_name)
                         .await
                         .map_err(|e| meta_error_to_io(&new, e))?;
@@ -1156,10 +1155,10 @@ where
             }
 
             let new_dir_ino = if &new_dir == "/" {
-                self.meta_layer.root_ino()
+                self.meta_layer().root_ino()
             } else {
                 let (ino, kind) = self
-                    .meta_layer
+                    .meta_layer()
                     .lookup_path(&new_dir)
                     .await
                     .map_err(|e| meta_error_to_io(&new_dir, e))?
@@ -1170,7 +1169,7 @@ where
                 ino
             };
             let new_parent_attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(new_dir_ino)
                 .await
                 .map_err(|e| meta_error_to_io(&new_dir, e))?
@@ -1183,7 +1182,7 @@ where
                 AccessMask::WRITE | AccessMask::EXEC,
                 &new_dir,
             )?;
-            self.meta_layer
+            self.meta_layer()
                 .rename(old_parent_ino, &old_name, new_dir_ino, new_name)
                 .await
                 .map_err(|e| meta_error_to_io(&new, e))?;
@@ -1208,7 +1207,7 @@ where
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, link));
             }
             let (src_ino, src_kind) = self
-                .meta_layer
+                .meta_layer()
                 .lookup_path(&existing)
                 .await
                 .map_err(|e| meta_error_to_io(&existing, e))?
@@ -1223,9 +1222,9 @@ where
             }
 
             let parent_ino = if &parent_path == "/" {
-                self.meta_layer.root_ino()
+                self.meta_layer().root_ino()
             } else {
-                self.meta_layer
+                self.meta_layer()
                     .lookup_path(&parent_path)
                     .await
                     .map_err(|e| meta_error_to_io(&parent_path, e))?
@@ -1234,7 +1233,7 @@ where
             };
 
             let parent_attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(parent_ino)
                 .await
                 .map_err(|e| meta_error_to_io(&parent_path, e))?
@@ -1249,7 +1248,7 @@ where
             )?;
 
             if self
-                .meta_layer
+                .meta_layer()
                 .lookup(parent_ino, &name)
                 .await
                 .map_err(|e| meta_error_to_io(&link, e))?
@@ -1258,7 +1257,7 @@ where
                 return Err(io::Error::new(io::ErrorKind::AlreadyExists, link));
             }
 
-            self.meta_layer
+            self.meta_layer()
                 .link(src_ino, parent_ino, &name)
                 .await
                 .map_err(|e| meta_error_to_io(&link, e))?;
@@ -1284,9 +1283,9 @@ where
             }
 
             let parent_ino = if &dir == "/" {
-                self.meta_layer.root_ino()
+                self.meta_layer().root_ino()
             } else {
-                self.meta_layer
+                self.meta_layer()
                     .lookup_path(&dir)
                     .await
                     .map_err(|e| meta_error_to_io(&dir, e))?
@@ -1295,7 +1294,7 @@ where
             };
 
             let parent_attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(parent_ino)
                 .await
                 .map_err(|e| meta_error_to_io(&dir, e))?
@@ -1305,7 +1304,7 @@ where
             }
 
             if self
-                .meta_layer
+                .meta_layer()
                 .lookup(parent_ino, &name)
                 .await
                 .map_err(|e| meta_error_to_io(&link, e))?
@@ -1315,7 +1314,7 @@ where
             }
 
             let (ino, _) = self
-                .meta_layer
+                .meta_layer()
                 .symlink(parent_ino, &name, target)
                 .await
                 .map_err(|e| meta_error_to_io(&link, e))?;
@@ -1333,7 +1332,7 @@ where
         let log_ctx = self.log_context();
         let result = async {
             let (ino, kind) = self
-                .meta_layer
+                .meta_layer()
                 .lookup_path(&path)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
@@ -1341,7 +1340,7 @@ where
             if kind != FileType::Symlink {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, path.clone()));
             }
-            self.meta_layer
+            self.meta_layer()
                 .read_symlink(ino)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))
@@ -1423,7 +1422,7 @@ where
         let log_ctx = self.log_context();
         let result = async {
             let (ino, kind) = self
-                .meta_layer
+                .meta_layer()
                 .lookup_path(&path)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
@@ -1432,13 +1431,13 @@ where
                 return Err(io::Error::new(io::ErrorKind::NotADirectory, path.clone()));
             }
             let attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(ino)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.clone()))?;
             self.check_access(&attr, AccessMask::READ | AccessMask::EXEC, &path)?;
-            self.meta_layer
+            self.meta_layer()
                 .readdir(ino)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))
@@ -1455,15 +1454,7 @@ where
         let result = async {
             let fi = self.resolve(&path, true).await?;
             self.check_access(fi.attr(), AccessMask::READ, &path)?;
-            read_inode(
-                &self.vfs,
-                self.meta_layer.as_ref(),
-                fi.inode(),
-                offset,
-                len,
-                &path,
-            )
-            .await
+            read_inode(&self.vfs, self.meta_layer(), fi.inode(), offset, len, &path).await
         }
         .await;
         self.log_result(log_ctx.as_ref(), "read_at", &path, &result);
@@ -1479,7 +1470,7 @@ where
             self.check_access(fi.attr(), AccessMask::WRITE, &path)?;
             write_inode(
                 &self.vfs,
-                self.meta_layer.as_ref(),
+                self.meta_layer(),
                 fi.inode(),
                 offset,
                 data,
@@ -1500,7 +1491,7 @@ where
     ) -> io::Result<crate::meta::file_lock::FileLockInfo> {
         let path = Self::normalize_path(path);
         let fi = self.resolve(&path, true).await?;
-        self.meta_layer
+        self.meta_layer()
             .get_plock(fi.inode(), query)
             .await
             .map_err(|e| meta_error_to_io(&path, e))
@@ -1518,7 +1509,7 @@ where
     ) -> io::Result<()> {
         let path = Self::normalize_path(path);
         let fi = self.resolve(&path, true).await?;
-        self.meta_layer
+        self.meta_layer()
             .set_plock(fi.inode(), owner, block, lock_type, range, pid)
             .await
             .map_err(|e| meta_error_to_io(&path, e))
@@ -1527,11 +1518,11 @@ where
     async fn mkdir_p(&self, path: &str) -> io::Result<i64> {
         let path = Self::normalize_path(path);
         if path == "/" {
-            return Ok(self.meta_layer.root_ino());
+            return Ok(self.meta_layer().root_ino());
         }
 
         if let Some((ino, kind)) = self
-            .meta_layer
+            .meta_layer()
             .lookup_path(&path)
             .await
             .map_err(|e| meta_error_to_io(&path, e))?
@@ -1542,10 +1533,10 @@ where
             return Ok(ino);
         }
 
-        let mut cur_ino = self.meta_layer.root_ino();
+        let mut cur_ino = self.meta_layer().root_ino();
         let mut cur_path = String::new();
         let mut cur_attr = self
-            .meta_layer
+            .meta_layer()
             .stat(cur_ino)
             .await
             .map_err(|e| meta_error_to_io(&path, e))?
@@ -1563,14 +1554,14 @@ where
             cur_path.push_str(part);
 
             match self
-                .meta_layer
+                .meta_layer()
                 .lookup(cur_ino, part)
                 .await
                 .map_err(|e| meta_error_to_io(&cur_path, e))?
             {
                 Some(ino) => {
                     let attr = self
-                        .meta_layer
+                        .meta_layer()
                         .stat(ino)
                         .await
                         .map_err(|e| meta_error_to_io(&cur_path, e))?
@@ -1589,13 +1580,13 @@ where
                         &parent_path,
                     )?;
                     let ino = self
-                        .meta_layer
+                        .meta_layer()
                         .mkdir(cur_ino, part.to_string())
                         .await
                         .map_err(|e| meta_error_to_io(&cur_path, e))?;
                     self.apply_owner(ino, &cur_attr, &cur_path).await?;
                     let attr = self
-                        .meta_layer
+                        .meta_layer()
                         .stat(ino)
                         .await
                         .map_err(|e| meta_error_to_io(&cur_path, e))?
@@ -1622,10 +1613,10 @@ where
         }
 
         let parent_ino = if dir == "/" {
-            self.meta_layer.root_ino()
+            self.meta_layer().root_ino()
         } else {
             let (ino, kind) = self
-                .meta_layer
+                .meta_layer()
                 .lookup_path(&dir)
                 .await
                 .map_err(|e| meta_error_to_io(&dir, e))?
@@ -1636,7 +1627,7 @@ where
             ino
         };
         let parent_attr = self
-            .meta_layer
+            .meta_layer()
             .stat(parent_ino)
             .await
             .map_err(|e| meta_error_to_io(&dir, e))?
@@ -1647,13 +1638,13 @@ where
         self.check_access(&parent_attr, AccessMask::WRITE | AccessMask::EXEC, &dir)?;
 
         if let Some(existing) = self
-            .meta_layer
+            .meta_layer()
             .lookup(parent_ino, &name)
             .await
             .map_err(|e| meta_error_to_io(path, e))?
         {
             let attr = self
-                .meta_layer
+                .meta_layer()
                 .stat(existing)
                 .await
                 .map_err(|e| meta_error_to_io(path, e))?
@@ -1668,7 +1659,7 @@ where
         }
 
         let ino = self
-            .meta_layer
+            .meta_layer()
             .create_file(parent_ino, name)
             .await
             .map_err(|e| meta_error_to_io(path, e))?;
@@ -1760,7 +1751,6 @@ where
     info: FileStat,
     flags: OpenFlags,
     offset: AtomicU64,
-    meta_layer: Arc<MetaClient<M>>,
     vfs: VFS<S, MetaClient<M>>,
     access_log_tx: Option<mpsc::Sender<AccessLogEntry>>,
 }
@@ -1770,6 +1760,10 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + 'static,
 {
+    fn meta_layer(&self) -> &MetaClient<M> {
+        self.vfs.meta_layer()
+    }
+
     /// Get the file path.
     pub fn path(&self) -> &str {
         &self.path
@@ -2000,19 +1994,16 @@ where
 
     /// Get current file size.
     pub async fn size(&self) -> io::Result<u64> {
-        let attr = self
-            .meta_layer
-            .stat(self.inode)
+        self.vfs
+            .inode_size(self.inode)
             .await
-            .map_err(|e| meta_error_to_io(&self.path, e))?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "inode not found"))?;
-        Ok(attr.size)
+            .map_err(io::Error::from)
     }
 
     /// Refresh file metadata.
     pub async fn refresh_info(&mut self) -> io::Result<()> {
         let attr = self
-            .meta_layer
+            .meta_layer()
             .stat(self.inode)
             .await
             .map_err(|e| meta_error_to_io(&self.path, e))?

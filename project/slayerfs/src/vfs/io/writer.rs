@@ -16,6 +16,7 @@ use crate::meta::backoff::backoff;
 use crate::meta::store::MetaError;
 use crate::meta::{MetaLayer, SLICE_ID_KEY};
 use crate::utils::NumCastExt;
+use crate::vfs::Inode;
 use crate::vfs::backend::Backend;
 use crate::vfs::cache::page::CacheSlice;
 use crate::vfs::cache::page::WriteAction as PageWriteAction;
@@ -1313,6 +1314,7 @@ mod tests {
     use crate::meta::MetaLayer;
     use crate::meta::factory::create_meta_store_from_url;
     use crate::meta::store::MetaStore;
+    use crate::vfs::Inode;
     use crate::vfs::config::ReadConfig;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1433,10 +1435,9 @@ mod tests {
     async fn test_file_writer_flush_commits_and_reads() {
         let layout = ChunkLayout::default();
         let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .store();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let ino = meta
             .create_file(1, "flush_reads.txt".to_string())
@@ -1480,10 +1481,9 @@ mod tests {
     async fn test_file_writer_appends_slices_for_overwrite() {
         let layout = ChunkLayout::default();
         let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .store();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let ino = meta
             .create_file(1, "overwrite.txt".to_string())
@@ -1512,7 +1512,7 @@ mod tests {
         writer.flush().await.unwrap();
 
         let cid = chunk_id_for(inode.ino(), 0).unwrap();
-        let slices = meta.get_slices(cid).await.unwrap();
+        let slices = meta_store.get_slices(cid).await.unwrap();
         assert_eq!(slices.len(), 1);
 
         let mut reader = DataFetcher::new(layout, cid, backend.as_ref());
@@ -1528,10 +1528,9 @@ mod tests {
             block_size: 4 * 1024,
         };
         let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .store();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let _meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let ino = meta
             .create_file(1, "cross_chunks.txt".to_string())
@@ -1570,10 +1569,9 @@ mod tests {
             block_size: 4 * 1024,
         };
         let store = Arc::new(BlockingStore::new(true));
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .store();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let _meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let ino = meta
             .create_file(1, "flush_blocking.txt".to_string())
@@ -1611,7 +1609,7 @@ mod tests {
         sleep(Duration::from_millis(20)).await;
         assert!(!write_task.is_finished());
 
-        block_store.unblock();
+        store.unblock();
 
         timeout(Duration::from_secs(1), flush_task)
             .await

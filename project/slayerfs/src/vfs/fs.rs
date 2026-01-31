@@ -337,6 +337,34 @@ where
         self.core.root
     }
 
+    pub(crate) fn meta_layer(&self) -> &M {
+        self.core.meta_layer.as_ref()
+    }
+
+    pub(crate) fn meta_layer_arc(&self) -> Arc<M> {
+        Arc::clone(&self.core.meta_layer)
+    }
+
+    pub(crate) fn inode_size_cached(&self, ino: i64) -> Option<u64> {
+        self.state.inodes.get(&ino).map(|inode| inode.file_size())
+    }
+
+    pub(crate) async fn inode_size(&self, ino: i64) -> Result<u64, VfsError> {
+        if let Some(size) = self.inode_size_cached(ino) {
+            return Ok(size);
+        }
+        let attr = self
+            .core
+            .meta_layer
+            .stat(ino)
+            .await
+            .map_err(VfsError::from)?
+            .ok_or(VfsError::NotFound {
+                path: PathHint::none(),
+            })?;
+        Ok(attr.size)
+    }
+
     /// get the node's parent inode.
     pub async fn parent_of(&self, ino: i64) -> Option<i64> {
         self.core
