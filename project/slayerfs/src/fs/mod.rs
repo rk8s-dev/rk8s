@@ -703,6 +703,7 @@ where
         let path = Self::normalize_path(path);
         let log_ctx = self.log_context();
         let result = async {
+            let mut resolved: Option<FileStat> = None;
             // Handle file creation
             if flags.create {
                 match self.resolve(&path, true).await {
@@ -719,6 +720,7 @@ where
                                 "cannot open directory as file",
                             ));
                         }
+                        resolved = Some(fi);
                     }
                     Err(e) if e.kind() == io::ErrorKind::NotFound => {
                         // Create the file
@@ -729,7 +731,10 @@ where
                 }
             }
 
-            let fi = self.resolve(&path, true).await?;
+            let fi = match resolved {
+                Some(fi) => fi,
+                None => self.resolve(&path, true).await?,
+            };
             if fi.is_dir() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -749,7 +754,10 @@ where
 
             // Handle truncate
             if flags.truncate && flags.write {
-                self.truncate(&path, 0).await?;
+                self.vfs
+                    .truncate_inode(fi.inode(), 0)
+                    .await
+                    .map_err(io::Error::from)?;
             }
 
             let fh = self
@@ -1364,7 +1372,7 @@ where
             }
             self.check_access(fi.attr(), AccessMask::WRITE, &path)?;
             self.vfs
-                .truncate(&path, size)
+                .truncate_inode(fi.inode(), size)
                 .await
                 .map_err(io::Error::from)?;
             Ok(())
@@ -1421,21 +1429,15 @@ where
         let path = Self::normalize_path(path);
         let log_ctx = self.log_context();
         let result = async {
-            let (ino, kind) = self
+            let (ino, attr) = self
                 .meta_layer()
-                .lookup_path(&path)
+                .lookup_path_with_attr(&path)
                 .await
                 .map_err(|e| meta_error_to_io(&path, e))?
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.clone()))?;
-            if kind != FileType::Dir {
+            if attr.kind != FileType::Dir {
                 return Err(io::Error::new(io::ErrorKind::NotADirectory, path.clone()));
             }
-            let attr = self
-                .meta_layer()
-                .stat(ino)
-                .await
-                .map_err(|e| meta_error_to_io(&path, e))?
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.clone()))?;
             self.check_access(&attr, AccessMask::READ | AccessMask::EXEC, &path)?;
             self.meta_layer()
                 .readdir(ino)
@@ -1454,7 +1456,7 @@ where
         let result = async {
             let fi = self.resolve(&path, true).await?;
             self.check_access(fi.attr(), AccessMask::READ, &path)?;
-            read_inode(&self.vfs, self.meta_layer(), fi.inode(), offset, len, &path).await
+            read_inode(&self.vfs, fi.inode(), fi.attr().clone(), offset, len, &path).await
         }
         .await;
         self.log_result(log_ctx.as_ref(), "read_at", &path, &result);
@@ -1470,8 +1472,8 @@ where
             self.check_access(fi.attr(), AccessMask::WRITE, &path)?;
             write_inode(
                 &self.vfs,
-                self.meta_layer(),
                 fi.inode(),
+                fi.attr().clone(),
                 offset,
                 data,
                 &path,
@@ -1670,8 +1672,8 @@ where
 
 async fn read_inode<S, M>(
     vfs: &VFS<S, MetaClient<M>>,
-    meta_layer: &MetaClient<M>,
     ino: i64,
+    attr: FileAttr,
     offset: u64,
     len: usize,
     path: &str,
@@ -1683,11 +1685,6 @@ where
     if len == 0 {
         return Ok(Vec::new());
     }
-    let attr = meta_layer
-        .stat(ino)
-        .await
-        .map_err(|e| meta_error_to_io(path, e))?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.to_string()))?;
     match attr.kind {
         FileType::File => {}
         FileType::Dir => return Err(io::Error::new(io::ErrorKind::IsADirectory, path)),
@@ -1705,8 +1702,8 @@ where
 
 async fn write_inode<S, M>(
     vfs: &VFS<S, MetaClient<M>>,
-    meta_layer: &MetaClient<M>,
     ino: i64,
+    attr: FileAttr,
     offset: u64,
     data: &[u8],
     path: &str,
@@ -1715,11 +1712,6 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaStore + 'static,
 {
-    let attr = meta_layer
-        .stat(ino)
-        .await
-        .map_err(|e| meta_error_to_io(path, e))?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.to_string()))?;
     match attr.kind {
         FileType::File => {}
         FileType::Dir => return Err(io::Error::new(io::ErrorKind::IsADirectory, path)),

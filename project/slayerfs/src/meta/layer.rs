@@ -45,6 +45,18 @@ pub trait MetaLayer: Send + Sync {
 
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError>;
 
+    async fn lookup_path_with_attr(
+        &self,
+        path: &str,
+    ) -> Result<Option<(i64, FileAttr)>, MetaError> {
+        let (ino, _) = match self.lookup_path(path).await? {
+            Some(result) => result,
+            None => return Ok(None),
+        };
+        let attr = self.stat(ino).await?.ok_or(MetaError::NotFound(ino))?;
+        Ok(Some((ino, attr)))
+    }
+
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError>;
 
     async fn opendir(&self, ino: i64) -> Result<DirHandle, MetaError>;

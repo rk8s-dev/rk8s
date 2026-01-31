@@ -1032,6 +1032,25 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(Some((ino, attr.kind)))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
+    async fn lookup_path_with_attr(
+        &self,
+        path: &str,
+    ) -> Result<Option<(i64, FileAttr)>, MetaError> {
+        let ino = match self.resolve_path(path).await {
+            Ok(ino) => ino,
+            Err(MetaError::NotFound(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        let attr = self
+            .cached_stat(ino)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        Ok(Some((ino, attr)))
+    }
+
     #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError> {
         let inode = self.check_root(ino);
