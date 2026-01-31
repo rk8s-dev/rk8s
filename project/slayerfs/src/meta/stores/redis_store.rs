@@ -176,7 +176,6 @@ const UNLINK_LUA: &str = r#"
     return cjson.encode({ok=true, nlink=node.attr.nlink, deleted=deleted})
 "#;
 
-
 // Lua script for atomically removing directory entry and updating parent nlink
 const RMDIR_LUA: &str = r#"
     local cjson = cjson
@@ -818,7 +817,6 @@ impl RedisMetaStore {
         out.dedup();
         Ok(out)
     }
-
 
     async fn bump_dir_times(&self, ino: i64, now: i64) -> Result<(), MetaError> {
         if let Some(mut node) = self.get_node(ino).await?
@@ -2156,7 +2154,6 @@ struct StoredNode {
 }
 
 impl StoredNode {
-
     fn as_file_attr(&self) -> FileAttr {
         self.attr.to_file_attr(self.ino, self.kind.into())
     }
