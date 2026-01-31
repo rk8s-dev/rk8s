@@ -54,12 +54,12 @@ fn init_tracing(chrome_trace: Option<&Path>) {
                 .with(fmt_layer)
                 .with(chrome_layer)
                 .init();
-        } else {
-            tracing_subscriber::registry()
-                .with(filter)
-                .with(fmt_layer)
-                .init();
+            return;
         }
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .init();
     });
 }
 
@@ -561,6 +561,7 @@ async fn write_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Resul
                 }
                 written += len;
             }
+            fs.fsync(fh, false).await.map_err(|e| anyhow!(e))?;
             close_handle(&fs, fh).await?;
             Result::<()>::Ok(())
         }));
@@ -568,7 +569,6 @@ async fn write_big_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Resul
     for handle in handles {
         handle.await??;
     }
-    flush_os_caches();
     Ok(())
 }
 
@@ -601,7 +601,6 @@ async fn write_big_files_baseline(cfg: &BenchConfig, base: PathBuf) -> Result<()
     for handle in handles {
         handle.await??;
     }
-    flush_os_caches();
     Ok(())
 }
 
@@ -663,6 +662,7 @@ async fn write_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Res
                     }
                     written += len;
                 }
+                fs.fsync(fh, false).await.map_err(|e| anyhow!(e))?;
                 close_handle(&fs, fh).await?;
             }
             Result::<()>::Ok(())
@@ -671,7 +671,6 @@ async fn write_small_files(fs: SharedFs, cfg: &BenchConfig, base: String) -> Res
     for handle in handles {
         handle.await??;
     }
-    flush_os_caches();
     Ok(())
 }
 
@@ -735,14 +734,6 @@ fn make_block_payload(size: usize, salt: usize) -> Vec<u8> {
 fn small_file_path(base: &str, tid: usize, idx: usize) -> String {
     format!("{base}/thread-{tid}/file-{idx}.dat")
 }
-
-#[cfg(unix)]
-fn flush_os_caches() {
-    unsafe { libc::sync() };
-}
-
-#[cfg(not(unix))]
-fn flush_os_caches() {}
 
 fn bench_big_files(c: &mut Criterion) {
     let cfg = BenchConfig::from_env();

@@ -4,6 +4,7 @@ use super::chunk::ChunkLayout;
 use super::slice::{SliceDesc, block_span_iter};
 use super::store::BlockStore;
 use crate::meta::MetaLayer;
+use crate::utils::NumCastExt;
 use crate::vfs::backend::Backend;
 use anyhow::Result;
 use bytes::Bytes;
@@ -70,28 +71,28 @@ where
     pub(crate) async fn write_at(
         &self,
         slice_id: u64,
-        offset: u32,
+        offset: u64,
         buf: &[u8],
     ) -> Result<SliceDesc> {
         let desc = SliceDesc {
             slice_id,
             chunk_id: self.id,
             offset,
-            length: buf.len() as u32,
+            length: buf.len() as u64,
         };
 
         let mut cursor = 0;
         let mut futures = Vec::new();
 
         for span in block_span_iter(desc, self.layout) {
-            let take = span.len as usize;
+            let take = span.len.as_usize();
             let data = &buf[cursor..(cursor + take)];
 
-            let future = self.backend.store().write_fresh_range(
-                (slice_id, span.index as u32),
-                span.offset,
-                data,
-            );
+            let block_index = span.index.as_u32();
+            let future =
+                self.backend
+                    .store()
+                    .write_fresh_range((slice_id, block_index), span.offset, data);
             futures.push(future);
             cursor += take;
         }
@@ -107,7 +108,7 @@ where
     pub(crate) async fn write_at_vectored(
         &self,
         slice_id: u64,
-        offset: u32,
+        offset: u64,
         chunks: &[Bytes],
     ) -> Result<SliceDesc> {
         let total_len = chunks.iter().map(|c| c.len()).sum::<usize>();
@@ -115,17 +116,18 @@ where
             slice_id,
             chunk_id: self.id,
             offset,
-            length: total_len as u32,
+            length: total_len as u64,
         };
 
         let mut cursor = ChunkCursor::new(chunks);
         let mut futures = Vec::new();
 
         for span in block_span_iter(desc, self.layout) {
-            let block_chunks = cursor.take(span.len as usize);
+            let block_chunks = cursor.take(span.len.as_usize());
 
+            let block_index = span.index.as_u32();
             let future = self.backend.store().write_fresh_vectored(
-                (slice_id, span.index as u32),
+                (slice_id, block_index),
                 span.offset,
                 block_chunks,
             );
@@ -177,7 +179,7 @@ mod tests {
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let data = patterned(layout.block_size as usize + 512, 7);
-        let offset = 512u32;
+        let offset = 512u64;
         let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
 
         let uploader = DataUploader::new(layout, 1, backend.as_ref());
@@ -203,7 +205,7 @@ mod tests {
             .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
-        let offset = layout.block_size - 128;
+        let offset = layout.block_size as u64 - 128;
         let part1 = patterned(300, 5);
         let part2 = patterned(700, 9);
         let part3 = patterned(500, 2);

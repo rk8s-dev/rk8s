@@ -5,6 +5,7 @@ use super::slice::{SliceDesc, block_span_iter};
 use super::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::utils::Intervals;
+use crate::utils::NumCastExt;
 use crate::vfs::backend::Backend;
 use anyhow::{Result, ensure};
 use futures_util::StreamExt;
@@ -49,6 +50,7 @@ where
             slice_count = tracing::field::Empty
         ))
         .await?;
+
         self.slices = slices;
         self.prepared = true;
         Ok(())
@@ -59,7 +61,7 @@ where
         skip(self),
         fields(chunk_id = self.id, offset, len, need_reads = tracing::field::Empty)
     )]
-    pub(crate) async fn read_at(&mut self, offset: u32, len: usize) -> Result<Vec<u8>> {
+    pub(crate) async fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -72,7 +74,7 @@ where
 
         let need_read = tracing::trace_span!("fetch.read_at.build_need_read", offset, len)
             .in_scope(|| {
-                let mut intervals = Intervals::new(offset, offset + len as u32);
+                let mut intervals = Intervals::new(offset, offset + len as u64);
                 let mut need_read = Vec::new();
 
                 for slice in self.slices.iter().copied().rev() {
@@ -95,8 +97,8 @@ where
             let mut futures = FuturesUnordered::new();
 
             for (l, r, slice) in need_read {
-                let start = (l - offset) as usize;
-                let len = (r - l) as usize;
+                let start = (l - offset).as_usize();
+                let len = (r - l).as_usize();
                 debug_assert!(start >= cursor);
 
                 // Skip gaps
@@ -126,11 +128,11 @@ where
                         let mut blocks = 0usize;
                         for span in block_span_iter(desc, layout) {
                             blocks += 1;
-                            let take = span.len as usize;
+                            let take = span.len.as_usize();
                             let out = &mut seg[pos..pos + take];
                             backend
                                 .store()
-                                .read_range((desc.slice_id, span.index as u32), span.offset, out)
+                                .read_range((desc.slice_id, span.index.as_u32()), span.offset, out)
                                 .await?;
                             pos += take;
                         }
@@ -176,7 +178,7 @@ mod tests {
             let desc = uploader
                 .write_at_vectored(
                     slice_id as u64,
-                    layout.block_size,
+                    layout.block_size as u64,
                     &[bytes::Bytes::copy_from_slice(&buf)],
                 )
                 .await
@@ -186,7 +188,7 @@ mod tests {
         let mut r = DataFetcher::new(layout, 7, backend.as_ref());
         r.prepare_slices().await.unwrap();
         // Read from the back half of block 0 to the front half of block 1 (one block total)
-        let off = layout.block_size / 2;
+        let off = layout.block_size as u64 / 2;
         let res = r.read_at(off, layout.block_size as usize).await.unwrap();
         assert_eq!(res.len(), layout.block_size as usize);
         // The first half should be zero-filled and the second half should be ones
@@ -215,7 +217,7 @@ mod tests {
             .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
-        let offset = layout.block_size - 512;
+        let offset = layout.block_size as u64 - 512;
         let data = vec![7u8; 2048];
         let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, 3, backend.as_ref());

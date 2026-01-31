@@ -39,9 +39,9 @@ pub struct SliceDesc {
     pub slice_id: u64,
     pub chunk_id: u64,
     /// Offset relative to the start of the chunk (bytes).
-    pub offset: u32,
+    pub offset: u64,
     /// Length in bytes.
-    pub length: u32,
+    pub length: u64,
 }
 
 pub fn block_span_iter(desc: SliceDesc, layout: ChunkLayout) -> impl Iterator<Item = BlockSpan> {
@@ -70,13 +70,13 @@ mod tests {
             slice_id: 1,
             chunk_id: 1,
             offset: 0,
-            length: DEFAULT_BLOCK_SIZE / 2,
+            length: (DEFAULT_BLOCK_SIZE / 2) as u64,
         };
         let spans: Vec<BlockSpan> = block_span_iter(s, layout).collect();
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].index, 0);
         assert_eq!(spans[0].offset, 0);
-        assert_eq!(spans[0].len, DEFAULT_BLOCK_SIZE / 2);
+        assert_eq!(spans[0].len, (DEFAULT_BLOCK_SIZE / 2) as u64);
     }
 
     #[test]
@@ -86,16 +86,16 @@ mod tests {
         let s = SliceDesc {
             slice_id: 1,
             chunk_id: 1,
-            offset: half,
-            length: layout.block_size,
+            offset: half as u64,
+            length: layout.block_size as u64,
         };
         let spans: Vec<BlockSpan> = block_span_iter(s, layout).collect();
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].index, 0);
-        assert_eq!(spans[0].offset, (layout.block_size / 2));
-        assert_eq!(spans[0].len, layout.block_size / 2);
+        assert_eq!(spans[0].offset, (layout.block_size / 2) as u64);
+        assert_eq!(spans[0].len, (layout.block_size / 2) as u64);
         assert_eq!(spans[1].index, 1);
         assert_eq!(spans[1].offset, 0);
-        assert_eq!(spans[1].len, layout.block_size / 2);
+        assert_eq!(spans[1].len, (layout.block_size / 2) as u64);
     }
 }

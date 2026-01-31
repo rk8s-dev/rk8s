@@ -8113,7 +8113,6 @@ dependencies = [
  "console-subscriber",
  "criterion",
  "dashmap",
- "derive_more 0.99.20",
  "dirs",
  "dotenv",
  "env_logger",

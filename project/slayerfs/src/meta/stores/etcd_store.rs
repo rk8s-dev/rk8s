@@ -56,7 +56,11 @@ struct UpdatePlan {
 }
 
 impl UpdatePlan {
-    fn write(ctx: &TxnContext, key: impl Into<String>, value: Vec<u8>) -> Result<Self, MetaError> {
+    fn new_write(
+        ctx: &TxnContext,
+        key: impl Into<String>,
+        value: Vec<u8>,
+    ) -> Result<Self, MetaError> {
         let key = key.into();
         let compare = ctx.compare_for(&key)?;
         Ok(Self {
@@ -67,7 +71,7 @@ impl UpdatePlan {
     }
 
     #[allow(dead_code)]
-    fn delete(ctx: &TxnContext, key: impl Into<String>) -> Result<Self, MetaError> {
+    fn new_delete(ctx: &TxnContext, key: impl Into<String>) -> Result<Self, MetaError> {
         let key = key.into();
         let compare = ctx.compare_for(&key)?;
         Ok(Self {
@@ -153,6 +157,8 @@ impl TxnContext {
             .map_err(|e| MetaError::Internal(format!("Etcd txn fetch error: {e}")))?;
 
         let mut slots = HashMap::with_capacity(keys.len());
+
+        // Etcd preserves response order for each request op in the txn success list.
         let responses = resp.op_responses();
 
         for (idx, key) in keys.iter().enumerate() {
@@ -241,6 +247,13 @@ impl TxnBuilder {
                 let mut seen_keys = std::collections::HashSet::new();
 
                 for plan in plans {
+                    if !ctx.slots.contains_key(&plan.key) {
+                        return Err(MetaError::Internal(format!(
+                            "Stage generated plan for undeclared key: {}",
+                            plan.key
+                        )));
+                    }
+
                     if !seen_keys.insert(plan.key.clone()) {
                         return Err(MetaError::Internal(format!(
                             "Duplicate update plan for key {}",
@@ -1544,6 +1557,7 @@ impl MetaStore for EtcdMetaStore {
                 .await
                 .map_err(|e| MetaError::Internal(format!("Etcd batch txn error: {}", e)))?;
 
+            // Etcd preserves response order for each request op in the txn success list.
             let responses = txn_response.op_responses();
 
             // Parse responses - one response per inode
@@ -2930,7 +2944,7 @@ impl MetaStore for EtcdMetaStore {
             slices.push(slice_for_update);
 
             let slices_payload = serde_json::to_vec(&slices)?;
-            plans.push(UpdatePlan::write(
+            plans.push(UpdatePlan::new_write(
                 ctx,
                 slice_key_for_stage.clone(),
                 slices_payload,
@@ -2953,7 +2967,7 @@ impl MetaStore for EtcdMetaStore {
                 entry_info.size = Some(new_size as i64);
                 entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
                 let entry_payload = serde_json::to_vec(&entry_info)?;
-                plans.push(UpdatePlan::write(
+                plans.push(UpdatePlan::new_write(
                     ctx,
                     inode_key_for_stage.clone(),
                     entry_payload,

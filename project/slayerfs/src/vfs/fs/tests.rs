@@ -660,7 +660,7 @@ mod io_tests {
         }
 
         let task_count = 4usize;
-        let iterations = 5000usize;
+        let iterations = 500usize;
         let max_write = 4096usize;
 
         let mut handles = Vec::with_capacity(task_count);

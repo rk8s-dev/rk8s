@@ -30,14 +30,12 @@ impl LocalFsBackend {
     }
 
     async fn ensure_dir(&self, dir: &Path) -> Result<()> {
-        let dir_buf = dir.to_path_buf();
-
-        if self.created_dirs.insert(dir_buf.clone())
-            && let Err(err) = fs::create_dir_all(&dir_buf).await
-        {
-            self.created_dirs.remove(&dir_buf);
-            return Err(err.into());
+        if self.created_dirs.contains(dir) {
+            return Ok(());
         }
+
+        fs::create_dir_all(dir).await?;
+        self.created_dirs.insert(dir.to_path_buf());
         Ok(())
     }
 }

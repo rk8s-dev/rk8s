@@ -9,7 +9,7 @@
 use crate::chuck::reader::DataFetcher;
 use crate::chuck::{BlockStore, ChunkLayout};
 use crate::meta::MetaLayer;
-use crate::utils::Intervals;
+use crate::utils::{Intervals, NumCastExt};
 use crate::vfs::backend::Backend;
 use crate::vfs::chunk_id_for;
 use crate::vfs::config::ReadConfig;
@@ -216,7 +216,7 @@ struct SliceState {
     /// Chunk index it belongs to
     index: u64,
     /// Range it contains
-    range: (u32, u32),
+    range: (u64, u64),
     page: Vec<u8>,
     state: SliceStatus,
     err: Option<String>,
@@ -232,7 +232,7 @@ struct SliceState {
 }
 
 impl SliceState {
-    fn new(index: u64, range: (u32, u32), refs: u16) -> Self {
+    fn new(index: u64, range: (u64, u64), refs: u16) -> Self {
         Self {
             index,
             range,
@@ -254,7 +254,7 @@ impl SliceState {
         )
     }
 
-    fn overlaps(&self, offset: u32, len: u32) -> bool {
+    fn overlaps(&self, offset: u64, len: u64) -> bool {
         let end = offset.saturating_add(len);
         self.range.0 < end && offset < self.range.1
     }
@@ -293,7 +293,7 @@ impl SliceState {
                 let mut fetcher = DataFetcher::new(layout, chunk_id, &backend);
                 fetcher.prepare_slices().await?;
 
-                let out = fetcher.read_at(start, (end - start) as usize).await?;
+                let out = fetcher.read_at(start, (end - start).as_usize()).await?;
                 Ok::<_, anyhow::Error>(out)
             };
 
@@ -498,8 +498,8 @@ where
             }
 
             let base = slice.index * self.config.layout.chunk_size;
-            let slice_start = base + slice.range.0 as u64;
-            let slice_end = base + slice.range.1 as u64;
+            let slice_start = base + slice.range.0;
+            let slice_end = base + slice.range.1;
 
             let overlaps_current = slice_start < cur_end && cur_start < slice_end;
             let needed_by_session = windows
@@ -599,7 +599,8 @@ where
         let mut tail = buf;
         let result = async {
             for span in spans {
-                let (seg, rest) = tail.split_at_mut(span.len as usize);
+                let span_len = span.len.as_usize();
+                let (seg, rest) = tail.split_at_mut(span_len);
                 tail = rest;
                 self.read_from_slice(span.index, span.offset, seg).await?;
             }
@@ -678,7 +679,7 @@ where
     // Read from cached slices for a chunk. This waits for slice readiness and copies
     // overlapping ranges into the provided buffer.
     #[tracing::instrument(level = "trace", skip(self, buf), fields(index, offset, len = buf.len()))]
-    async fn read_from_slice(&self, index: u64, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
+    async fn read_from_slice(&self, index: u64, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
         let slices = async {
             let guard = self.slices.lock().await;
             guard
@@ -702,7 +703,7 @@ where
                 let guard = slice.lock();
                 (
                     offset.max(guard.range.0),
-                    guard.range.1.min(offset + buf.len() as u32),
+                    guard.range.1.min(offset + buf.len() as u64),
                 )
             };
 
@@ -729,15 +730,15 @@ where
                 bytes = (dst_end - dst_start)
             )
             .in_scope(|| {
-                buf[dst_local_start as usize..dst_local_end as usize]
-                    .copy_from_slice(&guard.page[src_start as usize..src_end as usize]);
+                buf[dst_local_start.as_usize()..dst_local_end.as_usize()]
+                    .copy_from_slice(&guard.page[src_start.as_usize()..src_end.as_usize()]);
             });
         }
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(index, start, end))]
-    async fn prepare_slices(&self, index: u64, (start, end): (u32, u32)) -> SlicePinGuard {
+    async fn prepare_slices(&self, index: u64, (start, end): (u64, u64)) -> SlicePinGuard {
         let mut pinned = SlicePinGuard::new();
         let mut cutter = Intervals::new(start, end);
 
@@ -892,6 +893,7 @@ mod tests {
     use crate::vfs::config::{ReadConfig, WriteConfig};
     use crate::vfs::io::writer::FileWriter;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
     use std::time::Duration;
     use tokio::time::{sleep, timeout};
 
@@ -923,7 +925,7 @@ mod tests {
         let desc1 = uploader
             .write_at_vectored(
                 slice_id1 as u64,
-                offset as u32,
+                offset,
                 &[bytes::Bytes::copy_from_slice(head)],
             )
             .await
@@ -1035,6 +1037,7 @@ mod tests {
             Arc::new(WriteConfig::new(layout).page_size(4 * 1024)),
             backend.clone(),
             reader,
+            Arc::new(AtomicU64::new(0)),
         ));
 
         let write_task = {

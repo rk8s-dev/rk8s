@@ -40,9 +40,9 @@ clap = { workspace = true, features = ["derive", "env"] }
 auto_impl = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-tracing-chrome = { workspace = true }
-tracing-flame = { workspace = true }
-console-subscriber = { workspace = true }
+tracing-flame = { workspace = true, optional = true }
+tracing-chrome = { workspace = true, optional = true }
+console-subscriber = { workspace = true, optional = true }
 dotenv = { workspace = true }
 rand = { workspace = true }
 hostname = { workspace = true }
@@ -50,11 +50,11 @@ bitflags = { workspace = true }
 redis = { workspace = true }
 if-addrs = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
-derive_more = { workspace = true }
 parking_lot = { workspace = true }
 tikv-jemallocator = { workspace = true, optional = true }
 
 [features]
+profiling = ["dep:tracing-flame", "dep:tracing-chrome", "dep:console-subscriber"]
 jemalloc = ["dep:tikv-jemallocator"]
 jemalloc-profiling = ["jemalloc", "tikv-jemallocator/profiling"]
 
@@ -64,6 +64,8 @@ criterion = { workspace = true }
 pprof = { workspace = true }
 serial_test = { workspace = true }
 qlean = { workspace = true }
+tracing-chrome = { workspace = true }
+
 
 [[bench]]
 name = "slayerfs_bench"

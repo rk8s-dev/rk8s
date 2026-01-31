@@ -1739,8 +1739,10 @@ where
             });
         }
 
+        tracing::trace!(fh, ino = handle.ino, offset, len = data.len(), "vfs.write");
         let written = handle.write(offset, data).await?;
         self.state.modified.touch(handle.ino).await;
+        tracing::trace!(fh, ino = handle.ino, written, "vfs.write_done");
         Ok(written)
     }
 
@@ -1798,6 +1800,12 @@ where
             .get(fh)
             .ok_or(VfsError::StaleNetworkFileHandle)?;
 
+        tracing::trace!(
+            fh,
+            ino = handle.ino,
+            write = handle.flags.write,
+            "vfs.close"
+        );
         if handle.flags.write {
             handle.flush().await.map_err(|_| VfsError::Other)?;
             self.update_mtime_ctime(handle.ino).await?;
@@ -1827,6 +1835,7 @@ where
             }
         }
 
+        tracing::trace!(fh, ino = handle.ino, "vfs.close_done");
         Ok(())
     }
 
@@ -1838,11 +1847,18 @@ where
             .get(fh)
             .ok_or(VfsError::StaleNetworkFileHandle)?;
 
+        tracing::trace!(
+            fh,
+            ino = handle.ino,
+            write = handle.flags.write,
+            "vfs.flush"
+        );
         if handle.flags.write {
             handle.flush().await.map_err(|_| VfsError::Other)?;
         }
 
         self.update_timestamps_on_flush(handle.ino).await?;
+        tracing::trace!(fh, ino = handle.ino, "vfs.flush_done");
         Ok(())
     }
 
@@ -1854,11 +1870,18 @@ where
             .get(fh)
             .ok_or(VfsError::StaleNetworkFileHandle)?;
 
+        tracing::trace!(
+            fh,
+            ino = handle.ino,
+            write = handle.flags.write,
+            "vfs.fsync"
+        );
         if handle.flags.write {
             handle.flush().await.map_err(|_| VfsError::Other)?;
         }
 
         self.update_timestamps_on_flush(handle.ino).await?;
+        tracing::trace!(fh, ino = handle.ino, "vfs.fsync_done");
         Ok(())
     }
 

@@ -18,6 +18,7 @@ use crate::meta::store::{
     StatFsSnapshot,
 };
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
+use crate::utils::NumCastExt;
 use crate::vfs::chunk_id_for;
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
@@ -571,7 +572,12 @@ impl DatabaseMetaStore {
                     .map_err(MetaError::Database)?;
 
                 for row in rows {
-                    match trim_action(row.offset as u32, row.length as u32, cutoff_offset) {
+                    debug_assert!(row.offset >= 0);
+                    debug_assert!(row.length >= 0);
+                    let offset = row.offset as u64;
+                    let length = row.length as u64;
+
+                    match trim_action(offset, length, cutoff_offset) {
                         TrimAction::Keep => {}
                         TrimAction::Drop => {
                             let active: slice_meta::ActiveModel = row.into();
@@ -579,7 +585,7 @@ impl DatabaseMetaStore {
                         }
                         TrimAction::Truncate(new_len) => {
                             let mut active: slice_meta::ActiveModel = row.into();
-                            active.length = Set(new_len as i32);
+                            active.length = Set(new_len as i64);
                             active.update(conn).await.map_err(MetaError::Database)?;
                         }
                     }
@@ -2411,8 +2417,8 @@ impl MetaStore for DatabaseMetaStore {
         let model = slice_meta::ActiveModel {
             chunk_id: Set(chunk_id as i64),
             slice_id: Set(slice.slice_id as i64),
-            offset: Set(slice.offset as i32),
-            length: Set(slice.length as i32),
+            offset: Set(slice.offset.as_i64()),
+            length: Set(slice.length.as_i64()),
             ..Default::default()
         };
 
@@ -2437,8 +2443,8 @@ impl MetaStore for DatabaseMetaStore {
         let model = slice_meta::ActiveModel {
             chunk_id: Set(chunk_id as i64),
             slice_id: Set(slice.slice_id as i64),
-            offset: Set(slice.offset as i32),
-            length: Set(slice.length as i32),
+            offset: Set(slice.offset.as_i64()),
+            length: Set(slice.length.as_i64()),
             ..Default::default()
         };
 
