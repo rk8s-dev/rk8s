@@ -3658,4 +3658,35 @@ mod tests {
         assert_eq!(node2_after.parent, 0);
         assert_eq!(node2_after.name, "");
     }
+
+    #[test]
+    fn test_deserialize_i64_from_number() {
+        use serde::Deserialize;
+
+        #[derive(Deserialize)]
+        struct TestStruct {
+            #[serde(deserialize_with = "super::deserialize_i64_from_number")]
+            value: i64,
+        }
+
+        // Integer input (normal case)
+        let json = r#"{"value": 1234567890}"#;
+        let result: TestStruct = serde_json::from_str(json).unwrap();
+        assert_eq!(result.value, 1234567890);
+
+        // Float input (the bug case - scientific notation)
+        let json = r#"{"value": 1.7698324007242e+18}"#;
+        let result: TestStruct = serde_json::from_str(json).unwrap();
+        assert!(result.value > 1_700_000_000_000_000_000); // ~1.77e18
+
+        // Negative value
+        let json = r#"{"value": -1000}"#;
+        let result: TestStruct = serde_json::from_str(json).unwrap();
+        assert_eq!(result.value, -1000);
+
+        // Zero
+        let json = r#"{"value": 0}"#;
+        let result: TestStruct = serde_json::from_str(json).unwrap();
+        assert_eq!(result.value, 0);
+    }
 }
