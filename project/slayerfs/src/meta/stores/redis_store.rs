@@ -153,7 +153,7 @@ const UNLINK_LUA: &str = r#"
 
 // Lua script for atomically removing directory entry and updating parent nlink
 const RMDIR_LUA: &str = r#"
-    local cjson = require "cjson"
+    local cjson = cjson
 
     local parent_dir_key = KEYS[1]
     local child_node_key = KEYS[2]
@@ -215,7 +215,7 @@ const RMDIR_LUA: &str = r#"
 
 // Lua script for atomically creating directory entry with inode allocation
 const CREATE_ENTRY_LUA: &str = r#"
-    local cjson = require "cjson"
+    local cjson = cjson
 
     local parent_dir_key = KEYS[1]
     local parent_node_key = KEYS[2]
@@ -312,7 +312,7 @@ const CREATE_ENTRY_LUA: &str = r#"
 
 // Lua script for atomically renaming file or directory (no overwrite)
 const RENAME_LUA: &str = r#"
-    local cjson = require "cjson"
+    local cjson = cjson
 
     local old_parent_dir_key = KEYS[1]
     local new_parent_dir_key = KEYS[2]
@@ -426,7 +426,7 @@ const RENAME_LUA: &str = r#"
 "#;
 
 const RENAME_EXCHANGE_LUA: &str = r#"
-    local cjson = require "cjson"
+    local cjson = cjson
 
     local old_parent_dir_key = KEYS[1]
     local new_parent_dir_key = KEYS[2]
@@ -441,7 +441,7 @@ const RENAME_EXCHANGE_LUA: &str = r#"
     local old_parent_ino = tonumber(ARGV[3])
     local new_parent_ino = tonumber(ARGV[4])
     local timestamp = tonumber(ARGV[5])
-    
+
     -- 1. Check both entries exist
     local old_dentry_ino = redis.call('HGET', old_parent_dir_key, old_name)
     if not old_dentry_ino then
@@ -2136,14 +2136,51 @@ impl StoredNode {
     }
 }
 
+/// Deserializer that accepts both integer and floating-point numbers.
+/// Redis cjson encodes large integers (like epoch millis) as scientific notation
+/// floats (e.g., 1.7698324007242e+18), which serde_json rejects for i64 fields.
+fn deserialize_i64_from_number<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Error, Visitor};
+
+    struct I64OrFloatVisitor;
+
+    impl<'de> Visitor<'de> for I64OrFloatVisitor {
+        type Value = i64;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an integer or floating-point number")
+        }
+
+        fn visit_i64<E: Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(v)
+        }
+
+        fn visit_u64<E: Error>(self, v: u64) -> Result<Self::Value, E> {
+            i64::try_from(v).map_err(|_| E::custom("u64 out of i64 range"))
+        }
+
+        fn visit_f64<E: Error>(self, v: f64) -> Result<Self::Value, E> {
+            Ok(v as i64)
+        }
+    }
+
+    deserializer.deserialize_any(I64OrFloatVisitor)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct StoredAttr {
     size: u64,
     mode: u32,
     uid: u32,
     gid: u32,
+    #[serde(deserialize_with = "deserialize_i64_from_number")]
     atime: i64,
+    #[serde(deserialize_with = "deserialize_i64_from_number")]
     mtime: i64,
+    #[serde(deserialize_with = "deserialize_i64_from_number")]
     ctime: i64,
     nlink: u32,
 }
