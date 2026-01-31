@@ -15,7 +15,7 @@ use crate::chuck::{BlockStore, SliceDesc};
 use crate::meta::backoff::backoff;
 use crate::meta::store::MetaError;
 use crate::meta::{MetaLayer, SLICE_ID_KEY};
-use crate::utils::NumCastExt;
+use crate::utils::{NumCastExt, UsageGuard};
 use crate::vfs::backend::Backend;
 use crate::vfs::cache::page::CacheSlice;
 use crate::vfs::cache::page::WriteAction as PageWriteAction;
@@ -80,6 +80,7 @@ pub(crate) struct SliceState {
     uploaded: u64,
     uploading: Option<(usize, usize)>,
     data: CacheSlice,
+    usage: UsageGuard,
     /// Error occurred at background thread.
     err: Option<String>,
     notify: Arc<Notify>,
@@ -88,7 +89,12 @@ pub(crate) struct SliceState {
 }
 
 impl SliceState {
-    pub(crate) fn new(chunk_id: u64, offset: u64, config: Arc<WriteConfig>) -> Self {
+    pub(crate) fn new(
+        chunk_id: u64,
+        offset: u64,
+        config: Arc<WriteConfig>,
+        usage: Arc<AtomicU64>,
+    ) -> Self {
         let now = Instant::now();
         Self {
             state: SliceStatus::Writable,
@@ -98,6 +104,7 @@ impl SliceState {
             uploaded: 0,
             uploading: None,
             data: CacheSlice::new(config),
+            usage: UsageGuard::new(usage),
             err: None,
             notify: Arc::new(Notify::new()),
             started: now,
@@ -221,20 +228,15 @@ where
     }
 
     fn try_write(&self, offset: u64, buf: &[u8]) -> anyhow::Result<bool> {
-        let (wrote, delta) = self.with_mut(|s| match s.can_write(offset, buf.len()) {
+        let wrote = self.with_mut(|s| match s.can_write(offset, buf.len()) {
             Some(action) => {
-                let before = s.data.alloc_bytes();
                 s.write(offset, buf, action)?;
-                let after = s.data.alloc_bytes();
-
-                Ok::<(bool, u64), anyhow::Error>((true, after.saturating_sub(before)))
+                s.usage.update_bytes(s.data.alloc_bytes());
+                Ok::<bool, anyhow::Error>(true)
             }
-            None => Ok::<(bool, u64), anyhow::Error>((false, 0)),
+            None => Ok::<bool, anyhow::Error>(false),
         })?;
 
-        if wrote && delta > 0 {
-            self.shared.add_usage(delta);
-        }
         Ok(wrote)
     }
 
@@ -259,8 +261,8 @@ where
         self.with_mut(|s| {
             s.uploading = None;
             s.uploaded += len;
-            let freed = s.data.release_block(need_release);
-            self.shared.sub_usage(freed);
+            s.data.release_block(need_release);
+            s.usage.update_bytes(s.data.alloc_bytes());
 
             if matches!(s.state, SliceStatus::Readonly | SliceStatus::Failed) && !s.has_idle_block()
             {
@@ -457,6 +459,7 @@ where
                     chunk_id,
                     offset,
                     self.shared.config.clone(),
+                    self.shared.buffer_usage.clone(),
                 )));
                 slices.push_back(slice.clone());
                 slice
@@ -573,34 +576,6 @@ where
             flush_notify: Notify::new(),
             backend,
             reader,
-        }
-    }
-
-    fn add_usage(&self, bytes: u64) {
-        if bytes > 0 {
-            self.buffer_usage.fetch_add(bytes, Ordering::Relaxed);
-        }
-    }
-
-    fn sub_usage(&self, bytes: u64) {
-        if bytes == 0 {
-            return;
-        }
-
-        let mut current = self.buffer_usage.load(Ordering::Relaxed);
-
-        loop {
-            let next = current.saturating_sub(bytes);
-
-            match self.buffer_usage.compare_exchange_weak(
-                current,
-                next,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return,
-                Err(value) => current = value,
-            }
         }
     }
 }
@@ -833,11 +808,9 @@ where
         };
 
         for slice in slices {
-            let freed = {
-                let mut guard = slice.lock();
-                guard.data.release_all()
-            };
-            self.shared.sub_usage(freed);
+            let mut guard = slice.lock();
+            guard.data.release_all();
+            guard.usage.update_bytes(0);
         }
 
         let mut guard = self.shared.inner.lock().await;
@@ -1281,7 +1254,11 @@ where
     }
 
     pub(crate) fn release(&self, ino: u64) {
-        self.files.remove(&ino);
+        if let Some((_, writer)) = self.files.remove(&ino) {
+            tokio::spawn(async move {
+                writer.clear().await;
+            });
+        }
     }
 
     #[cfg(test)]
@@ -1383,7 +1360,12 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(1, 0, test_config(layout));
+        let mut slice = SliceState::new(
+            1,
+            0,
+            test_config(layout),
+            Arc::new(AtomicU64::new(0)),
+        );
         let len = layout.block_size as usize + (layout.block_size as usize / 2);
         slice.data.append(&vec![1u8; len]).unwrap();
 
@@ -1397,7 +1379,12 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(1, 0, test_config(layout));
+        let mut slice = SliceState::new(
+            1,
+            0,
+            test_config(layout),
+            Arc::new(AtomicU64::new(0)),
+        );
         let len = layout.block_size as usize + (layout.block_size as usize / 2);
         let data = vec![2u8; len];
         slice.data.append(&data).unwrap();
@@ -1418,7 +1405,12 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(1, 0, test_config(layout));
+        let mut slice = SliceState::new(
+            1,
+            0,
+            test_config(layout),
+            Arc::new(AtomicU64::new(0)),
+        );
         slice
             .data
             .append(&vec![0u8; layout.block_size as usize * 2])

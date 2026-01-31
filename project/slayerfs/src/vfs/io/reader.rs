@@ -9,7 +9,7 @@
 use crate::chuck::reader::DataFetcher;
 use crate::chuck::{BlockStore, ChunkLayout};
 use crate::meta::MetaLayer;
-use crate::utils::{Intervals, NumCastExt};
+use crate::utils::{Intervals, NumCastExt, UsageGuard};
 use crate::vfs::backend::Backend;
 use crate::vfs::chunk_id_for;
 use crate::vfs::config::ReadConfig;
@@ -68,11 +68,25 @@ where
 
     pub(crate) fn close_for_handle(&self, ino: u64, fh: u64) {
         if let Some(mut entry) = self.files.get_mut(&ino) {
-            entry.retain(|(id, _)| *id != fh);
-            let empty = entry.is_empty();
-            drop(entry);
-            if empty {
+            let mut removed = Vec::new();
+
+            entry.retain(|(id, reader)| {
+                if *id == fh {
+                    removed.push(reader.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if entry.is_empty() {
                 self.files.remove(&ino);
+            }
+
+            drop(entry);
+
+            for reader in removed {
+                tokio::spawn(async move { reader.invalidate_all().await; });
             }
         }
     }
@@ -218,6 +232,7 @@ struct SliceState {
     /// Range it contains
     range: (u64, u64),
     page: Vec<u8>,
+    usage: UsageGuard,
     state: SliceStatus,
     err: Option<String>,
     notify: Arc<Notify>,
@@ -232,11 +247,12 @@ struct SliceState {
 }
 
 impl SliceState {
-    fn new(index: u64, range: (u64, u64), refs: u16) -> Self {
+    fn new(index: u64, range: (u64, u64), refs: u16, usage: Arc<AtomicU64>) -> Self {
         Self {
             index,
             range,
             page: Vec::new(),
+            usage: UsageGuard::new(usage),
             state: SliceStatus::New,
             err: None,
             notify: Arc::new(Notify::new()),
@@ -262,7 +278,6 @@ impl SliceState {
     fn background_fetch<B, M>(
         this: Arc<ParkingMutex<SliceState>>,
         ino: u64,
-        usage: Arc<AtomicU64>,
         layout: ChunkLayout,
         backend: Arc<Backend<B, M>>,
     ) where
@@ -309,23 +324,16 @@ impl SliceState {
             guard.fetch_ms = Some(fetch_ms);
             match result {
                 Ok(out) => {
-                    let old_len = guard.page.len() as u64;
-                    let new_len = out.len() as u64;
-
-                    if new_len >= old_len {
-                        usage.fetch_add(new_len - old_len, Ordering::Relaxed);
-                    } else {
-                        sub_usage(&usage, old_len - new_len);
-                    }
-
                     guard.state = SliceStatus::Ready;
                     guard.page = out;
+                    let new_len = guard.page.len() as u64;
+                    guard.usage.update_bytes(new_len);
                     guard.err = None;
                 }
                 Err(e) => {
-                    sub_usage(&usage, guard.page.len() as u64);
                     guard.state = SliceStatus::Invalid;
                     guard.page = Vec::new();
+                    guard.usage.update_bytes(0);
                     guard.err = Some(e.to_string());
                 }
             }
@@ -505,12 +513,7 @@ where
             let needed_by_session = windows
                 .iter()
                 .any(|(win_start, win_end)| slice_start < *win_end && *win_start < slice_end);
-            let need_retain = overlaps_current || needed_by_session;
-
-            if !need_retain {
-                sub_usage(&self.buffer_usage, slice.page.len() as u64);
-            }
-            need_retain
+            overlaps_current || needed_by_session
         })
     }
 
@@ -765,11 +768,15 @@ where
         }
 
         for range in cutter.collect() {
-            let slice = Arc::new(ParkingMutex::new(SliceState::new(index, range, 1)));
+            let slice = Arc::new(ParkingMutex::new(SliceState::new(
+                index,
+                range,
+                1,
+                self.buffer_usage.clone(),
+            )));
             SliceState::background_fetch(
                 slice.clone(),
                 self.inode.ino() as u64,
-                self.buffer_usage.clone(),
                 self.config.layout,
                 self.backend.clone(),
             );
@@ -797,7 +804,6 @@ where
 
         {
             let mut guard = self.slices.lock().await;
-            let mut freed = 0u64;
             for slice in guard.drain(..) {
                 let mut state = slice.lock();
                 let Some((span_offset, span_len)) = span_map.get(&state.index) else {
@@ -830,12 +836,9 @@ where
 
                 if !matches!(state.state, SliceStatus::Invalid) || state.refs > 0 {
                     new_slices.push_back(slice.clone());
-                } else {
-                    freed += state.page.len() as u64;
                 }
             }
             *guard = new_slices;
-            sub_usage(&self.buffer_usage, freed);
         }
 
         // Invalidated slices must be re-fetched.
@@ -843,7 +846,6 @@ where
             SliceState::background_fetch(
                 slice,
                 self.inode.ino() as u64,
-                self.buffer_usage.clone(),
                 self.config.layout,
                 self.backend.clone(),
             );
@@ -852,12 +854,14 @@ where
 
     async fn invalidate_all(&self) {
         let mut guard = self.slices.lock().await;
-        let mut freed = 0u64;
         for slice in guard.drain(..) {
-            let state = slice.lock();
-            freed += state.page.len() as u64;
+            let mut state = slice.lock();
+            state.generation = state.generation.saturating_add(1);
+            state.state = SliceStatus::Invalid;
+            state.page = Vec::new();
+            state.usage.update_bytes(0);
+            state.notify.notify_waiters();
         }
-        sub_usage(&self.buffer_usage, freed);
     }
 
     /// Clean all invalid and unused slices.
@@ -865,20 +869,9 @@ where
         let mut guard = self.slices.lock().await;
         guard.retain(|slice| {
             let state = slice.lock();
-
-            let need_retain = !(matches!(state.state, SliceStatus::Invalid) && state.refs == 0);
-            if !need_retain {
-                sub_usage(&self.buffer_usage, state.page.len() as u64);
-            }
-            need_retain
+            !(matches!(state.state, SliceStatus::Invalid) && state.refs == 0)
         });
     }
-}
-
-fn sub_usage(usage: &AtomicU64, delta: u64) {
-    let _ = usage.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |r| {
-        Some(r.saturating_sub(delta))
-    });
 }
 
 #[cfg(test)]
