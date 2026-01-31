@@ -94,11 +94,20 @@ const LINK_LUA: &str = r#"
         return cjson.encode({ok=false, error="already_exists"})
     end
 
+    -- If transitioning from nlink=1 to nlink=2, save original parent/name to link_parents
+    if node.attr.nlink == 1 then
+        local original_member = node.parent .. ":" .. node.name
+        redis.call('SADD', lp_key, original_member)
+        -- Transition to hardlink state: parent=0, name=""
+        node.parent = 0
+        node.name = ""
+    end
+
     -- Increment nlink
     node.attr.nlink = node.attr.nlink + 1
     node.attr.ctime = timestamp
 
-    -- Add to link_parents set
+    -- Add new link to link_parents set
     local member = parent_ino .. ":" .. name
     redis.call('SADD', lp_key, member)
 
@@ -142,6 +151,23 @@ const UNLINK_LUA: &str = r#"
         node.attr.nlink = node.attr.nlink - 1
     end
     node.attr.ctime = timestamp
+
+    -- If transitioning from nlink=2 to nlink=1, restore parent/name from remaining link_parent
+    if node.attr.nlink == 1 then
+        local remaining_members = redis.call('SMEMBERS', lp_key)
+        if #remaining_members == 1 then
+            local parts = {}
+            for part in string.gmatch(remaining_members[1], "[^:]+") do
+                table.insert(parts, part)
+            end
+            if #parts >= 2 then
+                node.parent = tonumber(parts[1])
+                node.name = table.concat(parts, ":", 2)
+            end
+            -- Clear link_parents set
+            redis.call('DEL', lp_key)
+        end
+    end
 
     -- Save node
     redis.call('SET', node_key, cjson.encode(node))
