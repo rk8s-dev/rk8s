@@ -1,9 +1,12 @@
 mod cadapter;
 mod chuck;
 mod daemon;
+#[allow(dead_code)]
+mod fs;
 mod fuse;
 mod meta;
 mod utils;
+#[allow(dead_code)]
 mod vfs;
 
 #[cfg(all(feature = "jemalloc", target_os = "linux"))]

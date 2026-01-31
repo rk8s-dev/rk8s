@@ -27,8 +27,9 @@ Components overview:
 - chuck: ChunkLayout, ChunkReader/Writer. Maps file offsets to chunk/block and handles cross-block IO and zero-filling holes.
 - cadapter: Object backend abstraction and implementations (LocalFs implemented; S3/Rustfs placeholders).
 - meta: In-memory metadata + transactions (InMemoryMetaStore). Tracks size and slice, supports commit/rollback.
-- vfs: Path-based simplified VFS (mkdir_p/create/read/write/readdir/stat/unlink/rmdir/rename/truncate).
-- sdk: App-facing lightweight client wrapper (with LocalClient convenience).
+- fs: Path-based FileSystem (mkdir/mkdir_all/create/read/write/readdir/stat/unlink/rmdir/rename/truncate).
+- vfs: Inode-based VFS for FUSE integration.
+- sdk: App-facing lightweight client wrapper (FileSystem-backed, with LocalClient convenience).
 
 ## 🚀 Quick Start
 
@@ -48,8 +49,8 @@ The demo will:
 
 ## 🌟 Current Features (MVP)
 
-### Path-based VFS
-- mkdir_p/create/read/write/readdir/stat/exists/unlink/rmdir/rename/truncate
+### Path-based FileSystem
+- mkdir/mkdir_all/create/read/write/readdir/stat/exists/unlink/rmdir/rename/truncate
 - Single mutex to protect the namespace (avoid multi-lock deadlocks); avoid awaiting under lock on hot paths
 
 ### Chunked IO with zero-fill
@@ -92,4 +93,3 @@ RUST_LOG=info cargo test -p slayerfs --test test_slayerfs_kvm_integration test_s
 ## 🤝 Contributing
 
 Issues and PRs are welcome to improve architecture, implementation, and docs.
-

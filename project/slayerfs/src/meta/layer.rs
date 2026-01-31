@@ -4,7 +4,7 @@ use crate::chuck::SliceDesc;
 use crate::meta::client::session::SessionInfo;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{
-    DirEntry, FileAttr, FileType, MetaError, OpenFlags, SetAttrFlags, SetAttrRequest,
+    AclRule, DirEntry, FileAttr, FileType, MetaError, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
 use crate::vfs::handles::DirHandle;
@@ -228,4 +228,23 @@ pub trait MetaLayer: Send + Sync {
         range: FileLockRange,
         pid: u32,
     ) -> Result<(), MetaError>;
+
+    // ---------- Extended attribute & ACL ----------
+    async fn set_xattr(
+        &self,
+        inode: i64,
+        name: &str,
+        value: &[u8],
+        flags: u32,
+    ) -> Result<(), MetaError>;
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError>;
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError>;
+    async fn remove_xattr(&self, inode: i64, name: &str) -> Result<(), MetaError>;
+    async fn set_acl(&self, inode: i64, rule: AclRule) -> Result<(), MetaError>;
+    async fn get_acl(
+        &self,
+        inode: i64,
+        acl_type: u8,
+        acl_id: u32,
+    ) -> Result<Option<AclRule>, MetaError>;
 }

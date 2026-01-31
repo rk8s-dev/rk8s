@@ -724,6 +724,16 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError> {
+        let _ = (inode, name);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError> {
+        let _ = inode;
+        Err(MetaError::NotImplemented)
+    }
+
     async fn remove_xattr(&self, inode: i64, name: &str) -> Result<(), MetaError> {
         let _ = (inode, name);
         Err(MetaError::NotImplemented)

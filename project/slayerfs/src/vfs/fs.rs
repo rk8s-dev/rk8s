@@ -3,10 +3,12 @@
 use crate::chuck::chunk::ChunkLayout;
 use crate::chuck::store::BlockStore;
 use crate::meta::MetaLayer;
-use crate::meta::client::{MetaClient, MetaClientOptions};
-use crate::meta::config::{CacheCapacity, CacheTtl};
+use crate::meta::client::MetaClient;
+use crate::meta::config::MetaClientConfig;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
-use crate::meta::store::{MetaError, MetaStore, SetAttrFlags, SetAttrRequest};
+use crate::meta::store::{
+    AclRule, MetaError, MetaStore, SetAttrFlags, SetAttrRequest, StatFsSnapshot,
+};
 use dashmap::{DashMap, Entry};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,11 +30,11 @@ pub struct RenameFlags {
     pub whiteout: bool,
 }
 
+use crate::vfs::Inode;
 use crate::vfs::backend::Backend;
 use crate::vfs::config::VFSConfig;
 use crate::vfs::error::{PathHint, VfsError};
 use crate::vfs::handles::{DirHandle, FileHandle, HandleFlags};
-use crate::vfs::inode::Inode;
 use crate::vfs::io::{DataReader, DataWriter};
 
 struct HandleRegistry<B, M>
@@ -244,26 +246,8 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct MetaClientConfig {
-    pub(crate) capacity: CacheCapacity,
-    pub(crate) ttl: CacheTtl,
-    pub(crate) options: MetaClientOptions,
-}
-
-impl Default for MetaClientConfig {
-    fn default() -> Self {
-        Self {
-            capacity: CacheCapacity::default(),
-            ttl: CacheTtl::for_sqlite(),
-            options: MetaClientOptions::default(),
-        }
-    }
-}
-
 #[allow(unused)]
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone)]
 pub struct VFS<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
@@ -271,6 +255,19 @@ where
 {
     core: Arc<VfsCore<S, M>>,
     state: Arc<VfsState<S, M>>,
+}
+
+impl<S, M> Clone for VFS<S, M>
+where
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            core: Arc::clone(&self.core),
+            state: Arc::clone(&self.state),
+        }
+    }
 }
 
 impl<S, R> VFS<S, MetaClient<R>>
@@ -291,11 +288,7 @@ where
         let store = Arc::new(store);
         let meta = Arc::new(meta);
 
-        let ttl = if config.ttl.is_zero() {
-            CacheTtl::for_sqlite()
-        } else {
-            config.ttl.clone()
-        };
+        let ttl = config.effective_ttl();
 
         let meta_client = MetaClient::with_options(
             Arc::clone(&meta),
@@ -318,11 +311,10 @@ where
 {
     pub(crate) fn with_meta_layer(
         layout: ChunkLayout,
-        store: S,
+        store: Arc<S>,
         meta_layer: Arc<M>,
     ) -> Result<Self, VfsError> {
         let config = VFSConfig::new(layout);
-        let store = Arc::new(store);
         Self::from_components(config, store, meta_layer)
     }
 
@@ -542,6 +534,223 @@ where
             }
         }
         Ok(cur_ino)
+    }
+
+    /// Recursively create directories (mkdir -p behavior) with structured errors.
+    pub async fn mkdir_p_err(&self, path: &str) -> Result<i64, VfsError> {
+        let path = Self::norm_path(path);
+        if path == "/" {
+            return Ok(self.core.root);
+        }
+
+        if let Some((ino, kind)) = self
+            .core
+            .meta_layer
+            .lookup_path(&path)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+        {
+            if kind != FileType::Dir {
+                return Err(VfsError::NotADirectory {
+                    path: path.clone().into(),
+                });
+            }
+            return Ok(ino);
+        }
+
+        let mut cur_ino = self.core.root;
+        let mut cur_path = String::new();
+        for part in path.trim_start_matches('/').split('/') {
+            if part.is_empty() {
+                continue;
+            }
+            cur_path.push('/');
+            cur_path.push_str(part);
+
+            match self
+                .core
+                .meta_layer
+                .lookup(cur_ino, part)
+                .await
+                .map_err(|e| VfsError::from_meta(cur_path.clone(), e))?
+            {
+                Some(ino) => {
+                    let attr = self
+                        .core
+                        .meta_layer
+                        .stat(ino)
+                        .await
+                        .map_err(|e| VfsError::from_meta(cur_path.clone(), e))?
+                        .ok_or_else(|| VfsError::NotFound {
+                            path: cur_path.clone().into(),
+                        })?;
+                    if attr.kind != FileType::Dir {
+                        return Err(VfsError::NotADirectory {
+                            path: cur_path.clone().into(),
+                        });
+                    }
+                    cur_ino = ino;
+                }
+                None => {
+                    let ino = self
+                        .core
+                        .meta_layer
+                        .mkdir(cur_ino, part.to_string())
+                        .await
+                        .map_err(|e| VfsError::from_meta(cur_path.clone(), e))?;
+                    self.state.modified.touch(cur_ino).await;
+                    self.state.modified.touch(ino).await;
+                    cur_ino = ino;
+                }
+            }
+        }
+        Ok(cur_ino)
+    }
+
+    /// Create a single directory (non-recursive).
+    ///
+    /// - Parent directory must exist.
+    /// - If the target already exists as a directory, returns its inode.
+    /// - If the target exists as a non-directory, returns `AlreadyExists`.
+    /// - If parent does not exist, returns `NotFound`.
+    pub async fn mkdir_err(&self, path: &str) -> Result<i64, VfsError> {
+        let path = Self::norm_path(path);
+        if path == "/" {
+            return Ok(self.core.root);
+        }
+
+        let (dir, name) = Self::split_dir_file(&path);
+        if name.is_empty() {
+            return Err(VfsError::InvalidFilename);
+        }
+
+        // Check if parent exists
+        let parent_ino = if dir == "/" {
+            self.core.root
+        } else {
+            match self
+                .core
+                .meta_layer
+                .lookup_path(&dir)
+                .await
+                .map_err(|e| VfsError::from_meta(dir.clone(), e))?
+            {
+                Some((ino, kind)) => {
+                    if kind != FileType::Dir {
+                        return Err(VfsError::NotADirectory { path: dir.into() });
+                    }
+                    ino
+                }
+                None => return Err(VfsError::NotFound { path: dir.into() }),
+            }
+        };
+
+        // Check if target already exists
+        if let Some(ino) = self
+            .core
+            .meta_layer
+            .lookup(parent_ino, &name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+        {
+            let attr = self
+                .core
+                .meta_layer
+                .stat(ino)
+                .await
+                .map_err(|e| VfsError::from_meta(path.clone(), e))?
+                .ok_or_else(|| VfsError::NotFound {
+                    path: path.clone().into(),
+                })?;
+            if attr.kind == FileType::Dir {
+                return Ok(ino);
+            } else {
+                return Err(VfsError::AlreadyExists { path: path.into() });
+            }
+        }
+
+        // Create the directory
+        let ino = self
+            .core
+            .meta_layer
+            .mkdir(parent_ino, name.to_string())
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        Ok(ino)
+    }
+
+    /// Create a regular file in an existing parent directory (std-like behavior).
+    ///
+    /// - Does not create parent directories.
+    /// - If the target exists and `create_new` is true, returns `AlreadyExists`.
+    /// - If the target exists as a directory, returns `IsADirectory`.
+    pub async fn create_file_in_existing_dir_err(
+        &self,
+        path: &str,
+        create_new: bool,
+    ) -> Result<i64, VfsError> {
+        let path = Self::norm_path(path);
+        if path == "/" {
+            return Err(VfsError::IsADirectory { path: path.into() });
+        }
+
+        let (dir, name) = Self::split_dir_file(&path);
+        if name.is_empty() {
+            return Err(VfsError::InvalidFilename);
+        }
+
+        let parent_ino = if dir == "/" {
+            self.core.root
+        } else {
+            let (ino, kind) = self
+                .core
+                .meta_layer
+                .lookup_path(&dir)
+                .await
+                .map_err(|e| VfsError::from_meta(dir.clone(), e))?
+                .ok_or_else(|| VfsError::NotFound {
+                    path: dir.clone().into(),
+                })?;
+            if kind != FileType::Dir {
+                return Err(VfsError::NotADirectory { path: dir.into() });
+            }
+            ino
+        };
+
+        if let Some(existing) = self
+            .core
+            .meta_layer
+            .lookup(parent_ino, &name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?
+        {
+            let attr = self
+                .core
+                .meta_layer
+                .stat(existing)
+                .await
+                .map_err(|e| VfsError::from_meta(path.clone(), e))?
+                .ok_or_else(|| VfsError::NotFound {
+                    path: path.clone().into(),
+                })?;
+            if attr.kind == FileType::Dir {
+                return Err(VfsError::IsADirectory { path: path.into() });
+            }
+            if create_new {
+                return Err(VfsError::AlreadyExists { path: path.into() });
+            }
+            return Ok(existing);
+        }
+
+        let ino = self
+            .core
+            .meta_layer
+            .create_file(parent_ino, name)
+            .await
+            .map_err(|e| VfsError::from_meta(path.clone(), e))?;
+        self.state.modified.touch(parent_ino).await;
+        self.state.modified.touch(ino).await;
+        Ok(ino)
     }
 
     /// Create a regular file (running `mkdir_p` on its parent if needed).
@@ -777,6 +986,11 @@ where
                 path: PathHint::some(path.clone()),
             })?;
         Ok(meta_attr)
+    }
+
+    /// Fetch a file's attributes (kind/size come from the MetaStore), following symlinks.
+    pub async fn stat_follow_err(&self, path: &str) -> Result<FileAttr, VfsError> {
+        self.stat(path).await
     }
 
     /// Read a symlink target by inode.
@@ -1627,7 +1841,12 @@ where
             .ok_or_else(|| VfsError::NotFound {
                 path: PathHint::some(path.clone()),
             })?;
+        self.truncate_inode(ino, size).await
+    }
 
+    /// Truncate/extend file size by inode (metadata only; holes are read as zeros).
+    /// Shrinking does not eagerly reclaim block data.
+    pub async fn truncate_inode(&self, ino: i64, size: u64) -> Result<(), VfsError> {
         let fhs = self.state.handles.handles_for(ino);
         let mut guards = Vec::with_capacity(fhs.len());
         for fh in fhs {
@@ -1746,6 +1965,47 @@ where
         Ok(written)
     }
 
+    /// Write data by inode directly (used by FUSE to avoid path resolution).
+    pub async fn write_ino(&self, ino: i64, offset: u64, data: &[u8]) -> Result<usize, VfsError> {
+        if data.is_empty() {
+            return Ok(0);
+        }
+
+        let attr = self
+            .core
+            .meta_layer
+            .stat(ino)
+            .await
+            .map_err(VfsError::from)?
+            .ok_or(VfsError::NotFound {
+                path: PathHint::none(),
+            })?;
+        if attr.kind == FileType::Dir {
+            return Err(VfsError::IsADirectory {
+                path: PathHint::none(),
+            });
+        }
+        if attr.kind != FileType::File {
+            return Err(VfsError::InvalidInput);
+        }
+
+        let inode = self.ensure_inode_registered(ino).await?;
+        let writer = self.state.writer.ensure_file(inode);
+        let written = writer
+            .write_at(offset, data)
+            .await
+            .map_err(VfsError::from)?;
+
+        let target_size = offset + written as u64;
+        self.core
+            .meta_layer
+            .extend_file_size(ino, target_size)
+            .await
+            .map_err(VfsError::from)?;
+        self.state.modified.touch(ino).await;
+        Ok(written)
+    }
+
     /// Allocate a per-file handle, returning the opaque fh id.
     #[tracing::instrument(level = "trace", skip(self), fields(ino, read, write))]
     pub async fn open(
@@ -1789,6 +2049,18 @@ where
             handle.writer(writer);
         }
         Ok(handle.fh)
+    }
+
+    /// Allocate a file handle and return a guard that auto-closes on drop.
+    pub async fn open_guard(
+        &self,
+        ino: i64,
+        attr: FileAttr,
+        read: bool,
+        write: bool,
+    ) -> Result<FileGuard<S, M>, VfsError> {
+        let fh = self.open(ino, attr, read, write).await?;
+        Ok(FileGuard::new(self.clone(), fh))
     }
 
     /// Release a previously allocated file handle.
@@ -2005,6 +2277,54 @@ where
             .map_err(VfsError::from)
     }
 
+    /// Set xattr for a given inode.
+    pub async fn set_xattr_ino(
+        &self,
+        inode: i64,
+        name: &str,
+        value: &[u8],
+        flags: u32,
+    ) -> Result<(), MetaError> {
+        self.core
+            .meta_layer
+            .set_xattr(inode, name, value, flags)
+            .await
+    }
+
+    /// Get xattr for a given inode.
+    pub async fn get_xattr_ino(
+        &self,
+        inode: i64,
+        name: &str,
+    ) -> Result<Option<Vec<u8>>, MetaError> {
+        self.core.meta_layer.get_xattr(inode, name).await
+    }
+
+    /// List xattr names for a given inode.
+    pub async fn list_xattr_ino(&self, inode: i64) -> Result<Vec<String>, MetaError> {
+        self.core.meta_layer.list_xattr(inode).await
+    }
+
+    /// Remove xattr for a given inode.
+    pub async fn remove_xattr_ino(&self, inode: i64, name: &str) -> Result<(), MetaError> {
+        self.core.meta_layer.remove_xattr(inode, name).await
+    }
+
+    /// Set ACL rule for a given inode.
+    pub async fn set_acl_ino(&self, inode: i64, rule: AclRule) -> Result<(), MetaError> {
+        self.core.meta_layer.set_acl(inode, rule).await
+    }
+
+    /// Get ACL rule for a given inode.
+    pub async fn get_acl_ino(
+        &self,
+        inode: i64,
+        acl_type: u8,
+        acl_id: u32,
+    ) -> Result<Option<AclRule>, MetaError> {
+        self.core.meta_layer.get_acl(inode, acl_type, acl_id).await
+    }
+
     /// Get file lock information by path.
     pub async fn get_plock(
         &self,
@@ -2070,9 +2390,15 @@ where
         Ok(())
     }
 
+    /// Get file system statistics (total/available space and inodes).
+    pub async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
+        self.core.meta_layer.stat_fs().await
+    }
+
     async fn ensure_inode_registered(&self, ino: i64) -> Result<Arc<Inode>, VfsError> {
+        // Fast path to check whether there is an existing inode.
         if let Some(inode) = self.state.inodes.get(&ino) {
-            return Ok(inode.clone());
+            return Ok(Arc::clone(inode.value()));
         }
 
         match self.lock_inode(ino) {
@@ -2082,7 +2408,8 @@ where
                     .core
                     .meta_layer
                     .stat(ino)
-                    .await?
+                    .await
+                    .map_err(VfsError::from)?
                     .ok_or(VfsError::NotFound {
                         path: PathHint::none(),
                     })?;
@@ -2106,6 +2433,85 @@ where
     fn lock_inode(&self, ino: i64) -> Entry<'_, i64, Arc<Inode>> {
         self.state.inodes.entry(ino)
     }
+}
+
+/// RAII guard for file handles that ensures close on drop.
+pub struct FileGuard<S, M>
+where
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
+{
+    vfs: VFS<S, M>,
+    fh: u64,
+    closed: bool,
+}
+
+impl<S, M> FileGuard<S, M>
+where
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
+{
+    fn new(vfs: VFS<S, M>, fh: u64) -> Self {
+        Self {
+            vfs,
+            fh,
+            closed: false,
+        }
+    }
+
+    pub fn fh(&self) -> u64 {
+        self.fh
+    }
+
+    pub async fn read(&self, offset: u64, len: usize) -> Result<Vec<u8>, VfsError> {
+        self.vfs.read(self.fh, offset, len).await
+    }
+
+    pub async fn write(&self, offset: u64, data: &[u8]) -> Result<usize, VfsError> {
+        self.vfs.write(self.fh, offset, data).await
+    }
+
+    pub async fn close(mut self) -> Result<(), VfsError> {
+        self.closed = true;
+        self.vfs.close(self.fh).await
+    }
+}
+
+impl<S, M> Drop for FileGuard<S, M>
+where
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
+{
+    fn drop(&mut self) {
+        if self.closed {
+            return;
+        }
+        close_handle_best_effort(self.vfs.clone(), self.fh);
+    }
+}
+
+fn close_handle_best_effort<S, M>(vfs: VFS<S, M>, fh: u64)
+where
+    S: BlockStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
+{
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async move {
+            let _ = vfs.close(fh).await;
+        });
+        return;
+    }
+
+    let _ = std::thread::Builder::new()
+        .name("slayerfs-vfs-close".to_string())
+        .spawn(move || {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                let _ = rt.block_on(vfs.close(fh));
+            }
+        });
 }
 
 #[cfg(test)]

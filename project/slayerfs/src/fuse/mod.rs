@@ -27,6 +27,7 @@ use rfuse3::raw::Request;
 use rfuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyCreated, ReplyData, ReplyDirectory,
     ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyLock, ReplyOpen, ReplyStatFs, ReplyWrite,
+    ReplyXAttr,
 };
 use std::ffi::{OsStr, OsString};
 use std::num::NonZeroU32;
@@ -244,7 +245,7 @@ where
         Ok(ReplyOpen { fh, flags: 0 })
     }
 
-    // Read file: map to VFS::read (path derived from inode)
+    // Read file: inode-based read
     async fn read(
         &self,
         _req: Request,
@@ -295,37 +296,21 @@ where
         })
     }
 
-    // Write file: map to VFS::write (path derived from inode)
+    // Write file: inode-based write to avoid path resolution
     async fn write(
         &self,
         _req: Request,
         ino: u64,
-        fh: u64,
+        _fh: u64,
         offset: u64,
         data: &[u8],
         _write_flags: u32,
         _flags: u32,
     ) -> FuseResult<ReplyWrite> {
-        let n = if fh != 0 {
-            self.write(fh, offset, data)
-                .await
-                .map_err(Into::<Errno>::into)? as u32
-        } else {
-            let attr = self
-                .stat_ino(ino as i64)
-                .await
-                .ok_or_else(|| Errno::from(libc::ENOENT))?;
-            let tmp_fh = self
-                .open(ino as i64, attr, false, true)
-                .await
-                .map_err(Into::<Errno>::into)?;
-            let out = self
-                .write(tmp_fh, offset, data)
-                .await
-                .map_err(Into::<Errno>::into)? as u32;
-            let _ = self.close(tmp_fh).await;
-            out
-        };
+        let n = self
+            .write_ino(ino as i64, offset, data)
+            .await
+            .map_err(Into::<Errno>::into)? as u32;
         Ok(ReplyWrite { written: n })
     }
 
@@ -566,18 +551,30 @@ where
         Ok(ReplyDirectoryPlus { entries: boxed })
     }
 
-    // Filesystem statfs: return conservative placeholder values
+    // Filesystem statfs: best-effort statistics from MetaStore
     async fn statfs(&self, _req: Request, _ino: u64) -> FuseResult<ReplyStatFs> {
-        // Can't safely inspect internals here, so return conservative constants; can be hooked up later.
         let bsize: u32 = 4096;
         let frsize: u32 = 4096;
-        let files: u64 = 0;
-        let ffree: u64 = u64::MAX;
-        // blocks/bfree/bavail unknown → return 0; namelen capped at 255.
+        let (blocks, bfree, bavail, files, ffree) = match self.stat_fs().await {
+            Ok(snapshot) => {
+                let blocks = snapshot.total_space / frsize as u64;
+                let bfree = snapshot.available_space / frsize as u64;
+                let bavail = bfree;
+                let files = snapshot
+                    .used_inodes
+                    .saturating_add(snapshot.available_inodes);
+                let ffree = snapshot.available_inodes;
+                (blocks, bfree, bavail, files, ffree)
+            }
+            Err(e) => {
+                error!("statfs failed: {e}");
+                (0, 0, 0, 0, u64::MAX)
+            }
+        };
         Ok(ReplyStatFs {
-            blocks: 0,
-            bfree: 0,
-            bavail: 0,
+            blocks,
+            bfree,
+            bavail,
             files,
             ffree,
             bsize,
@@ -587,7 +584,7 @@ where
     }
 
     // Create a special file node (regular file, FIFO, etc.)
-    // Note: Device files (block/char) are not supported in this implementation
+    // Note: Special files beyond regular/dir are not supported in this implementation
     async fn mknod(
         &self,
         req: Request,
@@ -632,14 +629,8 @@ where
                 // Directory - use mkdir_p
                 self.mkdir_p(&p).await.map_err(Errno::from)?
             }
-            libc::S_IFIFO | libc::S_IFSOCK => {
-                // FIFO and socket: not fully supported, but create as regular file
-                // This allows tests to pass, though the special semantics are lost
-                self.create_file(&p).await.map_err(Errno::from)?
-            }
-            libc::S_IFCHR | libc::S_IFBLK => {
-                // Character and block devices are not supported in FUSE userspace
-                return Err(libc::EPERM.into());
+            libc::S_IFIFO | libc::S_IFSOCK | libc::S_IFCHR | libc::S_IFBLK => {
+                return Err(libc::ENOSYS.into());
             }
             _ => {
                 return Err(libc::EINVAL.into());
@@ -1029,6 +1020,100 @@ where
         self.fsync(fh, datasync).await.map_err(Errno::from)
     }
 
+    async fn setxattr(
+        &self,
+        _req: Request,
+        inode: u64,
+        name: &OsStr,
+        value: &[u8],
+        flags: u32,
+        position: u32,
+    ) -> FuseResult<()> {
+        if position != 0 {
+            return Err(libc::EINVAL.into());
+        }
+        if self.stat_ino(inode as i64).await.is_none() {
+            return Err(libc::ENOENT.into());
+        }
+        let name = name.to_string_lossy();
+        self.set_xattr_ino(inode as i64, &name, value, flags)
+            .await
+            .map_err(|e| match e {
+                MetaError::AlreadyExists { .. } => Errno::from(libc::EEXIST),
+                MetaError::NotSupported(_) | MetaError::NotImplemented => Errno::from(libc::ENOSYS),
+                MetaError::NotFound(_) => Errno::from(libc::ENODATA),
+                _ => Errno::from(libc::EIO),
+            })
+    }
+
+    async fn getxattr(
+        &self,
+        _req: Request,
+        inode: u64,
+        name: &OsStr,
+        size: u32,
+    ) -> FuseResult<ReplyXAttr> {
+        if self.stat_ino(inode as i64).await.is_none() {
+            return Err(libc::ENOENT.into());
+        }
+        let name = name.to_string_lossy();
+        let value = self
+            .get_xattr_ino(inode as i64, &name)
+            .await
+            .map_err(|e| match e {
+                MetaError::NotSupported(_) | MetaError::NotImplemented => Errno::from(libc::ENOSYS),
+                _ => Errno::from(libc::EIO),
+            })?
+            .ok_or_else(|| Errno::from(libc::ENODATA))?;
+        if size == 0 {
+            return Ok(ReplyXAttr::Size(value.len() as u32));
+        }
+        if (size as usize) < value.len() {
+            return Err(libc::ERANGE.into());
+        }
+        Ok(ReplyXAttr::Data(Bytes::from(value)))
+    }
+
+    async fn listxattr(&self, _req: Request, inode: u64, size: u32) -> FuseResult<ReplyXAttr> {
+        if self.stat_ino(inode as i64).await.is_none() {
+            return Err(libc::ENOENT.into());
+        }
+        let names = self
+            .list_xattr_ino(inode as i64)
+            .await
+            .map_err(|e| match e {
+                MetaError::NotSupported(_) | MetaError::NotImplemented => Errno::from(libc::ENOSYS),
+                _ => Errno::from(libc::EIO),
+            })?;
+        let total_len: usize = names.iter().map(|n| n.len() + 1).sum();
+        if size == 0 {
+            return Ok(ReplyXAttr::Size(total_len as u32));
+        }
+        if (size as usize) < total_len {
+            return Err(libc::ERANGE.into());
+        }
+        let mut data = Vec::with_capacity(total_len);
+        for name in names {
+            data.extend_from_slice(name.as_bytes());
+            data.push(0);
+        }
+        Ok(ReplyXAttr::Data(Bytes::from(data)))
+    }
+
+    async fn removexattr(&self, _req: Request, inode: u64, name: &OsStr) -> FuseResult<()> {
+        if self.stat_ino(inode as i64).await.is_none() {
+            return Err(libc::ENOENT.into());
+        }
+        let name = name.to_string_lossy();
+        self.remove_xattr_ino(inode as i64, &name)
+            .await
+            .map_err(|e| match e {
+                MetaError::NotSupported(_) | MetaError::NotImplemented => libc::ENOSYS.into(),
+                MetaError::NotFound(_) => libc::ENODATA.into(),
+                _ => libc::EIO.into(),
+            })
+    }
+
     // Close directory handle
     async fn releasedir(&self, _req: Request, _inode: u64, fh: u64, _flags: u32) -> FuseResult<()> {
         if fh == 0 {
@@ -1129,7 +1214,7 @@ where
 
         let range = FileLockRange { start, end };
 
-        // Note: block parameter is ignored for now, non-blocking only
+        // Forward block parameter to MetaStore; backend may choose to block or return conflicts
         match self
             .set_plock_ino(inode as i64, lock_owner as i64, block, fl_type, range, pid)
             .await

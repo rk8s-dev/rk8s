@@ -175,6 +175,29 @@ pub enum VfsError {
     Other,
 }
 
+impl VfsError {
+    pub fn from_meta(path: impl Into<PathHint>, err: MetaError) -> Self {
+        let path = path.into();
+        match err {
+            MetaError::NotFound(_) | MetaError::ParentNotFound(_) => VfsError::NotFound { path },
+            MetaError::AlreadyExists { .. } => VfsError::AlreadyExists { path },
+            MetaError::NotDirectory(_) => VfsError::NotADirectory { path },
+            MetaError::DirectoryNotEmpty(_) => VfsError::DirectoryNotEmpty { path },
+            MetaError::InvalidFilename => VfsError::InvalidFilename,
+            MetaError::InvalidPath(_) => VfsError::InvalidInput,
+            MetaError::TooManySymlinks => VfsError::InvalidInput,
+            MetaError::NotSupported(_) | MetaError::NotImplemented => VfsError::Unsupported,
+            MetaError::Io(err) => VfsError::from(err),
+            MetaError::LockConflict { .. } => VfsError::WouldBlock,
+            MetaError::LockNotFound { .. } => VfsError::NotFound { path },
+            MetaError::DeadlockDetected { .. } => VfsError::Deadlock,
+            MetaError::InvalidHandle(_) => VfsError::StaleNetworkFileHandle,
+            MetaError::Anyhow(err) => VfsError::from(err),
+            other => VfsError::Meta(other),
+        }
+    }
+}
+
 impl From<std::io::Error> for VfsError {
     fn from(value: std::io::Error) -> Self {
         // Map std::io::ErrorKind to VfsError. When no path context is available,
@@ -235,5 +258,54 @@ impl From<std::io::Error> for VfsError {
             ErrorKind::Other => VfsError::Other,
             _ => VfsError::Other,
         }
+    }
+}
+
+impl From<VfsError> for std::io::Error {
+    fn from(value: VfsError) -> Self {
+        let kind = match value {
+            VfsError::NotFound { .. } => ErrorKind::NotFound,
+            VfsError::AlreadyExists { .. } => ErrorKind::AlreadyExists,
+            VfsError::NotADirectory { .. } => ErrorKind::NotADirectory,
+            VfsError::IsADirectory { .. } => ErrorKind::IsADirectory,
+            VfsError::DirectoryNotEmpty { .. } => ErrorKind::DirectoryNotEmpty,
+            VfsError::PermissionDenied { .. } => ErrorKind::PermissionDenied,
+            VfsError::ReadOnlyFilesystem { .. } => ErrorKind::ReadOnlyFilesystem,
+            VfsError::ConnectionRefused => ErrorKind::ConnectionRefused,
+            VfsError::ConnectionReset => ErrorKind::ConnectionReset,
+            VfsError::HostUnreachable => ErrorKind::HostUnreachable,
+            VfsError::NetworkUnreachable => ErrorKind::NetworkUnreachable,
+            VfsError::ConnectionAborted => ErrorKind::ConnectionAborted,
+            VfsError::NotConnected => ErrorKind::NotConnected,
+            VfsError::AddrInUse => ErrorKind::AddrInUse,
+            VfsError::AddrNotAvailable => ErrorKind::AddrNotAvailable,
+            VfsError::NetworkDown => ErrorKind::NetworkDown,
+            VfsError::BrokenPipe => ErrorKind::BrokenPipe,
+            VfsError::WouldBlock => ErrorKind::WouldBlock,
+            VfsError::InvalidInput => ErrorKind::InvalidInput,
+            VfsError::InvalidData => ErrorKind::InvalidData,
+            VfsError::TimedOut => ErrorKind::TimedOut,
+            VfsError::WriteZero => ErrorKind::WriteZero,
+            VfsError::StorageFull => ErrorKind::StorageFull,
+            VfsError::NotSeekable => ErrorKind::NotSeekable,
+            VfsError::QuotaExceeded => ErrorKind::QuotaExceeded,
+            VfsError::FileTooLarge => ErrorKind::FileTooLarge,
+            VfsError::ResourceBusy => ErrorKind::ResourceBusy,
+            VfsError::ExecutableFileBusy => ErrorKind::ExecutableFileBusy,
+            VfsError::Deadlock => ErrorKind::Deadlock,
+            VfsError::CrossesDevices => ErrorKind::CrossesDevices,
+            VfsError::CircularRename { .. } => ErrorKind::InvalidInput,
+            VfsError::InvalidRenameTarget { .. } => ErrorKind::InvalidInput,
+            VfsError::TooManyLinks => ErrorKind::TooManyLinks,
+            VfsError::InvalidFilename => ErrorKind::InvalidFilename,
+            VfsError::ArgumentListTooLong => ErrorKind::ArgumentListTooLong,
+            VfsError::Interrupted => ErrorKind::Interrupted,
+            VfsError::Unsupported => ErrorKind::Unsupported,
+            VfsError::UnexpectedEof => ErrorKind::UnexpectedEof,
+            VfsError::OutOfMemory => ErrorKind::OutOfMemory,
+            VfsError::StaleNetworkFileHandle => ErrorKind::StaleNetworkFileHandle,
+            VfsError::Anyhow(_) | VfsError::Meta(_) | VfsError::Other => ErrorKind::Other,
+        };
+        std::io::Error::new(kind, value.to_string())
     }
 }

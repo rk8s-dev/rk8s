@@ -26,8 +26,9 @@ SlayerFS 是一个使用 Rust 构建、面向容器与 AI 场景的分布式文�
 - chuck：ChunkLayout、ChunkReader/Writer，负责将文件偏移映射到 chunk/block，处理跨块 IO 与洞零填充；
 - cadapter：对象后端抽象与实现（LocalFs 已实现，S3/Rustfs 预留）；
 - meta：内存版元数据与事务（InMemoryMetaStore），记录 size 与 slice，支持提交/回滚；
-- vfs：基于路径的简化 VFS（mkdir_p/create/read/write/readdir/stat/unlink/rmdir/rename/truncate）；
-- sdk：面向应用的轻量客户端封装（提供 LocalClient 便捷构造）。
+- fs：基于路径的 FileSystem（mkdir/mkdir_all/create/read/write/readdir/stat/unlink/rmdir/rename/truncate）；
+- vfs：面向 FUSE 的 inode-based VFS；
+- sdk：面向应用的轻量客户端封装（基于 FileSystem，提供 LocalClient 便捷构造）。
 
 ## 🚀 快速开始
 
@@ -48,8 +49,8 @@ cargo run -q --bin sdk_demo -- /tmp/slayerfs-objroot
 
 ## 🌟 当前能力（MVP）
 
-### 基于路径的 VFS
-- mkdir_p/create/read/write/readdir/stat/exists/unlink/rmdir/rename/truncate
+### 基于路径的 FileSystem
+- mkdir/mkdir_all/create/read/write/readdir/stat/exists/unlink/rmdir/rename/truncate
 - 使用单把互斥锁保护命名空间（避免多锁死锁）；热点路径避免持锁 await
 
 ### 分块 IO + 洞零填充
