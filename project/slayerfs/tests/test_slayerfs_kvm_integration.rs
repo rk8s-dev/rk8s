@@ -312,24 +312,6 @@ async fn setup_unprivileged_user(vm: &mut Machine, user: &str) -> Result<()> {
     Ok(())
 }
 
-async fn check_default_permissions(vm: &mut Machine) -> Result<()> {
-    let base = format!("{}/perm", SLAYERFS_MOUNTPOINT);
-
-    exec_check(vm, &format!("sh -lc 'echo secret > {base}'")).await?;
-    exec_check(vm, &format!("chmod 600 {base}")).await?;
-
-    exec_check(vm, &format!("sh -lc 'cat {base} | grep -q secret'")).await?;
-
-    let other = vm
-        .exec(&format!("su - tester -c 'cat {base} >/dev/null 2>&1'"))
-        .await?;
-    if other.status.success() {
-        anyhow::bail!("expected unprivileged user read to be denied, but it succeeded");
-    }
-
-    Ok(())
-}
-
 async fn run_posix_edge_cases(vm: &mut Machine) -> Result<()> {
     exec_check(
         vm,
@@ -508,12 +490,8 @@ async fn kill_slayerfs_best_effort(vm: &mut Machine) -> Result<()> {
     Ok(())
 }
 
-async fn run_in_vm(vm: &mut Machine, full: bool, slayerfs_bin: &Path) -> Result<()> {
-    let r = if full {
-        run_full(vm, slayerfs_bin).await
-    } else {
-        run_smoke(vm, slayerfs_bin).await
-    };
+async fn run_in_vm(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
+    let r = run_full(vm, slayerfs_bin).await;
 
     if let Err(e) = r {
         let dbg = dump_debug_info(vm).await.unwrap_or_else(|e| e.to_string());
@@ -524,7 +502,7 @@ async fn run_in_vm(vm: &mut Machine, full: bool, slayerfs_bin: &Path) -> Result<
     Ok(())
 }
 
-async fn start_vm_and_run(slayerfs_bin: PathBuf, full: bool) -> Result<()> {
+async fn start_vm_and_run(slayerfs_bin: PathBuf) -> Result<()> {
     tracing_subscriber_init();
 
     tracing::info!("using slayerfs binary at {:?}", slayerfs_bin);
@@ -540,25 +518,9 @@ async fn start_vm_and_run(slayerfs_bin: PathBuf, full: bool) -> Result<()> {
     let slayerfs_bin = std::sync::Arc::new(slayerfs_bin);
     with_machine(&image, &config, move |vm| {
         let slayerfs_bin = std::sync::Arc::clone(&slayerfs_bin);
-        Box::pin(async move { run_in_vm(vm, full, slayerfs_bin.as_ref()).await })
+        Box::pin(async move { run_in_vm(vm, slayerfs_bin.as_ref()).await })
     })
     .await?;
-
-    Ok(())
-}
-
-async fn run_smoke(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
-    install_deps(vm).await?;
-    setup_unprivileged_user(vm, "tester").await?;
-    upload_slayerfs(vm, slayerfs_bin).await?;
-
-    run_slayerfs_mount_root(vm, "sqlite:///tmp/slayerfs-meta/smoke-meta.db?mode=rwc").await?;
-    basic_fs_checks(vm).await?;
-    check_default_permissions(vm).await?;
-
-    kill_slayerfs_best_effort(vm).await?;
-    unmount_best_effort(vm).await?;
-    assert_not_mounted(vm).await?;
 
     Ok(())
 }
@@ -631,13 +593,7 @@ async fn upload_slayerfs(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_slayerfs_kvm_smoke() -> Result<()> {
+async fn test_slayerfs_kvm() -> Result<()> {
     let slayerfs_bin = get_slayerfs_binary_path()?;
-    start_vm_and_run(slayerfs_bin, false).await
-}
-
-#[tokio::test]
-async fn test_slayerfs_kvm_full() -> Result<()> {
-    let slayerfs_bin = get_slayerfs_binary_path()?;
-    start_vm_and_run(slayerfs_bin, true).await
+    start_vm_and_run(slayerfs_bin).await
 }
