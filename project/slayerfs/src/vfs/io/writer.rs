@@ -119,7 +119,7 @@ impl SliceState {
 
         let off_to_slice = offset - self.offset;
 
-        // Uploaded blocks cannot be overlapped
+        // Uploaded blocks cannot be overlapped.
         if off_to_slice < pending_start.max(self.uploaded) {
             return None;
         }
@@ -136,7 +136,7 @@ impl SliceState {
         buf: &[u8],
         action: PageWriteAction,
     ) -> anyhow::Result<()> {
-        self.data.write(offset, buf, action)?;
+        self.data.write(offset - self.offset, buf, action)?;
         self.last_mod = Instant::now();
         Ok(())
     }
@@ -216,7 +216,7 @@ where
         f(&guard)
     }
 
-    fn can_write(&self, offset: u64, len: usize) -> Option<crate::vfs::cache::page::WriteAction> {
+    fn can_write(&self, offset: u64, len: usize) -> Option<PageWriteAction> {
         self.with_ref(|s| s.can_write(offset, len))
     }
 

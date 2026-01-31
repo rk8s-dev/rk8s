@@ -1,7 +1,7 @@
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Once};
+use std::sync::{Arc, Once, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
@@ -32,6 +32,7 @@ const MB: usize = 1024 * 1024;
 const KB: usize = 1024;
 
 static TRACING_INIT: Once = Once::new();
+static CHROME_GUARD: OnceLock<tracing_chrome::FlushGuard> = OnceLock::new();
 
 fn init_tracing(chrome_trace: Option<&Path>) {
     TRACING_INIT.call_once(|| {
@@ -47,7 +48,7 @@ fn init_tracing(chrome_trace: Option<&Path>) {
                 .include_args(true)
                 .trace_style(TraceStyle::Async)
                 .build();
-            let _ = Box::leak(Box::new(guard));
+            let _ = CHROME_GUARD.set(guard);
             eprintln!("[slayerfs_bench] Chrome trace enabled: {}", path.display());
             tracing_subscriber::registry()
                 .with(filter)
