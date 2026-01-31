@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::path::Path;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
@@ -51,7 +51,7 @@ const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
 // Lua script for atomically extending file size
 const EXTEND_FILE_SIZE_LUA: &str = r#"
     local node_json = redis.call('GET', KEYS[1])
-    if not node_json then 
+    if not node_json then
         return cjson.encode({ok=false, error="node_not_found"})
     end
     local ok, node = pcall(cjson.decode, node_json)
@@ -60,7 +60,7 @@ const EXTEND_FILE_SIZE_LUA: &str = r#"
     end
     local new_size = tonumber(ARGV[1])
     local timestamp = tonumber(ARGV[2])
-    if new_size <= node.attr.size then 
+    if new_size <= node.attr.size then
         return cjson.encode({ok=true, updated=false})
     end
     node.attr.size = new_size
@@ -78,36 +78,36 @@ const LINK_LUA: &str = r#"
     local parent_ino = ARGV[1]
     local name = ARGV[2]
     local timestamp = tonumber(ARGV[3])
-    
+
     local node_json = redis.call('GET', node_key)
-    if not node_json then 
+    if not node_json then
         return cjson.encode({ok=false, error="node_not_found"})
     end
     local ok, node = pcall(cjson.decode, node_json)
     if not ok or not node or not node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
     end
-    
+
     -- Check if link name already exists in directory
     local existing = redis.call('HEXISTS', dir_key, name)
     if existing == 1 then
         return cjson.encode({ok=false, error="already_exists"})
     end
-    
+
     -- Increment nlink
     node.attr.nlink = node.attr.nlink + 1
     node.attr.ctime = timestamp
-    
+
     -- Add to link_parents set
     local member = parent_ino .. ":" .. name
     redis.call('SADD', lp_key, member)
-    
+
     -- Add to directory
     redis.call('HSET', dir_key, name, node.ino)
-    
+
     -- Save node
     redis.call('SET', node_key, cjson.encode(node))
-    
+
     return cjson.encode({ok=true, attr=node.attr})
 "#;
 
@@ -119,59 +119,42 @@ const UNLINK_LUA: &str = r#"
     local parent_ino = ARGV[1]
     local name = ARGV[2]
     local timestamp = tonumber(ARGV[3])
-    
+
     -- Remove from directory (idempotent)
     redis.call('HDEL', dir_key, name)
-    
+
     -- Remove from link_parents (idempotent)
     local member = parent_ino .. ":" .. name
     redis.call('SREM', lp_key, member)
-    
+
     -- Try to get node
     local node_json = redis.call('GET', node_key)
-    if not node_json then 
+    if not node_json then
         return cjson.encode({ok=true, nlink=0, deleted=true})
     end
     local ok, node = pcall(cjson.decode, node_json)
     if not ok or not node or not node.attr then
         return cjson.encode({ok=true, nlink=0, deleted=true})
     end
-    
+
     -- Decrement nlink
     if node.attr.nlink > 0 then
         node.attr.nlink = node.attr.nlink - 1
     end
     node.attr.ctime = timestamp
-    
+
     -- Save node
     redis.call('SET', node_key, cjson.encode(node))
-    
+
     local deleted = node.attr.nlink == 0
     return cjson.encode({ok=true, nlink=node.attr.nlink, deleted=deleted})
 "#;
 
-// Lua script for atomically replacing link_parents set
-#[allow(dead_code)]
-const SAVE_LINK_PARENTS_LUA: &str = r#"
-    local lp_key = KEYS[1]
-    
-    -- Delete existing set
-    redis.call('DEL', lp_key)
-    
-    -- Add all new members
-    local count = 0
-    for i = 1, #ARGV do
-        redis.call('SADD', lp_key, ARGV[i])
-        count = count + 1
-    end
-    
-    return cjson.encode({ok=true, count=count})
-"#;
 
 // Lua script for atomically removing directory entry and updating parent nlink
 const RMDIR_LUA: &str = r#"
     local cjson = require "cjson"
-    
+
     local parent_dir_key = KEYS[1]
     local child_node_key = KEYS[2]
     local parent_node_key = KEYS[3]
@@ -180,36 +163,36 @@ const RMDIR_LUA: &str = r#"
     local child_ino = tonumber(ARGV[2])
     local parent_ino = tonumber(ARGV[3])
     local timestamp = tonumber(ARGV[4])
-    
+
     -- 1. Check dentry exists
     local dentry_ino = redis.call('HGET', parent_dir_key, name)
     if not dentry_ino then
         return cjson.encode({ok=false, error="not_found", ino=parent_ino})
     end
-    
+
     -- 2. Get child node
     local child_json = redis.call('GET', child_node_key)
     if not child_json then
         return cjson.encode({ok=false, error="node_not_found", ino=child_ino})
     end
-    
+
     -- 3. Decode child node with pcall
     local ok, child_node = pcall(cjson.decode, child_json)
     if not ok or not child_node or not child_node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
     end
-    
+
     -- 4. Check is directory
     if child_node.kind ~= "Dir" then
         return cjson.encode({ok=false, error="not_directory", ino=child_ino})
     end
-    
+
     -- 5. Check empty
     local child_len = redis.call('HLEN', child_dir_key)
     if child_len > 0 then
         return cjson.encode({ok=false, error="dir_not_empty", ino=child_ino})
     end
-    
+
     -- 6. Get parent node and update
     local parent_json = redis.call('GET', parent_node_key)
     if parent_json then
@@ -221,19 +204,19 @@ const RMDIR_LUA: &str = r#"
             redis.call('SET', parent_node_key, cjson.encode(parent_node))
         end
     end
-    
+
     -- 7. Atomic delete
     redis.call('HDEL', parent_dir_key, name)
     redis.call('DEL', child_node_key)
     redis.call('DEL', child_dir_key)
-    
+
     return cjson.encode({ok=true})
 "#;
 
 // Lua script for atomically creating directory entry with inode allocation
 const CREATE_ENTRY_LUA: &str = r#"
     local cjson = require "cjson"
-    
+
     local parent_dir_key = KEYS[1]
     local parent_node_key = KEYS[2]
     local counter_key = KEYS[3]
@@ -246,33 +229,33 @@ const CREATE_ENTRY_LUA: &str = r#"
     local gid = tonumber(ARGV[7])
     local parent_gid = tonumber(ARGV[8])
     local parent_has_setgid = tonumber(ARGV[9])
-    
+
     -- 1. Get parent node
     local parent_json = redis.call('GET', parent_node_key)
     if not parent_json then
         return cjson.encode({ok=false, error="parent_not_found"})
     end
-    
+
     -- 2. Decode parent node with pcall
     local ok, parent_node = pcall(cjson.decode, parent_json)
     if not ok or not parent_node or not parent_node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
     end
-    
+
     -- 3. Check parent is directory
     if parent_node.kind ~= "Dir" then
         return cjson.encode({ok=false, error="parent_not_directory"})
     end
-    
+
     -- 4. Check entry doesn't already exist
     local existing = redis.call('HEXISTS', parent_dir_key, name)
     if existing == 1 then
         return cjson.encode({ok=false, error="already_exists"})
     end
-    
+
     -- 5. Allocate new inode atomically
     local new_ino = redis.call('INCR', counter_key)
-    
+
     -- 6. Apply setgid inheritance
     local final_gid = gid
     local final_mode = default_mode
@@ -282,13 +265,13 @@ const CREATE_ENTRY_LUA: &str = r#"
             final_mode = bit.bor(final_mode, 2048)  -- 0o2000 setgid bit
         end
     end
-    
+
     -- 7. Determine nlink based on kind
     local nlink = 1
     if kind == "Dir" then
         nlink = 2
     end
-    
+
     -- 8. Create new node
     local new_node = {
         ino = new_ino,
@@ -307,30 +290,30 @@ const CREATE_ENTRY_LUA: &str = r#"
         },
         deleted = false
     }
-    
+
     -- 9. Save new node
     redis.call('SET', 'i' .. new_ino, cjson.encode(new_node))
-    
+
     -- 10. Add directory entry
     redis.call('HSET', parent_dir_key, name, new_ino)
-    
+
     -- 11. Update parent if creating directory (nlink++)
     if kind == "Dir" then
         parent_node.attr.nlink = parent_node.attr.nlink + 1
     end
-    
+
     -- 12. Update parent timestamps
     parent_node.attr.mtime = timestamp
     parent_node.attr.ctime = timestamp
     redis.call('SET', parent_node_key, cjson.encode(parent_node))
-    
+
     return cjson.encode({ok=true, ino=new_ino})
 "#;
 
 // Lua script for atomically renaming file or directory (no overwrite)
 const RENAME_LUA: &str = r#"
     local cjson = require "cjson"
-    
+
     local old_parent_dir_key = KEYS[1]
     local new_parent_dir_key = KEYS[2]
     local child_node_key = KEYS[3]
@@ -342,13 +325,13 @@ const RENAME_LUA: &str = r#"
     local old_parent_ino = tonumber(ARGV[3])
     local new_parent_ino = tonumber(ARGV[4])
     local timestamp = tonumber(ARGV[5])
-    
+
     -- 1. Check source dentry exists
     local dentry_ino = redis.call('HGET', old_parent_dir_key, old_name)
     if not dentry_ino then
         return cjson.encode({ok=false, error="not_found", ino=old_parent_ino})
     end
-    
+
     -- 2. Check new_parent exists and is directory
     local new_parent_json = redis.call('GET', new_parent_node_key)
     if not new_parent_json then
@@ -361,13 +344,13 @@ const RENAME_LUA: &str = r#"
     if new_parent_node.kind ~= "Dir" then
         return cjson.encode({ok=false, error="parent_not_directory", ino=new_parent_ino})
     end
-    
+
     -- 3. Check target doesn't exist
     local target_exists = redis.call('HEXISTS', new_parent_dir_key, new_name)
     if target_exists == 1 then
         return cjson.encode({ok=false, error="already_exists"})
     end
-    
+
     -- 4. Get child node
     local child_json = redis.call('GET', child_node_key)
     if not child_json then
@@ -377,7 +360,7 @@ const RENAME_LUA: &str = r#"
     if not ok_child or not child_node or not child_node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
     end
-    
+
     -- 5. Update node parent/name OR link_parents based on nlink
     if child_node.attr.nlink <= 1 then
         -- Single parent: update node directly
@@ -388,7 +371,7 @@ const RENAME_LUA: &str = r#"
         local members = redis.call('SMEMBERS', link_parents_key)
         local new_members = {}
         local found = false
-        
+
         for _, member in ipairs(members) do
             if member == old_parent_ino .. ":" .. old_name then
                 table.insert(new_members, new_parent_ino .. ":" .. new_name)
@@ -397,33 +380,33 @@ const RENAME_LUA: &str = r#"
                 table.insert(new_members, member)
             end
         end
-        
+
         if not found then
             return cjson.encode({ok=false, error="link_parent_not_found"})
         end
-        
+
         -- Replace link_parents set atomically
         redis.call('DEL', link_parents_key)
         for _, member in ipairs(new_members) do
             redis.call('SADD', link_parents_key, member)
         end
-        
+
         -- Hardlinked files have parent=0, name=""
         child_node.parent = 0
         child_node.name = ""
     end
-    
+
     -- 6. Update child timestamps
     child_node.attr.mtime = timestamp
     child_node.attr.ctime = timestamp
-    
+
     -- 7. Remove old dentry and add new dentry
     redis.call('HDEL', old_parent_dir_key, old_name)
     redis.call('HSET', new_parent_dir_key, new_name, dentry_ino)
-    
+
     -- 8. Save updated child node
     redis.call('SET', child_node_key, cjson.encode(child_node))
-    
+
     -- 9. Update both parent directory times (but NOT nlink)
     local old_parent_json = redis.call('GET', old_parent_node_key)
     if old_parent_json then
@@ -434,17 +417,17 @@ const RENAME_LUA: &str = r#"
             redis.call('SET', old_parent_node_key, cjson.encode(old_parent_node))
         end
     end
-    
+
     new_parent_node.attr.mtime = timestamp
     new_parent_node.attr.ctime = timestamp
     redis.call('SET', new_parent_node_key, cjson.encode(new_parent_node))
-    
+
     return cjson.encode({ok=true})
 "#;
 
 const RENAME_EXCHANGE_LUA: &str = r#"
     local cjson = require "cjson"
-    
+
     local old_parent_dir_key = KEYS[1]
     local new_parent_dir_key = KEYS[2]
     local old_node_key = KEYS[3]
@@ -464,12 +447,12 @@ const RENAME_EXCHANGE_LUA: &str = r#"
     if not old_dentry_ino then
         return cjson.encode({ok=false, error="internal", msg="Entry '" .. old_name .. "' not found in parent " .. old_parent_ino .. " for exchange"})
     end
-    
+
     local new_dentry_ino = redis.call('HGET', new_parent_dir_key, new_name)
     if not new_dentry_ino then
         return cjson.encode({ok=false, error="internal", msg="Entry '" .. new_name .. "' not found in parent " .. new_parent_ino .. " for exchange"})
     end
-    
+
     -- 2. GET both nodes
     local old_node_json = redis.call('GET', old_node_key)
     if not old_node_json then
@@ -479,7 +462,7 @@ const RENAME_EXCHANGE_LUA: &str = r#"
     if not ok_old or not old_node or not old_node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
     end
-    
+
     local new_node_json = redis.call('GET', new_node_key)
     if not new_node_json then
         return cjson.encode({ok=false, error="corrupt_node"})
@@ -488,16 +471,16 @@ const RENAME_EXCHANGE_LUA: &str = r#"
     if not ok_new or not new_node or not new_node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
     end
-    
+
     -- 3. Swap directory entries atomically
     redis.call('HSET', old_parent_dir_key, old_name, new_dentry_ino)
     redis.call('HSET', new_parent_dir_key, new_name, old_dentry_ino)
-    
+
     -- 4. Update old_node (nlink>1: update link_parents, nlink<=1: update parent/name)
     if old_node.attr.nlink > 1 then
         local old_members = redis.call('SMEMBERS', old_link_parents_key)
         local new_old_members = {}
-        
+
         for _, member in ipairs(old_members) do
             if member == old_parent_ino .. ":" .. old_name then
                 table.insert(new_old_members, new_parent_ino .. ":" .. new_name)
@@ -505,24 +488,24 @@ const RENAME_EXCHANGE_LUA: &str = r#"
                 table.insert(new_old_members, member)
             end
         end
-        
+
         redis.call('DEL', old_link_parents_key)
         for _, member in ipairs(new_old_members) do
             redis.call('SADD', old_link_parents_key, member)
         end
-        
+
         old_node.parent = 0
         old_node.name = ""
     else
         old_node.parent = new_parent_ino
         old_node.name = new_name
     end
-    
+
     -- 5. Update new_node (nlink>1: update link_parents, nlink<=1: update parent/name)
     if new_node.attr.nlink > 1 then
         local new_members = redis.call('SMEMBERS', new_link_parents_key)
         local new_new_members = {}
-        
+
         for _, member in ipairs(new_members) do
             if member == new_parent_ino .. ":" .. new_name then
                 table.insert(new_new_members, old_parent_ino .. ":" .. old_name)
@@ -530,29 +513,29 @@ const RENAME_EXCHANGE_LUA: &str = r#"
                 table.insert(new_new_members, member)
             end
         end
-        
+
         redis.call('DEL', new_link_parents_key)
         for _, member in ipairs(new_new_members) do
             redis.call('SADD', new_link_parents_key, member)
         end
-        
+
         new_node.parent = 0
         new_node.name = ""
     else
         new_node.parent = old_parent_ino
         new_node.name = old_name
     end
-    
+
     -- 6. Update timestamps for both nodes
     old_node.attr.mtime = timestamp
     old_node.attr.ctime = timestamp
     new_node.attr.mtime = timestamp
     new_node.attr.ctime = timestamp
-    
+
     -- 7. SET both nodes
     redis.call('SET', old_node_key, cjson.encode(old_node))
     redis.call('SET', new_node_key, cjson.encode(new_node))
-    
+
     -- 8. Update parent directory timestamps
     local old_parent_json = redis.call('GET', old_parent_node_key)
     if old_parent_json then
@@ -563,7 +546,7 @@ const RENAME_EXCHANGE_LUA: &str = r#"
             redis.call('SET', old_parent_node_key, cjson.encode(old_parent_node))
         end
     end
-    
+
     local new_parent_json = redis.call('GET', new_parent_node_key)
     if new_parent_json then
         local ok_np, new_parent_node = pcall(cjson.decode, new_parent_json)
@@ -573,7 +556,7 @@ const RENAME_EXCHANGE_LUA: &str = r#"
             redis.call('SET', new_parent_node_key, cjson.encode(new_parent_node))
         end
     end
-    
+
     return cjson.encode({ok=true})
 "#;
 
@@ -597,7 +580,7 @@ struct LuaResponse {
     #[serde(default)]
     attr: Option<serde_json::Value>,
     #[serde(default)]
-    msg: Option<String>,  // For Internal error details
+    msg: Option<String>, // For Internal error details
 }
 
 /// Minimal Redis-backed meta store.
@@ -788,27 +771,6 @@ impl RedisMetaStore {
         conn.del(self.node_key(ino)).await.map_err(redis_err)
     }
 
-    #[allow(dead_code)]
-    async fn add_dir_entry(&self, parent: i64, name: &str, child: i64) -> Result<(), MetaError> {
-        let mut conn = self.conn.clone();
-        conn.hset(self.dir_key(parent), name, child)
-            .await
-            .map_err(redis_err)
-    }
-
-    #[allow(dead_code)]
-    async fn remove_dir_entry(&self, parent: i64, name: &str) -> Result<(), MetaError> {
-        let mut conn = self.conn.clone();
-        let removed: i64 = conn
-            .hdel(self.dir_key(parent), name)
-            .await
-            .map_err(redis_err)?;
-        if removed == 0 {
-            return Err(MetaError::NotFound(parent));
-        }
-        Ok(())
-    }
-
     async fn load_link_parents(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError> {
         let mut conn = self.conn.clone();
         let members: Vec<String> = conn
@@ -831,47 +793,6 @@ impl RedisMetaStore {
         Ok(out)
     }
 
-    #[allow(dead_code)]
-    async fn save_link_parents(
-        &self,
-        ino: i64,
-        parents: &[(i64, String)],
-    ) -> Result<(), MetaError> {
-        let key = Self::link_parent_key(ino);
-
-        if parents.is_empty() {
-            let mut conn = self.conn.clone();
-            let _: () = conn.del(&key).await.map_err(redis_err)?;
-            return Ok(());
-        }
-
-        let members: Vec<String> = parents
-            .iter()
-            .map(|(p, name)| format!("{}:{}", p, name))
-            .collect();
-
-        let mut conn = self.conn.clone();
-        let result: String = redis::cmd("EVAL")
-            .arg(SAVE_LINK_PARENTS_LUA)
-            .arg(1)
-            .arg(&key)
-            .arg(members)
-            .query_async(&mut conn)
-            .await
-            .map_err(redis_err)?;
-
-        let response: LuaResponse = serde_json::from_str(&result)
-            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
-
-        if !response.ok {
-            let err = response
-                .error
-                .unwrap_or_else(|| "unknown error".to_string());
-            return Err(MetaError::Internal(format!("Lua error: {err}")));
-        }
-
-        Ok(())
-    }
 
     async fn bump_dir_times(&self, ino: i64, now: i64) -> Result<(), MetaError> {
         if let Some(mut node) = self.get_node(ino).await?
@@ -891,12 +812,6 @@ impl RedisMetaStore {
             .await
             .map_err(redis_err)?;
         Ok(value)
-    }
-
-    #[allow(dead_code)]
-    async fn directory_len(&self, ino: i64) -> Result<i64, MetaError> {
-        let mut conn = self.conn.clone();
-        conn.hlen(self.dir_key(ino)).await.map_err(redis_err)
     }
 
     async fn ensure_parent_dir(&self, parent: i64) -> Result<StoredNode, MetaError> {
@@ -989,18 +904,6 @@ impl RedisMetaStore {
             None => Err(MetaError::Internal("unexpected Lua response".into())),
         }
     }
-
-    #[allow(dead_code)]
-    async fn update_nlink(&self, ino: i64, delta: i32) -> Result<(), MetaError> {
-        if let Some(mut node) = self.get_node(ino).await? {
-            let value = node.attr.nlink as i64 + delta as i64;
-            node.attr.nlink = value.max(0) as u32;
-            node.attr.ctime = current_time();
-            self.save_node(&node).await?;
-        }
-        Ok(())
-    }
-
     async fn alloc_id(&self, key: &str) -> Result<i64, MetaError> {
         let mut conn = self.conn.clone();
         let redis_key = Self::counter_key(key)?;
@@ -1696,9 +1599,7 @@ impl MetaStore for RedisMetaStore {
             .map_err(|e| MetaError::Internal(format!("Failed to parse Lua response: {e}")))?;
         match response.error.as_deref() {
             Some("internal") => {
-                let msg = response
-                    .msg
-                    .unwrap_or_else(|| "unknown error".to_string());
+                let msg = response.msg.unwrap_or_else(|| "unknown error".to_string());
                 Err(MetaError::Internal(msg))
             }
             Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
@@ -2229,18 +2130,6 @@ struct StoredNode {
 }
 
 impl StoredNode {
-    #[allow(dead_code)]
-    fn new(ino: i64, parent: i64, name: String, kind: FileType) -> Self {
-        let attr = StoredAttr::new(kind);
-        Self {
-            ino,
-            parent,
-            name,
-            kind: kind.into(),
-            attr,
-            deleted: false,
-        }
-    }
 
     fn as_file_attr(&self) -> FileAttr {
         self.attr.to_file_attr(self.ino, self.kind.into())
@@ -2260,26 +2149,6 @@ struct StoredAttr {
 }
 
 impl StoredAttr {
-    #[allow(dead_code)]
-    fn new(kind: FileType) -> Self {
-        let now = current_time();
-        let (mode, nlink) = match kind {
-            FileType::Dir => (0o040755, 2),
-            FileType::File => (0o100644, 1),
-            FileType::Symlink => (0o120777, 1),
-        };
-        Self {
-            size: 0,
-            mode,
-            uid: 0,
-            gid: 0,
-            atime: now,
-            mtime: now,
-            ctime: now,
-            nlink,
-        }
-    }
-
     fn to_file_attr(&self, ino: i64, kind: FileType) -> FileAttr {
         FileAttr {
             ino,
@@ -2325,16 +2194,6 @@ impl From<NodeKind> for FileType {
 
 fn current_time() -> i64 {
     Utc::now().timestamp_nanos_opt().unwrap_or(0)
-}
-
-#[allow(dead_code)]
-fn millis_to_system_time(ms: i64) -> Result<SystemTime, MetaError> {
-    if ms < 0 {
-        return Err(MetaError::Internal(format!(
-            "invalid session timestamp {ms}"
-        )));
-    }
-    Ok(UNIX_EPOCH + Duration::from_millis(ms as u64))
 }
 
 fn redis_err(err: redis::RedisError) -> MetaError {
@@ -3247,10 +3106,7 @@ mod tests {
         let root = store.root_ino();
 
         let parent_dir = store.mkdir(root, "parent".to_string()).await.unwrap();
-        let _child_dir = store
-            .mkdir(parent_dir, "child".to_string())
-            .await
-            .unwrap();
+        let _child_dir = store.mkdir(parent_dir, "child".to_string()).await.unwrap();
 
         let result = store.rmdir(root, "parent").await;
         assert!(result.is_err());
@@ -3282,7 +3138,10 @@ mod tests {
         let store = new_test_store().await;
         let root = store.root_ino();
 
-        let file_ino = store.create_file(root, "file.txt".to_string()).await.unwrap();
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
 
         let result = store.rmdir(root, "file.txt").await;
         assert!(result.is_err());
@@ -3377,7 +3236,10 @@ mod tests {
         let store = new_test_store().await;
         let root = store.root_ino();
 
-        let file_ino = store.create_file(root, "file.txt".to_string()).await.unwrap();
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
 
         let result = store.mkdir(file_ino, "newdir".to_string()).await;
         assert!(result.is_err());
@@ -3394,7 +3256,10 @@ mod tests {
         let store = Arc::new(new_test_store().await);
         let root = store.root_ino();
 
-        let file_ino = store.create_file(root, "file.txt".to_string()).await.unwrap();
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
         store.mkdir(root, "dir1".to_string()).await.unwrap();
         store.mkdir(root, "dir2".to_string()).await.unwrap();
         store.mkdir(root, "dir3".to_string()).await.unwrap();
@@ -3438,7 +3303,10 @@ mod tests {
             .iter()
             .filter(|r| matches!(r, Err(MetaError::NotFound(ino)) if *ino == root))
             .count();
-        assert_eq!(not_found_count, 3, "three renames should return NotFound(parent)");
+        assert_eq!(
+            not_found_count, 3,
+            "three renames should return NotFound(parent)"
+        );
 
         let final_node = store.get_node(file_ino).await.unwrap().unwrap();
         assert!(
@@ -3471,8 +3339,14 @@ mod tests {
         let store = new_test_store().await;
         let root = store.root_ino();
 
-        store.create_file(root, "file1.txt".to_string()).await.unwrap();
-        store.create_file(root, "file2.txt".to_string()).await.unwrap();
+        store
+            .create_file(root, "file1.txt".to_string())
+            .await
+            .unwrap();
+        store
+            .create_file(root, "file2.txt".to_string())
+            .await
+            .unwrap();
 
         let result = store
             .rename(root, "file1.txt", root, "file2.txt".to_string())
@@ -3494,7 +3368,10 @@ mod tests {
         let store = new_test_store().await;
         let root = store.root_ino();
 
-        let file_ino = store.create_file(root, "file.txt".to_string()).await.unwrap();
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
         let node_before = store.get_node(file_ino).await.unwrap().unwrap();
 
         let result = store
@@ -3503,8 +3380,14 @@ mod tests {
         assert!(result.is_ok(), "self-rename should be no-op");
 
         let node_after = store.get_node(file_ino).await.unwrap().unwrap();
-        assert_eq!(node_before.attr.mtime, node_after.attr.mtime, "mtime should not change");
-        assert_eq!(node_before.attr.ctime, node_after.attr.ctime, "ctime should not change");
+        assert_eq!(
+            node_before.attr.mtime, node_after.attr.mtime,
+            "mtime should not change"
+        );
+        assert_eq!(
+            node_before.attr.ctime, node_after.attr.ctime,
+            "ctime should not change"
+        );
     }
 
     #[serial]
@@ -3514,12 +3397,18 @@ mod tests {
         let store = new_test_store().await;
         let root = store.root_ino();
 
-        let file_ino = store.create_file(root, "file.txt".to_string()).await.unwrap();
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
         store.link(file_ino, root, "link.txt").await.unwrap();
 
         let node_before = store.get_node(file_ino).await.unwrap().unwrap();
         assert_eq!(node_before.attr.nlink, 2, "file should have nlink=2");
-        assert_eq!(node_before.parent, 0, "hardlinked file should have parent=0");
+        assert_eq!(
+            node_before.parent, 0,
+            "hardlinked file should have parent=0"
+        );
         assert_eq!(node_before.name, "", "hardlinked file should have name=''");
 
         let link_parents_before = store.load_link_parents(file_ino).await.unwrap();

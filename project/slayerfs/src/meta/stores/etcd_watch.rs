@@ -54,12 +54,7 @@ pub struct WatchConfig {
     #[serde(default)]
     pub enabled: bool,
 
-    /// Watch key prefix (default: all metadata keys)
-    /// DEPRECATED: Use `prefixes` instead. Kept for backward compatibility.
-    #[serde(default)]
-    pub key_prefix: String,
-
-    /// Watch key prefixes (default: empty, falls back to key_prefix)
+    /// Watch key prefixes (default: empty = watch all keys)
     #[serde(default)]
     pub prefixes: Vec<String>,
 
@@ -80,7 +75,6 @@ impl Default for WatchConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            key_prefix: "".to_string(),
             prefixes: vec![],
             event_buffer_size: 1000,
             debug: false,
@@ -90,10 +84,10 @@ impl Default for WatchConfig {
 
 impl WatchConfig {
     pub fn effective_prefixes(&self) -> Vec<String> {
-        if !self.prefixes.is_empty() {
-            self.prefixes.clone()
+        if self.prefixes.is_empty() {
+            vec!["".to_string()] // Default: watch all keys
         } else {
-            vec![self.key_prefix.clone()]
+            self.prefixes.clone()
         }
     }
 
@@ -102,7 +96,6 @@ impl WatchConfig {
             enabled: std::env::var("SLAYERFS_WATCH_ENABLED")
                 .map(|v| v.to_lowercase() == "true")
                 .unwrap_or(false),
-            key_prefix: String::new(),
             prefixes: std::env::var("SLAYERFS_WATCH_PREFIXES")
                 .map(|v| {
                     v.split(',')
@@ -450,10 +443,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_watch_config_effective_prefixes_new_style() {
+    fn test_watch_config_effective_prefixes() {
         let config = WatchConfig {
             enabled: true,
-            key_prefix: "old:".into(),
             prefixes: vec!["f:".into(), "r:".into()],
             ..Default::default()
         };
@@ -461,14 +453,13 @@ mod tests {
     }
 
     #[test]
-    fn test_watch_config_effective_prefixes_backward_compat() {
+    fn test_watch_config_effective_prefixes_empty() {
         let config = WatchConfig {
             enabled: true,
-            key_prefix: "legacy:".into(),
             prefixes: vec![],
             ..Default::default()
         };
-        assert_eq!(config.effective_prefixes(), vec!["legacy:"]);
+        assert_eq!(config.effective_prefixes(), vec![""]);
     }
 
     #[test]
