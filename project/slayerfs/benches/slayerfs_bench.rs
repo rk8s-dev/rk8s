@@ -15,11 +15,17 @@ use tokio::runtime::{Builder, Runtime};
 use tracing_chrome::{ChromeLayerBuilder, TraceStyle};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use slayerfs::{
-    BlockKey, BlockStore, CacheConfig, ChunkLayout, ClientOptions, Config, DatabaseConfig,
-    DatabaseMetaStore, DatabaseType, EtcdMetaStore, LocalFsBackend, MetaClient, MetaStore,
-    MetaStoreFactory, ObjectBlockStore, ObjectClient, S3Backend, S3Config, VFS,
-};
+use slayerfs::cadapter::client::ObjectClient;
+use slayerfs::cadapter::localfs::LocalFsBackend;
+use slayerfs::cadapter::s3::{S3Backend, S3Config};
+use slayerfs::chuck::chunk::ChunkLayout;
+use slayerfs::chuck::store::{BlockKey, BlockStore, ObjectBlockStore};
+use slayerfs::meta::MetaStore;
+use slayerfs::meta::client::MetaClient;
+use slayerfs::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+use slayerfs::meta::factory::MetaStoreFactory;
+use slayerfs::meta::stores::{DatabaseMetaStore, EtcdMetaStore};
+use slayerfs::vfs::fs::VFS;
 
 const MB: usize = 1024 * 1024;
 const KB: usize = 1024;
@@ -41,8 +47,11 @@ fn init_tracing(chrome_trace: Option<&Path>) {
                 .include_args(true)
                 .trace_style(TraceStyle::Async)
                 .build();
-            let guard_cell = CHROME_GUARD.get_or_init(|| Mutex::new(None));
-            *guard_cell.lock().unwrap() = Some(guard);
+            CHROME_GUARD
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .expect("lock chrome guard")
+                .replace(guard);
             eprintln!("[slayerfs_bench] Chrome trace enabled: {}", path.display());
             tracing_subscriber::registry()
                 .with(filter)
@@ -244,6 +253,13 @@ enum BenchStore {
 
 #[async_trait]
 impl BlockStore for BenchStore {
+    async fn write_vectored(&self, key: BlockKey, offset: u64, chunks: Vec<Bytes>) -> Result<u64> {
+        match self {
+            BenchStore::Local(store) => store.write_vectored(key, offset, chunks).await,
+            BenchStore::S3(store) => store.write_vectored(key, offset, chunks).await,
+        }
+    }
+
     async fn write_range(&self, key: BlockKey, offset: u64, data: &[u8]) -> anyhow::Result<u64> {
         match self {
             BenchStore::Local(store) => store.write_range(key, offset, data).await,

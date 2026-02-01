@@ -255,7 +255,7 @@ async fn run_slayerfs_mount_root(vm: &mut Machine, meta_url: &str) -> Result<()>
         exec_check(
             vm,
             &format!(
-                "rm -f '{p}' && touch '{p}' && chmod 666 '{p}' && stat -c '%A %U:%G %n' '{p}'",
+                "sh -lc \"test -e '{p}' || touch '{p}'; chmod 666 '{p}'; stat -c '%A %U:%G %n' '{p}'\"",
                 p = db_path
             ),
         )

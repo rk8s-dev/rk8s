@@ -3123,7 +3123,7 @@ mod tests {
         let r3 = h3.await.unwrap();
         let r4 = h4.await.unwrap();
 
-        let results = vec![r1, r2, r3, r4];
+        let results = [r1, r2, r3, r4];
         let success_count = results.iter().filter(|r| r.is_ok()).count();
         assert_eq!(
             success_count, 1,
@@ -3215,7 +3215,7 @@ mod tests {
         let r3 = h3.await.unwrap();
         let r4 = h4.await.unwrap();
 
-        let results = vec![r1, r2, r3, r4];
+        let results = [r1, r2, r3, r4];
         let success_count = results.iter().filter(|r| r.is_ok()).count();
         assert_eq!(
             success_count, 1,

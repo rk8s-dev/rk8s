@@ -3090,13 +3090,13 @@ impl MetaStore for EtcdMetaStore {
         builder.add_stage(vec![slice_key, inode_key], move |ctx| {
             let mut plans = Vec::new();
             let mut slices: Vec<SliceDesc> = match ctx.value(&slice_key_for_stage) {
-                Some(raw) => serde_json::from_slice(raw)?,
+                Some(raw) => crate::meta::serialization::deserialize_meta(raw)?,
                 None => Vec::new(),
             };
 
             slices.push(slice_for_update);
 
-            let slices_payload = serde_json::to_vec(&slices)?;
+            let slices_payload = crate::meta::serialization::serialize_meta(&slices)?;
             plans.push(UpdatePlan::new_write(
                 ctx,
                 slice_key_for_stage.clone(),
@@ -3107,7 +3107,11 @@ impl MetaStore for EtcdMetaStore {
                 .value(&inode_key_for_stage)
                 .ok_or(MetaError::NotFound(ino))?;
 
-            let mut entry_info: EtcdEntryInfo = serde_json::from_slice(entry_raw)?;
+            let mut entry_info: EtcdEntryInfo = serde_json::from_slice(entry_raw).map_err(|e| {
+                MetaError::Serialization(format!(
+                    "failed to deserialize EtcdEntryInfo for inode {ino}: {e}"
+                ))
+            })?;
 
             if !entry_info.is_file {
                 return Err(MetaError::Internal(
@@ -3119,7 +3123,11 @@ impl MetaStore for EtcdMetaStore {
             if new_size > current {
                 entry_info.size = Some(new_size as i64);
                 entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-                let entry_payload = serde_json::to_vec(&entry_info)?;
+                let entry_payload = serde_json::to_vec(&entry_info).map_err(|e| {
+                    MetaError::Serialization(format!(
+                        "failed to serialize EtcdEntryInfo for inode {ino}: {e}"
+                    ))
+                })?;
                 plans.push(UpdatePlan::new_write(
                     ctx,
                     inode_key_for_stage.clone(),

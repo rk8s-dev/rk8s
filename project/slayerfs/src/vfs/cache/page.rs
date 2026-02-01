@@ -333,7 +333,7 @@ mod tests {
         let end = if len == 0 {
             0
         } else {
-            ((len + block_size - 1) / block_size) as usize
+            len.div_ceil(block_size) as usize
         };
         let mut blocks = slice.collect_pages(0, end).unwrap();
         blocks.sort_by_key(|(idx, _)| *idx);
@@ -426,7 +426,7 @@ mod tests {
         slice.freeze();
 
         let mut expected = data.clone();
-        let start = offset as usize;
+        let start = offset;
         let end = start + patch.len();
         expected[start..end].copy_from_slice(&patch);
 
