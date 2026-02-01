@@ -1,7 +1,6 @@
 // Example program: demonstrate vfs::sdk::VfsClient usage without FUSE
 
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::vfs::sdk::LocalClient;
+use slayerfs::{ChunkLayout, LocalClient};
 use std::path::PathBuf;
 
 #[tokio::main(flavor = "current_thread")]

@@ -3,12 +3,10 @@
 // This demo shows how to use SlayerFS with an S3 backend.
 // Make sure you have AWS credentials configured (via environment variables, IAM roles, or ~/.aws/credentials)
 
-use slayerfs::cadapter::client::ObjectClient;
-use slayerfs::cadapter::s3::{S3Backend, S3Config};
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::chuck::store::ObjectBlockStore;
-use slayerfs::meta::create_meta_store_from_url;
-use slayerfs::vfs::sdk::VfsClient;
+use slayerfs::{
+    ChunkLayout, ObjectBlockStore, ObjectClient, S3Backend, S3Config, VfsClient,
+    create_meta_store_from_url,
+};
 use std::error::Error;
 
 #[tokio::main]
@@ -119,9 +117,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "  - {} ({})",
             entry.name,
             match entry.kind {
-                slayerfs::vfs::fs::FileType::Dir => "directory",
-                slayerfs::vfs::fs::FileType::File => "file",
-                slayerfs::vfs::fs::FileType::Symlink => "symlink",
+                slayerfs::VfsFileType::Dir => "directory",
+                slayerfs::VfsFileType::File => "file",
+                slayerfs::VfsFileType::Symlink => "symlink",
             }
         );
     }

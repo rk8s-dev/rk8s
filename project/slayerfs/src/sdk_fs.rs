@@ -702,6 +702,7 @@ impl OpenOptions {
             read_op: None,
             write_op: None,
             seek_op: None,
+            read_buffer: Vec::new(),
         })
     }
 }
@@ -763,6 +764,10 @@ pub struct File {
     read_op: Option<ReadOp>,
     write_op: Option<WriteOp>,
     seek_op: Option<SeekOp>,
+    /// Internal buffer for AsyncRead to handle partial consumption.
+    /// When read_at returns more data than the caller's buffer can hold,
+    /// the excess is stored here for the next poll_read call.
+    read_buffer: Vec<u8>,
 }
 
 impl File {
@@ -959,6 +964,14 @@ impl AsyncRead for File {
             return Poll::Ready(Ok(()));
         }
 
+        // First, drain any buffered data from previous reads
+        if !self.read_buffer.is_empty() {
+            let n = self.read_buffer.len().min(buf.remaining());
+            buf.put_slice(&self.read_buffer[..n]);
+            self.read_buffer.drain(..n);
+            return Poll::Ready(Ok(()));
+        }
+
         if self.read_op.is_none() {
             let client = Arc::clone(&self.client);
             let path = self.path.clone();
@@ -986,6 +999,10 @@ impl AsyncRead for File {
                     Ok(data) => {
                         let n = data.len().min(buf.remaining());
                         buf.put_slice(&data[..n]);
+                        // Store excess data in internal buffer for next call
+                        if n < data.len() {
+                            self.read_buffer.extend_from_slice(&data[n..]);
+                        }
                         Poll::Ready(Ok(()))
                     }
                     Err(err) => Poll::Ready(Err(err)),
@@ -1222,7 +1239,10 @@ mod tests {
     use crate::chuck::chunk::ChunkLayout;
     use crate::fs::{CallerIdentity, FileSystemConfig};
     use crate::vfs::sdk::LocalClient;
+    use futures::task::noop_waker;
     use tempfile::tempdir;
+    use tokio::sync::Notify;
+    use std::task::Context;
 
     async fn local_client() -> (tempfile::TempDir, Client) {
         let tmp = tempdir().expect("tempdir");
@@ -1232,6 +1252,152 @@ mod tests {
             .await
             .expect("init LocalClient");
         (tmp, Client::new(Arc::new(cli)))
+    }
+
+    struct MockClient {
+        data: Vec<u8>,
+        gate: Arc<Notify>,
+    }
+
+    #[async_trait]
+    impl ClientBackend for MockClient {
+        async fn mkdir(&self, _path: &str) -> io::Result<()> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn mkdir_p(&self, _path: &str) -> io::Result<()> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn create_file(&self, _path: &str, _create_new: bool) -> io::Result<()> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn write_at(&self, _path: &str, _offset: u64, _data: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn read_at(&self, _path: &str, offset: u64, len: usize) -> io::Result<Vec<u8>> {
+            self.gate.notified().await;
+            let start = offset as usize;
+            let end = (start + len).min(self.data.len());
+            Ok(self.data[start..end].to_vec())
+        }
+
+        async fn readdir(&self, _path: &str) -> io::Result<Vec<MetaDirEntry>> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn stat(&self, _path: &str) -> io::Result<MetaFileAttr> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn unlink(&self, _path: &str) -> io::Result<()> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn rmdir(&self, _path: &str) -> io::Result<()> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn rename(&self, _old: &str, _new: &str) -> io::Result<()> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn truncate(&self, _path: &str, _size: u64) -> io::Result<()> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn exists(&self, _path: &str) -> bool {
+            false
+        }
+
+        async fn set_attr(
+            &self,
+            _path: &str,
+            _req: &SetAttrRequest,
+            _flags: SetAttrFlags,
+        ) -> io::Result<MetaFileAttr> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn lstat(&self, _path: &str) -> io::Result<MetaFileAttr> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn remove_dir_all(&self, _path: &str) -> io::Result<()> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn stat_fs(&self) -> io::Result<StatFsSnapshot> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn link(&self, _existing: &str, _link_path: &str) -> io::Result<MetaFileAttr> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn symlink(&self, _link_path: &str, _target: &str) -> io::Result<MetaFileAttr> {
+            Err(io::Error::other("unsupported"))
+        }
+
+        async fn readlink(&self, _path: &str) -> io::Result<String> {
+            Err(io::Error::other("unsupported"))
+        }
+    }
+
+    #[tokio::test]
+    async fn async_read_buffers_partial_data_across_polls() {
+        let data = b"abcdefgh".to_vec();
+        let gate = Arc::new(Notify::new());
+        let client: DynClient = Arc::new(MockClient {
+            data: data.clone(),
+            gate: Arc::clone(&gate),
+        });
+
+        let mut opts = OpenOptions::new();
+        opts.read(true);
+
+        let mut file = File {
+            client,
+            path: "/mock".to_string(),
+            opts,
+            state: Arc::new(Mutex::new(FileState {
+                offset: 0,
+                length: data.len() as u64,
+            })),
+            read_op: None,
+            write_op: None,
+            seek_op: None,
+            read_buffer: Vec::new(),
+        };
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        let mut buf1 = [0u8; 8];
+        let mut read_buf1 = ReadBuf::new(&mut buf1);
+        assert!(Pin::new(&mut file)
+            .poll_read(&mut cx, &mut read_buf1)
+            .is_pending());
+
+        gate.notify_one();
+
+        let mut buf2 = [0u8; 4];
+        let mut read_buf2 = ReadBuf::new(&mut buf2);
+        match Pin::new(&mut file).poll_read(&mut cx, &mut read_buf2) {
+            Poll::Ready(Ok(())) => {}
+            other => panic!("unexpected poll result: {:?}", other),
+        }
+        assert_eq!(read_buf2.filled(), b"abcd");
+
+        let mut buf3 = [0u8; 4];
+        let mut read_buf3 = ReadBuf::new(&mut buf3);
+        match Pin::new(&mut file).poll_read(&mut cx, &mut read_buf3) {
+            Poll::Ready(Ok(())) => {}
+            other => panic!("unexpected poll result: {:?}", other),
+        }
+        assert_eq!(read_buf3.filled(), b"efgh");
     }
 
     #[tokio::test]

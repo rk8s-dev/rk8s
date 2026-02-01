@@ -1,6 +1,6 @@
 # SlayerFS SDK 使用说明
 
-本文档介绍基于 `vfs::sdk::VfsClient` 的应用接口，便于在不挂载 FUSE 的情况下直接以“路径”读写文件。
+本文档介绍基于 `VfsClient` 的应用接口，便于在不挂载 FUSE 的情况下直接以“路径”读写文件。
 
 ## 设计目标
 - 提供接近 POSIX 的基础路径 API：
@@ -13,8 +13,8 @@
 
 ## 快速开始（本地目录后端）
 ```rust
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::vfs::sdk::LocalClient;
+use slayerfs::ChunkLayout;
+use slayerfs::LocalClient;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -50,16 +50,16 @@ async fn main() {
 - `create_file(path, create_new) -> io::Result<()>`：创建文件；若同名目录存在报错 `"is a directory"`；`create_new=true` 时已存在会报错
 - `write_at(path, offset, data) -> io::Result<usize>`：按文件偏移写入，跨 Chunk/Block 自动拆分
 - `read_at(path, offset, len) -> io::Result<Vec<u8>>`：按文件偏移读取；对未写入区域 0 填充
-- `readdir(path) -> io::Result<Vec<DirEntry>>`：列目录；不包含 "." 与 ".."
-- `stat(path) -> io::Result<FileAttr>`：获取 kind/size；size 来自元数据层
+- `readdir(path) -> io::Result<Vec<VfsDirEntry>>`：列目录；不包含 "." 与 ".."
+- `stat(path) -> io::Result<VfsFileAttr>`：获取 kind/size；size 来自元数据层
 - `unlink(path) -> io::Result<()>`：删除文件；目录会报错 `"is a directory"`
 - `rmdir(path) -> io::Result<()>`：删除空目录；根目录不可删除；非空报错 `"directory not empty"`
 - `rename(old, new) -> io::Result<()>`：仅文件；目标不得存在；目标父目录缺失会自动创建
 - `truncate(path, size) -> io::Result<()>`：仅更新文件 size；收缩不立即清理块数据
 
 类型摘录：
-- `DirEntry { name: String, ino: i64, kind: FileType }`
-- `FileAttr { ino: i64, size: u64, kind: FileType }`
+- `VfsDirEntry { name: String, ino: i64, kind: VfsFileType }`
+- `VfsFileAttr { ino: i64, size: u64, kind: VfsFileType }`
 
 ## 后端与布局
 - 布局：`ChunkLayout { chunk_size: u64, block_size: u32 }`，默认 64MiB/4MiB，可自定义传入
@@ -73,7 +73,7 @@ async fn main() {
 - GC：`unlink/rmdir` 仅更新命名空间与元数据，底层块/切片回收将由后续实现补充
 
 ## 测试与演示
-- 本仓库内含端到端测试（`vfs::sdk`、`vfs::fs`、`vfs::simple`）与一个本地演示入口（`demo-localfs`）
+- 本仓库内含端到端测试（`VfsClient`/VFS 层）与一个本地演示入口（`demo-localfs`）
 - 你可以运行测试或示例来验证行为（见根目录 README）
 
 ---

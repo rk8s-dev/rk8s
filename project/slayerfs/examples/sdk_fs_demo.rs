@@ -1,6 +1,5 @@
-use slayerfs::chuck::chunk::ChunkLayout;
 use slayerfs::sdk_fs::{Client, OpenOptions};
-use slayerfs::vfs::sdk::LocalClient;
+use slayerfs::{ChunkLayout, LocalClient};
 use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
