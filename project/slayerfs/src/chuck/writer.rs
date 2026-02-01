@@ -104,7 +104,13 @@ where
     }
 
     /// Write a slice from a set of byte segments without concatenating them.
-    #[tracing::instrument(level = "trace", skip(self, chunks), fields(slice_id, offset, chunk_count = chunks.len()))]
+    #[tracing::instrument(
+        name = "DataUploader.write_at_vectored",
+        level = "trace",
+        skip(self, chunks),
+        fields(slice_id, offset,
+        chunk_count = chunks.len(),
+    ))]
     pub(crate) async fn write_at_vectored(
         &self,
         slice_id: u64,

@@ -8,16 +8,13 @@ pub(crate) struct UsageGuard {
 
 impl UsageGuard {
     pub(crate) fn new(usage: Arc<AtomicU64>) -> Self {
-        Self {
-            usage,
-            bytes: 0,
-        }
+        Self { usage, bytes: 0 }
     }
 
     pub(crate) fn update_bytes(&mut self, bytes: u64) {
         if bytes > self.bytes {
             self.usage.fetch_add(bytes - self.bytes, Ordering::Relaxed);
-        } else{
+        } else {
             sub_usage(&self.usage, self.bytes - bytes);
         }
 

@@ -932,7 +932,12 @@ where
     /// The background thread for committing a chunk.
     /// It waits for Uploaded slices, appends metadata, and marks them Committed.
     /// Each chunk will have a unique committing thread.
-    #[tracing::instrument(level = "trace", skip(shared), fields(chunk_id))]
+    #[tracing::instrument(
+        name = "FileWriter.commit_chunk",
+        level = "trace",
+        skip(shared),
+        fields(chunk_id)
+    )]
     async fn commit_chunk(shared: Arc<Shared<B, M>>, chunk_id: u64) {
         loop {
             let slice = {
@@ -1360,12 +1365,7 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(
-            1,
-            0,
-            test_config(layout),
-            Arc::new(AtomicU64::new(0)),
-        );
+        let mut slice = SliceState::new(1, 0, test_config(layout), Arc::new(AtomicU64::new(0)));
         let len = layout.block_size as usize + (layout.block_size as usize / 2);
         slice.data.append(&vec![1u8; len]).unwrap();
 
@@ -1379,12 +1379,7 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(
-            1,
-            0,
-            test_config(layout),
-            Arc::new(AtomicU64::new(0)),
-        );
+        let mut slice = SliceState::new(1, 0, test_config(layout), Arc::new(AtomicU64::new(0)));
         let len = layout.block_size as usize + (layout.block_size as usize / 2);
         let data = vec![2u8; len];
         slice.data.append(&data).unwrap();
@@ -1405,12 +1400,7 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(
-            1,
-            0,
-            test_config(layout),
-            Arc::new(AtomicU64::new(0)),
-        );
+        let mut slice = SliceState::new(1, 0, test_config(layout), Arc::new(AtomicU64::new(0)));
         slice
             .data
             .append(&vec![0u8; layout.block_size as usize * 2])

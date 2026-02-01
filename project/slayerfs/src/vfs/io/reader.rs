@@ -15,7 +15,7 @@ use crate::vfs::chunk_id_for;
 use crate::vfs::config::ReadConfig;
 use crate::vfs::inode::Inode;
 use crate::vfs::io::split_chunk_spans;
-use dashmap::DashMap;
+use dashmap::{DashMap, Entry};
 use parking_lot::Mutex as ParkingMutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -26,6 +26,8 @@ use tokio::time::Instant;
 use tracing::Instrument;
 
 const MAX_WAIT: Duration = Duration::from_secs(30);
+const DEFAULT_TOTAL_AHEAD_LIMIT: u64 = 256 * 1024 * 1024;
+const READ_SESSIONS: usize = 2;
 
 #[allow(clippy::type_complexity)]
 pub(crate) struct DataReader<B, M> {
@@ -67,10 +69,11 @@ where
     }
 
     pub(crate) fn close_for_handle(&self, ino: u64, fh: u64) {
-        if let Some(mut entry) = self.files.get_mut(&ino) {
+        if let Entry::Occupied(mut entry) = self.files.entry(ino) {
             let mut removed = Vec::new();
+            let list = entry.get_mut();
 
-            entry.retain(|(id, reader)| {
+            list.retain(|(id, reader)| {
                 if *id == fh {
                     removed.push(reader.clone());
                     false
@@ -79,14 +82,14 @@ where
                 }
             });
 
-            if entry.is_empty() {
-                self.files.remove(&ino);
+            if list.is_empty() {
+                entry.remove();
             }
 
-            drop(entry);
-
             for reader in removed {
-                tokio::spawn(async move { reader.invalidate_all().await; });
+                tokio::spawn(async move {
+                    reader.invalidate_all().await;
+                });
             }
         }
     }
@@ -198,17 +201,31 @@ impl Session {
         (win_start, win_end)
     }
 
-    fn update_ahead(&mut self, cfg: &ReadConfig) {
-        if self.ahead == 0 {
-            self.ahead = cfg.layout.block_size as u64;
-        } else if self.total >= self.ahead && self.ahead < cfg.max_ahead {
-            // Double the ahead to adapt larger read patterns.
-            self.ahead *= 2;
-        } else if self.total.saturating_mul(4) < self.ahead {
-            // Only shrink when the current sequential progress is much smaller than
-            // the prediction window.
-            self.ahead /= 2;
+    fn update_ahead(
+        &mut self,
+        block_size: u64,
+        max_ahead: u64,
+        total_ahead_limit: u64,
+        usage: u64,
+        offset: u64,
+        len: u64,
+    ) {
+        let mut ahead = self.ahead;
+
+        if ahead == 0 && block_size <= max_ahead && (offset == 0 || self.total > len) {
+            ahead = block_size;
+        } else if ahead < max_ahead
+            && self.total >= ahead
+            && total_ahead_limit > usage.saturating_add(ahead.saturating_mul(4))
+        {
+            ahead = ahead.saturating_mul(2);
+        } else if ahead >= block_size
+            && (total_ahead_limit < usage.saturating_add(ahead / 2) || self.total < ahead / 4)
+        {
+            ahead /= 2;
         }
+
+        self.ahead = ahead;
     }
 }
 
@@ -244,6 +261,8 @@ struct SliceState {
     queue_delay_ms: Option<u64>,
     /// Fetch duration (milliseconds) for the last successful/failed attempt.
     fetch_ms: Option<u64>,
+    /// Last access time for eviction decisions.
+    last_access: Instant,
 }
 
 impl SliceState {
@@ -260,6 +279,7 @@ impl SliceState {
             refs,
             queue_delay_ms: None,
             fetch_ms: None,
+            last_access: Instant::now(),
         }
     }
 
@@ -268,6 +288,11 @@ impl SliceState {
             self.state,
             SliceStatus::Refresh | SliceStatus::New | SliceStatus::Busy
         )
+    }
+
+    fn range_to_file(&self, chunk_size: u64) -> (u64, u64) {
+        let base = self.index * chunk_size;
+        (base + self.range.0, base + self.range.1)
     }
 
     fn overlaps(&self, offset: u64, len: u64) -> bool {
@@ -285,6 +310,7 @@ impl SliceState {
         M: MetaLayer + Send + Sync + 'static,
     {
         let queued_at = Instant::now();
+
         tokio::spawn(async move {
             let start_at = Instant::now();
             let queue_delay_ms = start_at.duration_since(queued_at).as_millis() as u64;
@@ -370,7 +396,7 @@ pub(crate) struct FileReader<B, M> {
     buffer_usage: Arc<AtomicU64>,
     inode: Arc<Inode>,
     slices: Mutex<VecDeque<Arc<ParkingMutex<SliceState>>>>,
-    sessions: ParkingMutex<[Session; 2]>,
+    sessions: ParkingMutex<[Session; READ_SESSIONS]>,
     backend: Arc<Backend<B, M>>,
 }
 
@@ -390,23 +416,28 @@ where
             inode,
             buffer_usage,
             slices: Mutex::new(VecDeque::new()),
-            sessions: ParkingMutex::new([Session::default(); 2]),
+            sessions: ParkingMutex::new([Session::default(); READ_SESSIONS]),
             backend,
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(name = "FileReader.read", level = "trace", skip(self))]
     pub(crate) async fn read(&self, offset: u64, len: usize) -> anyhow::Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }
+
         let mut buf = vec![0u8; len];
         let read = self.read_at(offset, &mut buf).await?;
         buf.truncate(read);
         Ok(buf)
     }
 
-    fn select_forward_session_match(&self, sessions: &[Session; 2], offset: u64) -> Option<usize> {
+    fn select_forward_session_match(
+        &self,
+        sessions: &[Session; READ_SESSIONS],
+        offset: u64,
+    ) -> Option<usize> {
         let sat = |s: &Session, offset: u64| {
             s.last_off <= offset
                 && offset <= s.last_off + s.ahead + self.config.layout.block_size as u64
@@ -427,7 +458,11 @@ where
         None
     }
 
-    fn select_back_session_match(&self, sessions: &[Session; 2], offset: u64) -> Option<usize> {
+    fn select_back_session_match(
+        &self,
+        sessions: &[Session; READ_SESSIONS],
+        offset: u64,
+    ) -> Option<usize> {
         let sat = |s: &Session, offset: u64| {
             let back = (s.ahead / 8).max(self.config.layout.block_size as u64);
             offset < s.last_off && offset >= s.last_off.saturating_sub(back)
@@ -450,7 +485,7 @@ where
 
     fn select_session_fallback(
         &self,
-        sessions: &mut [Session; 2],
+        sessions: &mut [Session; READ_SESSIONS],
         offset: u64,
         len: usize,
     ) -> usize {
@@ -478,15 +513,41 @@ where
             .or_else(|| self.select_back_session_match(&session, offset))
             .unwrap_or(self.select_session_fallback(&mut session, offset, len));
         session[selected].update(offset, len as u64);
-        session[selected].update_ahead(&self.config);
+        session[selected].update_ahead(
+            self.config.layout.block_size as u64,
+            self.max_ahead(),
+            self.total_ahead_limit(),
+            self.buffer_usage(),
+            offset,
+            len as u64,
+        );
+    }
+
+    fn buffer_usage(&self) -> u64 {
+        self.buffer_usage.load(Ordering::Relaxed)
+    }
+
+    fn total_ahead_limit(&self) -> u64 {
+        if self.config.buffer_size > 0 {
+            self.config.buffer_size * 8 / 10
+        } else {
+            DEFAULT_TOTAL_AHEAD_LIMIT
+        }
+    }
+
+    fn max_ahead(&self) -> u64 {
+        self.config.max_ahead.min(self.total_ahead_limit())
+    }
+
+    fn max_slice_amount(&self) -> usize {
+        // Allow each session to keep approximately `max_ahead / block_size` slices.
+        self.max_ahead()
+            .saturating_div(self.config.layout.block_size as u64)
+            .saturating_mul(READ_SESSIONS as u64)
+            .saturating_add(1) as usize
     }
 
     async fn clean_evictable_slices(&self, offset: u64, len: usize) {
-        // Early exit if memory usage is acceptable
-        if self.buffer_usage.load(Ordering::Relaxed) <= self.config.buffer_size {
-            return;
-        }
-
         let sessions = *self.sessions.lock();
         let windows = sessions
             .iter()
@@ -494,27 +555,57 @@ where
             .map(|s| s.window(self.config.layout.block_size as u64))
             .collect::<Vec<_>>();
 
+        let slice_limit = self.max_slice_amount();
+
         let cur_start = offset;
         let cur_end = offset + len as u64;
+        let now = Instant::now();
 
         let mut guard = self.slices.lock().await;
-        guard.retain(|slice| {
-            let slice = slice.lock();
+        let mut cnt = 0_usize;
 
-            if slice.refs > 0 || slice.in_flight() {
-                return true;
-            }
+        guard.retain(|s| {
+            let state = s.lock();
 
-            let base = slice.index * self.config.layout.chunk_size;
-            let slice_start = base + slice.range.0;
-            let slice_end = base + slice.range.1;
+            let (slice_start, slice_end) = state.range_to_file(self.config.layout.chunk_size);
 
             let overlaps_current = slice_start < cur_end && cur_start < slice_end;
             let needed_by_session = windows
                 .iter()
                 .any(|(win_start, win_end)| slice_start < *win_end && *win_start < slice_end);
-            overlaps_current || needed_by_session
-        })
+            let expired = now.duration_since(state.last_access) > Duration::from_secs(30);
+
+            let mut keep = true;
+            if (matches!(state.state, SliceStatus::Invalid) && state.refs == 0)
+                || (!overlaps_current
+                    && (expired || !needed_by_session)
+                    && state.refs == 0
+                    && !state.in_flight())
+            {
+                keep = false;
+            }
+
+            if keep && !overlaps_current {
+                cnt = cnt.saturating_add(1);
+            }
+
+            keep
+        });
+
+        if cnt > slice_limit {
+            guard.retain(|s| {
+                let state = s.lock();
+
+                let (slice_start, slice_end) = state.range_to_file(self.config.layout.chunk_size);
+                let overlaps_current = slice_start < cur_end && cur_start < slice_end;
+
+                if !overlaps_current && cnt > slice_limit && state.refs == 0 && !state.in_flight() {
+                    cnt = cnt.saturating_sub(1);
+                    return false;
+                }
+                true
+            })
+        }
     }
 
     async fn back_pressure(&self) -> anyhow::Result<()> {
@@ -548,7 +639,7 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, buf), fields(offset, len = buf.len()))]
+    #[tracing::instrument(name = "FileReader.read_at", level = "trace", skip(self, buf), fields(offset, len = buf.len()))]
     pub(crate) async fn read_at(&self, offset: u64, buf: &mut [u8]) -> anyhow::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -716,7 +807,8 @@ where
 
             Self::wait_ready(&slice).await?;
 
-            let guard = slice.lock();
+            let mut guard = slice.lock();
+            guard.last_access = Instant::now();
 
             let dst_local_start = dst_start - offset;
             let dst_local_end = dst_end - offset;
@@ -760,6 +852,7 @@ where
             // The "reservation" needs to read this slice.
             if guard.overlaps(start, end.saturating_sub(start)) {
                 guard.refs = guard.refs.saturating_add(1);
+                guard.last_access = Instant::now();
                 pinned.add(slice.clone());
             }
 
@@ -774,6 +867,7 @@ where
                 1,
                 self.buffer_usage.clone(),
             )));
+
             SliceState::background_fetch(
                 slice.clone(),
                 self.inode.ino() as u64,

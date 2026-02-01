@@ -43,6 +43,7 @@ impl LocalFsBackend {
 #[async_trait]
 impl ObjectBackend for LocalFsBackend {
     #[tracing::instrument(
+        name = "LocalFs.put_object_vectored",
         level = "trace",
         skip(self, chunks),
         fields(
@@ -113,7 +114,6 @@ impl ObjectBackend for LocalFsBackend {
             let write_ms = write_start.elapsed().as_millis() as u64;
 
             let flush_start = Instant::now();
-            f.flush()?;
             let flush_ms = flush_start.elapsed().as_millis() as u64;
 
             Ok(WriteStats {

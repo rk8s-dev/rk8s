@@ -255,7 +255,7 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         Ok(data.len() as u64)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, chunks), fields(key = ?key, offset, chunk_count = chunks.len()))]
+    #[tracing::instrument(name = "ObjectBlockStore.write_fresh_vectored", level = "trace", skip(self, chunks), fields(key = ?key, offset, chunk_count = chunks.len()))]
     async fn write_fresh_vectored(
         &self,
         key: BlockKey,
