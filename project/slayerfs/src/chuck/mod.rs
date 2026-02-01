@@ -28,5 +28,5 @@ pub use chunk::{
 };
 pub use slice::{BlockSpan, SliceDesc};
 pub use span::{BlockTag, ChunkTag, PageTag, Span, SpanTag};
-pub use store::{BlockStore, InMemoryBlockStore, ObjectBlockStore, RustfsBlockStore, S3BlockStore};
+pub use store::{BlockStore, InMemoryBlockStore, ObjectBlockStore, S3BlockStore};
 pub use util::ChunkSpan;

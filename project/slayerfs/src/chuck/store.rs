@@ -280,9 +280,6 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
 /// Convenience alias: BlockStore backed by the real S3 backend.
 #[allow(dead_code)]
 pub type S3BlockStore = ObjectBlockStore<crate::cadapter::s3::S3Backend>;
-/// Convenience alias: BlockStore backed by the Rustfs-like backend.
-#[allow(dead_code)]
-pub type RustfsBlockStore = ObjectBlockStore<crate::cadapter::rustfs::RustfsLikeBackend>;
 /// Convenience alias: BlockStore backed by the LocalFs mock backend.
 #[allow(dead_code)]
 pub type LocalFsBlockStore = ObjectBlockStore<crate::cadapter::localfs::LocalFsBackend>;

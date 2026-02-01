@@ -19,6 +19,17 @@ use std::time::Instant;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::field;
 
+fn can_block_in_place() -> bool {
+    tokio::runtime::Handle::try_current()
+        .map(|handle| {
+            matches!(
+                handle.runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread
+            )
+        })
+        .unwrap_or(false)
+}
+
 #[derive(Clone)]
 pub struct LocalFsBackend {
     root: PathBuf,
@@ -185,9 +196,31 @@ impl ObjectBackend for LocalFsBackend {
         let path = self.path_for(key);
         let len = buf.len();
 
+        if !can_block_in_place() {
+            let read = tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>> {
+                let file = match std::fs::File::open(&path) {
+                    Ok(file) => file,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                    Err(e) => return Err(e.into()),
+                };
+                let mut local = vec![0u8; len];
+                let n = file.read_at(&mut local, offset)?;
+                local.truncate(n);
+                Ok(Some(local))
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("blocking get_object_range failed: {e}"))??;
+
+            if let Some(data) = read {
+                let n = data.len();
+                buf[..n].copy_from_slice(&data);
+                return Ok(n);
+            }
+            return Ok(0);
+        }
+
         // Use block_in_place + read_at to fill caller's buffer directly (avoid alloc+copy).
         tokio::task::block_in_place(|| -> Result<usize> {
-            use std::os::unix::fs::FileExt;
             let file = match std::fs::File::open(&path) {
                 Ok(file) => file,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
