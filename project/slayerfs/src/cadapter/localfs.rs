@@ -1,4 +1,11 @@
 //! Local filesystem backend used to mock an object store (implements `ObjectBackend`).
+//!
+
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
+
+#[cfg(windows)]
+use std::os::windows::fs::FileExt;
 
 use crate::cadapter::client::ObjectBackend;
 use anyhow::Result;
