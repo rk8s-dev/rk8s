@@ -15,17 +15,11 @@ use tokio::runtime::{Builder, Runtime};
 use tracing_chrome::{ChromeLayerBuilder, TraceStyle};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use slayerfs::cadapter::client::ObjectClient;
-use slayerfs::cadapter::localfs::LocalFsBackend;
-use slayerfs::cadapter::s3::{S3Backend, S3Config};
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::chuck::store::{BlockKey, BlockStore, ObjectBlockStore};
-use slayerfs::meta::MetaStore;
-use slayerfs::meta::client::MetaClient;
-use slayerfs::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
-use slayerfs::meta::factory::MetaStoreFactory;
-use slayerfs::meta::stores::{DatabaseMetaStore, EtcdMetaStore};
-use slayerfs::vfs::fs::VFS;
+use slayerfs::{
+    BlockKey, BlockStore, CacheConfig, ChunkLayout, ClientOptions, Config, DatabaseConfig,
+    DatabaseMetaStore, DatabaseType, EtcdMetaStore, LocalFsBackend, MetaClient, MetaStore,
+    MetaStoreFactory, ObjectBlockStore, ObjectClient, S3Backend, S3Config, VFS,
+};
 
 const MB: usize = 1024 * 1024;
 const KB: usize = 1024;
