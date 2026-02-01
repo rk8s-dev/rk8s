@@ -398,9 +398,18 @@ const RENAME_LUA: &str = r#"
         local found = false
 
         for _, member in ipairs(members) do
-            if member == old_parent_ino .. ":" .. old_name then
-                table.insert(new_members, new_parent_ino .. ":" .. new_name)
-                found = true
+            -- Find first colon only to handle filenames with colons
+            local sep_pos = string.find(member, ":", 1, true)
+            if sep_pos and sep_pos > 1 and sep_pos < #member then
+                local parent_str = string.sub(member, 1, sep_pos - 1)
+                local name_str = string.sub(member, sep_pos + 1)
+                local parent_num = tonumber(parent_str)
+                if parent_num == old_parent_ino and name_str == old_name then
+                    table.insert(new_members, new_parent_ino .. ":" .. new_name)
+                    found = true
+                else
+                    table.insert(new_members, member)
+                end
             else
                 table.insert(new_members, member)
             end
@@ -507,8 +516,17 @@ const RENAME_EXCHANGE_LUA: &str = r#"
         local new_old_members = {}
 
         for _, member in ipairs(old_members) do
-            if member == old_parent_ino .. ":" .. old_name then
-                table.insert(new_old_members, new_parent_ino .. ":" .. new_name)
+            -- Find first colon only to handle filenames with colons
+            local sep_pos = string.find(member, ":", 1, true)
+            if sep_pos and sep_pos > 1 and sep_pos < #member then
+                local parent_str = string.sub(member, 1, sep_pos - 1)
+                local name_str = string.sub(member, sep_pos + 1)
+                local parent_num = tonumber(parent_str)
+                if parent_num == old_parent_ino and name_str == old_name then
+                    table.insert(new_old_members, new_parent_ino .. ":" .. new_name)
+                else
+                    table.insert(new_old_members, member)
+                end
             else
                 table.insert(new_old_members, member)
             end
@@ -532,8 +550,17 @@ const RENAME_EXCHANGE_LUA: &str = r#"
         local new_new_members = {}
 
         for _, member in ipairs(new_members) do
-            if member == new_parent_ino .. ":" .. new_name then
-                table.insert(new_new_members, old_parent_ino .. ":" .. old_name)
+            -- Find first colon only to handle filenames with colons
+            local sep_pos = string.find(member, ":", 1, true)
+            if sep_pos and sep_pos > 1 and sep_pos < #member then
+                local parent_str = string.sub(member, 1, sep_pos - 1)
+                local name_str = string.sub(member, sep_pos + 1)
+                local parent_num = tonumber(parent_str)
+                if parent_num == new_parent_ino and name_str == new_name then
+                    table.insert(new_new_members, old_parent_ino .. ":" .. old_name)
+                else
+                    table.insert(new_new_members, member)
+                end
             else
                 table.insert(new_new_members, member)
             end
@@ -2186,7 +2213,18 @@ where
         }
 
         fn visit_f64<E: Error>(self, v: f64) -> Result<Self::Value, E> {
-            Ok(v as i64)
+            // Validate finite value
+            if !v.is_finite() {
+                return Err(E::custom("non-finite float for i64 field"));
+            }
+
+            // Truncate and validate range
+            let truncated = v.trunc();
+            if truncated < i64::MIN as f64 || truncated > i64::MAX as f64 {
+                return Err(E::custom("float out of i64 range"));
+            }
+
+            Ok(truncated as i64)
         }
     }
 
