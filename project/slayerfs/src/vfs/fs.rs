@@ -1958,6 +1958,12 @@ where
             .await
             .map_err(VfsError::from)?;
 
+        let target_size = offset + written as u64;
+        self.core
+            .meta_layer
+            .extend_file_size(ino, target_size)
+            .await
+            .map_err(VfsError::from)?;
         self.state.modified.touch(ino).await;
         Ok(written)
     }

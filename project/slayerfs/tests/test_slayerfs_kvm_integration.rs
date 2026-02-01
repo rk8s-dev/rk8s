@@ -561,6 +561,10 @@ async fn run_full(vm: &mut Machine, slayerfs_bin: &Path) -> Result<()> {
     .await?;
     exec_check(vm, &format!("mkdir -p {}/pdir/sub", SLAYERFS_MOUNTPOINT)).await?;
 
+    // Ensure data is flushed to storage before killing the process
+    exec_check(vm, "sync").await?;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     kill_slayerfs_best_effort(vm).await?;
     unmount_best_effort(vm).await?;
     assert_not_mounted(vm).await?;
