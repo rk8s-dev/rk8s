@@ -173,7 +173,7 @@ async fn relist(state: &mut State) -> anyhow::Result<Vec<PodLifecycleEvent>> {
             old_pod
                 .containers
                 .iter()
-                .chain(old_pod.sanboxes.iter())
+                .chain(old_pod.sandboxes.iter())
                 .map(Arc::new)
                 .collect::<Vec<_>>()
         } else {
@@ -183,7 +183,7 @@ async fn relist(state: &mut State) -> anyhow::Result<Vec<PodLifecycleEvent>> {
             current_pod
                 .containers
                 .iter()
-                .chain(current_pod.sanboxes.iter())
+                .chain(current_pod.sandboxes.iter())
                 .map(Arc::new)
                 .collect::<Vec<_>>()
         } else {
@@ -345,7 +345,7 @@ mod tests {
             name: name.to_string(),
             namespace: "default".to_string(),
             containers,
-            sanboxes: Vec::new(),
+            sandboxes: Vec::new(),
         })
     }
 

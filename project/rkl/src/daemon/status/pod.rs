@@ -16,14 +16,14 @@ pub struct Pod {
     pub name: String,
     pub namespace: String,
     pub containers: Vec<Container>,
-    pub sanboxes: Vec<Container>,
+    pub sandboxes: Vec<Container>,
 }
 
 impl Pod {
     pub fn get_container_by_id(&self, cid: &str) -> Option<&Container> {
         self.containers
             .iter()
-            .chain(self.sanboxes.iter())
+            .chain(self.sandboxes.iter())
             .find(|container| container.state.id == cid)
             .map(|c| c as _)
     }
@@ -58,7 +58,7 @@ pub async fn get_pods(server_addr: &str, tls_cfg: &TLSConnectionArgs) -> anyhow:
             name: server_pod.metadata.name,
             namespace: server_pod.metadata.namespace,
             containers,
-            sanboxes: vec![sandbox],
+            sandboxes: vec![sandbox],
         };
         pods.push(pod);
     }

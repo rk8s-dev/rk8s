@@ -7107,6 +7107,7 @@ dependencies = [
  "nftables",
  "nix 0.29.0",
  "oci-spec",
+ "procfs",
  "prost 0.13.5",
  "prost-build 0.13.5",
  "prost-types 0.12.6",

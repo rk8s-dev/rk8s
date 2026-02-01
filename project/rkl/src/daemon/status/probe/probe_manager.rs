@@ -1,13 +1,20 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::anyhow;
-use common::{ExecAction, HttpGetAction, PodTask, ProbeAction, TcpSocketAction};
+use common::{ExecAction, HttpGetAction, PodTask, ProbeAction, RksMessage, TcpSocketAction};
 use dashmap::DashMap;
+use libcontainer::syscall::syscall::create_syscall;
+use libruntime::rootpath;
 use tokio::{select, sync::OnceCell};
+use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::daemon::status::probe::prober::{
-    ExecProber, HttpGetProber, ProbeConfig, Prober, TcpSocketProber,
+use crate::{
+    commands::pod::{PodInfo, TLSConnectionArgs},
+    daemon::status::probe::prober::{
+        ExecProber, HttpGetProber, ProbeConfig, Prober, TcpSocketProber,
+    },
+    quic::client::{Cli, QUICClient},
 };
 
 pub static PROBE_MANAGER: OnceCell<Arc<ProbeManager>> = OnceCell::const_new();
@@ -355,6 +362,55 @@ impl Drop for ProbeWorker {
     }
 }
 
+pub async fn restore_existing_probes(
+    server_addr: &str,
+    tls_cfg: Arc<TLSConnectionArgs>,
+    probe_manager: Arc<ProbeManager>,
+) -> anyhow::Result<()> {
+    let client = QUICClient::<Cli>::connect(server_addr.to_string(), &tls_cfg).await?;
+    client.send_msg(&RksMessage::ListPod).await?;
+    let pods = match client.fetch_msg().await? {
+        RksMessage::ListPodRes(pods) => pods,
+        msg => anyhow::bail!("unexpected response {msg:?}"),
+    };
+
+    let root_path = rootpath::determine(None, &*create_syscall())?;
+    let mut restored = 0usize;
+
+    for pod in pods {
+        if PodInfo::load(&root_path, &pod.metadata.name).is_err() {
+            continue;
+        }
+
+        let pod_ip = match pod.status.pod_ip.clone() {
+            Some(ip) if !ip.is_empty() => ip,
+            _ => {
+                warn!(
+                    pod = %pod.metadata.name,
+                    "[daemon] skipping probe restore: missing pod IP"
+                );
+                continue;
+            }
+        };
+
+        if let Err(e) = probe_manager.add_pod(&pod, &pod_ip).await {
+            warn!(
+                pod = %pod.metadata.name,
+                error = %e,
+                "[daemon] failed to restore probes for pod"
+            );
+        } else {
+            restored += 1;
+        }
+    }
+
+    if restored > 0 {
+        info!("[daemon] restored probes for {restored} pods");
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::daemon::status::probe::prober::{ProbeConfig, ProbeKind};
@@ -440,6 +496,11 @@ mod tests {
                         liveness_probe: Some(probe.clone()),
                         readiness_probe: Some(probe.clone()),
                         startup_probe: None,
+                        security_context: None,
+                        env: None,
+                        volume_mounts: None,
+                        command: None,
+                        working_dir: None,
                     },
                     ContainerSpec {
                         name: "sidecar".to_string(),
@@ -450,10 +511,16 @@ mod tests {
                         liveness_probe: None,
                         readiness_probe: None,
                         startup_probe: Some(probe),
+                        security_context: None,
+                        env: None,
+                        volume_mounts: None,
+                        command: None,
+                        working_dir: None,
                     },
                 ],
                 init_containers: vec![],
                 tolerations: vec![],
+                affinity: None,
                 restart_policy: RestartPolicy::Always,
             },
             status: PodStatus::default(),

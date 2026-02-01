@@ -39,7 +39,7 @@ impl Default for VersionedPodStatus {
             pod_name: String::new(),
             pod_namespace: String::new(),
             pod_is_finished: false,
-            at: chrono::DateTime::<Utc>::from_timestamp_millis(0).unwrap_or_else(chrono::Utc::now),
+            at: Utc::now(),
         }
     }
 }
@@ -116,7 +116,7 @@ impl StatusManager {
         }));
     }
 
-    fn stop(&mut self) {
+    pub fn stop(&mut self) {
         if let Some(handle) = self.sync_loop_handle.take() {
             handle.abort();
         }
@@ -862,4 +862,518 @@ fn get_container_status<'a>(
     container_statuses
         .iter()
         .find(|cs| cs.name == container_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_container_spec(name: &str) -> common::ContainerSpec {
+        common::ContainerSpec {
+            name: name.to_string(),
+            image: "image".to_string(),
+            ports: Vec::new(),
+            args: Vec::new(),
+            resources: None,
+            liveness_probe: None,
+            readiness_probe: None,
+            startup_probe: None,
+            security_context: None,
+            env: None,
+            volume_mounts: None,
+            command: None,
+            working_dir: None,
+        }
+    }
+
+    fn make_pod_task(container_names: &[&str], restart_policy: RestartPolicy) -> PodTask {
+        PodTask {
+            api_version: "v1".to_string(),
+            kind: "Pod".to_string(),
+            metadata: common::ObjectMeta {
+                name: "pod".to_string(),
+                namespace: "default".to_string(),
+                ..Default::default()
+            },
+            spec: PodSpec {
+                node_name: None,
+                containers: container_names
+                    .iter()
+                    .map(|name| make_container_spec(name))
+                    .collect(),
+                init_containers: Vec::new(),
+                tolerations: Vec::new(),
+                affinity: None,
+                restart_policy,
+            },
+            status: PodStatus::default(),
+        }
+    }
+
+    fn make_container_status(
+        name: &str,
+        ready: bool,
+        state: Option<ContainerState>,
+    ) -> ContainerStatus {
+        ContainerStatus {
+            name: name.to_string(),
+            ready,
+            state,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn check_container_status_transition_allows_always_restart() {
+        let pod_spec = make_pod_task(&[], RestartPolicy::Always).spec;
+        let old_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                false,
+                Some(ContainerState::Terminated {
+                    exit_code: 0,
+                    signal: None,
+                    reason: None,
+                    message: None,
+                    started_at: None,
+                    finished_at: None,
+                }),
+            )],
+            ..Default::default()
+        };
+        let new_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                true,
+                Some(ContainerState::Running { started_at: None }),
+            )],
+            ..Default::default()
+        };
+
+        assert!(check_container_status_transition(&old_status, &new_status, &pod_spec).is_ok());
+    }
+
+    #[test]
+    fn check_container_status_transition_allows_on_failure_nonzero_exit() {
+        let pod_spec = make_pod_task(&[], RestartPolicy::OnFailure).spec;
+        let old_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                false,
+                Some(ContainerState::Terminated {
+                    exit_code: 2,
+                    signal: None,
+                    reason: None,
+                    message: None,
+                    started_at: None,
+                    finished_at: None,
+                }),
+            )],
+            ..Default::default()
+        };
+        let new_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                true,
+                Some(ContainerState::Running { started_at: None }),
+            )],
+            ..Default::default()
+        };
+
+        assert!(check_container_status_transition(&old_status, &new_status, &pod_spec).is_ok());
+    }
+
+    #[test]
+    fn check_container_status_transition_blocks_restart_on_success() {
+        let pod_spec = make_pod_task(&[], RestartPolicy::OnFailure).spec;
+        let old_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                false,
+                Some(ContainerState::Terminated {
+                    exit_code: 0,
+                    signal: None,
+                    reason: None,
+                    message: None,
+                    started_at: None,
+                    finished_at: None,
+                }),
+            )],
+            ..Default::default()
+        };
+        let new_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                true,
+                Some(ContainerState::Running { started_at: None }),
+            )],
+            ..Default::default()
+        };
+
+        assert!(check_container_status_transition(&old_status, &new_status, &pod_spec).is_err());
+    }
+
+    #[test]
+    fn check_container_status_transition_blocks_restart_on_never() {
+        let pod_spec = make_pod_task(&[], RestartPolicy::Never).spec;
+        let old_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                false,
+                Some(ContainerState::Terminated {
+                    exit_code: 0,
+                    signal: None,
+                    reason: None,
+                    message: None,
+                    started_at: None,
+                    finished_at: None,
+                }),
+            )],
+            ..Default::default()
+        };
+        let new_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                true,
+                Some(ContainerState::Running { started_at: None }),
+            )],
+            ..Default::default()
+        };
+
+        assert!(check_container_status_transition(&old_status, &new_status, &pod_spec).is_err());
+    }
+
+    #[test]
+    fn containers_ready_condition_reports_all_ready() {
+        let pod = make_pod_task(&["app", "sidecar"], RestartPolicy::Never);
+        let statuses = vec![
+            make_container_status("app", true, None),
+            make_container_status("sidecar", true, None),
+        ];
+
+        let condition = create_containers_ready_condition(&pod, &statuses, PodPhase::Running);
+        assert_eq!(condition.status, ConditionStatus::True);
+        assert!(condition.reason.is_none());
+        assert!(condition.message.is_none());
+    }
+
+    #[test]
+    fn containers_ready_condition_reports_unknown_containers() {
+        let pod = make_pod_task(&["app", "sidecar"], RestartPolicy::Never);
+        let statuses = vec![make_container_status("app", true, None)];
+
+        let condition = create_containers_ready_condition(&pod, &statuses, PodPhase::Running);
+        assert_eq!(condition.status, ConditionStatus::False);
+        assert_eq!(condition.reason.as_deref(), Some("ContainersNotReady"));
+        assert_eq!(
+            condition.message.as_deref(),
+            Some("containers with unknown status: [sidecar]")
+        );
+    }
+
+    #[test]
+    fn containers_ready_condition_reports_unready_containers() {
+        let pod = make_pod_task(&["app"], RestartPolicy::Never);
+        let statuses = vec![make_container_status("app", false, None)];
+
+        let condition = create_containers_ready_condition(&pod, &statuses, PodPhase::Running);
+        assert_eq!(condition.status, ConditionStatus::False);
+        assert_eq!(condition.reason.as_deref(), Some("ContainersNotReady"));
+        assert_eq!(
+            condition.message.as_deref(),
+            Some("containers with unready status: [app]")
+        );
+    }
+
+    #[test]
+    fn containers_ready_condition_marks_pod_completed_on_success() {
+        let pod = make_pod_task(&["app"], RestartPolicy::Never);
+        let statuses = vec![make_container_status("app", false, None)];
+
+        let condition = create_containers_ready_condition(&pod, &statuses, PodPhase::Succeeded);
+        assert_eq!(condition.status, ConditionStatus::False);
+        assert_eq!(condition.reason.as_deref(), Some("PodCompleted"));
+    }
+
+    #[test]
+    fn pod_ready_condition_bubbles_container_failure_reason() {
+        let pod = make_pod_task(&["app"], RestartPolicy::Never);
+        let statuses = vec![make_container_status("app", false, None)];
+
+        let condition = create_pod_ready_condition(&pod, &statuses, PodPhase::Running);
+        assert_eq!(condition.status, ConditionStatus::False);
+        assert_eq!(condition.reason.as_deref(), Some("ContainersNotReady"));
+        assert_eq!(
+            condition.message.as_deref(),
+            Some("containers with unready status: [app]")
+        );
+    }
+
+    #[test]
+    fn update_pod_condition_adds_condition_and_sets_transition_time() {
+        let mut status = PodStatus::default();
+        let condition = PodCondition {
+            condition_type: PodConditionType::PodReady,
+            status: ConditionStatus::True,
+            ..Default::default()
+        };
+
+        assert!(update_pod_condition(&mut status, condition));
+        let condition = get_pod_condition(&status, &PodConditionType::PodReady)
+            .unwrap()
+            .1;
+        assert_eq!(condition.status, ConditionStatus::True);
+        assert!(condition.last_transition_time.is_some());
+    }
+
+    #[test]
+    fn update_pod_condition_no_change_preserves_transition_time() {
+        let fixed_time = DateTime::<Utc>::from_timestamp_millis(1000).unwrap();
+        let mut status = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodReady,
+                status: ConditionStatus::True,
+                last_transition_time: Some(fixed_time),
+                reason: Some("old".to_string()),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let condition = PodCondition {
+            condition_type: PodConditionType::PodReady,
+            status: ConditionStatus::True,
+            reason: Some("new".to_string()),
+            ..Default::default()
+        };
+
+        assert!(!update_pod_condition(&mut status, condition));
+        let condition = get_pod_condition(&status, &PodConditionType::PodReady)
+            .unwrap()
+            .1;
+        assert_eq!(condition.last_transition_time, Some(fixed_time));
+        assert_eq!(condition.reason.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn update_pod_condition_updates_transition_time_on_status_change() {
+        let fixed_time = DateTime::<Utc>::from_timestamp_millis(1000).unwrap();
+        let mut status = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodReady,
+                status: ConditionStatus::True,
+                last_transition_time: Some(fixed_time),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let condition = PodCondition {
+            condition_type: PodConditionType::PodReady,
+            status: ConditionStatus::False,
+            reason: Some("flipped".to_string()),
+            ..Default::default()
+        };
+
+        assert!(update_pod_condition(&mut status, condition));
+        let condition = get_pod_condition(&status, &PodConditionType::PodReady)
+            .unwrap()
+            .1;
+        assert_eq!(condition.status, ConditionStatus::False);
+        assert_eq!(condition.reason.as_deref(), Some("flipped"));
+        assert!(condition.last_transition_time.is_some());
+        assert_ne!(condition.last_transition_time, Some(fixed_time));
+    }
+
+    #[test]
+    fn update_last_transition_time_reuses_timestamp_when_status_unchanged() {
+        let fixed_time = DateTime::<Utc>::from_timestamp_millis(2000).unwrap();
+        let old_status = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodReady,
+                status: ConditionStatus::True,
+                last_transition_time: Some(fixed_time),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let mut new_status = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodReady,
+                status: ConditionStatus::True,
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+
+        update_last_transition_time(&old_status, &mut new_status, &PodConditionType::PodReady)
+            .unwrap();
+        let condition = get_pod_condition(&new_status, &PodConditionType::PodReady)
+            .unwrap()
+            .1;
+        assert_eq!(condition.last_transition_time, Some(fixed_time));
+    }
+
+    #[test]
+    fn update_last_transition_time_updates_when_status_changes() {
+        let fixed_time = DateTime::<Utc>::from_timestamp_millis(3000).unwrap();
+        let old_status = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodReady,
+                status: ConditionStatus::True,
+                last_transition_time: Some(fixed_time),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let mut new_status = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodReady,
+                status: ConditionStatus::False,
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+
+        update_last_transition_time(&old_status, &mut new_status, &PodConditionType::PodReady)
+            .unwrap();
+        let condition = get_pod_condition(&new_status, &PodConditionType::PodReady)
+            .unwrap()
+            .1;
+        assert!(condition.last_transition_time.is_some());
+        assert_ne!(condition.last_transition_time, Some(fixed_time));
+    }
+
+    #[test]
+    fn is_status_owned_by_rkl_equal_ignores_condition_order() {
+        let condition_a = PodCondition {
+            condition_type: PodConditionType::PodReady,
+            status: ConditionStatus::True,
+            ..Default::default()
+        };
+        let condition_b = PodCondition {
+            condition_type: PodConditionType::PodInitialized,
+            status: ConditionStatus::True,
+            ..Default::default()
+        };
+        let status_a = PodStatus {
+            conditions: Some(vec![condition_a.clone(), condition_b.clone()]),
+            phase: Some(PodPhase::Running),
+            ..Default::default()
+        };
+        let status_b = PodStatus {
+            conditions: Some(vec![condition_b, condition_a]),
+            phase: Some(PodPhase::Running),
+            ..Default::default()
+        };
+
+        assert!(is_status_owned_by_rkl_equal(&status_a, &status_b));
+    }
+
+    #[test]
+    fn is_status_owned_by_rkl_equal_detects_condition_changes() {
+        let status_a = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodReady,
+                status: ConditionStatus::True,
+                reason: Some("ready".to_string()),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let status_b = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodReady,
+                status: ConditionStatus::True,
+                reason: Some("changed".to_string()),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+
+        assert!(!is_status_owned_by_rkl_equal(&status_a, &status_b));
+    }
+
+    #[test]
+    fn is_status_owned_by_rkl_equal_detects_field_changes() {
+        let condition = PodCondition {
+            condition_type: PodConditionType::PodReady,
+            status: ConditionStatus::True,
+            ..Default::default()
+        };
+        let status_a = PodStatus {
+            conditions: Some(vec![condition.clone()]),
+            phase: Some(PodPhase::Running),
+            ..Default::default()
+        };
+        let status_b = PodStatus {
+            conditions: Some(vec![condition]),
+            phase: Some(PodPhase::Failed),
+            ..Default::default()
+        };
+
+        assert!(!is_status_owned_by_rkl_equal(&status_a, &status_b));
+    }
+
+    #[tokio::test]
+    async fn merge_status_sets_ready_conditions_false_on_terminal_phase() {
+        let old_status = PodStatus {
+            conditions: Some(vec![PodCondition {
+                condition_type: PodConditionType::PodScheduled,
+                status: ConditionStatus::True,
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let new_status = PodStatus {
+            phase: Some(PodPhase::Succeeded),
+            conditions: Some(vec![
+                PodCondition {
+                    condition_type: PodConditionType::PodReady,
+                    status: ConditionStatus::True,
+                    ..Default::default()
+                },
+                PodCondition {
+                    condition_type: PodConditionType::ContainersReady,
+                    status: ConditionStatus::True,
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+
+        let merged = merge_status(&old_status, &new_status).await;
+        let pod_ready = get_pod_ready_condition(&merged).unwrap();
+        let containers_ready = get_container_ready_condition(&merged).unwrap();
+        assert_eq!(pod_ready.status, ConditionStatus::False);
+        assert_eq!(pod_ready.reason.as_deref(), Some("PodCompleted"));
+        assert_eq!(containers_ready.status, ConditionStatus::False);
+        assert_eq!(containers_ready.reason.as_deref(), Some("PodCompleted"));
+    }
+
+    #[test]
+    fn can_be_deleted_requires_deletion_timestamp_terminal_phase_and_finish() {
+        let local_status = VersionedPodStatus {
+            version: 1,
+            status: PodStatus {
+                phase: Some(PodPhase::Succeeded),
+                ..Default::default()
+            },
+            pod_name: "pod".to_string(),
+            pod_namespace: "default".to_string(),
+            pod_is_finished: true,
+            at: Utc::now(),
+        };
+        let mut remote_pod = make_pod_task(&["app"], RestartPolicy::Never);
+        remote_pod.status.phase = Some(PodPhase::Succeeded);
+
+        assert!(!can_be_deleted(&local_status, &remote_pod).unwrap());
+
+        remote_pod.metadata.deletion_timestamp = Some(Utc::now());
+        assert!(can_be_deleted(&local_status, &remote_pod).unwrap());
+
+        let local_status = VersionedPodStatus {
+            pod_is_finished: false,
+            ..local_status
+        };
+        assert!(!can_be_deleted(&local_status, &remote_pod).unwrap());
+    }
 }

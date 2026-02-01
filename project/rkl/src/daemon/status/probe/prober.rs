@@ -218,9 +218,6 @@ impl Prober for HttpGetProber {
 
         stream.write_all(request.as_bytes()).await?;
 
-        // Use a conservative buffer size that accommodates typical HTTP status lines
-        // and essential headers. Probe responses should be minimal - we only need
-        // the status line to determine health.
         const HTTP_PROBE_BUFFER_SIZE: usize = 512;
 
         let mut buf = vec![0u8; HTTP_PROBE_BUFFER_SIZE];
@@ -230,11 +227,24 @@ impl Prober for HttpGetProber {
         }
 
         let response = std::str::from_utf8(&buf[..n])?;
-        if response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200") {
+        let status_line = response.lines().next().unwrap_or("");
+        let mut parts = status_line.split_whitespace();
+        let _http_version = parts.next();
+        let status_code_str = parts.next().ok_or_else(|| {
+            anyhow::anyhow!("http probe received malformed status line: {status_line}")
+        })?;
+        let status_code: u16 = status_code_str.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "http probe could not parse status code '{status_code_str}' in '{status_line}': {e}"
+            )
+        })?;
+
+        if (200..400).contains(&status_code) {
             Ok(())
         } else {
-            let line = response.lines().next().unwrap_or("");
-            Err(anyhow::anyhow!("http probe non-success status: {line}"))
+            Err(anyhow::anyhow!(
+                "http probe non-success status: {status_line}"
+            ))
         }
     }
 

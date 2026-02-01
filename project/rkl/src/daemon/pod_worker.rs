@@ -9,6 +9,9 @@ use libcontainer::container::Container;
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::Delete;
 use libruntime::{cri::cri_api::StartContainerRequest, rootpath};
+use nix::sys::wait::WaitStatus;
+use nix::unistd::Pid;
+use procfs::process::Process;
 use tokio::{select, sync::mpsc::UnboundedReceiver, task::JoinHandle};
 use tracing::info;
 use uuid::Uuid;
@@ -39,6 +42,8 @@ pub struct PodWorker {
     sync_loop_handle: Option<JoinHandle<anyhow::Result<()>>>,
     stop_signal_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
+
+const UNKNOWN_EXIT_CODE: i32 = -1;
 
 struct State {
     server_addr: String,
@@ -372,6 +377,8 @@ async fn apply_pod_lifecycle_event(
                 event.pod_name
             );
 
+            let (exit_code, signal, message) = resolve_exit_status(&event.container);
+
             match pod_status
                 .container_statuses
                 .iter_mut()
@@ -380,30 +387,28 @@ async fn apply_pod_lifecycle_event(
                 Some(container_status) => {
                     container_status.name = container.state.id.clone();
                     container_status.state = Some(ContainerState::Terminated {
-                        // TODO: get real exit code
-                        exit_code: 0,
+                        exit_code,
                         started_at: container.state.created,
                         finished_at: Some(DateTime::<chrono::Utc>::from(
                             std::time::SystemTime::now(),
                         )),
-                        signal: None,
+                        signal,
                         reason: Some("ContainerDied".to_string()),
-                        message: None,
+                        message,
                     });
                 }
                 None => {
                     let container_status = ContainerStatus {
                         name: container.state.id.clone(),
                         state: Some(ContainerState::Terminated {
-                            // TODO: get real exit code
-                            exit_code: 0,
+                            exit_code,
                             started_at: container.state.created,
                             finished_at: Some(DateTime::<chrono::Utc>::from(
                                 std::time::SystemTime::now(),
                             )),
-                            signal: None,
+                            signal,
                             reason: Some("ContainerDied".to_string()),
-                            message: None,
+                            message,
                         }),
                         ..Default::default()
                     };
@@ -444,7 +449,48 @@ async fn apply_pod_lifecycle_event(
     Ok(())
 }
 
-async fn restart_container_locally(pod_task: &PodTask, event: &PodLifecycleEvent) -> anyhow::Result<()> {
+fn resolve_exit_status(container: &Container) -> (i32, Option<i32>, Option<String>) {
+    match exit_status_from_container(container) {
+        Some((exit_code, signal)) => (exit_code, signal, None),
+        None => {
+            tracing::warn!(
+                container_id = %container.state.id,
+                "[PodWorker] Exit code unavailable; using fallback value"
+            );
+            (
+                UNKNOWN_EXIT_CODE,
+                None,
+                Some("exit code unavailable".to_string()),
+            )
+        }
+    }
+}
+
+fn exit_status_from_container(container: &Container) -> Option<(i32, Option<i32>)> {
+    let pid = container.state.pid?;
+    let process = Process::new(pid).ok()?;
+    let stat = process.stat().ok()?;
+    let raw_status = stat.exit_code?;
+    decode_wait_status(raw_status)
+}
+
+fn decode_wait_status(raw_status: i32) -> Option<(i32, Option<i32>)> {
+    let pid = Pid::from_raw(1);
+    let status = WaitStatus::from_raw(pid, raw_status).ok()?;
+    match status {
+        WaitStatus::Exited(_, code) => Some((code, None)),
+        WaitStatus::Signaled(_, signal, _) => {
+            let signal_code = signal as i32;
+            Some((128 + signal_code, Some(signal_code)))
+        }
+        _ => None,
+    }
+}
+
+async fn restart_container_locally(
+    pod_task: &PodTask,
+    event: &PodLifecycleEvent,
+) -> anyhow::Result<()> {
     let container_id = &event.container.state.id;
     let root_path = rootpath::determine(None, &*create_syscall())?;
     let pod_info = PodInfo::load(&root_path, &event.pod_name)?;
@@ -482,8 +528,9 @@ async fn restart_container_locally(pod_task: &PodTask, event: &PodLifecycleEvent
         )?;
     }
 
-    let create_request =
-        task_runner.build_create_container_request(&pod_info.pod_sandbox_id, container_spec).await?;
+    let create_request = task_runner
+        .build_create_container_request(&pod_info.pod_sandbox_id, container_spec)
+        .await?;
     let create_response = task_runner.create_container(create_request)?;
     task_runner.start_container(StartContainerRequest {
         container_id: create_response.container_id,
@@ -544,6 +591,7 @@ mod tests {
                 }],
                 init_containers: vec![],
                 tolerations: vec![],
+                affinity: None,
                 restart_policy,
             },
             status: PodStatus::default(),
@@ -644,12 +692,14 @@ mod tests {
                 reason,
                 started_at,
                 finished_at,
+                message,
                 ..
             } => {
-                assert_eq!(*exit_code, 0);
+                assert_eq!(*exit_code, UNKNOWN_EXIT_CODE);
                 assert_eq!(reason.as_deref(), Some("ContainerDied"));
                 assert_eq!(*started_at, Some(created_at));
                 assert!(finished_at.is_some());
+                assert_eq!(message.as_deref(), Some("exit code unavailable"));
             }
             state => panic!("unexpected container state: {state:?}"),
         }
@@ -675,5 +725,19 @@ mod tests {
             .unwrap();
 
         assert_eq!(pod_status.phase, Some(PodPhase::Running));
+    }
+
+    #[test]
+    fn decode_wait_status_exited() {
+        let status = decode_wait_status(0x0200).expect("status");
+        assert_eq!(status.0, 2);
+        assert!(status.1.is_none());
+    }
+
+    #[test]
+    fn decode_wait_status_signaled() {
+        let status = decode_wait_status(0x0009).expect("status");
+        assert_eq!(status.0, 137);
+        assert_eq!(status.1, Some(9));
     }
 }
