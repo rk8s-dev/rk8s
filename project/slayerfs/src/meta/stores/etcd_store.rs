@@ -464,7 +464,7 @@ impl EtcdMetaStore {
             old_size,
             chunk_size,
             |cutoff_chunk, cutoff_offset| async move {
-                let chunk_id = chunk_id_for(ino, cutoff_chunk);
+                let chunk_id = chunk_id_for(ino, cutoff_chunk)?;
                 let key = key_for_slice(chunk_id);
                 let mut slices: Vec<SliceDesc> =
                     self.etcd_get_json(&key).await?.unwrap_or_default();
@@ -481,7 +481,7 @@ impl EtcdMetaStore {
             },
             |start, end| async move {
                 for idx in start..end {
-                    let chunk_id = chunk_id_for(ino, idx);
+                    let chunk_id = chunk_id_for(ino, idx)?;
                     let key = key_for_slice(chunk_id);
                     let mut client = self.client.clone();
                     client.delete(key.as_str(), None).await.map_err(|e| {

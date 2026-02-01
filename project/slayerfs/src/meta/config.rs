@@ -2,6 +2,7 @@
 //!
 //! Database connection configuration supporting SQLite, PostgreSQL and Etcd
 
+use crate::meta::client::MetaClientOptions;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
@@ -131,6 +132,23 @@ pub struct CacheConfig {
     /// Whether cache is enabled (default: true)
     #[serde(default = "default_cache_enabled")]
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MetaClientConfig {
+    pub capacity: CacheCapacity,
+    pub ttl: CacheTtl,
+    pub options: MetaClientOptions,
+}
+
+impl MetaClientConfig {
+    pub fn effective_ttl(&self) -> CacheTtl {
+        if self.ttl.is_zero() {
+            CacheTtl::for_sqlite()
+        } else {
+            self.ttl.clone()
+        }
+    }
 }
 
 /// Meta client behaviour configuration

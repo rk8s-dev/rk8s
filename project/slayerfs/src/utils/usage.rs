@@ -11,6 +11,9 @@ impl UsageGuard {
         Self { usage, bytes: 0 }
     }
 
+    /// Updates the tracked byte count. This method must be called with exclusive access
+    /// (e.g., behind a Mutex) to ensure consistent accounting across all guards sharing
+    /// the same usage counter.
     pub(crate) fn update_bytes(&mut self, bytes: u64) {
         if bytes > self.bytes {
             self.usage.fetch_add(bytes - self.bytes, Ordering::Relaxed);

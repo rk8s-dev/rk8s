@@ -2,8 +2,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 /// The `Inode`, which holds file attribute state, as a local cache.
-/// Slayerfs ensure `close-to-open` semantics, that is to say, each `open` operation must see
-/// the newest file states. Otherwise, it is permitted to see stale states.
+/// Slayerfs ensures `close-to-open` semantics; each `open` must see the newest file state.
 #[derive(Clone)]
 pub(crate) struct Inode {
     ino: i64,
@@ -12,7 +11,7 @@ pub(crate) struct Inode {
 }
 
 impl Inode {
-    pub(crate) fn new(ino: i64, size: u64) -> Arc<Inode> {
+    pub fn new(ino: i64, size: u64) -> Arc<Inode> {
         let (tx, rx) = watch::channel(size);
 
         Arc::new(Self {
@@ -22,15 +21,15 @@ impl Inode {
         })
     }
 
-    pub(crate) fn ino(&self) -> i64 {
+    pub fn ino(&self) -> i64 {
         self.ino
     }
 
-    pub(crate) fn file_size(&self) -> u64 {
+    pub fn file_size(&self) -> u64 {
         *self.length_rx.borrow()
     }
 
-    pub(crate) fn update_size(&self, new_size: u64) {
+    pub fn update_size(&self, new_size: u64) {
         self.length_tx
             .send(new_size)
             .expect("Inode invariant violated: all receivers dropped in update_size");

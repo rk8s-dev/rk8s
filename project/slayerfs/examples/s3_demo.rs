@@ -3,13 +3,10 @@
 // This demo shows how to use SlayerFS with an S3 backend.
 // Make sure you have AWS credentials configured (via environment variables, IAM roles, or ~/.aws/credentials)
 
-use slayerfs::cadapter::client::ObjectClient;
-use slayerfs::cadapter::s3::{S3Backend, S3Config};
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::chuck::store::ObjectBlockStore;
-use slayerfs::meta::create_meta_store_from_url;
-use slayerfs::vfs::fs::VFS;
-use slayerfs::vfs::sdk::Client;
+use slayerfs::{
+    ChunkLayout, ObjectBlockStore, ObjectClient, S3Backend, S3Config, VfsClient,
+    create_meta_store_from_url,
+};
 use std::error::Error;
 
 #[tokio::main]
@@ -53,13 +50,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await
         .expect("create meta store");
 
-    // Create VFS client
+    // Create SDK client (FileSystem-backed)
     let store = ObjectBlockStore::new(object_client);
     let meta_store = meta_handle.store();
-    let vfs = VFS::new(layout, store, meta_store)
+    let client = VfsClient::new(layout, store, meta_store)
         .await
-        .expect("create vfs fail.");
-    let mut client = Client::from_vfs(vfs);
+        .expect("create filesystem client");
 
     // Test basic operations
     println!("Testing basic S3 operations...");
@@ -71,7 +67,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create a file
     let file_path = "/demo-s3/test.txt";
-    client.create(file_path).await?;
+    client.create_file(file_path, false).await?;
     println!("✓ Created file: {}", file_path);
 
     // Write some data
@@ -121,9 +117,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "  - {} ({})",
             entry.name,
             match entry.kind {
-                slayerfs::vfs::fs::FileType::Dir => "directory",
-                slayerfs::vfs::fs::FileType::File => "file",
-                slayerfs::vfs::fs::FileType::Symlink => "symlink",
+                slayerfs::VfsFileType::Dir => "directory",
+                slayerfs::VfsFileType::File => "file",
+                slayerfs::VfsFileType::Symlink => "symlink",
             }
         );
     }

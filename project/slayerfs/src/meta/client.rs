@@ -8,7 +8,7 @@ use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::layer::MetaLayer;
 use crate::meta::store::{
-    DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
+    AclRule, DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
 use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker, WatchConfig};
@@ -1032,6 +1032,25 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(Some((ino, attr.kind)))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
+    async fn lookup_path_with_attr(
+        &self,
+        path: &str,
+    ) -> Result<Option<(i64, FileAttr)>, MetaError> {
+        let ino = match self.resolve_path(path).await {
+            Ok(ino) => ino,
+            Err(MetaError::NotFound(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        let attr = self
+            .cached_stat(ino)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        Ok(Some((ino, attr)))
+    }
+
     #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError> {
         let inode = self.check_root(ino);
@@ -1845,6 +1864,44 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             .set_plock(inode, owner, block, lock_type, range, pid)
             .await
     }
+
+    async fn set_xattr(
+        &self,
+        inode: i64,
+        name: &str,
+        value: &[u8],
+        flags: u32,
+    ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        self.store.set_xattr(inode, name, value, flags).await
+    }
+
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError> {
+        self.store.get_xattr(inode, name).await
+    }
+
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError> {
+        self.store.list_xattr(inode).await
+    }
+
+    async fn remove_xattr(&self, inode: i64, name: &str) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        self.store.remove_xattr(inode, name).await
+    }
+
+    async fn set_acl(&self, inode: i64, rule: AclRule) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        self.store.set_acl(inode, rule).await
+    }
+
+    async fn get_acl(
+        &self,
+        inode: i64,
+        acl_type: u8,
+        acl_id: u32,
+    ) -> Result<Option<AclRule>, MetaError> {
+        self.store.get_acl(inode, acl_type, acl_id).await
+    }
 }
 
 #[cfg(test)]
@@ -1960,7 +2017,7 @@ mod tests {
         let client = create_test_client().await;
 
         let ino = client.create_file(1, "text".to_string()).await.unwrap();
-        let chunk_id = chunk_id_for(ino, 1);
+        let chunk_id = chunk_id_for(ino, 1).unwrap();
 
         let test_slices = (1..=10)
             .map(|e| crate::chuck::SliceDesc {

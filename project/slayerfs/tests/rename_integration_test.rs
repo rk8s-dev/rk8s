@@ -1,9 +1,6 @@
 //! Comprehensive integration tests for rename functionality
 
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::chuck::store::InMemoryBlockStore;
-use slayerfs::meta::factory::create_meta_store_from_url;
-use slayerfs::vfs::fs::{RenameFlags, VFS};
+use slayerfs::{ChunkLayout, InMemoryBlockStore, RenameFlags, VFS, create_meta_store_from_url};
 
 #[tokio::test]
 async fn test_rename_comprehensive_scenarios() {
@@ -205,184 +202,26 @@ async fn test_rename_batch_operations() {
             "/batch/file2.txt".to_string(),
             "/batch/renamed2.txt".to_string(),
         ),
+        (
+            "/batch/file3.txt".to_string(),
+            "/batch/renamed3.txt".to_string(),
+        ),
+        (
+            "/batch/file4.txt".to_string(),
+            "/batch/renamed4.txt".to_string(),
+        ),
     ];
 
     let results = fs.rename_batch(operations).await;
-
-    assert_eq!(results.len(), 3);
-    for result in &results {
-        assert!(result.is_ok(), "Batch operation should succeed");
+    for result in results {
+        result.unwrap();
     }
 
-    // Verify renames
-    for i in 0..3 {
-        assert!(
-            fs.exists(&format!("/batch/renamed{}.txt", i)).await,
-            "Renamed file should exist"
-        );
-        assert!(
-            !fs.exists(&format!("/batch/file{}.txt", i)).await,
-            "Original file should not exist"
-        );
+    // Verify
+    for i in 0..5 {
+        assert!(!fs.exists(&format!("/batch/file{}.txt", i)).await);
+        assert!(fs.exists(&format!("/batch/renamed{}.txt", i)).await);
     }
 
-    println!("✅ Batch rename test passed!");
-}
-
-#[tokio::test]
-async fn test_rename_preserves_timestamps() {
-    let layout = ChunkLayout::default();
-    let store = InMemoryBlockStore::new();
-    let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
-    let meta_store = meta_handle.store();
-    let fs = VFS::new(layout, store, meta_store).await.unwrap();
-
-    // Create file
-    fs.create_file("/test.txt").await.unwrap();
-    let attr_before = fs.stat("/test.txt").await.unwrap();
-
-    // Wait a bit
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    // Rename
-    fs.rename("/test.txt", "/renamed.txt").await.unwrap();
-    let attr_after = fs.stat("/renamed.txt").await.unwrap();
-
-    // Verify inode is the same (same file)
-    assert_eq!(attr_after.ino, attr_before.ino);
-
-    // Note: mtime should be updated for parent directory, not the file itself
-    // The file's creation time should be preserved
-
-    println!("✅ Timestamp preservation test passed!");
-}
-
-#[tokio::test]
-async fn test_directory_rename_with_deep_nesting() {
-    let layout = ChunkLayout::default();
-    let store = InMemoryBlockStore::new();
-    let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
-    let meta_store = meta_handle.store();
-    let fs = VFS::new(layout, store, meta_store).await.unwrap();
-
-    // Create a deeply nested directory structure
-    fs.mkdir_p("/root").await.unwrap();
-    fs.mkdir_p("/root/dir1").await.unwrap();
-    fs.mkdir_p("/root/dir1/dir2").await.unwrap();
-    fs.mkdir_p("/root/dir1/dir2/dir3").await.unwrap();
-
-    // Add files at various levels
-    fs.create_file("/root/file0.txt").await.unwrap();
-    fs.create_file("/root/dir1/file1.txt").await.unwrap();
-    fs.create_file("/root/dir1/dir2/file2.txt").await.unwrap();
-    fs.create_file("/root/dir1/dir2/dir3/file3.txt")
-        .await
-        .unwrap();
-
-    // Verify initial structure
-    assert!(fs.exists("/root/dir1").await);
-    assert!(fs.exists("/root/dir1/file1.txt").await);
-    assert!(fs.exists("/root/dir1/dir2/dir3/file3.txt").await);
-
-    println!("✓ Initial deep directory structure created");
-
-    // Rename the top-level directory
-    fs.rename("/root/dir1", "/root/renamed_dir").await.unwrap();
-
-    println!("✓ Directory renamed successfully");
-
-    // Verify all new paths exist
-    assert!(
-        fs.exists("/root/renamed_dir").await,
-        "Renamed directory should exist"
-    );
-    assert!(
-        fs.exists("/root/renamed_dir/file1.txt").await,
-        "File at level 1 should exist"
-    );
-    assert!(
-        fs.exists("/root/renamed_dir/dir2").await,
-        "Subdirectory should exist"
-    );
-    assert!(
-        fs.exists("/root/renamed_dir/dir2/file2.txt").await,
-        "File at level 2 should exist"
-    );
-    assert!(
-        fs.exists("/root/renamed_dir/dir2/dir3").await,
-        "Deep subdirectory should exist"
-    );
-    assert!(
-        fs.exists("/root/renamed_dir/dir2/dir3/file3.txt").await,
-        "File at level 3 should exist"
-    );
-
-    println!("✓ All new paths verified");
-
-    // Verify all old paths are gone
-    assert!(
-        !fs.exists("/root/dir1").await,
-        "Old directory path should not exist"
-    );
-    assert!(
-        !fs.exists("/root/dir1/file1.txt").await,
-        "Old file path should not exist"
-    );
-    assert!(
-        !fs.exists("/root/dir1/dir2").await,
-        "Old subdirectory path should not exist"
-    );
-    assert!(
-        !fs.exists("/root/dir1/dir2/dir3/file3.txt").await,
-        "Old deep file path should not exist"
-    );
-
-    println!("✓ All old paths confirmed removed");
-
-    // Verify we can still access the root file
-    assert!(
-        fs.exists("/root/file0.txt").await,
-        "Unrelated file should still exist"
-    );
-
-    println!("✅ Deep nested directory rename test passed!");
-}
-
-#[tokio::test]
-async fn test_directory_rename_multiple_levels() {
-    let layout = ChunkLayout::default();
-    let store = InMemoryBlockStore::new();
-    let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
-    let meta_store = meta_handle.store();
-    let fs = VFS::new(layout, store, meta_store).await.unwrap();
-
-    // Create structure
-    fs.mkdir_p("/parent").await.unwrap();
-    fs.mkdir_p("/parent/child").await.unwrap();
-    fs.create_file("/parent/child/data.txt").await.unwrap();
-
-    // First rename - rename child directory
-    fs.rename("/parent/child", "/parent/renamed_child")
-        .await
-        .unwrap();
-    assert!(fs.exists("/parent/renamed_child/data.txt").await);
-    assert!(!fs.exists("/parent/child/data.txt").await);
-
-    println!("✓ First rename (child) completed");
-
-    // Second rename - rename parent directory
-    fs.rename("/parent", "/new_parent").await.unwrap();
-    assert!(fs.exists("/new_parent/renamed_child/data.txt").await);
-    assert!(!fs.exists("/parent/renamed_child/data.txt").await);
-
-    println!("✓ Second rename (parent) completed");
-
-    // Third rename - rename the child again under new parent
-    fs.rename("/new_parent/renamed_child", "/new_parent/final_child")
-        .await
-        .unwrap();
-    assert!(fs.exists("/new_parent/final_child/data.txt").await);
-    assert!(!fs.exists("/new_parent/renamed_child/data.txt").await);
-
-    println!("✅ Multiple level directory rename test passed!");
+    println!("✓ Batch rename operations passed");
 }

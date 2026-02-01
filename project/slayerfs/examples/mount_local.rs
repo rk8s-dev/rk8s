@@ -1,10 +1,7 @@
-use slayerfs::cadapter::client::ObjectClient;
-use slayerfs::cadapter::localfs::LocalFsBackend;
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::chuck::store::ObjectBlockStore;
 use slayerfs::fuse::mount::mount_vfs_unprivileged;
-use slayerfs::meta::create_meta_store_from_url;
-use slayerfs::vfs::fs::VFS;
+use slayerfs::{
+    ChunkLayout, LocalFsBackend, ObjectBlockStore, ObjectClient, VFS, create_meta_store_from_url,
+};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {

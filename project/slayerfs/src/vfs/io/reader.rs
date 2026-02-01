@@ -10,10 +10,10 @@ use crate::chuck::reader::DataFetcher;
 use crate::chuck::{BlockStore, ChunkLayout};
 use crate::meta::MetaLayer;
 use crate::utils::{Intervals, NumCastExt, UsageGuard};
+use crate::vfs::Inode;
 use crate::vfs::backend::Backend;
 use crate::vfs::chunk_id_for;
 use crate::vfs::config::ReadConfig;
-use crate::vfs::inode::Inode;
 use crate::vfs::io::split_chunk_spans;
 use dashmap::{DashMap, Entry};
 use parking_lot::Mutex as ParkingMutex;
@@ -329,7 +329,16 @@ impl SliceState {
                 (guard.index, guard.range, guard.generation)
             };
 
-            let chunk_id = chunk_id_for(ino as i64, index);
+            let chunk_id = match chunk_id_for(ino as i64, index) {
+                Ok(id) => id,
+                Err(err) => {
+                    let mut guard = this.lock();
+                    guard.state = SliceStatus::Invalid;
+                    guard.err = Some(err.to_string());
+                    guard.notify.notify_waiters();
+                    return;
+                }
+            };
             let f = || async {
                 let mut fetcher = DataFetcher::new(layout, chunk_id, &backend);
                 fetcher.prepare_slices().await?;
@@ -992,8 +1001,11 @@ mod tests {
     use crate::meta::MetaLayer;
     use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;
+    use crate::meta::store::MetaStore;
+    use crate::vfs::Inode;
     use crate::vfs::config::{ReadConfig, WriteConfig};
     use crate::vfs::io::writer::FileWriter;
+    use bytes::Bytes;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
     use std::time::Duration;
@@ -1009,12 +1021,11 @@ mod tests {
     #[tokio::test]
     async fn test_file_reader_cross_chunks() {
         let layout = small_layout();
-        let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .layer();
-        let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
+        let block_store = Arc::new(InMemoryBlockStore::new());
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
+        let backend = Arc::new(Backend::new(block_store.clone(), meta.clone()));
 
         let ino: i64 = 11;
         let offset = layout.chunk_size - 512;
@@ -1022,8 +1033,8 @@ mod tests {
         let head = &data[..512];
         let tail = &data[512..];
 
-        let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
-        let uploader = DataUploader::new(layout, chunk_id_for(ino, 0), backend.as_ref());
+        let slice_id1 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
+        let uploader = DataUploader::new(layout, chunk_id_for(ino, 0).unwrap(), backend.as_ref());
         let desc1 = uploader
             .write_at_vectored(
                 slice_id1 as u64,
@@ -1032,17 +1043,19 @@ mod tests {
             )
             .await
             .unwrap();
-        meta.append_slice(chunk_id_for(ino, 0), desc1)
+        meta_store
+            .append_slice(chunk_id_for(ino, 0).unwrap(), desc1)
             .await
             .unwrap();
 
-        let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
-        let uploader = DataUploader::new(layout, chunk_id_for(ino, 1), backend.as_ref());
+        let slice_id2 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
+        let uploader = DataUploader::new(layout, chunk_id_for(ino, 1).unwrap(), backend.as_ref());
         let desc2 = uploader
-            .write_at_vectored(slice_id2 as u64, 0, &[bytes::Bytes::copy_from_slice(tail)])
+            .write_at_vectored(slice_id2 as u64, 0, &[Bytes::copy_from_slice(tail)])
             .await
             .unwrap();
-        meta.append_slice(chunk_id_for(ino, 1), desc2)
+        meta_store
+            .append_slice(chunk_id_for(ino, 1).unwrap(), desc2)
             .await
             .unwrap();
 
@@ -1059,28 +1072,24 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .layer();
-        let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
+        let block_store = Arc::new(InMemoryBlockStore::new());
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
+        let backend = Arc::new(Backend::new(block_store.clone(), meta.clone()));
 
         let ino: i64 = 22;
         let data1 = vec![1u8; 2048];
         let data2 = vec![2u8; 2048];
 
-        let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
-        let uploader = DataUploader::new(layout, chunk_id_for(ino, 0), backend.as_ref());
+        let slice_id1 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
+        let uploader = DataUploader::new(layout, chunk_id_for(ino, 0).unwrap(), backend.as_ref());
         let desc1 = uploader
-            .write_at_vectored(
-                slice_id1 as u64,
-                0,
-                &[bytes::Bytes::copy_from_slice(&data1)],
-            )
+            .write_at_vectored(slice_id1 as u64, 0, &[Bytes::copy_from_slice(&data1)])
             .await
             .unwrap();
-        meta.append_slice(chunk_id_for(ino, 0), desc1)
+        meta_store
+            .append_slice(chunk_id_for(ino, 0).unwrap(), desc1)
             .await
             .unwrap();
 
@@ -1090,16 +1099,13 @@ mod tests {
         let out1 = file_reader.read(0, data1.len()).await.unwrap();
         assert_eq!(out1, data1);
 
-        let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
+        let slice_id2 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
         let desc2 = uploader
-            .write_at_vectored(
-                slice_id2 as u64,
-                0,
-                &[bytes::Bytes::copy_from_slice(&data2)],
-            )
+            .write_at_vectored(slice_id2 as u64, 0, &[Bytes::copy_from_slice(&data2)])
             .await
             .unwrap();
-        meta.append_slice(chunk_id_for(ino, 0), desc2)
+        meta_store
+            .append_slice(chunk_id_for(ino, 0).unwrap(), desc2)
             .await
             .unwrap();
 
@@ -1114,12 +1120,10 @@ mod tests {
             chunk_size: 8 * 1024,
             block_size: 4 * 1024,
         };
-        let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .layer();
-        let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
+        let block_store = Arc::new(InMemoryBlockStore::new());
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta = meta_handle.layer();
+        let backend = Arc::new(Backend::new(block_store.clone(), meta.clone()));
 
         let ino = meta
             .create_file(1, "reader_write_eventual.txt".to_string())
