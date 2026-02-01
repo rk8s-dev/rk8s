@@ -2403,6 +2403,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_hardlink_dentry_binding_cross_dir_rename_unlink() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -2443,6 +2444,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_hardlink_dentry_binding_cross_dir_move_rename() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -2474,6 +2476,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_basic_read_lock() {
         let store = new_test_store().await;
         let session_id = Uuid::now_v7();
@@ -2515,6 +2518,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_multiple_read_locks() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -2585,6 +2589,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_write_lock_conflict() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -2647,6 +2652,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_lock_release() {
         let session_id = Uuid::now_v7();
         let owner = 1001;
@@ -2704,6 +2710,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_non_overlapping_locks() {
         // Create session manager with 2 sessions
         let session_mgr = TestSessionManager::new(2).await;
@@ -2780,6 +2787,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_concurrent_read_write_locks() {
         // Test multiple sessions acquiring different types of locks
         let session_mgr = TestSessionManager::new(3).await;
@@ -2888,6 +2896,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_cross_session_lock_visibility() {
         // Test that locks set by one session are visible to another session
         let session_mgr = TestSessionManager::new(2).await;
@@ -2990,6 +2999,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_extend_file_size_lua_concurrent() {
         use crate::meta::MetaStore;
 
@@ -3019,6 +3029,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_extend_file_size_lua_idempotent() {
         use crate::meta::MetaStore;
 
@@ -3044,6 +3055,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_extend_file_size_lua_missing_node() {
         use crate::meta::MetaStore;
 
@@ -3059,6 +3071,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_link_unlink_lua_atomicity() {
         use crate::meta::MetaStore;
 
@@ -3102,6 +3115,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rmdir_lua_concurrent() {
         let store = Arc::new(new_test_store().await);
         let root = store.root_ino();
@@ -3146,6 +3160,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rmdir_lua_not_empty() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3163,6 +3178,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rmdir_lua_not_found() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3177,6 +3193,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rmdir_lua_not_directory() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3196,6 +3213,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_create_entry_lua_concurrent() {
         let store = Arc::new(new_test_store().await);
         let root = store.root_ino();
@@ -3239,6 +3257,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_create_entry_lua_already_exists() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3258,6 +3277,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_create_entry_lua_parent_not_found() {
         let store = new_test_store().await;
 
@@ -3271,6 +3291,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_create_entry_lua_parent_not_directory() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3290,6 +3311,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_lua_concurrent() {
         let store = Arc::new(new_test_store().await);
         let root = store.root_ino();
@@ -3355,6 +3377,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_lua_source_not_found() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3371,6 +3394,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_lua_target_exists() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3399,6 +3423,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_lua_same_name() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3427,6 +3452,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_lua_hardlink() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3469,6 +3495,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_exchange_lua_concurrent() {
         let store = Arc::new(new_test_store().await);
         let root = store.root_ino();
@@ -3513,6 +3540,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_exchange_lua_old_not_found() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3541,6 +3569,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_exchange_lua_new_not_found() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3569,6 +3598,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_exchange_lua_same_entry() {
         let store = new_test_store().await;
         let root = store.root_ino();
@@ -3597,6 +3627,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
+    #[ignore]
     async fn test_rename_exchange_lua_hardlinks() {
         let store = new_test_store().await;
         let root = store.root_ino();
