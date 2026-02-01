@@ -505,13 +505,14 @@ where
         oldest_atime
     }
 
-    fn check_session(&self, offset: u64, len: usize) {
+    fn check_session(&self, offset: u64, len: usize) -> u64 {
         let mut session = self.sessions.lock();
 
         let selected = self
             .select_forward_session_match(&session, offset)
             .or_else(|| self.select_back_session_match(&session, offset))
             .unwrap_or(self.select_session_fallback(&mut session, offset, len));
+
         session[selected].update(offset, len as u64);
         session[selected].update_ahead(
             self.config.layout.block_size as u64,
@@ -521,6 +522,7 @@ where
             offset,
             len as u64,
         );
+        session[selected].ahead
     }
 
     fn buffer_usage(&self) -> u64 {
@@ -639,6 +641,18 @@ where
         Ok(())
     }
 
+    async fn prepare_ahead_slices(&self, offset: u64, ahead: u64, guards: &mut Vec<SlicePinGuard>) {
+        let aligned = (offset + ahead).next_multiple_of(self.config.layout.block_size as u64);
+
+        let spans = split_chunk_spans(self.config.layout, offset, (aligned - offset).as_usize());
+        for span in spans.iter().copied() {
+            guards.push(
+                self.prepare_slices(span.index, (span.offset, span.offset + span.len))
+                    .await,
+            );
+        }
+    }
+
     #[tracing::instrument(name = "FileReader.read_at", level = "trace", skip(self, buf), fields(offset, len = buf.len()))]
     pub(crate) async fn read_at(&self, offset: u64, buf: &mut [u8]) -> anyhow::Result<usize> {
         if buf.is_empty() {
@@ -666,9 +680,6 @@ where
             .instrument(tracing::trace_span!("read_at.back_pressure"))
             .await?;
 
-        tracing::trace_span!("read_at.zero_fill", len = actual_len)
-            .in_scope(|| buf[..actual_len].fill(0));
-
         let spans = tracing::trace_span!("read_at.split_spans", offset, len = actual_len)
             .in_scope(|| split_chunk_spans(self.config.layout, offset, actual_len));
 
@@ -687,8 +698,12 @@ where
             );
         }
 
-        tracing::trace_span!("read_at.check_session", offset, len = actual_len)
+        let ahead = tracing::trace_span!("read_at.check_session", offset, len = actual_len)
             .in_scope(|| self.check_session(offset, actual_len));
+
+        tracing::trace_span!("FileReader.read_at.prepare_ahead_slices", offset, ahead)
+            .in_scope(|| self.prepare_ahead_slices(offset, ahead, &mut pin_guard))
+            .await;
 
         let mut tail = buf;
         let result = async {

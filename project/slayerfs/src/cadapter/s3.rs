@@ -520,6 +520,10 @@ impl ObjectBackend for S3Backend {
         }
     }
 
+    async fn get_object_range(&self, _key: &str, _offset: u64, _buf: &mut [u8]) -> Result<usize> {
+        todo!("Add `get_object_range` to S3")
+    }
+
     async fn get_etag(&self, key: &str) -> Result<String> {
         let resp = self
             .client

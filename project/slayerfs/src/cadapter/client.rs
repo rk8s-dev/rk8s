@@ -18,6 +18,8 @@ pub trait ObjectBackend: Send + Sync {
 
     async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>>;
 
+    async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize>;
+
     #[allow(dead_code)]
     async fn get_etag(&self, key: &str) -> Result<String>;
 
@@ -45,6 +47,10 @@ impl<B: ObjectBackend> ObjectClient<B> {
 
     pub async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>> {
         self.backend.get_object(key).await
+    }
+
+    pub async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        self.backend.get_object_range(key, offset, buf).await
     }
 
     #[allow(dead_code)]

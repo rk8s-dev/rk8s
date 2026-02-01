@@ -66,7 +66,7 @@ let out = async {
 ```rust
 let span = tracing::trace_span!("read_range", key = %key_str, offset, len);
 let _enter = span.enter();
-span.record("block_len", block.len());
+span.record("read_len", read_len);
 ```
 
 > 实践建议：大对象用 `skip(...)`，只记录关键字段，避免 trace 文件过大。比如对`data: &[u8]`使用`skip(data)`，另加一个`fields(len = data.len())`记录长度即可。

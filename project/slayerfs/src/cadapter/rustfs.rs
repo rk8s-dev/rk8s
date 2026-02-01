@@ -46,6 +46,33 @@ impl ObjectBackend for RustfsLikeBackend {
         }
     }
 
+    async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let path = self.path_for(key);
+        let len = buf.len();
+        // Use block_in_place + read_at to fill caller's buffer directly (avoid alloc+copy).
+        tokio::task::block_in_place(|| -> Result<usize> {
+            use std::os::unix::fs::FileExt;
+            let file = match std::fs::File::open(&path) {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+                Err(e) => return Err(e.into()),
+            };
+            let mut read = 0usize;
+            while read < len {
+                let n = file.read_at(&mut buf[read..], offset + read as u64)?;
+                if n == 0 {
+                    break;
+                }
+                read += n;
+            }
+            Ok(read)
+        })
+    }
+
     async fn get_etag(&self, key: &str) -> Result<String> {
         let path = self.path_for(key);
         match fs::metadata(path).await {
