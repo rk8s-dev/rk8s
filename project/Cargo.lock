@@ -2396,7 +2396,7 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "oci-spec",
- "qlean 0.1.1",
+ "qlean",
  "rand 0.9.2",
  "regex",
  "reqwest 0.12.25",
@@ -4567,7 +4567,7 @@ dependencies = [
  "memmap2",
  "moka",
  "nix 0.29.0",
- "qlean 0.2.2",
+ "qlean",
  "radix_trie",
  "reqwest 0.12.25",
  "rfuse3 0.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6383,34 +6383,6 @@ dependencies = [
 
 [[package]]
 name = "qlean"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29348473f9420b83082acbec4f5fb866e201c9c358ef1a5b5364e3fc0be510dc"
-dependencies = [
- "anyhow",
- "console",
- "dir-lock",
- "directories",
- "futures",
- "nanoid",
- "reqwest 0.13.1",
- "russh",
- "russh-sftp",
- "serde",
- "serde_json",
- "serde_yml",
- "shell-escape",
- "termion",
- "tokio",
- "tokio-fd",
- "tokio-util",
- "tokio-vsock",
- "tracing",
- "walkdir",
-]
-
-[[package]]
-name = "qlean"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08665b257d2f26d894fecae72aa0d6ad2e2427a1858e223575e9cdb35e070bb1"
@@ -8182,7 +8154,7 @@ dependencies = [
  "moka",
  "parking_lot",
  "pprof",
- "qlean 0.1.1",
+ "qlean",
  "rand 0.9.2",
  "redis",
  "rfuse3 0.0.5",
