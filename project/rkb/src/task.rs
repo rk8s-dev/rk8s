@@ -59,7 +59,7 @@ impl TaskExec for RunTask {
     }
 
     fn run(&self, session: &mut MountSession) -> Result<()> {
-        let mut command = session.create_command("run")?;
+        let mut command = session.create_command("exec-internal")?;
 
         let commands_json = serde_json::to_string(&self.commands)
             .context("Failed to serialize commands to json")?;
