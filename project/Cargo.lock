@@ -2070,9 +2070,12 @@ dependencies = [
  "env_logger",
  "futures",
  "log",
+ "reqwest 0.12.25",
  "serde",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
+ "url",
 ]
 
 [[package]]

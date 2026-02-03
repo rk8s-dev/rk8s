@@ -21,6 +21,7 @@ rust_library(
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     features = [
+        "ai",
         "default",
         "derive",
     ],
@@ -31,8 +32,11 @@ rust_library(
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/futures/0.3.31:futures",
         "//third-party/rust/crates/log/0.4.29:log",
+        "//third-party/rust/crates/reqwest/0.12.25:reqwest",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
+        "//third-party/rust/crates/thiserror/2.0.17:thiserror",
         "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/url/2.5.7:url",
     ],
 )

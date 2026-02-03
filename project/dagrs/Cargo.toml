@@ -21,6 +21,9 @@ async-trait = {workspace = true}
 futures = {workspace = true}
 serde = { workspace= true }
 serde_json = { workspace= true }
+reqwest = { workspace = true, features = ["json"], optional = true }
+thiserror = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
@@ -31,6 +34,11 @@ env_logger = "0.11.6"
 [features]
 default = ["derive"]
 derive = ["dagrs-derive/derive"]
+ai = ["dep:reqwest"]
+
+[[example]]
+name = "gemini_agent"
+required-features = ["ai"]
 
 [[example]]
 name = "auto_node"
