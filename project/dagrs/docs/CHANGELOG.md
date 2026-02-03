@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **AI Agent Support (REQ-008)**: Introduced a lightweight, native AI module (feature `ai`) for integrating LLMs into DAG workflows.
+  - Implemented generic `Agent` and `CompletionModel` traits for LLM abstraction.
+  - Added `AgentAction` adapter to wrap AI agents as standard executor nodes.
+  - Provided built-in support for Google Gemini via `GeminiProvider`.
+  - Defined unified message structures (`Message`, `CompletionRequest`) with future-proof design for Tools and Multimodal inputs.
+
+## [0.6.0] - 2026-02-03
+
+### Added
 - **Loop Node (REQ-001)**: Introduced `LoopNode` struct and `LoopCondition` trait to support controllable iterative loops. Added `FlowControl::Loop` instruction for execution flow management.
 - **Checkpoint Mechanism (REQ-002)**: Implemented `Checkpoint` struct and `FileCheckpointStore` for state persistence. Added support for capturing and restoring graph execution snapshots (active nodes, env, loop counters).
 - **Dynamic Router (REQ-003)**: Added `RouterNode` implementing the `Router` trait for runtime conditional branching. Implemented automatic branch pruning for unselected paths.
