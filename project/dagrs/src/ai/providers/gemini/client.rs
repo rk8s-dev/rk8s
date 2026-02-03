@@ -33,7 +33,10 @@ impl Client {
     pub fn from_env() -> Result<Self, env::VarError> {
         let api_key = env::var("GEMINI_API_KEY")?;
         let provider = GeminiProvider::new(api_key);
-        Ok(Self::new("https://generativelanguage.googleapis.com", provider))
+        Ok(Self::new(
+            "https://generativelanguage.googleapis.com",
+            provider,
+        ))
     }
 
     /// Creates a CompletionModel for the specified Gemini model.

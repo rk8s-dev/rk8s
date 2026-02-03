@@ -42,11 +42,14 @@ impl<M: CompletionModel> Action for AgentAction<M> {
         let input: String = if let Some(id) = ids.first() {
             match in_channels.recv_from(id).await {
                 Ok(content) => content.get::<String>().cloned().unwrap_or_else(|| {
-                    log::warn!("Received content from upstream {} is not a String. Defaulting to empty.", id);
+                    log::warn!(
+                        "Received content from upstream {:?} is not a String. Defaulting to empty.",
+                        id
+                    );
                     String::new()
                 }),
                 Err(e) => {
-                    log::error!("Failed to receive input from upstream {}: {}", id, e);
+                    log::error!("Failed to receive input from upstream {:?}: {:?}", id, e);
                     String::new()
                 }
             }
