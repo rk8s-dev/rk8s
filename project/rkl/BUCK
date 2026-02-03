@@ -20,7 +20,24 @@ rust_binary(
     crate = "rkl",
     crate_root = "vendor/src/main.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rkl-manifest[env_flags])"],
+    rustc_flags = ["@$(location :rkl-manifest[env_flags])"] + select({
+        "prelude//os/constraints:windows": select({
+            "prelude//abi/constraints:gnu": [
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:windows_x86_64_gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:windows_x86_64_gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:windows_x86_64_gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:winapi-x86_64-pc-windows-gnu-build-script-run[rustc_flags])",
+            ],
+            "DEFAULT": [
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:windows_x86_64_msvc-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:windows_x86_64_msvc-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:windows_x86_64_msvc-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:windows_x86_64_msvc-build-script-run[rustc_flags])",
+            ],
+        }),
+        "DEFAULT": [],
+    }),
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
@@ -64,6 +81,7 @@ rust_binary(
         "//third-party/rust/crates/nftables/0.6.3:nftables",
         "//third-party/rust/crates/nix/0.29.0:nix",
         "//third-party/rust/crates/oci-spec/0.8.3:oci-spec",
+        "//third-party/rust/crates/procfs/0.17.0:procfs",
         "//third-party/rust/crates/prost-build/0.13.5:prost-build",
         "//third-party/rust/crates/prost-types/0.12.6:prost-types",
         "//third-party/rust/crates/prost/0.13.5:prost",
@@ -142,6 +160,7 @@ rust_library(
         "//third-party/rust/crates/nftables/0.6.3:nftables",
         "//third-party/rust/crates/nix/0.29.0:nix",
         "//third-party/rust/crates/oci-spec/0.8.3:oci-spec",
+        "//third-party/rust/crates/procfs/0.17.0:procfs",
         "//third-party/rust/crates/prost-build/0.13.5:prost-build",
         "//third-party/rust/crates/prost-types/0.12.6:prost-types",
         "//third-party/rust/crates/prost/0.13.5:prost",
