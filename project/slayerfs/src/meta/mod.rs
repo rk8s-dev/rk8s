@@ -21,7 +21,7 @@ pub mod file_lock;
 pub mod layer;
 pub(crate) mod migrations;
 pub mod permission;
-pub mod serialization;
+pub(crate) mod serialization;
 pub mod store;
 pub mod stores;
 

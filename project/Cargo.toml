@@ -237,6 +237,7 @@ if-addrs = "0.6.0"
 redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
 parking_lot = "0.12.5"
 qlean = "0.2.2"
+rkyv = "0.8.14"
 
 [profile.release]
 debug = true
