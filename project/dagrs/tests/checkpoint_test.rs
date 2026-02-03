@@ -236,16 +236,13 @@ fn test_checkpoint_events() {
         // Spawn event collector
         let collector = tokio::spawn(async move {
             let mut collected = Vec::new();
-            loop {
-                match tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await {
-                    Ok(Ok(event)) => {
-                        let is_finished = matches!(event, GraphEvent::GraphFinished);
-                        collected.push(event);
-                        if is_finished {
-                            break;
-                        }
-                    }
-                    _ => break,
+            while let Ok(Ok(event)) =
+                tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
+            {
+                let is_finished = matches!(event, GraphEvent::GraphFinished);
+                collected.push(event);
+                if is_finished {
+                    break;
                 }
             }
             collected
