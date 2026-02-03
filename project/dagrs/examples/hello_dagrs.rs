@@ -23,11 +23,8 @@ fn main() {
     // create an empty `NodeTable`
     let mut node_table = NodeTable::new();
     // create a `DefaultNode` with action `HelloAction`
-    let hello_node = DefaultNode::with_action(
-        "Hello Dagrs".to_string(),
-        HelloAction::default(),
-        &mut node_table,
-    );
+    let hello_node =
+        DefaultNode::with_action("Hello Dagrs".to_string(), HelloAction, &mut node_table);
     let id: &dagrs::NodeId = &hello_node.id();
 
     // create a graph with this node and run

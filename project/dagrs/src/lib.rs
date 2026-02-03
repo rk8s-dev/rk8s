@@ -21,3 +21,6 @@ pub use utils::{env::EnvVar, output::Output};
 
 #[cfg(feature = "derive")]
 pub use dagrs_derive::*;
+
+#[cfg(feature = "ai")]
+pub mod ai;

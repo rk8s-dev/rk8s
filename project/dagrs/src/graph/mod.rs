@@ -1759,7 +1759,7 @@ mod tests {
 
     impl HelloAction {
         pub fn new() -> Self {
-            Self::default()
+            Self
         }
     }
 

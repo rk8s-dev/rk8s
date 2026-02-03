@@ -154,11 +154,8 @@ fn main() {
     );
 
     // Create receiver node
-    let receiver = DefaultNode::with_action(
-        "Receiver".to_string(),
-        ReceiverAction::default(),
-        &mut node_table,
-    );
+    let receiver =
+        DefaultNode::with_action("Receiver".to_string(), ReceiverAction, &mut node_table);
 
     // Get node IDs before adding nodes to the graph
     let sender1_id = sender1.id();

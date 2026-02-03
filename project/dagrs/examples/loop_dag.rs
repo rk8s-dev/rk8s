@@ -93,7 +93,7 @@ impl Action for ProcAction {
         _env: Arc<EnvVar>,
     ) -> Output {
         let mut times = 0usize;
-        while let Ok(_) = in_channels.recv_from(&self.inter_node).await {
+        while (in_channels.recv_from(&self.inter_node).await).is_ok() {
             log::info!("`Proc` send {} to INTER node", times);
             out_channels
                 .send_to(

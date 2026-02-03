@@ -130,7 +130,7 @@ mod test_default_node {
 
     impl HelloAction {
         pub fn new() -> Self {
-            Self::default()
+            Self
         }
     }
 
