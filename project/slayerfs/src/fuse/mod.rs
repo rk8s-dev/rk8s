@@ -206,7 +206,7 @@ where
         })
     }
 
-    // Open file: stateless IO, always return fh=0
+    // Open file: allocate a handle for read/write operations.
     async fn open(&self, _req: Request, ino: u64, flags: u32) -> FuseResult<ReplyOpen> {
         // Verify the inode exists and is a file
         let Some(attr) = self.stat_ino(ino as i64).await else {
@@ -296,21 +296,25 @@ where
         })
     }
 
-    // Write file: inode-based write to avoid path resolution
     async fn write(
         &self,
         _req: Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: u64,
         data: &[u8],
         _write_flags: u32,
         _flags: u32,
     ) -> FuseResult<ReplyWrite> {
-        let n = self
-            .write_ino(ino as i64, offset, data)
-            .await
-            .map_err(Into::<Errno>::into)? as u32;
+        let n = if fh != 0 {
+            self.write(fh, offset, data)
+                .await
+                .map_err(Into::<Errno>::into)? as u32
+        } else {
+            self.write_ino(ino as i64, offset, data)
+                .await
+                .map_err(Into::<Errno>::into)? as u32
+        };
         Ok(ReplyWrite { written: n })
     }
 
@@ -706,7 +710,7 @@ where
         parent: u64,
         name: &OsStr,
         mode: u32,
-        _flags: u32,
+        flags: u32,
     ) -> FuseResult<ReplyCreated> {
         let name = name.to_string_lossy();
         // Validate parent
@@ -731,11 +735,20 @@ where
             return Err(libc::ENOENT.into());
         };
         let attr = vfs_to_fuse_attr(&vattr, &req);
+
+        let accmode = flags & (libc::O_ACCMODE as u32);
+        let read = accmode != (libc::O_WRONLY as u32);
+        let write = accmode != (libc::O_RDONLY as u32);
+        let fh = self
+            .open(ino, vattr.clone(), read, write)
+            .await
+            .map_err(Into::<Errno>::into)?;
+
         Ok(ReplyCreated {
             ttl: Duration::from_secs(1),
             attr,
             generation: 0,
-            fh: 0,
+            fh,
             flags: 0,
         })
     }
