@@ -106,15 +106,16 @@ Create a directory to store the output image.
 mkdir -p output
 ```
 
-Start rkb (root privilege is required).
+Start rkb. By default, it uses Linux native mount which requires root privileges:
 
 ```sh
 sudo ../target/debug/rkb build -f example-Dockerfile -t image1 -o output .
 ```
 
-Or use `--libfuse` option.
+Alternatively, use `--libfuse` option to avoid sudo (uses userspace FUSE):
+
 ```sh
-sudo ../target/debug/rkb build -f example-Dockerfile -t image1 -o output --libfuse .
+../target/debug/rkb build -f example-Dockerfile -t image1 -o output --libfuse .
 ```
 
 Here the last optional `.` specifies the build context, which by default is `.`.
@@ -288,7 +289,61 @@ rkb pull me/image:latest
 
 The image reference should only contain the namespace and image name (e.g., `mynamespace/myimage:latest`), while the server URL should be specified separately using the `--url` parameter.
 
-### Login to Distribution Server
+#### Namespace Auto-Completion
+
+If an image reference does not contain a `/` (i.e., no namespace), rkb automatically prefixes it with `library/`:
+
+```sh
+# These are equivalent:
+rkb pull nginx:latest
+rkb pull library/nginx:latest
+
+# Similarly for push:
+rkb push --path output/nginx nginx:latest  # Pushes to library/nginx:latest
+```
+
+This behavior matches Docker Hub, where official images are stored under the `library/` namespace. To use this feature, create a user named `library` on your distribution server and configure rkb with that user's credentials.
+
+### Authentication
+
+#### GitHub OAuth Login
+
+Login to your distribution server using GitHub OAuth:
+
+```sh
+# First time login (both URL and client ID required)
+rkb login https://your-distribution-server.com your-github-oauth-client-id
+
+# Re-login when PAT expires (client ID will be reused from config)
+rkb login https://your-distribution-server.com
+
+# If only one server is configured, you can omit the URL too
+rkb login
+```
+
+This will open a browser for GitHub OAuth authentication and store the credentials locally. The client ID is required only for the first login to a server - it will be saved and reused for subsequent logins.
+
+**Note:** GitHub OAuth requires the distribution server to be configured with `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` environment variables. If these are not configured, you must use manual token authentication (debug mode only).
+
+#### Manual Token Authentication (Debug Mode)
+
+In debug mode or when GitHub OAuth is not configured, you can manually obtain and configure authentication tokens:
+
+```sh
+# Get authentication token using Basic Auth
+curl -u "username:password" "http://your-distribution-server.com/auth/token"
+
+# Configure the token manually
+# Edit ~/.config/rk8s/rkb.toml (Linux) or ~/Library/Application Support/rk8s/rkb.toml (macOS)
+# Add the following:
+# [[entries]]
+# pat = "your-token-here"
+# url = "your-distribution-server.com"
+```
+
+Tokens expire after a configurable period (default: 1 hour). When a token expires, repeat the token retrieval process and update the configuration file.
+
+### List Repositories
 
 First, login to your distribution server using GitHub OAuth:
 
@@ -469,7 +524,20 @@ Options:
 | LABEL       | ✅     |
 | COPY        | ✅     |
 | ENTRYPOINT  | ✅     |
-| ARG         | ❌     |
+| ARG         | ✅     |
+
+The following instructions are not supported and will be silently ignored with a warning message:
+
+| Instruction | Status |
+|-------------|--------|
+| EXPOSE      | Ignored |
+| STOPSIGNAL  | Ignored |
+| WORKDIR     | Ignored |
+| USER        | Ignored |
+| VOLUME      | Ignored |
+| HEALTHCHECK | Ignored |
+| SHELL       | Ignored |
+| ONBUILD     | Ignored |
 
 ## Testing
 
