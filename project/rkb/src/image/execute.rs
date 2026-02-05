@@ -4,6 +4,7 @@ use dockerfile_parser::{
     EntrypointInstruction, EnvInstruction, FromInstruction, Instruction, LabelInstruction,
     RunInstruction, ShellOrExecExpr,
 };
+use serde_json;
 use std::path::{Path, PathBuf};
 
 use crate::{
@@ -67,9 +68,57 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
                         ctx.image_config.set_user(user);
                         Ok(())
                     }
+                    "VOLUME" => {
+                        // Extract volume paths from arguments
+                        // VOLUME supports multiple formats:
+                        // - VOLUME /data
+                        // - VOLUME /data /logs
+                        // - VOLUME ["/data", "/logs"]
+                        let volume_arg = extract_misc_argument(&misc.arguments);
+                        if volume_arg.is_empty() {
+                            bail!("VOLUME requires at least one path argument");
+                        }
+
+                        // Check if it's JSON array format
+                        let volumes: Vec<String> = if volume_arg.starts_with('[') {
+                            // Parse JSON array format: ["/data", "/logs"]
+                            match serde_json::from_str::<Vec<String>>(&volume_arg) {
+                                Ok(v) => v,
+                                Err(_) => {
+                                    // Fallback: treat as single path if JSON parsing fails
+                                    vec![volume_arg.trim_matches(|c| c == '[' || c == ']').to_string()]
+                                }
+                            }
+                        } else {
+                            // Space-separated format: /data /logs
+                            volume_arg
+                                .split_whitespace()
+                                .map(|s| s.to_string())
+                                .collect()
+                        };
+
+                        for vol in volumes {
+                            let vol = vol.trim().to_string();
+                            if !vol.is_empty() {
+                                tracing::debug!("Adding VOLUME: {}", vol);
+                                ctx.image_config.add_volume(vol);
+                            }
+                        }
+                        Ok(())
+                    }
+                    "STOPSIGNAL" => {
+                        // Extract the stop signal from arguments
+                        let signal = extract_misc_argument(&misc.arguments);
+                        if signal.is_empty() {
+                            bail!("STOPSIGNAL requires a signal argument");
+                        }
+                        tracing::debug!("Setting STOPSIGNAL to: {}", signal);
+                        ctx.image_config.set_stop_signal(signal);
+                        Ok(())
+                    }
                     // TODO: These instructions are currently ignored but should be properly
                     // recorded in the image config for OCI compliance
-                    "EXPOSE" | "STOPSIGNAL" | "VOLUME" | "HEALTHCHECK" | "SHELL" | "ONBUILD" => {
+                    "EXPOSE" | "HEALTHCHECK" | "SHELL" | "ONBUILD" => {
                         tracing::warn!(
                             "Instruction {} is ignored (not yet implemented)",
                             instr_name

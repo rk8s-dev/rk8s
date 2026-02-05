@@ -64,6 +64,13 @@ pub struct ImageConfig {
     /// User to run as. This is set by the USER instruction.
     /// Format can be: "user", "uid", "user:group", "uid:gid", "uid:group", "user:gid"
     pub user: Option<String>,
+    /// Volumes to be mounted. This is set by the VOLUME instruction.
+    /// A set of directories describing where the process is likely to write data
+    /// specific to a container instance.
+    pub volumes: Option<Vec<String>>,
+    /// Signal to stop the container. This is set by the STOPSIGNAL instruction.
+    /// The signal can be a signal name (e.g., SIGTERM, SIGKILL) or a number.
+    pub stop_signal: Option<String>,
 }
 
 impl ImageConfig {
@@ -118,6 +125,35 @@ impl ImageConfig {
         self.user.as_deref()
     }
 
+    /// Add a volume mount point. This is set by the VOLUME instruction.
+    /// Each call adds a new volume path to the list.
+    pub fn add_volume(&mut self, volume: String) {
+        if self.volumes.is_none() {
+            self.volumes = Some(Vec::new());
+        }
+        if let Some(ref mut volumes) = self.volumes {
+            // Avoid duplicates
+            if !volumes.contains(&volume) {
+                volumes.push(volume);
+            }
+        }
+    }
+
+    /// Get all volume mount points.
+    pub fn get_volumes(&self) -> Option<&Vec<String>> {
+        self.volumes.as_ref()
+    }
+
+    /// Set the stop signal for the container.
+    pub fn set_stop_signal(&mut self, signal: String) {
+        self.stop_signal = Some(signal);
+    }
+
+    /// Get the stop signal, if set.
+    pub fn get_stop_signal(&self) -> Option<&str> {
+        self.stop_signal.as_deref()
+    }
+
     pub fn get_oci_image_config(&self) -> Result<Config> {
         let mut config = ConfigBuilder::default();
 
@@ -149,6 +185,14 @@ impl ImageConfig {
             config = config.user(user.clone());
         }
 
+        if let Some(volumes) = &self.volumes {
+            config = config.volumes(volumes.clone());
+        }
+
+        if let Some(stop_signal) = &self.stop_signal {
+            config = config.stop_signal(stop_signal.clone());
+        }
+
         config.build().context("Failed to build OCI image config")
     }
 }
@@ -165,6 +209,8 @@ impl Default for ImageConfig {
             cmd: None,
             working_dir: None,
             user: None,
+            volumes: None,
+            stop_signal: None,
         }
     }
 }
