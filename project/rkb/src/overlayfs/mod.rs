@@ -235,13 +235,51 @@ fn execute_command(command_args: &[&str], envp: &[CString]) -> Result<()> {
     unreachable!();
 }
 
+/// User specification containing uid and optional gid.
+#[derive(Debug, Clone)]
+pub struct UserSpec {
+    pub uid: u32,
+    pub gid: Option<u32>,
+}
+
 pub fn do_exec<P: AsRef<Path>>(
     mountpoint: P,
     command_args: &[&str],
     envp: &[CString],
+    working_dir: &str,
+    user_spec: Option<UserSpec>,
 ) -> Result<()> {
     let mountpoint = mountpoint.as_ref();
     do_chroot(mountpoint)?;
+
+    // Change to the specified working directory
+    // Create the directory if it doesn't exist (Docker behavior)
+    if let Err(e) = chdir(working_dir) {
+        // Check if the error is because directory doesn't exist
+        if e == nix::errno::Errno::ENOENT {
+            // Create the directory recursively
+            fs::create_dir_all(working_dir)
+                .with_context(|| format!("Failed to create working directory {}", working_dir))?;
+            // Try chdir again
+            chdir(working_dir)
+                .with_context(|| format!("Failed to chdir to {} after creating it", working_dir))?;
+        } else {
+            return Err(e).with_context(|| format!("Failed to chdir to {}", working_dir));
+        }
+    }
+
+    // Switch user if specified
+    if let Some(spec) = user_spec {
+        // Set gid first (must be done before setuid)
+        if let Some(gid) = spec.gid {
+            nix::unistd::setgid(nix::unistd::Gid::from_raw(gid))
+                .with_context(|| format!("Failed to setgid to {}", gid))?;
+        }
+        // Set uid
+        nix::unistd::setuid(nix::unistd::Uid::from_raw(spec.uid))
+            .with_context(|| format!("Failed to setuid to {}", spec.uid))?;
+    }
+
     execute_command(command_args, envp)?;
     unreachable!();
 }

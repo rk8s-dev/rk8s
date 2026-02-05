@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use dockerfile_parser::{
-    ArgInstruction, BreakableStringComponent, CmdInstruction, CopyInstruction,
+    ArgInstruction, BreakableString, BreakableStringComponent, CmdInstruction, CopyInstruction,
     EntrypointInstruction, EnvInstruction, FromInstruction, Instruction, LabelInstruction,
     RunInstruction, ShellOrExecExpr,
 };
@@ -12,6 +12,20 @@ use crate::{
     storage::full_image_ref,
     task::{CopyTask, RunTask, TaskExec},
 };
+
+/// Extract the argument string from a BreakableString (used for Misc instructions like WORKDIR, USER).
+fn extract_misc_argument(args: &BreakableString) -> String {
+    let mut result = String::new();
+    for component in args.components.iter() {
+        match component {
+            BreakableStringComponent::Comment(_) => {}
+            BreakableStringComponent::String(spanned_string) => {
+                result.push_str(&spanned_string.content);
+            }
+        }
+    }
+    result.trim().to_string()
+}
 
 /// An extension trait to execute dockerfile instructions.
 pub trait InstructionExt<P: AsRef<Path>> {
@@ -29,13 +43,33 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
             Instruction::Cmd(inst) => inst.execute(ctx),
             Instruction::Copy(inst) => inst.execute(ctx),
             Instruction::Env(inst) => inst.execute(ctx),
-            // TODO: These instructions are currently ignored but should be properly
-            // recorded in the image config for OCI compliance
+            // Handle miscellaneous instructions
             Instruction::Misc(misc) => {
                 let instr_name = misc.instruction.content.to_uppercase();
                 match instr_name.as_str() {
-                    "EXPOSE" | "STOPSIGNAL" | "WORKDIR" | "USER" | "VOLUME" | "HEALTHCHECK"
-                    | "SHELL" | "ONBUILD" => {
+                    "WORKDIR" => {
+                        // Extract the working directory path from arguments
+                        let workdir = extract_misc_argument(&misc.arguments);
+                        if workdir.is_empty() {
+                            bail!("WORKDIR requires a path argument");
+                        }
+                        tracing::debug!("Setting WORKDIR to: {}", workdir);
+                        ctx.image_config.set_working_dir(workdir);
+                        Ok(())
+                    }
+                    "USER" => {
+                        // Extract the user specification from arguments
+                        let user = extract_misc_argument(&misc.arguments);
+                        if user.is_empty() {
+                            bail!("USER requires a user argument");
+                        }
+                        tracing::debug!("Setting USER to: {}", user);
+                        ctx.image_config.set_user(user);
+                        Ok(())
+                    }
+                    // TODO: These instructions are currently ignored but should be properly
+                    // recorded in the image config for OCI compliance
+                    "EXPOSE" | "STOPSIGNAL" | "VOLUME" | "HEALTHCHECK" | "SHELL" | "ONBUILD" => {
                         tracing::warn!(
                             "Instruction {} is ignored (not yet implemented)",
                             instr_name
@@ -129,6 +163,8 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
         let task = RunTask {
             commands: command_args,
             envp,
+            working_dir: ctx.image_config.working_dir.clone(),
+            user: ctx.image_config.user.clone(),
         };
         task.execute(ctx.mount_config)
     }
@@ -206,11 +242,21 @@ impl<P: AsRef<Path>> InstructionExt<P> for CopyInstruction {
 
         let dest = self.destination.content.clone();
         let dest = if dest.starts_with('/') {
+            // Absolute path - strip leading slash and join to mountpoint
             ctx.mount_config
                 .mountpoint
                 .join(dest.trim_start_matches('/'))
         } else {
-            ctx.mount_config.mountpoint.join("root").join(dest)
+            // Relative path - resolve relative to WORKDIR
+            let working_dir = ctx.image_config.get_working_dir();
+            let abs_dest = if working_dir == "/" {
+                format!("/{}", dest)
+            } else {
+                format!("{}/{}", working_dir, dest)
+            };
+            ctx.mount_config
+                .mountpoint
+                .join(abs_dest.trim_start_matches('/'))
         };
 
         let build_ctx = ctx.build_context.as_ref().canonicalize()?;
