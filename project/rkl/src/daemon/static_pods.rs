@@ -77,7 +77,7 @@ async fn run_new_pods(state: Arc<State>, pods: Vec<PodTask>) {
         .for_each(|p| {
             let runner = TaskRunner::from_task(p.clone()).unwrap();
             let name = runner.task.metadata.name.clone();
-            match pod::run_pod_from_taskrunner(runner) {
+            match pod::sync_run_pod_from_taskrunner(runner) {
                 Ok(result) => {
                     match build_probe_registrations(&result.pod_task, &result.pod_ip) {
                         Ok(registrations) => {

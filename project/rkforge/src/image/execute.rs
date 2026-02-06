@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     image::context::StageContext as Context,
-    pull::pull_or_get_image,
+    pull::sync_pull_or_get_image,
     storage::full_image_ref,
     task::{CopyTask, RunTask, TaskExec},
 };
@@ -57,7 +57,7 @@ impl<P: AsRef<Path>> InstructionExt<P> for FromInstruction {
 
         let img_ref = full_image_ref(&image_parsed.image, image_parsed.tag.as_deref());
 
-        let (_, layers) = pull_or_get_image(&img_ref, None::<String>)?;
+        let (_, layers) = sync_pull_or_get_image(&img_ref, None::<String>)?;
 
         // add image alias mapping
         if let Some(alias) = &self.alias {

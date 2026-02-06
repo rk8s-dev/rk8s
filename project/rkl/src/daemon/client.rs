@@ -258,7 +258,7 @@ pub async fn run_once(
                                 }
                             };
 
-                            match pod::run_pod_from_taskrunner(runner) {
+                            match pod::run_pod_from_taskrunner(runner).await {
                                 Ok(result) => {
                                     let pod_name = result.pod_task.metadata.name.clone();
 
