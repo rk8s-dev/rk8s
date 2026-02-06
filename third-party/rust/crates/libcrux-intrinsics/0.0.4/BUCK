@@ -31,7 +31,10 @@ rust_library(
         "@$(location :libcrux-intrinsics-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/hax-lib/0.3.5:hax-lib"],
+    deps = [
+        "//third-party/rust/crates/core-models/0.0.4:core-models",
+        "//third-party/rust/crates/hax-lib/0.3.5:hax-lib",
+    ],
 )
 
 rust_binary(

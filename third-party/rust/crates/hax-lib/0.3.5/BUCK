@@ -35,7 +35,11 @@ rust_library(
         "@$(location :hax-lib-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/hax-lib-macros/0.3.5:hax-lib-macros"],
+    deps = [
+        "//third-party/rust/crates/hax-lib-macros/0.3.5:hax-lib-macros",
+        "//third-party/rust/crates/num-bigint/0.4.6:num-bigint",
+        "//third-party/rust/crates/num-traits/0.2.19:num-traits",
+    ],
 )
 
 rust_binary(

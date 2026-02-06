@@ -34,10 +34,14 @@ rust_library(
         "@$(location :getrandom-build-script-run[rustc_flags])",
         "@$(location :getrandom-manifest[env_flags])",
     ],
+    os_deps = {
+        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
-        "//third-party/rust/crates/libc/0.2.178:libc",
+        "//third-party/rust/crates/r-efi/5.3.0:r-efi",
     ],
 )
 
