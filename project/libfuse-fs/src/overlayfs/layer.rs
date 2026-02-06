@@ -59,7 +59,8 @@ pub trait Layer: Filesystem {
         // Try to create whiteout char device with 0/0 device number.
         let dev = libc::makedev(0, 0);
         let mode = libc::S_IFCHR | 0o777;
-        self.mknod(ctx, ino, name, mode, dev as u32).await
+        #[allow(clippy::unnecessary_cast)]
+        self.mknod(ctx, ino, name, mode as u32, dev as u32).await
     }
 
     /// Delete whiteout file with name <name>.
@@ -141,10 +142,15 @@ pub trait Layer: Filesystem {
                 }
                 Err(e) => {
                     let ioerror: std::io::Error = e.into();
-                    if let Some(raw_error) = ioerror.raw_os_error()
-                        && raw_error == libc::ENODATA
-                    {
-                        return Ok(false);
+                    #[allow(clippy::collapsible_if)]
+                    if let Some(raw_error) = ioerror.raw_os_error() {
+                        if raw_error == libc::ENODATA || raw_error == libc::ENOENT {
+                            return Ok(false);
+                        }
+                        #[cfg(target_os = "macos")]
+                        if raw_error == libc::ENOATTR || raw_error == libc::EPERM {
+                            return Ok(false);
+                        }
                     }
 
                     Err(e)
@@ -192,8 +198,8 @@ pub(crate) fn is_chardev(st: &FileAttr) -> bool {
 pub(crate) fn is_whiteout(st: &FileAttr) -> bool {
     // A whiteout is created as a character device with 0/0 device number.
     // See ref: https://docs.kernel.org/filesystems/overlayfs.html#whiteouts-and-opaque-directories
-    let major = libc::major(st.rdev.into());
-    let minor = libc::minor(st.rdev.into());
+    let major = libc::major(st.rdev as libc::dev_t);
+    let minor = libc::minor(st.rdev as libc::dev_t);
     is_chardev(st) && major == 0 && minor == 0
 }
 

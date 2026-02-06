@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 
 /// Directory entry type enumeration
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum EntryType {
     #[sea_orm(num_value = 0)]

@@ -1,3 +1,4 @@
+#![allow(clippy::unnecessary_cast)]
 pub mod bind_mount;
 pub mod mapping;
 pub mod open_options;
@@ -6,6 +7,9 @@ use tracing::error;
 
 use std::{fmt::Display, path::PathBuf};
 
+#[cfg(target_os = "macos")]
+use libc::stat as stat64;
+#[cfg(target_os = "linux")]
 use libc::stat64;
 use rfuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use serde::{Deserialize, Serialize};
@@ -66,7 +70,7 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
         ctime: Timestamp::new(stat.st_ctime, stat.st_ctime_nsec.try_into().unwrap()),
         #[cfg(target_os = "macos")]
         crtime: Timestamp::new(0, 0), // Set crtime to 0 for non-macOS platforms
-        kind: filetype_from_mode(stat.st_mode),
+        kind: filetype_from_mode(stat.st_mode as u32),
         perm: (stat.st_mode & 0o7777) as u16,
         nlink: stat.st_nlink as u32,
         uid: stat.st_uid,
@@ -79,20 +83,38 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
 }
 
 pub fn filetype_from_mode(st_mode: u32) -> FileType {
-    let st_mode = st_mode & libc::S_IFMT;
-    match st_mode {
-        libc::S_IFIFO => FileType::NamedPipe,
-        libc::S_IFCHR => FileType::CharDevice,
-        libc::S_IFBLK => FileType::BlockDevice,
-        libc::S_IFDIR => FileType::Directory,
-        libc::S_IFREG => FileType::RegularFile,
-        libc::S_IFLNK => FileType::Symlink,
-        libc::S_IFSOCK => FileType::Socket,
-        _ => {
-            error!("wrong st mode : {st_mode}");
-            unreachable!();
-        }
+    let st_mode = st_mode & (libc::S_IFMT as u32);
+    if st_mode == (libc::S_IFIFO as u32) {
+        return FileType::NamedPipe;
     }
+    if st_mode == (libc::S_IFCHR as u32) {
+        return FileType::CharDevice;
+    }
+    if st_mode == (libc::S_IFBLK as u32) {
+        return FileType::BlockDevice;
+    }
+    if st_mode == (libc::S_IFDIR as u32) {
+        return FileType::Directory;
+    }
+    if st_mode == (libc::S_IFREG as u32) {
+        return FileType::RegularFile;
+    }
+    if st_mode == (libc::S_IFLNK as u32) {
+        return FileType::Symlink;
+    }
+    if st_mode == (libc::S_IFSOCK as u32) {
+        return FileType::Socket;
+    }
+    // Handle whiteout files on macOS (0xE000 / 57344)
+    // rfuse3 doesn't seem to have a specific Whiteout variant exposed or we don't have it imported.
+    // Treating as regular file or simply not panicking.
+    // Ideally we should filter these out if they are not real files, or map to closest.
+    #[cfg(target_os = "macos")]
+    if st_mode == 0xE000 {
+        return FileType::RegularFile;
+    }
+    error!("wrong st mode : {st_mode}");
+    unreachable!();
 }
 #[cfg(test)]
 mod tests {

@@ -29,8 +29,23 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
             Instruction::Cmd(inst) => inst.execute(ctx),
             Instruction::Copy(inst) => inst.execute(ctx),
             Instruction::Env(inst) => inst.execute(ctx),
-            _ => {
-                bail!("Instruction {:?} is not supported", self);
+            // TODO: These instructions are currently ignored but should be properly
+            // recorded in the image config for OCI compliance
+            Instruction::Misc(misc) => {
+                let instr_name = misc.instruction.content.to_uppercase();
+                match instr_name.as_str() {
+                    "EXPOSE" | "STOPSIGNAL" | "WORKDIR" | "USER" | "VOLUME" | "HEALTHCHECK"
+                    | "SHELL" | "ONBUILD" => {
+                        tracing::warn!(
+                            "Instruction {} is ignored (not yet implemented)",
+                            instr_name
+                        );
+                        Ok(())
+                    }
+                    _ => {
+                        bail!("Instruction {:?} is not supported", self);
+                    }
+                }
             }
         }
     }
@@ -90,16 +105,19 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
             }
             ShellOrExecExpr::Shell(shell_expr) => {
                 command_args.extend(vec!["/bin/sh".to_owned(), "-c".to_owned()]);
+                let mut script = String::new();
                 for component in shell_expr.components.iter() {
                     match component {
                         BreakableStringComponent::Comment(_) => {}
                         BreakableStringComponent::String(spanned_string) => {
-                            command_args.push(spanned_string.content.as_str().to_owned());
+                            script.push_str(&spanned_string.content);
                         }
                     }
                 }
+                command_args.push(script);
             }
         }
+        // println!("Executing RUN command: {:?}", command_args);
 
         let envp: Vec<String> = ctx
             .image_config

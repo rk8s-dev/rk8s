@@ -1,4 +1,11 @@
 //! Local filesystem backend used to mock an object store (implements `ObjectBackend`).
+//!
+
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
+
+#[cfg(windows)]
+use std::os::windows::fs::FileExt;
 
 use crate::cadapter::client::ObjectBackend;
 use anyhow::Result;
@@ -11,6 +18,17 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::field;
+
+fn can_block_in_place() -> bool {
+    tokio::runtime::Handle::try_current()
+        .map(|handle| {
+            matches!(
+                handle.runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread
+            )
+        })
+        .unwrap_or(false)
+}
 
 #[derive(Clone)]
 pub struct LocalFsBackend {
@@ -43,6 +61,7 @@ impl LocalFsBackend {
 #[async_trait]
 impl ObjectBackend for LocalFsBackend {
     #[tracing::instrument(
+        name = "LocalFs.put_object_vectored",
         level = "trace",
         skip(self, chunks),
         fields(
@@ -141,17 +160,21 @@ impl ObjectBackend for LocalFsBackend {
 
     async fn put_object(&self, key: &str, data: &[u8]) -> Result<()> {
         let path = self.path_for(key);
+
         if let Some(dir) = path.parent() {
             self.ensure_dir(dir).await?;
         }
+
         let mut f = fs::File::create(path).await?;
         f.write_all(data).await?;
         f.flush().await?;
         Ok(())
     }
 
+    #[tracing::instrument(name = "LocalFsBackend.get_object", level = "trace", skip(self))]
     async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>> {
         let path = self.path_for(key);
+
         match fs::read(path).await {
             Ok(buf) => Ok(Some(buf)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -159,8 +182,66 @@ impl ObjectBackend for LocalFsBackend {
         }
     }
 
+    #[tracing::instrument(
+        name = "LocalFsBackend.get_object_range",
+        level = "trace",
+        skip(self, buf),
+        fields(key, offset, len = buf.len())
+    )]
+    async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let path = self.path_for(key);
+        let len = buf.len();
+
+        if !can_block_in_place() {
+            let read = tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>> {
+                let file = match std::fs::File::open(&path) {
+                    Ok(file) => file,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                    Err(e) => return Err(e.into()),
+                };
+                let mut local = vec![0u8; len];
+                let n = file.read_at(&mut local, offset)?;
+                local.truncate(n);
+                Ok(Some(local))
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("blocking get_object_range failed: {e}"))??;
+
+            if let Some(data) = read {
+                let n = data.len();
+                buf[..n].copy_from_slice(&data);
+                return Ok(n);
+            }
+            return Ok(0);
+        }
+
+        // Use block_in_place + read_at to fill caller's buffer directly (avoid alloc+copy).
+        tokio::task::block_in_place(|| -> Result<usize> {
+            let file = match std::fs::File::open(&path) {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+                Err(e) => return Err(e.into()),
+            };
+
+            let mut read = 0usize;
+            while read < len {
+                let n = file.read_at(&mut buf[read..], offset + read as u64)?;
+                if n == 0 {
+                    break;
+                }
+                read += n;
+            }
+            Ok(read)
+        })
+    }
+
     async fn get_etag(&self, key: &str) -> Result<String> {
         let path = self.path_for(key);
+
         match fs::metadata(path).await {
             Ok(metadata) => {
                 let modified = metadata.modified()?;
@@ -173,6 +254,7 @@ impl ObjectBackend for LocalFsBackend {
 
     async fn delete_object(&self, key: &str) -> Result<()> {
         let path = self.path_for(key);
+
         match fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),

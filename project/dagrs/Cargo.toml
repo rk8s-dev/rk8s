@@ -5,7 +5,7 @@ authors = [
     "Xiaolong Fu <njufxl@gmail.com>",
     "Zhilei Qiu <qzl2503687@gmail.com>",
 ]
-version = "0.5.2"
+version = "0.6.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Dagrs follows the concept of Flow-based Programming and is suitable for the execution of multiple tasks with graph-like dependencies. Dagrs has the characteristics of high performance and asynchronous execution. It provides users with a convenient programming interface."

@@ -5097,13 +5097,19 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
             // Currently we only encounter this case in xfstests.
             use std::borrow::Cow;
             const ALIGNMENT: usize = 4096;
-            let mut aligned_buf =
-                aligned_box::AlignedBox::<[u8]>::slice_from_default(ALIGNMENT, data.len()).unwrap();
-            aligned_buf.copy_from_slice(&data);
-            let aligned_data: Cow<[u8]> = if data.as_ptr().align_offset(ALIGNMENT) == 0 {
-                Cow::Borrowed(&data)
+
+            let mut _owned = None;
+
+            let aligned_data: Cow<[u8]> = if data.as_ptr().align_offset(ALIGNMENT) != 0 {
+                tracing::warn!("The data is not 4096 bytes aligned");
+                let mut buf =
+                    aligned_box::AlignedBox::<[u8]>::slice_from_default(ALIGNMENT, data.len())
+                        .unwrap();
+                buf.copy_from_slice(&data);
+                _owned = Some(buf);
+                Cow::Borrowed(_owned.as_ref().unwrap())
             } else {
-                Cow::Borrowed(&aligned_buf)
+                Cow::Borrowed(&data)
             };
 
             let reply_write = match fs

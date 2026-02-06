@@ -4,7 +4,7 @@ use crate::chuck::SliceDesc;
 use crate::meta::client::session::SessionInfo;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{
-    DirEntry, FileAttr, FileType, MetaError, OpenFlags, SetAttrFlags, SetAttrRequest,
+    AclRule, DirEntry, FileAttr, FileType, MetaError, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
 use crate::vfs::handles::DirHandle;
@@ -44,6 +44,18 @@ pub trait MetaLayer: Send + Sync {
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError>;
 
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError>;
+
+    async fn lookup_path_with_attr(
+        &self,
+        path: &str,
+    ) -> Result<Option<(i64, FileAttr)>, MetaError> {
+        let (ino, _) = match self.lookup_path(path).await? {
+            Some(result) => result,
+            None => return Ok(None),
+        };
+        let attr = self.stat(ino).await?.ok_or(MetaError::NotFound(ino))?;
+        Ok(Some((ino, attr)))
+    }
 
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError>;
 
@@ -228,4 +240,23 @@ pub trait MetaLayer: Send + Sync {
         range: FileLockRange,
         pid: u32,
     ) -> Result<(), MetaError>;
+
+    // ---------- Extended attribute & ACL ----------
+    async fn set_xattr(
+        &self,
+        inode: i64,
+        name: &str,
+        value: &[u8],
+        flags: u32,
+    ) -> Result<(), MetaError>;
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError>;
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError>;
+    async fn remove_xattr(&self, inode: i64, name: &str) -> Result<(), MetaError>;
+    async fn set_acl(&self, inode: i64, rule: AclRule) -> Result<(), MetaError>;
+    async fn get_acl(
+        &self,
+        inode: i64,
+        acl_type: u8,
+        acl_id: u32,
+    ) -> Result<Option<AclRule>, MetaError>;
 }

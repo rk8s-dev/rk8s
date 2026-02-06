@@ -8,6 +8,7 @@ pub(crate) mod locks_meta;
 pub(crate) mod plock_meta;
 pub(crate) mod session_meta;
 pub(crate) mod slice_meta;
+pub(crate) mod xattr_meta;
 
 pub(crate) use access_meta::{Entity as AccessMeta, Model as AccessMetaModel};
 pub(crate) use content_meta::{Entity as ContentMeta, EntryType, Model as ContentMetaModel};
@@ -17,3 +18,4 @@ pub(crate) use locks_meta::Entity as LocksMeta;
 pub(crate) use plock_meta::Entity as PlockMeta;
 #[allow(unused_imports)]
 pub(crate) use slice_meta::{Entity as SliceMeta, Model as SliceMetaModel};
+pub(crate) use xattr_meta::Entity as XattrMeta;

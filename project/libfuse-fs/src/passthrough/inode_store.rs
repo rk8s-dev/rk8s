@@ -1,6 +1,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+#![allow(clippy::useless_conversion)]
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -11,7 +12,10 @@ use super::{Inode, InodeData, InodeHandle};
 #[derive(Clone, Copy, Default, PartialOrd, Ord, PartialEq, Eq, Debug, Hash)]
 /// Identify an inode in `PassthroughFs` by `InodeId`.
 pub struct InodeId {
+    #[cfg(target_os = "linux")]
     pub ino: libc::ino64_t,
+    #[cfg(target_os = "macos")]
+    pub ino: libc::ino_t,
     pub dev: libc::dev_t,
     pub mnt: u64,
 }
@@ -78,8 +82,7 @@ impl InodeStore {
         // if let Some(old_data) = self.data.insert(data.inode, data.clone()) {
         //     warn!(
         //         "overwriting `data` entry for inode {}. Old id: {:?}, new id: {:?}",
-        //         data.inode,
-        //         old_data.id,
+        //         data.id,
         //         data.id
         //     );
         // }
@@ -173,7 +176,7 @@ mod test {
             file_or_handle1,
             2,
             id1,
-            inode_stat1.st.st_mode,
+            inode_stat1.st.st_mode.into(),
             inode_stat1.btime.unwrap(),
         );
         let data2 = InodeData::new(
@@ -181,7 +184,7 @@ mod test {
             file_or_handle2,
             2,
             id2,
-            inode_stat2.st.st_mode,
+            inode_stat2.st.st_mode.into(),
             inode_stat2.btime.unwrap(),
         );
         let data1 = Arc::new(data1);

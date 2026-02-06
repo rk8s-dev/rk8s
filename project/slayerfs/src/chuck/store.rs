@@ -23,21 +23,6 @@ use tokio::{
 #[async_trait]
 // ensure offset_in_block + data.len() <= block_size
 pub trait BlockStore {
-    /// Write a new block from a set of byte segments without concatenating them.
-    /// The result of it should be equal to concatenate these bytes and call [`write_range`].
-    async fn write_vectored(
-        &self,
-        key: BlockKey,
-        offset: u64,
-        chunks: Vec<Bytes>,
-    ) -> anyhow::Result<u64> {
-        let data = chunks
-            .into_iter()
-            .flat_map(|e| e.to_vec())
-            .collect::<Vec<_>>();
-        self.write_range(key, offset, &data).await
-    }
-
     async fn write_range(&self, key: BlockKey, offset: u64, data: &[u8]) -> anyhow::Result<u64>;
 
     /// Write a new block without reading any existing data.
@@ -53,7 +38,11 @@ pub trait BlockStore {
         offset: u64,
         chunks: Vec<Bytes>,
     ) -> anyhow::Result<u64> {
-        self.write_vectored(key, offset, chunks).await
+        let data = chunks
+            .into_iter()
+            .flat_map(|e| e.to_vec())
+            .collect::<Vec<_>>();
+        self.write_fresh_range(key, offset, &data).await
     }
 
     /// Write a new block without reading any existing data. See write_fresh_vectored for details.
@@ -105,8 +94,8 @@ impl BlockStore for InMemoryBlockStore {
         Ok(data.len() as u64)
     }
 
+    // Caller is responsible for zero-filling buf; this method only overwrites existing bytes.
     async fn read_range(&self, key: BlockKey, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
-        buf.fill(0);
         let guard = self.map.read().await;
         if let Some(src) = guard.get(&key) {
             let start = offset.as_usize();
@@ -178,60 +167,6 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
 
 #[async_trait]
 impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
-    async fn write_vectored(
-        &self,
-        key: BlockKey,
-        offset: u64,
-        chunks: Vec<Bytes>,
-    ) -> anyhow::Result<u64> {
-        let key_str = Self::key_for(key);
-        let total_len = chunks.iter().map(|c| c.len()).sum::<usize>();
-        if total_len == 0 {
-            return Ok(0);
-        }
-
-        let existing = self
-            .client
-            .get_object(&key_str)
-            .await
-            .map_err(|e| anyhow::anyhow!("object store get failed: {:?}", e))?;
-
-        let offset_usize = offset.as_usize();
-        let mut parts: Vec<Bytes> = Vec::new();
-
-        if let Some(existing_vec) = existing {
-            let existing_bytes = Bytes::from(existing_vec);
-            let existing_len = existing_bytes.len();
-
-            let prefix_take = offset_usize.min(existing_len);
-            if prefix_take > 0 {
-                parts.push(existing_bytes.slice(0..prefix_take));
-            }
-            if existing_len < offset_usize {
-                parts.extend(make_zero_bytes(offset_usize - existing_len));
-            }
-
-            parts.extend(chunks.iter().cloned());
-
-            let end = offset_usize + total_len;
-            if existing_len > end {
-                parts.push(existing_bytes.slice(end..existing_len));
-            }
-        } else {
-            if offset_usize > 0 {
-                parts.extend(make_zero_bytes(offset_usize));
-            }
-            parts.extend(chunks.iter().cloned());
-        }
-
-        self.client
-            .put_object_vectored(&key_str, parts)
-            .await
-            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
-
-        Ok(total_len as u64)
-    }
-
     async fn write_range(&self, key: BlockKey, offset: u64, data: &[u8]) -> anyhow::Result<u64> {
         let key_str = Self::key_for(key);
         let mut buf = self
@@ -255,7 +190,7 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         Ok(data.len() as u64)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, chunks), fields(key = ?key, offset, chunk_count = chunks.len()))]
+    #[tracing::instrument(name = "ObjectBlockStore.write_fresh_vectored", level = "trace", skip(self, chunks), fields(key = ?key, offset, chunk_count = chunks.len()))]
     async fn write_fresh_vectored(
         &self,
         key: BlockKey,
@@ -309,29 +244,21 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         Ok(data.len() as u64)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, buf), fields(key = ?key, offset, len = buf.len(), block_len = tracing::field::Empty))]
+    #[tracing::instrument(
+        name = "ObjectBlockStore.read_range",
+        level = "trace",
+        skip(self, buf),
+        fields(key = ?key, offset, len = buf.len(), read_len = tracing::field::Empty)
+    )]
+    // Caller is responsible for zero-filling buf; this method only overwrites existing bytes.
     async fn read_range(&self, key: BlockKey, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
         let key_str = Self::key_for(key);
-        let len = buf.len();
-        buf.fill(0);
-        let start = offset.as_usize();
-        let end = start + len;
-
-        let block = match self
+        let read = self
             .client
-            .get_object(&key_str)
+            .get_object_range(&key_str, offset, buf)
             .await
-            .map_err(|e| anyhow::anyhow!("object store get failed: {:?}", e))?
-        {
-            Some(data) => data,
-            None => vec![0u8; end],
-        };
-
-        tracing::Span::current().record("block_len", block.len());
-        let copy_end = end.min(block.len());
-        if copy_end > start {
-            buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
-        }
+            .map_err(|e| anyhow::anyhow!("object store get range failed: {key_str}, {e:?}"))?;
+        tracing::Span::current().record("read_len", read);
         Ok(())
     }
 
@@ -353,9 +280,6 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
 /// Convenience alias: BlockStore backed by the real S3 backend.
 #[allow(dead_code)]
 pub type S3BlockStore = ObjectBlockStore<crate::cadapter::s3::S3Backend>;
-/// Convenience alias: BlockStore backed by the Rustfs-like backend.
-#[allow(dead_code)]
-pub type RustfsBlockStore = ObjectBlockStore<crate::cadapter::rustfs::RustfsLikeBackend>;
 /// Convenience alias: BlockStore backed by the LocalFs mock backend.
 #[allow(dead_code)]
 pub type LocalFsBlockStore = ObjectBlockStore<crate::cadapter::localfs::LocalFsBackend>;

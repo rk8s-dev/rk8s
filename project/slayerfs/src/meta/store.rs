@@ -293,7 +293,7 @@ pub enum MetaError {
     Io(#[from] std::io::Error),
 
     #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+    Serialization(String),
 
     #[error("Config error: {0}")]
     Config(String),
@@ -721,6 +721,16 @@ pub trait MetaStore: Send + Sync {
         flags: u32,
     ) -> Result<(), MetaError> {
         let _ = (inode, name, value, flags);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError> {
+        let _ = (inode, name);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError> {
+        let _ = inode;
         Err(MetaError::NotImplemented)
     }
 

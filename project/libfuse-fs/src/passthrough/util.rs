@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::useless_conversion)]
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 // Copyright (C) 2023 Alibaba Cloud. All rights reserved.
@@ -12,10 +14,18 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
-use libc::stat64;
-use rfuse3::raw::reply::FileAttr;
-use rfuse3::{FileType, Timestamp};
+use rfuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use tracing::error;
+
+#[cfg(target_os = "macos")]
+#[allow(non_camel_case_types)]
+pub type stat64 = libc::stat;
+
+#[cfg(target_os = "macos")]
+pub const AT_EMPTY_PATH: i32 = 0;
+
+#[cfg(target_os = "linux")]
+pub use libc::{AT_EMPTY_PATH, stat64};
 
 use super::inode_store::InodeId;
 use super::{CURRENT_DIR_CSTR, EMPTY_CSTR, MAX_HOST_INO, PARENT_DIR_CSTR};
@@ -40,6 +50,12 @@ pub struct UniqueInodeGenerator {
     next_virtual_inode: AtomicU64,
 }
 
+impl Default for UniqueInodeGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UniqueInodeGenerator {
     pub fn new() -> Self {
         UniqueInodeGenerator {
@@ -49,7 +65,15 @@ impl UniqueInodeGenerator {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub fn get_unique_inode(&self, id: &InodeId) -> io::Result<libc::ino64_t> {
+        self.get_unique_inode_impl(id)
+    }
+    #[cfg(target_os = "macos")]
+    pub fn get_unique_inode(&self, id: &InodeId) -> io::Result<libc::ino_t> {
+        self.get_unique_inode_impl(id)
+    }
+    fn get_unique_inode_impl(&self, id: &InodeId) -> io::Result<u64> {
         let unique_id = {
             let id: DevMntIDPair = DevMntIDPair(id.dev, id.mnt);
             let mut id_map_guard = self.dev_mntid_map.lock().unwrap();
@@ -83,7 +107,7 @@ impl UniqueInodeGenerator {
     }
 
     #[cfg(test)]
-    fn decode_unique_inode(&self, inode: libc::ino64_t) -> io::Result<InodeId> {
+    fn decode_unique_inode(&self, inode: u64) -> io::Result<InodeId> {
         use super::VFS_MAX_INO;
 
         if inode > VFS_MAX_INO {
@@ -164,35 +188,63 @@ pub fn reopen_fd_through_proc(
     flags: libc::c_int,
     proc_self_fd: &impl AsRawFd,
 ) -> io::Result<File> {
-    let name = CString::new(format!("{}", fd.as_raw_fd()).as_str())?;
     // Clear the `O_NOFOLLOW` flag if it is set since we need to follow the `/proc/self/fd` symlink
     // to get the file.
-    openat(
-        proc_self_fd,
-        &name,
-        flags & !libc::O_NOFOLLOW & !libc::O_CREAT,
-        0,
-    )
+    #[cfg(target_os = "macos")]
+    {
+        let mut buf = [0u8; libc::MAXPATHLEN as usize];
+        let res = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETPATH, buf.as_mut_ptr()) };
+        if res < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let path = unsafe { CStr::from_ptr(buf.as_ptr() as *const libc::c_char) };
+        let flags = flags & !libc::O_NOFOLLOW & !libc::O_CREAT & !libc::O_DIRECTORY;
+        // On macOS, F_GETPATH returns the absolute path, so openat will ignore the dir_fd.
+        // We use proc_self_fd as a valid FD placeholder.
+        openat(proc_self_fd, path, flags, 0)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let name = CString::new(format!("{}", fd.as_raw_fd()).as_str())?;
+        let flags = flags & !libc::O_NOFOLLOW & !libc::O_CREAT;
+        openat(proc_self_fd, &name, flags, 0)
+    }
 }
 
-pub fn stat_fd(dir: &impl AsRawFd, path: Option<&CStr>) -> io::Result<libc::stat64> {
+pub fn stat_fd(dir: &impl AsRawFd, path: Option<&CStr>) -> io::Result<stat64> {
     // Safe because this is a constant value and a valid C string.
     let pathname =
         path.unwrap_or_else(|| unsafe { CStr::from_bytes_with_nul_unchecked(EMPTY_CSTR) });
-    let mut st = MaybeUninit::<libc::stat64>::zeroed();
+    let mut stat = MaybeUninit::<stat64>::zeroed();
     let dir_fd = dir.as_raw_fd();
-    // Safe because the kernel will only write data in `st` and we check the return value.
-    let res = unsafe {
-        libc::fstatat64(
-            dir_fd,
-            pathname.as_ptr(),
-            st.as_mut_ptr(),
-            libc::AT_EMPTY_PATH | libc::AT_SYMLINK_NOFOLLOW,
-        )
+    // Safe because the kernel will only write data in `stat` and we check the return value.
+    let res = match () {
+        #[cfg(target_os = "linux")]
+        () => unsafe {
+            libc::fstatat64(
+                dir_fd,
+                pathname.as_ptr(),
+                stat.as_mut_ptr(),
+                libc::AT_EMPTY_PATH | libc::AT_SYMLINK_NOFOLLOW,
+            )
+        },
+        #[cfg(target_os = "macos")]
+        () => unsafe {
+            if pathname.to_bytes().is_empty() {
+                libc::fstat(dir_fd, stat.as_mut_ptr())
+            } else {
+                libc::fstatat(
+                    dir_fd,
+                    pathname.as_ptr(),
+                    stat.as_mut_ptr(),
+                    AT_EMPTY_PATH | libc::AT_SYMLINK_NOFOLLOW,
+                )
+            }
+        },
     };
     if res >= 0 {
         // Safe because the kernel guarantees that the struct is now fully initialized.
-        Ok(unsafe { st.assume_init() })
+        Ok(unsafe { stat.assume_init() })
     } else {
         Err(io::Error::last_os_error())
     }
@@ -202,12 +254,13 @@ pub fn stat_fd(dir: &impl AsRawFd, path: Option<&CStr>) -> io::Result<libc::stat
 pub fn is_safe_inode(mode: u32) -> bool {
     // Only regular files and directories are considered safe to be opened from the file
     // server without O_PATH.
-    matches!(mode & libc::S_IFMT, libc::S_IFREG | libc::S_IFDIR)
+    let kind = mode & (libc::S_IFMT as u32);
+    kind == (libc::S_IFREG as u32) || kind == (libc::S_IFDIR as u32)
 }
 
 /// Returns true if the mode is for a directory.
 pub fn is_dir(mode: u32) -> bool {
-    (mode & libc::S_IFMT) == libc::S_IFDIR
+    (mode & (libc::S_IFMT as u32)) == (libc::S_IFDIR as u32)
 }
 
 pub fn ebadf() -> io::Error {
@@ -236,8 +289,8 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
         ctime: Timestamp::new(stat.st_ctime, stat.st_ctime_nsec.try_into().unwrap()),
         #[cfg(target_os = "macos")]
         crtime: Timestamp::new(0, 0), // Set crtime to 0 for non-macOS platforms
-        kind: filetype_from_mode(stat.st_mode),
-        perm: stat.st_mode as u16 & 0o7777,
+        kind: filetype_from_mode(stat.st_mode.into()),
+        perm: (stat.st_mode & 0o7777) as u16,
         nlink: stat.st_nlink as u32,
         uid: stat.st_uid,
         gid: stat.st_gid,
@@ -249,20 +302,30 @@ pub fn convert_stat64_to_file_attr(stat: stat64) -> FileAttr {
 }
 
 pub fn filetype_from_mode(st_mode: u32) -> FileType {
-    let st_mode = st_mode & 0xfff000;
-    match st_mode {
-        libc::S_IFIFO => FileType::NamedPipe,
-        libc::S_IFCHR => FileType::CharDevice,
-        libc::S_IFBLK => FileType::BlockDevice,
-        libc::S_IFDIR => FileType::Directory,
-        libc::S_IFREG => FileType::RegularFile,
-        libc::S_IFLNK => FileType::Symlink,
-        libc::S_IFSOCK => FileType::Socket,
-        _ => {
-            error!("wrong st mode : {st_mode}");
-            unreachable!();
-        }
+    let st_mode = st_mode & (libc::S_IFMT as u32);
+    if st_mode == (libc::S_IFIFO as u32) {
+        return FileType::NamedPipe;
     }
+    if st_mode == (libc::S_IFCHR as u32) {
+        return FileType::CharDevice;
+    }
+    if st_mode == (libc::S_IFBLK as u32) {
+        return FileType::BlockDevice;
+    }
+    if st_mode == (libc::S_IFDIR as u32) {
+        return FileType::Directory;
+    }
+    if st_mode == (libc::S_IFREG as u32) {
+        return FileType::RegularFile;
+    }
+    if st_mode == (libc::S_IFLNK as u32) {
+        return FileType::Symlink;
+    }
+    if st_mode == (libc::S_IFSOCK as u32) {
+        return FileType::Socket;
+    }
+    error!("wrong st mode : {st_mode}");
+    unreachable!();
 }
 
 /// Validate a path component. A well behaved FUSE client should never send dot, dotdot and path
@@ -298,10 +361,11 @@ pub fn osstr_to_cstr(os_str: &OsStr) -> Result<CString, std::ffi::NulError> {
     Ok(c_string)
 }
 
+#[cfg(target_os = "linux")]
 macro_rules! scoped_cred {
     ($name:ident, $ty:ty, $syscall_nr:expr) => {
         #[derive(Debug)]
-        pub(crate) struct $name;
+        pub struct $name;
 
         impl $name {
             // Changes the effective uid/gid of the current thread to `val`.  Changes
@@ -348,8 +412,28 @@ macro_rules! scoped_cred {
         }
     };
 }
+#[cfg(target_os = "linux")]
 scoped_cred!(ScopedUid, libc::uid_t, libc::SYS_setresuid);
+#[cfg(target_os = "linux")]
 scoped_cred!(ScopedGid, libc::gid_t, libc::SYS_setresgid);
+
+// Dummy implementation for macOS (or use setreuid/setregid if needed, but for now stub to compile)
+#[cfg(target_os = "macos")]
+pub struct ScopedUid;
+#[cfg(target_os = "macos")]
+impl ScopedUid {
+    fn new(_: libc::uid_t) -> io::Result<Option<Self>> {
+        Ok(None)
+    }
+}
+#[cfg(target_os = "macos")]
+pub struct ScopedGid;
+#[cfg(target_os = "macos")]
+impl ScopedGid {
+    fn new(_: libc::gid_t) -> io::Result<Option<Self>> {
+        Ok(None)
+    }
+}
 
 pub fn set_creds(
     uid: libc::uid_t,
@@ -366,34 +450,63 @@ mod tests {
 
     #[test]
     fn test_is_safe_inode() {
-        let mode = libc::S_IFREG;
+        let mut mode = (libc::S_IFDIR as u32) | 0o755;
         assert!(is_safe_inode(mode));
 
-        let mode = libc::S_IFDIR;
+        mode = (libc::S_IFREG as u32) | 0o755;
         assert!(is_safe_inode(mode));
 
-        let mode = libc::S_IFBLK;
+        mode = (libc::S_IFLNK as u32) | 0o755;
         assert!(!is_safe_inode(mode));
 
-        let mode = libc::S_IFCHR;
+        mode = (libc::S_IFCHR as u32) | 0o755;
         assert!(!is_safe_inode(mode));
 
-        let mode = libc::S_IFIFO;
+        mode = (libc::S_IFBLK as u32) | 0o755;
         assert!(!is_safe_inode(mode));
 
-        let mode = libc::S_IFLNK;
+        mode = (libc::S_IFIFO as u32) | 0o755;
         assert!(!is_safe_inode(mode));
 
-        let mode = libc::S_IFSOCK;
+        mode = (libc::S_IFSOCK as u32) | 0o755;
         assert!(!is_safe_inode(mode));
+
+        assert_eq!(
+            filetype_from_mode((libc::S_IFIFO as u32) | 0o755),
+            FileType::NamedPipe
+        );
+        assert_eq!(
+            filetype_from_mode((libc::S_IFCHR as u32) | 0o755),
+            FileType::CharDevice
+        );
+        assert_eq!(
+            filetype_from_mode((libc::S_IFBLK as u32) | 0o755),
+            FileType::BlockDevice
+        );
+        assert_eq!(
+            filetype_from_mode((libc::S_IFDIR as u32) | 0o755),
+            FileType::Directory
+        );
+        assert_eq!(
+            filetype_from_mode((libc::S_IFREG as u32) | 0o755),
+            FileType::RegularFile
+        );
+        assert_eq!(
+            filetype_from_mode((libc::S_IFLNK as u32) | 0o755),
+            FileType::Symlink
+        );
+        assert_eq!(
+            filetype_from_mode((libc::S_IFSOCK as u32) | 0o755),
+            FileType::Socket
+        );
     }
 
     #[test]
     fn test_is_dir() {
-        let mode = libc::S_IFREG;
+        let mode = libc::S_IFREG as u32;
         assert!(!is_dir(mode));
 
-        let mode = libc::S_IFDIR;
+        let mode = libc::S_IFDIR as u32;
         assert!(is_dir(mode));
     }
 
@@ -461,7 +574,7 @@ mod tests {
             let generator = UniqueInodeGenerator::new();
             let inode_alt_key = InodeId {
                 ino: MAX_HOST_INO + 1,
-                dev: u64::MAX,
+                dev: u64::MAX as libc::dev_t,
                 mnt: u64::MAX,
             };
             let unique_inode = generator.get_unique_inode(&inode_alt_key).unwrap();
@@ -472,7 +585,7 @@ mod tests {
 
             let inode_alt_key = InodeId {
                 ino: MAX_HOST_INO + 2,
-                dev: u64::MAX,
+                dev: u64::MAX as libc::dev_t,
                 mnt: u64::MAX,
             };
             let unique_inode = generator.get_unique_inode(&inode_alt_key).unwrap();
@@ -483,7 +596,7 @@ mod tests {
 
             let inode_alt_key = InodeId {
                 ino: MAX_HOST_INO + 3,
-                dev: u64::MAX,
+                dev: u64::MAX as libc::dev_t,
                 mnt: 0,
             };
             let unique_inode = generator.get_unique_inode(&inode_alt_key).unwrap();
@@ -494,7 +607,7 @@ mod tests {
 
             let inode_alt_key = InodeId {
                 ino: u64::MAX,
-                dev: u64::MAX,
+                dev: u64::MAX as libc::dev_t,
                 mnt: u64::MAX,
             };
             let unique_inode = generator.get_unique_inode(&inode_alt_key).unwrap();

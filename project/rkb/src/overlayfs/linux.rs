@@ -17,7 +17,12 @@ pub(super) fn do_mount(
     detach()?;
 
     // Safely construct overlayfs options using byte operations
-    let lower_dirs_bytes: Vec<&[u8]> = lower_dir.iter().map(|p| p.as_os_str().as_bytes()).collect();
+    // According to overlayfs semantics, newest lower layer should be first
+    let lower_dirs_bytes: Vec<&[u8]> = lower_dir
+        .iter()
+        .rev()
+        .map(|p| p.as_os_str().as_bytes())
+        .collect();
     let lower_dir_option = lower_dirs_bytes.join(&b':');
     let mut options = Vec::new();
     options.extend_from_slice(b"lowerdir=");

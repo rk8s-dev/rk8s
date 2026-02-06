@@ -15,14 +15,14 @@ use crate::chuck::{BlockStore, SliceDesc};
 use crate::meta::backoff::backoff;
 use crate::meta::store::MetaError;
 use crate::meta::{MetaLayer, SLICE_ID_KEY};
-use crate::utils::NumCastExt;
+use crate::utils::{NumCastExt, UsageGuard};
+use crate::vfs::Inode;
 use crate::vfs::backend::Backend;
 use crate::vfs::cache::page::CacheSlice;
 use crate::vfs::cache::page::WriteAction as PageWriteAction;
 use crate::vfs::chunk_id_for;
 use crate::vfs::config::WriteConfig;
 use crate::vfs::extract_ino_and_chunk_index;
-use crate::vfs::inode::Inode;
 use crate::vfs::io::split_chunk_spans;
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -80,6 +80,7 @@ pub(crate) struct SliceState {
     uploaded: u64,
     uploading: Option<(usize, usize)>,
     data: CacheSlice,
+    usage: UsageGuard,
     /// Error occurred at background thread.
     err: Option<String>,
     notify: Arc<Notify>,
@@ -88,7 +89,12 @@ pub(crate) struct SliceState {
 }
 
 impl SliceState {
-    pub(crate) fn new(chunk_id: u64, offset: u64, config: Arc<WriteConfig>) -> Self {
+    pub(crate) fn new(
+        chunk_id: u64,
+        offset: u64,
+        config: Arc<WriteConfig>,
+        usage: Arc<AtomicU64>,
+    ) -> Self {
         let now = Instant::now();
         Self {
             state: SliceStatus::Writable,
@@ -98,6 +104,7 @@ impl SliceState {
             uploaded: 0,
             uploading: None,
             data: CacheSlice::new(config),
+            usage: UsageGuard::new(usage),
             err: None,
             notify: Arc::new(Notify::new()),
             started: now,
@@ -221,20 +228,15 @@ where
     }
 
     fn try_write(&self, offset: u64, buf: &[u8]) -> anyhow::Result<bool> {
-        let (wrote, delta) = self.with_mut(|s| match s.can_write(offset, buf.len()) {
+        let wrote = self.with_mut(|s| match s.can_write(offset, buf.len()) {
             Some(action) => {
-                let before = s.data.alloc_bytes();
                 s.write(offset, buf, action)?;
-                let after = s.data.alloc_bytes();
-
-                Ok::<(bool, u64), anyhow::Error>((true, after.saturating_sub(before)))
+                s.usage.update_bytes(s.data.alloc_bytes());
+                Ok::<bool, anyhow::Error>(true)
             }
-            None => Ok::<(bool, u64), anyhow::Error>((false, 0)),
+            None => Ok::<bool, anyhow::Error>(false),
         })?;
 
-        if wrote && delta > 0 {
-            self.shared.add_usage(delta);
-        }
         Ok(wrote)
     }
 
@@ -259,8 +261,8 @@ where
         self.with_mut(|s| {
             s.uploading = None;
             s.uploaded += len;
-            let freed = s.data.release_block(need_release);
-            self.shared.sub_usage(freed);
+            s.data.release_block(need_release);
+            s.usage.update_bytes(s.data.alloc_bytes());
 
             if matches!(s.state, SliceStatus::Readonly | SliceStatus::Failed) && !s.has_idle_block()
             {
@@ -457,6 +459,7 @@ where
                     chunk_id,
                     offset,
                     self.shared.config.clone(),
+                    self.shared.buffer_usage.clone(),
                 )));
                 slices.push_back(slice.clone());
                 slice
@@ -575,34 +578,6 @@ where
             reader,
         }
     }
-
-    fn add_usage(&self, bytes: u64) {
-        if bytes > 0 {
-            self.buffer_usage.fetch_add(bytes, Ordering::Relaxed);
-        }
-    }
-
-    fn sub_usage(&self, bytes: u64) {
-        if bytes == 0 {
-            return;
-        }
-
-        let mut current = self.buffer_usage.load(Ordering::Relaxed);
-
-        loop {
-            let next = current.saturating_sub(bytes);
-
-            match self.buffer_usage.compare_exchange_weak(
-                current,
-                next,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return,
-                Err(value) => current = value,
-            }
-        }
-    }
 }
 
 struct Inner {
@@ -719,7 +694,7 @@ where
 
         let spans = split_chunk_spans(self.shared.config.layout, offset, buf.len());
         for span in spans {
-            let cid = chunk_id_for(self.shared.inode.ino(), span.index);
+            let cid = chunk_id_for(self.shared.inode.ino(), span.index)?;
             let ckey = guard.get_or_create_chunk(cid);
 
             let mut handle = guard.chunk_handle(&self.shared, ckey);
@@ -833,11 +808,9 @@ where
         };
 
         for slice in slices {
-            let freed = {
-                let mut guard = slice.lock();
-                guard.data.release_all()
-            };
-            self.shared.sub_usage(freed);
+            let mut guard = slice.lock();
+            guard.data.release_all();
+            guard.usage.update_bytes(0);
         }
 
         let mut guard = self.shared.inner.lock().await;
@@ -959,7 +932,12 @@ where
     /// The background thread for committing a chunk.
     /// It waits for Uploaded slices, appends metadata, and marks them Committed.
     /// Each chunk will have a unique committing thread.
-    #[tracing::instrument(level = "trace", skip(shared), fields(chunk_id))]
+    #[tracing::instrument(
+        name = "FileWriter.commit_chunk",
+        level = "trace",
+        skip(shared),
+        fields(chunk_id)
+    )]
     async fn commit_chunk(shared: Arc<Shared<B, M>>, chunk_id: u64) {
         loop {
             let slice = {
@@ -1281,7 +1259,11 @@ where
     }
 
     pub(crate) fn release(&self, ino: u64) {
-        self.files.remove(&ino);
+        if let Some((_, writer)) = self.files.remove(&ino) {
+            tokio::spawn(async move {
+                writer.clear().await;
+            });
+        }
     }
 
     #[cfg(test)]
@@ -1313,6 +1295,8 @@ mod tests {
     use crate::chuck::store::{BlockKey, BlockStore, InMemoryBlockStore};
     use crate::meta::MetaLayer;
     use crate::meta::factory::create_meta_store_from_url;
+    use crate::meta::store::MetaStore;
+    use crate::vfs::Inode;
     use crate::vfs::config::ReadConfig;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1383,7 +1367,7 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(1, 0, test_config(layout));
+        let mut slice = SliceState::new(1, 0, test_config(layout), Arc::new(AtomicU64::new(0)));
         let len = layout.block_size as usize + (layout.block_size as usize / 2);
         slice.data.append(&vec![1u8; len]).unwrap();
 
@@ -1397,7 +1381,7 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(1, 0, test_config(layout));
+        let mut slice = SliceState::new(1, 0, test_config(layout), Arc::new(AtomicU64::new(0)));
         let len = layout.block_size as usize + (layout.block_size as usize / 2);
         let data = vec![2u8; len];
         slice.data.append(&data).unwrap();
@@ -1418,7 +1402,7 @@ mod tests {
             chunk_size: 16 * 1024,
             block_size: 4 * 1024,
         };
-        let mut slice = SliceState::new(1, 0, test_config(layout));
+        let mut slice = SliceState::new(1, 0, test_config(layout), Arc::new(AtomicU64::new(0)));
         slice
             .data
             .append(&vec![0u8; layout.block_size as usize * 2])
@@ -1433,10 +1417,9 @@ mod tests {
     async fn test_file_writer_flush_commits_and_reads() {
         let layout = ChunkLayout::default();
         let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .layer();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let ino = meta
             .create_file(1, "flush_reads.txt".to_string())
@@ -1466,8 +1449,8 @@ mod tests {
 
         assert!(inode.file_size() >= len as u64);
 
-        let cid = chunk_id_for(inode.ino(), 0);
-        let slices = meta.get_slices(cid).await.unwrap();
+        let cid = chunk_id_for(inode.ino(), 0).unwrap();
+        let slices = meta_store.get_slices(cid).await.unwrap();
         assert_eq!(slices.len(), 1);
 
         let mut reader = DataFetcher::new(layout, cid, backend.as_ref());
@@ -1480,10 +1463,9 @@ mod tests {
     async fn test_file_writer_appends_slices_for_overwrite() {
         let layout = ChunkLayout::default();
         let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .layer();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let ino = meta
             .create_file(1, "overwrite.txt".to_string())
@@ -1511,8 +1493,8 @@ mod tests {
 
         writer.flush().await.unwrap();
 
-        let cid = chunk_id_for(inode.ino(), 0);
-        let slices = meta.get_slices(cid).await.unwrap();
+        let cid = chunk_id_for(inode.ino(), 0).unwrap();
+        let slices = meta_store.get_slices(cid).await.unwrap();
         assert_eq!(slices.len(), 1);
 
         let mut reader = DataFetcher::new(layout, cid, backend.as_ref());
@@ -1528,10 +1510,9 @@ mod tests {
             block_size: 4 * 1024,
         };
         let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .layer();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let _meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let ino = meta
             .create_file(1, "cross_chunks.txt".to_string())
@@ -1570,10 +1551,9 @@ mod tests {
             block_size: 4 * 1024,
         };
         let store = Arc::new(BlockingStore::new(true));
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .layer();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let _meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         let ino = meta
             .create_file(1, "flush_blocking.txt".to_string())
@@ -1631,12 +1611,11 @@ mod tests {
             chunk_size: 8 * 1024,
             block_size: 4 * 1024,
         };
-        let store = Arc::new(InMemoryBlockStore::new());
-        let meta = create_meta_store_from_url("sqlite::memory:")
-            .await
-            .unwrap()
-            .layer();
-        let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
+        let block_store = Arc::new(InMemoryBlockStore::new());
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let meta = meta_handle.layer();
+        let backend = Arc::new(Backend::new(block_store.clone(), meta.clone()));
 
         let reader = Arc::new(DataReader::new(
             Arc::new(ReadConfig::new(layout)),
@@ -1659,10 +1638,10 @@ mod tests {
         let data = vec![7u8; 1024];
         writer.write_at(0, &data).await.unwrap();
 
-        let cid = chunk_id_for(inode.ino(), 0);
+        let cid = chunk_id_for(inode.ino(), 0).unwrap();
         timeout(Duration::from_secs(1), async {
             loop {
-                if !meta.get_slices(cid).await.unwrap().is_empty() {
+                if !meta_store.get_slices(cid).await.unwrap().is_empty() {
                     break;
                 }
                 sleep(Duration::from_millis(10)).await;

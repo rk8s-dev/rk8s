@@ -36,7 +36,12 @@ jobs:
             fuse3 \
             pkg-config \
             libssl-dev \
-            protobuf-compiler
+            protobuf-compiler \
+            qemu-system-x86 \
+            qemu-utils \
+            libvirt-clients \
+            guestfish \
+            xorriso
 
       - name: Run tests
         run: |

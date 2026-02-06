@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::path::Path;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
@@ -47,6 +47,593 @@ const LOCKED_KEY: &str = "locked";
 const LINK_PARENT_KEY_PREFIX: &str = "lp:";
 
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
+
+// Lua script for atomically extending file size
+const EXTEND_FILE_SIZE_LUA: &str = r#"
+    local node_json = redis.call('GET', KEYS[1])
+    if not node_json then
+        return cjson.encode({ok=false, error="node_not_found"})
+    end
+    local ok, node = pcall(cjson.decode, node_json)
+    if not ok or not node or not node.attr or not node.attr.size then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+    local new_size = tonumber(ARGV[1])
+    local timestamp = tonumber(ARGV[2])
+    if new_size <= node.attr.size then
+        return cjson.encode({ok=true, updated=false})
+    end
+    node.attr.size = new_size
+    node.attr.mtime = timestamp
+    node.attr.ctime = timestamp
+    redis.call('SET', KEYS[1], cjson.encode(node))
+    return cjson.encode({ok=true, updated=true})
+"#;
+
+// Lua script for atomically incrementing nlink and updating link_parents
+const LINK_LUA: &str = r#"
+    local node_key = KEYS[1]
+    local lp_key = KEYS[2]
+    local dir_key = KEYS[3]
+    local parent_ino = ARGV[1]
+    local name = ARGV[2]
+    local timestamp = tonumber(ARGV[3])
+
+    local node_json = redis.call('GET', node_key)
+    if not node_json then
+        return cjson.encode({ok=false, error="node_not_found"})
+    end
+    local ok, node = pcall(cjson.decode, node_json)
+    if not ok or not node or not node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+
+    -- Check if link name already exists in directory
+    local existing = redis.call('HEXISTS', dir_key, name)
+    if existing == 1 then
+        return cjson.encode({ok=false, error="already_exists"})
+    end
+
+    -- If transitioning from nlink=1 to nlink=2, save original parent/name to link_parents
+    if node.attr.nlink == 1 then
+        local original_member = node.parent .. ":" .. node.name
+        redis.call('SADD', lp_key, original_member)
+        -- Transition to hardlink state: parent=0, name=""
+        node.parent = 0
+        node.name = ""
+    end
+
+    -- Increment nlink
+    node.attr.nlink = node.attr.nlink + 1
+    node.attr.ctime = timestamp
+
+    -- Add new link to link_parents set
+    local member = parent_ino .. ":" .. name
+    redis.call('SADD', lp_key, member)
+
+    -- Add to directory
+    redis.call('HSET', dir_key, name, node.ino)
+
+    -- Save node
+    redis.call('SET', node_key, cjson.encode(node))
+
+    return cjson.encode({ok=true, attr=node.attr})
+"#;
+
+// Lua script for atomically decrementing nlink and updating link_parents
+const UNLINK_LUA: &str = r#"
+    local node_key = KEYS[1]
+    local lp_key = KEYS[2]
+    local dir_key = KEYS[3]
+    local parent_ino = ARGV[1]
+    local name = ARGV[2]
+    local timestamp = tonumber(ARGV[3])
+
+    -- Remove from directory (idempotent)
+    redis.call('HDEL', dir_key, name)
+
+    -- Remove from link_parents (idempotent)
+    local member = parent_ino .. ":" .. name
+    redis.call('SREM', lp_key, member)
+
+    -- Try to get node
+    local node_json = redis.call('GET', node_key)
+    if not node_json then
+        return cjson.encode({ok=true, nlink=0, deleted=true})
+    end
+    local ok, node = pcall(cjson.decode, node_json)
+    if not ok or not node or not node.attr then
+        return cjson.encode({ok=true, nlink=0, deleted=true})
+    end
+
+    -- Decrement nlink
+    if node.attr.nlink > 0 then
+        node.attr.nlink = node.attr.nlink - 1
+    end
+    node.attr.ctime = timestamp
+
+    -- If transitioning from nlink=2 to nlink=1, restore parent/name from remaining link_parent
+    if node.attr.nlink == 1 then
+        local remaining_members = redis.call('SMEMBERS', lp_key)
+        if #remaining_members == 1 then
+            local parts = {}
+            for part in string.gmatch(remaining_members[1], "[^:]+") do
+                table.insert(parts, part)
+            end
+            if #parts >= 2 then
+                node.parent = tonumber(parts[1])
+                node.name = table.concat(parts, ":", 2)
+            end
+            -- Clear link_parents set
+            redis.call('DEL', lp_key)
+        end
+    end
+
+    -- Save node
+    redis.call('SET', node_key, cjson.encode(node))
+
+    local deleted = node.attr.nlink == 0
+    return cjson.encode({ok=true, nlink=node.attr.nlink, deleted=deleted})
+"#;
+
+// Lua script for atomically removing directory entry and updating parent nlink
+const RMDIR_LUA: &str = r#"
+    local cjson = cjson
+
+    local parent_dir_key = KEYS[1]
+    local child_node_key = KEYS[2]
+    local parent_node_key = KEYS[3]
+    local child_dir_key = KEYS[4]
+    local name = ARGV[1]
+    local child_ino = tonumber(ARGV[2])
+    local parent_ino = tonumber(ARGV[3])
+    local timestamp = tonumber(ARGV[4])
+
+    -- 1. Check dentry exists
+    local dentry_ino = redis.call('HGET', parent_dir_key, name)
+    if not dentry_ino then
+        return cjson.encode({ok=false, error="not_found", ino=parent_ino})
+    end
+
+    -- 2. Get child node
+    local child_json = redis.call('GET', child_node_key)
+    if not child_json then
+        return cjson.encode({ok=false, error="node_not_found", ino=child_ino})
+    end
+
+    -- 3. Decode child node with pcall
+    local ok, child_node = pcall(cjson.decode, child_json)
+    if not ok or not child_node or not child_node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+
+    -- 4. Check is directory
+    if child_node.kind ~= "Dir" then
+        return cjson.encode({ok=false, error="not_directory", ino=child_ino})
+    end
+
+    -- 5. Check empty
+    local child_len = redis.call('HLEN', child_dir_key)
+    if child_len > 0 then
+        return cjson.encode({ok=false, error="dir_not_empty", ino=child_ino})
+    end
+
+    -- 6. Get parent node and update
+    local parent_json = redis.call('GET', parent_node_key)
+    if parent_json then
+        local ok_p, parent_node = pcall(cjson.decode, parent_json)
+        if ok_p and parent_node and parent_node.attr then
+            parent_node.attr.nlink = parent_node.attr.nlink - 1
+            parent_node.attr.mtime = timestamp
+            parent_node.attr.ctime = timestamp
+            redis.call('SET', parent_node_key, cjson.encode(parent_node))
+        end
+    end
+
+    -- 7. Atomic delete
+    redis.call('HDEL', parent_dir_key, name)
+    redis.call('DEL', child_node_key)
+    redis.call('DEL', child_dir_key)
+
+    return cjson.encode({ok=true})
+"#;
+
+// Lua script for atomically creating directory entry with inode allocation
+const CREATE_ENTRY_LUA: &str = r#"
+    local cjson = cjson
+
+    local parent_dir_key = KEYS[1]
+    local parent_node_key = KEYS[2]
+    local counter_key = KEYS[3]
+    local name = ARGV[1]
+    local kind = ARGV[2]
+    local timestamp = tonumber(ARGV[3])
+    local parent_ino = tonumber(ARGV[4])
+    local default_mode = tonumber(ARGV[5])
+    local uid = tonumber(ARGV[6])
+    local gid = tonumber(ARGV[7])
+    local parent_gid = tonumber(ARGV[8])
+    local parent_has_setgid = tonumber(ARGV[9])
+
+    -- 1. Get parent node
+    local parent_json = redis.call('GET', parent_node_key)
+    if not parent_json then
+        return cjson.encode({ok=false, error="parent_not_found"})
+    end
+
+    -- 2. Decode parent node with pcall
+    local ok, parent_node = pcall(cjson.decode, parent_json)
+    if not ok or not parent_node or not parent_node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+
+    -- 3. Check parent is directory
+    if parent_node.kind ~= "Dir" then
+        return cjson.encode({ok=false, error="parent_not_directory"})
+    end
+
+    -- 4. Check entry doesn't already exist
+    local existing = redis.call('HEXISTS', parent_dir_key, name)
+    if existing == 1 then
+        return cjson.encode({ok=false, error="already_exists"})
+    end
+
+    -- 5. Allocate new inode atomically
+    local new_ino = redis.call('INCR', counter_key)
+
+    -- 6. Apply setgid inheritance
+    local final_gid = gid
+    local final_mode = default_mode
+    if parent_has_setgid == 1 then
+        final_gid = parent_gid
+        if kind == "Dir" then
+            final_mode = bit.bor(final_mode, 2048)  -- 0o2000 setgid bit
+        end
+    end
+
+    -- 7. Determine nlink based on kind
+    local nlink = 1
+    if kind == "Dir" then
+        nlink = 2
+    end
+
+    -- 8. Create new node
+    local new_node = {
+        ino = new_ino,
+        parent = parent_ino,
+        name = name,
+        kind = kind,
+        attr = {
+            size = 0,
+            mode = final_mode,
+            uid = uid,
+            gid = final_gid,
+            atime = timestamp,
+            mtime = timestamp,
+            ctime = timestamp,
+            nlink = nlink
+        },
+        deleted = false
+    }
+
+    -- 9. Save new node
+    redis.call('SET', 'i' .. new_ino, cjson.encode(new_node))
+
+    -- 10. Add directory entry
+    redis.call('HSET', parent_dir_key, name, new_ino)
+
+    -- 11. Update parent if creating directory (nlink++)
+    if kind == "Dir" then
+        parent_node.attr.nlink = parent_node.attr.nlink + 1
+    end
+
+    -- 12. Update parent timestamps
+    parent_node.attr.mtime = timestamp
+    parent_node.attr.ctime = timestamp
+    redis.call('SET', parent_node_key, cjson.encode(parent_node))
+
+    return cjson.encode({ok=true, ino=new_ino})
+"#;
+
+// Lua script for atomically renaming file or directory (no overwrite)
+const RENAME_LUA: &str = r#"
+    local cjson = cjson
+
+    local old_parent_dir_key = KEYS[1]
+    local new_parent_dir_key = KEYS[2]
+    local child_node_key = KEYS[3]
+    local old_parent_node_key = KEYS[4]
+    local new_parent_node_key = KEYS[5]
+    local link_parents_key = KEYS[6]
+    local old_name = ARGV[1]
+    local new_name = ARGV[2]
+    local old_parent_ino = tonumber(ARGV[3])
+    local new_parent_ino = tonumber(ARGV[4])
+    local timestamp = tonumber(ARGV[5])
+
+    -- 1. Check source dentry exists
+    local dentry_ino = redis.call('HGET', old_parent_dir_key, old_name)
+    if not dentry_ino then
+        return cjson.encode({ok=false, error="not_found", ino=old_parent_ino})
+    end
+
+    -- 2. Check new_parent exists and is directory
+    local new_parent_json = redis.call('GET', new_parent_node_key)
+    if not new_parent_json then
+        return cjson.encode({ok=false, error="parent_not_found", ino=new_parent_ino})
+    end
+    local ok_np, new_parent_node = pcall(cjson.decode, new_parent_json)
+    if not ok_np or not new_parent_node or not new_parent_node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+    if new_parent_node.kind ~= "Dir" then
+        return cjson.encode({ok=false, error="parent_not_directory", ino=new_parent_ino})
+    end
+
+    -- 3. Check target doesn't exist
+    local target_exists = redis.call('HEXISTS', new_parent_dir_key, new_name)
+    if target_exists == 1 then
+        return cjson.encode({ok=false, error="already_exists"})
+    end
+
+    -- 4. Get child node
+    local child_json = redis.call('GET', child_node_key)
+    if not child_json then
+        return cjson.encode({ok=false, error="node_not_found", ino=tonumber(dentry_ino)})
+    end
+    local ok_child, child_node = pcall(cjson.decode, child_json)
+    if not ok_child or not child_node or not child_node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+
+    -- 5. Update node parent/name OR link_parents based on nlink
+    if child_node.attr.nlink <= 1 then
+        -- Single parent: update node directly
+        child_node.parent = new_parent_ino
+        child_node.name = new_name
+    else
+        -- Hardlink: update link_parents set
+        local members = redis.call('SMEMBERS', link_parents_key)
+        local new_members = {}
+        local found = false
+
+        for _, member in ipairs(members) do
+            -- Find first colon only to handle filenames with colons
+            local sep_pos = string.find(member, ":", 1, true)
+            if sep_pos and sep_pos > 1 and sep_pos < #member then
+                local parent_str = string.sub(member, 1, sep_pos - 1)
+                local name_str = string.sub(member, sep_pos + 1)
+                local parent_num = tonumber(parent_str)
+                if parent_num == old_parent_ino and name_str == old_name then
+                    table.insert(new_members, new_parent_ino .. ":" .. new_name)
+                    found = true
+                else
+                    table.insert(new_members, member)
+                end
+            else
+                table.insert(new_members, member)
+            end
+        end
+
+        if not found then
+            return cjson.encode({ok=false, error="link_parent_not_found"})
+        end
+
+        -- Replace link_parents set atomically
+        redis.call('DEL', link_parents_key)
+        for _, member in ipairs(new_members) do
+            redis.call('SADD', link_parents_key, member)
+        end
+
+        -- Hardlinked files have parent=0, name=""
+        child_node.parent = 0
+        child_node.name = ""
+    end
+
+    -- 6. Update child timestamps
+    child_node.attr.mtime = timestamp
+    child_node.attr.ctime = timestamp
+
+    -- 7. Remove old dentry and add new dentry
+    redis.call('HDEL', old_parent_dir_key, old_name)
+    redis.call('HSET', new_parent_dir_key, new_name, dentry_ino)
+
+    -- 8. Save updated child node
+    redis.call('SET', child_node_key, cjson.encode(child_node))
+
+    -- 9. Update both parent directory times (but NOT nlink)
+    local old_parent_json = redis.call('GET', old_parent_node_key)
+    if old_parent_json then
+        local ok_op, old_parent_node = pcall(cjson.decode, old_parent_json)
+        if ok_op and old_parent_node and old_parent_node.attr then
+            old_parent_node.attr.mtime = timestamp
+            old_parent_node.attr.ctime = timestamp
+            redis.call('SET', old_parent_node_key, cjson.encode(old_parent_node))
+        end
+    end
+
+    new_parent_node.attr.mtime = timestamp
+    new_parent_node.attr.ctime = timestamp
+    redis.call('SET', new_parent_node_key, cjson.encode(new_parent_node))
+
+    return cjson.encode({ok=true})
+"#;
+
+const RENAME_EXCHANGE_LUA: &str = r#"
+    local cjson = cjson
+
+    local old_parent_dir_key = KEYS[1]
+    local new_parent_dir_key = KEYS[2]
+    local old_node_key = KEYS[3]
+    local new_node_key = KEYS[4]
+    local old_parent_node_key = KEYS[5]
+    local new_parent_node_key = KEYS[6]
+    local old_link_parents_key = KEYS[7]
+    local new_link_parents_key = KEYS[8]
+    local old_name = ARGV[1]
+    local new_name = ARGV[2]
+    local old_parent_ino = tonumber(ARGV[3])
+    local new_parent_ino = tonumber(ARGV[4])
+    local timestamp = tonumber(ARGV[5])
+
+    -- 1. Check both entries exist
+    local old_dentry_ino = redis.call('HGET', old_parent_dir_key, old_name)
+    if not old_dentry_ino then
+        return cjson.encode({ok=false, error="internal", msg="Entry '" .. old_name .. "' not found in parent " .. old_parent_ino .. " for exchange"})
+    end
+
+    local new_dentry_ino = redis.call('HGET', new_parent_dir_key, new_name)
+    if not new_dentry_ino then
+        return cjson.encode({ok=false, error="internal", msg="Entry '" .. new_name .. "' not found in parent " .. new_parent_ino .. " for exchange"})
+    end
+
+    -- 2. GET both nodes
+    local old_node_json = redis.call('GET', old_node_key)
+    if not old_node_json then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+    local ok_old, old_node = pcall(cjson.decode, old_node_json)
+    if not ok_old or not old_node or not old_node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+
+    local new_node_json = redis.call('GET', new_node_key)
+    if not new_node_json then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+    local ok_new, new_node = pcall(cjson.decode, new_node_json)
+    if not ok_new or not new_node or not new_node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+
+    -- 3. Swap directory entries atomically
+    redis.call('HSET', old_parent_dir_key, old_name, new_dentry_ino)
+    redis.call('HSET', new_parent_dir_key, new_name, old_dentry_ino)
+
+    -- 4. Update old_node (nlink>1: update link_parents, nlink<=1: update parent/name)
+    if old_node.attr.nlink > 1 then
+        local old_members = redis.call('SMEMBERS', old_link_parents_key)
+        local new_old_members = {}
+
+        for _, member in ipairs(old_members) do
+            -- Find first colon only to handle filenames with colons
+            local sep_pos = string.find(member, ":", 1, true)
+            if sep_pos and sep_pos > 1 and sep_pos < #member then
+                local parent_str = string.sub(member, 1, sep_pos - 1)
+                local name_str = string.sub(member, sep_pos + 1)
+                local parent_num = tonumber(parent_str)
+                if parent_num == old_parent_ino and name_str == old_name then
+                    table.insert(new_old_members, new_parent_ino .. ":" .. new_name)
+                else
+                    table.insert(new_old_members, member)
+                end
+            else
+                table.insert(new_old_members, member)
+            end
+        end
+
+        redis.call('DEL', old_link_parents_key)
+        for _, member in ipairs(new_old_members) do
+            redis.call('SADD', old_link_parents_key, member)
+        end
+
+        old_node.parent = 0
+        old_node.name = ""
+    else
+        old_node.parent = new_parent_ino
+        old_node.name = new_name
+    end
+
+    -- 5. Update new_node (nlink>1: update link_parents, nlink<=1: update parent/name)
+    if new_node.attr.nlink > 1 then
+        local new_members = redis.call('SMEMBERS', new_link_parents_key)
+        local new_new_members = {}
+
+        for _, member in ipairs(new_members) do
+            -- Find first colon only to handle filenames with colons
+            local sep_pos = string.find(member, ":", 1, true)
+            if sep_pos and sep_pos > 1 and sep_pos < #member then
+                local parent_str = string.sub(member, 1, sep_pos - 1)
+                local name_str = string.sub(member, sep_pos + 1)
+                local parent_num = tonumber(parent_str)
+                if parent_num == new_parent_ino and name_str == new_name then
+                    table.insert(new_new_members, old_parent_ino .. ":" .. old_name)
+                else
+                    table.insert(new_new_members, member)
+                end
+            else
+                table.insert(new_new_members, member)
+            end
+        end
+
+        redis.call('DEL', new_link_parents_key)
+        for _, member in ipairs(new_new_members) do
+            redis.call('SADD', new_link_parents_key, member)
+        end
+
+        new_node.parent = 0
+        new_node.name = ""
+    else
+        new_node.parent = old_parent_ino
+        new_node.name = old_name
+    end
+
+    -- 6. Update timestamps for both nodes
+    old_node.attr.mtime = timestamp
+    old_node.attr.ctime = timestamp
+    new_node.attr.mtime = timestamp
+    new_node.attr.ctime = timestamp
+
+    -- 7. SET both nodes
+    redis.call('SET', old_node_key, cjson.encode(old_node))
+    redis.call('SET', new_node_key, cjson.encode(new_node))
+
+    -- 8. Update parent directory timestamps
+    local old_parent_json = redis.call('GET', old_parent_node_key)
+    if old_parent_json then
+        local ok_op, old_parent_node = pcall(cjson.decode, old_parent_json)
+        if ok_op and old_parent_node and old_parent_node.attr then
+            old_parent_node.attr.mtime = timestamp
+            old_parent_node.attr.ctime = timestamp
+            redis.call('SET', old_parent_node_key, cjson.encode(old_parent_node))
+        end
+    end
+
+    local new_parent_json = redis.call('GET', new_parent_node_key)
+    if new_parent_json then
+        local ok_np, new_parent_node = pcall(cjson.decode, new_parent_json)
+        if ok_np and new_parent_node and new_parent_node.attr then
+            new_parent_node.attr.mtime = timestamp
+            new_parent_node.attr.ctime = timestamp
+            redis.call('SET', new_parent_node_key, cjson.encode(new_parent_node))
+        end
+    end
+
+    return cjson.encode({ok=true})
+"#;
+
+/// Response structure for Lua script results
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct LuaResponse {
+    ok: bool,
+    #[serde(default)]
+    ino: Option<i64>,
+    #[serde(default)]
+    updated: Option<bool>,
+    #[serde(default)]
+    nlink: Option<u32>,
+    #[serde(default)]
+    deleted: Option<bool>,
+    #[serde(default)]
+    count: Option<usize>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    attr: Option<serde_json::Value>,
+    #[serde(default)]
+    msg: Option<String>, // For Internal error details
+}
 
 /// Minimal Redis-backed meta store.
 pub struct RedisMetaStore {
@@ -236,25 +823,6 @@ impl RedisMetaStore {
         conn.del(self.node_key(ino)).await.map_err(redis_err)
     }
 
-    async fn add_dir_entry(&self, parent: i64, name: &str, child: i64) -> Result<(), MetaError> {
-        let mut conn = self.conn.clone();
-        conn.hset(self.dir_key(parent), name, child)
-            .await
-            .map_err(redis_err)
-    }
-
-    async fn remove_dir_entry(&self, parent: i64, name: &str) -> Result<(), MetaError> {
-        let mut conn = self.conn.clone();
-        let removed: i64 = conn
-            .hdel(self.dir_key(parent), name)
-            .await
-            .map_err(redis_err)?;
-        if removed == 0 {
-            return Err(MetaError::NotFound(parent));
-        }
-        Ok(())
-    }
-
     async fn load_link_parents(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError> {
         let mut conn = self.conn.clone();
         let members: Vec<String> = conn
@@ -277,25 +845,6 @@ impl RedisMetaStore {
         Ok(out)
     }
 
-    async fn save_link_parents(
-        &self,
-        ino: i64,
-        parents: &[(i64, String)],
-    ) -> Result<(), MetaError> {
-        let mut conn = self.conn.clone();
-        let key = Self::link_parent_key(ino);
-
-        let mut pipe = redis::pipe();
-        pipe.atomic();
-        pipe.del(&key);
-        for (p, name) in parents {
-            let member = format!("{}:{}", p, name);
-            pipe.sadd(&key, member);
-        }
-        let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
-        Ok(())
-    }
-
     async fn bump_dir_times(&self, ino: i64, now: i64) -> Result<(), MetaError> {
         if let Some(mut node) = self.get_node(ino).await?
             && node.kind == NodeKind::Dir
@@ -316,11 +865,6 @@ impl RedisMetaStore {
         Ok(value)
     }
 
-    async fn directory_len(&self, ino: i64) -> Result<i64, MetaError> {
-        let mut conn = self.conn.clone();
-        conn.hlen(self.dir_key(ino)).await.map_err(redis_err)
-    }
-
     async fn ensure_parent_dir(&self, parent: i64) -> Result<StoredNode, MetaError> {
         let parent_node = self
             .get_node(parent)
@@ -338,45 +882,79 @@ impl RedisMetaStore {
         name: String,
         kind: FileType,
     ) -> Result<i64, MetaError> {
-        self.ensure_parent_dir(parent).await?;
-        if self.directory_child(parent, &name).await?.is_some() {
-            return Err(MetaError::AlreadyExists { parent, name });
-        }
-        let ino = self.alloc_id(INODE_ID_KEY).await?;
-        let mut node = StoredNode::new(ino, parent, name.clone(), kind);
-
-        // Inherit gid and setgid bit from parent if parent has setgid bit set
-        if let Some(parent_node) = self.get_node(parent).await? {
-            let parent_has_setgid = (parent_node.attr.mode & 0o2000) != 0;
-            if parent_has_setgid {
-                node.attr.gid = parent_node.attr.gid;
-                // Directories inherit setgid bit from parent
-                if matches!(kind, FileType::Dir) {
-                    node.attr.mode |= 0o2000;
-                }
-            }
+        // Step 1: Get parent node for setgid check
+        let parent_node = self
+            .get_node(parent)
+            .await?
+            .ok_or(MetaError::ParentNotFound(parent))?;
+        if parent_node.kind != NodeKind::Dir {
+            return Err(MetaError::NotDirectory(parent));
         }
 
-        self.save_node(&node).await?;
-        self.add_dir_entry(parent, &name, ino).await?;
-        if matches!(kind, FileType::Dir) {
-            self.update_nlink(parent, 1).await?;
-        }
+        // Step 2: Construct Redis keys
+        let parent_dir_key = self.dir_key(parent);
+        let parent_node_key = self.node_key(parent);
+        let counter_key = COUNTER_INODE_KEY;
+
+        // Step 3: Prepare ARGV parameters
+        let kind_str = match kind {
+            FileType::File => "File",
+            FileType::Dir => "Dir",
+            FileType::Symlink => "Symlink",
+        };
+        let default_mode = if kind == FileType::Dir {
+            0o040755
+        } else if kind == FileType::Symlink {
+            0o120777
+        } else {
+            0o100644
+        };
         let now = current_time();
-        self.bump_dir_times(parent, now).await?;
-        Ok(ino)
-    }
+        let parent_gid = parent_node.attr.gid;
+        let parent_has_setgid = if (parent_node.attr.mode & 0o2000) != 0 {
+            1
+        } else {
+            0
+        };
 
-    async fn update_nlink(&self, ino: i64, delta: i32) -> Result<(), MetaError> {
-        if let Some(mut node) = self.get_node(ino).await? {
-            let value = node.attr.nlink as i64 + delta as i64;
-            node.attr.nlink = value.max(0) as u32;
-            node.attr.ctime = current_time();
-            self.save_node(&node).await?;
+        // Step 4: Invoke Lua script atomically
+        let script = redis::Script::new(CREATE_ENTRY_LUA);
+        let result: String = script
+            .key(&parent_dir_key) // KEYS[1]
+            .key(&parent_node_key) // KEYS[2]
+            .key(counter_key) // KEYS[3]
+            .arg(&name) // ARGV[1]
+            .arg(kind_str) // ARGV[2]
+            .arg(now) // ARGV[3]
+            .arg(parent) // ARGV[4]
+            .arg(default_mode) // ARGV[5]
+            .arg(0u32) // ARGV[6] - uid (default 0)
+            .arg(0u32) // ARGV[7] - gid (default 0)
+            .arg(parent_gid) // ARGV[8]
+            .arg(parent_has_setgid) // ARGV[9]
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        // Step 5: Parse response and map errors
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
+
+        match response.error.as_deref() {
+            Some("parent_not_found") => Err(MetaError::ParentNotFound(parent)),
+            Some("parent_not_directory") => Err(MetaError::NotDirectory(parent)),
+            Some("already_exists") => Err(MetaError::AlreadyExists { parent, name }),
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt parent node".into())),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => {
+                let new_ino = response
+                    .ino
+                    .ok_or_else(|| MetaError::Internal("missing ino in response".into()))?;
+                Ok(new_ino)
+            }
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
         }
-        Ok(())
     }
-
     async fn alloc_id(&self, key: &str) -> Result<i64, MetaError> {
         let mut conn = self.conn.clone();
         let redis_key = Self::counter_key(key)?;
@@ -528,7 +1106,7 @@ impl RedisMetaStore {
         let mut pipe = redis::pipe();
         pipe.cmd("DEL").arg(&key);
         for slice in slices {
-            let data = serde_json::to_vec(slice).map_err(|e| MetaError::Internal(e.to_string()))?;
+            let data = crate::meta::serialization::serialize_meta(slice)?;
             pipe.cmd("RPUSH").arg(&key).arg(data);
         }
         pipe.query_async::<()>(&mut conn).await.map_err(redis_err)?;
@@ -769,26 +1347,49 @@ impl MetaStore for RedisMetaStore {
 
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        // Step 1: Lookup child ino first (preserves NotFound(parent) behavior)
         let Some(child) = self.lookup(parent, name).await? else {
             return Err(MetaError::NotFound(parent));
         };
-        let node = self
-            .get_node(child)
-            .await?
-            .ok_or(MetaError::NotFound(child))?;
-        if node.kind != NodeKind::Dir {
-            return Err(MetaError::NotDirectory(child));
-        }
-        let len = self.directory_len(child).await?;
-        if len > 0 {
-            return Err(MetaError::DirectoryNotEmpty(child));
-        }
-        self.remove_dir_entry(parent, name).await?;
-        self.delete_node(child).await?;
-        self.update_nlink(parent, -1).await?;
+
+        // Step 2: Construct Redis keys
+        let parent_dir_key = self.dir_key(parent);
+        let child_node_key = self.node_key(child);
+        let parent_node_key = self.node_key(parent);
+        let child_dir_key = self.dir_key(child);
         let now = current_time();
-        self.bump_dir_times(parent, now).await?;
-        Ok(())
+
+        // Step 3: Invoke Lua script atomically
+        let script = redis::Script::new(RMDIR_LUA);
+        let result: String = script
+            .key(&parent_dir_key)
+            .key(&child_node_key)
+            .key(&parent_node_key)
+            .key(&child_dir_key)
+            .arg(name)
+            .arg(child)
+            .arg(parent)
+            .arg(now)
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        // Step 4: Parse response and map errors
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
+
+        match response.error.as_deref() {
+            Some("not_found") => Err(MetaError::NotFound(response.ino.unwrap_or(parent))),
+            Some("node_not_found") => Err(MetaError::NotFound(response.ino.unwrap_or(child))),
+            Some("not_directory") => Err(MetaError::NotDirectory(response.ino.unwrap_or(child))),
+            Some("dir_not_empty") => {
+                Err(MetaError::DirectoryNotEmpty(response.ino.unwrap_or(child)))
+            }
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => Ok(()),
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
+        }
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
@@ -799,59 +1400,47 @@ impl MetaStore for RedisMetaStore {
     #[tracing::instrument(level = "trace", skip(self), fields(ino, parent, name))]
     async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
         self.ensure_parent_dir(parent).await?;
-        if self.directory_child(parent, name).await?.is_some() {
-            return Err(MetaError::AlreadyExists {
+
+        let node_key = self.node_key(ino);
+        let lp_key = Self::link_parent_key(ino);
+        let dir_key = self.dir_key(parent);
+        let now = current_time();
+
+        let script = redis::Script::new(LINK_LUA);
+        let result: String = script
+            .key(&node_key)
+            .key(&lp_key)
+            .key(&dir_key)
+            .arg(parent)
+            .arg(name)
+            .arg(now)
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
+
+        match response.error.as_deref() {
+            Some("node_not_found") => Err(MetaError::NotFound(ino)),
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+            Some("already_exists") => Err(MetaError::AlreadyExists {
                 parent,
                 name: name.to_string(),
-            });
-        }
+            }),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => {
+                let attr_json = response
+                    .attr
+                    .ok_or_else(|| MetaError::Internal("missing attr in link response".into()))?;
+                let stored_attr: StoredAttr = serde_json::from_value(attr_json)
+                    .map_err(|e| MetaError::Internal(format!("attr parse error: {e}")))?;
 
-        let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
-        match node.kind {
-            NodeKind::File => {}
-            NodeKind::Symlink => {
-                return Err(MetaError::NotSupported(
-                    "cannot create hard links to symbolic links".into(),
-                ));
+                self.bump_dir_times(parent, now).await?;
+                Ok(stored_attr.to_file_attr(ino, FileType::File))
             }
-            NodeKind::Dir => {
-                return Err(MetaError::NotSupported(
-                    "cannot create hard links to directories".into(),
-                ));
-            }
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
         }
-        if node.deleted || node.attr.nlink == 0 {
-            return Err(MetaError::NotFound(ino));
-        }
-
-        if node.attr.nlink <= 1 {
-            let old_parent = node.parent;
-            let old_name = node.name.clone();
-
-            node.attr.nlink = node.attr.nlink.saturating_add(1);
-            node.parent = 0;
-            node.name = String::new();
-            node.attr.ctime = current_time();
-
-            let parents = vec![(old_parent, old_name), (parent, name.to_string())];
-            self.save_link_parents(ino, &parents).await?;
-        } else {
-            let mut parents = self.load_link_parents(ino).await?;
-            parents.push((parent, name.to_string()));
-            parents.sort();
-            parents.dedup();
-            node.attr.nlink = node.attr.nlink.saturating_add(1);
-            node.parent = 0;
-            node.name = String::new();
-            node.attr.ctime = current_time();
-            self.save_link_parents(ino, &parents).await?;
-        }
-
-        self.save_node(&node).await?;
-        self.add_dir_entry(parent, name, ino).await?;
-        let now = current_time();
-        self.bump_dir_times(parent, now).await?;
-        Ok(node.as_file_attr())
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
@@ -859,7 +1448,8 @@ impl MetaStore for RedisMetaStore {
         let Some(child) = self.lookup(parent, name).await? else {
             return Err(MetaError::NotFound(parent));
         };
-        let mut node = self
+
+        let node = self
             .get_node(child)
             .await?
             .ok_or(MetaError::NotFound(child))?;
@@ -867,52 +1457,65 @@ impl MetaStore for RedisMetaStore {
             return Err(MetaError::NotSupported(format!("{child} is not a file")));
         }
 
-        self.remove_dir_entry(parent, name).await?;
+        let node_key = self.node_key(child);
+        let lp_key = Self::link_parent_key(child);
+        let dir_key = self.dir_key(parent);
+        let now = current_time();
 
-        if node.attr.nlink > 1 {
+        let script = redis::Script::new(UNLINK_LUA);
+        let result: String = script
+            .key(&node_key)
+            .key(&lp_key)
+            .key(&dir_key)
+            .arg(parent)
+            .arg(name)
+            .arg(now)
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
+
+        if !response.ok {
+            let err = response
+                .error
+                .unwrap_or_else(|| "unknown error".to_string());
+            return Err(MetaError::Internal(format!("Lua error: {err}")));
+        }
+
+        let nlink = response.nlink.unwrap_or(0);
+        let deleted = response.deleted.unwrap_or(false);
+
+        if deleted {
+            let mut node_mut = node;
+            self.mark_deleted(child, &mut node_mut).await?;
+        } else if nlink <= 1 {
             let mut link_parents = self.load_link_parents(child).await?;
             link_parents.retain(|(p, n)| !(*p == parent && n.as_str() == name));
 
-            node.attr.nlink = node.attr.nlink.saturating_sub(1);
-
-            let now = current_time();
-            node.attr.ctime = now;
-
-            if node.attr.nlink <= 1 {
-                let remaining = link_parents.into_iter().next().ok_or_else(|| {
-                    MetaError::Internal(format!("missing remaining link parent for inode {child}"))
-                })?;
-                node.parent = remaining.0;
-                node.name = remaining.1;
+            if let Some(remaining) = link_parents.into_iter().next() {
+                let mut node_mut = node;
+                node_mut.parent = remaining.0;
+                node_mut.name = remaining.1;
+                node_mut.attr.nlink = nlink;
+                node_mut.attr.ctime = now;
 
                 let key = Self::link_parent_key(child);
-                let data =
-                    serde_json::to_vec(&node).map_err(|e| MetaError::Internal(e.to_string()))?;
+                let data = serde_json::to_vec(&node_mut)
+                    .map_err(|e| MetaError::Internal(e.to_string()))?;
 
                 let mut conn = self.conn.clone();
                 let _: () = redis::pipe()
                     .atomic()
                     .del(key)
-                    .set(self.node_key(node.ino), data)
+                    .set(self.node_key(node_mut.ino), data)
                     .query_async(&mut conn)
                     .await
                     .map_err(redis_err)?;
-            } else {
-                self.save_link_parents(child, &link_parents).await?;
-                node.parent = 0;
-                node.name = String::new();
             }
-
-            if node.attr.nlink > 1 {
-                self.save_node(&node).await?;
-            }
-
-            self.bump_dir_times(parent, now).await?;
-            return Ok(());
         }
 
-        self.mark_deleted(child, &mut node).await?;
-        let now = current_time();
         self.bump_dir_times(parent, now).await?;
         Ok(())
     }
@@ -929,54 +1532,64 @@ impl MetaStore for RedisMetaStore {
         new_parent: i64,
         new_name: String,
     ) -> Result<(), MetaError> {
+        // Self-rename optimization: no-op if same location
+        if old_parent == new_parent && old_name == new_name {
+            return Ok(());
+        }
+
+        // Step 1: Lookup source dentry to get child ino (preserves NotFound(old_parent) error)
         let Some(child) = self.lookup(old_parent, old_name).await? else {
             return Err(MetaError::NotFound(old_parent));
         };
-        self.ensure_parent_dir(new_parent).await?;
-        if self.lookup(new_parent, &new_name).await?.is_some() {
-            return Err(MetaError::AlreadyExists {
+
+        // Step 2: Construct Redis keys
+        let old_parent_dir_key = self.dir_key(old_parent);
+        let new_parent_dir_key = self.dir_key(new_parent);
+        let child_node_key = self.node_key(child);
+        let old_parent_node_key = self.node_key(old_parent);
+        let new_parent_node_key = self.node_key(new_parent);
+        let link_parents_key = Self::link_parent_key(child);
+        let now = current_time();
+
+        // Step 3: Invoke Lua script atomically
+        let script = redis::Script::new(RENAME_LUA);
+        let result: String = script
+            .key(&old_parent_dir_key) // KEYS[1]
+            .key(&new_parent_dir_key) // KEYS[2]
+            .key(&child_node_key) // KEYS[3]
+            .key(&old_parent_node_key) // KEYS[4]
+            .key(&new_parent_node_key) // KEYS[5]
+            .key(&link_parents_key) // KEYS[6]
+            .arg(old_name) // ARGV[1]
+            .arg(&new_name) // ARGV[2]
+            .arg(old_parent) // ARGV[3]
+            .arg(new_parent) // ARGV[4]
+            .arg(now) // ARGV[5]
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        // Step 4: Parse response and map errors
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
+
+        match response.error.as_deref() {
+            Some("not_found") => Err(MetaError::NotFound(response.ino.unwrap_or(old_parent))),
+            Some("parent_not_found") => Err(MetaError::ParentNotFound(new_parent)),
+            Some("parent_not_directory") => Err(MetaError::NotDirectory(new_parent)),
+            Some("already_exists") => Err(MetaError::AlreadyExists {
                 parent: new_parent,
                 name: new_name,
-            });
+            }),
+            Some("node_not_found") => Err(MetaError::NotFound(child)),
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+            Some("link_parent_not_found") => Err(MetaError::Internal(format!(
+                "expected link parent binding {old_parent}/{old_name} for inode {child}"
+            ))),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => Ok(()),
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
         }
-        let mut node = self
-            .get_node(child)
-            .await?
-            .ok_or(MetaError::NotFound(child))?;
-        self.remove_dir_entry(old_parent, old_name).await?;
-        self.add_dir_entry(new_parent, &new_name, child).await?;
-
-        if node.attr.nlink <= 1 {
-            node.parent = new_parent;
-            node.name = new_name;
-        } else {
-            let mut link_parents = self.load_link_parents(child).await?;
-            let mut updated = false;
-            for (p, n) in &mut link_parents {
-                if *p == old_parent && n.as_str() == old_name {
-                    *p = new_parent;
-                    *n = new_name.clone();
-                    updated = true;
-                    break;
-                }
-            }
-            if !updated {
-                return Err(MetaError::Internal(format!(
-                    "expected link parent binding {old_parent}/{old_name} for inode {child}"
-                )));
-            }
-            self.save_link_parents(child, &link_parents).await?;
-            node.parent = 0;
-            node.name = String::new();
-        }
-
-        let now = current_time();
-        node.attr.mtime = now;
-        node.attr.ctime = now;
-        self.save_node(&node).await?;
-        self.bump_dir_times(old_parent, now).await?;
-        self.bump_dir_times(new_parent, now).await?;
-        Ok(())
     }
 
     async fn rename_exchange(
@@ -986,86 +1599,65 @@ impl MetaStore for RedisMetaStore {
         new_parent: i64,
         new_name: &str,
     ) -> Result<(), MetaError> {
-        // Get both entries
-        let old_ino = self.lookup(old_parent, old_name).await?.ok_or_else(|| {
-            MetaError::Internal(format!(
+        if old_parent == new_parent && old_name == new_name {
+            return Ok(());
+        }
+
+        let Some(old_ino) = self.lookup(old_parent, old_name).await? else {
+            return Err(MetaError::Internal(format!(
                 "Entry '{}' not found in parent {} for exchange",
                 old_name, old_parent
-            ))
-        })?;
+            )));
+        };
 
-        let new_ino = self.lookup(new_parent, new_name).await?.ok_or_else(|| {
-            MetaError::Internal(format!(
+        let Some(new_ino) = self.lookup(new_parent, new_name).await? else {
+            return Err(MetaError::Internal(format!(
                 "Entry '{}' not found in parent {} for exchange",
                 new_name, new_parent
-            ))
-        })?;
+            )));
+        };
 
-        // Remove both entries
-        self.remove_dir_entry(old_parent, old_name).await?;
-        self.remove_dir_entry(new_parent, new_name).await?;
-
-        // Add swapped entries
-        self.add_dir_entry(old_parent, old_name, new_ino).await?;
-        self.add_dir_entry(new_parent, new_name, old_ino).await?;
-
-        // Update node parents if needed
-        let mut old_node = self
-            .get_node(old_ino)
-            .await?
-            .ok_or(MetaError::NotFound(old_ino))?;
-        let mut new_node = self
-            .get_node(new_ino)
-            .await?
-            .ok_or(MetaError::NotFound(new_ino))?;
-
+        let old_parent_dir_key = self.dir_key(old_parent);
+        let new_parent_dir_key = self.dir_key(new_parent);
+        let old_node_key = self.node_key(old_ino);
+        let new_node_key = self.node_key(new_ino);
+        let old_parent_node_key = self.node_key(old_parent);
+        let new_parent_node_key = self.node_key(new_parent);
+        let old_link_parents_key = Self::link_parent_key(old_ino);
+        let new_link_parents_key = Self::link_parent_key(new_ino);
         let now = current_time();
 
-        // Update old node to new location
-        if old_node.attr.nlink <= 1 {
-            old_node.parent = new_parent;
-            old_node.name = new_name.to_string();
-        } else {
-            let mut link_parents = self.load_link_parents(old_ino).await?;
-            for (p, n) in &mut link_parents {
-                if *p == old_parent && n.as_str() == old_name {
-                    *p = new_parent;
-                    *n = new_name.to_string();
-                    break;
-                }
+        let script = redis::Script::new(RENAME_EXCHANGE_LUA);
+        let result: String = script
+            .key(&old_parent_dir_key)
+            .key(&new_parent_dir_key)
+            .key(&old_node_key)
+            .key(&new_node_key)
+            .key(&old_parent_node_key)
+            .key(&new_parent_node_key)
+            .key(&old_link_parents_key)
+            .key(&new_link_parents_key)
+            .arg(old_name)
+            .arg(new_name)
+            .arg(old_parent)
+            .arg(new_parent)
+            .arg(now)
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Failed to parse Lua response: {e}")))?;
+        match response.error.as_deref() {
+            Some("internal") => {
+                let msg = response.msg.unwrap_or_else(|| "unknown error".to_string());
+                Err(MetaError::Internal(msg))
             }
-            self.save_link_parents(old_ino, &link_parents).await?;
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => Ok(()),
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
         }
-        old_node.attr.mtime = now;
-        old_node.attr.ctime = now;
-        self.save_node(&old_node).await?;
-
-        // Update new node to old location
-        if new_node.attr.nlink <= 1 {
-            new_node.parent = old_parent;
-            new_node.name = old_name.to_string();
-        } else {
-            let mut link_parents = self.load_link_parents(new_ino).await?;
-            for (p, n) in &mut link_parents {
-                if *p == new_parent && n.as_str() == new_name {
-                    *p = old_parent;
-                    *n = old_name.to_string();
-                    break;
-                }
-            }
-            self.save_link_parents(new_ino, &link_parents).await?;
-        }
-        new_node.attr.mtime = now;
-        new_node.attr.ctime = now;
-        self.save_node(&new_node).await?;
-
-        // Update parent directory timestamps
-        self.bump_dir_times(old_parent, now).await?;
-        if old_parent != new_parent {
-            self.bump_dir_times(new_parent, now).await?;
-        }
-
-        Ok(())
     }
     #[tracing::instrument(
         level = "trace",
@@ -1158,17 +1750,28 @@ impl MetaStore for RedisMetaStore {
 
     #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
-        // TODO: Use a Lua script for atomic update.
-        let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
-        let old_size = node.attr.size;
-        if size <= old_size {
-            return Ok(());
-        }
+        let script = redis::Script::new(EXTEND_FILE_SIZE_LUA);
+        let node_key = self.node_key(ino);
         let now = current_time();
-        node.attr.size = size;
-        node.attr.mtime = now;
-        node.attr.ctime = now;
-        self.save_node(&node).await
+
+        let result: String = script
+            .key(&node_key)
+            .arg(size)
+            .arg(now)
+            .invoke_async(&mut self.conn.clone())
+            .await
+            .map_err(redis_err)?;
+
+        let response: LuaResponse = serde_json::from_str(&result)
+            .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
+
+        match response.error.as_deref() {
+            Some("node_not_found") => Err(MetaError::NotFound(ino)),
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => Ok(()),
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
+        }
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(ino, size, chunk_size))]
@@ -1310,8 +1913,7 @@ impl MetaStore for RedisMetaStore {
             .map_err(redis_err)?;
         let mut slices = Vec::new();
         for entry in raw {
-            let desc: SliceDesc =
-                serde_json::from_slice(&entry).map_err(|e| MetaError::Internal(e.to_string()))?;
+            let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
             slices.push(desc);
         }
         tracing::Span::current().record("slice_count", slices.len());
@@ -1325,7 +1927,7 @@ impl MetaStore for RedisMetaStore {
     )]
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
-        let data = serde_json::to_vec(&slice).map_err(|e| MetaError::Internal(e.to_string()))?;
+        let data = crate::meta::serialization::serialize_meta(&slice)?;
         let _: () = redis::cmd("RPUSH")
             .arg(self.chunk_key(chunk_id))
             .arg(data)
@@ -1579,21 +2181,54 @@ struct StoredNode {
 }
 
 impl StoredNode {
-    fn new(ino: i64, parent: i64, name: String, kind: FileType) -> Self {
-        let attr = StoredAttr::new(kind);
-        Self {
-            ino,
-            parent,
-            name,
-            kind: kind.into(),
-            attr,
-            deleted: false,
-        }
-    }
-
     fn as_file_attr(&self) -> FileAttr {
         self.attr.to_file_attr(self.ino, self.kind.into())
     }
+}
+
+/// Deserializer that accepts both integer and floating-point numbers.
+/// Redis cjson encodes large integers (like epoch millis) as scientific notation
+/// floats (e.g., 1.7698324007242e+18), which serde_json rejects for i64 fields.
+fn deserialize_i64_from_number<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Error, Visitor};
+
+    struct I64OrFloatVisitor;
+
+    impl<'de> Visitor<'de> for I64OrFloatVisitor {
+        type Value = i64;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an integer or floating-point number")
+        }
+
+        fn visit_i64<E: Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(v)
+        }
+
+        fn visit_u64<E: Error>(self, v: u64) -> Result<Self::Value, E> {
+            i64::try_from(v).map_err(|_| E::custom("u64 out of i64 range"))
+        }
+
+        fn visit_f64<E: Error>(self, v: f64) -> Result<Self::Value, E> {
+            // Validate finite value
+            if !v.is_finite() {
+                return Err(E::custom("non-finite float for i64 field"));
+            }
+
+            // Truncate and validate range
+            let truncated = v.trunc();
+            if truncated < i64::MIN as f64 || truncated > i64::MAX as f64 {
+                return Err(E::custom("float out of i64 range"));
+            }
+
+            Ok(truncated as i64)
+        }
+    }
+
+    deserializer.deserialize_any(I64OrFloatVisitor)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1602,32 +2237,16 @@ struct StoredAttr {
     mode: u32,
     uid: u32,
     gid: u32,
+    #[serde(deserialize_with = "deserialize_i64_from_number")]
     atime: i64,
+    #[serde(deserialize_with = "deserialize_i64_from_number")]
     mtime: i64,
+    #[serde(deserialize_with = "deserialize_i64_from_number")]
     ctime: i64,
     nlink: u32,
 }
 
 impl StoredAttr {
-    fn new(kind: FileType) -> Self {
-        let now = current_time();
-        let (mode, nlink) = match kind {
-            FileType::Dir => (0o040755, 2),
-            FileType::File => (0o100644, 1),
-            FileType::Symlink => (0o120777, 1),
-        };
-        Self {
-            size: 0,
-            mode,
-            uid: 0,
-            gid: 0,
-            atime: now,
-            mtime: now,
-            ctime: now,
-            nlink,
-        }
-    }
-
     fn to_file_attr(&self, ino: i64, kind: FileType) -> FileAttr {
         FileAttr {
             ino,
@@ -1675,16 +2294,6 @@ fn current_time() -> i64 {
     Utc::now().timestamp_nanos_opt().unwrap_or(0)
 }
 
-#[allow(dead_code)]
-fn millis_to_system_time(ms: i64) -> Result<SystemTime, MetaError> {
-    if ms < 0 {
-        return Err(MetaError::Internal(format!(
-            "invalid session timestamp {ms}"
-        )));
-    }
-    Ok(UNIX_EPOCH + Duration::from_millis(ms as u64))
-}
-
 fn redis_err(err: redis::RedisError) -> MetaError {
     MetaError::Internal(format!("Redis error: {err}"))
 }
@@ -1698,6 +2307,7 @@ mod tests {
     use crate::meta::store::MetaError;
     use crate::meta::stores::RedisMetaStore;
     use serial_test::serial;
+    use std::sync::Arc;
     use tokio::time;
     use uuid::Uuid;
 
@@ -2423,5 +3033,721 @@ mod tests {
         let lock_info = store2.get_plock(file_ino, &query).await.unwrap();
         assert_eq!(lock_info.lock_type, FileLockType::Write);
         assert_eq!(lock_info.pid, 5555);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_extend_file_size_lua_concurrent() {
+        use crate::meta::MetaStore;
+
+        let store = new_test_store().await;
+        let root = store.root_ino();
+        let ino = store
+            .create_file(root, "test.txt".to_string())
+            .await
+            .unwrap();
+
+        let store1 = std::sync::Arc::new(store);
+        let store2 = store1.clone();
+        let store3 = store1.clone();
+        let store4 = store1.clone();
+
+        let h1 = tokio::spawn(async move { store2.extend_file_size(ino, 1000).await });
+        let h2 = tokio::spawn(async move { store3.extend_file_size(ino, 2000).await });
+        let h3 = tokio::spawn(async move { store4.extend_file_size(ino, 1500).await });
+
+        h1.await.unwrap().unwrap();
+        h2.await.unwrap().unwrap();
+        h3.await.unwrap().unwrap();
+
+        let attr = store1.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr.size, 2000);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_extend_file_size_lua_idempotent() {
+        use crate::meta::MetaStore;
+
+        let store = new_test_store().await;
+        let root = store.root_ino();
+        let ino = store
+            .create_file(root, "test.txt".to_string())
+            .await
+            .unwrap();
+
+        store.extend_file_size(ino, 1000).await.unwrap();
+        let attr1 = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr1.size, 1000);
+
+        store.extend_file_size(ino, 500).await.unwrap();
+        let attr2 = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr2.size, 1000);
+
+        store.extend_file_size(ino, 1000).await.unwrap();
+        let attr3 = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr3.size, 1000);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_extend_file_size_lua_missing_node() {
+        use crate::meta::MetaStore;
+
+        let store = new_test_store().await;
+        let result = store.extend_file_size(99999, 1000).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::NotFound(ino) => assert_eq!(ino, 99999),
+            other => panic!("expected NotFound error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_link_unlink_lua_atomicity() {
+        use crate::meta::MetaStore;
+
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let dir_a = store.mkdir(root, "a".to_string()).await.unwrap();
+        let dir_b = store.mkdir(root, "b".to_string()).await.unwrap();
+
+        let ino = store.create_file(dir_a, "x".to_string()).await.unwrap();
+
+        let attr1 = store.link(ino, dir_b, "y").await.unwrap();
+        assert_eq!(attr1.nlink, 2);
+
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), Some(ino));
+
+        let result = store.link(ino, dir_b, "y").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::AlreadyExists { parent, name } => {
+                assert_eq!(parent, dir_b);
+                assert_eq!(name, "y");
+            }
+            other => panic!("expected AlreadyExists error, got {:?}", other),
+        }
+
+        store.unlink(dir_a, "x").await.unwrap();
+        assert_eq!(store.lookup(dir_a, "x").await.unwrap(), None);
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), Some(ino));
+
+        let attr2 = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr2.nlink, 1);
+
+        store.unlink(dir_b, "y").await.unwrap();
+        assert_eq!(store.lookup(dir_b, "y").await.unwrap(), None);
+
+        let deleted = store.get_deleted_files().await.unwrap();
+        assert!(deleted.contains(&ino));
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rmdir_lua_concurrent() {
+        let store = Arc::new(new_test_store().await);
+        let root = store.root_ino();
+
+        let _test_dir = store.mkdir(root, "testdir".to_string()).await.unwrap();
+
+        let store1 = store.clone();
+        let store2 = store.clone();
+        let store3 = store.clone();
+        let store4 = store.clone();
+
+        let h1 = tokio::spawn(async move { store1.rmdir(root, "testdir").await });
+        let h2 = tokio::spawn(async move { store2.rmdir(root, "testdir").await });
+        let h3 = tokio::spawn(async move { store3.rmdir(root, "testdir").await });
+        let h4 = tokio::spawn(async move { store4.rmdir(root, "testdir").await });
+
+        let r1 = h1.await.unwrap();
+        let r2 = h2.await.unwrap();
+        let r3 = h3.await.unwrap();
+        let r4 = h4.await.unwrap();
+
+        let results = [r1, r2, r3, r4];
+        let success_count = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(
+            success_count, 1,
+            "Exactly one rmdir should succeed, got {} successes",
+            success_count
+        );
+
+        let not_found_count = results
+            .iter()
+            .filter(|r| matches!(r, Err(MetaError::NotFound(ino)) if ino == &root))
+            .count();
+        assert_eq!(
+            not_found_count, 3,
+            "Three rmdir should return NotFound(parent), got {}",
+            not_found_count
+        );
+
+        assert_eq!(store.lookup(root, "testdir").await.unwrap(), None);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rmdir_lua_not_empty() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let parent_dir = store.mkdir(root, "parent".to_string()).await.unwrap();
+        let _child_dir = store.mkdir(parent_dir, "child".to_string()).await.unwrap();
+
+        let result = store.rmdir(root, "parent").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::DirectoryNotEmpty(ino) => assert_eq!(ino, parent_dir),
+            other => panic!("expected DirectoryNotEmpty error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rmdir_lua_not_found() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let result = store.rmdir(root, "nonexistent").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::NotFound(ino) => assert_eq!(ino, root),
+            other => panic!("expected NotFound(parent) error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rmdir_lua_not_directory() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
+
+        let result = store.rmdir(root, "file.txt").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::NotDirectory(ino) => assert_eq!(ino, file_ino),
+            other => panic!("expected NotDirectory error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_entry_lua_concurrent() {
+        let store = Arc::new(new_test_store().await);
+        let root = store.root_ino();
+
+        let store1 = store.clone();
+        let store2 = store.clone();
+        let store3 = store.clone();
+        let store4 = store.clone();
+
+        let h1 = tokio::spawn(async move { store1.mkdir(root, "newdir".to_string()).await });
+        let h2 = tokio::spawn(async move { store2.mkdir(root, "newdir".to_string()).await });
+        let h3 = tokio::spawn(async move { store3.mkdir(root, "newdir".to_string()).await });
+        let h4 = tokio::spawn(async move { store4.mkdir(root, "newdir".to_string()).await });
+
+        let r1 = h1.await.unwrap();
+        let r2 = h2.await.unwrap();
+        let r3 = h3.await.unwrap();
+        let r4 = h4.await.unwrap();
+
+        let results = [r1, r2, r3, r4];
+        let success_count = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(
+            success_count, 1,
+            "Exactly one mkdir should succeed, got {} successes",
+            success_count
+        );
+
+        let already_exists_count = results
+            .iter()
+            .filter(|r| matches!(r, Err(MetaError::AlreadyExists { parent, name }) if parent == &root && name == "newdir"))
+            .count();
+        assert_eq!(
+            already_exists_count, 3,
+            "Three mkdir should return AlreadyExists, got {}",
+            already_exists_count
+        );
+
+        let ino = store.lookup(root, "newdir").await.unwrap();
+        assert!(ino.is_some());
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_entry_lua_already_exists() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        store.mkdir(root, "existing".to_string()).await.unwrap();
+
+        let result = store.mkdir(root, "existing".to_string()).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::AlreadyExists { parent, name } => {
+                assert_eq!(parent, root);
+                assert_eq!(name, "existing");
+            }
+            other => panic!("expected AlreadyExists error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_entry_lua_parent_not_found() {
+        let store = new_test_store().await;
+
+        let result = store.mkdir(999999, "newdir".to_string()).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::ParentNotFound(ino) => assert_eq!(ino, 999999),
+            other => panic!("expected ParentNotFound error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_create_entry_lua_parent_not_directory() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
+
+        let result = store.mkdir(file_ino, "newdir".to_string()).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::NotDirectory(ino) => assert_eq!(ino, file_ino),
+            other => panic!("expected NotDirectory error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_lua_concurrent() {
+        let store = Arc::new(new_test_store().await);
+        let root = store.root_ino();
+
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
+        store.mkdir(root, "dir1".to_string()).await.unwrap();
+        store.mkdir(root, "dir2".to_string()).await.unwrap();
+        store.mkdir(root, "dir3".to_string()).await.unwrap();
+        store.mkdir(root, "dir4".to_string()).await.unwrap();
+
+        let store1 = store.clone();
+        let store2 = store.clone();
+        let store3 = store.clone();
+        let store4 = store.clone();
+
+        let h1 = tokio::spawn(async move {
+            store1
+                .rename(root, "file.txt", root, "moved1.txt".to_string())
+                .await
+        });
+        let h2 = tokio::spawn(async move {
+            store2
+                .rename(root, "file.txt", root, "moved2.txt".to_string())
+                .await
+        });
+        let h3 = tokio::spawn(async move {
+            store3
+                .rename(root, "file.txt", root, "moved3.txt".to_string())
+                .await
+        });
+        let h4 = tokio::spawn(async move {
+            store4
+                .rename(root, "file.txt", root, "moved4.txt".to_string())
+                .await
+        });
+
+        let r1 = h1.await.unwrap();
+        let r2 = h2.await.unwrap();
+        let r3 = h3.await.unwrap();
+        let r4 = h4.await.unwrap();
+
+        let success_count = [&r1, &r2, &r3, &r4].iter().filter(|r| r.is_ok()).count();
+        assert_eq!(success_count, 1, "exactly one rename should succeed");
+
+        let not_found_count = [&r1, &r2, &r3, &r4]
+            .iter()
+            .filter(|r| matches!(r, Err(MetaError::NotFound(ino)) if *ino == root))
+            .count();
+        assert_eq!(
+            not_found_count, 3,
+            "three renames should return NotFound(parent)"
+        );
+
+        let final_node = store.get_node(file_ino).await.unwrap().unwrap();
+        assert!(
+            final_node.name.starts_with("moved") && final_node.name.ends_with(".txt"),
+            "file should be renamed to one of the target names"
+        );
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_lua_source_not_found() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let result = store
+            .rename(root, "nonexistent.txt", root, "moved.txt".to_string())
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::NotFound(ino) => assert_eq!(ino, root),
+            other => panic!("expected NotFound(parent) error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_lua_target_exists() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        store
+            .create_file(root, "file1.txt".to_string())
+            .await
+            .unwrap();
+        store
+            .create_file(root, "file2.txt".to_string())
+            .await
+            .unwrap();
+
+        let result = store
+            .rename(root, "file1.txt", root, "file2.txt".to_string())
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MetaError::AlreadyExists { parent, name } => {
+                assert_eq!(parent, root);
+                assert_eq!(name, "file2.txt");
+            }
+            other => panic!("expected AlreadyExists error, got {:?}", other),
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_lua_same_name() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
+        let node_before = store.get_node(file_ino).await.unwrap().unwrap();
+
+        let result = store
+            .rename(root, "file.txt", root, "file.txt".to_string())
+            .await;
+        assert!(result.is_ok(), "self-rename should be no-op");
+
+        let node_after = store.get_node(file_ino).await.unwrap().unwrap();
+        assert_eq!(
+            node_before.attr.mtime, node_after.attr.mtime,
+            "mtime should not change"
+        );
+        assert_eq!(
+            node_before.attr.ctime, node_after.attr.ctime,
+            "ctime should not change"
+        );
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_lua_hardlink() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
+        store.link(file_ino, root, "link.txt").await.unwrap();
+
+        let node_before = store.get_node(file_ino).await.unwrap().unwrap();
+        assert_eq!(node_before.attr.nlink, 2, "file should have nlink=2");
+        assert_eq!(
+            node_before.parent, 0,
+            "hardlinked file should have parent=0"
+        );
+        assert_eq!(node_before.name, "", "hardlinked file should have name=''");
+
+        let link_parents_before = store.load_link_parents(file_ino).await.unwrap();
+        assert_eq!(link_parents_before.len(), 2);
+        assert!(link_parents_before.contains(&(root, "file.txt".to_string())));
+        assert!(link_parents_before.contains(&(root, "link.txt".to_string())));
+
+        let result = store
+            .rename(root, "file.txt", root, "renamed.txt".to_string())
+            .await;
+        assert!(result.is_ok());
+
+        let node_after = store.get_node(file_ino).await.unwrap().unwrap();
+        assert_eq!(node_after.attr.nlink, 2, "nlink should remain 2");
+        assert_eq!(node_after.parent, 0, "parent should remain 0");
+        assert_eq!(node_after.name, "", "name should remain ''");
+
+        let link_parents_after = store.load_link_parents(file_ino).await.unwrap();
+        assert_eq!(link_parents_after.len(), 2);
+        assert!(link_parents_after.contains(&(root, "renamed.txt".to_string())));
+        assert!(link_parents_after.contains(&(root, "link.txt".to_string())));
+        assert!(!link_parents_after.contains(&(root, "file.txt".to_string())));
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_exchange_lua_concurrent() {
+        let store = Arc::new(new_test_store().await);
+        let root = store.root_ino();
+
+        let file1 = store
+            .create_file(root, "file1.txt".to_string())
+            .await
+            .unwrap();
+        let file2 = store
+            .create_file(root, "file2.txt".to_string())
+            .await
+            .unwrap();
+
+        let mut handles = vec![];
+        for _ in 0..4 {
+            let store_clone = Arc::clone(&store);
+            let handle = tokio::spawn(async move {
+                store_clone
+                    .rename_exchange(root, "file1.txt", root, "file2.txt")
+                    .await
+            });
+            handles.push(handle);
+        }
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let successes = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(successes, 4, "all exchanges should succeed (idempotent)");
+
+        let lookup1 = store.lookup(root, "file1.txt").await.unwrap();
+        let lookup2 = store.lookup(root, "file2.txt").await.unwrap();
+        assert!(
+            (lookup1 == Some(file1) && lookup2 == Some(file2))
+                || (lookup1 == Some(file2) && lookup2 == Some(file1)),
+            "entries should be exchanged or restored to original"
+        );
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_exchange_lua_old_not_found() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        store
+            .create_file(root, "file2.txt".to_string())
+            .await
+            .unwrap();
+
+        let result = store
+            .rename_exchange(root, "nonexistent.txt", root, "file2.txt")
+            .await;
+
+        assert!(result.is_err());
+        if let Err(MetaError::Internal(msg)) = result {
+            assert!(
+                msg.contains("Entry 'nonexistent.txt' not found in parent")
+                    && msg.contains("for exchange"),
+                "error message should match format: got '{}'",
+                msg
+            );
+        } else {
+            panic!("expected Internal error");
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_exchange_lua_new_not_found() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        store
+            .create_file(root, "file1.txt".to_string())
+            .await
+            .unwrap();
+
+        let result = store
+            .rename_exchange(root, "file1.txt", root, "nonexistent.txt")
+            .await;
+
+        assert!(result.is_err());
+        if let Err(MetaError::Internal(msg)) = result {
+            assert!(
+                msg.contains("Entry 'nonexistent.txt' not found in parent")
+                    && msg.contains("for exchange"),
+                "error message should match format: got '{}'",
+                msg
+            );
+        } else {
+            panic!("expected Internal error");
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_exchange_lua_same_entry() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let file_ino = store
+            .create_file(root, "file.txt".to_string())
+            .await
+            .unwrap();
+        let node_before = store.get_node(file_ino).await.unwrap().unwrap();
+
+        let result = store
+            .rename_exchange(root, "file.txt", root, "file.txt")
+            .await;
+        assert!(result.is_ok(), "self-exchange should be no-op");
+
+        let node_after = store.get_node(file_ino).await.unwrap().unwrap();
+        assert_eq!(
+            node_before.attr.mtime, node_after.attr.mtime,
+            "mtime should not change"
+        );
+        assert_eq!(
+            node_before.attr.ctime, node_after.attr.ctime,
+            "ctime should not change"
+        );
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_rename_exchange_lua_hardlinks() {
+        let store = new_test_store().await;
+        let root = store.root_ino();
+
+        let file1 = store
+            .create_file(root, "file1.txt".to_string())
+            .await
+            .unwrap();
+        store.link(file1, root, "link1.txt").await.unwrap();
+
+        let file2 = store
+            .create_file(root, "file2.txt".to_string())
+            .await
+            .unwrap();
+        store.link(file2, root, "link2.txt").await.unwrap();
+
+        let node1_before = store.get_node(file1).await.unwrap().unwrap();
+        assert_eq!(node1_before.attr.nlink, 2);
+        assert_eq!(node1_before.parent, 0);
+        assert_eq!(node1_before.name, "");
+
+        let node2_before = store.get_node(file2).await.unwrap().unwrap();
+        assert_eq!(node2_before.attr.nlink, 2);
+        assert_eq!(node2_before.parent, 0);
+        assert_eq!(node2_before.name, "");
+
+        let result = store
+            .rename_exchange(root, "file1.txt", root, "file2.txt")
+            .await;
+        assert!(result.is_ok());
+
+        let link_parents1 = store.load_link_parents(file1).await.unwrap();
+        assert_eq!(link_parents1.len(), 2);
+        assert!(link_parents1.contains(&(root, "file2.txt".to_string())));
+        assert!(link_parents1.contains(&(root, "link1.txt".to_string())));
+        assert!(!link_parents1.contains(&(root, "file1.txt".to_string())));
+
+        let link_parents2 = store.load_link_parents(file2).await.unwrap();
+        assert_eq!(link_parents2.len(), 2);
+        assert!(link_parents2.contains(&(root, "file1.txt".to_string())));
+        assert!(link_parents2.contains(&(root, "link2.txt".to_string())));
+        assert!(!link_parents2.contains(&(root, "file2.txt".to_string())));
+
+        let node1_after = store.get_node(file1).await.unwrap().unwrap();
+        assert_eq!(node1_after.attr.nlink, 2);
+        assert_eq!(node1_after.parent, 0);
+        assert_eq!(node1_after.name, "");
+
+        let node2_after = store.get_node(file2).await.unwrap().unwrap();
+        assert_eq!(node2_after.attr.nlink, 2);
+        assert_eq!(node2_after.parent, 0);
+        assert_eq!(node2_after.name, "");
+    }
+
+    #[test]
+    fn test_deserialize_i64_from_number() {
+        use serde::Deserialize;
+
+        #[derive(Deserialize)]
+        struct TestStruct {
+            #[serde(deserialize_with = "super::deserialize_i64_from_number")]
+            value: i64,
+        }
+
+        // Integer input (normal case)
+        let json = r#"{"value": 1234567890}"#;
+        let result: TestStruct = serde_json::from_str(json).unwrap();
+        assert_eq!(result.value, 1234567890);
+
+        // Float input (the bug case - scientific notation)
+        let json = r#"{"value": 1.7698324007242e+18}"#;
+        let result: TestStruct = serde_json::from_str(json).unwrap();
+        assert!(result.value > 1_700_000_000_000_000_000); // ~1.77e18
+
+        // Negative value
+        let json = r#"{"value": -1000}"#;
+        let result: TestStruct = serde_json::from_str(json).unwrap();
+        assert_eq!(result.value, -1000);
+
+        // Zero
+        let json = r#"{"value": 0}"#;
+        let result: TestStruct = serde_json::from_str(json).unwrap();
+        assert_eq!(result.value, 0);
     }
 }

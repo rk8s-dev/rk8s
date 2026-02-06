@@ -35,6 +35,11 @@ pub type BlockSpan = Span<BlockTag>;
 
 /// Basic slice descriptor for a chunk-local contiguous range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
+#[cfg_attr(feature = "rkyv-serialization", rkyv(compare(PartialEq)))]
 pub struct SliceDesc {
     pub slice_id: u64,
     pub chunk_id: u64,
@@ -97,5 +102,29 @@ mod tests {
         assert_eq!(spans[1].index, 1);
         assert_eq!(spans[1].offset, 0);
         assert_eq!(spans[1].len, (layout.block_size / 2) as u64);
+    }
+
+    #[test]
+    fn test_slice_desc_serialization_roundtrip() {
+        let desc = SliceDesc {
+            slice_id: 1,
+            chunk_id: 2,
+            offset: 100,
+            length: 4096,
+        };
+        let bytes = crate::meta::serialization::serialize_meta(&desc).unwrap();
+        let recovered: SliceDesc = crate::meta::serialization::deserialize_meta(&bytes).unwrap();
+        assert_eq!(desc, recovered);
+    }
+
+    #[test]
+    fn test_slice_desc_json_backward_compat() {
+        // Old JSON format must still work - MUST use deserialize_meta (not serde_json::from_str)
+        let json_bytes = br#"{"slice_id":1,"chunk_id":2,"offset":100,"length":4096}"#;
+        let desc: SliceDesc = crate::meta::serialization::deserialize_meta(json_bytes).unwrap();
+        assert_eq!(desc.slice_id, 1);
+        assert_eq!(desc.chunk_id, 2);
+        assert_eq!(desc.offset, 100);
+        assert_eq!(desc.length, 4096);
     }
 }

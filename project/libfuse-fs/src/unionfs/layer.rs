@@ -1,3 +1,4 @@
+#![allow(clippy::unnecessary_cast)]
 use async_trait::async_trait;
 use rfuse3::raw::reply::{FileAttr, ReplyCreated, ReplyXAttr};
 use rfuse3::raw::{ObjectSafeFilesystem, Request, reply::ReplyEntry};
@@ -12,6 +13,11 @@ pub const OPAQUE_XATTR_LEN: u32 = 16;
 pub const OPAQUE_XATTR: &str = "user.fuseoverlayfs.opaque";
 pub const UNPRIVILEGED_OPAQUE_XATTR: &str = "user.overlay.opaque";
 pub const PRIVILEGED_OPAQUE_XATTR: &str = "trusted.overlay.opaque";
+
+#[cfg(target_os = "macos")]
+type Stat64 = libc::stat;
+#[cfg(target_os = "linux")]
+type Stat64 = libc::stat64;
 
 /// A filesystem must implement Layer trait, or it cannot be used as an OverlayFS layer.
 #[async_trait]
@@ -60,7 +66,7 @@ pub trait Layer: ObjectSafeFilesystem {
 
         // Try to create whiteout char device with 0/0 device number.
         let dev = libc::makedev(0, 0);
-        let mode = libc::S_IFCHR | 0o777;
+        let mode = (libc::S_IFCHR as u32) | 0o777;
         self.mknod(ctx, ino, name, mode, dev as u32).await
     }
 
@@ -143,9 +149,11 @@ pub trait Layer: ObjectSafeFilesystem {
                 }
                 Err(e) => {
                     let ioerror: std::io::Error = e.into();
-                    if let Some(raw_error) = ioerror.raw_os_error()
-                        && raw_error == libc::ENODATA
-                    {
+                    if ioerror.raw_os_error() == Some(libc::ENODATA) {
+                        return Ok(false);
+                    }
+                    #[cfg(target_os = "macos")]
+                    if ioerror.raw_os_error() == Some(libc::ENOATTR) {
                         return Ok(false);
                     }
 
@@ -225,7 +233,7 @@ pub trait Layer: ObjectSafeFilesystem {
         _inode: Inode,
         _handle: Option<u64>,
         _mapping: bool,
-    ) -> std::io::Result<(libc::stat64, Duration)> {
+    ) -> std::io::Result<(Stat64, Duration)> {
         Err(std::io::Error::from_raw_os_error(libc::ENOSYS))
     }
 }
@@ -302,7 +310,7 @@ impl Layer for PassthroughFs {
         inode: Inode,
         handle: Option<u64>,
         mapping: bool,
-    ) -> std::io::Result<(libc::stat64, Duration)> {
+    ) -> std::io::Result<(Stat64, Duration)> {
         PassthroughFs::do_getattr_inner(self, inode, handle, mapping).await
     }
 }
@@ -317,8 +325,8 @@ pub(crate) fn is_chardev(st: &FileAttr) -> bool {
 pub(crate) fn is_whiteout(st: &FileAttr) -> bool {
     // A whiteout is created as a character device with 0/0 device number.
     // See ref: https://docs.kernel.org/filesystems/overlayfs.html#whiteouts-and-opaque-directories
-    let major = libc::major(st.rdev.into());
-    let minor = libc::minor(st.rdev.into());
+    let major = libc::major(st.rdev as libc::dev_t);
+    let minor = libc::minor(st.rdev as libc::dev_t);
     is_chardev(st) && major == 0 && minor == 0
 }
 

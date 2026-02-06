@@ -57,6 +57,7 @@ where
     }
 
     #[tracing::instrument(
+        name = "DataFetcher.read_at",
         level = "trace",
         skip(self),
         fields(chunk_id = self.id, offset, len, need_reads = tracing::field::Empty)

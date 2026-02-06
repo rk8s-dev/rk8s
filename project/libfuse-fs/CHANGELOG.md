@@ -1,3 +1,9 @@
+# 0.1.10 (February 1st, 2026)
+
+### Fixed
+
+- passthroughfs: suppress logging for ESTALE errors in getattr
+
 # 0.1.9 (December 11th, 2025)
 
 ### Changed

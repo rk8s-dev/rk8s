@@ -65,46 +65,14 @@ where
         }
     }
 
-    /// Only write the data of a slice into the object storage. Callers must update metadata.
-    #[allow(dead_code)]
-    #[deprecated = "Will be removed after enhancing the read-path"]
-    pub(crate) async fn write_at(
-        &self,
-        slice_id: u64,
-        offset: u64,
-        buf: &[u8],
-    ) -> Result<SliceDesc> {
-        let desc = SliceDesc {
-            slice_id,
-            chunk_id: self.id,
-            offset,
-            length: buf.len() as u64,
-        };
-
-        let mut cursor = 0;
-        let mut futures = Vec::new();
-
-        for span in block_span_iter(desc, self.layout) {
-            let take = span.len.as_usize();
-            let data = &buf[cursor..(cursor + take)];
-
-            let block_index = span.index.as_u32();
-            let future =
-                self.backend
-                    .store()
-                    .write_fresh_range((slice_id, block_index), span.offset, data);
-            futures.push(future);
-            cursor += take;
-        }
-
-        for res in join_all(futures).await {
-            res?;
-        }
-        Ok(desc)
-    }
-
     /// Write a slice from a set of byte segments without concatenating them.
-    #[tracing::instrument(level = "trace", skip(self, chunks), fields(slice_id, offset, chunk_count = chunks.len()))]
+    #[tracing::instrument(
+        name = "DataUploader.write_at_vectored",
+        level = "trace",
+        skip(self, chunks),
+        fields(slice_id, offset,
+        chunk_count = chunks.len(),
+    ))]
     pub(crate) async fn write_at_vectored(
         &self,
         slice_id: u64,

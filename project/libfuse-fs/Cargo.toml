@@ -1,6 +1,6 @@
 [package]
 name = "libfuse-fs"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 description = "FUSE Filesystem Library"
 homepage = "https://github.com/r2cn-dev/rk8s/tree/main/project/libfuse-fs"
@@ -35,3 +35,6 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+qlean = "0.2"
+tokio = { workspace = true, features = ["full"] }
+anyhow = { workspace = true }

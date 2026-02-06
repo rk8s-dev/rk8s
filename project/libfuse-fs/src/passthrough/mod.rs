@@ -1,8 +1,12 @@
+#![allow(clippy::useless_conversion)]
 use config::{CachePolicy, Config};
 use file_handle::{FileHandle, OpenableFileHandle};
 
+#[cfg(target_os = "macos")]
+use self::statx::statx_timestamp;
 use futures::executor::block_on;
 use inode_store::{InodeId, InodeStore};
+#[cfg(target_os = "linux")]
 use libc::{self, statx_timestamp};
 
 use moka::future::Cache;
@@ -46,7 +50,7 @@ use vm_memory::bitmap::BitmapSlice;
 
 use nix::sys::resource::{Resource, getrlimit};
 
-mod async_io;
+pub mod async_io;
 mod config;
 mod file_handle;
 mod inode_store;
@@ -55,16 +59,22 @@ mod mount_fd;
 pub mod newlogfs;
 mod os_compat;
 mod statx;
-mod util;
+pub mod util;
 
 /// Current directory
 pub const CURRENT_DIR_CSTR: &[u8] = b".\0";
 /// Parent directory
 pub const PARENT_DIR_CSTR: &[u8] = b"..\0";
 pub const VFS_MAX_INO: u64 = 0xff_ffff_ffff_ffff;
+#[cfg(target_os = "linux")]
 const MOUNT_INFO_FILE: &str = "/proc/self/mountinfo";
+#[cfg(target_os = "macos")]
+const MOUNT_INFO_FILE: &str = "/dev/null";
 pub const EMPTY_CSTR: &[u8] = b"\0";
+#[cfg(target_os = "linux")]
 pub const PROC_SELF_FD_CSTR: &[u8] = b"/proc/self/fd\0";
+#[cfg(target_os = "macos")]
+pub const PROC_SELF_FD_CSTR: &[u8] = b"/dev/fd\0";
 pub const ROOT_ID: u64 = 1;
 use tokio::sync::{Mutex, MutexGuard, RwLock};
 
@@ -97,7 +107,17 @@ pub async fn new_passthroughfs_layer<P: AsRef<Path>, M: AsRef<str>>(
 
     let fs = PassthroughFs::<()>::new(config)?;
 
-    fs.import().await?;
+    #[cfg(target_os = "linux")]
+    if fs.cfg.do_import {
+        fs.import().await?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, always import for now since we rely on the root node being set up?
+        // Or respect the config.
+        fs.import().await?;
+    }
+
     Ok(fs)
 }
 
@@ -160,7 +180,10 @@ impl InodeHandle {
         match self {
             InodeHandle::File(f) => Ok(InodeFile::Ref(f)),
             InodeHandle::Handle(h) => {
+                #[cfg(target_os = "linux")]
                 let f = h.open(libc::O_PATH)?;
+                #[cfg(target_os = "macos")]
+                let f = h.open(libc::O_RDONLY)?;
                 Ok(InodeFile::Owned(f))
             }
         }
@@ -173,7 +196,31 @@ impl InodeHandle {
         }
     }
 
+    #[cfg(target_os = "linux")]
     fn stat(&self) -> Result<libc::stat64> {
+        self.do_stat()
+    }
+    #[cfg(target_os = "macos")]
+    fn stat(&self) -> Result<libc::stat> {
+        // On macOS, stat_fd returns libc::stat, which is the correct type.
+        // No explicit cast from stat64 is needed if stat_fd is correctly implemented
+        // to return the platform-specific stat struct.
+        self.do_stat()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn do_stat(&self) -> Result<libc::stat64> {
+        match self {
+            InodeHandle::File(f) => stat_fd(f, None),
+            InodeHandle::Handle(_h) => {
+                let file = self.get_file()?;
+                stat_fd(&file, None)
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn do_stat(&self) -> Result<libc::stat> {
         match self {
             InodeHandle::File(f) => stat_fd(f, None),
             InodeHandle::Handle(_h) => {
@@ -252,11 +299,15 @@ impl InodeMap {
             .ok_or_else(ebadf)
     }
 
-    fn get_inode_locked(inodes: &InodeStore, handle: &Arc<FileHandle>) -> Option<Inode> {
-        inodes.inode_by_handle(handle).copied()
+    fn get_inode_locked(inodes: &InodeStore, handle: &InodeHandle) -> Option<Inode> {
+        if let Some(h) = handle.file_handle() {
+            inodes.inode_by_handle(h).copied()
+        } else {
+            None
+        }
     }
 
-    async fn get_alt(&self, id: &InodeId, handle: &Arc<FileHandle>) -> Option<Arc<InodeData>> {
+    async fn get_alt(&self, id: &InodeId, handle: &InodeHandle) -> Option<Arc<InodeData>> {
         // Do not expect poisoned lock here, so safe to unwrap().
         let inodes = self.inodes.read().await;
 
@@ -266,10 +317,15 @@ impl InodeMap {
     fn get_alt_locked(
         inodes: &InodeStore,
         id: &InodeId,
-        handle: &Arc<FileHandle>,
+        handle: &InodeHandle,
     ) -> Option<Arc<InodeData>> {
-        inodes
-            .get_by_handle(handle)
+        let by_handle = if let Some(h) = handle.file_handle() {
+            inodes.get_by_handle(h)
+        } else {
+            None
+        };
+
+        by_handle
             .or_else(|| {
                 inodes.get_by_id(id).filter(|data| {
                     // When we have to fall back to looking up an inode by its IDs, ensure that
@@ -471,12 +527,13 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         // Safe because this is a constant value and a valid C string.
         let proc_self_fd_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(PROC_SELF_FD_CSTR) };
-        let proc_self_fd = Self::open_file(
-            &libc::AT_FDCWD,
-            proc_self_fd_cstr,
-            libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0,
-        )?;
+
+        #[cfg(target_os = "linux")]
+        let flags = libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+        #[cfg(target_os = "macos")]
+        let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+
+        let proc_self_fd = Self::open_file(&libc::AT_FDCWD, proc_self_fd_cstr, flags, 0)?;
 
         let (dir_entry_timeout, dir_attr_timeout) =
             match (cfg.dir_entry_timeout, cfg.dir_attr_timeout) {
@@ -545,14 +602,15 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let root =
             CString::new(self.cfg.root_dir.as_os_str().as_bytes()).expect("Invalid root_dir");
 
-        let (h, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root)
+        let (handle, st) = Self::open_file_and_handle(self, &libc::AT_FDCWD, &root)
             .await
             .map_err(|e| {
                 error!("fuse: import: failed to get file or handle: {e:?}");
+
                 e
             })?;
+
         let id = InodeId::from_stat(&st);
-        let handle = InodeHandle::Handle(self.to_openable_handle(h)?);
 
         // Safe because this doesn't modify any memory and there is no need to check the return
         // value because this system call always succeeds. We need to clear the umask here because
@@ -566,7 +624,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 handle,
                 2,
                 id,
-                st.st.st_mode,
+                st.st.st_mode.into(),
                 st.btime
                     .ok_or_else(|| io::Error::other("birth time not available"))?,
             )))
@@ -665,8 +723,11 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         &self,
         dir: &impl AsRawFd,
         name: &CStr,
-    ) -> io::Result<(Arc<FileHandle>, StatExt)> {
+    ) -> io::Result<(InodeHandle, StatExt)> {
+        #[cfg(target_os = "linux")]
         let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
+        #[cfg(target_os = "macos")]
+        let path_file = self.open_file_restricted(dir, name, libc::O_RDONLY, 0)?;
         let st = statx::statx(&path_file, None)?;
 
         let btime_is_valid = match st.btime {
@@ -678,27 +739,28 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             let key = FileUniqueKey(st.st.st_ino, st.btime.unwrap());
             let cache = self.handle_cache.clone();
             if let Some(h) = cache.get(&key).await {
-                Ok((h, st))
+                // If found in cache, it's an Arc<FileHandle>. Convert to InodeHandle::Handle
+                let openable = self.to_openable_handle(h)?;
+                Ok((InodeHandle::Handle(openable), st))
             } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
                 let handle_arc = Arc::new(handle_from_fd);
                 cache.insert(key, Arc::clone(&handle_arc)).await;
-                Ok((handle_arc, st))
+                let openable = self.to_openable_handle(handle_arc)?;
+                Ok((InodeHandle::Handle(openable), st))
             } else {
-                Err(Error::new(
-                    io::ErrorKind::NotFound,
-                    "Failed to create file handle",
-                ))
+                // Fallback for macOS if btime is valid but no handle
+                Ok((InodeHandle::File(path_file), st))
             }
         } else {
-            let handle = {
-                if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
-                    handle_from_fd
-                } else {
-                    return Err(Error::new(io::ErrorKind::NotFound, "File not found"));
-                }
-            };
-            let handle_arc = Arc::new(handle);
-            Ok((handle_arc, st))
+            // If not valid btime
+            if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
+                let handle_arc = Arc::new(handle_from_fd);
+                let openable = self.to_openable_handle(handle_arc)?;
+                Ok((InodeHandle::Handle(openable), st))
+            } else {
+                // Fallback
+                Ok((InodeHandle::File(path_file), st))
+            }
         }
     }
 
@@ -721,7 +783,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         &self,
         inodes: &InodeStore,
         id: &InodeId,
-        handle: &Arc<FileHandle>,
+        handle: &InodeHandle,
     ) -> io::Result<Inode> {
         if !self.cfg.use_host_ino {
             // If the inode has already been assigned before, the new inode is not reassigned,
@@ -759,19 +821,19 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
         let dir = self.inode_map.get(parent).await?;
         let dir_file = dir.get_file()?;
-        let (handle_arc, st) = self.open_file_and_handle(&dir_file, name).await?;
+        let (inode_handle, st) = self.open_file_and_handle(&dir_file, name).await?;
         let id = InodeId::from_stat(&st);
         debug!(
-            "do_lookup: parent: {}, name: {}, handle_arc: {:?}, id: {:?}",
+            "do_lookup: parent: {}, name: {}, handle: {:?}, id: {:?}",
             parent,
             name.to_string_lossy(),
-            handle_arc,
+            inode_handle,
             id
         );
 
         let mut found = None;
         'search: loop {
-            match self.inode_map.get_alt(&id, &handle_arc).await {
+            match self.inode_map.get_alt(&id, &inode_handle).await {
                 // No existing entry found
                 None => break 'search,
                 Some(data) => {
@@ -800,11 +862,6 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
         let inode = if let Some(v) = found {
             v
         } else {
-            // Clone handle_arc before moving it
-            let handle_arc_clone = Arc::clone(&handle_arc);
-            let handle_clone =
-                InodeHandle::Handle(self.to_openable_handle(Arc::clone(&handle_arc))?);
-
             // Write guard get_alt_locked() and insert_lock() to avoid race conditions.
             let mut inodes = self.inode_map.inodes.write().await;
 
@@ -813,7 +870,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             // the lock. If so just use the newly added inode, otherwise the inode will be replaced
             // and results in EBADF.
             // trace!("FS {} looking up inode for id: {:?} with handle: {:?}", self.uuid, id, handle);
-            match InodeMap::get_alt_locked(&inodes, &id, &handle_arc_clone) {
+            match InodeMap::get_alt_locked(&inodes, &id, &inode_handle) {
                 Some(data) => {
                     // An inode was added concurrently while we did not hold a lock on
                     // `self.inodes_map`, so we use that instead. `handle` will be dropped.
@@ -822,7 +879,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                     data.inode
                 }
                 None => {
-                    let inode = self.allocate_inode(&inodes, &id, &handle_arc).await?;
+                    let inode = self.allocate_inode(&inodes, &id, &inode_handle).await?;
                     // trace!("FS {} allocated new inode: {} for id: {:?}", self.uuid, inode, id);
 
                     if inode > VFS_MAX_INO {
@@ -837,10 +894,10 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                         inodes.deref_mut(),
                         Arc::new(InodeData::new(
                             inode,
-                            handle_clone,
+                            inode_handle,
                             1,
                             id,
-                            st.st.st_mode,
+                            st.st.st_mode.into(),
                             st.btime
                                 .ok_or_else(|| io::Error::other("birth time not available"))?,
                         )),
@@ -851,7 +908,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             }
         };
 
-        let (entry_timeout, _) = if is_dir(st.st.st_mode) {
+        let (entry_timeout, _) = if is_dir(st.st.st_mode.into()) {
             (self.dir_entry_timeout, self.dir_attr_timeout)
         } else {
             (self.cfg.entry_timeout, self.cfg.attr_timeout)
@@ -1234,6 +1291,7 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
 #[cfg(test)]
 #[allow(unused_imports)]
+#[allow(clippy::useless_conversion)]
 mod tests {
     use crate::{
         passthrough::{PassthroughArgs, PassthroughFs, ROOT_ID, new_passthroughfs_layer},

@@ -36,7 +36,7 @@ libruntime = { path = "libruntime" }
 rkb = { path = "rkb" }
 rkl = { path = "rkl" }
 rks = { path = "rks" }
-dagrs-derive = { path = "dagrs-derive" }
+dagrs-derive = { path = "dagrs-derive", version = "0.4.3" }
 quote = "1.0"
 proc-macro2 = "1.0"
 rfuse3 = { version = "0.0.5", features = ["tokio-runtime","unprivileged"]}
@@ -236,7 +236,8 @@ pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 if-addrs = "0.6.0"
 redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
 parking_lot = "0.12.5"
-qlean = "0.1.1"
+qlean = "0.2.2"
+rkyv = "0.8.14"
 
 [profile.release]
 debug = true

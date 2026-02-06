@@ -520,6 +520,44 @@ impl ObjectBackend for S3Backend {
         }
     }
 
+    async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let end = offset + buf.len() as u64 - 1;
+        let range_header = format!("bytes={}-{}", offset, end);
+
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.config.bucket)
+            .key(key)
+            .range(range_header)
+            .send()
+            .await;
+
+        match resp {
+            Ok(o) => {
+                use tokio::io::AsyncReadExt;
+                let mut body = o.body.into_async_read();
+                let mut read = 0;
+
+                while read < buf.len() {
+                    let n = body.read(&mut buf[read..]).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    read += n;
+                }
+
+                Ok(read)
+            }
+            Err(SdkError::ServiceError(err)) if err.err().is_no_such_key() => Ok(0),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     async fn get_etag(&self, key: &str) -> Result<String> {
         let resp = self
             .client
