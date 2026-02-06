@@ -525,18 +525,18 @@ Options:
 | COPY        | ✅     |
 | ENTRYPOINT  | ✅     |
 | ARG         | ✅     |
+| WORKDIR     | ✅     |
+| USER        | ✅     |
+| VOLUME      | ✅     |
+| STOPSIGNAL  | ✅     |
+| EXPOSE      | ✅     |
+| SHELL       | ✅     |
 
 The following instructions are not supported and will be silently ignored with a warning message:
 
 | Instruction | Status |
 |-------------|--------|
-| EXPOSE      | Ignored |
-| STOPSIGNAL  | Ignored |
-| WORKDIR     | Ignored |
-| USER        | Ignored |
-| VOLUME      | Ignored |
 | HEALTHCHECK | Ignored |
-| SHELL       | Ignored |
 | ONBUILD     | Ignored |
 
 ## Testing

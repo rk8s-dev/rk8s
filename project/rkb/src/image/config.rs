@@ -58,19 +58,12 @@ pub struct ImageConfig {
     pub envp: HashMap<String, String>,
     pub entrypoint: Option<Vec<String>>,
     pub cmd: Option<Vec<String>>,
-    /// Working directory for the container. This is set by the WORKDIR instruction.
-    /// If None, defaults to "/" (root directory).
     pub working_dir: Option<String>,
-    /// User to run as. This is set by the USER instruction.
-    /// Format can be: "user", "uid", "user:group", "uid:gid", "uid:group", "user:gid"
     pub user: Option<String>,
-    /// Volumes to be mounted. This is set by the VOLUME instruction.
-    /// A set of directories describing where the process is likely to write data
-    /// specific to a container instance.
     pub volumes: Option<Vec<String>>,
-    /// Signal to stop the container. This is set by the STOPSIGNAL instruction.
-    /// The signal can be a signal name (e.g., SIGTERM, SIGKILL) or a number.
     pub stop_signal: Option<String>,
+    pub exposed_ports: Option<Vec<String>>,
+    pub shell: Option<Vec<String>>,
 }
 
 impl ImageConfig {
@@ -110,17 +103,14 @@ impl ImageConfig {
         self.working_dir = Some(new_dir);
     }
 
-    /// Get the current working directory, defaulting to "/" if not set.
     pub fn get_working_dir(&self) -> &str {
         self.working_dir.as_deref().unwrap_or("/")
     }
 
-    /// Set the user to run as.
     pub fn set_user(&mut self, user: String) {
         self.user = Some(user);
     }
 
-    /// Get the current user, if set.
     pub fn get_user(&self) -> Option<&str> {
         self.user.as_deref()
     }
@@ -139,19 +129,48 @@ impl ImageConfig {
         }
     }
 
-    /// Get all volume mount points.
     pub fn get_volumes(&self) -> Option<&Vec<String>> {
         self.volumes.as_ref()
     }
 
-    /// Set the stop signal for the container.
     pub fn set_stop_signal(&mut self, signal: String) {
         self.stop_signal = Some(signal);
     }
 
-    /// Get the stop signal, if set.
     pub fn get_stop_signal(&self) -> Option<&str> {
         self.stop_signal.as_deref()
+    }
+
+    pub fn add_exposed_port(&mut self, port: String) {
+        if self.exposed_ports.is_none() {
+            self.exposed_ports = Some(Vec::new());
+        }
+        // Normalize port format: if no protocol specified, add /tcp
+        let normalized_port = if port.contains('/') {
+            port
+        } else {
+            format!("{}/tcp", port)
+        };
+        if let Some(ref mut ports) = self.exposed_ports {
+            // Avoid duplicates
+            if !ports.contains(&normalized_port) {
+                ports.push(normalized_port);
+            }
+        }
+    }
+
+    pub fn get_exposed_ports(&self) -> Option<&Vec<String>> {
+        self.exposed_ports.as_ref()
+    }
+
+    pub fn set_shell(&mut self, shell: Vec<String>) {
+        self.shell = Some(shell);
+    }
+
+    pub fn get_shell(&self) -> Vec<String> {
+        self.shell
+            .clone()
+            .unwrap_or_else(|| vec!["/bin/sh".to_string(), "-c".to_string()])
     }
 
     pub fn get_oci_image_config(&self) -> Result<Config> {
@@ -193,6 +212,12 @@ impl ImageConfig {
             config = config.stop_signal(stop_signal.clone());
         }
 
+        if let Some(exposed_ports) = &self.exposed_ports {
+            config = config.exposed_ports(exposed_ports.clone());
+        }
+
+        // Note: SHELL is not part of OCI image config spec, it only affects build-time behavior
+
         config.build().context("Failed to build OCI image config")
     }
 }
@@ -211,6 +236,8 @@ impl Default for ImageConfig {
             user: None,
             volumes: None,
             stop_signal: None,
+            exposed_ports: None,
+            shell: None,
         }
     }
 }

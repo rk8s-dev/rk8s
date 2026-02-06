@@ -49,7 +49,6 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
                 let instr_name = misc.instruction.content.to_uppercase();
                 match instr_name.as_str() {
                     "WORKDIR" => {
-                        // Extract the working directory path from arguments
                         let workdir = extract_misc_argument(&misc.arguments);
                         if workdir.is_empty() {
                             bail!("WORKDIR requires a path argument");
@@ -59,7 +58,6 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
                         Ok(())
                     }
                     "USER" => {
-                        // Extract the user specification from arguments
                         let user = extract_misc_argument(&misc.arguments);
                         if user.is_empty() {
                             bail!("USER requires a user argument");
@@ -79,18 +77,18 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
                             bail!("VOLUME requires at least one path argument");
                         }
 
-                        // Check if it's JSON array format
                         let volumes: Vec<String> = if volume_arg.starts_with('[') {
-                            // Parse JSON array format: ["/data", "/logs"]
                             match serde_json::from_str::<Vec<String>>(&volume_arg) {
                                 Ok(v) => v,
                                 Err(_) => {
-                                    // Fallback: treat as single path if JSON parsing fails
-                                    vec![volume_arg.trim_matches(|c| c == '[' || c == ']').to_string()]
+                                    vec![
+                                        volume_arg
+                                            .trim_matches(|c| c == '[' || c == ']')
+                                            .to_string(),
+                                    ]
                                 }
                             }
                         } else {
-                            // Space-separated format: /data /logs
                             volume_arg
                                 .split_whitespace()
                                 .map(|s| s.to_string())
@@ -107,7 +105,6 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
                         Ok(())
                     }
                     "STOPSIGNAL" => {
-                        // Extract the stop signal from arguments
                         let signal = extract_misc_argument(&misc.arguments);
                         if signal.is_empty() {
                             bail!("STOPSIGNAL requires a signal argument");
@@ -116,9 +113,52 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
                         ctx.image_config.set_stop_signal(signal);
                         Ok(())
                     }
+                    "EXPOSE" => {
+                        // Extract exposed ports from arguments
+                        // EXPOSE supports multiple formats:
+                        // - EXPOSE 80
+                        // - EXPOSE 80/tcp
+                        // - EXPOSE 80/udp
+                        // - EXPOSE 80 443 (multiple ports)
+                        // - EXPOSE 80/tcp 443/tcp
+                        let expose_arg = extract_misc_argument(&misc.arguments);
+                        if expose_arg.is_empty() {
+                            bail!("EXPOSE requires at least one port argument");
+                        }
+
+                        for port in expose_arg.split_whitespace() {
+                            let port = port.trim().to_string();
+                            if !port.is_empty() {
+                                tracing::debug!("Adding EXPOSE: {}", port);
+                                ctx.image_config.add_exposed_port(port);
+                            }
+                        }
+                        Ok(())
+                    }
+                    "SHELL" => {
+                        let shell_arg = extract_misc_argument(&misc.arguments);
+                        if shell_arg.is_empty() {
+                            bail!("SHELL requires a JSON array argument");
+                        }
+
+                        let shell: Vec<String> = match serde_json::from_str(&shell_arg) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                bail!("SHELL requires a valid JSON array: {}", e);
+                            }
+                        };
+
+                        if shell.is_empty() {
+                            bail!("SHELL array cannot be empty");
+                        }
+
+                        tracing::debug!("Setting SHELL to: {:?}", shell);
+                        ctx.image_config.set_shell(shell);
+                        Ok(())
+                    }
                     // TODO: These instructions are currently ignored but should be properly
                     // recorded in the image config for OCI compliance
-                    "EXPOSE" | "HEALTHCHECK" | "SHELL" | "ONBUILD" => {
+                    "HEALTHCHECK" | "ONBUILD" => {
                         tracing::warn!(
                             "Instruction {} is ignored (not yet implemented)",
                             instr_name
@@ -187,7 +227,9 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
                     .collect();
             }
             ShellOrExecExpr::Shell(shell_expr) => {
-                command_args.extend(vec!["/bin/sh".to_owned(), "-c".to_owned()]);
+                // Use custom shell if set, otherwise default to ["/bin/sh", "-c"]
+                let shell = ctx.image_config.get_shell();
+                command_args.extend(shell);
                 let mut script = String::new();
                 for component in shell_expr.components.iter() {
                     match component {
@@ -291,12 +333,10 @@ impl<P: AsRef<Path>> InstructionExt<P> for CopyInstruction {
 
         let dest = self.destination.content.clone();
         let dest = if dest.starts_with('/') {
-            // Absolute path - strip leading slash and join to mountpoint
             ctx.mount_config
                 .mountpoint
                 .join(dest.trim_start_matches('/'))
         } else {
-            // Relative path - resolve relative to WORKDIR
             let working_dir = ctx.image_config.get_working_dir();
             let abs_dest = if working_dir == "/" {
                 format!("/{}", dest)
