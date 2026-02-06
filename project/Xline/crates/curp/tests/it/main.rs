@@ -1,3 +1,0 @@
-mod common;
-
-mod server;

@@ -1,0 +1,1321 @@
+07:48:02 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:48:02 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:48:02 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:48:02 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:48:02 [DEBUG] (1) cni_plugin::cni: read payload bytes=0
+07:48:02 [ERROR] missing input network config
+07:48:02 [DEBUG] (1) cni_plugin::reply: replying with ErrorReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    code: 7,
+    msg: "Missing payload",
+    details: "missing input network config",
+}
+07:48:02 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:48:02 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:48:02 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:48:02 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:48:02 [DEBUG] (1) cni_plugin::cni: read payload bytes=349
+07:48:02 [DEBUG] (1) cni_plugin::cni: read env var CNI_COMMAND = "ADD"
+07:48:02 [DEBUG] (1) cni_plugin::cni: read env var CNI_CONTAINERID = "16112"
+07:48:02 [DEBUG] (1) cni_plugin::cni: read env var CNI_IFNAME = "vethcni0"
+07:48:02 [DEBUG] (1) cni_plugin::cni: read env var CNI_NETNS = "/proc/16112/ns/net"
+07:48:02 [INFO] (1) libbridge: libbridge serving spec v1.0.0 for command=Add
+07:48:02 [INFO] (1) libbridge: (CNI bridge plugin) version bridge config: BridgeNetConf { net_conf: NetworkConfig { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, name: "single-net", plugin: "libbridge", args: {}, ip_masq: false, ipam: Some(IpamConfig { plugin: "libipam", specific: {"ranges": Array [Array [Object {"gateway": String("172.17.0.1"), "subnet": String("172.17.0.0/16")}]], "dataDir": Null, "name": Null, "routes": Null, "resolvConf": Null} }), dns: None, runtime: None, prev_result: None, specific: {"macSpoofCheck": Null} }, br_name: Some("single0"), is_gw: Some(true), is_default_gw: None, force_address: None, mtu: Some(1500), hairpin_mode: None, promisc_mode: None, vlan: None, vlan_trunk: None, preserve_default_vlan: Some(true), mac_spoof_chk: None, enable_dad: None, disable_container_interface: None, port_isolation: None, args: None, mac: None, vlans: Some([]) }
+07:48:03 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:03 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:03 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:03 [INFO] (1) libbridge: netns: "NS(4:4026532567)"
+07:48:03 [INFO] (1) libbridge: host_ns: "NS(4:4026531840)"
+07:48:03 [INFO] (1) libcni::ip::veth: Creating veth pair: container_veth_name=vethcni0, host_veth_name=veth49a4d3c1
+07:48:03 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:03 [INFO] (1) libbridge: veth: Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532567]", read: true, write: false }, path: Some("/proc/16112/ns/net") } }, peer_inf: Interface { name: "veth49a4d3c1", mac: None, ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16114/task/16114/ns/net") } } }
+07:48:03 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:03 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:03 [DEBUG] (1) libbridge:  veth :Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532567]", read: true, write: false }, path: Some("/proc/16112/ns/net") } }, peer_inf: Interface { name: "veth49a4d3c1", mac: Some(MacAddr(MacAddr6([206, 32, 48, 180, 195, 229]))), ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16114/task/16114/ns/net") } } }
+07:48:03 [INFO] (1) cni_plugin::delegation: delegating to plugin at /opt/cni/bin/libipam for command=ADD
+07:48:03 [DEBUG] (1) cni_plugin::delegation: spawing child process, async=smol
+07:48:03 [DEBUG] (1) cni_plugin::delegation: taking child stdin
+07:48:03 [DEBUG] (1) cni_plugin::delegation: copying bytes=245 to stdin
+07:48:03 [DEBUG] (1) cni_plugin::delegation: closing stdin
+07:48:03 [DEBUG] (1) cni_plugin::delegation: dropping stdin handle
+07:48:03 [DEBUG] (1) cni_plugin::delegation: awaiting child
+07:48:04 [INFO] (1) cni_plugin::delegation: delegate plugin at /opt/cni/bin/libipam for command=ADD has returned with exit status: 0; stdout bytes=104
+07:48:04 [DEBUG] (1) libbridge: ipam_result:IpamSuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.196, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:04 [DEBUG] (1) libbridge: bridge_result:SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([42, 188, 187, 135, 244, 146]))), sandbox: "" }, Interface { name: "veth49a4d3c1", mac: Some(MacAddr(MacAddr6([206, 32, 48, 180, 195, 229]))), sandbox: "/proc/16114/task/16114/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16112/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.196, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:04 [INFO] (1) libbridge: gateway_infos: [GatewayInfo { gws: [V4(Ipv4Network { addr: 172.17.0.1, prefix: 16 })], family: Inet, default_route_found: false }]
+07:48:04 [INFO] (1) libbridge: bridge_result: SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([42, 188, 187, 135, 244, 146]))), sandbox: "" }, Interface { name: "veth49a4d3c1", mac: Some(MacAddr(MacAddr6([206, 32, 48, 180, 195, 229]))), sandbox: "/proc/16114/task/16114/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16112/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.196, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [DEBUG] (1) libcni::ip::ipam: ips:[Ip { address: V4(Ipv4Network { addr: 172.17.0.196, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }]
+07:48:04 [DEBUG] (1) libcni::ip::ipam: add ip:[Ip { address: V4(Ipv4Network { addr: 172.17.0.196, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }] to:"vethcni0"
+07:48:04 [DEBUG] (1) libcni::ip::addr: container ip add :172.17.0.196
+07:48:04 [DEBUG] (1) libcni::ip::addr: container ip add success
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [INFO] (1) libbridge: add addr to br, addr: Addr { ipnet: V4(Ipv4Network { addr: 172.17.0.1, prefix: 16 }), label: "", flags: AddressFlags(0x0), scope: Universe, peer: None, broadcast: None, cache_info: CacheInfo { ifa_preferred: 0, ifa_valid: 0, cstamp: 0, tstamp: 0 }, link_index: 0 }
+07:48:04 [DEBUG] (1) libcni::ip::addr: container ip add :172.17.0.1
+07:48:04 [DEBUG] (1) libcni::ip::addr: container ip add success
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [INFO] (1) libnetwork::ip: all_ifaces: [Interface { index: 1, mtu: Some(65536), name: "lo", hardware_addr: Some(V6(MacAddr6([0, 0, 0, 0, 0, 0]))), flags: Flags(UP | POINT_TO_POINT) }, Interface { index: 2, mtu: Some(1500), name: "ens33", hardware_addr: Some(V6(MacAddr6([0, 12, 41, 26, 72, 121]))), flags: Flags(UP | BROADCAST) }, Interface { index: 3, mtu: Some(1500), name: "single0", hardware_addr: Some(V6(MacAddr6([34, 230, 163, 148, 38, 162]))), flags: Flags(UP | BROADCAST) }, Interface { index: 4, mtu: Some(1500), name: "veth49a4d3c1", hardware_addr: Some(V6(MacAddr6([182, 135, 173, 232, 102, 76]))), flags: Flags(UP | BROADCAST) }]
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:04 [DEBUG] (1) libbridge: success! SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            42,
+                            188,
+                            187,
+                            135,
+                            244,
+                            146,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth49a4d3c1",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            206,
+                            32,
+                            48,
+                            180,
+                            195,
+                            229,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16114/task/16114/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16112/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.196,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:48:04 [DEBUG] (1) cni_plugin::reply: replying with SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            42,
+                            188,
+                            187,
+                            135,
+                            244,
+                            146,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth49a4d3c1",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            206,
+                            32,
+                            48,
+                            180,
+                            195,
+                            229,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16114/task/16114/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16112/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.196,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:48:05 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:48:05 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:48:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:48:05 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:48:05 [DEBUG] (1) cni_plugin::cni: read payload bytes=0
+07:48:05 [ERROR] missing input network config
+07:48:05 [DEBUG] (1) cni_plugin::reply: replying with ErrorReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    code: 7,
+    msg: "Missing payload",
+    details: "missing input network config",
+}
+07:48:05 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:48:05 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:48:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:48:05 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:48:05 [DEBUG] (1) cni_plugin::cni: read payload bytes=349
+07:48:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_COMMAND = "ADD"
+07:48:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_CONTAINERID = "16230"
+07:48:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_IFNAME = "vethcni0"
+07:48:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_NETNS = "/proc/16230/ns/net"
+07:48:05 [INFO] (1) libbridge: libbridge serving spec v1.0.0 for command=Add
+07:48:05 [INFO] (1) libbridge: (CNI bridge plugin) version bridge config: BridgeNetConf { net_conf: NetworkConfig { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, name: "single-net", plugin: "libbridge", args: {}, ip_masq: false, ipam: Some(IpamConfig { plugin: "libipam", specific: {"ranges": Array [Array [Object {"gateway": String("172.17.0.1"), "subnet": String("172.17.0.0/16")}]], "name": Null, "resolvConf": Null, "dataDir": Null, "routes": Null} }), dns: None, runtime: None, prev_result: None, specific: {"macSpoofCheck": Null} }, br_name: Some("single0"), is_gw: Some(true), is_default_gw: None, force_address: None, mtu: Some(1500), hairpin_mode: None, promisc_mode: None, vlan: None, vlan_trunk: None, preserve_default_vlan: Some(true), mac_spoof_chk: None, enable_dad: None, disable_container_interface: None, port_isolation: None, args: None, mac: None, vlans: Some([]) }
+07:48:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:05 [INFO] (1) libbridge: netns: "NS(4:4026532568)"
+07:48:05 [INFO] (1) libbridge: host_ns: "NS(4:4026531840)"
+07:48:05 [INFO] (1) libcni::ip::veth: Creating veth pair: container_veth_name=vethcni0, host_veth_name=vethe836c964
+07:48:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [INFO] (1) libbridge: veth: Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532568]", read: true, write: false }, path: Some("/proc/16230/ns/net") } }, peer_inf: Interface { name: "vethe836c964", mac: None, ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16240/task/16240/ns/net") } } }
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [DEBUG] (1) libbridge:  veth :Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532568]", read: true, write: false }, path: Some("/proc/16230/ns/net") } }, peer_inf: Interface { name: "vethe836c964", mac: Some(MacAddr(MacAddr6([138, 193, 185, 126, 69, 79]))), ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16240/task/16240/ns/net") } } }
+07:48:06 [INFO] (1) cni_plugin::delegation: delegating to plugin at /opt/cni/bin/libipam for command=ADD
+07:48:06 [DEBUG] (1) cni_plugin::delegation: spawing child process, async=smol
+07:48:06 [DEBUG] (1) cni_plugin::delegation: taking child stdin
+07:48:06 [DEBUG] (1) cni_plugin::delegation: copying bytes=245 to stdin
+07:48:06 [DEBUG] (1) cni_plugin::delegation: closing stdin
+07:48:06 [DEBUG] (1) cni_plugin::delegation: dropping stdin handle
+07:48:06 [DEBUG] (1) cni_plugin::delegation: awaiting child
+07:48:06 [INFO] (1) cni_plugin::delegation: delegate plugin at /opt/cni/bin/libipam for command=ADD has returned with exit status: 0; stdout bytes=104
+07:48:06 [DEBUG] (1) libbridge: ipam_result:IpamSuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.197, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:06 [DEBUG] (1) libbridge: bridge_result:SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "vethe836c964", mac: Some(MacAddr(MacAddr6([138, 193, 185, 126, 69, 79]))), sandbox: "/proc/16240/task/16240/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16230/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.197, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:06 [INFO] (1) libbridge: gateway_infos: [GatewayInfo { gws: [V4(Ipv4Network { addr: 172.17.0.1, prefix: 16 })], family: Inet, default_route_found: false }]
+07:48:06 [INFO] (1) libbridge: bridge_result: SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "vethe836c964", mac: Some(MacAddr(MacAddr6([138, 193, 185, 126, 69, 79]))), sandbox: "/proc/16240/task/16240/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16230/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.197, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [DEBUG] (1) libcni::ip::ipam: ips:[Ip { address: V4(Ipv4Network { addr: 172.17.0.197, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }]
+07:48:06 [DEBUG] (1) libcni::ip::ipam: add ip:[Ip { address: V4(Ipv4Network { addr: 172.17.0.197, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }] to:"vethcni0"
+07:48:06 [DEBUG] (1) libcni::ip::addr: container ip add :172.17.0.197
+07:48:06 [DEBUG] (1) libcni::ip::addr: container ip add success
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [INFO] (1) libnetwork::ip: all_ifaces: [Interface { index: 1, mtu: Some(65536), name: "lo", hardware_addr: Some(V6(MacAddr6([0, 0, 0, 0, 0, 0]))), flags: Flags(UP | POINT_TO_POINT) }, Interface { index: 2, mtu: Some(1500), name: "ens33", hardware_addr: Some(V6(MacAddr6([0, 12, 41, 26, 72, 121]))), flags: Flags(UP | BROADCAST) }, Interface { index: 3, mtu: Some(1500), name: "single0", hardware_addr: Some(V6(MacAddr6([34, 230, 163, 148, 38, 162]))), flags: Flags(UP | BROADCAST) }, Interface { index: 5, mtu: Some(1500), name: "vethe836c964", hardware_addr: Some(V6(MacAddr6([202, 101, 130, 198, 254, 165]))), flags: Flags(UP | BROADCAST) }]
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:06 [DEBUG] (1) libbridge: success! SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "vethe836c964",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            138,
+                            193,
+                            185,
+                            126,
+                            69,
+                            79,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16240/task/16240/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16230/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.197,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:48:06 [DEBUG] (1) cni_plugin::reply: replying with SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "vethe836c964",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            138,
+                            193,
+                            185,
+                            126,
+                            69,
+                            79,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16240/task/16240/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16230/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.197,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:48:07 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:48:07 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:48:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:48:07 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:48:07 [DEBUG] (1) cni_plugin::cni: read payload bytes=0
+07:48:07 [ERROR] missing input network config
+07:48:07 [DEBUG] (1) cni_plugin::reply: replying with ErrorReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    code: 7,
+    msg: "Missing payload",
+    details: "missing input network config",
+}
+07:48:07 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:48:07 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:48:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:48:07 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:48:07 [DEBUG] (1) cni_plugin::cni: read payload bytes=349
+07:48:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_COMMAND = "ADD"
+07:48:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_CONTAINERID = "16292"
+07:48:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_IFNAME = "vethcni0"
+07:48:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_NETNS = "/proc/16292/ns/net"
+07:48:07 [INFO] (1) libbridge: libbridge serving spec v1.0.0 for command=Add
+07:48:07 [INFO] (1) libbridge: (CNI bridge plugin) version bridge config: BridgeNetConf { net_conf: NetworkConfig { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, name: "single-net", plugin: "libbridge", args: {}, ip_masq: false, ipam: Some(IpamConfig { plugin: "libipam", specific: {"resolvConf": Null, "dataDir": Null, "name": Null, "routes": Null, "ranges": Array [Array [Object {"gateway": String("172.17.0.1"), "subnet": String("172.17.0.0/16")}]]} }), dns: None, runtime: None, prev_result: None, specific: {"macSpoofCheck": Null} }, br_name: Some("single0"), is_gw: Some(true), is_default_gw: None, force_address: None, mtu: Some(1500), hairpin_mode: None, promisc_mode: None, vlan: None, vlan_trunk: None, preserve_default_vlan: Some(true), mac_spoof_chk: None, enable_dad: None, disable_container_interface: None, port_isolation: None, args: None, mac: None, vlans: Some([]) }
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [INFO] (1) libbridge: netns: "NS(4:4026532569)"
+07:48:07 [INFO] (1) libbridge: host_ns: "NS(4:4026531840)"
+07:48:07 [INFO] (1) libcni::ip::veth: Creating veth pair: container_veth_name=vethcni0, host_veth_name=veth90296f12
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [INFO] (1) libbridge: veth: Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532569]", read: true, write: false }, path: Some("/proc/16292/ns/net") } }, peer_inf: Interface { name: "veth90296f12", mac: None, ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16294/task/16294/ns/net") } } }
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [DEBUG] (1) libbridge:  veth :Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532569]", read: true, write: false }, path: Some("/proc/16292/ns/net") } }, peer_inf: Interface { name: "veth90296f12", mac: Some(MacAddr(MacAddr6([154, 93, 112, 15, 125, 20]))), ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16294/task/16294/ns/net") } } }
+07:48:07 [INFO] (1) cni_plugin::delegation: delegating to plugin at /opt/cni/bin/libipam for command=ADD
+07:48:07 [DEBUG] (1) cni_plugin::delegation: spawing child process, async=smol
+07:48:07 [DEBUG] (1) cni_plugin::delegation: taking child stdin
+07:48:07 [DEBUG] (1) cni_plugin::delegation: copying bytes=245 to stdin
+07:48:07 [DEBUG] (1) cni_plugin::delegation: closing stdin
+07:48:07 [DEBUG] (1) cni_plugin::delegation: dropping stdin handle
+07:48:07 [DEBUG] (1) cni_plugin::delegation: awaiting child
+07:48:07 [INFO] (1) cni_plugin::delegation: delegate plugin at /opt/cni/bin/libipam for command=ADD has returned with exit status: 0; stdout bytes=104
+07:48:07 [DEBUG] (1) libbridge: ipam_result:IpamSuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.198, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:07 [DEBUG] (1) libbridge: bridge_result:SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "veth90296f12", mac: Some(MacAddr(MacAddr6([154, 93, 112, 15, 125, 20]))), sandbox: "/proc/16294/task/16294/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16292/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.198, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:07 [INFO] (1) libbridge: gateway_infos: [GatewayInfo { gws: [V4(Ipv4Network { addr: 172.17.0.1, prefix: 16 })], family: Inet, default_route_found: false }]
+07:48:07 [INFO] (1) libbridge: bridge_result: SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "veth90296f12", mac: Some(MacAddr(MacAddr6([154, 93, 112, 15, 125, 20]))), sandbox: "/proc/16294/task/16294/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16292/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.198, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [DEBUG] (1) libcni::ip::ipam: ips:[Ip { address: V4(Ipv4Network { addr: 172.17.0.198, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }]
+07:48:07 [DEBUG] (1) libcni::ip::ipam: add ip:[Ip { address: V4(Ipv4Network { addr: 172.17.0.198, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }] to:"vethcni0"
+07:48:07 [DEBUG] (1) libcni::ip::addr: container ip add :172.17.0.198
+07:48:07 [DEBUG] (1) libcni::ip::addr: container ip add success
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [INFO] (1) libnetwork::ip: all_ifaces: [Interface { index: 1, mtu: Some(65536), name: "lo", hardware_addr: Some(V6(MacAddr6([0, 0, 0, 0, 0, 0]))), flags: Flags(UP | POINT_TO_POINT) }, Interface { index: 2, mtu: Some(1500), name: "ens33", hardware_addr: Some(V6(MacAddr6([0, 12, 41, 26, 72, 121]))), flags: Flags(UP | BROADCAST) }, Interface { index: 3, mtu: Some(1500), name: "single0", hardware_addr: Some(V6(MacAddr6([34, 230, 163, 148, 38, 162]))), flags: Flags(UP | BROADCAST) }, Interface { index: 6, mtu: Some(1500), name: "veth90296f12", hardware_addr: Some(V6(MacAddr6([154, 93, 112, 15, 125, 20]))), flags: Flags(UP | BROADCAST) }]
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:48:07 [DEBUG] (1) libbridge: success! SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth90296f12",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            154,
+                            93,
+                            112,
+                            15,
+                            125,
+                            20,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16294/task/16294/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16292/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.198,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:48:07 [DEBUG] (1) cni_plugin::reply: replying with SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth90296f12",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            154,
+                            93,
+                            112,
+                            15,
+                            125,
+                            20,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16294/task/16294/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16292/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.198,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:49:04 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:49:04 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:49:04 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:49:04 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:49:04 [DEBUG] (1) cni_plugin::cni: read payload bytes=0
+07:49:04 [ERROR] missing input network config
+07:49:04 [DEBUG] (1) cni_plugin::reply: replying with ErrorReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    code: 7,
+    msg: "Missing payload",
+    details: "missing input network config",
+}
+07:49:04 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:49:04 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:49:04 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:49:04 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:49:04 [DEBUG] (1) cni_plugin::cni: read payload bytes=349
+07:49:04 [DEBUG] (1) cni_plugin::cni: read env var CNI_COMMAND = "ADD"
+07:49:04 [DEBUG] (1) cni_plugin::cni: read env var CNI_CONTAINERID = "16507"
+07:49:04 [DEBUG] (1) cni_plugin::cni: read env var CNI_IFNAME = "vethcni0"
+07:49:04 [DEBUG] (1) cni_plugin::cni: read env var CNI_NETNS = "/proc/16507/ns/net"
+07:49:04 [INFO] (1) libbridge: libbridge serving spec v1.0.0 for command=Add
+07:49:04 [INFO] (1) libbridge: (CNI bridge plugin) version bridge config: BridgeNetConf { net_conf: NetworkConfig { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, name: "single-net", plugin: "libbridge", args: {}, ip_masq: false, ipam: Some(IpamConfig { plugin: "libipam", specific: {"ranges": Array [Array [Object {"gateway": String("172.17.0.1"), "subnet": String("172.17.0.0/16")}]], "dataDir": Null, "name": Null, "resolvConf": Null, "routes": Null} }), dns: None, runtime: None, prev_result: None, specific: {"macSpoofCheck": Null} }, br_name: Some("single0"), is_gw: Some(true), is_default_gw: None, force_address: None, mtu: Some(1500), hairpin_mode: None, promisc_mode: None, vlan: None, vlan_trunk: None, preserve_default_vlan: Some(true), mac_spoof_chk: None, enable_dad: None, disable_container_interface: None, port_isolation: None, args: None, mac: None, vlans: Some([]) }
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [INFO] (1) libbridge: netns: "NS(4:4026532849)"
+07:49:04 [INFO] (1) libbridge: host_ns: "NS(4:4026531840)"
+07:49:04 [INFO] (1) libcni::ip::veth: Creating veth pair: container_veth_name=vethcni0, host_veth_name=veth3e24d0de
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [INFO] (1) libbridge: veth: Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532849]", read: true, write: false }, path: Some("/proc/16507/ns/net") } }, peer_inf: Interface { name: "veth3e24d0de", mac: None, ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16509/task/16509/ns/net") } } }
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [DEBUG] (1) libbridge:  veth :Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532849]", read: true, write: false }, path: Some("/proc/16507/ns/net") } }, peer_inf: Interface { name: "veth3e24d0de", mac: Some(MacAddr(MacAddr6([210, 233, 254, 69, 233, 27]))), ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16509/task/16509/ns/net") } } }
+07:49:04 [INFO] (1) cni_plugin::delegation: delegating to plugin at /opt/cni/bin/libipam for command=ADD
+07:49:04 [DEBUG] (1) cni_plugin::delegation: spawing child process, async=smol
+07:49:04 [DEBUG] (1) cni_plugin::delegation: taking child stdin
+07:49:04 [DEBUG] (1) cni_plugin::delegation: copying bytes=245 to stdin
+07:49:04 [DEBUG] (1) cni_plugin::delegation: closing stdin
+07:49:04 [DEBUG] (1) cni_plugin::delegation: dropping stdin handle
+07:49:04 [DEBUG] (1) cni_plugin::delegation: awaiting child
+07:49:04 [INFO] (1) cni_plugin::delegation: delegate plugin at /opt/cni/bin/libipam for command=ADD has returned with exit status: 0; stdout bytes=104
+07:49:04 [DEBUG] (1) libbridge: ipam_result:IpamSuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.199, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:04 [DEBUG] (1) libbridge: bridge_result:SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "veth3e24d0de", mac: Some(MacAddr(MacAddr6([210, 233, 254, 69, 233, 27]))), sandbox: "/proc/16509/task/16509/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16507/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.199, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:04 [INFO] (1) libbridge: gateway_infos: [GatewayInfo { gws: [V4(Ipv4Network { addr: 172.17.0.1, prefix: 16 })], family: Inet, default_route_found: false }]
+07:49:04 [INFO] (1) libbridge: bridge_result: SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "veth3e24d0de", mac: Some(MacAddr(MacAddr6([210, 233, 254, 69, 233, 27]))), sandbox: "/proc/16509/task/16509/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16507/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.199, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [DEBUG] (1) libcni::ip::ipam: ips:[Ip { address: V4(Ipv4Network { addr: 172.17.0.199, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }]
+07:49:04 [DEBUG] (1) libcni::ip::ipam: add ip:[Ip { address: V4(Ipv4Network { addr: 172.17.0.199, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }] to:"vethcni0"
+07:49:04 [DEBUG] (1) libcni::ip::addr: container ip add :172.17.0.199
+07:49:04 [DEBUG] (1) libcni::ip::addr: container ip add success
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [INFO] (1) libnetwork::ip: all_ifaces: [Interface { index: 1, mtu: Some(65536), name: "lo", hardware_addr: Some(V6(MacAddr6([0, 0, 0, 0, 0, 0]))), flags: Flags(UP | POINT_TO_POINT) }, Interface { index: 2, mtu: Some(1500), name: "ens33", hardware_addr: Some(V6(MacAddr6([0, 12, 41, 26, 72, 121]))), flags: Flags(UP | BROADCAST) }, Interface { index: 3, mtu: Some(1500), name: "single0", hardware_addr: Some(V6(MacAddr6([34, 230, 163, 148, 38, 162]))), flags: Flags(UP | BROADCAST) }, Interface { index: 6, mtu: Some(1500), name: "veth90296f12", hardware_addr: Some(V6(MacAddr6([154, 93, 112, 15, 125, 20]))), flags: Flags(UP | BROADCAST) }, Interface { index: 7, mtu: Some(1500), name: "veth3e24d0de", hardware_addr: Some(V6(MacAddr6([210, 233, 254, 69, 233, 27]))), flags: Flags(UP | BROADCAST) }]
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:04 [DEBUG] (1) libbridge: success! SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth3e24d0de",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            210,
+                            233,
+                            254,
+                            69,
+                            233,
+                            27,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16509/task/16509/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16507/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.199,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:49:04 [DEBUG] (1) cni_plugin::reply: replying with SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth3e24d0de",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            210,
+                            233,
+                            254,
+                            69,
+                            233,
+                            27,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16509/task/16509/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16507/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.199,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:49:05 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:49:05 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:49:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:49:05 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:49:05 [DEBUG] (1) cni_plugin::cni: read payload bytes=0
+07:49:05 [ERROR] missing input network config
+07:49:05 [DEBUG] (1) cni_plugin::reply: replying with ErrorReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    code: 7,
+    msg: "Missing payload",
+    details: "missing input network config",
+}
+07:49:05 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:49:05 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:49:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:49:05 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:49:05 [DEBUG] (1) cni_plugin::cni: read payload bytes=349
+07:49:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_COMMAND = "ADD"
+07:49:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_CONTAINERID = "16591"
+07:49:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_IFNAME = "vethcni0"
+07:49:05 [DEBUG] (1) cni_plugin::cni: read env var CNI_NETNS = "/proc/16591/ns/net"
+07:49:05 [INFO] (1) libbridge: libbridge serving spec v1.0.0 for command=Add
+07:49:05 [INFO] (1) libbridge: (CNI bridge plugin) version bridge config: BridgeNetConf { net_conf: NetworkConfig { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, name: "single-net", plugin: "libbridge", args: {}, ip_masq: false, ipam: Some(IpamConfig { plugin: "libipam", specific: {"routes": Null, "ranges": Array [Array [Object {"gateway": String("172.17.0.1"), "subnet": String("172.17.0.0/16")}]], "name": Null, "resolvConf": Null, "dataDir": Null} }), dns: None, runtime: None, prev_result: None, specific: {"macSpoofCheck": Null} }, br_name: Some("single0"), is_gw: Some(true), is_default_gw: None, force_address: None, mtu: Some(1500), hairpin_mode: None, promisc_mode: None, vlan: None, vlan_trunk: None, preserve_default_vlan: Some(true), mac_spoof_chk: None, enable_dad: None, disable_container_interface: None, port_isolation: None, args: None, mac: None, vlans: Some([]) }
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [INFO] (1) libbridge: netns: "NS(4:4026532568)"
+07:49:05 [INFO] (1) libbridge: host_ns: "NS(4:4026531840)"
+07:49:05 [INFO] (1) libcni::ip::veth: Creating veth pair: container_veth_name=vethcni0, host_veth_name=veth1b7ee02c
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [INFO] (1) libbridge: veth: Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532568]", read: true, write: false }, path: Some("/proc/16591/ns/net") } }, peer_inf: Interface { name: "veth1b7ee02c", mac: None, ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16593/task/16593/ns/net") } } }
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [DEBUG] (1) libbridge:  veth :Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532568]", read: true, write: false }, path: Some("/proc/16591/ns/net") } }, peer_inf: Interface { name: "veth1b7ee02c", mac: Some(MacAddr(MacAddr6([94, 34, 240, 150, 62, 251]))), ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16593/task/16593/ns/net") } } }
+07:49:05 [INFO] (1) cni_plugin::delegation: delegating to plugin at /opt/cni/bin/libipam for command=ADD
+07:49:05 [DEBUG] (1) cni_plugin::delegation: spawing child process, async=smol
+07:49:05 [DEBUG] (1) cni_plugin::delegation: taking child stdin
+07:49:05 [DEBUG] (1) cni_plugin::delegation: copying bytes=245 to stdin
+07:49:05 [DEBUG] (1) cni_plugin::delegation: closing stdin
+07:49:05 [DEBUG] (1) cni_plugin::delegation: dropping stdin handle
+07:49:05 [DEBUG] (1) cni_plugin::delegation: awaiting child
+07:49:05 [INFO] (1) cni_plugin::delegation: delegate plugin at /opt/cni/bin/libipam for command=ADD has returned with exit status: 0; stdout bytes=104
+07:49:05 [DEBUG] (1) libbridge: ipam_result:IpamSuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.200, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:05 [DEBUG] (1) libbridge: bridge_result:SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "veth1b7ee02c", mac: Some(MacAddr(MacAddr6([94, 34, 240, 150, 62, 251]))), sandbox: "/proc/16593/task/16593/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16591/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.200, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:05 [INFO] (1) libbridge: gateway_infos: [GatewayInfo { gws: [V4(Ipv4Network { addr: 172.17.0.1, prefix: 16 })], family: Inet, default_route_found: false }]
+07:49:05 [INFO] (1) libbridge: bridge_result: SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "veth1b7ee02c", mac: Some(MacAddr(MacAddr6([94, 34, 240, 150, 62, 251]))), sandbox: "/proc/16593/task/16593/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16591/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.200, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [DEBUG] (1) libcni::ip::ipam: ips:[Ip { address: V4(Ipv4Network { addr: 172.17.0.200, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }]
+07:49:05 [DEBUG] (1) libcni::ip::ipam: add ip:[Ip { address: V4(Ipv4Network { addr: 172.17.0.200, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }] to:"vethcni0"
+07:49:05 [DEBUG] (1) libcni::ip::addr: container ip add :172.17.0.200
+07:49:05 [DEBUG] (1) libcni::ip::addr: container ip add success
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [INFO] (1) libnetwork::ip: all_ifaces: [Interface { index: 1, mtu: Some(65536), name: "lo", hardware_addr: Some(V6(MacAddr6([0, 0, 0, 0, 0, 0]))), flags: Flags(UP | POINT_TO_POINT) }, Interface { index: 2, mtu: Some(1500), name: "ens33", hardware_addr: Some(V6(MacAddr6([0, 12, 41, 26, 72, 121]))), flags: Flags(UP | BROADCAST) }, Interface { index: 3, mtu: Some(1500), name: "single0", hardware_addr: Some(V6(MacAddr6([34, 230, 163, 148, 38, 162]))), flags: Flags(UP | BROADCAST) }, Interface { index: 8, mtu: Some(1500), name: "veth1b7ee02c", hardware_addr: Some(V6(MacAddr6([226, 122, 142, 152, 106, 58]))), flags: Flags(UP | BROADCAST) }]
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:05 [DEBUG] (1) libbridge: success! SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth1b7ee02c",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            94,
+                            34,
+                            240,
+                            150,
+                            62,
+                            251,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16593/task/16593/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16591/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.200,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:49:05 [DEBUG] (1) cni_plugin::reply: replying with SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth1b7ee02c",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            94,
+                            34,
+                            240,
+                            150,
+                            62,
+                            251,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16593/task/16593/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16591/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.200,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:49:07 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:49:07 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:49:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:49:07 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:49:07 [DEBUG] (1) cni_plugin::cni: read payload bytes=0
+07:49:07 [ERROR] missing input network config
+07:49:07 [DEBUG] (1) cni_plugin::reply: replying with ErrorReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    code: 7,
+    msg: "Missing payload",
+    details: "missing input network config",
+}
+07:49:07 [DEBUG] (1) libbridge: libbridge (CNI bridge plugin) version 0.1.0
+07:49:07 [DEBUG] (1) cni_plugin::cni: CNI plugin built with cni-plugin crate version 0.2.1
+07:49:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_PATH = "/opt/cni/bin"
+07:49:07 [DEBUG] (1) cni_plugin::cni: reading stdin til EOF...
+07:49:07 [DEBUG] (1) cni_plugin::cni: read payload bytes=349
+07:49:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_COMMAND = "ADD"
+07:49:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_CONTAINERID = "16661"
+07:49:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_IFNAME = "vethcni0"
+07:49:07 [DEBUG] (1) cni_plugin::cni: read env var CNI_NETNS = "/proc/16661/ns/net"
+07:49:07 [INFO] (1) libbridge: libbridge serving spec v1.0.0 for command=Add
+07:49:07 [INFO] (1) libbridge: (CNI bridge plugin) version bridge config: BridgeNetConf { net_conf: NetworkConfig { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, name: "single-net", plugin: "libbridge", args: {}, ip_masq: false, ipam: Some(IpamConfig { plugin: "libipam", specific: {"resolvConf": Null, "dataDir": Null, "routes": Null, "name": Null, "ranges": Array [Array [Object {"gateway": String("172.17.0.1"), "subnet": String("172.17.0.0/16")}]]} }), dns: None, runtime: None, prev_result: None, specific: {"macSpoofCheck": Null} }, br_name: Some("single0"), is_gw: Some(true), is_default_gw: None, force_address: None, mtu: Some(1500), hairpin_mode: None, promisc_mode: None, vlan: None, vlan_trunk: None, preserve_default_vlan: Some(true), mac_spoof_chk: None, enable_dad: None, disable_container_interface: None, port_isolation: None, args: None, mac: None, vlans: Some([]) }
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [INFO] (1) libbridge: netns: "NS(4:4026532850)"
+07:49:07 [INFO] (1) libbridge: host_ns: "NS(4:4026531840)"
+07:49:07 [INFO] (1) libcni::ip::veth: Creating veth pair: container_veth_name=vethcni0, host_veth_name=veth78f0f988
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [INFO] (1) libbridge: veth: Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532850]", read: true, write: false }, path: Some("/proc/16661/ns/net") } }, peer_inf: Interface { name: "veth78f0f988", mac: None, ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16663/task/16663/ns/net") } } }
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [DEBUG] (1) libbridge:  veth :Veth { interface: Interface { name: "vethcni0", mac: None, ns: Netns { f: File { fd: 19, path: "net:[4026532850]", read: true, write: false }, path: Some("/proc/16661/ns/net") } }, peer_inf: Interface { name: "veth78f0f988", mac: Some(MacAddr(MacAddr6([246, 218, 8, 12, 152, 42]))), ns: Netns { f: File { fd: 21, path: "net:[4026531840]", read: true, write: false }, path: Some("/proc/16663/task/16663/ns/net") } } }
+07:49:07 [INFO] (1) cni_plugin::delegation: delegating to plugin at /opt/cni/bin/libipam for command=ADD
+07:49:07 [DEBUG] (1) cni_plugin::delegation: spawing child process, async=smol
+07:49:07 [DEBUG] (1) cni_plugin::delegation: taking child stdin
+07:49:07 [DEBUG] (1) cni_plugin::delegation: copying bytes=245 to stdin
+07:49:07 [DEBUG] (1) cni_plugin::delegation: closing stdin
+07:49:07 [DEBUG] (1) cni_plugin::delegation: dropping stdin handle
+07:49:07 [DEBUG] (1) cni_plugin::delegation: awaiting child
+07:49:07 [INFO] (1) cni_plugin::delegation: delegate plugin at /opt/cni/bin/libipam for command=ADD has returned with exit status: 0; stdout bytes=104
+07:49:07 [DEBUG] (1) libbridge: ipam_result:IpamSuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.201, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:07 [DEBUG] (1) libbridge: bridge_result:SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "veth78f0f988", mac: Some(MacAddr(MacAddr6([246, 218, 8, 12, 152, 42]))), sandbox: "/proc/16663/task/16663/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16661/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.201, prefix: 16 }), gateway: Some(172.17.0.1), interface: None }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:07 [INFO] (1) libbridge: gateway_infos: [GatewayInfo { gws: [V4(Ipv4Network { addr: 172.17.0.1, prefix: 16 })], family: Inet, default_route_found: false }]
+07:49:07 [INFO] (1) libbridge: bridge_result: SuccessReply { cni_version: Version { major: 1, minor: 0, patch: 0, pre: [], build: [] }, interfaces: [Interface { name: "single0", mac: Some(MacAddr(MacAddr6([34, 230, 163, 148, 38, 162]))), sandbox: "" }, Interface { name: "veth78f0f988", mac: Some(MacAddr(MacAddr6([246, 218, 8, 12, 152, 42]))), sandbox: "/proc/16663/task/16663/ns/net" }, Interface { name: "vethcni0", mac: None, sandbox: "/proc/16661/ns/net" }], ips: [Ip { address: V4(Ipv4Network { addr: 172.17.0.201, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }], routes: [], dns: Dns { nameservers: [], domain: None, search: [], options: [] }, specific: {} }
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [DEBUG] (1) libcni::ip::ipam: ips:[Ip { address: V4(Ipv4Network { addr: 172.17.0.201, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }]
+07:49:07 [DEBUG] (1) libcni::ip::ipam: add ip:[Ip { address: V4(Ipv4Network { addr: 172.17.0.201, prefix: 16 }), gateway: Some(172.17.0.1), interface: Some(2) }] to:"vethcni0"
+07:49:07 [DEBUG] (1) libcni::ip::addr: container ip add :172.17.0.201
+07:49:07 [DEBUG] (1) libcni::ip::addr: container ip add success
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [INFO] (1) libnetwork::ip: all_ifaces: [Interface { index: 1, mtu: Some(65536), name: "lo", hardware_addr: Some(V6(MacAddr6([0, 0, 0, 0, 0, 0]))), flags: Flags(UP | POINT_TO_POINT) }, Interface { index: 2, mtu: Some(1500), name: "ens33", hardware_addr: Some(V6(MacAddr6([0, 12, 41, 26, 72, 121]))), flags: Flags(UP | BROADCAST) }, Interface { index: 3, mtu: Some(1500), name: "single0", hardware_addr: Some(V6(MacAddr6([34, 230, 163, 148, 38, 162]))), flags: Flags(UP | BROADCAST) }, Interface { index: 8, mtu: Some(1500), name: "veth1b7ee02c", hardware_addr: Some(V6(MacAddr6([226, 122, 142, 152, 106, 58]))), flags: Flags(UP | BROADCAST) }, Interface { index: 9, mtu: Some(1500), name: "veth78f0f988", hardware_addr: Some(V6(MacAddr6([118, 151, 66, 92, 213, 7]))), flags: Flags(UP | BROADCAST) }]
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [WARN] Specified IFLA_INET6_ICMP6STATS NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 48, got 56
+07:49:07 [DEBUG] (1) libbridge: success! SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth78f0f988",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            246,
+                            218,
+                            8,
+                            12,
+                            152,
+                            42,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16663/task/16663/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16661/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.201,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
+07:49:07 [DEBUG] (1) cni_plugin::reply: replying with SuccessReply {
+    cni_version: Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: [],
+        build: [],
+    },
+    interfaces: [
+        Interface {
+            name: "single0",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            34,
+                            230,
+                            163,
+                            148,
+                            38,
+                            162,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "",
+        },
+        Interface {
+            name: "veth78f0f988",
+            mac: Some(
+                MacAddr(
+                    MacAddr6(
+                        [
+                            246,
+                            218,
+                            8,
+                            12,
+                            152,
+                            42,
+                        ],
+                    ),
+                ),
+            ),
+            sandbox: "/proc/16663/task/16663/ns/net",
+        },
+        Interface {
+            name: "vethcni0",
+            mac: None,
+            sandbox: "/proc/16661/ns/net",
+        },
+    ],
+    ips: [
+        Ip {
+            address: V4(
+                Ipv4Network {
+                    addr: 172.17.0.201,
+                    prefix: 16,
+                },
+            ),
+            gateway: Some(
+                172.17.0.1,
+            ),
+            interface: Some(
+                2,
+            ),
+        },
+    ],
+    routes: [],
+    dns: Dns {
+        nameservers: [],
+        domain: None,
+        search: [],
+        options: [],
+    },
+    specific: {},
+}
