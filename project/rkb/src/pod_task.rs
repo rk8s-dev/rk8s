@@ -14,7 +14,7 @@ use libruntime::cri::cri_api::{
 use libruntime::cri::{create, delete, kill, load_container, start};
 use libruntime::oci::{self, OCISpecGenerator};
 use libruntime::rootpath;
-use libruntime::utils::{ImagePuller, handle_image_typ};
+use libruntime::utils::{ImagePuller, sync_handle_image_typ};
 
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
@@ -23,9 +23,13 @@ use tracing::{debug, error, info};
 
 struct RkbImagePuller {}
 
+#[async_trait::async_trait]
 impl ImagePuller for RkbImagePuller {
-    fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
-        crate::pull::pull_or_get_image(image_ref, None::<&str>)
+    async fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        crate::pull::pull_or_get_image(image_ref, None::<&str>).await
+    }
+    fn sync_pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        crate::pull::sync_pull_or_get_image(image_ref, None::<&str>)
     }
 }
 
@@ -152,7 +156,7 @@ impl TaskRunner {
         };
 
         let puller = RkbImagePuller {};
-        let (config_builder, bundle_path) = handle_image_typ(&puller, &sandbox_spec)
+        let (config_builder, bundle_path) = sync_handle_image_typ(&puller, &sandbox_spec)
             .map_err(|e| anyhow!("failed to get pause container's bundle_path: {e}"))?;
 
         // 2. build final oci specification config.json
@@ -263,7 +267,7 @@ impl TaskRunner {
         container: &ContainerSpec,
     ) -> Result<CreateContainerRequest, anyhow::Error> {
         let puller = RkbImagePuller {};
-        let (mut config_builder, bundle_path) = handle_image_typ(&puller, container)?;
+        let (mut config_builder, bundle_path) = sync_handle_image_typ(&puller, container)?;
 
         let config = if let Some(ref mut builder) = config_builder {
             builder.container_spec(container.clone())?;

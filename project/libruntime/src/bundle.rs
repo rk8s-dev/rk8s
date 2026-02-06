@@ -3,7 +3,6 @@ use std::{
     fs::File,
     io::{BufReader, copy},
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use anyhow::Context;
@@ -16,6 +15,7 @@ use sha256::try_digest;
 use std::str::FromStr;
 use tar::Archive;
 use tokio::fs;
+use tokio::process::Command;
 use tracing::{debug, info};
 
 /// Converts an OCI image directory to a bundle directory.
@@ -285,6 +285,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
             rootfs.display()
         ))
         .status()
+        .await
         .with_context(|| "Failed to execute cp command")?;
 
     if !status.success() {

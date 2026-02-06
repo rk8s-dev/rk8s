@@ -29,7 +29,7 @@ pub struct PullArgs {
 }
 
 pub fn pull(args: PullArgs) -> anyhow::Result<()> {
-    pull_or_get_image(args.image_ref, args.url)?;
+    sync_pull_or_get_image(args.image_ref, args.url)?;
     Ok(())
 }
 
@@ -56,7 +56,7 @@ pub fn pull(args: PullArgs) -> anyhow::Result<()> {
 ///
 /// Returns an error if the image reference is invalid, the pull from the registry fails,
 /// or there are file system access issues.
-pub fn pull_or_get_image(
+pub fn sync_pull_or_get_image(
     image_ref: impl AsRef<str>,
     url: Option<impl AsRef<str>>,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
@@ -110,7 +110,7 @@ pub fn pull_or_get_image(
     }
 }
 
-pub async fn async_pull_or_get_image(
+pub async fn pull_or_get_image(
     image_ref: impl AsRef<str>,
     url: Option<impl AsRef<str>>,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {

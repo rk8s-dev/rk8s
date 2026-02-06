@@ -21,7 +21,7 @@ use liboci_cli::{Create, Delete, List, Start};
 use libruntime::cri::config::ContainerConfigBuilder;
 use libruntime::oci;
 use libruntime::rootpath;
-use libruntime::utils::{ImageType, determine_image, handle_oci_image};
+use libruntime::utils::{ImageType, determine_image, sync_handle_oci_image};
 use libruntime::volume::{VolumeManager, VolumePattern, string_to_pattern};
 use libruntime::{
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
@@ -46,9 +46,13 @@ use tracing::{debug, info, warn};
 
 struct RkbImagePuller {}
 
+#[async_trait::async_trait]
 impl ImagePuller for RkbImagePuller {
-    fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
-        pull::pull_or_get_image(image_ref, None::<&str>)
+    async fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        pull::pull_or_get_image(image_ref, None::<&str>).await
+    }
+    fn sync_pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        pull::sync_pull_or_get_image(image_ref, None::<&str>)
     }
 }
 
@@ -738,7 +742,7 @@ pub fn handle_image_typ(
     let puller = RkbImagePuller {};
     if let ImageType::OCIImage = determine_image(&container_spec.image)? {
         let (image_config, bundle_path) =
-            handle_oci_image(&puller, &container_spec.image, container_spec.name.clone())?;
+            sync_handle_oci_image(&puller, &container_spec.image, container_spec.name.clone())?;
         // handle image_config
         let mut builder = ContainerConfigBuilder::default();
         if let Some(config) = image_config.config() {

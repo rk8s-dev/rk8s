@@ -196,11 +196,11 @@ impl PodInfo {
 
 // Currently the rkl's pod command functionality do not be removed yet
 // So keep this sync `run_pod_from_taskrunner` api temporaily.
-pub fn run_pod_from_taskrunner_sync(
+pub fn sync_run_pod_from_taskrunner(
     mut task_runner: TaskRunner,
 ) -> Result<PodRunResult, anyhow::Error> {
     let pod_name = task_runner.task.metadata.name.clone();
-    let (pod_sandbox_id, podip) = task_runner.run()?;
+    let (pod_sandbox_id, podip) = task_runner.sync_run()?;
     info!("PodSandbox ID: {}", pod_sandbox_id);
 
     let container_names: Vec<String> = task_runner
@@ -231,7 +231,7 @@ pub async fn run_pod_from_taskrunner(
     mut task_runner: TaskRunner,
 ) -> Result<PodRunResult, anyhow::Error> {
     let pod_name = task_runner.task.metadata.name.clone();
-    let (pod_sandbox_id, podip) = task_runner.run()?;
+    let (pod_sandbox_id, podip) = task_runner.run().await?;
     info!("PodSandbox ID: {}", pod_sandbox_id);
 
     let container_names: Vec<String> = task_runner
@@ -260,7 +260,7 @@ pub async fn run_pod_from_taskrunner(
 
 pub fn run_pod(pod_yaml: &str) -> Result<String, anyhow::Error> {
     let task_runner = TaskRunner::from_file(pod_yaml)?;
-    run_pod_from_taskrunner_sync(task_runner).map(|res| res.pod_ip)
+    sync_run_pod_from_taskrunner(task_runner).map(|res| res.pod_ip)
 }
 
 #[allow(dead_code)]
