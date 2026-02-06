@@ -1,10 +1,10 @@
 ## Overview
-This document shows how to push docker's image to the target machine using rkb for now. 
+This document shows how to push docker's image to the target machine using rkforge for now. 
 ### Prequisites
 1. [skopeo](https://github.com/containers/skopeo)
 2. [umoci](https://github.com/containers/umoci)
-3. [rkb](../project/rkb/README.md)
-### Example: Use rkb to push docker's image 
+3. [rkforge](../project/rkforge/README.md)
+### Example: Use rkforge to push docker's image 
 Here we use `nginx:latest` image as example:
 ```bash
 $ docker image list
@@ -25,10 +25,10 @@ drwxr-xr-x 3 erasernoob erasernoob 4096 Dec  3 12:56 blobs/
 -rw-r--r-- 1 erasernoob erasernoob  248 Dec  3 12:56 index.json
 -rw-r--r-- 1 erasernoob erasernoob   30 Dec  3 12:56 oci-layout
 ```
-**Use rkb to push the image to default server**
+**Use rkforge to push the image to default server**
 ```bash
 $ cd nginx-oci
-$ rkb push nginx:latest # Currently rkb choose the default server to push
+$ rkforge push nginx:latest # Currently rkforge choose the default server to push
 ⠐ dbf015e6353d pushing 
   dbf015e6353d pushed 
 ```
@@ -64,4 +64,4 @@ $ rkl container list
 ID    PID     STATUS   BUNDLE                                                                                  CREATED                    CREATOR
 test  171318  Running  /var/lib/rkl/registry/dbf015e6353da2b5dcd2fb23cad15f13e5597fe6af6f9e165ef7f2048f99c43c  2025-12-03T13:54:12+08:00  root
 ```
-More details on rkb's usage refers to [rkb](../project/rkb/README.md#quick-start)
+More details on rkforge's usage refers to [rkforge](../project/rkforge/README.md#quick-start)

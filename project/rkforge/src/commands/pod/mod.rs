@@ -25,29 +25,29 @@ pub struct PodRunResult {
 
 #[derive(Subcommand, Debug)]
 pub enum PodCommand {
-    #[command(about = "Run a pod from a YAML file using rkb run pod.yaml")]
+    #[command(about = "Run a pod from a YAML file using rkforge run pod.yaml")]
     Run {
         #[arg(value_name = "POD_YAML")]
         pod_yaml: String,
     },
-    #[command(about = "Create a pod from a YAML file using rkb create pod.yaml")]
+    #[command(about = "Create a pod from a YAML file using rkforge create pod.yaml")]
     Create {
         #[arg(value_name = "POD_YAML")]
         pod_yaml: String,
     },
-    #[command(about = "Start a pod with a pod-name using rkb start pod-name")]
+    #[command(about = "Start a pod with a pod-name using rkforge start pod-name")]
     Start {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
     },
 
-    #[command(about = "Delete a pod with a pod-name using rkb delete pod-name")]
+    #[command(about = "Delete a pod with a pod-name using rkforge delete pod-name")]
     Delete {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
     },
 
-    #[command(about = "Get the state of a pod using rkb state pod-name")]
+    #[command(about = "Get the state of a pod using rkforge state pod-name")]
     State {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,

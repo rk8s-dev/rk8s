@@ -1,4 +1,4 @@
-# rkb
+# rkforge
 
 A container image builder and registry management tool implemented in Rust, similar to `docker build` functionality with additional support for interacting with distribution servers.
 
@@ -7,7 +7,7 @@ A container image builder and registry management tool implemented in Rust, simi
 ```mermaid
 flowchart TD
   subgraph CLI
-    cli[CLI: rkb] --> main[main.rs::main]
+    cli[CLI: rkforge] --> main[main.rs::main]
   end
 
   subgraph "Command Dispatch"
@@ -73,7 +73,7 @@ The following operations are based on Ubuntu 24.04.
 
 ### Build simple image
 
-Build rkb from source code.
+Build rkforge from source code.
 
 ```sh
 cargo build
@@ -106,16 +106,16 @@ Create a directory to store the output image.
 mkdir -p output
 ```
 
-Start rkb. By default, it uses Linux native mount which requires root privileges:
+Start rkforge. By default, it uses Linux native mount which requires root privileges:
 
 ```sh
-sudo ../target/debug/rkb build -f example-Dockerfile -t image1 -o output .
+sudo ../target/debug/rkforge build -f example-Dockerfile -t image1 -o output .
 ```
 
 Alternatively, use `--libfuse` option to avoid sudo (uses userspace FUSE):
 
 ```sh
-../target/debug/rkb build -f example-Dockerfile -t image1 -o output --libfuse .
+../target/debug/rkforge build -f example-Dockerfile -t image1 -o output --libfuse .
 ```
 
 Here the last optional `.` specifies the build context, which by default is `.`.
@@ -251,20 +251,20 @@ Push a local OCI image to a distribution server:
 
 ```sh
 # Push image to registry
-rkb push --url https://your-distribution-server.com --path output/image1 mynamespace/myimage:latest
+rkforge push --url https://your-distribution-server.com --path output/image1 mynamespace/myimage:latest
 
 # If only one server is configured, you can omit the URL
-rkb push --path output/image1 mynamespace/myimage:latest
+rkforge push --path output/image1 mynamespace/myimage:latest
 ```
 
 Pull an image from a distribution server:
 
 ```sh
 # Pull image from registry
-rkb pull --url https://your-distribution-server.com mynamespace/myimage:latest
+rkforge pull --url https://your-distribution-server.com mynamespace/myimage:latest
 
 # If only one server is configured, you can omit the URL
-rkb pull mynamespace/myimage:latest
+rkforge pull mynamespace/myimage:latest
 ```
 
 #### Important Notes on Image References
@@ -272,37 +272,37 @@ rkb pull mynamespace/myimage:latest
 **❌ Incorrect usage:**
 ```sh
 # DON'T include the server URL in the image reference
-rkb push --url 127.0.0.1:8968 --path output/image1 127.0.0.1:8968/me/image:latest
-rkb pull --url 127.0.0.1:8968 127.0.0.1:8968/me/image:latest
+rkforge push --url 127.0.0.1:8968 --path output/image1 127.0.0.1:8968/me/image:latest
+rkforge pull --url 127.0.0.1:8968 127.0.0.1:8968/me/image:latest
 ```
 
 **✅ Correct usage:**
 ```sh
 # Use the server URL as a separate --url parameter
-rkb push --url 127.0.0.1:8968 --path output/image1 me/image:latest
-rkb pull --url 127.0.0.1:8968 me/image:latest
+rkforge push --url 127.0.0.1:8968 --path output/image1 me/image:latest
+rkforge pull --url 127.0.0.1:8968 me/image:latest
 
 # Or omit --url if only one server is configured
-rkb push --path output/image1 me/image:latest
-rkb pull me/image:latest
+rkforge push --path output/image1 me/image:latest
+rkforge pull me/image:latest
 ```
 
 The image reference should only contain the namespace and image name (e.g., `mynamespace/myimage:latest`), while the server URL should be specified separately using the `--url` parameter.
 
 #### Namespace Auto-Completion
 
-If an image reference does not contain a `/` (i.e., no namespace), rkb automatically prefixes it with `library/`:
+If an image reference does not contain a `/` (i.e., no namespace), rkforge automatically prefixes it with `library/`:
 
 ```sh
 # These are equivalent:
-rkb pull nginx:latest
-rkb pull library/nginx:latest
+rkforge pull nginx:latest
+rkforge pull library/nginx:latest
 
 # Similarly for push:
-rkb push --path output/nginx nginx:latest  # Pushes to library/nginx:latest
+rkforge push --path output/nginx nginx:latest  # Pushes to library/nginx:latest
 ```
 
-This behavior matches Docker Hub, where official images are stored under the `library/` namespace. To use this feature, create a user named `library` on your distribution server and configure rkb with that user's credentials.
+This behavior matches Docker Hub, where official images are stored under the `library/` namespace. To use this feature, create a user named `library` on your distribution server and configure rkforge with that user's credentials.
 
 ### Authentication
 
@@ -312,13 +312,13 @@ Login to your distribution server using GitHub OAuth:
 
 ```sh
 # First time login (both URL and client ID required)
-rkb login https://your-distribution-server.com your-github-oauth-client-id
+rkforge login https://your-distribution-server.com your-github-oauth-client-id
 
 # Re-login when PAT expires (client ID will be reused from config)
-rkb login https://your-distribution-server.com
+rkforge login https://your-distribution-server.com
 
 # If only one server is configured, you can omit the URL too
-rkb login
+rkforge login
 ```
 
 This will open a browser for GitHub OAuth authentication and store the credentials locally. The client ID is required only for the first login to a server - it will be saved and reused for subsequent logins.
@@ -334,7 +334,7 @@ In debug mode or when GitHub OAuth is not configured, you can manually obtain an
 curl -u "username:password" "http://your-distribution-server.com/auth/token"
 
 # Configure the token manually
-# Edit ~/.config/rk8s/rkb.toml (Linux) or ~/Library/Application Support/rk8s/rkb.toml (macOS)
+# Edit ~/.config/rk8s/rkforge.toml (Linux) or ~/Library/Application Support/rk8s/rkforge.toml (macOS)
 # Add the following:
 # [[entries]]
 # pat = "your-token-here"
@@ -349,13 +349,13 @@ First, login to your distribution server using GitHub OAuth:
 
 ```sh
 # First time login (both URL and client ID required)
-rkb login https://your-distribution-server.com your-github-oauth-client-id
+rkforge login https://your-distribution-server.com your-github-oauth-client-id
 
 # Re-login when PAT expires (client ID will be reused from config)
-rkb login https://your-distribution-server.com
+rkforge login https://your-distribution-server.com
 
 # If only one server is configured, you can omit the URL too
-rkb login
+rkforge login
 ```
 
 This will open a browser for GitHub OAuth authentication and store the credentials locally. The client ID is required only for the first login to a server - it will be saved and reused for subsequent logins. If you have only one server configured, you can omit both URL and client ID for re-login.
@@ -365,13 +365,13 @@ This will open a browser for GitHub OAuth authentication and store the credentia
 List all repositories on the distribution server:
 
 ```sh
-rkb repo list
+rkforge repo list
 ```
 
 Or specify a server URL if you have multiple servers configured:
 
 ```sh
-rkb repo --url https://your-distribution-server.com list
+rkforge repo --url https://your-distribution-server.com list
 ```
 
 ### Manage Repository Visibility
@@ -379,14 +379,14 @@ rkb repo --url https://your-distribution-server.com list
 Change repository visibility between public and private. Note that the repository name must be the full name including namespace:
 
 ```sh
-rkb repo vis mine/hello-world public
-rkb repo vis mine/hello-world private
+rkforge repo vis mine/hello-world public
+rkforge repo vis mine/hello-world private
 ```
 
 Or with a specific server:
 
 ```sh
-rkb repo --url https://your-distribution-server.com vis mine/hello-world public
+rkforge repo --url https://your-distribution-server.com vis mine/hello-world public
 ```
 
 ### Logout
@@ -394,19 +394,19 @@ rkb repo --url https://your-distribution-server.com vis mine/hello-world public
 Logout from the distribution server:
 
 ```sh
-rkb logout
+rkforge logout
 ```
 
 Or logout from a specific server:
 
 ```sh
-rkb logout https://your-distribution-server.com
+rkforge logout https://your-distribution-server.com
 ```
 
-## rkb usage
+## rkforge usage
 
 ```sh
-Usage: rkb <COMMAND>
+Usage: rkforge <COMMAND>
 
 Commands:
   build   Build a container image from Dockerfile
@@ -424,7 +424,7 @@ Options:
 ### Build Command
 
 ```sh
-Usage: rkb build [OPTIONS]
+Usage: rkforge build [OPTIONS]
 
 Options:
   -f, --file <FILE>       Dockerfile or Containerfile
@@ -439,7 +439,7 @@ Options:
 
 #### Push
 ```sh
-Usage: rkb push [OPTIONS] <IMAGE_REF>
+Usage: rkforge push [OPTIONS] <IMAGE_REF>
 
 Arguments:
   <IMAGE_REF>  Image reference
@@ -452,7 +452,7 @@ Options:
 
 #### Pull
 ```sh
-Usage: rkb pull [OPTIONS] <IMAGE_REF>
+Usage: rkforge pull [OPTIONS] <IMAGE_REF>
 
 Arguments:
   <IMAGE_REF>  Image reference
@@ -464,7 +464,7 @@ Options:
 
 #### Login
 ```sh
-Usage: rkb login [URL] [CLIENT_ID]
+Usage: rkforge login [URL] [CLIENT_ID]
 
 Arguments:
   [URL]         URL of the distribution server (optional if only one server is configured)
@@ -476,7 +476,7 @@ Options:
 
 #### Logout
 ```sh
-Usage: rkb logout [URL]
+Usage: rkforge logout [URL]
 
 Arguments:
   [URL]  URL of the distribution server (optional if only one entry exists)
@@ -487,7 +487,7 @@ Options:
 
 #### Repository Management
 ```sh
-Usage: rkb repo [OPTIONS] <COMMAND>
+Usage: rkforge repo [OPTIONS] <COMMAND>
 
 Commands:
   list                    List all repositories
@@ -543,14 +543,14 @@ The following instructions are not supported and will be silently ignored with a
 
 ### Running the Registry Test Suite
 
-The project includes a comprehensive test script that validates rkb's functionality with a distribution server:
+The project includes a comprehensive test script that validates rkforge's functionality with a distribution server:
 
 ```sh
 # Make sure you have a distribution server running
 # (e.g., using docker-compose up -d)
 
 # Run the test suite
-./test_rkb_registry.sh
+./test_rkforge_registry.sh
 ```
 
 The test suite covers:
@@ -565,4 +565,4 @@ The test suite covers:
 - Docker installed and running
 - Distribution server running (e.g., on 127.0.0.1:8968)
 - `jq` command-line JSON processor
-- Built rkb binary in `../target/debug/rkb`
+- Built rkforge binary in `../target/debug/rkforge`

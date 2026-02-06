@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn test_dockerfile() {
         let build_args =
-            BuildArgs::parse_from(vec!["rkb", "-f", "example-Dockerfile", "-t", "image1"]);
+            BuildArgs::parse_from(vec!["rkforge", "-f", "example-Dockerfile", "-t", "image1"]);
 
         assert_eq!(build_args.file, Some(PathBuf::from("example-Dockerfile")));
         let dockerfile = parse_dockerfile(PathBuf::from("example-Dockerfile")).unwrap();
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn test_output_dir() {
         let build_args = BuildArgs::parse_from(vec![
-            "rkb",
+            "rkforge",
             "-f",
             "example-Dockerfile",
             "-t",
@@ -161,7 +161,7 @@ mod tests {
 
         assert_eq!("output_dir/image1", image_output_dir.to_str().unwrap());
 
-        let build_args = BuildArgs::parse_from(vec!["rkb", "-f", "example-Dockerfile"]);
+        let build_args = BuildArgs::parse_from(vec!["rkforge", "-f", "example-Dockerfile"]);
 
         let output_dir = build_args
             .output_dir
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn test_run_instruction() {
         let build_args =
-            BuildArgs::parse_from(vec!["rkb", "-f", "example-Dockerfile", "-t", "image1"]);
+            BuildArgs::parse_from(vec!["rkforge", "-f", "example-Dockerfile", "-t", "image1"]);
 
         assert_eq!(build_args.file, Some(PathBuf::from("example-Dockerfile")));
         let dockerfile = parse_dockerfile(PathBuf::from("example-Dockerfile")).unwrap();

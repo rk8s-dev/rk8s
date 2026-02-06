@@ -48,7 +48,7 @@ struct RkbImagePuller {}
 
 impl ImagePuller for RkbImagePuller {
     fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
-        rkb::pull::pull_or_get_image(image_ref, None::<&str>)
+        rkforge::pull::pull_or_get_image(image_ref, None::<&str>)
     }
 }
 

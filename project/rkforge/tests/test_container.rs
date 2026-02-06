@@ -1,6 +1,6 @@
 use serial_test::serial;
 
-use rkb::commands::container::{ContainerCommand, container_execute};
+use rkforge::commands::container::{ContainerCommand, container_execute};
 use test_common::*;
 
 mod test_common;

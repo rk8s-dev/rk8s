@@ -1,6 +1,6 @@
 use serial_test::serial;
 
-use rkb::commands::compose::{ComposeCommand, DownArgs, PsArgs, UpArgs, compose_execute};
+use rkforge::commands::compose::{ComposeCommand, DownArgs, PsArgs, UpArgs, compose_execute};
 use test_common::*;
 
 mod test_common;

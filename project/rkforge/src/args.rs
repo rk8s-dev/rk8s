@@ -3,7 +3,7 @@ use crate::{copy, image, login, logout, overlayfs, pull, push, repo, run};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "rkb", about = "A container runtime and management tool")]
+#[command(name = "rkforge", about = "A container runtime and management tool")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

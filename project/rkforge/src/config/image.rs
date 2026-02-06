@@ -6,9 +6,9 @@ pub static CONFIG: Lazy<Config> =
     Lazy::new(|| Config::new().expect("Failed to initialize configuration"));
 
 static REGISTRY: &str = "47.79.87.161:8968";
-static ROOT_PATH: &str = "/var/lib/rkb";
+static ROOT_PATH: &str = "/var/lib/rkforge";
 
-/// Configuration for rkb build
+/// Configuration for rkforge build
 #[derive(Debug)]
 pub struct Config {
     pub layers_store_root: PathBuf,

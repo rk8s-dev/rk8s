@@ -1,6 +1,6 @@
 use serial_test::serial;
 
-use rkb::commands::volume::{VolumeCommand, volume_execute};
+use rkforge::commands::volume::{VolumeCommand, volume_execute};
 use test_common::*;
 
 mod test_common;

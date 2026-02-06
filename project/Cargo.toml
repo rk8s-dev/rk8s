@@ -7,7 +7,7 @@ members = [
     "libfuse-fs", 
     "rfuse3", 
     "libipam", 
-    "rkb",
+    "rkforge",
     "rkl",
     "rks",
     "libruntime",
@@ -19,7 +19,7 @@ members = [
     "dagrs"
 ]
 
-default-members = ["distribution", "rkl", "libbridge", "libipam", "rkb", "libnetwork", "rks"]
+default-members = ["distribution", "rkl", "libbridge", "libipam", "rkforge", "libnetwork", "rks"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -33,7 +33,7 @@ libnetwork = { path = "libnetwork" }
 libscheduler = { path = "libscheduler" }
 libvault = { path = "libvault" }
 libruntime = { path = "libruntime" }
-rkb = { path = "rkb" }
+rkforge = { path = "rkforge" }
 rkl = { path = "rkl" }
 rks = { path = "rks" }
 dagrs-derive = { path = "dagrs-derive", version = "0.4.3" }

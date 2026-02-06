@@ -4,7 +4,7 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use rkb::commands::pod::{PodCommand, PodInfo, pod_execute};
+use rkforge::commands::pod::{PodCommand, PodInfo, pod_execute};
 use test_common::*;
 
 mod test_common;
@@ -147,7 +147,7 @@ fn test_pod_run_command() {
 #[serial]
 fn test_pod_persistence() {
     let pod_name = "test-persistence-pod";
-    let root_path = Path::new("/tmp/rkb_test");
+    let root_path = Path::new("/tmp/rkforge_test");
 
     // Create test directory
     if root_path.exists() {

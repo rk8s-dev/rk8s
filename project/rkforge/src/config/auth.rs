@@ -27,7 +27,7 @@ impl AuthEntry {
 
 impl AuthConfig {
     const APP_NAME: &'static str = "rk8s";
-    const CONFIG_NAME: &'static str = "rkb";
+    const CONFIG_NAME: &'static str = "rkforge";
 
     pub fn single_entry(&self) -> anyhow::Result<&AuthEntry> {
         match self.entries.len() {

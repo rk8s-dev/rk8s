@@ -6991,7 +6991,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rkb"
+name = "rkforge"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -7111,7 +7111,7 @@ dependencies = [
  "quinn",
  "rand 0.9.2",
  "regex",
- "rkb",
+ "rkforge",
  "rustls 0.23.35",
  "scopeguard",
  "serde",

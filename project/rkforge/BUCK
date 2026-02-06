@@ -4,23 +4,23 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_binary", "rust_library")
 
 filegroup(
-    name = "rkb-vendor",
+    name = "rkforge-vendor",
     srcs = glob(["**/**"]),
     out = "vendor",
 )
 
 cargo_manifest(
-    name = "rkb-manifest",
-    vendor = ":rkb-vendor",
+    name = "rkforge-manifest",
+    vendor = ":rkforge-vendor",
 )
 
 rust_binary(
-    name = "rkb",
-    srcs = [":rkb-vendor"],
-    crate = "rkb",
+    name = "rkforge",
+    srcs = [":rkforge-vendor"],
+    crate = "rkforge",
     crate_root = "vendor/src/main.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rkb-manifest[env_flags])"],
+    rustc_flags = ["@$(location :rkforge-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
@@ -89,17 +89,17 @@ rust_binary(
         "//third-party/rust/crates/uuid/1.19.0:uuid",
         "//third-party/rust/crates/uzers/0.12.1:uzers",
         "//third-party/rust/crates/walkdir/2.5.0:walkdir",
-        ":rkb-lib",
+        ":rkforge-lib",
     ],
 )
 
 rust_library(
-    name = "rkb-lib",
-    srcs = [":rkb-vendor"],
-    crate = "rkb",
+    name = "rkforge-lib",
+    srcs = [":rkforge-vendor"],
+    crate = "rkforge",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rkb-manifest[env_flags])"],
+    rustc_flags = ["@$(location :rkforge-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",

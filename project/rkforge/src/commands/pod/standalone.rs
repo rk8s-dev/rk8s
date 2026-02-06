@@ -163,7 +163,7 @@ pub fn create_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
     let pod_sandbox_id_check = pod_name.clone();
     if let Ok(_container) = load_container(root_path.clone(), &pod_sandbox_id_check) {
         return Err(anyhow!(
-            "Container {} already exists (orphaned). Please clean up first with 'rkb delete {}'",
+            "Container {} already exists (orphaned). Please clean up first with 'rkforge delete {}'",
             pod_sandbox_id_check,
             pod_sandbox_id_check
         ));
