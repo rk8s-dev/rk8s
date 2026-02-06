@@ -18,6 +18,7 @@ use crate::chuck::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
+use crate::posix::NAME_MAX;
 use crate::vfs::error::VfsError;
 use crate::vfs::fs::{FileAttr as VfsFileAttr, FileType as VfsFileType, VFS};
 use bytes::Bytes;
@@ -582,7 +583,7 @@ where
             files,
             ffree,
             bsize,
-            namelen: 255,
+            namelen: NAME_MAX as u32,
             frsize,
         })
     }

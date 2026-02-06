@@ -5,6 +5,7 @@ mod daemon;
 mod fs;
 mod fuse;
 mod meta;
+mod posix;
 mod utils;
 #[allow(dead_code)]
 mod vfs;

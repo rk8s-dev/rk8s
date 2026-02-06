@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 #![allow(clippy::upper_case_acronyms)]
 
+pub(crate) mod posix;
 #[allow(unused_imports)]
 pub(crate) mod cadapter;
 pub(crate) mod chuck;
