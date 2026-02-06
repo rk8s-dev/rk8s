@@ -682,6 +682,13 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             let mut symlink_encountered = false;
 
             for (idx, seg) in segments.iter().enumerate() {
+                // POSIX: check parent is a directory before lookup
+                if let Ok(Some(attr)) = self.cached_stat(current_ino).await
+                    && attr.kind != FileType::Dir
+                {
+                    return Err(MetaError::NotDirectory(current_ino));
+                }
+
                 let child_ino = self
                     .cached_lookup(current_ino, seg)
                     .await?

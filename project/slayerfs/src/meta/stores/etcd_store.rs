@@ -3123,6 +3123,8 @@ impl MetaStore for EtcdMetaStore {
             if new_size > current {
                 entry_info.size = Some(new_size as i64);
                 entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                // POSIX: clear setuid/setgid bits on write (security: prevent privilege escalation)
+                entry_info.permission.mode &= !0o6000;
                 let entry_payload = serde_json::to_vec(&entry_info).map_err(|e| {
                     MetaError::Serialization(format!(
                         "failed to serialize EtcdEntryInfo for inode {ino}: {e}"
