@@ -37,21 +37,12 @@ rust_library(
         "@$(location :curve25519-dalek-build-script-run[rustc_flags])",
         "@$(location :curve25519-dalek-manifest[env_flags])",
     ],
-    os_deps = {
-        "linux": [
-            "//third-party/rust/crates/cpufeatures/0.2.17:cpufeatures",
-            "//third-party/rust/crates/curve25519-dalek-derive/0.1.1:curve25519-dalek-derive",
-        ],
-        "windows": [
-            "//third-party/rust/crates/cpufeatures/0.2.17:cpufeatures",
-            "//third-party/rust/crates/curve25519-dalek-derive/0.1.1:curve25519-dalek-derive",
-        ],
-    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
+        "//third-party/rust/crates/cpufeatures/0.2.17:cpufeatures",
+        "//third-party/rust/crates/curve25519-dalek-derive/0.1.1:curve25519-dalek-derive",
         "//third-party/rust/crates/digest/0.10.7:digest",
-        "//third-party/rust/crates/fiat-crypto/0.2.9:fiat-crypto",
         "//third-party/rust/crates/subtle/2.6.1:subtle",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],

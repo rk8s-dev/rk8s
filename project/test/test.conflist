@@ -1,6 +1,6 @@
 {
     "cniVersion": "1.0.0",
-    "name": "rkbridge",
+    "name": "rkforgeridge",
     "plugins": [
         {
             "type": "libnetwork"
