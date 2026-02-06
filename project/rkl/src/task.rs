@@ -416,7 +416,7 @@ impl TaskRunner {
         Ok(RemovePodSandboxResponse {})
     }
 
-    pub fn run(&mut self) -> Result<(String, String), anyhow::Error> {
+    pub async fn run(&mut self) -> Result<(String, String), anyhow::Error> {
         // run PodSandbox（Pause container）
         let pod_request = self.build_run_pod_sandbox_request();
         let config = pod_request
