@@ -24,7 +24,7 @@ rust_binary(
     visibility = ["PUBLIC"],
     deps = [
         "//project/libcni:libcni",
-        "//project/libnetwork:libnetwork-lib",
+        "//project/libnetwork:liblibnetwork",
         "//third-party/rust/crates/anyhow/1.0.100:anyhow",
         "//third-party/rust/crates/async-std/1.13.2:async-std",
         "//third-party/rust/crates/cni-plugin/0.2.1:cni-plugin",

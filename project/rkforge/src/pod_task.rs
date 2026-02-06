@@ -21,10 +21,10 @@ use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
 
-struct RkbImagePuller {}
+struct RkforgeImagePuller {}
 
 #[async_trait::async_trait]
-impl ImagePuller for RkbImagePuller {
+impl ImagePuller for RkforgeImagePuller {
     async fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
         crate::pull::pull_or_get_image(image_ref, None::<&str>).await
     }
@@ -155,7 +155,7 @@ impl TaskRunner {
             working_dir: None,
         };
 
-        let puller = RkbImagePuller {};
+        let puller = RkforgeImagePuller {};
         let (config_builder, bundle_path) = sync_handle_image_typ(&puller, &sandbox_spec)
             .map_err(|e| anyhow!("failed to get pause container's bundle_path: {e}"))?;
 
@@ -266,7 +266,7 @@ impl TaskRunner {
         pod_sandbox_id: &str,
         container: &ContainerSpec,
     ) -> Result<CreateContainerRequest, anyhow::Error> {
-        let puller = RkbImagePuller {};
+        let puller = RkforgeImagePuller {};
         let (mut config_builder, bundle_path) = sync_handle_image_typ(&puller, container)?;
 
         let config = if let Some(ref mut builder) = config_builder {
