@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use oci_spec::image::{Config, ConfigBuilder};
 use std::collections::HashMap;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 pub static DEFAULT_ENV: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /// Normalize a path by resolving `.` and `..` components.
 /// This does not access the filesystem, just manipulates the path string.
-fn normalize_path(path: &str) -> String {
+pub(crate) fn normalize_path(path: &str) -> String {
     let path = Path::new(path);
     let mut components = Vec::new();
 
@@ -38,12 +38,11 @@ fn normalize_path(path: &str) -> String {
     if components.is_empty() {
         "/".to_string()
     } else {
-        components
-            .iter()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/")
-            .replace("//", "/")
+        let mut result = PathBuf::new();
+        for c in &components {
+            result.push(c);
+        }
+        result.to_string_lossy().to_string()
     }
 }
 

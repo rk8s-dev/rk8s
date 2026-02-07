@@ -1,4 +1,4 @@
-use crate::overlayfs::{UserSpec, bind_mount, do_exec, prepare_network, switch_namespace};
+use crate::overlayfs::{bind_mount, do_exec, prepare_network, switch_namespace};
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
 use clap::Parser;
@@ -53,56 +53,14 @@ pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
     // Get working directory, default to "/"
     let working_dir = args.working_dir.as_deref().unwrap_or("/");
 
-    // Parse user specification if provided
-    let user_spec = args.user.as_ref().map(|u| parse_user_spec(u)).transpose()?;
-
-    do_exec(mountpoint, &commands, &envp, working_dir, user_spec)?;
+    // Pass raw user string to do_exec; user resolution happens after chroot
+    // so it reads the container's /etc/passwd instead of the host's.
+    do_exec(
+        mountpoint,
+        &commands,
+        &envp,
+        working_dir,
+        args.user.as_deref(),
+    )?;
     unreachable!();
-}
-
-/// Parse a user specification string into uid and optional gid.
-/// Supported formats: "user", "uid", "user:group", "uid:gid", "uid:group", "user:gid"
-fn parse_user_spec(user_str: &str) -> Result<UserSpec> {
-    let parts: Vec<&str> = user_str.split(':').collect();
-
-    let uid = parse_uid_or_username(parts[0])?;
-    let gid = if parts.len() > 1 {
-        Some(parse_gid_or_groupname(parts[1])?)
-    } else {
-        None
-    };
-
-    Ok(UserSpec { uid, gid })
-}
-
-/// Parse a string as either a numeric uid or a username.
-fn parse_uid_or_username(s: &str) -> Result<u32> {
-    // Try parsing as numeric uid first
-    if let Ok(uid) = s.parse::<u32>() {
-        return Ok(uid);
-    }
-
-    // Try looking up as username using uzers crate
-    use uzers::get_user_by_name;
-    if let Some(user) = get_user_by_name(s) {
-        return Ok(user.uid());
-    }
-
-    bail!("Unknown user: {}", s)
-}
-
-/// Parse a string as either a numeric gid or a group name.
-fn parse_gid_or_groupname(s: &str) -> Result<u32> {
-    // Try parsing as numeric gid first
-    if let Ok(gid) = s.parse::<u32>() {
-        return Ok(gid);
-    }
-
-    // Try looking up as group name using uzers crate
-    use uzers::get_group_by_name;
-    if let Some(group) = get_group_by_name(s) {
-        return Ok(group.gid());
-    }
-
-    bail!("Unknown group: {}", s)
 }

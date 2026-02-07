@@ -8,7 +8,7 @@ use serde_json;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    image::context::StageContext as Context,
+    image::{config::normalize_path, context::StageContext as Context},
     pull::pull_or_get_image,
     storage::full_image_ref,
     task::{CopyTask, RunTask, TaskExec},
@@ -78,14 +78,11 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
                         }
 
                         let volumes: Vec<String> = if volume_arg.starts_with('[') {
+                            // JSON-array form: must be valid JSON, otherwise fail the build
                             match serde_json::from_str::<Vec<String>>(&volume_arg) {
                                 Ok(v) => v,
-                                Err(_) => {
-                                    vec![
-                                        volume_arg
-                                            .trim_matches(|c| c == '[' || c == ']')
-                                            .to_string(),
-                                    ]
+                                Err(err) => {
+                                    bail!("Invalid JSON array syntax in VOLUME instruction: {err}");
                                 }
                             }
                         } else {
@@ -333,19 +330,24 @@ impl<P: AsRef<Path>> InstructionExt<P> for CopyInstruction {
 
         let dest = self.destination.content.clone();
         let dest = if dest.starts_with('/') {
+            // Absolute path - normalize to resolve `.` and `..` components
+            let normalized = normalize_path(&dest);
             ctx.mount_config
                 .mountpoint
-                .join(dest.trim_start_matches('/'))
+                .join(normalized.trim_start_matches('/'))
         } else {
+            // Relative path - resolve based on working directory, then normalize
             let working_dir = ctx.image_config.get_working_dir();
             let abs_dest = if working_dir == "/" {
                 format!("/{}", dest)
             } else {
                 format!("{}/{}", working_dir, dest)
             };
+            // Normalize to resolve `..` segments and prevent path traversal
+            let normalized = normalize_path(&abs_dest);
             ctx.mount_config
                 .mountpoint
-                .join(abs_dest.trim_start_matches('/'))
+                .join(normalized.trim_start_matches('/'))
         };
 
         let build_ctx = ctx.build_context.as_ref().canonicalize()?;

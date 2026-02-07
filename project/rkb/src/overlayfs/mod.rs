@@ -247,7 +247,7 @@ pub fn do_exec<P: AsRef<Path>>(
     command_args: &[&str],
     envp: &[CString],
     working_dir: &str,
-    user_spec: Option<UserSpec>,
+    user: Option<&str>,
 ) -> Result<()> {
     let mountpoint = mountpoint.as_ref();
     do_chroot(mountpoint)?;
@@ -268,13 +268,30 @@ pub fn do_exec<P: AsRef<Path>>(
         }
     }
 
-    // Switch user if specified
-    if let Some(spec) = user_spec {
+    // Resolve and switch user if specified.
+    // IMPORTANT: User resolution happens AFTER chroot so that username/group lookups
+    // read the container's /etc/passwd and /etc/group instead of the host's.
+    if let Some(user_str) = user {
+        let spec = resolve_user_spec(user_str)?;
+
+        // Determine gid: use explicit gid if provided, otherwise look up user's primary gid
+        let gid = match spec.gid {
+            Some(gid) => gid,
+            None => {
+                // Look up the user's primary group from /etc/passwd (inside chroot)
+                uzers::get_user_by_uid(spec.uid)
+                    .map(|u| u.primary_group_id())
+                    .unwrap_or(spec.uid)
+            }
+        };
+
         // Set gid first (must be done before setuid)
-        if let Some(gid) = spec.gid {
-            nix::unistd::setgid(nix::unistd::Gid::from_raw(gid))
-                .with_context(|| format!("Failed to setgid to {}", gid))?;
-        }
+        nix::unistd::setgid(nix::unistd::Gid::from_raw(gid))
+            .with_context(|| format!("Failed to setgid to {}", gid))?;
+
+        // Clear supplementary groups to prevent retaining host/root group privileges
+        nix::unistd::setgroups(&[]).context("Failed to clear supplementary groups")?;
+
         // Set uid
         nix::unistd::setuid(nix::unistd::Uid::from_raw(spec.uid))
             .with_context(|| format!("Failed to setuid to {}", spec.uid))?;
@@ -282,6 +299,48 @@ pub fn do_exec<P: AsRef<Path>>(
 
     execute_command(command_args, envp)?;
     unreachable!();
+}
+
+/// Resolve a user specification string into uid and optional gid.
+/// This should be called AFTER chroot so it reads the container's /etc/passwd and /etc/group.
+/// Supported formats: "user", "uid", "user:group", "uid:gid", "uid:group", "user:gid"
+fn resolve_user_spec(user_str: &str) -> Result<UserSpec> {
+    let parts: Vec<&str> = user_str.split(':').collect();
+
+    let uid = resolve_uid(parts[0])?;
+    let gid = if parts.len() > 1 {
+        Some(resolve_gid(parts[1])?)
+    } else {
+        None
+    };
+
+    Ok(UserSpec { uid, gid })
+}
+
+/// Parse a string as either a numeric uid or resolve a username from /etc/passwd.
+fn resolve_uid(s: &str) -> Result<u32> {
+    // Try parsing as numeric uid first
+    if let Ok(uid) = s.parse::<u32>() {
+        return Ok(uid);
+    }
+
+    // Look up as username (reads container's /etc/passwd after chroot)
+    uzers::get_user_by_name(s)
+        .map(|u| u.uid())
+        .ok_or_else(|| anyhow::anyhow!("Unknown user: {}", s))
+}
+
+/// Parse a string as either a numeric gid or resolve a group name from /etc/group.
+fn resolve_gid(s: &str) -> Result<u32> {
+    // Try parsing as numeric gid first
+    if let Ok(gid) = s.parse::<u32>() {
+        return Ok(gid);
+    }
+
+    // Look up as group name (reads container's /etc/group after chroot)
+    uzers::get_group_by_name(s)
+        .map(|g| g.gid())
+        .ok_or_else(|| anyhow::anyhow!("Unknown group: {}", s))
 }
 
 pub fn bind_mount<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
