@@ -1200,8 +1200,8 @@ impl EtcdMetaStore {
 
                 let (updated, ret, mod_revision) = match resp.kvs().first() {
                     Some(kv) => {
-                        let current = serde_json::from_slice::<T>(kv.value())
-                            .map_err(|e| MetaError::Internal(e.to_string()))?;
+                        let current: T =
+                            crate::meta::serialization::deserialize_meta(kv.value())?;
                         let (value, r) = f(current)?;
                         (value, r, kv.mod_revision())
                     }
@@ -1212,8 +1212,7 @@ impl EtcdMetaStore {
                         (value, r, 0)
                     }
                 };
-                let current = serde_json::to_string(&updated)
-                    .map_err(|e| MetaError::Internal(e.to_string()))?;
+                let current = crate::meta::serialization::serialize_meta(&updated)?;
 
                 let compare = if mod_revision == 0 {
                     Compare::version(key, CompareOp::Equal, 0)
