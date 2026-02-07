@@ -9,7 +9,6 @@ use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLoc
 use crate::meta::store::{
     AclRule, MetaError, MetaStore, SetAttrFlags, SetAttrRequest, StatFsSnapshot,
 };
-use crate::posix::NAME_MAX;
 use dashmap::{DashMap, Entry};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -479,19 +478,6 @@ where
         Some(entries)
     }
 
-    /// Validate that all path components respect NAME_MAX (255 bytes).
-    /// Returns ENAMETOOLONG if any component exceeds the limit.
-    fn validate_path_components(path: &str) -> Result<(), VfsError> {
-        for component in path.split('/').filter(|s| !s.is_empty()) {
-            if component.len() > NAME_MAX {
-                return Err(VfsError::FilenameTooLong {
-                    path: PathHint::some(path.to_string()),
-                });
-            }
-        }
-        Ok(())
-    }
-
     /// Normalize a path by stripping redundant separators and ensuring it starts with `/`.
     /// Does not resolve `.` or `..`.
     fn norm_path(p: &str) -> String {
@@ -521,7 +507,6 @@ where
     #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn mkdir_p(&self, path: &str) -> Result<i64, VfsError> {
         let path = Self::norm_path(path);
-        Self::validate_path_components(&path)?;
         if &path == "/" {
             return Ok(self.core.root);
         }
@@ -587,7 +572,6 @@ where
     /// - If parent does not exist, returns `NotFound`.
     pub async fn mkdir_err(&self, path: &str) -> Result<i64, VfsError> {
         let path = Self::norm_path(path);
-        Self::validate_path_components(&path)?;
         if path == "/" {
             return Ok(self.core.root);
         }
@@ -732,7 +716,6 @@ where
     #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn create_file(&self, path: &str) -> Result<i64, VfsError> {
         let path = Self::norm_path(path);
-        Self::validate_path_components(&path)?;
         let (dir, name) = Self::split_dir_file(&path);
         let dir_ino = self.mkdir_p(&dir).await?;
 
@@ -778,8 +761,6 @@ where
     pub async fn link(&self, existing_path: &str, link_path: &str) -> Result<FileAttr, VfsError> {
         let existing_path = Self::norm_path(existing_path);
         let link_path = Self::norm_path(link_path);
-        Self::validate_path_components(&existing_path)?;
-        Self::validate_path_components(&link_path)?;
 
         if existing_path == "/" {
             return Err(VfsError::IsADirectory {
@@ -874,7 +855,6 @@ where
         target: &str,
     ) -> Result<(i64, FileAttr), VfsError> {
         let link_path = Self::norm_path(link_path);
-        Self::validate_path_components(&link_path)?;
         if link_path == "/" {
             return Err(VfsError::InvalidFilename);
         }
@@ -1024,7 +1004,6 @@ where
     #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn unlink(&self, path: &str) -> Result<(), VfsError> {
         let path = Self::norm_path(path);
-        Self::validate_path_components(&path)?;
         let (dir, name) = Self::split_dir_file(&path);
 
         let parent_ino = if &dir == "/" {
@@ -1082,7 +1061,6 @@ where
     #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn rmdir(&self, path: &str) -> Result<(), VfsError> {
         let path = Self::norm_path(path);
-        Self::validate_path_components(&path)?;
         if path == "/" {
             return Err(VfsError::PermissionDenied {
                 path: PathHint::some(path),
@@ -1518,8 +1496,6 @@ where
         // Step 1: Normalize and parse paths
         let old = Self::norm_path(old);
         let new = Self::norm_path(new);
-        Self::validate_path_components(&old)?;
-        Self::validate_path_components(&new)?;
         let (old_dir, old_name) = Self::split_dir_file(&old);
         let (new_dir, new_name) = Self::split_dir_file(&new);
 
@@ -1813,7 +1789,6 @@ where
     #[tracing::instrument(level = "trace", skip(self), fields(path, size))]
     pub async fn truncate(&self, path: &str, size: u64) -> Result<(), VfsError> {
         let path = Self::norm_path(path);
-        Self::validate_path_components(&path)?;
         let (ino, _) = self
             .core
             .meta_layer
