@@ -110,6 +110,23 @@ pub enum PodCommand {
         tls_cfg: TLSConnectionArgs,
     },
 
+    #[command(about = "Get details of a specific Pod")]
+    Get {
+        #[arg(value_name = "POD_NAME")]
+        pod_name: String,
+
+        #[arg(
+            long,
+            value_name = "RKS_ADDRESS",
+            env = "RKS_ADDRESS",
+            required = false
+        )]
+        cluster: Option<String>,
+
+        #[clap(flatten)]
+        tls_cfg: TLSConnectionArgs,
+    },
+
     // Run as a daemon process.
     // For convenient, I won't remove cli part now.
     #[command(
@@ -328,6 +345,11 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
         }
         PodCommand::Daemon { tls_cfg } => start_daemon(tls_cfg),
         PodCommand::List { cluster, tls_cfg } => pod_list(cluster, tls_cfg),
+        PodCommand::Get {
+            pod_name,
+            cluster,
+            tls_cfg,
+        } => pod_get(&pod_name, cluster, tls_cfg),
     }
 }
 
@@ -342,6 +364,17 @@ fn pod_list(addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
                 "no rks address configuration find (Currently rkl does not support list cmd in standalone mode)"
             )),
         },
+    }
+}
+
+fn pod_get(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rt = tokio::runtime::Runtime::new()?;
+    match addr.or(env_addr) {
+        Some(rks_addr) => rt.block_on(cluster::get_pod(pod_name, &rks_addr, tls_cfg)),
+        None => Err(anyhow!(
+            "No RKS address provided. Set RKS_ADDRESS or use --cluster"
+        )),
     }
 }
 

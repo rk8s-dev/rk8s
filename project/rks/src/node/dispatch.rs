@@ -82,6 +82,18 @@ pub async fn dispatch_user(
                 .await?;
             }
         }
+        RksMessage::GetPod(name) => {
+            if let Some(pod) = xline_store.get_pod(&name).await? {
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved Pod {name}"
+                );
+                conn.send_msg(&RksMessage::GetPodRes(Box::new(pod))).await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!("Pod {} not found", name)))
+                    .await?;
+            }
+        }
         RksMessage::ListPod => {
             let pods = xline_store.list_pods().await?;
             info!(

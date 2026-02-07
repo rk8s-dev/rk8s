@@ -753,6 +753,7 @@ pub enum RksMessage {
     CreatePod(Box<PodTask>),
     DeletePod(String),
     GetPodByUid(Uuid),
+    GetPod(String),
     ListPod,
 
     CreateReplicaSet(Box<ReplicaSet>),
@@ -804,6 +805,7 @@ pub enum RksMessage {
     Error(String),
     NodeCount(usize),
     GetPodByUidRes(Box<PodTask>),
+    GetPodRes(Box<PodTask>),
     ListPodRes(Vec<PodTask>),
     GetReplicaSetRes(Box<ReplicaSet>),
     ListReplicaSetRes(Vec<ReplicaSet>),
@@ -825,6 +827,7 @@ impl std::fmt::Debug for RksMessage {
                 write!(f, "RksMessage::DeletePod {{ pod_name: {} }}", pod_name)
             }
             Self::GetPodByUid(uid) => write!(f, "RksMessage::GetPodByUid({})", uid),
+            Self::GetPod(name) => write!(f, "RksMessage::GetPod({})", name),
             Self::ListPod => f.write_str("RksMessage::ListPod"),
             Self::CreateReplicaSet(_) => f.write_str("RksMessage::CreateReplicaSet { .. }"),
             Self::UpdateReplicaSet(_) => f.write_str("RksMessage::UpdateReplicaSet { .. }"),
@@ -894,6 +897,7 @@ impl std::fmt::Debug for RksMessage {
             Self::Error(err_msg) => write!(f, "RksMessage::Error({})", err_msg),
             Self::NodeCount(count) => write!(f, "RksMessage::NodeCount({})", count),
             Self::GetPodByUidRes(_) => f.write_str("RksMessage::GetPodByUidRes { .. }"),
+            Self::GetPodRes(_) => f.write_str("RksMessage::GetPodRes { .. }"),
             Self::ListPodRes(pods) => {
                 write!(f, "RksMessage::ListPodRes {{ count: {} }}", pods.len())
             }
@@ -948,6 +952,7 @@ impl Display for RksMessage {
             ),
             Self::DeletePod(pod_name) => write!(f, "Delete pod '{}'", pod_name),
             Self::GetPodByUid(uid) => write!(f, "Get pod by UID '{}'", uid),
+            Self::GetPod(name) => write!(f, "Get pod '{}'", name),
             Self::ListPod => f.write_str("List pods"),
             Self::CreateReplicaSet(rs) => write!(f, "Create replicaset '{}'", rs.metadata.name),
             Self::UpdateReplicaSet(rs) => write!(f, "Update replicaset '{}'", rs.metadata.name),
@@ -1025,6 +1030,9 @@ impl Display for RksMessage {
             Self::NodeCount(count) => write!(f, "Reported node count: {}", count),
             Self::GetPodByUidRes(pod) => {
                 write!(f, "Get pod by UID response: '{}'", pod.metadata.name)
+            }
+            Self::GetPodRes(pod) => {
+                write!(f, "Get pod response: '{}'", pod.metadata.name)
             }
             Self::ListPodRes(pods) => {
                 if pods.is_empty() {
