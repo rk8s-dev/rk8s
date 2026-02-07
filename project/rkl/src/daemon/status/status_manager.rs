@@ -1,3 +1,14 @@
+//! Manages local pod status caching, deduplication, and synchronization with the rks API server.
+//!
+//! [`StatusManager`] caches [`PodStatus`] locally and deduplicates unchanged updates to reduce
+//! unnecessary syncs. It maintains a versioned cache to track which statuses need uploading.
+//! Synchronization is bidirectional: on-demand (signal-driven) syncs when status changes,
+//! and periodic syncs every 5 seconds via the background sync loop.
+//!
+//! Before uploading to the rks API server over QUIC, [`StatusManager`] merges rkl-owned
+//! conditions (PodReady, ContainersReady, PodScheduled, PodInitialized) with server-side
+//! conditions to preserve pod status ownership contracts.
+
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -18,6 +29,9 @@ use crate::{
 
 const SYNC_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Global singleton instance of [`StatusManager`], initialized once by the daemon at startup.
+///
+/// Access this via [`STATUS_MANAGER`] to get a reference to the central status cache and sync engine.
 pub static STATUS_MANAGER: OnceCell<Arc<StatusManager>> = OnceCell::const_new();
 
 #[allow(unused)]
@@ -44,6 +58,11 @@ impl Default for VersionedPodStatus {
     }
 }
 
+/// The central status cache and sync engine for the daemon.
+///
+/// Manages local caching of [`PodStatus`] with version tracking, deduplicates unchanged updates,
+/// and synchronizes changes to the rks API server over QUIC. Implements both on-demand (signal-driven)
+/// and periodic (5-second ticker) synchronization strategies.
 pub struct StatusManager {
     client: QUICClient<Cli>,
     pod_statuses: Arc<DashMap<Uuid, VersionedPodStatus>>,
@@ -66,6 +85,14 @@ struct State {
 }
 
 impl StatusManager {
+    /// Creates a new [`StatusManager`] with a QUIC connection to the rks API server.
+    ///
+    /// # Arguments
+    /// * `server_addr` - The rks API server address (e.g., "127.0.0.1:6000")
+    /// * `tls_cfg` - TLS configuration for the QUIC connection
+    ///
+    /// # Errors
+    /// Returns an error if the QUIC connection fails to establish.
     pub async fn try_new(
         server_addr: String,
         tls_cfg: Arc<TLSConnectionArgs>,
@@ -83,6 +110,14 @@ impl StatusManager {
         })
     }
 
+    /// Starts the background sync loop.
+    ///
+    /// The loop runs indefinitely, syncing pod status updates via two mechanisms:
+    /// - **On-demand**: When [`set_pod_status`](Self::set_pod_status) signals a change
+    /// - **Periodic**: Every 5 seconds to catch any missed updates or reconcile divergence
+    ///
+    /// Must be called exactly once after construction. Calling multiple times will spawn
+    /// multiple background tasks, and the previously spawned task is not stopped automatically.
     pub fn run(&mut self) {
         info!("[StatusManager] Starting to sync pod status to rks.");
 
@@ -116,12 +151,28 @@ impl StatusManager {
         }));
     }
 
+    /// Stops the background sync loop.
+    ///
+    /// Aborts the sync task if running. Safe to call multiple times or if `run()` was never called.
+    /// After stopping, no further syncs will occur until `run()` is called again.
     pub fn stop(&mut self) {
         if let Some(handle) = self.sync_loop_handle.take() {
             handle.abort();
         }
     }
 
+    /// Updates the cached status for a pod and signals the sync loop.
+    ///
+    /// Caches the [`PodStatus`] locally with version tracking and deduplicates unchanged updates.
+    /// If the status has changed, notifies the background sync loop to perform an on-demand sync.
+    ///
+    /// # Arguments
+    /// * `pod` - The [`PodTask`] whose status is being updated
+    /// * `status` - The new [`PodStatus`] to cache
+    ///
+    /// # Errors
+    /// Returns an error only when internal status-processing fails.
+    /// Illegal container transitions are logged and ignored (no error is returned).
     pub async fn set_pod_status(&self, pod: &PodTask, status: &PodStatus) -> anyhow::Result<()> {
         self.update_status_internal(
             pod,
@@ -133,10 +184,35 @@ impl StatusManager {
         Ok(())
     }
 
+    /// Retrieves the cached status for a pod by UID.
+    ///
+    /// Returns a copy of the cached [`PodStatus`] if the pod UID is in the cache, or None if not found.
+    ///
+    /// # Arguments
+    /// * `pod_uid` - The UUID of the pod to look up
     pub async fn get_pod_status(&self, pod_uid: Uuid) -> Option<PodStatus> {
         self.pod_statuses.get(&pod_uid).map(|p| p.status.clone())
     }
 
+    /// Updates a specific container's readiness and recalculates PodReady and ContainersReady conditions.
+    ///
+    /// Finds the cached status for a pod by UID, updates the readiness flag for the specified container,
+    /// and recalculates the PodReady and ContainersReady conditions based on all container states.
+    /// Signals the sync loop for an on-demand sync if successful.
+    ///
+    /// Does nothing if:
+    /// - Pod UID is not found on the rks API server
+    /// - Pod status has not been cached yet
+    /// - Container does not exist in the cached status
+    /// - Container readiness is already set to the requested value
+    ///
+    /// # Arguments
+    /// * `pod_uid` - The UUID of the pod whose container is being updated
+    /// * `container_name` - The name of the container within the pod
+    /// * `is_ready` - Whether the container is ready (true) or not (false)
+    ///
+    /// # Errors
+    /// Returns an error if fetching the pod from rks or updating status cache fails.
     pub async fn set_container_readiness(
         &self,
         pod_uid: Uuid,
@@ -522,11 +598,7 @@ fn can_be_deleted(local_status: &VersionedPodStatus, remote_pod: &PodTask) -> an
         return Ok(false);
     }
 
-    if !is_pod_phase_terminal(
-        remote_pod
-            .status
-            .phase
-    ) {
+    if !is_pod_phase_terminal(remote_pod.status.phase) {
         return Ok(false);
     }
 

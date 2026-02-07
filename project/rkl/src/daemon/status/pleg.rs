@@ -1,3 +1,24 @@
+//! Pod Lifecycle Event Generator (PLEG).
+//!
+//! PLEG is responsible for detecting container state transitions on the local
+//! node. It works by periodically *relisting* all containers through the
+//! container runtime and comparing the current snapshot with the previous one.
+//! Any state change (e.g. a container that was `Created` is now `Running`) is
+//! translated into a [`PodLifecycleEvent`] and sent to the [`super::super::pod_worker::PodWorker`]
+//! via an unbounded MPSC channel.
+//!
+//! # Usage
+//!
+//! ```rust,ignore
+//! let mut pleg = PLEG::new(server_addr, tls_cfg, Duration::from_secs(10));
+//! let event_rx = pleg.run();
+//! // Pass event_rx to PodWorker::new(...)
+//! ```
+//!
+//! The relist interval controls how quickly state changes are detected. A
+//! shorter interval increases responsiveness at the cost of higher CPU and
+//! network usage.
+
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use anyhow::{anyhow, bail};
@@ -18,6 +39,18 @@ struct PodRecord {
     current_pod: Option<Arc<Pod>>,
 }
 
+/// Pod Lifecycle Event Generator.
+///
+/// Periodically queries the container runtime for current container states,
+/// diffs them against the previous snapshot, and emits [`PodLifecycleEvent`]s.
+///
+/// # Lifecycle
+///
+/// 1. Create with [`PLEG::new`], supplying the rks server address, TLS config,
+///    and the relist interval.
+/// 2. Call [`PLEG::run`] to start the background relist loop. It returns an
+///    [`UnboundedReceiver`] of events.
+/// 3. Drop or call [`PLEG::stop`] to cancel the background task.
 #[allow(clippy::upper_case_acronyms)]
 pub struct PLEG {
     rks_addr: String,
@@ -38,13 +71,19 @@ struct State {
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<PodLifecycleEvent>>,
 }
 
+/// Discriminant for the kind of state transition detected by PLEG.
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PodLifecycleEventType {
+    /// Container entered the `Creating` / `Created` state.
     ContainerCreating,
+    /// Container transitioned to `Running`.
     ContainerStarted,
+    /// Container transitioned to `Stopped` / exited.
     ContainerDied,
+    /// Container was removed from the runtime entirely.
     ContainerRemoved,
+    /// Container state changed to an unrecognised / unknown value.
     ContainerChanged,
 }
 
@@ -57,15 +96,28 @@ enum ContainerState {
     NonExistent,
 }
 
+/// A single pod lifecycle event emitted by PLEG.
+///
+/// Consumed by [`super::super::pod_worker::PodWorker`] to update the cached
+/// [`common::PodStatus`] and trigger restart / probe logic.
 #[derive(Debug)]
 pub struct PodLifecycleEvent {
+    /// UID of the pod this event belongs to.
     pub pod_uid: Uuid,
+    /// Human-readable pod name (used for logging).
     pub pod_name: String,
+    /// The kind of state transition that occurred.
     pub event_type: PodLifecycleEventType,
+    /// The container whose state changed.
     pub container: Container,
 }
 
 impl PLEG {
+    /// Creates a new PLEG instance.
+    ///
+    /// * `rks_addr` — Address of the rks API server (used to fetch pod lists).
+    /// * `tls_cfg` — TLS configuration for QUIC connections.
+    /// * `relist_duration` — Interval between consecutive relist cycles.
     pub fn new(
         rks_addr: String,
         tls_cfg: Arc<TLSConnectionArgs>,
@@ -82,6 +134,10 @@ impl PLEG {
         }
     }
 
+    /// Starts the background relist loop and returns a receiver for lifecycle events.
+    ///
+    /// Must be called exactly once. The returned [`UnboundedReceiver`] should be
+    /// passed to [`super::super::pod_worker::PodWorker::new`].
     pub fn run(&mut self) -> UnboundedReceiver<PodLifecycleEvent> {
         let (stop_signal_tx, mut stop_signal_rx) = tokio::sync::oneshot::channel();
         self.stop_signal_tx = Some(stop_signal_tx);
@@ -131,6 +187,7 @@ impl PLEG {
         event_rx
     }
 
+    /// Signals the background relist loop to stop.
     pub fn stop(&mut self) {
         if let Some(stop_signal_tx) = self.stop_signal_tx.take() {
             let _ = stop_signal_tx.send(());

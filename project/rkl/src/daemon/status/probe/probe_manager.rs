@@ -1,3 +1,10 @@
+//! Container health probe management.
+//!
+//! This module manages the lifecycle of container health probes (liveness, readiness, startup).
+//! [`ProbeManager`] registers per-pod probe workers, each running a [`Prober`] on a periodic timer.
+//! Results flow through [`ProbeResultManager`] which caches the latest result per container and
+//! broadcasts changes to subscribers (typically the [`crate::daemon::pod_worker::PodWorker`]).
+
 use std::{sync::Arc, time::Duration};
 
 use anyhow::anyhow;
@@ -17,30 +24,44 @@ use crate::{
     quic::client::{Cli, QUICClient},
 };
 
+/// Global singleton [`ProbeManager`], initialized once by the daemon.
 pub static PROBE_MANAGER: OnceCell<Arc<ProbeManager>> = OnceCell::const_new();
 
+/// Classifies a probe as liveness, readiness, or startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProbeClass {
+    /// Probe that determines if a container is alive; failure may trigger a restart.
     Liveness,
+    /// Probe that determines if a container is ready to serve traffic.
     Readiness,
+    /// Probe that gates liveness/readiness checks until the container has started.
     Startup,
 }
 
+/// Outcome of a single probe execution.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ProbeResultType {
+    /// Probe succeeded.
     Success,
+    /// Probe failed.
     Failure,
+    /// Probe result is not yet known (default).
     #[default]
     Unknown,
 }
 
+/// A probe outcome tied to a specific pod and container.
 #[derive(Clone)]
 pub struct ProbeResult {
+    /// Pod ID for this probe result.
     pub pod_id: String,
+    /// Container name used by status updates and restart handling.
     pub container_id: String,
+    /// The outcome of the probe execution.
     pub result: ProbeResultType,
 }
 impl ProbeResult {
+    /// Creates a successful probe result.
     pub fn new_success(pod_id: impl Into<String>, container_id: impl Into<String>) -> Self {
         Self {
             pod_id: pod_id.into(),
@@ -49,6 +70,7 @@ impl ProbeResult {
         }
     }
 
+    /// Creates a failed probe result.
     pub fn new_failure(pod_id: impl Into<String>, container_id: impl Into<String>) -> Self {
         Self {
             pod_id: pod_id.into(),
@@ -57,6 +79,7 @@ impl ProbeResult {
         }
     }
 
+    /// Creates an unknown probe result.
     #[allow(unused)]
     pub fn new_unknown(pod_id: impl Into<String>, container_id: impl Into<String>) -> Self {
         Self {
@@ -77,6 +100,7 @@ impl std::fmt::Debug for ProbeResult {
     }
 }
 
+/// Caches the latest probe result per container and broadcasts changes to subscribers.
 pub struct ProbeResultManager {
     result_cache: DashMap<String, ProbeResult>,
     result_tx: tokio::sync::broadcast::Sender<ProbeResult>,
@@ -89,6 +113,7 @@ impl Default for ProbeResultManager {
 }
 
 impl ProbeResultManager {
+    /// Creates a new empty result manager.
     pub fn new() -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(32);
         Self {
@@ -116,6 +141,7 @@ impl ProbeResultManager {
     }
 }
 
+/// Orchestrates all probe workers for all pods.
 pub struct ProbeManager {
     liveness_results: Arc<ProbeResultManager>,
     readiness_results: Arc<ProbeResultManager>,
@@ -130,6 +156,7 @@ impl Default for ProbeManager {
 }
 
 impl ProbeManager {
+    /// Creates a new [`ProbeManager`] with empty result managers.
     pub fn new() -> Self {
         Self {
             liveness_results: Arc::new(ProbeResultManager::new()),
@@ -139,6 +166,7 @@ impl ProbeManager {
         }
     }
 
+    /// Creates and starts probe workers for all probes defined in the pod spec.
     pub async fn add_pod(&self, pod: &PodTask, pod_ip: &str) -> anyhow::Result<()> {
         if self.probe_workers.get(&pod.metadata.name).is_some() {
             return Err(anyhow!(
@@ -191,18 +219,22 @@ impl ProbeManager {
         Ok(())
     }
 
+    /// Stops and removes all probe workers for the given pod.
     pub async fn remove_pod(&self, pod_name: &str) {
         self.probe_workers.remove(pod_name);
     }
 
+    /// Returns the shared liveness result manager.
     pub fn liveness_results(&self) -> Arc<ProbeResultManager> {
         self.liveness_results.clone()
     }
 
+    /// Returns the shared readiness result manager.
     pub fn readiness_results(&self) -> Arc<ProbeResultManager> {
         self.readiness_results.clone()
     }
 
+    /// Returns the shared startup result manager.
     pub fn startup_results(&self) -> Arc<ProbeResultManager> {
         self.startup_results.clone()
     }
@@ -251,6 +283,7 @@ fn create_prober_from_spec(
     }
 }
 
+/// Runs a single [`Prober`] on a timer, publishing results to a [`ProbeResultManager`].
 pub struct ProbeWorker {
     results_manager: Arc<ProbeResultManager>,
     prober: Arc<dyn Prober + Send + Sync>,
@@ -261,6 +294,7 @@ pub struct ProbeWorker {
 }
 
 impl ProbeWorker {
+    /// Creates a new probe worker (does not start it).
     pub fn new(
         results_manager: Arc<ProbeResultManager>,
         prober: Arc<dyn Prober + Send + Sync>,
@@ -277,6 +311,7 @@ impl ProbeWorker {
         }
     }
 
+    /// Starts the probe loop: waits for initial delay, then probes periodically.
     pub async fn run(&mut self) {
         let results_manager = self.results_manager.clone();
         let prober = self.prober.clone();
@@ -348,6 +383,7 @@ impl ProbeWorker {
         }));
     }
 
+    /// Signals the probe loop to stop.
     pub fn stop(&mut self) {
         if let Some(stop_tx) = self.stop_signal_tx.take() {
             let _ = stop_tx.send(());
@@ -362,6 +398,7 @@ impl Drop for ProbeWorker {
     }
 }
 
+/// Re-registers probes for pods that already exist on the server (called on daemon restart).
 pub async fn restore_existing_probes(
     server_addr: &str,
     tls_cfg: Arc<TLSConnectionArgs>,

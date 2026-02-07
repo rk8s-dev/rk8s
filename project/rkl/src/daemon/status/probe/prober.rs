@@ -1,3 +1,14 @@
+//! Container health probe implementations.
+//!
+//! This module defines the [`Prober`] trait and three concrete implementations for container
+//! health checking. Supported probe types are:
+//! - Exec: runs a command inside the container
+//! - HTTP GET: sends an HTTP request to the container
+//! - TCP socket: attempts a TCP connection to the container
+//!
+//! Each prober carries a [`ProbeConfig`] that controls timing (initial delay, period, timeout)
+//! and thresholds (success and failure counts).
+
 use std::{any::Any, path::Path, time::Duration};
 
 use libruntime::rootpath;
@@ -13,25 +24,47 @@ use crate::{
 };
 use libcontainer::syscall::syscall::create_syscall;
 
+/// Interface for container health probes.
+///
+/// Implementers define the probe mechanism (exec, HTTP, or TCP) and execute the probe
+/// when `probe()` is called.
 #[async_trait::async_trait]
 #[allow(unused)]
 pub trait Prober: Any {
+    /// Executes the probe.
+    ///
+    /// Returns `Ok(())` on success, `Err` on probe failure.
+    /// Timeout behavior is applied by the caller.
     async fn probe(&self) -> anyhow::Result<()>;
+
+    /// Returns the kind of probe (Exec, HttpGet, or TcpSocket).
     fn probe_kind(&self) -> ProbeKind;
+
+    /// Returns the probe's configuration.
     fn config(&self) -> &ProbeConfig;
+
+    /// Downcasts to the concrete type for testing or inspection.
     fn as_any(&self) -> &dyn Any;
 }
 
 /// Configuration shared by all probe types.
 #[derive(Clone, Debug)]
 pub struct ProbeConfig {
+    /// UID of the pod being probed.
     pub pod_id: Uuid,
+    /// Name of the pod.
     pub pod_name: String,
+    /// Name of the container within the pod.
     pub container_name: String,
+    /// Time to wait after container start before first probe.
     pub initial_delay: Duration,
+    /// Interval between consecutive probes.
     pub period: Duration,
+    /// Maximum time to wait for a single probe to complete.
     pub timeout: Duration,
+    /// Consecutive successes required to mark the probe as passing.
     pub success_threshold: u32,
+    /// Consecutive failures required to mark the probe as failing.
     pub failure_threshold: u32,
 }
 
@@ -50,19 +83,25 @@ impl Default for ProbeConfig {
     }
 }
 
+/// Discriminant for the probe mechanism.
 #[derive(Clone, Debug)]
 #[allow(unused)]
 pub enum ProbeKind {
+    /// Executes a command inside the container.
     Exec,
+    /// Sends an HTTP GET request to the container.
     HttpGet,
+    /// Attempts a TCP connection to the container.
     TcpSocket,
 }
 
+/// Runs a command inside the container via the runtime exec API.
 pub struct ExecProber {
     command: Vec<String>,
     config: ProbeConfig,
 }
 
+/// Sends an HTTP GET request to the container.
 pub struct HttpGetProber {
     host: String,
     port: u16,
@@ -70,6 +109,7 @@ pub struct HttpGetProber {
     config: ProbeConfig,
 }
 
+/// Attempts a TCP connection to the container.
 pub struct TcpSocketProber {
     host: String,
     port: u16,
@@ -77,6 +117,7 @@ pub struct TcpSocketProber {
 }
 
 impl ExecProber {
+    /// Creates a new exec prober with the given command and config.
     pub fn new(command: Vec<String>, config: ProbeConfig) -> Self {
         Self { command, config }
     }
@@ -183,6 +224,7 @@ impl Prober for ExecProber {
 
 #[allow(unused)]
 impl HttpGetProber {
+    /// Creates a new HTTP GET prober.
     pub fn new(host: String, port: u16, path: String, config: ProbeConfig) -> Self {
         Self {
             host,
@@ -192,14 +234,17 @@ impl HttpGetProber {
         }
     }
 
+    /// Returns the target host.
     pub fn host(&self) -> &str {
         &self.host
     }
 
+    /// Returns the target port.
     pub fn port(&self) -> u16 {
         self.port
     }
 
+    /// Returns the request path.
     pub fn path(&self) -> &str {
         &self.path
     }
@@ -263,14 +308,17 @@ impl Prober for HttpGetProber {
 
 #[allow(unused)]
 impl TcpSocketProber {
+    /// Creates a new TCP socket prober.
     pub fn new(host: String, port: u16, config: ProbeConfig) -> Self {
         Self { host, port, config }
     }
 
+    /// Returns the target host.
     pub fn host(&self) -> &str {
         &self.host
     }
 
+    /// Returns the target port.
     pub fn port(&self) -> u16 {
         self.port
     }

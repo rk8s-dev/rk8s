@@ -1,3 +1,12 @@
+//! Pod worker event loop that synchronizes pod lifecycle and probe results into container lifecycle actions.
+//!
+//! [`PodWorker`] is the central event loop that reacts to pod lifecycle events from
+//! [`crate::daemon::status::pleg::PLEG`]
+//! and probe results from the probe subsystem. On lifecycle events (container creating, started, died),
+//! it updates the pod's [`PodStatus`] via the [`StatusManager`]. On probe results, it updates
+//! container readiness (readiness probes) or triggers container restarts (liveness probe failures,
+//! respecting [`common::RestartPolicy`]). It runs as a single background task consuming from multiple async channels.
+
 use std::sync::Arc;
 
 use chrono::DateTime;
@@ -31,6 +40,11 @@ use crate::{
     task::TaskRunner,
 };
 
+/// The central event loop that bridges PLEG events and probe results into status updates and container lifecycle actions.
+///
+/// [`PodWorker`] consumes pod lifecycle events from the [`crate::daemon::status::pleg::PLEG`] and probe results from
+/// the probe subsystem. It updates pod status via [`StatusManager`] and triggers container
+/// restarts when liveness probes fail (respecting [`common::RestartPolicy`]).
 pub struct PodWorker {
     server_addr: String,
     tls_cfg: Arc<TLSConnectionArgs>,
@@ -56,6 +70,16 @@ struct State {
 }
 
 impl PodWorker {
+    /// Creates a new [`PodWorker`] wired to the given PLEG event receiver, probe manager, and status manager.
+    ///
+    /// # Arguments
+    ///
+    /// * `server_addr` - The server address for QUIC connections
+    /// * `tls_cfg` - TLS configuration for secure connections
+    /// * `pod_lifecycle_event_rx` - Receiver for pod lifecycle events from
+    ///   [`crate::daemon::status::pleg::PLEG`]
+    /// * `probe_manager` - Manager that provides probe result broadcast channels
+    /// * `status_manager` - Manager for updating pod status
     pub fn new(
         server_addr: String,
         tls_cfg: Arc<TLSConnectionArgs>,
@@ -76,6 +100,10 @@ impl PodWorker {
         }
     }
 
+    /// Starts the event loop as a background tokio task.
+    ///
+    /// The task will consume from pod lifecycle event and probe result channels,
+    /// updating status and handling container restarts until [`Self::stop`] is called.
     pub fn run(&mut self) {
         let (stop_signal_tx, mut stop_signal_rx) = tokio::sync::oneshot::channel();
         self.stop_signal_tx = Some(stop_signal_tx);
@@ -122,6 +150,9 @@ impl PodWorker {
         }));
     }
 
+    /// Sends a stop signal to the event loop.
+    ///
+    /// This gracefully shuts down the background task spawned by [`Self::run`].
     pub fn stop(&mut self) {
         if let Some(stop_signal_tx) = self.stop_signal_tx.take() {
             let _ = stop_signal_tx.send(());
@@ -438,13 +469,23 @@ async fn apply_pod_lifecycle_event(
     }
 
     // update pod phase to Succeeded or Failed if all containers are terminated
-    // TODO: set Failed phase if any container exited with non-zero code
-    if pod_status
-        .container_statuses
-        .iter()
-        .all(|cs| matches!(cs.state, Some(ContainerState::Terminated { .. })))
+    if !pod_status.container_statuses.is_empty()
+        && pod_status
+            .container_statuses
+            .iter()
+            .all(|cs| matches!(cs.state, Some(ContainerState::Terminated { .. })))
     {
-        pod_status.phase = PodPhase::Succeeded;
+        let has_non_zero_exit = pod_status.container_statuses.iter().any(|cs| {
+            matches!(
+                cs.state,
+                Some(ContainerState::Terminated { exit_code, .. }) if exit_code != 0
+            )
+        });
+        pod_status.phase = if has_non_zero_exit {
+            PodPhase::Failed
+        } else {
+            PodPhase::Succeeded
+        };
     }
     Ok(())
 }
@@ -667,7 +708,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_event_container_died_succeeds_when_all_terminated() {
+    async fn apply_event_container_died_fails_when_any_exit_code_non_zero() {
         let pod_task = make_pod_task(common::RestartPolicy::Never);
         let created_at = Utc::now();
         let container = make_container("c1", Some(created_at));
@@ -680,7 +721,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(pod_status.phase, PodPhase::Succeeded);
+        assert_eq!(pod_status.phase, PodPhase::Failed);
         let container_status = pod_status
             .container_statuses
             .iter()
@@ -703,6 +744,34 @@ mod tests {
             }
             state => panic!("unexpected container state: {state:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn apply_event_all_terminated_with_zero_exit_code_sets_succeeded() {
+        let pod_task = make_pod_task(common::RestartPolicy::Never);
+        let container = make_container("c1", None);
+        let event = make_event(PodLifecycleEventType::ContainerChanged, container);
+
+        let mut pod_status = PodStatus::default();
+        pod_status.phase = PodPhase::Running;
+        pod_status.container_statuses.push(ContainerStatus {
+            name: "c1".to_string(),
+            state: Some(ContainerState::Terminated {
+                exit_code: 0,
+                started_at: None,
+                finished_at: None,
+                signal: None,
+                reason: Some("Completed".to_string()),
+                message: None,
+            }),
+            ..Default::default()
+        });
+
+        apply_pod_lifecycle_event(&pod_task, &mut pod_status, &event)
+            .await
+            .unwrap();
+
+        assert_eq!(pod_status.phase, PodPhase::Succeeded);
     }
 
     #[tokio::test]
