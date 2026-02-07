@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 #![allow(clippy::upper_case_acronyms)]
 
-pub(crate) mod posix;
 #[allow(unused_imports)]
 pub(crate) mod cadapter;
 pub(crate) mod chuck;
@@ -10,6 +9,7 @@ pub mod daemon;
 pub(crate) mod fs;
 pub mod fuse;
 pub(crate) mod meta;
+pub(crate) mod posix;
 pub mod sdk_fs;
 pub(crate) mod vfs;
 

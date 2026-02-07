@@ -1200,8 +1200,7 @@ impl EtcdMetaStore {
 
                 let (updated, ret, mod_revision) = match resp.kvs().first() {
                     Some(kv) => {
-                        let current: T =
-                            crate::meta::serialization::deserialize_meta(kv.value())?;
+                        let current: T = crate::meta::serialization::deserialize_meta(kv.value())?;
                         let (value, r) = f(current)?;
                         (value, r, kv.mod_revision())
                     }
