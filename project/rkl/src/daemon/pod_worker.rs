@@ -33,7 +33,10 @@ use crate::{
     daemon::status::{
         get_pod_by_uid,
         pleg::{PodLifecycleEvent, PodLifecycleEventType},
-        probe::probe_manager::{ProbeManager, ProbeResult, ProbeResultType},
+        probe::{
+            probe_manager::{ProbeManager, ProbeResult, ProbeResultType},
+            prober::match_container_name,
+        },
         status_manager::StatusManager,
     },
     quic::client::{Cli, QUICClient},
@@ -319,8 +322,14 @@ async fn handle_liveness_probe_result(
         common::RestartPolicy::Always | common::RestartPolicy::OnFailure => {}
     }
 
+    let root_path = rootpath::determine(None, &*create_syscall())?;
+    let resolved_container_id = PodInfo::load(&root_path, &pod.metadata.name)
+        .ok()
+        .and_then(|info| match_container_name(&probe_result.container_id, &info.container_names))
+        .unwrap_or_else(|| probe_result.container_id.clone());
+
     let mut container = Container::default();
-    container.state.id = probe_result.container_id.clone();
+    container.state.id = resolved_container_id;
 
     let event = PodLifecycleEvent {
         pod_uid,
@@ -701,7 +710,11 @@ async fn restart_container_locally(
         .spec
         .containers
         .iter()
-        .find(|c| c.name == *container_id)
+        .find(|c| {
+            c.name == *container_id
+                || match_container_name(&c.name, &pod_info.container_names).as_deref()
+                    == Some(container_id.as_str())
+        })
         .ok_or(anyhow::anyhow!(
             "Container spec not found for id {} in pod {}",
             container_id,

@@ -139,7 +139,7 @@ impl ProbeResultManager {
 
     /// Store a probe result and notify subscribers if probe result has changed.
     pub fn set(&self, result: ProbeResult) {
-        let key = result.container_id.clone();
+        let key = format!("{}:{}", result.pod_id, result.container_id);
         let notify = match self.result_cache.get(&key) {
             Some(existing) => existing.result != result.result,
             None => true,
@@ -156,6 +156,12 @@ impl ProbeResultManager {
     /// Subscribe to probe result updates.
     pub fn updates(&self) -> tokio::sync::broadcast::Receiver<ProbeResult> {
         self.result_tx.subscribe()
+    }
+
+    /// Remove cached results whose key starts with `pod_id:`.
+    pub fn remove_by_pod(&self, pod_id: &str) {
+        let prefix = format!("{pod_id}:");
+        self.result_cache.retain(|key, _| !key.starts_with(&prefix));
     }
 }
 
@@ -291,7 +297,14 @@ impl ProbeManager {
     /// Stops and removes all probe workers for the given pod.
     pub async fn remove_pod(&self, pod_name: &str) {
         debug!(pod_name, "[ProbeManager] Removing pod probe workers");
-        self.probe_workers.remove(pod_name);
+        if let Some((_, workers)) = self.probe_workers.remove(pod_name) {
+            for worker in &workers {
+                self.liveness_results.remove_by_pod(&worker.pod_id);
+                self.readiness_results.remove_by_pod(&worker.pod_id);
+                self.startup_results.remove_by_pod(&worker.pod_id);
+            }
+            // workers are dropped here, triggering ProbeWorker::drop → stop()
+        }
     }
 
     /// Returns the shared liveness result manager.
@@ -324,7 +337,7 @@ fn create_prober_from_spec(
             container_name,
             initial_delay: Duration::from_secs(probe.initial_delay_seconds.unwrap_or(0) as u64),
             timeout: Duration::from_secs(probe.timeout_seconds.unwrap_or(1) as u64),
-            period: Duration::from_secs(probe.period_seconds.unwrap_or(10) as u64),
+            period: Duration::from_secs(probe.period_seconds.unwrap_or(10).max(1) as u64),
             success_threshold: probe.success_threshold.unwrap_or(1),
             failure_threshold: probe.failure_threshold.unwrap_or(3),
         };
@@ -791,6 +804,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn probe_result_manager_does_not_mix_same_container_name_across_pods() {
+        let manager = ProbeResultManager::new();
+        let mut rx = manager.updates();
+
+        manager.set(ProbeResult::new_success("pod1", "app"));
+        let first = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("timeout")
+            .expect("recv");
+        assert_eq!(first.pod_id, "pod1");
+        assert_eq!(first.result, ProbeResultType::Success);
+
+        manager.set(ProbeResult::new_success("pod2", "app"));
+        let second = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("timeout")
+            .expect("recv");
+        assert_eq!(second.pod_id, "pod2");
+        assert_eq!(second.result, ProbeResultType::Success);
+    }
+
+    #[tokio::test]
     async fn probe_worker_emits_success_result() {
         let manager = Arc::new(ProbeResultManager::new());
         let mut rx = manager.updates();
@@ -916,5 +951,26 @@ mod tests {
             .expect("tcp prober");
         assert_eq!(prober.host(), "127.0.0.1");
         assert_eq!(prober.port(), 9090);
+    }
+
+    #[test]
+    fn create_prober_from_spec_clamps_zero_period_to_one_second() {
+        let probe = Probe {
+            action: Some(ProbeAction::TcpSocket(TcpSocketAction {
+                host: None,
+                port: 9090,
+            })),
+            period_seconds: Some(0),
+            ..Default::default()
+        };
+        let prober = create_prober_from_spec(
+            &probe,
+            Uuid::new_v4(),
+            "pod".to_string(),
+            "app".to_string(),
+            "127.0.0.1",
+        )
+        .expect("prober");
+        assert_eq!(prober.config().period, Duration::from_secs(1));
     }
 }

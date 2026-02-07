@@ -11,18 +11,15 @@
 
 use std::{any::Any, path::Path, time::Duration};
 
+use libcontainer::syscall::syscall::create_syscall;
 use libruntime::rootpath;
 use tokio::{
-    io::{AsyncReadExt as _, AsyncWriteExt as _},
+    io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _},
     net::TcpStream,
 };
 use uuid::Uuid;
 
-use crate::{
-    commands::pod::PodInfo,
-    commands::{Exec, exec},
-};
-use libcontainer::syscall::syscall::create_syscall;
+use crate::commands::{Exec, exec, pod::PodInfo};
 
 /// Interface for container health probes.
 ///
@@ -123,7 +120,10 @@ impl ExecProber {
     }
 }
 
-fn resolve_container_id(root_path: &Path, config: &ProbeConfig) -> anyhow::Result<String> {
+pub(crate) fn resolve_container_id(
+    root_path: &Path,
+    config: &ProbeConfig,
+) -> anyhow::Result<String> {
     if !config.pod_id.is_nil() {
         let pod_info = PodInfo::load(root_path, &config.pod_name)?;
         if let Some(container_id) =
@@ -152,7 +152,7 @@ fn resolve_container_id(root_path: &Path, config: &ProbeConfig) -> anyhow::Resul
     ))
 }
 
-fn match_container_name(name: &str, candidates: &[String]) -> Option<String> {
+pub(crate) fn match_container_name(name: &str, candidates: &[String]) -> Option<String> {
     if candidates.iter().any(|candidate| candidate == name) {
         return Some(name.to_string());
     }
@@ -197,8 +197,13 @@ impl Prober for ExecProber {
             cgroup: None,
         };
 
-        let exit_code = exec(exec_args, root_path)
-            .map_err(|e| anyhow::anyhow!("exec probe join error: {e}"))?;
+        // exec() calls waitpid() which is a blocking syscall. Run it on a
+        // dedicated blocking thread so we don't stall the tokio runtime and
+        // so that tokio::time::timeout can actually cancel the future.
+        let exit_code = tokio::task::spawn_blocking(move || exec(exec_args, root_path))
+            .await
+            .map_err(|e| anyhow::anyhow!("exec probe join error: {e}"))?
+            .map_err(|e| anyhow::anyhow!("exec probe error: {e}"))?;
 
         if exit_code == 0 {
             Ok(())
@@ -263,16 +268,20 @@ impl Prober for HttpGetProber {
 
         stream.write_all(request.as_bytes()).await?;
 
-        const HTTP_PROBE_BUFFER_SIZE: usize = 512;
+        // Use BufReader to reliably read the complete status line, even if the
+        // response arrives across multiple TCP segments.
+        let reader = tokio::io::BufReader::new(&mut stream);
+        let mut status_line = String::new();
+        const MAX_STATUS_LINE_LEN: usize = 512;
+        reader
+            .take(MAX_STATUS_LINE_LEN as u64)
+            .read_line(&mut status_line)
+            .await?;
 
-        let mut buf = vec![0u8; HTTP_PROBE_BUFFER_SIZE];
-        let n = stream.read(&mut buf).await?;
-        if n == 0 {
+        if status_line.is_empty() {
             return Err(anyhow::anyhow!("http probe received empty response"));
         }
 
-        let response = std::str::from_utf8(&buf[..n])?;
-        let status_line = response.lines().next().unwrap_or("");
         let mut parts = status_line.split_whitespace();
         let _http_version = parts.next();
         let status_code_str = parts.next().ok_or_else(|| {

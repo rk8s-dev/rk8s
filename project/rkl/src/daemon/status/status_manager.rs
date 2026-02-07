@@ -17,13 +17,15 @@ use common::{
     PodSpec, PodStatus, PodTask, RestartPolicy, RksMessage,
 };
 use dashmap::DashMap;
+use libcontainer::syscall::syscall::create_syscall;
+use libruntime::rootpath;
 use tokio::sync::{Notify, OnceCell};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    commands::pod::TLSConnectionArgs,
-    daemon::status::get_pod_by_uid,
+    commands::pod::{PodInfo, TLSConnectionArgs},
+    daemon::status::{get_pod_by_uid, probe::prober::match_container_name},
     quic::client::{Cli, QUICClient},
 };
 
@@ -270,11 +272,14 @@ impl StatusManager {
             return Ok(());
         }
 
+        let resolved_name = resolve_runtime_container_name(&pod.metadata.name, container_name)
+            .unwrap_or_else(|| container_name.to_string());
+
         let container_status = cached_status
             .status
             .container_statuses
             .iter_mut()
-            .find(|container_status| container_status.name == container_name);
+            .find(|container_status| container_status.name == resolved_name);
 
         if container_status.is_none() {
             debug!(
@@ -1069,6 +1074,12 @@ fn get_container_status<'a>(
     container_statuses
         .iter()
         .find(|cs| cs.name == container_name)
+}
+
+fn resolve_runtime_container_name(pod_name: &str, container_name: &str) -> Option<String> {
+    let root_path = rootpath::determine(None, &*create_syscall()).ok()?;
+    let pod_info = PodInfo::load(&root_path, pod_name).ok()?;
+    match_container_name(container_name, &pod_info.container_names)
 }
 
 #[cfg(test)]
