@@ -86,12 +86,7 @@ fn list_print(pod_list: Vec<PodTask>) -> Result<()> {
             .count();
         let total_count = pod.spec.containers.len();
         let ready = format!("{}/{}", ready_count, total_count);
-        let status = pod
-            .status
-            .phase
-            .as_ref()
-            .map(|p| format!("{:?}", p))
-            .unwrap_or_else(|| "Unknown".into());
+        let status = format!("{:?}", pod.status.phase);
         let restarts: u32 = pod
             .status
             .container_statuses

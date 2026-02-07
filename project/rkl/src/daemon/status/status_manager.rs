@@ -214,7 +214,7 @@ impl StatusManager {
             &create_containers_ready_condition(
                 &pod,
                 &cached_status.status.container_statuses,
-                cached_status.status.phase.unwrap_or(PodPhase::Unknown),
+                cached_status.status.phase,
             ),
         );
 
@@ -223,7 +223,7 @@ impl StatusManager {
             &create_pod_ready_condition(
                 &pod,
                 &cached_status.status.container_statuses,
-                cached_status.status.phase.unwrap_or(PodPhase::Unknown),
+                cached_status.status.phase,
             ),
         );
 
@@ -450,22 +450,18 @@ async fn merge_status(old_pod_status: &PodStatus, new_pod_status: &PodStatus) ->
     merged_status.conditions = Some(pod_conditions);
 
     // If the new phase is terminal, explicitly set the ready condition to false for PodReady and ContainersReady.
-    if is_pod_phase_terminal(new_pod_status.phase.as_ref().unwrap_or(&PodPhase::Unknown))
+    if is_pod_phase_terminal(new_pod_status.phase)
         && (get_pod_ready_condition(new_pod_status).is_some()
             || get_container_ready_condition(new_pod_status).is_some())
     {
         let ready_condition = PodCondition {
             condition_type: PodConditionType::PodReady,
             status: common::ConditionStatus::False,
-            reason: if let Some(phase) = &new_pod_status.phase {
-                match phase {
-                    PodPhase::Succeeded => Some("PodCompleted".to_string()),
-                    PodPhase::Failed => Some("PodFailed".to_string()),
-                    _ => Some("Unknown".to_string()),
-                }
-            } else {
-                Some("Unknown".to_string())
-            },
+            reason: Some(match new_pod_status.phase {
+                PodPhase::Succeeded => "PodCompleted".to_string(),
+                PodPhase::Failed => "PodFailed".to_string(),
+                _ => "Unknown".to_string(),
+            }),
             ..Default::default()
         };
 
@@ -474,15 +470,11 @@ async fn merge_status(old_pod_status: &PodStatus, new_pod_status: &PodStatus) ->
         let containers_ready_condition = PodCondition {
             condition_type: PodConditionType::ContainersReady,
             status: common::ConditionStatus::False,
-            reason: if let Some(phase) = &new_pod_status.phase {
-                match phase {
-                    PodPhase::Succeeded => Some("PodCompleted".to_string()),
-                    PodPhase::Failed => Some("PodFailed".to_string()),
-                    _ => Some("Unknown".to_string()),
-                }
-            } else {
-                Some("Unknown".to_string())
-            },
+            reason: Some(match new_pod_status.phase {
+                PodPhase::Succeeded => "PodCompleted".to_string(),
+                PodPhase::Failed => "PodFailed".to_string(),
+                _ => "Unknown".to_string(),
+            }),
             ..Default::default()
         };
 
@@ -534,8 +526,6 @@ fn can_be_deleted(local_status: &VersionedPodStatus, remote_pod: &PodTask) -> an
         remote_pod
             .status
             .phase
-            .as_ref()
-            .unwrap_or(&PodPhase::Unknown),
     ) {
         return Ok(false);
     }
@@ -606,7 +596,7 @@ fn check_container_status_transition(
     Ok(())
 }
 
-fn is_pod_phase_terminal(phase: &PodPhase) -> bool {
+fn is_pod_phase_terminal(phase: PodPhase) -> bool {
     matches!(phase, PodPhase::Succeeded | PodPhase::Failed)
 }
 
@@ -1256,12 +1246,12 @@ mod tests {
         };
         let status_a = PodStatus {
             conditions: Some(vec![condition_a.clone(), condition_b.clone()]),
-            phase: Some(PodPhase::Running),
+            phase: PodPhase::Running,
             ..Default::default()
         };
         let status_b = PodStatus {
             conditions: Some(vec![condition_b, condition_a]),
-            phase: Some(PodPhase::Running),
+            phase: PodPhase::Running,
             ..Default::default()
         };
 
@@ -1301,12 +1291,12 @@ mod tests {
         };
         let status_a = PodStatus {
             conditions: Some(vec![condition.clone()]),
-            phase: Some(PodPhase::Running),
+            phase: PodPhase::Running,
             ..Default::default()
         };
         let status_b = PodStatus {
             conditions: Some(vec![condition]),
-            phase: Some(PodPhase::Failed),
+            phase: PodPhase::Failed,
             ..Default::default()
         };
 
@@ -1324,7 +1314,7 @@ mod tests {
             ..Default::default()
         };
         let new_status = PodStatus {
-            phase: Some(PodPhase::Succeeded),
+            phase: PodPhase::Succeeded,
             conditions: Some(vec![
                 PodCondition {
                     condition_type: PodConditionType::PodReady,
@@ -1354,7 +1344,7 @@ mod tests {
         let local_status = VersionedPodStatus {
             version: 1,
             status: PodStatus {
-                phase: Some(PodPhase::Succeeded),
+                phase: PodPhase::Succeeded,
                 ..Default::default()
             },
             pod_name: "pod".to_string(),
@@ -1363,7 +1353,7 @@ mod tests {
             at: Utc::now(),
         };
         let mut remote_pod = make_pod_task(&["app"], RestartPolicy::Never);
-        remote_pod.status.phase = Some(PodPhase::Succeeded);
+        remote_pod.status.phase = PodPhase::Succeeded;
 
         assert!(!can_be_deleted(&local_status, &remote_pod).unwrap());
 

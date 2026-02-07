@@ -299,7 +299,7 @@ async fn apply_pod_lifecycle_event(
                 event.pod_name
             );
 
-            pod_status.phase = Some(PodPhase::Pending);
+            pod_status.phase = PodPhase::Pending;
             let pod_conditions = pod_status.conditions.as_mut().unwrap();
             match pod_conditions
                 .iter_mut()
@@ -347,7 +347,7 @@ async fn apply_pod_lifecycle_event(
                 event.pod_name
             );
 
-            pod_status.phase = Some(PodPhase::Running);
+            pod_status.phase = PodPhase::Running;
             match pod_status
                 .container_statuses
                 .iter_mut()
@@ -444,7 +444,7 @@ async fn apply_pod_lifecycle_event(
         .iter()
         .all(|cs| matches!(cs.state, Some(ContainerState::Terminated { .. })))
     {
-        pod_status.phase = Some(PodPhase::Succeeded);
+        pod_status.phase = PodPhase::Succeeded;
     }
     Ok(())
 }
@@ -609,7 +609,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(pod_status.phase, Some(PodPhase::Pending));
+        assert_eq!(pod_status.phase, PodPhase::Pending);
         let conditions = pod_status.conditions.as_ref().unwrap();
         let scheduled = conditions
             .iter()
@@ -652,7 +652,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(pod_status.phase, Some(PodPhase::Running));
+        assert_eq!(pod_status.phase, PodPhase::Running);
         let container_status = pod_status
             .container_statuses
             .iter()
@@ -674,13 +674,13 @@ mod tests {
         let event = make_event(PodLifecycleEventType::ContainerDied, container);
 
         let mut pod_status = PodStatus::default();
-        pod_status.phase = Some(PodPhase::Running);
+        pod_status.phase = PodPhase::Running;
 
         apply_pod_lifecycle_event(&pod_task, &mut pod_status, &event)
             .await
             .unwrap();
 
-        assert_eq!(pod_status.phase, Some(PodPhase::Succeeded));
+        assert_eq!(pod_status.phase, PodPhase::Succeeded);
         let container_status = pod_status
             .container_statuses
             .iter()
@@ -713,7 +713,7 @@ mod tests {
         let event = make_event(PodLifecycleEventType::ContainerDied, container);
 
         let mut pod_status = PodStatus::default();
-        pod_status.phase = Some(PodPhase::Running);
+        pod_status.phase = PodPhase::Running;
         pod_status.container_statuses.push(ContainerStatus {
             name: "sidecar".to_string(),
             state: Some(ContainerState::Running { started_at: None }),
@@ -724,7 +724,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(pod_status.phase, Some(PodPhase::Running));
+        assert_eq!(pod_status.phase, PodPhase::Running);
     }
 
     #[test]

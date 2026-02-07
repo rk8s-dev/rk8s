@@ -296,7 +296,7 @@ pub enum NodeSelectorOperator {
     Lt,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
     #[serde(default)]
@@ -556,7 +556,7 @@ pub struct PodStatus {
     pub container_statuses: Vec<ContainerStatus>,
     /// Phase indicates the high-level summary of the pod's status.
     #[serde(default)]
-    pub phase: Option<PodPhase>,
+    pub phase: PodPhase,
     /// Detailed conditions of the pod's status.
     #[serde(default)]
     pub conditions: Option<Vec<PodCondition>>,
