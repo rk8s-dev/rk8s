@@ -13,7 +13,7 @@ use dashmap::DashMap;
 use libcontainer::syscall::syscall::create_syscall;
 use libruntime::rootpath;
 use tokio::{select, sync::OnceCell};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -132,6 +132,9 @@ impl ProbeResultManager {
         if notify {
             self.result_cache.insert(key, result.clone());
             let _ = self.result_tx.send(result);
+            debug!("[Probe] Probe result changed and broadcasted");
+        } else {
+            debug!("[Probe] Probe result unchanged; suppressing broadcast");
         }
     }
 
@@ -168,6 +171,14 @@ impl ProbeManager {
 
     /// Creates and starts probe workers for all probes defined in the pod spec.
     pub async fn add_pod(&self, pod: &PodTask, pod_ip: &str) -> anyhow::Result<()> {
+        debug!(
+            pod_uid = %pod.metadata.uid,
+            pod_name = %pod.metadata.name,
+            pod_namespace = %pod.metadata.namespace,
+            pod_ip,
+            container_count = pod.spec.containers.len(),
+            "[ProbeManager] add_pod called"
+        );
         if self.probe_workers.get(&pod.metadata.name).is_some() {
             return Err(anyhow!(
                 "[ProbeManager] Probes for pod {} already exist",
@@ -209,18 +220,37 @@ impl ProbeManager {
                     container_name.clone(),
                 );
                 worker.run().await;
+                debug!(
+                    pod_uid = %pod.metadata.uid,
+                    pod_name = %pod.metadata.name,
+                    container_name,
+                    probe_class = ?probe_class,
+                    "[ProbeManager] Probe worker started"
+                );
                 self.probe_workers
                     .entry(pod.metadata.name.clone())
                     .or_default()
                     .push(worker);
             }
         }
+        let worker_count = self
+            .probe_workers
+            .get(&pod.metadata.name)
+            .map(|workers| workers.len())
+            .unwrap_or(0);
+        debug!(
+            pod_uid = %pod.metadata.uid,
+            pod_name = %pod.metadata.name,
+            worker_count,
+            "[ProbeManager] add_pod completed"
+        );
 
         Ok(())
     }
 
     /// Stops and removes all probe workers for the given pod.
     pub async fn remove_pod(&self, pod_name: &str) {
+        debug!(pod_name, "[ProbeManager] Removing pod probe workers");
         self.probe_workers.remove(pod_name);
     }
 
@@ -279,6 +309,12 @@ fn create_prober_from_spec(
             }
         }
     } else {
+        debug!(
+            pod_id = %pod_id,
+            pod_name,
+            container_name,
+            "[ProbeManager] Probe spec has no action; skipping prober creation"
+        );
         None
     }
 }
@@ -313,6 +349,19 @@ impl ProbeWorker {
 
     /// Starts the probe loop: waits for initial delay, then probes periodically.
     pub async fn run(&mut self) {
+        if let Some(handle) = &self.handle {
+            if !handle.is_finished() {
+                warn!(
+                    pod_id = %self.pod_id,
+                    container_id = %self.container_id,
+                    "[Probe] run() called while already running; ignoring."
+                );
+                return;
+            }
+            self.handle = None;
+            self.stop_signal_tx = None;
+        }
+
         let results_manager = self.results_manager.clone();
         let prober = self.prober.clone();
         let config = prober.config().clone();
@@ -322,12 +371,23 @@ impl ProbeWorker {
 
         self.stop_signal_tx.replace(stop_tx);
         self.handle = Some(tokio::spawn(async move {
+            debug!(
+                pod_id,
+                container_id,
+                initial_delay = ?config.initial_delay,
+                period = ?config.period,
+                timeout = ?config.timeout,
+                success_threshold = config.success_threshold,
+                failure_threshold = config.failure_threshold,
+                "[Probe] Probe worker started"
+            );
             if !config.initial_delay.is_zero() {
                 let delay = tokio::time::sleep(config.initial_delay);
                 tokio::pin!(delay);
                 select! {
                     _ = &mut delay => {}
                     _ = &mut stop_rx => {
+                        debug!(pod_id, container_id, "[Probe] Probe worker stopped during initial delay");
                         return;
                     }
                 }
@@ -349,6 +409,12 @@ impl ProbeWorker {
                                         pod_id.clone(),
                                         container_id.clone(),
                                     ));
+                                    debug!(
+                                        pod_id,
+                                        container_id,
+                                        success_count,
+                                        "[Probe] Success threshold reached"
+                                    );
                                 }
                             }
                             Ok(Err(e)) => {
@@ -359,6 +425,12 @@ impl ProbeWorker {
                                         pod_id.clone(),
                                         container_id.clone(),
                                     ));
+                                    debug!(
+                                        pod_id,
+                                        container_id,
+                                        failure_count,
+                                        "[Probe] Failure threshold reached after probe error"
+                                    );
                                 }
                                 tracing::warn!(error = %e, "[Probe] probe failed");
                             }
@@ -370,16 +442,24 @@ impl ProbeWorker {
                                         pod_id.clone(),
                                         container_id.clone(),
                                     ));
+                                    debug!(
+                                        pod_id,
+                                        container_id,
+                                        failure_count,
+                                        "[Probe] Failure threshold reached after probe timeout"
+                                    );
                                 }
                                 tracing::warn!(timeout = ?config.timeout, "[Probe] probe timed out");
                             }
                         }
                     }
                     _ = &mut stop_rx => {
+                        debug!(pod_id, container_id, "[Probe] Probe worker received stop signal");
                         break;
                     }
                 }
             }
+            debug!(pod_id, container_id, "[Probe] Probe worker exited");
         }));
     }
 
@@ -388,7 +468,9 @@ impl ProbeWorker {
         if let Some(stop_tx) = self.stop_signal_tx.take() {
             let _ = stop_tx.send(());
         }
-        self.handle.take();
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
     }
 }
 
@@ -404,18 +486,31 @@ pub async fn restore_existing_probes(
     tls_cfg: Arc<TLSConnectionArgs>,
     probe_manager: Arc<ProbeManager>,
 ) -> anyhow::Result<()> {
+    debug!(
+        server_addr,
+        "[daemon] Restoring existing probes from server pod list"
+    );
     let client = QUICClient::<Cli>::connect(server_addr.to_string(), &tls_cfg).await?;
     client.send_msg(&RksMessage::ListPod).await?;
     let pods = match client.fetch_msg().await? {
         RksMessage::ListPodRes(pods) => pods,
         msg => anyhow::bail!("unexpected response {msg:?}"),
     };
+    debug!(
+        pod_count = pods.len(),
+        "[daemon] Loaded pods for probe restoration"
+    );
 
     let root_path = rootpath::determine(None, &*create_syscall())?;
     let mut restored = 0usize;
 
     for pod in pods {
         if PodInfo::load(&root_path, &pod.metadata.name).is_err() {
+            debug!(
+                pod = %pod.metadata.name,
+                namespace = %pod.metadata.namespace,
+                "[daemon] skipping probe restore: pod not found in local runtime"
+            );
             continue;
         }
 
@@ -438,6 +533,11 @@ pub async fn restore_existing_probes(
             );
         } else {
             restored += 1;
+            debug!(
+                pod = %pod.metadata.name,
+                namespace = %pod.metadata.namespace,
+                "[daemon] restored probes for pod"
+            );
         }
     }
 

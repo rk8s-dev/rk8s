@@ -18,7 +18,7 @@ use common::{
 };
 use dashmap::DashMap;
 use tokio::sync::{Notify, OnceCell};
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -116,9 +116,15 @@ impl StatusManager {
     /// - **On-demand**: When [`set_pod_status`](Self::set_pod_status) signals a change
     /// - **Periodic**: Every 5 seconds to catch any missed updates or reconcile divergence
     ///
-    /// Must be called exactly once after construction. Calling multiple times will spawn
-    /// multiple background tasks, and the previously spawned task is not stopped automatically.
     pub fn run(&mut self) {
+        if let Some(handle) = &self.sync_loop_handle {
+            if !handle.is_finished() {
+                warn!("[StatusManager] run() called while already running; ignoring.");
+                return;
+            }
+            self.sync_loop_handle = None;
+        }
+
         info!("[StatusManager] Starting to sync pod status to rks.");
 
         let state = Arc::new(State {
@@ -134,14 +140,14 @@ impl StatusManager {
                 tokio::select! {
                     _ = state.pod_status_update_signal.notified() => {
                         // Sync on-demand
-                        info!("[StatusManager] Syncing updated pod status.");
+                        debug!("[StatusManager] Received status update signal; syncing changed pods");
                         if let Err(e) = sync_batch(&state, false).await {
                             error!("[StatusManager] Failed to sync updated pod statuses: {e}");
                         }
                     }
                     _ = ticker.tick() => {
                         // Periodic sync all
-                        info!("[StatusManager] Syncing all pod statuses.");
+                        debug!("[StatusManager] Periodic sync tick fired; syncing all pods");
                         if let Err(e) = sync_batch(&state, true).await {
                             error!("[StatusManager] Failed to sync all pod statuses: {e}");
                         }
@@ -174,6 +180,16 @@ impl StatusManager {
     /// Returns an error only when internal status-processing fails.
     /// Illegal container transitions are logged and ignored (no error is returned).
     pub async fn set_pod_status(&self, pod: &PodTask, status: &PodStatus) -> anyhow::Result<()> {
+        debug!(
+            pod_uid = %pod.metadata.uid,
+            pod_name = %pod.metadata.name,
+            pod_namespace = %pod.metadata.namespace,
+            phase = ?status.phase,
+            container_status_count = status.container_statuses.len(),
+            force_update = false,
+            pod_is_finished = %pod.metadata.deletion_timestamp.is_some(),
+            "[StatusManager] set_pod_status called"
+        );
         self.update_status_internal(
             pod,
             status,
@@ -219,16 +235,20 @@ impl StatusManager {
         container_name: &str,
         is_ready: bool,
     ) -> anyhow::Result<()> {
-        info!(
-            "[StatusManager] Setting container '{}' readiness to {}",
-            container_name, is_ready
+        debug!(
+            pod_uid = %pod_uid,
+            container_name,
+            is_ready,
+            "[StatusManager] Setting container readiness"
         );
         let pod = match get_pod_by_uid(&self.client, &pod_uid).await? {
             Some(p) => p,
             None => {
-                info!(
-                    "[StatusManager] Pod with UID '{}' not found on rks, skipping container readiness update.",
-                    pod_uid
+                debug!(
+                    pod_uid = %pod_uid,
+                    container_name,
+                    is_ready,
+                    "[StatusManager] Pod not found on rks; skipping container readiness update"
                 );
                 return Ok(());
             }
@@ -240,7 +260,13 @@ impl StatusManager {
         };
 
         if !is_cached {
-            info!("[StatusManager] Container readiness changed before pod has synced",);
+            debug!(
+                pod_uid = %pod_uid,
+                pod_name = %pod.metadata.name,
+                container_name,
+                is_ready,
+                "[StatusManager] Container readiness changed before pod status was cached"
+            );
             return Ok(());
         }
 
@@ -251,9 +277,12 @@ impl StatusManager {
             .find(|container_status| container_status.name == container_name);
 
         if container_status.is_none() {
-            info!(
-                "[StatusManager] Container '{}' not found in pod '{}', skipping container readiness update.",
-                container_name, cached_status.pod_name
+            debug!(
+                pod_uid = %pod_uid,
+                pod_name = %cached_status.pod_name,
+                container_name,
+                is_ready,
+                "[StatusManager] Container not found in cached status; skipping readiness update"
             );
             return Ok(());
         }
@@ -261,9 +290,12 @@ impl StatusManager {
         let container_status = container_status.unwrap();
 
         if container_status.ready == is_ready {
-            info!(
-                "[StatusManager] Container readiness for '{}' already set to {}, skipping update.",
-                container_name, is_ready
+            debug!(
+                pod_uid = %pod_uid,
+                pod_name = %cached_status.pod_name,
+                container_name,
+                is_ready,
+                "[StatusManager] Container readiness already up to date; skipping"
             );
             return Ok(());
         }
@@ -305,6 +337,13 @@ impl StatusManager {
 
         self.update_status_internal(&pod, &cached_status.status, false, false)
             .await?;
+        debug!(
+            pod_uid = %pod_uid,
+            pod_name = %pod.metadata.name,
+            container_name,
+            is_ready,
+            "[StatusManager] Container readiness update persisted"
+        );
 
         Ok(())
     }
@@ -318,6 +357,16 @@ impl StatusManager {
     ) -> anyhow::Result<()> {
         let pod_uid = pod.metadata.uid;
         let mut status = status.clone();
+        debug!(
+            pod_uid = %pod_uid,
+            pod_name = %pod.metadata.name,
+            pod_namespace = %pod.metadata.namespace,
+            incoming_phase = ?status.phase,
+            incoming_container_status_count = status.container_statuses.len(),
+            force_update,
+            pod_is_finished,
+            "[StatusManager] update_status_internal start"
+        );
 
         let (is_cached, cached_status, old_status) = match self.pod_statuses.get(&pod_uid) {
             Some(s) => {
@@ -349,9 +398,11 @@ impl StatusManager {
         }
 
         if is_cached && is_status_owned_by_rkl_equal(&old_status, &status) && !force_update {
-            info!(
-                "[StatusManager] Pod '{}' status unchanged, skipping update.",
-                pod.metadata.name
+            debug!(
+                pod_uid = %pod_uid,
+                pod_name = %pod.metadata.name,
+                cached_version = cached_status.version,
+                "[StatusManager] Pod status unchanged; skipping cache update"
             );
 
             return Ok(());
@@ -370,9 +421,13 @@ impl StatusManager {
             },
         };
 
-        info!(
-            "[StatusManager] Pod '{}' status updated to version {}: {:?}.",
-            pod.metadata.name, new_status.version, new_status.status
+        debug!(
+            pod_uid = %pod_uid,
+            pod_name = %pod.metadata.name,
+            version = new_status.version,
+            phase = ?new_status.status.phase,
+            container_status_count = new_status.status.container_statuses.len(),
+            "[StatusManager] Pod status cached with new version"
         );
 
         // Update the status in the cache.
@@ -380,6 +435,11 @@ impl StatusManager {
 
         // Notify the main loop to process the updated status.
         self.pod_status_update_signal.notify_one();
+        debug!(
+            pod_uid = %pod_uid,
+            pod_name = %pod.metadata.name,
+            "[StatusManager] Notified sync loop about cached status update"
+        );
         Ok(())
     }
 }
@@ -391,17 +451,29 @@ impl Drop for StatusManager {
 }
 
 async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
+    debug!(
+        sync_all,
+        cached_pod_count = state.pod_statuses.len(),
+        api_version_count = state.api_status_versions.len(),
+        "[StatusManager] sync_batch start"
+    );
     let mut updated_status: Vec<(Uuid, VersionedPodStatus)> = Vec::new();
 
     // Clean up orphaned versions.
     if sync_all {
+        let mut removed_orphans = 0usize;
         for entry in state.api_status_versions.iter() {
             let uid = *entry.key();
             let has_pod = state.pod_statuses.get(&uid).is_some();
             if !has_pod {
                 state.api_status_versions.remove(&uid);
+                removed_orphans += 1;
             }
         }
+        debug!(
+            removed_orphans,
+            "[StatusManager] Removed orphaned API status versions during full sync"
+        );
     }
 
     // Decide which pods need status updates.
@@ -413,9 +485,12 @@ async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
             if let Some(api_version) = state.api_status_versions.get(&pod_uid)
                 && *api_version.value() >= pod_status.version
             {
-                info!(
-                    "[StatusManager] Pod '{}' status version {} already synced, skipping.",
-                    pod_status.pod_name, pod_status.version
+                debug!(
+                    pod_uid = %pod_uid,
+                    pod_name = %pod_status.pod_name,
+                    local_version = pod_status.version,
+                    api_version = *api_version.value(),
+                    "[StatusManager] Pod status already synced; skipping"
                 );
                 continue;
             }
@@ -432,14 +507,22 @@ async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
         }
     }
 
+    debug!(
+        sync_all,
+        update_count = updated_status.len(),
+        "[StatusManager] sync_batch selected pods for upload"
+    );
     for (pod_uid, pod_status) in updated_status {
-        info!(
-            "Sync status for pod '{}'(version {})",
-            pod_status.pod_name, pod_status.version
+        debug!(
+            pod_uid = %pod_uid,
+            pod_name = %pod_status.pod_name,
+            version = pod_status.version,
+            "[StatusManager] Syncing pod status"
         );
         sync_pod(state, pod_uid, &pod_status).await?;
     }
 
+    debug!(sync_all, "[StatusManager] sync_batch completed");
     Ok(())
 }
 
@@ -448,18 +531,35 @@ async fn sync_pod(
     pod_uid: Uuid,
     pod_status: &VersionedPodStatus,
 ) -> anyhow::Result<()> {
+    debug!(
+        pod_uid = %pod_uid,
+        pod_name = %pod_status.pod_name,
+        pod_namespace = %pod_status.pod_namespace,
+        version = pod_status.version,
+        "[StatusManager] sync_pod start"
+    );
     let pod = match get_pod_by_uid(&state.client, &pod_uid).await? {
         Some(p) => p,
         None => {
-            info!(
-                "[StatusManager] Pod with UID '{}' not found on server, skipping status sync.",
-                pod_uid
+            debug!(
+                pod_uid = %pod_uid,
+                pod_name = %pod_status.pod_name,
+                version = pod_status.version,
+                "[StatusManager] Pod not found on server; skipping status sync"
             );
             return Ok(());
         }
     };
 
     let merged_status = merge_status(&pod.status, &pod_status.status).await;
+    debug!(
+        pod_uid = %pod_uid,
+        pod_name = %pod.metadata.name,
+        pod_namespace = %pod.metadata.namespace,
+        version = pod_status.version,
+        merged_phase = ?merged_status.phase,
+        "[StatusManager] Merged local and remote pod status; uploading"
+    );
 
     // Update the pod status on the server
     update_pod_status(
@@ -474,6 +574,12 @@ async fn sync_pod(
     state
         .api_status_versions
         .insert(pod_uid, pod_status.version);
+    debug!(
+        pod_uid = %pod_uid,
+        pod_name = %pod.metadata.name,
+        version = pod_status.version,
+        "[StatusManager] sync_pod finished; recorded API status version"
+    );
 
     Ok(())
 }
@@ -484,6 +590,13 @@ async fn update_pod_status(
     pod_namespace: &str,
     pod_status: &PodStatus,
 ) -> anyhow::Result<()> {
+    debug!(
+        pod_name,
+        pod_namespace,
+        phase = ?pod_status.phase,
+        container_status_count = pod_status.container_statuses.len(),
+        "[StatusManager] Sending UpdatePodStatus request"
+    );
     client
         .send_msg(&RksMessage::UpdatePodStatus {
             pod_name: pod_name.to_string(),
@@ -493,7 +606,13 @@ async fn update_pod_status(
         .await?;
 
     match client.fetch_msg().await? {
-        RksMessage::Ack => Ok(()),
+        RksMessage::Ack => {
+            debug!(
+                pod_name,
+                pod_namespace, "[StatusManager] UpdatePodStatus acknowledged"
+            );
+            Ok(())
+        }
         RksMessage::Error(err_msg) => Err(anyhow::anyhow!(
             "[StatusManager] Failed to upload pod status for '{}': {}",
             pod_name,
@@ -578,16 +697,38 @@ async fn need_update(
 ) -> anyhow::Result<bool> {
     let latest_api_version = match state.api_status_versions.get(pod_uid) {
         Some(v) => *v.value(),
-        None => return Ok(true),
+        None => {
+            debug!(
+                pod_uid = %pod_uid,
+                pod_name = %pod_status.pod_name,
+                local_version = pod_status.version,
+                "[StatusManager] No API version cached; pod status needs upload"
+            );
+            return Ok(true);
+        }
     };
 
     if latest_api_version < pod_status.version {
+        debug!(
+            pod_uid = %pod_uid,
+            pod_name = %pod_status.pod_name,
+            local_version = pod_status.version,
+            api_version = latest_api_version,
+            "[StatusManager] Local status version is newer than API version"
+        );
         return Ok(true);
     }
 
     let pod = match get_pod_by_uid(&state.client, pod_uid).await? {
         Some(p) => p,
-        None => return Ok(false),
+        None => {
+            debug!(
+                pod_uid = %pod_uid,
+                pod_name = %pod_status.pod_name,
+                "[StatusManager] Pod not found on server while checking need_update"
+            );
+            return Ok(false);
+        }
     };
 
     can_be_deleted(pod_status, &pod)
@@ -624,9 +765,13 @@ async fn need_reconcile(
         return false;
     }
 
-    info!(
-        "Pod status mismatch detected for pod '{}', need reconcile. Local status: {:?}, Remote status: {:?}.",
-        pod.metadata.name, pod_status.status, pod.status
+    debug!(
+        pod_uid = %pod.metadata.uid,
+        pod_name = %pod.metadata.name,
+        local_version = pod_status.version,
+        local_phase = ?pod_status.status.phase,
+        remote_phase = ?pod.status.phase,
+        "[StatusManager] Pod status mismatch detected; reconciliation required"
     );
 
     true

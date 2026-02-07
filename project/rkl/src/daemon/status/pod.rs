@@ -8,7 +8,7 @@
 use common::RksMessage;
 use libcontainer::{container::Container, syscall::syscall::create_syscall};
 use libruntime::rootpath;
-use tracing::warn;
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
@@ -54,7 +54,10 @@ impl Pod {
 /// Pods whose local [`PodInfo`] cannot be loaded (e.g. not yet scheduled to
 /// this node) are skipped with a warning log.
 pub async fn get_pods(server_addr: &str, tls_cfg: &TLSConnectionArgs) -> anyhow::Result<Vec<Pod>> {
-    // Implementation goes here
+    debug!(
+        server_addr,
+        "[status::pod] Loading pods from rks and local runtime"
+    );
     let root_path = rootpath::determine(None, &*create_syscall())?;
 
     // get pod list from rks server
@@ -64,13 +67,21 @@ pub async fn get_pods(server_addr: &str, tls_cfg: &TLSConnectionArgs) -> anyhow:
         RksMessage::ListPodRes(pods) => pods,
         msg => anyhow::bail!("unexpected response {:?} ", msg),
     };
+    debug!(
+        pod_count = server_pods.len(),
+        "[status::pod] Received pod list from rks"
+    );
 
     // convert to local Pod structs
     let mut pods = Vec::new();
     for server_pod in server_pods {
         let pod_info = PodInfo::load(&root_path, &server_pod.metadata.name).ok();
         if pod_info.is_none() {
-            warn!("pod {} not found in local", server_pod.metadata.name);
+            debug!(
+                pod = %server_pod.metadata.name,
+                namespace = %server_pod.metadata.namespace,
+                "[status::pod] Pod not found in local runtime, skipping"
+            );
             continue;
         }
         let pod_info = pod_info.unwrap();
@@ -86,6 +97,10 @@ pub async fn get_pods(server_addr: &str, tls_cfg: &TLSConnectionArgs) -> anyhow:
         };
         pods.push(pod);
     }
+    debug!(
+        pod_count = pods.len(),
+        "[status::pod] Built local pod snapshots"
+    );
 
     Ok(pods)
 }

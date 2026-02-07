@@ -22,7 +22,7 @@ use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
 use procfs::process::Process;
 use tokio::{select, sync::mpsc::UnboundedReceiver, task::JoinHandle};
-use tracing::info;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -105,14 +105,31 @@ impl PodWorker {
     /// The task will consume from pod lifecycle event and probe result channels,
     /// updating status and handling container restarts until [`Self::stop`] is called.
     pub fn run(&mut self) {
+        if let Some(handle) = &self.sync_loop_handle {
+            if !handle.is_finished() {
+                warn!("[PodWorker] run() called while already running; ignoring.");
+                return;
+            }
+            self.sync_loop_handle = None;
+            self.stop_signal_tx = None;
+        }
+
+        let Some(pod_lifecycle_event_rx) = self.pod_lifecycle_event_rx.take() else {
+            warn!(
+                "[PodWorker] run() called after event receiver was consumed; PodWorker cannot be restarted."
+            );
+            return;
+        };
+
         let (stop_signal_tx, mut stop_signal_rx) = tokio::sync::oneshot::channel();
         self.stop_signal_tx = Some(stop_signal_tx);
+        debug!("[PodWorker] Starting event loop task");
 
         let mut state = State {
             server_addr: self.server_addr.clone(),
             tls_cfg: self.tls_cfg.clone(),
             status_manager: self.status_manager.clone(),
-            pod_lifecycle_event_rx: self.pod_lifecycle_event_rx.take().unwrap(),
+            pod_lifecycle_event_rx,
             liveness_probe_result_rx: self.liveness_probe_result_rx.resubscribe(),
             readiness_probe_result_rx: self.readiness_probe_result_rx.resubscribe(),
             startup_probe_result_rx: self.startup_probe_result_rx.resubscribe(),
@@ -122,6 +139,13 @@ impl PodWorker {
             loop {
                 select! {
                     Some(event) = state.pod_lifecycle_event_rx.recv() => {
+                        tracing::debug!(
+                            pod_uid = %event.pod_uid,
+                            pod_name = %event.pod_name,
+                            event_type = ?event.event_type,
+                            container_id = %event.container.state.id,
+                            "[PodWorker] Received pod lifecycle event"
+                        );
                         if let Err(e) = sync_pod_for_pod_lifecycle_event(&state, &event).await {
                             tracing::error!("Error syncing pod for lifecycle event {:?}: {:?}", event, e);
                         }
@@ -137,11 +161,11 @@ impl PodWorker {
                         }
                     }
                     Ok(probe_result) = state.startup_probe_result_rx.recv() => {
-                        tracing::info!("Received startup probe result: {:?}", probe_result);
+                        tracing::debug!(?probe_result, "[PodWorker] Received startup probe result");
                         //TODO: handle startup probe result
                     }
                     _ = &mut stop_signal_rx => {
-                        tracing::info!("PodWorker received stop signal, exiting.");
+                        tracing::debug!("[PodWorker] Received stop signal, exiting event loop");
                         break;
                     }
                 }
@@ -157,6 +181,9 @@ impl PodWorker {
         if let Some(stop_signal_tx) = self.stop_signal_tx.take() {
             let _ = stop_signal_tx.send(());
         }
+        if let Some(sync_loop_handle) = self.sync_loop_handle.take() {
+            sync_loop_handle.abort();
+        }
     }
 }
 
@@ -170,11 +197,17 @@ async fn handle_readiness_probe_result(
     state: &State,
     probe_result: ProbeResult,
 ) -> anyhow::Result<()> {
+    tracing::debug!(
+        pod_id = %probe_result.pod_id,
+        container_id = %probe_result.container_id,
+        result = ?probe_result.result,
+        "[PodWorker] Handling readiness probe result"
+    );
     let is_ready = match probe_result.result {
         ProbeResultType::Success => true,
         ProbeResultType::Failure => false,
         ProbeResultType::Unknown => {
-            tracing::info!(
+            tracing::debug!(
                 pod_id = %probe_result.pod_id,
                 container_id = %probe_result.container_id,
                 "[PodWorker] Ignoring unknown readiness probe result"
@@ -195,10 +228,22 @@ async fn handle_readiness_probe_result(
         }
     };
 
+    tracing::debug!(
+        pod_uid = %pod_uid,
+        container_id = %probe_result.container_id,
+        is_ready,
+        "[PodWorker] Updating container readiness in status manager"
+    );
     state
         .status_manager
         .set_container_readiness(pod_uid, &probe_result.container_id, is_ready)
         .await?;
+    tracing::debug!(
+        pod_uid = %pod_uid,
+        container_id = %probe_result.container_id,
+        is_ready,
+        "[PodWorker] Updated container readiness in status manager"
+    );
 
     Ok(())
 }
@@ -207,10 +252,23 @@ async fn handle_liveness_probe_result(
     state: &State,
     probe_result: ProbeResult,
 ) -> anyhow::Result<()> {
+    tracing::debug!(
+        pod_id = %probe_result.pod_id,
+        container_id = %probe_result.container_id,
+        result = ?probe_result.result,
+        "[PodWorker] Handling liveness probe result"
+    );
     match probe_result.result {
-        ProbeResultType::Success => return Ok(()),
+        ProbeResultType::Success => {
+            tracing::debug!(
+                pod_id = %probe_result.pod_id,
+                container_id = %probe_result.container_id,
+                "[PodWorker] Liveness probe succeeded"
+            );
+            return Ok(());
+        }
         ProbeResultType::Unknown => {
-            tracing::info!(
+            tracing::debug!(
                 pod_id = %probe_result.pod_id,
                 container_id = %probe_result.container_id,
                 "[PodWorker] Ignoring unknown liveness probe result"
@@ -232,11 +290,16 @@ async fn handle_liveness_probe_result(
         }
     };
 
+    tracing::debug!(
+        pod_uid = %pod_uid,
+        container_id = %probe_result.container_id,
+        "[PodWorker] Querying pod for liveness failure handling"
+    );
     let client = QUICClient::<Cli>::connect(&state.server_addr, &state.tls_cfg).await?;
     let pod = match get_pod_by_uid(&client, &pod_uid).await? {
         Some(pod) => pod,
         None => {
-            tracing::info!(
+            tracing::debug!(
                 pod_id = %probe_result.pod_id,
                 "[PodWorker] Pod not found for liveness probe result"
             );
@@ -246,7 +309,7 @@ async fn handle_liveness_probe_result(
 
     match pod.spec.restart_policy {
         common::RestartPolicy::Never => {
-            tracing::info!(
+            tracing::debug!(
                 pod_name = %pod.metadata.name,
                 container_id = %probe_result.container_id,
                 "[PodWorker] Skipping restart for liveness failure due to RestartPolicy::Never"
@@ -266,7 +329,19 @@ async fn handle_liveness_probe_result(
         container,
     };
 
+    tracing::info!(
+        pod_name = %pod.metadata.name,
+        pod_uid = %pod_uid,
+        container_id = %probe_result.container_id,
+        "[PodWorker] Restarting container due to liveness probe failure"
+    );
     restart_container_locally(&pod, &event).await?;
+    tracing::debug!(
+        pod_name = %pod.metadata.name,
+        pod_uid = %pod_uid,
+        container_id = %probe_result.container_id,
+        "[PodWorker] Restart finished for liveness probe failure"
+    );
     Ok(())
 }
 
@@ -276,9 +351,12 @@ async fn sync_pod_for_pod_lifecycle_event(
 ) -> anyhow::Result<()> {
     let status_manager = state.status_manager.clone();
 
-    info!(
-        "[PodWorker] Syncing pod {:?} for lifecycle event {:?}",
-        event.pod_name, event.event_type
+    debug!(
+        pod_uid = %event.pod_uid,
+        pod_name = %event.pod_name,
+        event_type = ?event.event_type,
+        container_id = %event.container.state.id,
+        "[PodWorker] Syncing pod for lifecycle event"
     );
 
     let client = QUICClient::<Cli>::connect(&state.server_addr, &state.tls_cfg).await?;
@@ -289,27 +367,37 @@ async fn sync_pod_for_pod_lifecycle_event(
     let mut pod_status = match status_manager.get_pod_status(event.pod_uid).await {
         Some(status) => status,
         None => {
-            info!(
-                "[PodWorker] Pod status not found for {:?}, initializing from API status",
-                event.pod_name
+            debug!(
+                pod_uid = %event.pod_uid,
+                pod_name = %event.pod_name,
+                "[PodWorker] Pod status not cached; initializing from API status"
             );
             pod.status.clone()
         }
     };
 
-    info!(
-        "[PodWorker] Current pod status for pod {:?}: {:?}",
-        event.pod_name, pod_status
+    debug!(
+        pod_uid = %event.pod_uid,
+        pod_name = %event.pod_name,
+        status = ?pod_status,
+        "[PodWorker] Current cached pod status before lifecycle handling"
     );
 
     apply_pod_lifecycle_event(&pod, &mut pod_status, event).await?;
 
-    info!(
-        "[PodWorker] Updated pod status for pod {:?}: {:?}",
-        event.pod_name, pod_status
+    debug!(
+        pod_uid = %event.pod_uid,
+        pod_name = %event.pod_name,
+        status = ?pod_status,
+        "[PodWorker] Pod status after lifecycle handling"
     );
 
     status_manager.set_pod_status(&pod, &pod_status).await?;
+    debug!(
+        pod_uid = %event.pod_uid,
+        pod_name = %event.pod_name,
+        "[PodWorker] Persisted lifecycle-derived pod status to status manager"
+    );
     Ok(())
 }
 
@@ -325,9 +413,11 @@ async fn apply_pod_lifecycle_event(
     let container = &event.container;
     match event.event_type {
         PodLifecycleEventType::ContainerCreating => {
-            info!(
-                "[PodWorker] Handling ContainerCreating event for pod {:?}",
-                event.pod_name
+            debug!(
+                pod_uid = %event.pod_uid,
+                pod_name = %event.pod_name,
+                container_id = %container.state.id,
+                "[PodWorker] Handling ContainerCreating event"
             );
 
             pod_status.phase = PodPhase::Pending;
@@ -373,9 +463,11 @@ async fn apply_pod_lifecycle_event(
             };
         }
         PodLifecycleEventType::ContainerStarted => {
-            info!(
-                "[PodWorker] Handling ContainerStarted event for pod {:?}",
-                event.pod_name
+            debug!(
+                pod_uid = %event.pod_uid,
+                pod_name = %event.pod_name,
+                container_id = %container.state.id,
+                "[PodWorker] Handling ContainerStarted event"
             );
 
             pod_status.phase = PodPhase::Running;
@@ -403,9 +495,11 @@ async fn apply_pod_lifecycle_event(
             };
         }
         PodLifecycleEventType::ContainerDied => {
-            info!(
-                "[PodWorker] Handling ContainerDied event for pod {:?}",
-                event.pod_name
+            debug!(
+                pod_uid = %event.pod_uid,
+                pod_name = %event.pod_name,
+                container_id = %container.state.id,
+                "[PodWorker] Handling ContainerDied event"
             );
 
             let (exit_code, signal, message) = resolve_exit_status(&event.container);
@@ -450,8 +544,10 @@ async fn apply_pod_lifecycle_event(
             match pod_task.spec.restart_policy {
                 common::RestartPolicy::Always => {
                     info!(
-                        "[PodWorker] Restarting container {} in pod {:?} due to RestartPolicy::Always",
-                        container.state.id, event.pod_name
+                        pod_uid = %event.pod_uid,
+                        pod_name = %event.pod_name,
+                        container_id = %container.state.id,
+                        "[PodWorker] Restarting container due to RestartPolicy::Always"
                     );
 
                     restart_container_locally(pod_task, event).await?;
@@ -461,9 +557,11 @@ async fn apply_pod_lifecycle_event(
             }
         }
         _ => {
-            info!(
-                "[PodWorker] Unhandled PodLifecycleEventType: {:?}",
-                event.event_type
+            debug!(
+                pod_uid = %event.pod_uid,
+                pod_name = %event.pod_name,
+                event_type = ?event.event_type,
+                "[PodWorker] Unhandled PodLifecycleEventType"
             );
         }
     }
@@ -487,12 +585,27 @@ async fn apply_pod_lifecycle_event(
             PodPhase::Succeeded
         };
     }
+    debug!(
+        pod_uid = %event.pod_uid,
+        pod_name = %event.pod_name,
+        phase = ?pod_status.phase,
+        container_status_count = pod_status.container_statuses.len(),
+        "[PodWorker] Finished applying lifecycle event to pod status"
+    );
     Ok(())
 }
 
 fn resolve_exit_status(container: &Container) -> (i32, Option<i32>, Option<String>) {
     match exit_status_from_container(container) {
-        Some((exit_code, signal)) => (exit_code, signal, None),
+        Some((exit_code, signal)) => {
+            tracing::debug!(
+                container_id = %container.state.id,
+                exit_code,
+                signal = ?signal,
+                "[PodWorker] Resolved container exit status from process state"
+            );
+            (exit_code, signal, None)
+        }
         None => {
             tracing::warn!(
                 container_id = %container.state.id,
@@ -508,10 +621,25 @@ fn resolve_exit_status(container: &Container) -> (i32, Option<i32>, Option<Strin
 }
 
 fn exit_status_from_container(container: &Container) -> Option<(i32, Option<i32>)> {
-    let pid = container.state.pid?;
+    let pid = match container.state.pid {
+        Some(pid) => pid,
+        None => {
+            tracing::debug!(
+                container_id = %container.state.id,
+                "[PodWorker] Container pid is unavailable while resolving exit status"
+            );
+            return None;
+        }
+    };
     let process = Process::new(pid).ok()?;
     let stat = process.stat().ok()?;
     let raw_status = stat.exit_code?;
+    tracing::debug!(
+        container_id = %container.state.id,
+        pid,
+        raw_status,
+        "[PodWorker] Decoding raw wait status from /proc"
+    );
     decode_wait_status(raw_status)
 }
 
@@ -524,7 +652,14 @@ fn decode_wait_status(raw_status: i32) -> Option<(i32, Option<i32>)> {
             let signal_code = signal as i32;
             Some((128 + signal_code, Some(signal_code)))
         }
-        _ => None,
+        _ => {
+            tracing::debug!(
+                raw_status,
+                wait_status = ?status,
+                "[PodWorker] Unsupported wait status variant while decoding exit status"
+            );
+            None
+        }
     }
 }
 
@@ -533,6 +668,12 @@ async fn restart_container_locally(
     event: &PodLifecycleEvent,
 ) -> anyhow::Result<()> {
     let container_id = &event.container.state.id;
+    tracing::debug!(
+        pod_uid = %event.pod_uid,
+        pod_name = %event.pod_name,
+        container_id = %container_id,
+        "[PodWorker] restart_container_locally started"
+    );
     let root_path = rootpath::determine(None, &*create_syscall())?;
     let pod_info = PodInfo::load(&root_path, &event.pod_name)?;
     let pod_sandbox = load_container(root_path.clone(), &pod_info.pod_sandbox_id)?;
@@ -546,6 +687,14 @@ async fn restart_container_locally(
     task_runner.pause_pid = Some(pause_pid);
     task_runner.sandbox_config =
         Some(task_runner.create_pod_sandbox_config(&event.pod_uid.to_string(), 0)?);
+    tracing::debug!(
+        pod_uid = %event.pod_uid,
+        pod_name = %event.pod_name,
+        container_id = %container_id,
+        pause_pid,
+        sandbox_id = %pod_info.pod_sandbox_id,
+        "[PodWorker] Loaded pod sandbox context for container restart"
+    );
 
     let container_spec = task_runner
         .task
@@ -560,6 +709,12 @@ async fn restart_container_locally(
         ))?;
 
     if root_path.join(container_id).exists() {
+        tracing::debug!(
+            pod_uid = %event.pod_uid,
+            pod_name = %event.pod_name,
+            container_id = %container_id,
+            "[PodWorker] Removing existing local container state before restart"
+        );
         delete(
             Delete {
                 container_id: container_id.clone(),
@@ -576,6 +731,12 @@ async fn restart_container_locally(
     task_runner.start_container(StartContainerRequest {
         container_id: create_response.container_id,
     })?;
+    tracing::debug!(
+        pod_uid = %event.pod_uid,
+        pod_name = %event.pod_name,
+        container_id = %container_id,
+        "[PodWorker] restart_container_locally completed"
+    );
 
     Ok(())
 }
