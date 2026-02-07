@@ -3,7 +3,6 @@ use std::{
     fs::File,
     io::{BufReader, copy},
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use anyhow::Context;
@@ -16,6 +15,7 @@ use sha256::try_digest;
 use std::str::FromStr;
 use tar::Archive;
 use tokio::fs;
+use tokio::process::Command;
 use tracing::{debug, info};
 
 /// Converts an OCI image directory to a bundle directory.
@@ -201,7 +201,6 @@ async fn extract_tar_gz<P: AsRef<Path>>(tar_gz_path: P, extract_dir: P) -> anyho
     .with_context(|| "Failed to spawn blocking task for tar extraction")?
 }
 
-#[allow(unused)]
 pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     bundle_path: P,
     layers: &[PathBuf],
@@ -230,7 +229,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
         debug!("{} directory exists deleting...", merged_dir.display());
         fs::remove_dir_all(&merged_dir)
             .await
-            .with_context(|| format!("failed to delete the dir {merged_dir:?}"));
+            .with_context(|| format!("failed to delete the dir {merged_dir:?}"))?;
     }
 
     if upper_dir.exists() {
@@ -238,7 +237,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
         debug!("{} directory exists deleting...", upper_dir.display());
         fs::remove_dir_all(&upper_dir)
             .await
-            .with_context(|| format!("failed to delete the dir {upper_dir:?}"));
+            .with_context(|| format!("failed to delete the dir {upper_dir:?}"))?;
     }
 
     fs::create_dir_all(&merged_dir)
@@ -265,7 +264,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
             .unwrap_or(&OsString::from_str("unknown").unwrap())
     );
     // mount with libfuse
-    let mut mnt_handle = mount_fs(OverlayArgs {
+    let mnt_handle = mount_fs(OverlayArgs {
         lowerdir: lower_dirs,
         upperdir: &upper_dir,
         mountpoint: &merged_dir,
@@ -286,6 +285,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
             rootfs.display()
         ))
         .status()
+        .await
         .with_context(|| "Failed to execute cp command")?;
 
     if !status.success() {

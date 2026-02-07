@@ -1,3 +1,4 @@
+use crate::controllers::nftrules_controller::build_rules;
 use crate::node::{Shared, WorkerSession};
 use anyhow::Context;
 use common::lease::{Lease, LeaseAttrs};
@@ -88,11 +89,32 @@ impl<'a> NodeRegister<'a> {
             self.conn.remote_address().ip()
         );
 
-        let session = Arc::new(WorkerSession::new(msg_tx, lease));
+        let session = Arc::new(WorkerSession::new(msg_tx.clone(), lease));
         self.shared
             .node_registry
-            .register(node_id, session.clone())
+            .register(node_id.clone(), session.clone())
             .await;
+
+        // Send current nftables rules
+        match build_rules(&self.shared.xline_store).await {
+            Ok(rules) => {
+                let msg = RksMessage::SetNftablesRules(rules);
+                if let Err(e) = msg_tx.try_send(msg) {
+                    log::warn!(
+                        "Failed to send initial nftables rules to {}: {}",
+                        node_id,
+                        e
+                    );
+                }
+            }
+            Err(e) => {
+                log::error!(
+                    "Failed to build initial nftables rules for {}: {}",
+                    node_id,
+                    e
+                );
+            }
+        }
 
         self.conn.send_msg(&RksMessage::Ack).await?;
 

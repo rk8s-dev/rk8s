@@ -13,7 +13,8 @@ mod vault;
 use crate::controllers::endpoint_controller::EndpointController;
 use crate::controllers::garbage_collector::GarbageCollector;
 use crate::controllers::{
-    CONTROLLER_MANAGER, ControllerManager, DeploymentController, ReplicaSetController,
+    CONTROLLER_MANAGER, ControllerManager, DeploymentController, NftablesController,
+    ReplicaSetController,
 };
 use crate::dns::authority::{run_dns_server, setup_dns_nftable};
 use crate::network::init;
@@ -64,7 +65,15 @@ async fn handle_start_command() -> anyhow::Result<()> {
     let local_manager = init_local_manager(cfg, &xline_options).await?;
     launch_scheduler(xline_options, xline_store.clone()).await?;
 
-    register_controllers(CONTROLLER_MANAGER.clone(), xline_store.clone(), 4).await?;
+    let node_registry = Arc::new(NodeRegistry::default());
+
+    register_controllers(
+        CONTROLLER_MANAGER.clone(),
+        xline_store.clone(),
+        node_registry.clone(),
+        4,
+    )
+    .await?;
     CONTROLLER_MANAGER
         .clone()
         .start_watch(xline_store.clone())
@@ -74,7 +83,7 @@ async fn handle_start_command() -> anyhow::Result<()> {
         xline_store.clone(),
         local_manager,
         vault.clone(),
-        Arc::new(NodeRegistry::default()),
+        node_registry,
     ));
 
     internal::start_internal_server(vault.clone()).await?;
@@ -168,12 +177,15 @@ async fn launch_scheduler(
 async fn register_controllers(
     mgr: Arc<ControllerManager>,
     xline_store: Arc<XlineStore>,
+    node_registry: Arc<NodeRegistry>,
     workers: usize,
 ) -> anyhow::Result<()> {
     let gc = GarbageCollector::new(xline_store.clone());
     let rs = ReplicaSetController::new(xline_store.clone());
     let ep = EndpointController::new(xline_store.clone());
     let deploy = DeploymentController::new(xline_store.clone());
+    let nft = NftablesController::new(xline_store.clone(), node_registry);
+
     mgr.clone()
         .register(Arc::new(RwLock::new(gc)), workers)
         .await?;
@@ -185,6 +197,9 @@ async fn register_controllers(
         .await?;
     mgr.clone()
         .register(Arc::new(RwLock::new(deploy)), workers)
+        .await?;
+    mgr.clone()
+        .register(Arc::new(RwLock::new(nft)), workers)
         .await?;
     Ok(())
 }

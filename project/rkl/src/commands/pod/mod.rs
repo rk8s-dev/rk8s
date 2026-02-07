@@ -194,9 +194,44 @@ impl PodInfo {
     }
 }
 
-pub fn run_pod_from_taskrunner(mut task_runner: TaskRunner) -> Result<PodRunResult, anyhow::Error> {
+// Currently the rkl's pod command functionality do not be removed yet
+// So keep this sync `run_pod_from_taskrunner` api temporaily.
+pub fn sync_run_pod_from_taskrunner(
+    mut task_runner: TaskRunner,
+) -> Result<PodRunResult, anyhow::Error> {
     let pod_name = task_runner.task.metadata.name.clone();
-    let (pod_sandbox_id, podip) = task_runner.run()?;
+    let (pod_sandbox_id, podip) = task_runner.sync_run()?;
+    info!("PodSandbox ID: {}", pod_sandbox_id);
+
+    let container_names: Vec<String> = task_runner
+        .task
+        .spec
+        .containers
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
+
+    let root_path = rootpath::determine(None, &*create_syscall())?;
+    let pod_info = PodInfo {
+        pod_sandbox_id: pod_sandbox_id.clone(),
+        container_names: container_names.clone(),
+    };
+    pod_info.save(&root_path, &pod_name)?;
+
+    info!("Pod {} created and started successfully", pod_name);
+    Ok(PodRunResult {
+        pod_sandbox_id,
+        pod_ip: podip,
+        container_names,
+        pod_task: task_runner.task.clone(),
+    })
+}
+
+pub async fn run_pod_from_taskrunner(
+    mut task_runner: TaskRunner,
+) -> Result<PodRunResult, anyhow::Error> {
+    let pod_name = task_runner.task.metadata.name.clone();
+    let (pod_sandbox_id, podip) = task_runner.run().await?;
     info!("PodSandbox ID: {}", pod_sandbox_id);
 
     let container_names: Vec<String> = task_runner
@@ -225,7 +260,7 @@ pub fn run_pod_from_taskrunner(mut task_runner: TaskRunner) -> Result<PodRunResu
 
 pub fn run_pod(pod_yaml: &str) -> Result<String, anyhow::Error> {
     let task_runner = TaskRunner::from_file(pod_yaml)?;
-    run_pod_from_taskrunner(task_runner).map(|res| res.pod_ip)
+    sync_run_pod_from_taskrunner(task_runner).map(|res| res.pod_ip)
 }
 
 #[allow(dead_code)]

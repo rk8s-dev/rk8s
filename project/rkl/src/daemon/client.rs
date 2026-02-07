@@ -258,7 +258,7 @@ pub async fn run_once(
                                 }
                             };
 
-                            match pod::run_pod_from_taskrunner(runner) {
+                            match pod::run_pod_from_taskrunner(runner).await {
                                 Ok(result) => {
                                     let pod_name = result.pod_task.metadata.name.clone();
 
@@ -335,6 +335,43 @@ pub async fn run_once(
                             } else {
                                 info!("[worker] dns config applied successfully");
                                 let _ = client.send_msg(&RksMessage::Ack).await;
+                            }
+                        }
+                        Ok(RksMessage::SetNftablesRules(rules)) => {
+                            info!("[worker] received nftables rules (len={})", rules.len());
+                            match network_receiver.apply_nft_rules(rules).await {
+                                Ok(()) => {
+                                    info!("[worker] nftables rules applied");
+                                    let _ = client.send_msg(&RksMessage::Ack).await;
+                                }
+                                Err(e) => {
+                                    error!("[worker] failed to apply nftables rules: {e}");
+                                    let _ = client
+                                        .send_msg(&RksMessage::Error(format!(
+                                            "apply nftables failed: {e}"
+                                        )))
+                                        .await;
+                                }
+                            }
+                        }
+                        Ok(RksMessage::UpdateNftablesRules(rules)) => {
+                            info!(
+                                "[worker] received nftables rules update (len={})",
+                                rules.len()
+                            );
+                            match network_receiver.apply_nft_rules(rules).await {
+                                Ok(()) => {
+                                    info!("[worker] nftables rules updated");
+                                    let _ = client.send_msg(&RksMessage::Ack).await;
+                                }
+                                Err(e) => {
+                                    error!("[worker] failed to update nftables rules: {e}");
+                                    let _ = client
+                                        .send_msg(&RksMessage::Error(format!(
+                                            "update nftables failed: {e}"
+                                        )))
+                                        .await;
+                                }
                             }
                         }
                         Ok(other) => {
