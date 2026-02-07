@@ -1242,6 +1242,11 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             return Err(MetaError::InvalidFilename);
         }
         
+        // POSIX: symlink target path component must also respect NAME_MAX
+        if target.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+        
         info!(
             "MetaClient: symlink operation for ({}, '{}') -> '{}'",
             parent, name, target
