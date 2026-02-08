@@ -413,7 +413,7 @@ async fn test_deployment_hash_collision() -> Result<()> {
                     }],
                     init_containers: Vec::new(),
                     tolerations: Vec::new(),
-                    affinity: None,
+                    ..Default::default()
                 },
             },
         },
@@ -719,7 +719,7 @@ fn create_test_deployment(name: &str, replicas: i32) -> Deployment {
                     }],
                     init_containers: Vec::new(),
                     tolerations: Vec::new(),
-                    affinity: None,
+                    ..Default::default()
                 },
             },
             strategy: DeploymentStrategy::RollingUpdate {

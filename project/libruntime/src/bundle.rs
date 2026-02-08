@@ -1,12 +1,13 @@
 use std::{
+    env,
     ffi::OsString,
     fs::File,
     io::{BufReader, copy},
     path::{Path, PathBuf},
 };
 
-use anyhow::Context;
 use anyhow::anyhow;
+use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use futures::future;
 use libfuse_fs::overlayfs::{OverlayArgs, mount_fs};
@@ -201,6 +202,36 @@ async fn extract_tar_gz<P: AsRef<Path>>(tar_gz_path: P, extract_dir: P) -> anyho
     .with_context(|| "Failed to spawn blocking task for tar extraction")?
 }
 
+pub fn prepare_runtime_customize_layer<P: AsRef<Path>>(path: P) -> Result<()> {
+    // 1. Add customized-hosts file(if RKS_ADDRESS variable is not set, it SIMPLY means it's not in cluster mode)
+    if let Ok(address) = env::var("RKS_ADDRESS")
+        && !address.is_empty()
+    {
+        let nameserver_ip = address.split(':').next().unwrap_or(&address);
+        info!(
+            "RKS_ADDRESS set to {}, preparing runtime customization layer...",
+            address
+        );
+
+        let etc_dir = path.as_ref().join("etc");
+        if !etc_dir.exists() {
+            std::fs::create_dir_all(&etc_dir).with_context(|| {
+                format!("Failed to create etc dir in runtime layer: {:?}", etc_dir)
+            })?;
+        }
+
+        let resolv_path = etc_dir.join("resolv.conf");
+        let resolv_content =
+            format!("nameserver {nameserver_ip}\nsearch cluster.local\noptions ndots:5\n");
+
+        std::fs::write(&resolv_path, resolv_content)
+            .with_context(|| format!("Failed to write resolv to layer: {:?}", resolv_path))?;
+    }
+    // 2. Do other stuff
+
+    Ok(())
+}
+
 pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     bundle_path: P,
     layers: &[PathBuf],
@@ -213,8 +244,9 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     let bundle_path = bundle_path.as_ref();
     let upper_dir = bundle_path.join("upper");
     let merged_dir = bundle_path.join("merged");
+    let runtime_layer = bundle_path.join("runtime_layer");
 
-    let lower_dirs = layers
+    let mut lower_dirs = layers
         .iter()
         .rev()
         .map(|dir| {
@@ -224,6 +256,11 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
                 .map(|p| p.display().to_string())
         })
         .collect::<Result<Vec<String>, _>>()?;
+
+    // Add rkl-rkforge's customize's layer for target container like: hosts file, probe
+    prepare_runtime_customize_layer(&runtime_layer)
+        .map_err(|e| anyhow!("failed to prepare the customize layer: {e}"))?;
+    lower_dirs.insert(0, runtime_layer.canonicalize()?.display().to_string());
 
     if merged_dir.exists() {
         debug!("{} directory exists deleting...", merged_dir.display());
@@ -297,13 +334,15 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
 
     mnt_handle.unmount().await?;
 
-    // clean
     fs::remove_dir_all(&upper_dir)
         .await
         .with_context(|| format!("Failed to remove upper directory: {upper_dir:?}"))?;
     fs::remove_dir_all(&merged_dir)
         .await
         .with_context(|| format!("Failed to remove merged directory: {merged_dir:?}"))?;
+    fs::remove_dir_all(&runtime_layer)
+        .await
+        .with_context(|| format!("Failed to remove runtime directory: {runtime_layer:?}"))?;
 
     // for layer in layers {
     //     fs::remove_dir_all(layer)

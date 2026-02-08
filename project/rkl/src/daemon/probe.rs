@@ -655,7 +655,9 @@ mod tests {
     use anyhow::Result;
     use tokio::time::{Duration, sleep, timeout};
 
-    use common::{ContainerSpec, ExecAction, HttpGetAction, ObjectMeta, PodSpec, PodStatus};
+    use common::{
+        ContainerSpec, ExecAction, HttpGetAction, ObjectMeta, PodSpec, PodStatus, RestartPolicy,
+    };
     use std::collections::HashMap;
 
     async fn wait_for_state(
@@ -878,6 +880,7 @@ mod tests {
                 init_containers: vec![],
                 tolerations: vec![],
                 affinity: None,
+                restart_policy: RestartPolicy::Always,
             },
             status: PodStatus::default(),
         }

@@ -89,7 +89,7 @@ fn pod_with_meta(name: &str, uid: Uuid, owners: Option<Vec<OwnerReference>>) -> 
             containers: vec![container],
             init_containers: vec![],
             tolerations: vec![],
-            affinity: None,
+            ..Default::default()
         },
         status: PodStatus::default(),
     }
@@ -146,7 +146,7 @@ fn replicaset_with_meta(name: &str, uid: Uuid, replicas: i32) -> ReplicaSet {
                     }],
                     init_containers: vec![],
                     tolerations: vec![],
-                    affinity: None,
+                    ..Default::default()
                 },
             },
         },

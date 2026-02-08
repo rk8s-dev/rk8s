@@ -7,7 +7,6 @@ use liboci_cli::{Delete, Start, State};
 use libruntime::rootpath;
 use tracing::{error, info};
 
-use crate::daemon::probe::collect_container_statuses;
 use libcontainer::syscall::syscall::create_syscall;
 
 pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
@@ -162,40 +161,7 @@ pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
         );
     }
 
-    let probe_statuses = collect_container_statuses(pod_name);
-    if !probe_statuses.is_empty() {
-        println!("Probe status:");
-        for status in probe_statuses {
-            println!("  container: {}", status.name);
-            if let Some(probe) = status.readiness_probe {
-                println!(
-                    "    readiness: {:?} (successes: {}, failures: {}, last_error: {})",
-                    probe.state,
-                    probe.consecutive_successes,
-                    probe.consecutive_failures,
-                    probe.last_error.unwrap_or_else(|| "<none>".to_string())
-                );
-            }
-            if let Some(probe) = status.liveness_probe {
-                println!(
-                    "    liveness: {:?} (successes: {}, failures: {}, last_error: {})",
-                    probe.state,
-                    probe.consecutive_successes,
-                    probe.consecutive_failures,
-                    probe.last_error.unwrap_or_else(|| "<none>".to_string())
-                );
-            }
-            if let Some(probe) = status.startup_probe {
-                println!(
-                    "    startup: {:?} (successes: {}, failures: {}, last_error: {})",
-                    probe.state,
-                    probe.consecutive_successes,
-                    probe.consecutive_failures,
-                    probe.last_error.unwrap_or_else(|| "<none>".to_string())
-                );
-            }
-        }
-    }
+    // TODO: show probe status
 
     Ok(())
 }
