@@ -2,6 +2,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use aligned_box::AlignedBox;
+use std::error::Error;
+#[cfg(feature = "buffer-pool")]
+use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 
 #[cfg(all(
     feature = "buffer-pool",
@@ -40,13 +43,13 @@ impl std::fmt::Debug for AlignedBuffer {
 
 impl AlignedBuffer {
     /// Create a new aligned buffer with the specified size
-    pub fn new(size: usize) -> Self {
+    pub fn try_new(size: usize) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let inner = AlignedBox::<[u8]>::slice_from_default(BUFFER_ALIGNMENT, size)
-            .expect("aligned buffer allocation failed");
-        Self {
+            .map_err(|err| format!("aligned buffer allocation failed: {err:?}"))?;
+        Ok(Self {
             inner,
             capacity: size,
-        }
+        })
     }
 
     /// Get the buffer capacity
@@ -125,34 +128,38 @@ impl BufferPool {
     }
 
     /// Acquire a buffer from the pool, or create a new one if pool is empty
-    pub async fn acquire(&self) -> AlignedBuffer {
+    pub async fn acquire(&self) -> IoResult<AlignedBuffer> {
         self.acquisitions.fetch_add(1, Ordering::Relaxed);
 
         let mut pool = self.pool.lock().await;
         if let Some(mut buf) = pool.pop() {
             self.hits.fetch_add(1, Ordering::Relaxed);
             buf.reset();
-            buf
+            Ok(buf)
         } else {
             drop(pool);
-            AlignedBuffer::new(self.buffer_size)
+            AlignedBuffer::try_new(self.buffer_size)
+                .map_err(|err| IoError::new(ErrorKind::Other, err))
         }
     }
 
     /// Try to acquire a buffer synchronously (non-blocking)
     /// Returns None if the pool lock is contended
     #[cfg(all(not(feature = "async-io-runtime"), feature = "tokio-runtime"))]
-    pub fn try_acquire(&self) -> Option<AlignedBuffer> {
+    pub fn try_acquire(&self) -> Option<IoResult<AlignedBuffer>> {
         self.acquisitions.fetch_add(1, Ordering::Relaxed);
 
         if let Ok(mut pool) = self.pool.try_lock() {
             if let Some(mut buf) = pool.pop() {
                 self.hits.fetch_add(1, Ordering::Relaxed);
                 buf.reset();
-                return Some(buf);
+                return Some(Ok(buf));
             }
         }
-        Some(AlignedBuffer::new(self.buffer_size))
+        Some(
+            AlignedBuffer::try_new(self.buffer_size)
+                .map_err(|err| IoError::new(ErrorKind::Other, err)),
+        )
     }
 
     /// Release a buffer back to the pool for reuse
@@ -227,14 +234,14 @@ mod tests {
         let pool = BufferPool::new(4096);
 
         // Acquire a buffer
-        let buf1 = pool.acquire().await;
+        let buf1 = pool.acquire().await.expect("buffer allocation failed");
         assert_eq!(buf1.capacity(), 4096);
 
         // Release it
         pool.release(buf1).await;
 
         // Acquire again - should reuse
-        let buf2 = pool.acquire().await;
+        let buf2 = pool.acquire().await.expect("buffer allocation failed");
         assert_eq!(buf2.capacity(), 4096);
 
         let stats = pool.stats();
@@ -248,9 +255,9 @@ mod tests {
         let pool = BufferPool::with_capacity(1024, 2);
 
         // Acquire 3 buffers
-        let buf1 = pool.acquire().await;
-        let buf2 = pool.acquire().await;
-        let buf3 = pool.acquire().await;
+        let buf1 = pool.acquire().await.expect("buffer allocation failed");
+        let buf2 = pool.acquire().await.expect("buffer allocation failed");
+        let buf3 = pool.acquire().await.expect("buffer allocation failed");
 
         // Release all 3
         pool.release(buf1).await;

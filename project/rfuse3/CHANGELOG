@@ -7,7 +7,7 @@
 - rfuse3: mount options for max_write and max_readahead.
 - rfuse3: benchmark filesystem example and fio helper script.
 - rfuse3: performance report (report.md).
-- slayerfs: performance report (slayerfs/report.md).
+- rfuse3: direct_io mount option to force FOPEN_DIRECT_IO on all file operations
 
 ### Changed
 - rfuse3: init reply is now empty; size tuning is via mount options.

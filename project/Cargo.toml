@@ -39,7 +39,7 @@ rks = { path = "rks" }
 dagrs-derive = { path = "dagrs-derive", version = "0.4.3" }
 quote = "1.0"
 proc-macro2 = "1.0"
-rfuse3 = { version = "0.0.5", features = ["tokio-runtime","unprivileged"]}
+rfuse3 = { path = "rfuse3", features = ["tokio-runtime", "unprivileged"] }
 slayerfs = { path = "slayerfs" }
 libcgroups = { version = "0.5.7", default-features = false }
 libcontainer = "0.5.7"

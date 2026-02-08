@@ -47,6 +47,7 @@ pub struct MountOptions {
     pub(crate) no_open_dir_support: bool,
     pub(crate) handle_killpriv: bool,
     pub(crate) write_back: bool,
+    pub(crate) direct_io: bool,
     pub(crate) force_readdir_plus: bool,
 
     // FUSE transfer size options
@@ -91,6 +92,7 @@ impl Default for MountOptions {
             no_open_dir_support: false,
             handle_killpriv: false,
             write_back: false,
+            direct_io: false,
             force_readdir_plus: false,
             max_write: NonZeroU32::new(DEFAULT_MAX_WRITE).unwrap(),
             max_readahead: None,
@@ -205,6 +207,15 @@ impl MountOptions {
     /// if enable this feature, when write flags has `FUSE_WRITE_CACHE`, file handle is guessed.
     pub fn write_back(&mut self, write_back: bool) -> &mut Self {
         self.write_back = write_back;
+
+        self
+    }
+
+    /// Force direct I/O for all file opens, similar to libfuse `-o direct_io`.
+    ///
+    /// This maps to setting `FOPEN_DIRECT_IO` on `open`/`create` replies.
+    pub fn direct_io(&mut self, direct_io: bool) -> &mut Self {
+        self.direct_io = direct_io;
 
         self
     }

@@ -179,7 +179,7 @@ where
     M: MetaLayer + Send + Sync + 'static,
 {
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
-        Ok(ReplyInit)
+        Ok(ReplyInit::default())
     }
 
     async fn destroy(&self, _req: Request) {}

@@ -611,7 +611,8 @@ async fn main() -> Result<()> {
 
     let mut mount_options = MountOptions::default();
     mount_options.fs_name("rfuse3-bench");
-    mount_options.max_write(NonZeroU32::new(args.max_write.max(4096)).unwrap());
+    mount_options.max_write(NonZeroU32::new(args.max_write.max(1_048_576)).unwrap());
+    mount_options.direct_io(true);
     if args.allow_other {
         mount_options.allow_other(true);
     }

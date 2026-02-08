@@ -5,8 +5,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use bytes::Bytes;
+use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use futures_util::stream::{self, Stream, StreamExt};
+use tracing::warn;
 
 use super::inode_generator::InodeGenerator;
 use super::path_filesystem::PathFilesystem;
@@ -78,12 +80,11 @@ impl InodeNameManager {
 
     fn remove_name(&self, name: &Name) {
         if let Some((_, inode)) = self.name_to_inode.remove(name) {
-            if let Some(mut names_ref) = self.inode_to_names.get_mut(&inode) {
-                names_ref.remove(name);
-
-                if names_ref.is_empty() {
-                    drop(names_ref);
-                    self.inode_to_names.remove(&inode);
+            if let Entry::Occupied(mut entry) = self.inode_to_names.entry(inode) {
+                let names = entry.get_mut();
+                names.remove(name);
+                if names.is_empty() {
+                    entry.remove();
                     if let Ok(mut gen) = self.inode_generator.lock() {
                         gen.release_inode(inode);
                     }
@@ -112,7 +113,10 @@ impl InodeNameManager {
         let inode = self
             .inode_generator
             .lock()
-            .expect("inode_generator lock poisoned")
+            .unwrap_or_else(|poisoned| {
+                warn!("inode_generator lock was poisoned, recovering");
+                poisoned.into_inner()
+            })
             .allocate_inode();
 
         self.name_to_inode.insert(name.clone(), inode);
@@ -136,7 +140,10 @@ impl InodeNameManager {
         let inode = self
             .inode_generator
             .lock()
-            .expect("inode_generator lock poisoned")
+            .unwrap_or_else(|poisoned| {
+                warn!("inode_generator lock was poisoned, recovering");
+                poisoned.into_inner()
+            })
             .allocate_inode();
 
         // Use entry API to handle race condition
@@ -192,7 +199,7 @@ where
 {
     async fn init(&self, req: Request) -> Result<ReplyInit> {
         self.path_filesystem.init(req).await?;
-        Ok(ReplyInit)
+        Ok(ReplyInit::default())
     }
 
     async fn destroy(&self, req: Request) {
