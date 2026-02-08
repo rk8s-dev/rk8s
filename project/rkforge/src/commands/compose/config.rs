@@ -10,7 +10,6 @@ pub struct ConfigMountInfo {
     pub read_only: bool,
 }
 
-
 #[derive(Debug)]
 pub struct ConfigManager {
     pub configs_map: HashMap<String, ConfigsSpec>,

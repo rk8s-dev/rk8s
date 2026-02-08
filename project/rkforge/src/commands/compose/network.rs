@@ -175,7 +175,6 @@ impl Default for CliNetworkConfig {
     }
 }
 
-
 #[derive(Debug)]
 pub struct NetworkManager {
     map: HashMap<String, NetworkSpec>,
