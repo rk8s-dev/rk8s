@@ -122,6 +122,10 @@ impl ComposeManager {
         Ok(manager)
     }
 
+    /// Restores the compose application state from persisted metadata.
+    /// This is called during initialization to load information about
+    /// previously created containers and volumes, enabling proper cleanup
+    /// during `compose down` operations.
     fn restore_compose_state(&mut self) -> Result<()> {
         let state_file = self.root_path.join("metadata.json");
         if state_file.exists() {
@@ -131,8 +135,8 @@ impl ComposeManager {
             let metadata: ComposeMetadata =
                 serde_json::from_slice(&bytes).context("failed to parse compose's state")?;
 
-            self.containers = metadata.containers.clone();
-            self.volumes = metadata.volumes.clone();
+            self.containers = metadata.containers;
+            self.volumes = metadata.volumes;
         }
 
         Ok(())
