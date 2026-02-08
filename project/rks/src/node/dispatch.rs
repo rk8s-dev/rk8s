@@ -65,12 +65,41 @@ pub async fn dispatch_user(
         RksMessage::DeletePod(pod_name) => {
             delete::user_delete(pod_name, xline_store, conn).await?;
         }
-
+        RksMessage::GetPodByUid(pod_uid) => {
+            let pods = xline_store.list_pods().await?;
+            if let Some(pod) = pods.into_iter().find(|p| p.metadata.uid == pod_uid) {
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved Pod with UID {pod_uid}"
+                );
+                conn.send_msg(&RksMessage::GetPodByUidRes(Box::new(pod)))
+                    .await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!(
+                    "Pod with UID {} not found",
+                    pod_uid
+                )))
+                .await?;
+            }
+        }
+        RksMessage::GetPod(name) => {
+            if let Some(pod) = xline_store.get_pod(&name).await? {
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved Pod {name}"
+                );
+                conn.send_msg(&RksMessage::GetPodRes(Box::new(pod))).await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!("Pod {} not found", name)))
+                    .await?;
+            }
+        }
         RksMessage::ListPod => {
-            let pods = xline_store.list_pod_names().await?;
+            let pods = xline_store.list_pods().await?;
             info!(
                 target: "rks::node::user_dispatch",
-                "list current pod: {pods:?}"
+                "list current pods: {} items",
+                pods.len()
             );
             conn.send_msg(&RksMessage::ListPodRes(pods)).await?;
         }
@@ -306,6 +335,38 @@ pub async fn dispatch_user(
                 target: "rks::node::user_dispatch",
                 "GetNodeCount received"
             );
+        }
+        RksMessage::UpdatePodStatus {
+            pod_name,
+            pod_namespace,
+            status,
+        } => {
+            info!(
+                target: "rks::node::user_dispatch",
+                "UpdatePodStatus received for Pod {}/{}", pod_namespace, pod_name
+            );
+            // Update the pod status in xline store
+            if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await? {
+                let mut pod_task: PodTask = serde_yaml::from_str(&pod_yaml)?;
+                pod_task.status = status;
+                let new_yaml = serde_yaml::to_string(&pod_task)?;
+                xline_store.insert_pod_yaml(&pod_name, &new_yaml).await?;
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "updated PodTask {}/{} status", pod_namespace, pod_name
+                );
+                conn.send_msg(&RksMessage::Ack).await?;
+            } else {
+                warn!(
+                    target: "rks::node::user_dispatch",
+                    "PodTask {}/{} not found when updating status", pod_namespace, pod_name
+                );
+                conn.send_msg(&RksMessage::Error(format!(
+                    "PodTask {}/{} not found",
+                    pod_namespace, pod_name
+                )))
+                .await?;
+            }
         }
         _ => warn!(
             target: "rks::node::user_dispatch",

@@ -20,24 +20,7 @@ rust_binary(
     crate = "rks",
     crate_root = "vendor/src/main.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rks-manifest[env_flags])"] + select({
-        "prelude//os/constraints:windows": select({
-            "prelude//abi/constraints:gnu": [
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:winapi-x86_64-pc-windows-gnu-build-script-run[rustc_flags])",
-            ],
-            "DEFAULT": [
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:windows_x86_64_msvc-build-script-run[rustc_flags])",
-            ],
-        }),
-        "DEFAULT": [],
-    }),
+    rustc_flags = ["@$(location :rks-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",

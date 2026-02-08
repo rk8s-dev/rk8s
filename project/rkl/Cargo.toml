@@ -26,6 +26,7 @@ libvault = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 tracing = { workspace = true, features = ["attributes"] }
 tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
+tracing-appender = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "full"] }
 serde = { workspace = true, features = ["derive"] }
 uuid = { workspace = true, features = ["v4"] }
@@ -73,12 +74,14 @@ hickory-resolver = { workspace = true }
 async-trait = { workspace = true }
 hickory-client = { workspace = true }
 nftables = { workspace = true }
+procfs = { workspace = true }
 protobuf = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 tonic =  "0.13"
 tonic-build = "0.13"
 prost-build = { workspace = true }
+dashmap = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

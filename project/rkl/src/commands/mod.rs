@@ -35,6 +35,19 @@ pub mod pod;
 pub mod replicaset;
 pub mod volume;
 
+pub(crate) fn format_duration(duration: chrono::Duration) -> String {
+    let seconds = duration.num_seconds().max(0);
+    if seconds < 60 {
+        format!("{}s", seconds)
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else if seconds < 86400 {
+        format!("{}h", seconds / 3600)
+    } else {
+        format!("{}d", seconds / 86400)
+    }
+}
+
 fn construct_container_root<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<PathBuf> {
     // resolves relative paths, symbolic links etc. and get complete path
     let root_path = fs::canonicalize(&root_path).with_context(|| {

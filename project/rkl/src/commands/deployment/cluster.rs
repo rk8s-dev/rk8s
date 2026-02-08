@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use tabwriter::TabWriter;
 
+use crate::commands::format_duration;
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Cli, QUICClient};
 
@@ -438,17 +439,4 @@ fn history_print(deploy_name: &str, history: Vec<common::DeploymentRevisionInfo>
 
     tw.flush()?;
     Ok(())
-}
-
-fn format_duration(duration: chrono::Duration) -> String {
-    let seconds = duration.num_seconds();
-    if seconds < 60 {
-        format!("{}s", seconds)
-    } else if seconds < 3600 {
-        format!("{}m", seconds / 60)
-    } else if seconds < 86400 {
-        format!("{}h", seconds / 3600)
-    } else {
-        format!("{}d", seconds / 86400)
-    }
 }
