@@ -877,6 +877,7 @@ mod tests {
                 }],
                 init_containers: vec![],
                 tolerations: vec![],
+                affinity: None,
             },
             status: PodStatus::default(),
         }

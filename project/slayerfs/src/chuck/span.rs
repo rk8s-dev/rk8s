@@ -22,13 +22,13 @@ impl SpanTag for PageTag {}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span<T: SpanTag> {
     pub index: u64,
-    pub offset: u32,
-    pub len: u32,
+    pub offset: u64,
+    pub len: u64,
     _marker: PhantomData<T>,
 }
 
 impl<T: SpanTag> Span<T> {
-    pub fn new(index: u64, offset: u32, len: u32) -> Self {
+    pub fn new(index: u64, offset: u64, len: u64) -> Self {
         Self {
             index,
             offset,
@@ -61,14 +61,14 @@ impl<T: SpanTag> Span<T> {
         );
 
         // Calculate the absolute linear start position
-        let start_abs = self.index * my_align + self.offset as u64;
+        let start_abs = self.index * my_align + self.offset;
 
         // If relative, the base is the start position of the parent; otherwise, the base is 0.
         let base_offset = if relative { self.index * my_align } else { 0 };
 
         SpanIter {
             cursor: start_abs,
-            remaining: self.len as u64,
+            remaining: self.len,
             target_align,
             base_offset,
             _marker: PhantomData,
@@ -100,15 +100,15 @@ impl<T: SpanTag> Iterator for SpanIter<T> {
         let effective_val = self.cursor - self.base_offset;
 
         let index = effective_val / self.target_align;
-        let offset = (effective_val % self.target_align) as u32;
+        let offset = effective_val % self.target_align;
 
         // Calculate how much we can take in the current target block
-        let capacity = self.target_align as u32 - offset;
-        let take = std::cmp::min(self.remaining, capacity as u64) as u32;
+        let capacity = self.target_align - offset;
+        let take = std::cmp::min(self.remaining, capacity);
 
         // Advance the state
-        self.cursor += take as u64;
-        self.remaining -= take as u64;
+        self.cursor += take;
+        self.remaining -= take;
 
         Some(Span::new(index, offset, take))
     }

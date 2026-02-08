@@ -68,12 +68,12 @@ impl InodeEntry {
         }
     }
 
-    pub(crate) async fn get_parent(&self) -> Option<i64> {
-        *self.parent.read().await
-    }
-
     pub(crate) async fn set_parent(&self, parent_ino: i64) {
         *self.parent.write().await = Some(parent_ino);
+    }
+
+    pub(crate) async fn clear_parent(&self) {
+        *self.parent.write().await = None;
     }
 }
 
@@ -95,7 +95,7 @@ impl InodeCache {
 
         let ttl_manager = Cache::builder()
             .max_capacity(capacity)
-            .time_to_live(ttl)
+            .time_to_idle(ttl)
             .eviction_listener(
                 move |key: Arc<i64>, _value: Arc<InodeEntry>, cause: RemovalCause| {
                     info!("InodeCache: Evicting inode {} (cause: {:?})", key, cause);
@@ -111,15 +111,16 @@ impl InodeCache {
     }
 
     pub(crate) async fn insert_node(&self, ino: i64, attr: FileAttr, parent: Option<i64>) {
-        if let Some(existing_node) = self.ttl_manager.get(&ino).await {
-            *existing_node.attr.write().await = attr;
-            if let Some(p) = parent {
-                existing_node.set_parent(p).await;
+        match self.ttl_manager.get(&ino).await {
+            Some(node) => {
+                *node.attr.write().await = attr;
+                *node.parent.write().await = parent;
             }
-        } else {
-            let node = Arc::new(InodeEntry::new(attr, parent));
-            self.entries.insert(ino, node.clone());
-            self.ttl_manager.insert(ino, node).await;
+            None => {
+                let node = Arc::new(InodeEntry::new(attr, parent));
+                self.entries.insert(ino, node.clone());
+                self.ttl_manager.insert(ino, node).await;
+            }
         }
     }
 
@@ -275,6 +276,15 @@ impl InodeCache {
                 .entry(chunk_index)
                 .and_modify(|slices| slices.push(desc))
                 .or_insert_with(|| vec![desc]);
+        }
+    }
+
+    pub(crate) async fn replace_slices(&self, inode: i64, chunk_index: u64, desc: &[SliceDesc]) {
+        if let Some(node) = self.ttl_manager.get(&inode).await {
+            node.slices
+                .entry(chunk_index)
+                .and_modify(|slices| *slices = desc.to_owned())
+                .or_insert_with(|| desc.to_owned());
         }
     }
 

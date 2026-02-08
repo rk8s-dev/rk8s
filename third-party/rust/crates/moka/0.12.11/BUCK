@@ -71,6 +71,7 @@ rust_binary(
     ],
     rustc_flags = ["@$(location :moka-manifest[env_flags])"],
     visibility = [],
+    deps = ["//third-party/rust/crates/rustc_version/0.4.1:rustc_version"],
 )
 
 buildscript_run(

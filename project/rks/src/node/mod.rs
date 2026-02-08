@@ -6,6 +6,10 @@ use crate::vault::Vault;
 use common::RksMessage;
 use common::lease::Lease;
 use log::info;
+use log::warn;
+use nftables::{batch::Batch, schema, types};
+use serde_json::json;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,8 +53,20 @@ impl NodeRegistry {
     }
 
     pub async fn unregister(&self, node_id: &str) {
-        let mut inner = self.inner.lock().await;
-        if let Some(session) = inner.remove(node_id) {
+        let session = {
+            let mut inner = self.inner.lock().await;
+            inner.remove(node_id)
+        };
+
+        if let Some(session) = session {
+            let cleanup_rules = build_delete_table_ruleset();
+            if let Err(e) = session
+                .tx
+                .try_send(RksMessage::SetNftablesRules(cleanup_rules))
+            {
+                warn!("Failed to send nftables cleanup to node {}: {}", node_id, e);
+            }
+
             session.cancel_notify.notify_one();
         }
     }
@@ -59,6 +75,28 @@ impl NodeRegistry {
         let inner = self.inner.lock().await;
         inner.get(node_id).cloned()
     }
+
+    /// Return a snapshot of all registered worker sessions.
+    pub async fn list_sessions(&self) -> Vec<(String, Arc<WorkerSession>)> {
+        let inner = self.inner.lock().await;
+        inner.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+}
+
+fn build_delete_table_ruleset() -> String {
+    // Use nftables batch builder for consistency with the rest of the codebase
+    let mut batch = Batch::new();
+    batch.delete(schema::NfListObject::Table(schema::Table {
+        family: types::NfFamily::IP,
+        name: Cow::Borrowed("rk8s"),
+        ..Default::default()
+    }));
+
+    serde_json::to_string(&batch.to_nftables()).unwrap_or_else(|e| {
+        warn!("Failed to serialize nft delete-table ruleset: {}", e);
+        // Fallback to an empty ruleset string; unregister will still proceed
+        json!({ "nftables": [] }).to_string()
+    })
 }
 
 pub struct RksNode {

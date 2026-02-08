@@ -23,6 +23,15 @@ impl Filesystem for OverlayFs {
         if self.config.do_import {
             self.import().await?;
         }
+        #[cfg(target_os = "linux")]
+        {
+            for layer in self.lower_layers.iter() {
+                layer.init(_req).await?;
+            }
+            if let Some(upper) = &self.upper_layer {
+                upper.init(_req).await?;
+            }
+        }
         if !self.config.do_import || self.config.writeback {
             self.writeback.store(true, Ordering::Relaxed);
         }
@@ -879,7 +888,10 @@ impl Filesystem for OverlayFs {
 
         let mut flags: i32 = flags as i32;
         flags |= libc::O_NOFOLLOW;
-        flags &= !libc::O_DIRECT;
+        #[cfg(target_os = "linux")]
+        {
+            flags &= !libc::O_DIRECT;
+        }
         if self.config.writeback {
             if flags & libc::O_ACCMODE == libc::O_WRONLY {
                 flags &= !libc::O_ACCMODE;

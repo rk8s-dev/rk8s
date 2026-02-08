@@ -2,6 +2,7 @@
 //!
 //! Database connection configuration supporting SQLite, PostgreSQL and Etcd
 
+use crate::meta::client::MetaClientOptions;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
@@ -48,6 +49,7 @@ pub enum DatabaseType {
 fn default_sqlite_url() -> String {
     "sqlite:///tmp/slayerfs/metadata.db".to_string()
 }
+
 #[allow(dead_code)]
 impl Config {
     /// Load configuration from YAML file
@@ -132,8 +134,25 @@ pub struct CacheConfig {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct MetaClientConfig {
+    pub capacity: CacheCapacity,
+    pub ttl: CacheTtl,
+    pub options: MetaClientOptions,
+}
+
+impl MetaClientConfig {
+    pub fn effective_ttl(&self) -> CacheTtl {
+        if self.ttl.is_zero() {
+            CacheTtl::for_sqlite()
+        } else {
+            self.ttl.clone()
+        }
+    }
+}
+
 /// Meta client behaviour configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientOptions {
     /// If true, the meta client runs in read-only mode.
     #[serde(default)]
@@ -154,6 +173,18 @@ pub struct ClientOptions {
 
 fn default_max_symlinks() -> usize {
     40
+}
+
+impl Default for ClientOptions {
+    fn default() -> Self {
+        Self {
+            read_only: false,
+            no_background_jobs: false,
+            case_insensitive: false,
+            session_heartbeat: None,
+            max_symlinks: default_max_symlinks(),
+        }
+    }
 }
 
 /// Cache capacity configuration
@@ -230,11 +261,11 @@ impl CacheTtl {
         }
     }
 
-    /// Etcd backend defaults (100ms TTL for distributed consistency)
+    /// Etcd backend defaults (longer TTL improves slice cache reuse)
     pub fn for_etcd() -> Self {
         Self {
-            inode_ttl: Duration::from_millis(100),
-            path_ttl: Duration::from_millis(100),
+            inode_ttl: Duration::from_secs(2),
+            path_ttl: Duration::from_secs(2),
         }
     }
 

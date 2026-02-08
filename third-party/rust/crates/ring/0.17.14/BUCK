@@ -37,6 +37,9 @@ rust_library(
         "@$(location :ring-build-script-run[rustc_flags])",
         "@$(location :ring-manifest[env_flags])",
     ],
+    os_deps = {
+        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",

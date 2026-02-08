@@ -1,33 +1,64 @@
 //! Storage backends: asynchronous block-level IO traits and in-memory implementations.
 
+use crate::utils::NumCastExt;
+use crate::utils::zero::make_zero_bytes;
 use crate::{
     cadapter::client::{ObjectBackend, ObjectClient},
     chuck::cache::{ChunksCache, ChunksCacheConfig},
 };
 use anyhow::{self, Context};
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::executor::block_on;
 use hex::encode;
-use libc::{KEYCTL_CAPS0_CAPABILITIES, SYS_remap_file_pages, VM_VFS_CACHE_PRESSURE};
 use moka::{Entry, ops::compute::Op};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf};
+use std::{collections::HashMap, fs, io::SeekFrom, path::PathBuf, sync::LazyLock};
 use tokio::{
     io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     sync::RwLock,
 };
-use tracing::info;
 
 /// Abstract block store interface (cadapter/S3/etc. can implement this).
 #[async_trait]
 // ensure offset_in_block + data.len() <= block_size
 pub trait BlockStore {
-    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64>;
+    async fn write_range(&self, key: BlockKey, offset: u64, data: &[u8]) -> anyhow::Result<u64>;
 
-    async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()>;
+    /// Write a new block without reading any existing data.
+    ///
+    /// This exists to support COW-style writes where every write targets a fresh object/key.
+    /// In that model, read-modify-write is wasted IO because there is no old data to preserve.
+    /// Callers must ensure the target key is fresh; using this on an existing object would
+    /// drop any previous content outside the written range.
+    #[tracing::instrument(level = "trace", skip(self, chunks), fields(key = ?key, offset, chunk_count = chunks.len()))]
+    async fn write_fresh_vectored(
+        &self,
+        key: BlockKey,
+        offset: u64,
+        chunks: Vec<Bytes>,
+    ) -> anyhow::Result<u64> {
+        let data = chunks
+            .into_iter()
+            .flat_map(|e| e.to_vec())
+            .collect::<Vec<_>>();
+        self.write_fresh_range(key, offset, &data).await
+    }
+
+    /// Write a new block without reading any existing data. See write_fresh_vectored for details.
+    async fn write_fresh_range(
+        &self,
+        key: BlockKey,
+        offset: u64,
+        data: &[u8],
+    ) -> anyhow::Result<u64> {
+        self.write_range(key, offset, data).await
+    }
+
+    async fn read_range(&self, key: BlockKey, offset: u64, buf: &mut [u8]) -> anyhow::Result<()>;
 
     #[allow(dead_code)]
-    async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()>;
+    async fn delete_range(&self, key: BlockKey, len: u64) -> anyhow::Result<()>;
 }
 
 pub type BlockKey = (u64 /*slice_id*/, u32 /*block_index*/);
@@ -51,10 +82,10 @@ impl InMemoryBlockStore {
 
 #[async_trait]
 impl BlockStore for InMemoryBlockStore {
-    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
+    async fn write_range(&self, key: BlockKey, offset: u64, data: &[u8]) -> anyhow::Result<u64> {
         let mut guard = self.map.write().await;
         let entry = guard.entry(key).or_insert_with(Vec::new);
-        let start = offset as usize;
+        let start = offset.as_usize();
         let end = start + data.len();
         if entry.len() < end {
             entry.resize(end, 0);
@@ -63,11 +94,11 @@ impl BlockStore for InMemoryBlockStore {
         Ok(data.len() as u64)
     }
 
-    async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
-        buf.fill(0);
+    // Caller is responsible for zero-filling buf; this method only overwrites existing bytes.
+    async fn read_range(&self, key: BlockKey, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
         let guard = self.map.read().await;
         if let Some(src) = guard.get(&key) {
-            let start = offset as usize;
+            let start = offset.as_usize();
             let end = start + buf.len();
             let copy_end = end.min(src.len());
             if copy_end > start {
@@ -78,11 +109,11 @@ impl BlockStore for InMemoryBlockStore {
         Ok(())
     }
 
-    async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
+    async fn delete_range(&self, key: BlockKey, len: u64) -> anyhow::Result<()> {
         let (chunk_id, block_index) = key;
         let mut guard = self.map.write().await;
         let start = block_index;
-        let end = start + len as u32;
+        let end = start + len.as_u32();
         for i in start..end {
             guard.remove(&(chunk_id, i));
         }
@@ -93,6 +124,7 @@ impl BlockStore for InMemoryBlockStore {
 /// BlockStore backed by cadapter::client (key space `chunks/{chunk_id}/{block_index}`).
 pub struct ObjectBlockStore<B: ObjectBackend> {
     client: ObjectClient<B>,
+    #[allow(dead_code)]
     block_cache: ChunksCache,
 }
 
@@ -135,22 +167,16 @@ impl<B: ObjectBackend> ObjectBlockStore<B> {
 
 #[async_trait]
 impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
-    async fn write_range(&self, key: BlockKey, offset: u32, data: &[u8]) -> anyhow::Result<u64> {
+    async fn write_range(&self, key: BlockKey, offset: u64, data: &[u8]) -> anyhow::Result<u64> {
         let key_str = Self::key_for(key);
-        let existing = self.client.get_object(&key_str).await;
-        let mut buf = match existing {
-            Ok(Some(data)) => data,
-            Ok(None) => Vec::new(),
-            Err(e) => {
-                let error_str = format!("{:?}", e);
-                if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
-                    Vec::new()
-                } else {
-                    return Err(anyhow::anyhow!("object store get failed: {:?}", e));
-                }
-            }
-        };
-        let start = offset as usize;
+        let mut buf = self
+            .client
+            .get_object(&key_str)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store get failed: {:?}", e))?
+            .unwrap_or_default();
+
+        let start = offset.as_usize();
         let end = start + data.len();
         if buf.len() < end {
             buf.resize(end, 0);
@@ -161,62 +187,85 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
             .await
             .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
 
-        let etag = self
-            .client
-            .get_etag(&key_str)
-            .await
-            .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key_str, etag);
-        let _ = self.block_cache.remove(&cache_key).await;
         Ok(data.len() as u64)
     }
 
-    async fn read_range(&self, key: BlockKey, offset: u32, buf: &mut [u8]) -> anyhow::Result<()> {
+    #[tracing::instrument(name = "ObjectBlockStore.write_fresh_vectored", level = "trace", skip(self, chunks), fields(key = ?key, offset, chunk_count = chunks.len()))]
+    async fn write_fresh_vectored(
+        &self,
+        key: BlockKey,
+        offset: u64,
+        chunks: Vec<Bytes>,
+    ) -> anyhow::Result<u64> {
         let key_str = Self::key_for(key);
-        let len = buf.len();
-        buf.fill(0);
-        let start = offset as usize;
-        let end = start + len;
+        let total_len = chunks.iter().map(|c| c.len()).sum::<usize>();
+        if total_len == 0 {
+            return Ok(0);
+        }
 
-        let etag = self
-            .client
-            .get_etag(&key_str)
+        let offset_usize = offset.as_usize();
+        let mut parts: Vec<Bytes> = Vec::new();
+        if offset_usize > 0 {
+            parts.extend(make_zero_bytes(offset_usize));
+        }
+        parts.extend(chunks);
+
+        self.client
+            .put_object_vectored(&key_str, parts)
             .await
-            .unwrap_or_else(|_| "default_etag".to_string());
-        let cache_key = format!("{}{}", key_str, etag);
-        if let Some(block) = self.block_cache.get(&cache_key).await {
-            let copy_end = end.min(block.len());
-            if copy_end > start {
-                buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
-            }
-            info!("Read block range from cache");
-            return Ok(());
+            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
+
+        Ok(total_len as u64)
+    }
+
+    async fn write_fresh_range(
+        &self,
+        key: BlockKey,
+        offset: u64,
+        data: &[u8],
+    ) -> anyhow::Result<u64> {
+        let key_str = Self::key_for(key);
+        if data.is_empty() {
+            return Ok(0);
         }
 
-        let block = match self.client.get_object(&key_str).await {
-            Ok(Some(data)) => data,
-            Ok(None) => vec![0u8; end],
-            Err(e) => {
-                let error_str = format!("{:?}", e);
-                if error_str.contains("NoSuchKey") || error_str.contains("NotFound") {
-                    vec![0u8; end]
-                } else {
-                    return Err(anyhow::anyhow!("object store get failed: {:?}", e));
-                }
-            }
-        };
-        let copy_end = end.min(block.len());
-        if copy_end > start {
-            buf[..(copy_end - start)].copy_from_slice(&block[start..copy_end]);
+        let offset_usize = offset.as_usize();
+        let mut parts = Vec::new();
+        if offset_usize > 0 {
+            parts.extend(make_zero_bytes(offset_usize));
         }
-        let _ = self.block_cache.insert(&cache_key, &block).await;
+        parts.push(Bytes::copy_from_slice(data));
+
+        self.client
+            .put_object_vectored(&key_str, parts)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store put failed: {key_str}, {e:?}"))?;
+
+        Ok(data.len() as u64)
+    }
+
+    #[tracing::instrument(
+        name = "ObjectBlockStore.read_range",
+        level = "trace",
+        skip(self, buf),
+        fields(key = ?key, offset, len = buf.len(), read_len = tracing::field::Empty)
+    )]
+    // Caller is responsible for zero-filling buf; this method only overwrites existing bytes.
+    async fn read_range(&self, key: BlockKey, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
+        let key_str = Self::key_for(key);
+        let read = self
+            .client
+            .get_object_range(&key_str, offset, buf)
+            .await
+            .map_err(|e| anyhow::anyhow!("object store get range failed: {key_str}, {e:?}"))?;
+        tracing::Span::current().record("read_len", read);
         Ok(())
     }
 
-    async fn delete_range(&self, key: BlockKey, len: usize) -> anyhow::Result<()> {
+    async fn delete_range(&self, key: BlockKey, len: u64) -> anyhow::Result<()> {
         let (chunk_id, block_index) = key;
         let start = block_index;
-        let end = start + len as u32;
+        let end = start + len.as_u32();
         for i in start..end {
             let key_str = Self::key_for((chunk_id, i));
             self.client
@@ -231,9 +280,6 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
 /// Convenience alias: BlockStore backed by the real S3 backend.
 #[allow(dead_code)]
 pub type S3BlockStore = ObjectBlockStore<crate::cadapter::s3::S3Backend>;
-/// Convenience alias: BlockStore backed by the Rustfs-like backend.
-#[allow(dead_code)]
-pub type RustfsBlockStore = ObjectBlockStore<crate::cadapter::rustfs::RustfsLikeBackend>;
 /// Convenience alias: BlockStore backed by the LocalFs mock backend.
 #[allow(dead_code)]
 pub type LocalFsBlockStore = ObjectBlockStore<crate::cadapter::localfs::LocalFsBackend>;
@@ -254,13 +300,13 @@ mod tests {
 
         let data = vec![7u8; layout.block_size as usize / 2];
         store
-            .write_range((42, 3), layout.block_size / 4, &data)
+            .write_range((42, 3), (layout.block_size / 4) as u64, &data)
             .await
             .unwrap();
 
         let mut out = vec![0u8; data.len()];
         store
-            .read_range((42, 3), layout.block_size / 4, &mut out)
+            .read_range((42, 3), (layout.block_size / 4) as u64, &mut out)
             .await
             .unwrap();
         assert_eq!(out, data);
@@ -274,20 +320,20 @@ mod tests {
         let layout = ChunkLayout::default();
         let data = vec![7u8; layout.block_size as usize / 2];
         store
-            .write_range((42, 3), layout.block_size / 4, &data)
+            .write_range((42, 3), (layout.block_size / 4) as u64, &data)
             .await
             .unwrap();
         // First read should miss the cache.
         let mut data1 = vec![0u8; data.len()];
         store
-            .read_range((42, 3), layout.block_size / 4, &mut data1)
+            .read_range((42, 3), (layout.block_size / 4) as u64, &mut data1)
             .await
             .unwrap();
 
         // Second read of the same data should hit the cache.
         let mut data2 = vec![0u8; data.len()];
         store
-            .read_range((42, 3), layout.block_size / 4, &mut data2)
+            .read_range((42, 3), (layout.block_size / 4) as u64, &mut data2)
             .await
             .unwrap();
         assert_eq!(data1, data2);

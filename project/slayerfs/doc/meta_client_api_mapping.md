@@ -17,7 +17,8 @@ _Date: 2025-11-13_
 | `Read` (chunks) | `read_slices` | Naming differs; function already present. Update doc to reflect parity. |
 | `Write` | `write_slice` | Return values provide slices and metadata; extend with quota deltas via `WriteOutcome`. |
 | `Truncate` | `truncate_file` (existing signature) | Already present; client must forward flags/quota updates. |
-| `GetParents`, `GetPath` | `get_parent`, `get_path` | Functionality split into multiple methods. |
+| `GetParents` | `get_names`, `get_dir_parent` | `get_names(ino)` returns all parent bindings (dir always single-binding; file may be multi-binding for hardlinks). `get_dir_parent(ino)` is the authoritative parent for directories (`..` resolution). |
+| `GetPath` | `get_paths` | Returns all possible paths for an inode (potentially multiple for hardlinks). Client chooses how to present/resolve. |
 | `StatFS` | `stat_fs` | Implemented for DatabaseMetaStore; remaining backends need wiring. |
 | `SetAttr` | `set_attr` (+ legacy `set_file_size`) | DatabaseMetaStore now implements unified setter; evaluate deprecating legacy helpers. |
 | `Open`, `Close` | `open`, `close` | DatabaseMetaStore returns authoritative attrs; etcd/in-memory still default to `NotImplemented`. |

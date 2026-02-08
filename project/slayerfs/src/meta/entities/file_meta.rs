@@ -24,10 +24,6 @@ pub struct Model {
     /// Behavior:
     /// - When nlink=1: Contains the parent directory inode (O(1) lookup optimization)
     /// - When nlink>1: Set to 0 and LinkParentMeta is used to track all parents
-    ///
-    /// Important: Once nlink transitions from 1→2 and this field is set to 0,
-    /// it remains 0 permanently even if nlink later drops back to 1.
-    /// This is the "immediate transition strategy" - no dynamic switching.
     #[sea_orm(column_type = "BigInteger", default_value = "0")]
     pub parent: i64,
 

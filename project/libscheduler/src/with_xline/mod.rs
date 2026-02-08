@@ -3,7 +3,7 @@ use libvault::storage::xline::XlineOptions;
 use tokio::{select, sync::mpsc::UnboundedReceiver};
 
 pub mod model;
-mod utils;
+pub mod utils;
 
 use crate::{
     models::Assignment,

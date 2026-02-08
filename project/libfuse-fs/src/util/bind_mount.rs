@@ -106,6 +106,7 @@ impl BindMountManager {
     }
 
     /// Perform the actual bind mount using mount(2) syscall
+    #[cfg(target_os = "linux")]
     fn do_mount(&self, source: &Path, target: &Path) -> Result<()> {
         use std::ffi::CString;
 
@@ -165,6 +166,12 @@ impl BindMountManager {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
+    fn do_mount(&self, _source: &Path, _target: &Path) -> Result<()> {
+        // Bind mounts are not supported on non-Linux platforms yet
+        Err(Error::other("Bind mounts are not supported on macOS"))
+    }
+
     /// Unmount all bind mounts
     pub async fn unmount_all(&self) -> Result<()> {
         let mut mounts = self.mounts.lock().await;
@@ -194,6 +201,7 @@ impl BindMountManager {
     }
 
     /// Perform the actual unmount using umount(2) syscall
+    #[cfg(target_os = "linux")]
     fn do_unmount(&self, target: &Path) -> Result<()> {
         use std::ffi::CString;
 
@@ -215,6 +223,11 @@ impl BindMountManager {
             }
         }
 
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn do_unmount(&self, _target: &Path) -> Result<()> {
         Ok(())
     }
 }
@@ -256,5 +269,31 @@ mod tests {
     fn test_invalid_bind_mount() {
         assert!(BindMount::parse("invalid").is_err());
         assert!(BindMount::parse("too:many:colons").is_err());
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "macos")]
+    async fn test_bind_mount_macos_fail() {
+        // Since mount_all calls do_mount, it should fail
+        // However, mount_all creates directories first. We should mock or use temp dirs.
+        // Or we can just call do_mount via internal method if it was public? It is private.
+        // We can call mount_all with dummy paths.
+        // But mount_all attempts to create dirs.
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        let target_dir = temp.path().join("target_dir");
+        let manager = BindMountManager::new(&target_dir);
+        let bind = BindMount {
+            source: source.clone(),
+            target: std::path::PathBuf::from("mnt"),
+        };
+
+        let result = manager.mount_all(&[bind]).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Bind mounts are not supported on macOS"
+        );
     }
 }

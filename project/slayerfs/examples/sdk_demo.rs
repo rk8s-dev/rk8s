@@ -1,7 +1,6 @@
-// Example program: demonstrate vfs::sdk::Client usage without FUSE
+// Example program: demonstrate vfs::sdk::VfsClient usage without FUSE
 
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::vfs::sdk::LocalClient;
+use slayerfs::{ChunkLayout, LocalClient};
 use std::path::PathBuf;
 
 #[tokio::main(flavor = "current_thread")]
@@ -15,7 +14,7 @@ async fn main() {
     };
 
     let layout = ChunkLayout::default();
-    let mut cli = LocalClient::new_local(&root, layout)
+    let cli = LocalClient::new_local(&root, layout)
         .await
         .expect("init LocalClient");
 
@@ -30,8 +29,8 @@ async fn main() {
 
     // Ensure directory and files
     cli.mkdir_p(dir).await.expect("mkdir_p");
-    cli.create(file_a).await.expect("create a");
-    cli.create(file_b).await.expect("create b");
+    cli.create_file(file_a, false).await.expect("create a");
+    cli.create_file(file_b, false).await.expect("create b");
 
     // A) Write cross-block content to a.txt starting at half block
     let half = (layout.block_size / 2) as usize;

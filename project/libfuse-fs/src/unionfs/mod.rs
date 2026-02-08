@@ -2824,8 +2824,10 @@ where
     let gid = unsafe { libc::getgid() };
 
     let mut mount_options = MountOptions::default();
+    #[cfg(target_os = "linux")]
+    mount_options.force_readdir_plus(true);
+
     mount_options
-        .force_readdir_plus(true)
         .uid(uid)
         .gid(gid)
         .allow_other(args.allow_other);

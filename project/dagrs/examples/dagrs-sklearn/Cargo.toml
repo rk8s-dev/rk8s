@@ -1,0 +1,11 @@
+[package]
+name = "dagrs-sklearn"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dagrs = {path = "../../"}
+thiserror = "2"
+yaml-rust = "0.4"
+log = "0.4.22"
+env_logger = "0.11.6"

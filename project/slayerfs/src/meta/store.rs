@@ -63,6 +63,7 @@ pub struct SetAttrRequest {
 bitflags::bitflags! {
     /// Additional flags that control set-attribute semantics.
     #[allow(dead_code)]
+    #[derive(Debug)]
     pub struct SetAttrFlags: u32 {
         const CLEAR_SUID = 0b0001;
         const CLEAR_SGID = 0b0010;
@@ -74,6 +75,7 @@ bitflags::bitflags! {
 bitflags::bitflags! {
     /// POSIX-style open flags translated for the metadata store.
     #[allow(dead_code)]
+    #[derive(Debug)]
     pub struct OpenFlags: u32 {
         const RDONLY = 0b0001;
         const WRONLY = 0b0010;
@@ -206,9 +208,11 @@ pub struct LoadOption {
     pub allow_conflicts: bool,
 }
 
+#[derive(Debug)]
 pub enum LockName {
     CleanupSessionsLock,
 }
+
 impl fmt::Display for LockName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -259,6 +263,9 @@ pub enum MetaError {
     #[error("Invalid path: {0}")]
     InvalidPath(String),
 
+    #[error("Invalid filename")]
+    InvalidFilename,
+
     #[error(
         "More than max_symlinks symbolic links were encountered during resolution of the path."
     )]
@@ -286,7 +293,7 @@ pub enum MetaError {
     Io(#[from] std::io::Error),
 
     #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+    Serialization(String),
 
     #[error("Config error: {0}")]
     Config(String),
@@ -390,16 +397,51 @@ pub trait MetaStore: Send + Sync {
         new_name: String,
     ) -> Result<(), MetaError>;
 
+    /// Atomically exchange two files (RENAME_EXCHANGE)
+    /// Both entries must exist
+    async fn rename_exchange(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
+    ) -> Result<(), MetaError>;
+
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        self.set_file_size(ino, size).await
+    }
+    async fn truncate(&self, ino: i64, size: u64, _chunk_size: u64) -> Result<(), MetaError> {
+        self.set_file_size(ino, size).await
+    }
 
-    /// get the node's parent inode
-    async fn get_parent(&self, ino: i64) -> Result<Option<i64>, MetaError>;
+    async fn get_dentries(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError> {
+        Ok(self
+            .get_names(ino)
+            .await?
+            .into_iter()
+            .filter_map(|(p, n)| p.map(|p| (p, n)))
+            .collect())
+    }
 
-    /// get the node's name in its parent directory
-    async fn get_name(&self, ino: i64) -> Result<Option<String>, MetaError>;
+    async fn get_dir_parent(&self, dir_ino: i64) -> Result<Option<i64>, MetaError> {
+        let Some(attr) = self.stat(dir_ino).await? else {
+            return Ok(None);
+        };
+        if attr.kind != FileType::Dir {
+            return Err(MetaError::NotDirectory(dir_ino));
+        }
+        Ok(self
+            .get_dentries(dir_ino)
+            .await?
+            .into_iter()
+            .next()
+            .map(|(p, _)| p))
+    }
 
-    /// get the inode's full path (from the root directory)
-    async fn get_path(&self, ino: i64) -> Result<Option<String>, MetaError>;
+    async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError>;
+
+    async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError>;
 
     fn root_ino(&self) -> i64;
 
@@ -413,6 +455,14 @@ pub trait MetaStore: Send + Sync {
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError>;
 
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError>;
+
+    async fn write(
+        &self,
+        ino: i64,
+        chunk_id: u64,
+        slice: SliceDesc,
+        new_size: u64,
+    ) -> Result<(), MetaError>;
 
     async fn next_id(&self, key: &str) -> Result<i64, MetaError>;
     /// Allow downcasting to concrete types
@@ -671,6 +721,16 @@ pub trait MetaStore: Send + Sync {
         flags: u32,
     ) -> Result<(), MetaError> {
         let _ = (inode, name, value, flags);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError> {
+        let _ = (inode, name);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError> {
+        let _ = inode;
         Err(MetaError::NotImplemented)
     }
 

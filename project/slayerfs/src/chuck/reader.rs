@@ -3,15 +3,17 @@
 use super::chunk::ChunkLayout;
 use super::slice::{SliceDesc, block_span_iter};
 use super::store::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::utils::Intervals;
+use crate::utils::NumCastExt;
 use crate::vfs::backend::Backend;
 use anyhow::{Result, ensure};
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use std::cmp::{max, min};
+use tracing::Instrument;
 
-pub struct DataFetcher<'a, B, M> {
+pub(crate) struct DataFetcher<'a, B, M> {
     layout: ChunkLayout,
     id: u64,
     slices: Vec<SliceDesc>,
@@ -22,9 +24,9 @@ pub struct DataFetcher<'a, B, M> {
 impl<'a, B, M> DataFetcher<'a, B, M>
 where
     B: BlockStore,
-    M: MetaStore,
+    M: MetaLayer,
 {
-    pub fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
+    pub(crate) fn new(layout: ChunkLayout, id: u64, backend: &'a Backend<B, M>) -> Self {
         Self {
             layout,
             id,
@@ -34,13 +36,33 @@ where
         }
     }
 
-    pub async fn prepare_slices(&mut self) -> anyhow::Result<()> {
-        self.slices = self.backend.meta().get_slices(self.id).await?;
+    pub(crate) async fn prepare_slices(&mut self) -> Result<()> {
+        let chunk_id = self.id;
+        let backend = self.backend;
+        let slices = async {
+            let slices = backend.meta().get_slices(chunk_id).await?;
+            tracing::Span::current().record("slice_count", slices.len());
+            Ok::<_, anyhow::Error>(slices)
+        }
+        .instrument(tracing::trace_span!(
+            "fetch.prepare_slices",
+            chunk_id,
+            slice_count = tracing::field::Empty
+        ))
+        .await?;
+
+        self.slices = slices;
         self.prepared = true;
         Ok(())
     }
 
-    pub async fn read_at(&mut self, offset: u32, len: usize) -> Result<Vec<u8>> {
+    #[tracing::instrument(
+        name = "DataFetcher.read_at",
+        level = "trace",
+        skip(self),
+        fields(chunk_id = self.id, offset, len, need_reads = tracing::field::Empty)
+    )]
+    pub(crate) async fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -51,14 +73,21 @@ where
 
         let mut buf = vec![0; len];
 
-        let mut intervals = Intervals::new(offset, offset + len as u32);
-        let mut need_read = Vec::new();
-        for slice in self.slices.iter().copied().rev() {
-            for (l, r) in intervals.cut(slice.offset, slice.offset + slice.length) {
-                need_read.push((l, r, slice));
-            }
-        }
-        need_read.sort_by_key(|(l, _, _)| *l);
+        let need_read = tracing::trace_span!("fetch.read_at.build_need_read", offset, len)
+            .in_scope(|| {
+                let mut intervals = Intervals::new(offset, offset + len as u64);
+                let mut need_read = Vec::new();
+
+                for slice in self.slices.iter().copied().rev() {
+                    for (l, r) in intervals.cut(slice.offset, slice.offset + slice.length) {
+                        need_read.push((l, r, slice));
+                    }
+                }
+
+                need_read.sort_by_key(|(l, _, _)| *l);
+                need_read
+            });
+        tracing::Span::current().record("need_reads", need_read.len());
 
         let layout = self.layout;
         let backend = self.backend;
@@ -69,8 +98,8 @@ where
             let mut futures = FuturesUnordered::new();
 
             for (l, r, slice) in need_read {
-                let start = (l - offset) as usize;
-                let len = (r - l) as usize;
+                let start = (l - offset).as_usize();
+                let len = (r - l).as_usize();
                 debug_assert!(start >= cursor);
 
                 // Skip gaps
@@ -86,19 +115,33 @@ where
                     ..slice
                 };
 
-                futures.push(async move {
-                    let mut pos = 0_usize;
-                    for span in block_span_iter(desc, layout) {
-                        let take = span.len as usize;
-                        let out = &mut seg[pos..pos + take];
-                        backend
-                            .store()
-                            .read_range((desc.slice_id, span.index as u32), span.offset, out)
-                            .await?;
-                        pos += take;
+                let span = tracing::trace_span!(
+                    "fetch.read_slice",
+                    slice_id = desc.slice_id,
+                    offset = desc.offset,
+                    len = desc.length,
+                    blocks = tracing::field::Empty
+                );
+
+                futures.push(
+                    async move {
+                        let mut pos = 0_usize;
+                        let mut blocks = 0usize;
+                        for span in block_span_iter(desc, layout) {
+                            blocks += 1;
+                            let take = span.len.as_usize();
+                            let out = &mut seg[pos..pos + take];
+                            backend
+                                .store()
+                                .read_range((desc.slice_id, span.index.as_u32()), span.offset, out)
+                                .await?;
+                            pos += take;
+                        }
+                        tracing::Span::current().record("blocks", blocks);
+                        Ok::<_, anyhow::Error>(())
                     }
-                    Ok::<_, anyhow::Error>(())
-                });
+                    .instrument(span),
+                );
             }
 
             while let Some(res) = futures.next().await {
@@ -126,7 +169,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
         // Only write the first half of the second block
         {
@@ -134,7 +177,11 @@ mod tests {
             let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
             let uploader = DataUploader::new(layout, 7, backend.as_ref());
             let desc = uploader
-                .write_at(slice_id as u64, layout.block_size, &buf)
+                .write_at_vectored(
+                    slice_id as u64,
+                    layout.block_size as u64,
+                    &[bytes::Bytes::copy_from_slice(&buf)],
+                )
                 .await
                 .unwrap();
             meta.append_slice(7, desc).await.unwrap();
@@ -142,7 +189,7 @@ mod tests {
         let mut r = DataFetcher::new(layout, 7, backend.as_ref());
         r.prepare_slices().await.unwrap();
         // Read from the back half of block 0 to the front half of block 1 (one block total)
-        let off = layout.block_size / 2;
+        let off = layout.block_size as u64 / 2;
         let res = r.read_at(off, layout.block_size as usize).await.unwrap();
         assert_eq!(res.len(), layout.block_size as usize);
         // The first half should be zero-filled and the second half should be ones
@@ -168,15 +215,19 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
-        let offset = layout.block_size - 512;
+        let offset = layout.block_size as u64 - 512;
         let data = vec![7u8; 2048];
         let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, 3, backend.as_ref());
         let desc = uploader
-            .write_at(slice_id as u64, offset, &data)
+            .write_at_vectored(
+                slice_id as u64,
+                offset,
+                &[bytes::Bytes::copy_from_slice(&data)],
+            )
             .await
             .unwrap();
         meta.append_slice(3, desc).await.unwrap();
@@ -197,7 +248,7 @@ mod tests {
         let meta = create_meta_store_from_url("sqlite::memory:")
             .await
             .unwrap()
-            .store();
+            .layer();
         let backend = Arc::new(Backend::new(store.clone(), meta.clone()));
 
         let data1 = vec![1u8; 2048];
@@ -206,14 +257,22 @@ mod tests {
         let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, 9, backend.as_ref());
         let desc1 = uploader
-            .write_at(slice_id1 as u64, 0, &data1)
+            .write_at_vectored(
+                slice_id1 as u64,
+                0,
+                &[bytes::Bytes::copy_from_slice(&data1)],
+            )
             .await
             .unwrap();
         meta.append_slice(9, desc1).await.unwrap();
 
         let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let desc2 = uploader
-            .write_at(slice_id2 as u64, 1024, &data2)
+            .write_at_vectored(
+                slice_id2 as u64,
+                1024,
+                &[bytes::Bytes::copy_from_slice(&data2)],
+            )
             .await
             .unwrap();
         meta.append_slice(9, desc2).await.unwrap();

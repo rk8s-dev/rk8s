@@ -15,15 +15,18 @@ use tracing::trace;
 
 impl Filesystem for OverlayFs {
     /// initialize filesystem. Called before any other filesystem method.
-    async fn init(&self, req: Request) -> Result<ReplyInit> {
-        for layer in self.lower_layers.iter() {
-            layer.init(req).await?;
-        }
-        if let Some(upper) = &self.upper_layer {
-            upper.init(req).await?;
-        }
+    async fn init(&self, _req: Request) -> Result<ReplyInit> {
         if self.config.do_import {
             self.import().await?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            for layer in self.lower_layers.iter() {
+                layer.init(_req).await?;
+            }
+            if let Some(upper) = &self.upper_layer {
+                upper.init(_req).await?;
+            }
         }
         if !self.config.do_import || self.config.writeback {
             self.writeback.store(true, Ordering::Relaxed);
@@ -880,7 +883,10 @@ impl Filesystem for OverlayFs {
 
         let mut flags: i32 = flags as i32;
         flags |= libc::O_NOFOLLOW;
-        flags &= !libc::O_DIRECT;
+        #[cfg(target_os = "linux")]
+        {
+            flags &= !libc::O_DIRECT;
+        }
         if self.config.writeback {
             if flags & libc::O_ACCMODE == libc::O_WRONLY {
                 flags &= !libc::O_ACCMODE;

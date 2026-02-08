@@ -35,6 +35,10 @@ rust_library(
         "hcl": "//third-party/rust/crates/hcl-rs/0.18.7:hcl-rs",
         "webpki": "//third-party/rust/crates/rustls-webpki/0.103.8:rustls-webpki",
     },
+    os_deps = {
+        "linux": ["//third-party/rust/crates/daemonize/0.5.0:daemonize"],
+        "macos": ["//third-party/rust/crates/daemonize/0.5.0:daemonize"],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anyhow/1.0.100:anyhow",
@@ -49,7 +53,6 @@ rust_library(
         "//third-party/rust/crates/builder-pattern/0.4.2:builder-pattern",
         "//third-party/rust/crates/chrono/0.4.42:chrono",
         "//third-party/rust/crates/crossbeam-channel/0.5.15:crossbeam-channel",
-        "//third-party/rust/crates/daemonize/0.5.0:daemonize",
         "//third-party/rust/crates/dashmap/6.1.0:dashmap",
         "//third-party/rust/crates/derivative/2.2.0:derivative",
         "//third-party/rust/crates/derive_more/0.99.20:derive_more",
@@ -79,7 +82,7 @@ rust_library(
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_bytes/0.11.19:serde_bytes",
         "//third-party/rust/crates/serde_derive/1.0.228:serde_derive",
-        "//third-party/rust/crates/serde_json/1.0.145:serde_json",
+        "//third-party/rust/crates/serde_json/1.0.149:serde_json",
         "//third-party/rust/crates/serde_yaml/0.9.34+deprecated:serde_yaml",
         "//third-party/rust/crates/stretto/0.8.4:stretto",
         "//third-party/rust/crates/strum/0.25.0:strum",

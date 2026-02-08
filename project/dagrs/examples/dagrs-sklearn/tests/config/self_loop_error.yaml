@@ -1,0 +1,5 @@
+dagrs:
+  a:
+    name: "Task 1"
+    after: [ a ]
+    cmd: sh -c echo x

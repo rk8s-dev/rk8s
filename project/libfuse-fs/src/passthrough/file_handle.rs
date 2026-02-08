@@ -9,14 +9,19 @@ use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io;
 use std::os::fd::AsFd;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+#[cfg(target_os = "linux")]
+use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 
+#[allow(unused_imports)]
 use tracing::error;
 use vmm_sys_util::fam::{FamStruct, FamStructWrapper};
 
 use super::EMPTY_CSTR;
-use super::mount_fd::{MPRResult, MountFd, MountFds, MountId};
+#[cfg(target_os = "linux")]
+use super::mount_fd::MountId;
+use super::mount_fd::{MPRResult, MountFd, MountFds};
 
 /// An arbitrary maximum size for CFileHandle::f_handle.
 ///
@@ -159,6 +164,7 @@ impl Default for FileHandle {
 }
 
 unsafe extern "C" {
+    #[allow(dead_code)]
     unsafe fn name_to_handle_at(
         dirfd: libc::c_int,
         pathname: *const libc::c_char,
@@ -169,6 +175,7 @@ unsafe extern "C" {
 
     // Technically `file_handle` should be a `mut` pointer, but `open_by_handle_at()` is specified
     // not to change it, so we can declare it `const`.
+    #[allow(dead_code)]
     unsafe fn open_by_handle_at(
         mount_fd: libc::c_int,
         file_handle: *const CFileHandleInner,
@@ -186,65 +193,75 @@ impl FileHandle {
     /// returns `Ok(Some)` at some point, it will never return `Ok(None)` later.
     ///
     /// Return an `io::Error` for all other errors.
-    pub fn from_name_at(dir_fd: &impl AsRawFd, path: &CStr) -> io::Result<Option<Self>> {
-        let mut mount_id: libc::c_int = 0;
-        let mut c_fh = CFileHandle::new(0);
+    pub fn from_name_at(
+        #[allow(unused_variables)] dir_fd: &impl AsRawFd,
+        #[allow(unused_variables)] path: &CStr,
+    ) -> io::Result<Option<Self>> {
+        #[cfg(target_os = "linux")]
+        {
+            let mut mount_id: libc::c_int = 0;
+            let mut c_fh = CFileHandle::new(0);
 
-        // Per name_to_handle_at(2), the caller can discover the required size
-        // for the file_handle structure by making a call in which
-        // handle->handle_bytes is zero.  In this case, the call fails with the
-        // error EOVERFLOW and handle->handle_bytes is set to indicate the
-        // required size; the caller can then use this information to allocate a
-        // structure of the correct size.
-        let ret = unsafe {
-            name_to_handle_at(
-                dir_fd.as_raw_fd(),
-                path.as_ptr(),
-                c_fh.wrapper.as_mut_fam_struct_ptr(),
-                &mut mount_id,
-                libc::AT_EMPTY_PATH,
-            )
-        };
-        if ret == -1 {
-            let err = io::Error::last_os_error();
-            match err.raw_os_error() {
-                // Got the needed buffer size.
-                Some(libc::EOVERFLOW) => {}
-                // Filesystem does not support file handles
-                Some(libc::EOPNOTSUPP) => return Ok(None),
-                // Other error
-                _ => return Err(err),
+            // Per name_to_handle_at(2), the caller can discover the required size
+            // for the file_handle structure by making a call in which
+            // handle->handle_bytes is zero.  In this case, the call fails with the
+            // error EOVERFLOW and handle->handle_bytes is set to indicate the
+            // required size; the caller can then use this information to allocate a
+            // structure of the correct size.
+            let ret = unsafe {
+                name_to_handle_at(
+                    dir_fd.as_raw_fd(),
+                    path.as_ptr(),
+                    c_fh.wrapper.as_mut_fam_struct_ptr(),
+                    &mut mount_id,
+                    libc::AT_EMPTY_PATH,
+                )
+            };
+            if ret == -1 {
+                let err = io::Error::last_os_error();
+                match err.raw_os_error() {
+                    // Got the needed buffer size.
+                    Some(libc::EOVERFLOW) => {}
+                    // Filesystem does not support file handles
+                    Some(libc::EOPNOTSUPP) => return Ok(None),
+                    // Other error
+                    _ => return Err(err),
+                }
+            } else {
+                return Err(io::Error::from(io::ErrorKind::InvalidData));
             }
-        } else {
-            return Err(io::Error::from(io::ErrorKind::InvalidData));
+
+            let needed = c_fh.wrapper.as_fam_struct_ref().handle_bytes as usize;
+            let mut c_fh = CFileHandle::new(needed);
+
+            // name_to_handle_at() does not trigger a mount when the final component of the pathname is
+            // an automount point. When a filesystem supports both file handles and automount points,
+            // a name_to_handle_at() call on an automount point will return with error EOVERFLOW
+            // without having increased handle_bytes.  This can happen since Linux 4.13 with NFS
+            // when accessing a directory which is on a separate filesystem on the server. In this case,
+            // the automount can be triggered by adding a "/" to the end of the pathname.
+            let ret = unsafe {
+                name_to_handle_at(
+                    dir_fd.as_raw_fd(),
+                    path.as_ptr(),
+                    c_fh.wrapper.as_mut_fam_struct_ptr(),
+                    &mut mount_id,
+                    libc::AT_EMPTY_PATH,
+                )
+            };
+            if ret == -1 {
+                return Err(io::Error::last_os_error());
+            }
+
+            Ok(Some(FileHandle {
+                mnt_id: mount_id as MountId,
+                handle: c_fh,
+            }))
         }
-
-        let needed = c_fh.wrapper.as_fam_struct_ref().handle_bytes as usize;
-        let mut c_fh = CFileHandle::new(needed);
-
-        // name_to_handle_at() does not trigger a mount when the final component of the pathname is
-        // an automount point. When a filesystem supports both file handles and automount points,
-        // a name_to_handle_at() call on an automount point will return with error EOVERFLOW
-        // without having increased handle_bytes.  This can happen since Linux 4.13 with NFS
-        // when accessing a directory which is on a separate filesystem on the server. In this case,
-        // the automount can be triggered by adding a "/" to the end of the pathname.
-        let ret = unsafe {
-            name_to_handle_at(
-                dir_fd.as_raw_fd(),
-                path.as_ptr(),
-                c_fh.wrapper.as_mut_fam_struct_ptr(),
-                &mut mount_id,
-                libc::AT_EMPTY_PATH,
-            )
-        };
-        if ret == -1 {
-            return Err(io::Error::last_os_error());
+        #[cfg(target_os = "macos")]
+        {
+            Ok(None)
         }
-
-        Ok(Some(FileHandle {
-            mnt_id: mount_id as MountId,
-            handle: c_fh,
-        }))
     }
 
     /// Create a file handle from a `fd`.
@@ -295,22 +312,29 @@ impl Debug for OpenableFileHandle {
 
 impl OpenableFileHandle {
     /// Open a file from an openable file handle.
-    pub fn open(&self, flags: libc::c_int) -> io::Result<File> {
-        let ret = unsafe {
-            open_by_handle_at(
-                self.mount_fd.as_fd().as_raw_fd(),
-                self.handle.handle.wrapper.as_fam_struct_ptr(),
-                flags,
-            )
-        };
-        if ret >= 0 {
-            // Safe because `open_by_handle_at()` guarantees this is a valid fd
-            let file = unsafe { File::from_raw_fd(ret) };
-            Ok(file)
-        } else {
-            let e = io::Error::last_os_error();
-            error!("open_by_handle_at failed error {e:?}");
-            Err(e)
+    pub fn open(&self, #[allow(unused_variables)] flags: libc::c_int) -> io::Result<File> {
+        #[cfg(target_os = "linux")]
+        {
+            let ret = unsafe {
+                open_by_handle_at(
+                    self.mount_fd.as_fd().as_raw_fd(),
+                    self.handle.handle.wrapper.as_fam_struct_ptr(),
+                    flags,
+                )
+            };
+            if ret >= 0 {
+                // Safe because `open_by_handle_at()` guarantees this is a valid fd
+                let file = unsafe { File::from_raw_fd(ret) };
+                Ok(file)
+            } else {
+                let e = io::Error::last_os_error();
+                error!("open_by_handle_at failed error {e:?}");
+                Err(e)
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            Err(io::Error::from_raw_os_error(libc::ENOTSUP))
         }
     }
 
@@ -322,7 +346,9 @@ impl OpenableFileHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
     use std::ffi::CString;
+    #[cfg(target_os = "linux")]
     use std::fs::OpenOptions;
 
     fn generate_c_file_handle(
@@ -411,6 +437,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_file_handle_from_name_at() {
         // Create a temporary file in /tmp
         let tmp_dir = std::env::temp_dir();

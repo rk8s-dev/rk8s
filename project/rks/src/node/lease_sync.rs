@@ -1,6 +1,5 @@
-use crate::network::lease::LeaseWatchResult;
 use crate::network::manager::LocalManager;
-use crate::node::NodeRegistry;
+use crate::{network::lease::LeaseWatchResult, node::NodeRegistry};
 use common::RksMessage;
 use common::lease::Lease;
 use libcni::ip::route::Route;

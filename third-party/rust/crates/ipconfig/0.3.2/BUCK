@@ -35,6 +35,14 @@ rust_library(
         "@$(location :ipconfig-build-script-run[rustc_flags])",
         "@$(location :ipconfig-manifest[env_flags])",
     ],
+    os_deps = {
+        "windows": [
+            "//third-party/rust/crates/socket2/0.5.10:socket2",
+            "//third-party/rust/crates/widestring/1.2.1:widestring",
+            "//third-party/rust/crates/windows-sys/0.48.0:windows-sys",
+            "//third-party/rust/crates/winreg/0.50.0:winreg",
+        ],
+    },
     visibility = ["PUBLIC"],
 )
 

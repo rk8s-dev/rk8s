@@ -2,7 +2,7 @@ use crate::meta::store::MetaError;
 use rand::{RngCore, rng};
 use std::{future::Future, time::Duration};
 
-pub async fn backoff<F, Fut, R>(max_retries: u64, mut f: F) -> Result<R, MetaError>
+pub(crate) async fn backoff<F, Fut, R>(max_retries: u64, mut f: F) -> Result<R, MetaError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<R, MetaError>>,

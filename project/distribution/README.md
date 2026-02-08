@@ -287,6 +287,49 @@ The distribution registry implements the [OCI Distribution Spec](https://github.
 | end-12b | `GET`          | `/v2/<name>/referrers/<digest>?artifactType=<artifactType>`  | 🚧             |
 | end-13  | `GET`          | `/v2/<name>/blobs/uploads/<reference>`                       | ✅             |
 
+## Integration Tests
+
+The project includes integration tests that run inside a QEMU/KVM virtual machine using the [qlean](https://crates.io/crates/qlean) crate. These tests verify user permissions and repository access controls.
+
+### Prerequisites
+
+Before running the integration tests, ensure you have:
+
+1. **QEMU/KVM** installed and configured on your Linux host
+2. Required tools: `qemu-system-x86_64`, `qemu-img`, `guestfish`, `virt-copy-out`, `xorriso`
+
+You can verify the installation with:
+
+```bash
+qemu-system-x86_64 --version
+qemu-img --version
+guestfish --version
+```
+
+### Running the Tests
+
+1. First, build the distribution binary (debug mode required):
+
+```bash
+cd project
+cargo build -p distribution
+```
+
+2. Run the integration tests:
+
+```bash
+cd project
+RUST_LOG=info cargo test -p distribution --test test_registry_integration -- --nocapture
+```
+
+The tests will:
+- Create a Debian VM
+- Install and configure PostgreSQL
+- Upload and start the distribution service
+- Run permission tests (anonymous user, cross-namespace push, public/private repository access)
+
+**Note**: The first run may take longer as it downloads the VM image. Subsequent runs will be faster.
+
 ## Conformance Tests
 
 To run the conformance tests provided by OCI Distribution Spec, you need to install Go 1.17+ first, and then clone the distribution-spec repository:

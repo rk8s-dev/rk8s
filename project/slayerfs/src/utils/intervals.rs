@@ -1,14 +1,14 @@
 use std::cmp::{max, min};
 
-pub struct Intervals<T: Copy + Ord>(Vec<(T, T)>);
+pub(crate) struct Intervals<T: Copy + Ord>(Vec<(T, T)>);
 
 impl<T: Copy + Ord> Intervals<T> {
-    pub fn new(l: T, r: T) -> Self {
+    pub(crate) fn new(l: T, r: T) -> Self {
         debug_assert!(l <= r, "invalid interval: left must be <= right");
         Intervals(vec![(l, r)])
     }
 
-    pub fn cut(&mut self, slice_l: T, slice_r: T) -> Vec<(T, T)> {
+    pub(crate) fn cut(&mut self, slice_l: T, slice_r: T) -> Vec<(T, T)> {
         if self.0.is_empty() {
             return Vec::new();
         }
@@ -45,7 +45,7 @@ impl<T: Copy + Ord> Intervals<T> {
         cut
     }
 
-    pub fn collect(self) -> Vec<(T, T)> {
+    pub(crate) fn collect(self) -> Vec<(T, T)> {
         self.0
     }
 }

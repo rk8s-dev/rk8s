@@ -1,0 +1,32 @@
+dagrs:
+  a:
+    name: "Task 1"
+    after: [ b, c ]
+    cmd: error_cmd
+  b:
+    name: "Task 2"
+    after: [ c, f, g ]
+    cmd: error_cmd
+  c:
+    name: "Task 3"
+    after: [ e, g ]
+    cmd: sh -c echo c
+  d:
+    name: "Task 4"
+    after: [ c, e ]
+    cmd: sh -c echo d
+  e:
+    name: "Task 5"
+    after: [ h ]
+    cmd: sh -c echo e
+  f:
+    name: "Task 6"
+    after: [ g ]
+    cmd: err_cmd
+  g:
+    name: "Task 7"
+    after: [ h ]
+    cmd: err_cmd
+  h:
+    name: "Task 8"
+    cmd: sh -c echo h

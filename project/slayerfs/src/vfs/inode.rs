@@ -2,10 +2,9 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 /// The `Inode`, which holds file attribute state, as a local cache.
-/// Slayerfs ensure `close-to-open` semantics, that is to say, each `open` operation must see
-/// the newest file states. Otherwise, it is permitted to see stale states.
+/// Slayerfs ensures `close-to-open` semantics; each `open` must see the newest file state.
 #[derive(Clone)]
-pub struct Inode {
+pub(crate) struct Inode {
     ino: i64,
     length_rx: watch::Receiver<u64>,
     length_tx: watch::Sender<u64>,

@@ -30,6 +30,10 @@ rust_library(
         "@$(location :findshlibs-build-script-run[rustc_flags])",
         "@$(location :findshlibs-manifest[env_flags])",
     ],
+    os_deps = {
+        "macos": ["//third-party/rust/crates/lazy_static/1.5.0:lazy_static"],
+        "windows": ["//third-party/rust/crates/winapi/0.3.9:winapi"],
+    },
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/libc/0.2.178:libc"],
 )

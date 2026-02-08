@@ -1,0 +1,21 @@
+dagrs:
+  a:
+    name: "Task 1"
+    after: [ b, c ]
+    cmd: sh -c echo x
+  b:
+    name: "Task 2"
+    after: [ c ]
+    cmd: sh -c echo x
+  c:
+    name: "Task 3"
+    after: [ d ]
+    cmd: sh -c echo x
+  d:
+    name: "Task 4"
+    after: [ e ]
+    cmd: sh -c echo x
+  e:
+    name: "Task 5"
+    after: [ c ]
+    cmd: sh -c echo x

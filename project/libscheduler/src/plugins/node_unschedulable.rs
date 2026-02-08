@@ -44,6 +44,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
             queued_info: QueuedInfo::default(),
@@ -70,6 +71,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec::default(),
             queued_info: QueuedInfo::default(),
@@ -101,6 +103,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 tolerations: vec![Toleration {
@@ -135,6 +138,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 tolerations: vec![Toleration {

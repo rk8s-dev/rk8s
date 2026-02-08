@@ -128,7 +128,13 @@ impl MountFds {
                     .prefix(format!("Failed to convert \"{mount_point}\" to a CString"))
             })?;
 
-            let mount_point_fd = unsafe { libc::open(c_mount_point.as_ptr(), libc::O_PATH) };
+            let mount_point_fd = unsafe {
+                #[cfg(target_os = "linux")]
+                let f = libc::open(c_mount_point.as_ptr(), libc::O_PATH);
+                #[cfg(target_os = "macos")]
+                let f = libc::open(c_mount_point.as_ptr(), libc::O_RDONLY);
+                f
+            };
             if mount_point_fd < 0 {
                 return Err(self
                     .error_for(mount_id, io::Error::last_os_error())
@@ -139,8 +145,8 @@ impl MountFds {
             let st_mode = self.validate_mount_id(mount_id, &mount_point_fd, &mount_point)?;
 
             // Ensure that we can safely reopen `mount_point_path` with `O_RDONLY`
-            let file_type = st_mode & libc::S_IFMT;
-            if !is_safe_inode(file_type) {
+            let file_type = st_mode & (libc::S_IFMT as libc::mode_t);
+            if !is_safe_inode(file_type as u32) {
                 return Err(self
                     .error_for(mount_id, io::Error::from_raw_os_error(libc::EIO))
                     .set_desc(format!(
@@ -152,7 +158,7 @@ impl MountFds {
             let file = reopen_fd(
                 mount_point_fd.as_raw_fd(),
                 libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                st_mode,
+                st_mode as u32,
             )
             .map_err(|e| {
                 self.error_for(mount_id, e).prefix(format!(
@@ -201,7 +207,7 @@ impl MountFds {
                 .prefix(format!("Failed to stat mount point \"{mount_point}\""))
         })?;
 
-        if stx.mnt_id != mount_id {
+        if cfg!(target_os = "linux") && stx.mnt_id != mount_id {
             return Err(self
                 .error_for(mount_id, io::Error::from_raw_os_error(libc::EIO))
                 .set_desc(format!(
@@ -215,6 +221,9 @@ impl MountFds {
 
     /// Given a mount ID, return the mount root path (by reading `/proc/self/mountinfo`)
     fn get_mount_root(&self, mount_id: MountId) -> MPRResult<String> {
+        if cfg!(target_os = "macos") {
+            return Ok(String::from("/")); // Dummy root for macos
+        }
         let mountinfo = {
             let mountinfo_file = &mut *self.mount_info.lock().unwrap();
 
@@ -441,9 +450,11 @@ impl std::error::Error for MPRError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
     use crate::passthrough::file_handle::FileHandle;
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_mount_fd_get() {
         let topdir = std::env::current_dir().unwrap();
         let dir = File::open(&topdir).unwrap();

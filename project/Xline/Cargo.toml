@@ -1,0 +1,34 @@
+[workspace]
+members = [
+    "crates/benchmark",
+    "crates/curp",
+    "crates/curp-external-api",
+    "crates/curp-test-utils",
+    "crates/engine",
+    "crates/simulation",
+    "crates/test-macros",
+    "crates/utils",
+    "crates/xline",
+    "crates/xline-client",
+    "crates/xline-test-utils",
+    "crates/xlineapi",
+    "crates/xlinectl",
+    "crates/xlineutl",
+]
+resolver = "2"
+
+[workspace.metadata.cargo-machete]
+ignored = ["prost", "workspace-hack"]
+
+[patch.crates-io]
+# This branch update the tonic version for madsim. We should switch to the original etcd-client crate when new version release.
+madsim = { git = "https://github.com/LucienY01/madsim.git", branch = "bz/tonic-0-12" }
+madsim-tonic = { git = "https://github.com/LucienY01/madsim.git", branch = "bz/tonic-0-12" }
+madsim-tonic-build = { git = "https://github.com/LucienY01/madsim.git", branch = "bz/tonic-0-12" }
+madsim-tokio = { git = "https://github.com/LucienY01/madsim.git", branch = "bz/tonic-0-12" }
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)', 'cfg(ignore)'] }
+
+[workspace.package]
+edition = "2024"

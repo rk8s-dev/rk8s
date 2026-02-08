@@ -33,7 +33,6 @@ pub mod container;
 pub mod deployment;
 pub mod pod;
 pub mod replicaset;
-pub mod utils;
 pub mod volume;
 
 fn construct_container_root<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<PathBuf> {
@@ -128,6 +127,7 @@ pub fn list(_: List, root_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn kill(args: Kill, root_path: PathBuf) -> Result<()> {
     let mut container = load_container(root_path, &args.container_id)?;
     let signal: Signal = args.signal.as_str().try_into()?;
@@ -195,7 +195,6 @@ pub fn exec(args: Exec, root_path: PathBuf) -> Result<i32> {
 
     // See https://github.com/containers/youki/pull/1252 for a detailed explanation
     // basically, if there is any error in starting exec, the build above will return error
-    // however, if the process does start, and detach is given, we do not wait for it
     // if not detached, then we wait for it using waitpid below
     if args.detach {
         return Ok(0);

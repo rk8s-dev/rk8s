@@ -8,7 +8,7 @@ use tokio::time::{Duration, interval};
 use tracing::{debug, error, info};
 
 #[allow(dead_code)]
-pub async fn start_upload_workers() {
+pub(crate) fn start_upload_workers() {
     // TODO: implement upload worker pool
 }
 
@@ -35,7 +35,7 @@ impl Default for GcConfig {
 }
 
 #[allow(dead_code)]
-pub struct MarkBasedGarbageCollector<B: ObjectBackend> {
+pub(crate) struct MarkBasedGarbageCollector<B: ObjectBackend> {
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
     config: GcConfig,
@@ -43,7 +43,7 @@ pub struct MarkBasedGarbageCollector<B: ObjectBackend> {
 
 #[allow(dead_code)]
 impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
-    pub fn new(
+    pub(crate) fn new(
         meta_store: Arc<dyn MetaStore>,
         object_client: Arc<ObjectClient<B>>,
         config: GcConfig,
@@ -56,7 +56,7 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
     }
 
     /// Start the garbage collector with graceful shutdown support
-    pub async fn start(&self) {
+    pub(crate) async fn start(&self) {
         let mut interval = interval(Duration::from_secs(self.config.interval_secs));
 
         info!("GC interval {} seconds", self.config.interval_secs);

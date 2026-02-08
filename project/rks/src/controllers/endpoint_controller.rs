@@ -244,15 +244,15 @@ impl EndpointController {
 
                             // requeue to process latest changes (no extra delay)
                             info!("requeue due to dirty service={key_cl}");
-                            schedule_enqueue(
-                                &tx_c,
-                                queued_c.clone(),
-                                dirty_c.clone(),
-                                processing_c.clone(),
-                                key_cl.clone(),
-                                Duration::from_millis(0),
-                            )
-                            .await;
+                            // schedule_enqueue(
+                            //     &tx_c,
+                            //     queued_c.clone(),
+                            //     dirty_c.clone(),
+                            //     processing_c.clone(),
+                            //     key_cl.clone(),
+                            //     Duration::from_millis(0),
+                            // )
+                            // .await;
                         }
                     });
                 }

@@ -15,9 +15,13 @@ pub(super) fn do_mount(
     check_mountpoint(cfg)?;
     detach()?;
 
+    // According to overlayfs semantics, newest lower layer should be first
+    let mut lowerdir = cfg.lower_dir.clone();
+    lowerdir.reverse();
+
     block_on(async {
         let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
-            lowerdir: &cfg.lower_dir,
+            lowerdir: &lowerdir,
             upperdir: &cfg.upper_dir,
             mountpoint: &cfg.mountpoint,
             privileged: CONFIG.is_root,

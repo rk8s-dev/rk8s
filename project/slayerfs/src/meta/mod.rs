@@ -12,15 +12,16 @@
 //! - Ensure critical write-path updates (blocks + slice_blocks + slices + inode.size)
 //!   are committed atomically.
 //!
-pub mod backoff;
+pub(crate) mod backoff;
 pub mod client;
 pub mod config;
-pub mod entities;
+pub(crate) mod entities;
 pub mod factory;
 pub mod file_lock;
 pub mod layer;
-pub mod migrations;
+pub(crate) mod migrations;
 pub mod permission;
+pub(crate) mod serialization;
 pub mod store;
 pub mod stores;
 

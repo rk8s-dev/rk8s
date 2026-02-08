@@ -1,1 +1,1 @@
-pub mod page;
+pub(crate) mod page;

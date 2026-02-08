@@ -10,10 +10,13 @@ members = [
     "rkb",
     "rkl",
     "rks",
+    "libruntime",
     "libscheduler", 
     "common",
     "slayerfs",
-    "libvault"
+    "libvault",
+    "dagrs-derive",
+    "dagrs"
 ]
 
 default-members = ["distribution", "rkl", "libbridge", "libipam", "rkb", "libnetwork", "rks"]
@@ -29,9 +32,13 @@ libipam = { path = "libipam" }
 libnetwork = { path = "libnetwork" }
 libscheduler = { path = "libscheduler" }
 libvault = { path = "libvault" }
+libruntime = { path = "libruntime" }
 rkb = { path = "rkb" }
 rkl = { path = "rkl" }
 rks = { path = "rks" }
+dagrs-derive = { path = "dagrs-derive", version = "0.4.3" }
+quote = "1.0"
+proc-macro2 = "1.0"
 rfuse3 = { version = "0.0.5", features = ["tokio-runtime","unprivileged"]}
 slayerfs = { path = "slayerfs" }
 libcgroups = { version = "0.5.7", default-features = false }
@@ -189,9 +196,10 @@ thiserror = "2.0.17"
 time = "0.3.0"
 tokio = { version = "1.48.0", features = ["full"] }
 tokio-stream = "0.1.17"
-tokio-util = "0.7.0"
+tokio-util = "0.7.18"
 toml = "0.8.19"
 aligned_box = "0.3.0"
+tikv-jemallocator = "0.5.4"
 tonic = "0.14.2"
 tower = "0.5.2"
 tower-http = "0.6.6"
@@ -200,6 +208,9 @@ tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-journald = "0.3.1"
 tracing-subscriber = "0.3.20"
+tracing-chrome = "0.7.2"
+tracing-flame = "0.2.0"
+console-subscriber = "0.5.0"
 trait-make = "0.1.0"
 typetag = "0.2.20"
 ureq = "2.10.0"
@@ -224,6 +235,10 @@ criterion = { version = "0.5", features = ["html_reports"] }
 pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 if-addrs = "0.6.0"
 redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
+parking_lot = "0.12.5"
+qlean = "0.2.2"
+rkyv = "0.8.14"
 
 [profile.release]
 debug = true
+strip = false

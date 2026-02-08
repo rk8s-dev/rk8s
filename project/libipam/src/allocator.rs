@@ -204,7 +204,7 @@ impl Iterator for Iter<'_> {
                 return self.next();
             }
 
-            let ip = IpNetwork::with_netmask(self.cur.unwrap(), range.subnet.mask()).ok();
+            let ip = IpNetwork::with_netmask(range.range_start.unwrap(), range.subnet.mask()).ok();
             return Some((ip.unwrap(), range.gateway.unwrap()));
         }
 

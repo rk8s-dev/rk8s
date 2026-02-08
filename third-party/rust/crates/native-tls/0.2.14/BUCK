@@ -30,13 +30,22 @@ rust_library(
         "@$(location :native-tls-build-script-run[rustc_flags])",
         "@$(location :native-tls-manifest[env_flags])",
     ],
+    os_deps = {
+        "linux": [
+            "//third-party/rust/crates/log/0.4.29:log",
+            "//third-party/rust/crates/openssl-probe/0.1.6:openssl-probe",
+            "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys",
+            "//third-party/rust/crates/openssl/0.10.75:openssl",
+        ],
+        "macos": [
+            "//third-party/rust/crates/libc/0.2.178:libc",
+            "//third-party/rust/crates/security-framework-sys/2.15.0:security-framework-sys",
+            "//third-party/rust/crates/security-framework/2.11.1:security-framework",
+            "//third-party/rust/crates/tempfile/3.23.0:tempfile",
+        ],
+        "windows": ["//third-party/rust/crates/schannel/0.1.28:schannel"],
+    },
     visibility = ["PUBLIC"],
-    deps = [
-        "//third-party/rust/crates/log/0.4.29:log",
-        "//third-party/rust/crates/openssl-probe/0.1.6:openssl-probe",
-        "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys",
-        "//third-party/rust/crates/openssl/0.10.75:openssl",
-    ],
 )
 
 rust_binary(

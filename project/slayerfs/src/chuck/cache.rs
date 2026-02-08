@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -794,7 +796,10 @@ impl SystemMetrics {
         let total = self.total_requests.load(Ordering::Relaxed);
         if total > 0 {
             let hits = self.cache_hits.load(Ordering::Relaxed);
-            let rate = (hits * 10000) / total; // Scale to 0-10000 for 0.0-1.0
+            let rate = hits
+                .checked_mul(10000)
+                .and_then(|value| value.checked_div(total))
+                .unwrap_or(0); // Scale to 0-10000 for 0.0-1.0
             self.hit_rate.store(rate, Ordering::Relaxed);
         }
     }
@@ -815,7 +820,10 @@ impl SystemMetrics {
 
     fn update_cache_utilization(&self, current_size: u64, max_size: u64) {
         if max_size > 0 {
-            let utilization = (current_size * 10000) / max_size;
+            let utilization = current_size
+                .checked_mul(10000)
+                .and_then(|value| value.checked_div(max_size))
+                .unwrap_or(0);
             self.hot_cache_utilization
                 .store(utilization, Ordering::Relaxed);
         }
@@ -1189,6 +1197,9 @@ pub struct ChunksCache {
     /// Uses Moka's high-performance concurrent cache implementation
     hot_cache: moka::future::Cache<String, Vec<u8>>,
 
+    /// Approximate hot cache bytes (sum of Vec<u8> lengths)
+    hot_bytes: Arc<AtomicU64>,
+
     /// Cold cache tier tracking all accessed keys for pattern analysis
     /// Stores empty tuples () as lightweight metadata markers
     cold_cache: moka::future::Cache<String, ()>,
@@ -1221,10 +1232,15 @@ impl ChunksCache {
         debug!("Using cache directory: {:?}", cache_dir);
         let disk_storage = DiskStorage::new(cache_dir).await?;
 
+        let hot_bytes = Arc::new(AtomicU64::new(0));
+        let hot_bytes_evict = hot_bytes.clone();
         let hot_cache_builder = moka::future::Cache::builder()
             .max_capacity(config.hot_cache_size as u64)
             .time_to_idle(Duration::from_secs(30))
-            .time_to_live(Duration::from_secs(120));
+            .time_to_live(Duration::from_secs(120))
+            .eviction_listener(move |_key, value: Vec<u8>, _cause| {
+                hot_bytes_evict.fetch_sub(value.len() as u64, Ordering::Relaxed);
+            });
         let cold_cache_builder = moka::future::Cache::builder()
             .max_capacity(config.cold_cache_size as u64)
             .time_to_idle(Duration::from_secs(30))
@@ -1250,6 +1266,7 @@ impl ChunksCache {
         Ok(Self {
             disk_storage,
             hot_cache: hot_cache_builder.build(),
+            hot_bytes,
             cold_cache: cold_cache_builder.build(),
             policy,
             config,
@@ -1278,6 +1295,7 @@ impl ChunksCache {
         let diskstorage = self.disk_storage.clone();
         let policy = self.policy.clone();
         let hot_cache = self.hot_cache.clone();
+        let hot_bytes = self.hot_bytes.clone();
         let key_owned = key.to_string();
 
         // ensure key exists in cold cache
@@ -1301,6 +1319,7 @@ impl ChunksCache {
             if policy.should_promote(key_owned.clone()).await {
                 debug!("Promoting key to hot cache: {}", key_owned);
                 hot_cache.insert(key_owned.clone(), value.clone()).await;
+                hot_bytes.fetch_add(value.len() as u64, Ordering::Relaxed);
             } else {
                 trace!("Key not eligible for promotion: {}", key_owned);
             }
@@ -1325,9 +1344,12 @@ impl ChunksCache {
     fn update_utilization_metrics(&self) {
         let current_size = self.hot_cache.entry_count();
         let max_size = self.config.hot_cache_size as u64;
+        let bytes = self.hot_bytes.load(Ordering::Relaxed);
         trace!(
-            "Updating cache utilization: {}/{} entries",
-            current_size, max_size
+            "Updating cache utilization: {}/{} entries, {} MB hot bytes",
+            current_size,
+            max_size,
+            bytes / 1024 / 1024
         );
         self.policy.update_cache_utilization(current_size, max_size);
     }
@@ -1340,6 +1362,8 @@ impl ChunksCache {
         );
         trace!("Inserting into hot cache: {}", key);
         self.hot_cache.insert(key.to_owned(), data.clone()).await;
+        self.hot_bytes
+            .fetch_add(data.len() as u64, Ordering::Relaxed);
 
         trace!("Storing on disk: {}", key);
         self.disk_storage.store(key, data).await?;
@@ -1409,8 +1433,8 @@ mod tests {
         assert!(temp_dir.path().exists());
     }
 
-    #[tokio::test]
-    async fn test_etag_to_filename_special_characters() {
+    #[test]
+    fn test_etag_to_filename_special_characters() {
         let binding = "a".repeat(1000);
         let etags = vec![
             "normal",
@@ -1571,8 +1595,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_filename_uniqueness() {
+    #[test]
+    fn test_filename_uniqueness() {
         let etag1 = "test1";
         let etag2 = "test2";
 
@@ -1625,8 +1649,8 @@ mod tests {
 
     // ========== AccessStats tests ==========
 
-    #[tokio::test]
-    async fn test_access_stats_basic_functionality() {
+    #[test]
+    fn test_access_stats_basic_functionality() {
         let short_window_size = Duration::from_secs(10);
         let medium_window_size = Duration::from_secs(60);
         let max_entries = 100;
@@ -1755,8 +1779,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_access_stats_frequency_calculation() {
+    #[test]
+    fn test_access_stats_frequency_calculation() {
         let short_window_size = Duration::from_secs(10);
         let medium_window_size = Duration::from_secs(60);
         let max_entries = 100;

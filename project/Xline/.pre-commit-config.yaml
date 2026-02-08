@@ -1,0 +1,65 @@
+fail_fast: false
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: no-commit-to-branch
+      - id: check-byte-order-marker
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+  - repo: https://github.com/psf/black
+    rev: 23.3.0
+    hooks:
+      - id: black
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.20.9
+    hooks:
+      - id: typos
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        description: Format files with rustfmt.
+        entry: bash -c 'cargo fmt -- --check'
+        language: rust
+        files: ^(?!abi)\.rs$
+        args: []
+      - id: conventional-commit-msg-validation
+        name: commit message conventional validation
+        language: pygrep
+        entry: '^(breaking|build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test|squash|fixup){1}(\([\w\-\.]+\))?(!)?: ([\w `])+([\s\S]*)'
+        args: [--multiline, --negate]
+        stages: [commit-msg]
+      - id: commit-msg-needs-to-be-signed-off
+        name: commit message needs to be signed off
+        language: pygrep
+        entry: "^Signed-off-by:"
+        args: [--multiline, --negate]
+        stages: [commit-msg]
+      - id: cargo-sort
+        name: Check Cargo.toml is sorted
+        description: Ensure Cargo.toml is sorted
+        entry: bash -c 'cargo sort --workspace'
+        language: rust
+        files: Cargo\.toml
+        pass_filenames: false
+      - id: cargo-hakari
+        name: Check if workspace-hack works correctly
+        description: Ensure workspace-hack works correctly
+        entry: bash -c 'cargo hakari generate --diff && cargo hakari manage-deps --dry-run && cargo hakari verify'
+        language: rust
+        files: Cargo\.(toml|lock)
+        pass_filenames: false
+      - id: cargo machete
+        name: Check if all dependencies are used
+        description: Ensure no unused dependencies in /crates increase compiling time
+        entry: bash -c 'cargo machete --fix crates/'
+        language: rust
+        files: Cargo\.toml
+        pass_filenames: false

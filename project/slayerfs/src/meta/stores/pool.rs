@@ -11,7 +11,7 @@ pub struct IdPool {
 
 impl IdPool {
     /// Try allocating an id from the pool of `counter_key`.
-    pub async fn try_alloc(&self, counter_key: impl AsRef<str>) -> Option<i64> {
+    pub fn try_alloc(&self, counter_key: impl AsRef<str>) -> Option<i64> {
         let counter_key = counter_key.as_ref();
 
         // Notice that the entry api will lock current thread, but it's ok there because we will not
@@ -38,7 +38,7 @@ impl IdPool {
     }
 
     /// Update the new `next` and `end` of the pool of `counter_key`
-    pub async fn update(&self, counter_key: impl AsRef<str>, next: i64, end: i64) {
+    pub fn update(&self, counter_key: impl AsRef<str>, next: i64, end: i64) {
         let counter_key = counter_key.as_ref();
 
         // if everything is ok, there must be an occupied entry.

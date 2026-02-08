@@ -1,0 +1,260 @@
+// Message types for curp client
+syntax = "proto3";
+
+package commandpb;
+
+import "google/protobuf/empty.proto";
+
+option go_package           = ".;curpapi";
+option java_package         = "com.curp.protobuf";
+option java_outer_classname = "CommandProto";
+option java_multiple_files  = true;
+
+// For compatibility of gRPC implementations that do not support the `optional`
+// keyword
+message OptionalU64 {
+    uint64 value = 1;
+}
+
+message ProposeId {
+    uint64 client_id = 1;
+    uint64 seq_num   = 2;
+}
+
+message Member {
+    uint64 id                   = 1;
+    string name                 = 2;
+    repeated string peer_urls   = 3;
+    repeated string client_urls = 4;
+    bool is_learner             = 5;
+}
+
+message CmdResult {
+    oneof result {
+        // The serialized command execute result
+        // The original type is Command::ER
+        bytes ok = 1;
+        // The serialized command error
+        // The original type is Command::Error
+        bytes error = 2;
+    }
+}
+
+// All possible errors that the curp server may encounter.
+// This error will be serialized in the `detail` of the gRPC Status and returned
+// to clients. The reason for not dividing into some levels is for the
+// convenience of the client to make judgments. If some errors never be checked
+// in client, they could be merged into `Internal`.
+//
+// Feel free to use `google.protobuf.Empty` as the client never concerned the
+// details happens in the server. If your error needs the context to be passed
+// within the server, you can implement a separate error and implement the
+// From<YourError> trait for `CurpError`, see `StorageError`. Or your error
+// context may also be passed with the client, add your error details in
+// `CurpError`, see `Redirect` below.
+//
+// Please add comments above your error if you want to extend more :)
+message CurpError {
+    message Redirect {
+        OptionalU64 leader_id = 1;
+        uint64 term           = 2;
+    }
+    oneof err {
+        // When a command conflicts with the server SP.
+        google.protobuf.Empty KeyConflict = 1;
+        // When a proposal id is duplicated.
+        google.protobuf.Empty Duplicated = 2;
+        // When the client id in a proposal id is expired.
+        google.protobuf.Empty ExpiredClientId = 3;
+        // When the conf change config is invalid.
+        google.protobuf.Empty InvalidConfig = 4;
+        // When the conf change proposal remove a node which is not exists.
+        google.protobuf.Empty NodeNotExists = 5;
+        // When the conf change proposal add a node which is exists.
+        google.protobuf.Empty NodeAlreadyExists = 6;
+        // When the conf change proposal promote a lazy learner.
+        google.protobuf.Empty LearnerNotCatchUp = 7;
+        // When the cluster is shutting down
+        google.protobuf.Empty ShuttingDown = 8;
+        // When the request cluster_version does not match the cluster's.
+        google.protobuf.Empty WrongClusterVersion = 9;
+        // When rpc transport error happens, this means the request does not
+        // send to server
+        google.protobuf.Empty RpcTransport = 10;
+
+        // When the request should be send to leader and this node is not the
+        // leader. Return the context to client to update its state.
+        Redirect redirect = 11;
+
+        // The internal error that the client never concerned.
+        // e.g.
+        // 1. failed to allocate a new snapshot
+        // 2. failed to reset the command executor by snapshot
+        // 3. failed to get last applied index from command executor.
+        // 4. io::Error
+        // 5. failed to encode and decode some stuff, like pb serialize or
+        // bincode serialize.
+        // 6. failed in storage layer
+        // ...
+        string Internal = 12;
+        // When the leader is transferring or an error occurred in the transfer
+        string LeaderTransfer = 13;
+        // When the leader is a zombie
+        google.protobuf.Empty Zombie = 14;
+    }
+}
+
+message ProposeRequest {
+    ProposeId propose_id = 1;
+    // The serialized command
+    // The original type is `Command`
+    bytes command          = 2;
+    uint64 cluster_version = 3;
+    uint64 term = 4;
+    bool slow_path = 5;
+    uint64 first_incomplete = 6;
+}
+
+message ProposeResponse {
+    CmdResult result = 1;
+    bool conflict = 2;
+}
+
+message SyncedResponse {
+    // The serialized command after sync result
+    // The original type is Result<Command::ASR, Command::Error>
+    CmdResult after_sync_result = 1;
+}
+
+message OpResponse {
+    oneof op {
+        ProposeResponse propose = 1;
+        SyncedResponse synced = 2;
+    }
+}
+
+message RecordRequest {
+    ProposeId propose_id = 1;
+    // The serialized command
+    // The original type is `Command`
+    bytes command = 2;
+}
+
+message RecordResponse {
+    bool conflict = 1;
+}
+
+
+message WaitSyncedRequest {
+    ProposeId propose_id   = 1;
+    uint64 cluster_version = 2;
+}
+
+message WaitSyncedResponse {
+    // The serialized command after sync result
+    // The original type is Result<Command::ASR, Command::Error>
+    CmdResult after_sync_result = 1;
+
+    // The serialized command execute result
+    // The original type is Result<Command::ER, Command::Error>
+    CmdResult exe_result = 2;
+}
+
+message FetchClusterRequest {
+    bool linearizable = 1;
+}
+
+message FetchClusterResponse {
+    OptionalU64 leader_id   = 1;
+    uint64 term             = 2;
+    uint64 cluster_id       = 3;
+    repeated Member members = 4;
+    uint64 cluster_version  = 5;
+}
+
+message FetchReadStateRequest {
+    bytes command          = 1;
+    uint64 cluster_version = 2;
+}
+
+message FetchReadStateResponse {
+    message IdSet {
+        repeated uint64 inflight_ids = 1;
+    }
+    oneof read_state {
+        IdSet ids           = 1;
+        uint64 commit_index = 2;
+    }
+}
+
+message ShutdownRequest {
+    ProposeId propose_id   = 1;
+    uint64 cluster_version = 2;
+}
+
+message ShutdownResponse {}
+
+message ProposeConfChangeRequest {
+    enum ConfChangeType {
+        Add        = 0;
+        AddLearner = 1;
+        Remove     = 2;
+        Update     = 3;
+        Promote    = 4;
+    }
+    message ConfChange {
+        ConfChangeType change_type = 1;
+        uint64 node_id             = 2;
+        repeated string address    = 3;
+    }
+    ProposeId propose_id        = 1;
+    repeated ConfChange changes = 2;
+    uint64 cluster_version      = 3;
+}
+
+message ProposeConfChangeResponse {
+    repeated Member members = 1;
+}
+
+message PublishRequest {
+    ProposeId propose_id        = 1;
+    uint64 node_id              = 2;
+    string name                 = 3;
+    repeated string client_urls = 4;
+}
+
+message PublishResponse {}
+
+message MoveLeaderRequest {
+    uint64 node_id         = 1;
+    uint64 cluster_version = 2;
+}
+
+message MoveLeaderResponse {}
+
+message LeaseKeepAliveMsg {
+    uint64 client_id = 1;
+}
+
+message ReadIndexRequest {}
+
+message ReadIndexResponse {
+    uint64 term = 1;
+}
+
+service Protocol {
+    // Unary
+    rpc ProposeStream(ProposeRequest) returns (stream OpResponse);
+    rpc Record(RecordRequest) returns (RecordResponse);
+    rpc ReadIndex(ReadIndexRequest) returns (ReadIndexResponse);
+    rpc ProposeConfChange(ProposeConfChangeRequest)
+        returns (ProposeConfChangeResponse);
+    rpc Publish(PublishRequest) returns (PublishResponse);
+    rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+    rpc FetchCluster(FetchClusterRequest) returns (FetchClusterResponse);
+    rpc FetchReadState(FetchReadStateRequest) returns (FetchReadStateResponse);
+    rpc MoveLeader(MoveLeaderRequest) returns (MoveLeaderResponse);
+
+    // Stream
+    rpc LeaseKeepAlive(stream LeaseKeepAliveMsg) returns (LeaseKeepAliveMsg);
+}

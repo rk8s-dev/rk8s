@@ -1,3 +1,4 @@
+#![allow(unused)]
 use std::{
     collections::HashMap,
     fs, io,
@@ -16,8 +17,8 @@ use std::io::Write;
 use tabwriter::TabWriter;
 use tracing::debug;
 
-use crate::commands::{compose::ComposeMetadata, utils::parse_key_val};
-use crate::cri::cri_api::Mount;
+use crate::commands::compose::ComposeMetadata;
+use libruntime::cri::cri_api::Mount;
 
 #[derive(Debug)]
 pub enum PatternType {
@@ -447,4 +448,10 @@ pub fn volume_execute(cmd: VolumeCommand) -> Result<()> {
         VolumeCommand::Inspect { name } => v_manager.inspect(name),
         VolumeCommand::Prune { force } => v_manager.prune(force),
     }
+}
+
+pub fn parse_key_val(s: &str) -> Result<(String, String), String> {
+    s.split_once("=")
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .ok_or_else(|| format!("invalid KEY=VALUE: '{}'", s))
 }

@@ -27,8 +27,12 @@ rust_library(
         "OUT_DIR": "$(location :aws-lc-rs-build-script-run[out_dir])",
     },
     features = [
+        "alloc",
         "aws-lc-sys",
+        "default",
         "prebuilt-nasm",
+        "ring-io",
+        "ring-sig-verify",
     ],
     rustc_flags = [
         "@$(location :aws-lc-rs-build-script-run[rustc_flags])",
@@ -37,6 +41,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/aws-lc-sys/0.34.0:aws-lc-sys",
+        "//third-party/rust/crates/untrusted/0.7.1:untrusted",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],
 )
@@ -48,8 +53,12 @@ rust_binary(
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = [
+        "alloc",
         "aws-lc-sys",
+        "default",
         "prebuilt-nasm",
+        "ring-io",
+        "ring-sig-verify",
     ],
     rustc_flags = ["@$(location :aws-lc-rs-manifest[env_flags])"],
     visibility = [],
@@ -64,8 +73,12 @@ buildscript_run(
         ":aws-lc-rs-manifest[env_dict]",
     ],
     features = [
+        "alloc",
         "aws-lc-sys",
+        "default",
         "prebuilt-nasm",
+        "ring-io",
+        "ring-sig-verify",
     ],
     version = "1.15.1",
     manifest_dir = ":aws-lc-rs-vendor",

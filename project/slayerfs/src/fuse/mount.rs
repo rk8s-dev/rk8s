@@ -9,7 +9,7 @@ use std::path::Path;
 use rfuse3::MountOptions;
 
 use crate::chuck::store::BlockStore;
-use crate::meta::MetaStore;
+use crate::meta::MetaLayer;
 use crate::vfs::fs::VFS;
 
 /// Build default mount options for SlayerFS.
@@ -34,7 +34,7 @@ pub async fn mount_vfs_unprivileged<S, M>(
 ) -> std::io::Result<rfuse3::raw::MountHandle>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     let opts = default_mount_options();
     let session = rfuse3::raw::Session::new(opts);
@@ -50,7 +50,7 @@ pub async fn mount_vfs_unprivileged<S, M>(
 ) -> std::io::Result<rfuse3::raw::MountHandle>
 where
     S: BlockStore + Send + Sync + 'static,
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaLayer + Send + Sync + 'static,
 {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,

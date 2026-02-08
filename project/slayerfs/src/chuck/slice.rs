@@ -27,7 +27,6 @@ use super::{
     span::{BlockTag, ChunkTag, Span},
 };
 use crate::chuck::BlockStore;
-use crate::meta::MetaStore;
 use anyhow::Context;
 use std::marker::PhantomData;
 
@@ -36,13 +35,18 @@ pub type BlockSpan = Span<BlockTag>;
 
 /// Basic slice descriptor for a chunk-local contiguous range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
+#[cfg_attr(feature = "rkyv-serialization", rkyv(compare(PartialEq)))]
 pub struct SliceDesc {
     pub slice_id: u64,
     pub chunk_id: u64,
     /// Offset relative to the start of the chunk (bytes).
-    pub offset: u32,
+    pub offset: u64,
     /// Length in bytes.
-    pub length: u32,
+    pub length: u64,
 }
 
 pub fn block_span_iter(desc: SliceDesc, layout: ChunkLayout) -> impl Iterator<Item = BlockSpan> {
@@ -71,13 +75,13 @@ mod tests {
             slice_id: 1,
             chunk_id: 1,
             offset: 0,
-            length: DEFAULT_BLOCK_SIZE / 2,
+            length: (DEFAULT_BLOCK_SIZE / 2) as u64,
         };
         let spans: Vec<BlockSpan> = block_span_iter(s, layout).collect();
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].index, 0);
         assert_eq!(spans[0].offset, 0);
-        assert_eq!(spans[0].len, DEFAULT_BLOCK_SIZE / 2);
+        assert_eq!(spans[0].len, (DEFAULT_BLOCK_SIZE / 2) as u64);
     }
 
     #[test]
@@ -87,16 +91,40 @@ mod tests {
         let s = SliceDesc {
             slice_id: 1,
             chunk_id: 1,
-            offset: half,
-            length: layout.block_size,
+            offset: half as u64,
+            length: layout.block_size as u64,
         };
         let spans: Vec<BlockSpan> = block_span_iter(s, layout).collect();
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].index, 0);
-        assert_eq!(spans[0].offset, (layout.block_size / 2));
-        assert_eq!(spans[0].len, layout.block_size / 2);
+        assert_eq!(spans[0].offset, (layout.block_size / 2) as u64);
+        assert_eq!(spans[0].len, (layout.block_size / 2) as u64);
         assert_eq!(spans[1].index, 1);
         assert_eq!(spans[1].offset, 0);
-        assert_eq!(spans[1].len, layout.block_size / 2);
+        assert_eq!(spans[1].len, (layout.block_size / 2) as u64);
+    }
+
+    #[test]
+    fn test_slice_desc_serialization_roundtrip() {
+        let desc = SliceDesc {
+            slice_id: 1,
+            chunk_id: 2,
+            offset: 100,
+            length: 4096,
+        };
+        let bytes = crate::meta::serialization::serialize_meta(&desc).unwrap();
+        let recovered: SliceDesc = crate::meta::serialization::deserialize_meta(&bytes).unwrap();
+        assert_eq!(desc, recovered);
+    }
+
+    #[test]
+    fn test_slice_desc_json_backward_compat() {
+        // Old JSON format must still work - MUST use deserialize_meta (not serde_json::from_str)
+        let json_bytes = br#"{"slice_id":1,"chunk_id":2,"offset":100,"length":4096}"#;
+        let desc: SliceDesc = crate::meta::serialization::deserialize_meta(json_bytes).unwrap();
+        assert_eq!(desc.slice_id, 1);
+        assert_eq!(desc.chunk_id, 2);
+        assert_eq!(desc.offset, 100);
+        assert_eq!(desc.length, 4096);
     }
 }
