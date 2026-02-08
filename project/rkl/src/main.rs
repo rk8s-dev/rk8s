@@ -11,11 +11,11 @@ mod task;
 
 use commands::{
     compose::ComposeCommand, container::ContainerCommand, deployment::DeploymentCommand,
-    pod::PodCommand, replicaset::ReplicaSetCommand,
+    pod::PodCommand, replicaset::ReplicaSetCommand, service::ServiceCommand,
 };
 use commands::{
     compose::compose_execute, container::container_execute, deployment::deployment_execute,
-    pod::pod_execute, replicaset::replicaset_execute,
+    pod::pod_execute, replicaset::replicaset_execute, service::service_execute,
 };
 use tracing::error;
 
@@ -42,6 +42,7 @@ impl Cli {
             Workload::Volume(cmd) => volume_execute(cmd),
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
             Workload::Deployment(cmd) => deployment_execute(cmd),
+            Workload::Service(cmd) => service_execute(cmd),
         }
     }
 }
@@ -68,6 +69,9 @@ enum Workload {
 
     #[command(subcommand, about = "Manage Deployments", alias = "deploy")]
     Deployment(DeploymentCommand),
+
+    #[command(subcommand, about = "Manage Services", alias = "svc")]
+    Service(ServiceCommand),
 }
 
 fn main() -> Result<(), anyhow::Error> {

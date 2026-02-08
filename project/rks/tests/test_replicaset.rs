@@ -103,6 +103,7 @@ fn make_test_replicaset(name: &str, replicas: i32) -> ReplicaSet {
                     }],
                     init_containers: Vec::new(),
                     tolerations: Vec::new(),
+                    affinity: None,
                 },
             },
         },
@@ -470,6 +471,7 @@ async fn test_replicaset_adopts_orphan_pods() -> Result<()> {
                 }],
                 init_containers: Vec::new(),
                 tolerations: Vec::new(),
+                affinity: None,
             },
             status: Default::default(),
         };

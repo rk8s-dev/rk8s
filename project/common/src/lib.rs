@@ -675,6 +675,13 @@ pub enum RksMessage {
     },
     GetDeploymentHistory(String),
 
+    // Service operations
+    CreateService(Box<ServiceTask>),
+    UpdateService(Box<ServiceTask>),
+    DeleteService(String),
+    GetService(String),
+    ListService,
+
     GetNodeCount,
     RegisterNode(Box<Node>),
     UserRequest(String),
@@ -706,6 +713,9 @@ pub enum RksMessage {
     GetDeploymentRes(Box<Deployment>),
     ListDeploymentRes(Vec<Deployment>),
     DeploymentHistoryRes(Vec<DeploymentRevisionInfo>),
+    // Service responses
+    GetServiceRes(Box<ServiceTask>),
+    ListServiceRes(Vec<ServiceTask>),
     // (Podname, Podip)
     SetPodip((String, String)),
     Certificate(IssueCertificateResponse),
@@ -748,6 +758,13 @@ impl std::fmt::Debug for RksMessage {
             Self::GetDeploymentHistory(name) => {
                 write!(f, "RksMessage::GetDeploymentHistory {{ name: {} }}", name)
             }
+            Self::CreateService(_) => f.write_str("RksMessage::CreateService { .. }"),
+            Self::UpdateService(_) => f.write_str("RksMessage::UpdateService { .. }"),
+            Self::DeleteService(name) => {
+                write!(f, "RksMessage::DeleteService {{ name: {} }}", name)
+            }
+            Self::GetService(name) => write!(f, "RksMessage::GetService {{ name: {} }}", name),
+            Self::ListService => f.write_str("RksMessage::ListService"),
             Self::GetNodeCount => f.write_str("RksMessage::GetNodeCount"),
             Self::RegisterNode(_) => f.write_str("RksMessage::RegisterNode { .. }"),
             Self::UserRequest(_) => f.write_str("RksMessage::UserRequest { .. }"),
@@ -804,6 +821,14 @@ impl std::fmt::Debug for RksMessage {
                     history.len()
                 )
             }
+            Self::GetServiceRes(_) => f.write_str("RksMessage::GetServiceRes { .. }"),
+            Self::ListServiceRes(services) => {
+                write!(
+                    f,
+                    "RksMessage::ListServiceRes {{ count: {} }}",
+                    services.len()
+                )
+            }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(
                     f,
@@ -852,6 +877,11 @@ impl Display for RksMessage {
             Self::GetDeploymentHistory(name) => {
                 write!(f, "Get deployment '{}' revision history", name)
             }
+            Self::CreateService(svc) => write!(f, "Create service '{}'", svc.metadata.name),
+            Self::UpdateService(svc) => write!(f, "Update service '{}'", svc.metadata.name),
+            Self::DeleteService(name) => write!(f, "Delete service '{}'", name),
+            Self::GetService(name) => write!(f, "Get service '{}'", name),
+            Self::ListService => f.write_str("List services"),
             Self::GetNodeCount => f.write_str("Get node count"),
             Self::RegisterNode(node) => write!(f, "Register node '{}'", node.metadata.name),
             Self::UserRequest(payload) => write!(f, "User request: {}", payload),
@@ -970,6 +1000,28 @@ impl Display for RksMessage {
                     "Deployment history response: {} revision(s)",
                     history.len()
                 )
+            }
+            Self::GetServiceRes(svc) => {
+                write!(f, "Get service '{}' response", svc.metadata.name)
+            }
+            Self::ListServiceRes(services) => {
+                if services.is_empty() {
+                    return f.write_str("List services response: no services found");
+                }
+                let preview = services
+                    .iter()
+                    .take(3)
+                    .map(|svc| svc.metadata.name.as_str())
+                    .collect::<Vec<_>>();
+                if services.len() > preview.len() {
+                    return write!(
+                        f,
+                        "List services response: {} (+{} more)",
+                        preview.join(", "),
+                        services.len() - preview.len()
+                    );
+                }
+                write!(f, "List services response: {}", preview.join(", "))
             }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
@@ -1216,7 +1268,7 @@ pub struct ExternalInterface {
     pub ext_v6_addr: Option<Ipv6Addr>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ServiceSpec {
     #[serde(rename = "type", default = "default_service_type")]
     pub service_type: String, // ClusterIP, NodePort, LoadBalancer
@@ -1236,7 +1288,7 @@ fn default_service_type() -> String {
     "ClusterIP".to_string()
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ServicePort {
     #[serde(rename = "port")]
     pub port: i32,

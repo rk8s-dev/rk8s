@@ -301,6 +301,97 @@ pub async fn dispatch_user(
             }
         }
 
+        // Service operations
+        RksMessage::CreateService(mut svc) => {
+            if xline_store
+                .get_service_yaml(&svc.metadata.name)
+                .await?
+                .is_some()
+            {
+                let err_msg = format!("service \"{}\" already exists", svc.metadata.name);
+                conn.send_msg(&RksMessage::Error(err_msg)).await?;
+                return Ok(());
+            }
+            let name = svc.metadata.name.clone();
+            if svc.metadata.creation_timestamp.is_none() {
+                svc.metadata.creation_timestamp = Some(Utc::now());
+            }
+            let yaml = serde_yaml::to_string(&*svc)?;
+            xline_store.insert_service_yaml(&name, &yaml).await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "created Service {name}"
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::UpdateService(incoming_svc) => {
+            let name = incoming_svc.metadata.name.clone();
+            if let Some(existing_yaml) = xline_store.get_service_yaml(&name).await? {
+                let mut final_svc: ServiceTask = serde_yaml::from_str(&existing_yaml)?;
+                if final_svc.spec != incoming_svc.spec {
+                    let current_gen = final_svc.metadata.generation.unwrap_or(0);
+                    final_svc.metadata.generation = Some(current_gen + 1);
+                    final_svc.spec = incoming_svc.spec.clone();
+                    info!(
+                        target: "rks::node::user_dispatch",
+                        "Service {} spec updated, add generation",
+                        name
+                    );
+                }
+                let yaml = serde_yaml::to_string(&final_svc)?;
+                xline_store.insert_service_yaml(&name, &yaml).await?;
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "updated Service {name} (preserved state)"
+                );
+            } else {
+                let yaml = serde_yaml::to_string(&*incoming_svc)?;
+                xline_store.insert_service_yaml(&name, &yaml).await?;
+            }
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::DeleteService(name) => {
+            xline_store
+                .delete_object(
+                    common::ResourceKind::Service,
+                    &name,
+                    common::DeletePropagationPolicy::Background,
+                )
+                .await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "marked Service {} for deletion (background policy)",
+                name
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::GetService(name) => {
+            if let Some(svc) = xline_store.get_service(&name).await? {
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved Service {name}"
+                );
+                conn.send_msg(&RksMessage::GetServiceRes(Box::new(svc)))
+                    .await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!("Service {} not found", name)))
+                    .await?;
+            }
+        }
+
+        RksMessage::ListService => {
+            let services = xline_store.list_services().await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "list current services: {} items",
+                services.len()
+            );
+            conn.send_msg(&RksMessage::ListServiceRes(services)).await?;
+        }
+
         RksMessage::GetNodeCount => {
             info!(
                 target: "rks::node::user_dispatch",

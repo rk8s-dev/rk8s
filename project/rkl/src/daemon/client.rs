@@ -284,8 +284,15 @@ pub async fn run_once(
                                         }
                                     }
 
+                                    let pod_ip = result
+                                        .pod_ip
+                                        .split('/')
+                                        .next()
+                                        .unwrap_or(&result.pod_ip)
+                                        .to_string();
+
                                     let _ = client
-                                        .send_msg(&RksMessage::SetPodip((pod_name, result.pod_ip)))
+                                        .send_msg(&RksMessage::SetPodip((pod_name, pod_ip)))
                                         .await;
                                 }
 
@@ -338,7 +345,11 @@ pub async fn run_once(
                             }
                         }
                         Ok(RksMessage::SetNftablesRules(rules)) => {
-                            info!("[worker] received nftables rules (len={})", rules.len());
+                            info!(
+                                "[worker] received nftables rules (len={}):{}",
+                                rules.len(),
+                                rules
+                            );
                             match network_receiver.apply_nft_rules(rules).await {
                                 Ok(()) => {
                                     info!("[worker] nftables rules applied");
@@ -356,8 +367,9 @@ pub async fn run_once(
                         }
                         Ok(RksMessage::UpdateNftablesRules(rules)) => {
                             info!(
-                                "[worker] received nftables rules update (len={})",
-                                rules.len()
+                                "[worker] received nftables rules update (len={}):{}",
+                                rules.len(),
+                                rules,
                             );
                             match network_receiver.apply_nft_rules(rules).await {
                                 Ok(()) => {

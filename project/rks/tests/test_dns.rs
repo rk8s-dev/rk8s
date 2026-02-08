@@ -4,7 +4,6 @@ use rks::dns::authority::run_dns_server;
 use rks::protocol::config::load_config;
 use std::{fs, sync::Arc};
 
-use env_logger;
 use log::{LevelFilter, info};
 use once_cell::sync::OnceCell;
 

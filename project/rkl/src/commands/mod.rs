@@ -33,6 +33,7 @@ pub mod container;
 pub mod deployment;
 pub mod pod;
 pub mod replicaset;
+pub mod service;
 pub mod volume;
 
 fn construct_container_root<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<PathBuf> {
