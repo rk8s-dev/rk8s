@@ -2474,6 +2474,8 @@ impl MetaStore for DatabaseMetaStore {
         }
 
         let now = Self::now_nanos();
+
+        // First, try to update size if needed
         let result = file_meta::Entity::update_many()
             .col_expr(
                 file_meta::Column::Size,
@@ -2498,6 +2500,21 @@ impl MetaStore for DatabaseMetaStore {
                 let _ = txn.rollback().await;
                 return Err(MetaError::NotFound(ino));
             }
+        }
+
+        // POSIX: clear setuid/setgid bits on write (security: prevent privilege escalation)
+        // Need to fetch-modify-update because Permission is a JSON field
+        if let Some(file) = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            let mut perm = file.permission.clone();
+            perm.mode &= !0o6000; // Clear setuid (04000) and setgid (02000) bits
+
+            let mut active: file_meta::ActiveModel = file.into();
+            active.permission = Set(perm);
+            active.update(&txn).await.map_err(MetaError::Database)?;
         }
 
         txn.commit().await.map_err(MetaError::Database)?;

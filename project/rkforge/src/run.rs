@@ -14,6 +14,12 @@ pub struct ExecInternalArgs {
     /// we use base64 to encode the entire command list as a single argument.
     #[arg(long)]
     pub commands_base64: String,
+    /// Working directory for command execution. If not specified, defaults to "/".
+    #[arg(long)]
+    pub working_dir: Option<String>,
+    /// User to run the command as. Format: "user", "uid", "user:group", "uid:gid", etc.
+    #[arg(long)]
+    pub user: Option<String>,
 }
 
 pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
@@ -44,6 +50,17 @@ pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
         .map(|s| CString::new(s.as_bytes()).context("Environment variable contains null byte"))
         .collect::<Result<Vec<_>>>()?;
 
-    do_exec(mountpoint, &commands, &envp)?;
+    // Get working directory, default to "/"
+    let working_dir = args.working_dir.as_deref().unwrap_or("/");
+
+    // Pass raw user string to do_exec; user resolution happens after chroot
+    // so it reads the container's /etc/passwd instead of the host's.
+    do_exec(
+        mountpoint,
+        &commands,
+        &envp,
+        working_dir,
+        args.user.as_deref(),
+    )?;
     unreachable!();
 }

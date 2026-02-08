@@ -13,6 +13,11 @@ use tracing::trace;
 pub struct RunTask {
     pub commands: Vec<String>,
     pub envp: Vec<String>,
+    /// Working directory for command execution. If None, defaults to "/".
+    pub working_dir: Option<String>,
+    /// User to run the command as. Format: "user", "uid", "user:group", "uid:gid", etc.
+    /// If None, runs as root.
+    pub user: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -68,7 +73,10 @@ impl TaskExec for RunTask {
             serde_json::to_string(&self.envp).context("Failed to serialize envp to json")?;
         let envp_base64 = general_purpose::STANDARD.encode(envp_json);
 
-        trace!("Run commands: {:?}, envp: {:?}", self.commands, self.envp);
+        trace!(
+            "Run commands: {:?}, envp: {:?}, working_dir: {:?}, user: {:?}",
+            self.commands, self.envp, self.working_dir, self.user
+        );
         command
             .arg("--mountpoint")
             .arg(&session.mountpoint)
@@ -76,6 +84,16 @@ impl TaskExec for RunTask {
             .arg(&envp_base64)
             .arg("--commands-base64")
             .arg(commands_base64);
+
+        // Add working directory if specified
+        if let Some(ref working_dir) = self.working_dir {
+            command.arg("--working-dir").arg(working_dir);
+        }
+
+        // Add user if specified
+        if let Some(ref user) = self.user {
+            command.arg("--user").arg(user);
+        }
 
         let status = command.status().context("Failed to run run command")?;
         if !status.success() {

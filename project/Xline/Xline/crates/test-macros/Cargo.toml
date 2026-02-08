@@ -1,0 +1,25 @@
+[package]
+name = "test-macros"
+authors = ["DatenLord <dev@datenlord.io>"]
+categories = ["Macros"]
+description = "Macros for test configurations"
+keywords = ["Test", "Macros"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/xline-kv/Xline/tree/master/test-macros"
+version = "0.1.0"
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+assert_cmd = "2.0.15"
+
+[lints]
+workspace = true

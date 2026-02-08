@@ -1,17 +1,32 @@
 use anyhow::{Result, bail};
 use dockerfile_parser::{
-    ArgInstruction, BreakableStringComponent, CmdInstruction, CopyInstruction,
+    ArgInstruction, BreakableString, BreakableStringComponent, CmdInstruction, CopyInstruction,
     EntrypointInstruction, EnvInstruction, FromInstruction, Instruction, LabelInstruction,
     RunInstruction, ShellOrExecExpr,
 };
+use serde_json;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    image::context::StageContext as Context,
+    image::{config::normalize_path, context::StageContext as Context},
     pull::sync_pull_or_get_image,
     storage::full_image_ref,
     task::{CopyTask, RunTask, TaskExec},
 };
+
+/// Extract the argument string from a BreakableString (used for Misc instructions like WORKDIR, USER).
+fn extract_misc_argument(args: &BreakableString) -> String {
+    let mut result = String::new();
+    for component in args.components.iter() {
+        match component {
+            BreakableStringComponent::Comment(_) => {}
+            BreakableStringComponent::String(spanned_string) => {
+                result.push_str(&spanned_string.content);
+            }
+        }
+    }
+    result.trim().to_string()
+}
 
 /// An extension trait to execute dockerfile instructions.
 pub trait InstructionExt<P: AsRef<Path>> {
@@ -29,13 +44,118 @@ impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
             Instruction::Cmd(inst) => inst.execute(ctx),
             Instruction::Copy(inst) => inst.execute(ctx),
             Instruction::Env(inst) => inst.execute(ctx),
-            // TODO: These instructions are currently ignored but should be properly
-            // recorded in the image config for OCI compliance
+            // Handle miscellaneous instructions
             Instruction::Misc(misc) => {
                 let instr_name = misc.instruction.content.to_uppercase();
                 match instr_name.as_str() {
-                    "EXPOSE" | "STOPSIGNAL" | "WORKDIR" | "USER" | "VOLUME" | "HEALTHCHECK"
-                    | "SHELL" | "ONBUILD" => {
+                    "WORKDIR" => {
+                        let workdir = extract_misc_argument(&misc.arguments);
+                        if workdir.is_empty() {
+                            bail!("WORKDIR requires a path argument");
+                        }
+                        tracing::debug!("Setting WORKDIR to: {}", workdir);
+                        ctx.image_config.set_working_dir(workdir);
+                        Ok(())
+                    }
+                    "USER" => {
+                        let user = extract_misc_argument(&misc.arguments);
+                        if user.is_empty() {
+                            bail!("USER requires a user argument");
+                        }
+                        tracing::debug!("Setting USER to: {}", user);
+                        ctx.image_config.set_user(user);
+                        Ok(())
+                    }
+                    "VOLUME" => {
+                        // Extract volume paths from arguments
+                        // VOLUME supports multiple formats:
+                        // - VOLUME /data
+                        // - VOLUME /data /logs
+                        // - VOLUME ["/data", "/logs"]
+                        let volume_arg = extract_misc_argument(&misc.arguments);
+                        if volume_arg.is_empty() {
+                            bail!("VOLUME requires at least one path argument");
+                        }
+
+                        let volumes: Vec<String> = if volume_arg.starts_with('[') {
+                            // JSON-array form: must be valid JSON, otherwise fail the build
+                            match serde_json::from_str::<Vec<String>>(&volume_arg) {
+                                Ok(v) => v,
+                                Err(err) => {
+                                    bail!("Invalid JSON array syntax in VOLUME instruction: {err}");
+                                }
+                            }
+                        } else {
+                            volume_arg
+                                .split_whitespace()
+                                .map(|s| s.to_string())
+                                .collect()
+                        };
+
+                        for vol in volumes {
+                            let vol = vol.trim().to_string();
+                            if !vol.is_empty() {
+                                tracing::debug!("Adding VOLUME: {}", vol);
+                                ctx.image_config.add_volume(vol);
+                            }
+                        }
+                        Ok(())
+                    }
+                    "STOPSIGNAL" => {
+                        let signal = extract_misc_argument(&misc.arguments);
+                        if signal.is_empty() {
+                            bail!("STOPSIGNAL requires a signal argument");
+                        }
+                        tracing::debug!("Setting STOPSIGNAL to: {}", signal);
+                        ctx.image_config.set_stop_signal(signal);
+                        Ok(())
+                    }
+                    "EXPOSE" => {
+                        // Extract exposed ports from arguments
+                        // EXPOSE supports multiple formats:
+                        // - EXPOSE 80
+                        // - EXPOSE 80/tcp
+                        // - EXPOSE 80/udp
+                        // - EXPOSE 80 443 (multiple ports)
+                        // - EXPOSE 80/tcp 443/tcp
+                        let expose_arg = extract_misc_argument(&misc.arguments);
+                        if expose_arg.is_empty() {
+                            bail!("EXPOSE requires at least one port argument");
+                        }
+
+                        for port in expose_arg.split_whitespace() {
+                            let port = port.trim().to_string();
+                            if !port.is_empty() {
+                                tracing::debug!("Adding EXPOSE: {}", port);
+                                ctx.image_config.add_exposed_port(port);
+                            }
+                        }
+                        Ok(())
+                    }
+                    "SHELL" => {
+                        let shell_arg = extract_misc_argument(&misc.arguments);
+                        if shell_arg.is_empty() {
+                            bail!("SHELL requires a JSON array argument");
+                        }
+
+                        let shell: Vec<String> = match serde_json::from_str(&shell_arg) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                bail!("SHELL requires a valid JSON array: {}", e);
+                            }
+                        };
+
+                        if shell.is_empty() {
+                            bail!("SHELL array cannot be empty");
+                        }
+
+                        tracing::debug!("Setting SHELL to: {:?}", shell);
+                        ctx.image_config.set_shell(shell);
+                        Ok(())
+                    }
+                    // TODO: These instructions are currently ignored but should be properly
+                    // recorded in the image config for OCI compliance
+                    "HEALTHCHECK" | "ONBUILD" => {
                         tracing::warn!(
                             "Instruction {} is ignored (not yet implemented)",
                             instr_name
@@ -104,7 +224,9 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
                     .collect();
             }
             ShellOrExecExpr::Shell(shell_expr) => {
-                command_args.extend(vec!["/bin/sh".to_owned(), "-c".to_owned()]);
+                // Use custom shell if set, otherwise default to ["/bin/sh", "-c"]
+                let shell = ctx.image_config.get_shell();
+                command_args.extend(shell);
                 let mut script = String::new();
                 for component in shell_expr.components.iter() {
                     match component {
@@ -129,6 +251,8 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
         let task = RunTask {
             commands: command_args,
             envp,
+            working_dir: ctx.image_config.working_dir.clone(),
+            user: ctx.image_config.user.clone(),
         };
         task.execute(ctx.mount_config)
     }
@@ -206,11 +330,24 @@ impl<P: AsRef<Path>> InstructionExt<P> for CopyInstruction {
 
         let dest = self.destination.content.clone();
         let dest = if dest.starts_with('/') {
+            // Absolute path - normalize to resolve `.` and `..` components
+            let normalized = normalize_path(&dest);
             ctx.mount_config
                 .mountpoint
-                .join(dest.trim_start_matches('/'))
+                .join(normalized.trim_start_matches('/'))
         } else {
-            ctx.mount_config.mountpoint.join("root").join(dest)
+            // Relative path - resolve based on working directory, then normalize
+            let working_dir = ctx.image_config.get_working_dir();
+            let abs_dest = if working_dir == "/" {
+                format!("/{}", dest)
+            } else {
+                format!("{}/{}", working_dir, dest)
+            };
+            // Normalize to resolve `..` segments and prevent path traversal
+            let normalized = normalize_path(&abs_dest);
+            ctx.mount_config
+                .mountpoint
+                .join(normalized.trim_start_matches('/'))
         };
 
         let build_ctx = ctx.build_context.as_ref().canonicalize()?;

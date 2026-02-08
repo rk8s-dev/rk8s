@@ -147,6 +147,9 @@ pub enum VfsError {
     #[error("invalid filename")]
     InvalidFilename,
 
+    #[error("filename too long{path}")]
+    FilenameTooLong { path: PathHint },
+
     #[error("argument list too long")]
     ArgumentListTooLong,
 
@@ -298,6 +301,7 @@ impl From<VfsError> for std::io::Error {
             VfsError::InvalidRenameTarget { .. } => ErrorKind::InvalidInput,
             VfsError::TooManyLinks => ErrorKind::TooManyLinks,
             VfsError::InvalidFilename => ErrorKind::InvalidFilename,
+            VfsError::FilenameTooLong { .. } => ErrorKind::InvalidFilename,
             VfsError::ArgumentListTooLong => ErrorKind::ArgumentListTooLong,
             VfsError::Interrupted => ErrorKind::Interrupted,
             VfsError::Unsupported => ErrorKind::Unsupported,

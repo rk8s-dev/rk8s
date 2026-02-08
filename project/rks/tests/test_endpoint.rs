@@ -93,6 +93,7 @@ fn pod_with_ip_and_labels(name: &str, ip: &str, labels: HashMap<String, String>)
         containers: vec![],
         init_containers: vec![],
         tolerations: vec![],
+        ..Default::default()
     };
     let status = PodStatus {
         pod_ip: Some(ip.to_string()),

@@ -66,6 +66,10 @@ const EXTEND_FILE_SIZE_LUA: &str = r#"
     node.attr.size = new_size
     node.attr.mtime = timestamp
     node.attr.ctime = timestamp
+    -- POSIX: clear setuid/setgid bits on write (security: prevent privilege escalation)
+    if node.attr.mode then
+        node.attr.mode = bit.band(node.attr.mode, bit.bnot(6144))  -- Clear 06000 (setuid+setgid)
+    end
     redis.call('SET', KEYS[1], cjson.encode(node))
     return cjson.encode({ok=true, updated=true})
 "#;
