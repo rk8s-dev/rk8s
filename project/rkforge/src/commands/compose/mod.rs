@@ -6,7 +6,7 @@ use std::{
     vec,
 };
 
-use anyhow::{Ok, Result, anyhow};
+use anyhow::{Context, Ok, Result, anyhow};
 use clap::Subcommand;
 use libcontainer::container::State;
 use libcontainer::syscall::syscall::create_syscall;
@@ -61,13 +61,12 @@ pub struct DownArgs {
 
 #[derive(Args, Debug)]
 pub struct UpArgs {
-    #[arg(value_name = "COMPOSE_YAML")]
+    #[arg(short = 'f', value_name = "COMPOSE_YAML")]
     pub compose_yaml: Option<String>,
 
     #[arg(long = "project-name", value_name = "PROJECT_NAME")]
     pub project_name: Option<String>,
 }
-
 #[derive(Subcommand, Debug)]
 pub enum ComposeCommand {
     #[command(about = "Start a compose application from a compose yaml")]
@@ -90,6 +89,7 @@ pub struct ComposeMetadata {
     pub project_name: String,
 }
 
+#[derive(Debug)]
 pub struct ComposeManager {
     /// the path to store the basic info of compose application
     root_path: PathBuf,
@@ -107,8 +107,7 @@ impl ComposeManager {
 
         // /root_path/compose/compose_id to store the state of current compose application
         let root_path = Path::new(&root_path).join("compose").join(&project_name);
-
-        Ok(Self {
+        let mut manager = Self {
             root_path,
             network_manager: NetworkManager::new(project_name.clone()),
             config_manager: ConfigManager::new(),
@@ -116,7 +115,27 @@ impl ComposeManager {
             containers: vec![],
             volumes: vec![],
             startup_order: HashMap::new(),
-        })
+        };
+
+        manager.restore_compose_state()?;
+
+        Ok(manager)
+    }
+
+    fn restore_compose_state(&mut self) -> Result<()> {
+        let state_file = self.root_path.join("metadata.json");
+        if state_file.exists() {
+            let bytes = fs::read(&state_file)
+                .with_context(|| format!("failed to read compose state from {:?}", state_file))?;
+
+            let metadata: ComposeMetadata =
+                serde_json::from_slice(&bytes).context("failed to parse compose's state")?;
+
+            self.containers = metadata.containers.clone();
+            self.volumes = metadata.volumes.clone();
+        }
+
+        Ok(())
     }
 
     fn down(&self, _: DownArgs) -> Result<()> {
