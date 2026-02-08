@@ -26,6 +26,7 @@ pub mod barrier;
 pub mod barrier_aes_gcm;
 pub mod barrier_view;
 pub mod physical;
+#[cfg(feature = "etcd-client")]
 pub mod xline;
 
 /// A trait that abstracts core methods for all storage barrier types.
@@ -85,6 +86,7 @@ pub fn new_backend(t: &str, conf: &HashMap<String, Value>) -> Result<Arc<dyn Bac
             let backend = physical::file::FileBackend::new(conf)?;
             Ok(Arc::new(backend))
         }
+        #[cfg(feature = "etcd-client")]
         "xline" => {
             let backend = xline::XlineBackend::new(conf)?;
             Ok(Arc::new(backend))

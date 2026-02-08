@@ -33,12 +33,15 @@ use crate::{
     errors::RvError,
     logical::{Request, Response},
     modules::{
-        auth::AuthModule, credential::cert::CertModule, kv::KvModule, pki::PkiModule,
-        policy::PolicyModule,
+        auth::AuthModule, credential::cert::CertModule, kv::KvModule, openpgp::OpenPgpModule,
+        pki::PkiModule, policy::PolicyModule,
     },
     mount::MountsMonitor,
     storage::Backend,
 };
+
+#[cfg(feature = "ssh-key")]
+use crate::modules::ssh::SshModule;
 
 pub mod config;
 pub mod context;
@@ -92,6 +95,17 @@ impl RustyVault {
         // add pki_module
         let pki_module = PkiModule::new(core.clone());
         core.module_manager.add_module(Arc::new(pki_module))?;
+
+        // add ssh module
+        #[cfg(feature = "ssh-key")]
+        {
+            let ssh_module = SshModule::new(core.clone());
+            core.module_manager.add_module(Arc::new(ssh_module))?;
+        }
+
+        // add openpgp module
+        let openpgp_module = OpenPgpModule::new(core.clone());
+        core.module_manager.add_module(Arc::new(openpgp_module))?;
 
         // add credential module: cert
         let cert_module = CertModule::new(core.clone());

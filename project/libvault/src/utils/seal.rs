@@ -104,6 +104,110 @@ pub enum SealBoxError {
     ShamirSecretCombineFailed,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct SealedSecret {
+    pub box_data: SealBox<Vec<u8>>,
+    /// The encryption key for the SealBox.
+    /// WARNING: In a real production system, this key MUST NOT be stored alongside the data.
+    /// It should be encrypted with a master key (KEK) or stored in a separate KMS/HSM.
+    /// For this implementation, we are encrypting it with a hardcoded "root" key simulation
+    /// to demonstrate the concept of "wrapping".
+    pub encrypted_key: Vec<u8>,
+    pub salt: Option<Vec<u8>>,
+    pub encrypted: bool,
+}
+
+impl SealedSecret {
+    /// Helper to wrap the raw key into an encrypted_key using a simulated root key.
+    /// In production, use a real KMS.
+    pub fn new(box_data: SealBox<Vec<u8>>, raw_key: [u8; 32]) -> Self {
+        // Simulating a root key encryption (AES-256-GCM)
+        // For demo purposes, we use a fixed key (DO NOT DO THIS IN PROD)
+        let root_kek = b"0123456789abcdef0123456789abcdef";
+
+        use crate::modules::crypto::{AEADCipher, AES, AESKeySize, BlockCipher, CipherMode};
+
+        use rand::Rng;
+        let mut iv = [0u8; 16];
+        rand::thread_rng().fill(&mut iv);
+
+        let mut aes = AES::new(
+            false,
+            Some(AESKeySize::AES256),
+            Some(CipherMode::GCM),
+            Some(root_kek.to_vec()),
+            Some(iv.to_vec()),
+        )
+        .expect("Failed to init KEK cipher");
+
+        aes.set_aad(vec![]).expect("Failed to set AAD");
+        let encrypted_key = aes
+            .encrypt(&raw_key.to_vec())
+            .expect("Failed to encrypt DEK");
+        let mut final_blob = Vec::new();
+        final_blob.extend_from_slice(&aes.get_key_iv().1); // Nonce (12 bytes for GCM usually, but AES struct returns 16)
+        final_blob.extend_from_slice(&aes.get_tag().expect("No tag")); // Tag
+        final_blob.extend_from_slice(&encrypted_key);
+
+        Self {
+            box_data,
+            encrypted_key: final_blob,
+            salt: None,
+            encrypted: true,
+        }
+    }
+
+    /// Helper to unwrap the key
+    pub fn unwrap_key(&self) -> Result<[u8; 32], anyhow::Error> {
+        let root_kek = b"0123456789abcdef0123456789abcdef";
+        use crate::modules::crypto::{AEADCipher, AES, AESKeySize, BlockCipher, CipherMode};
+
+        // Extract Nonce (16), Tag (16), Ciphertext (rest) based on AES struct behavior
+        // Assuming AES returns 16 byte IV/Nonce
+        if self.encrypted_key.len() < 32 {
+            return Err(anyhow::anyhow!("Invalid encrypted key length"));
+        }
+
+        let nonce = &self.encrypted_key[0..16];
+        let tag = &self.encrypted_key[16..32];
+        let ciphertext = &self.encrypted_key[32..];
+
+        let mut aes = AES::new(
+            false,
+            Some(AESKeySize::AES256),
+            Some(CipherMode::GCM),
+            Some(root_kek.to_vec()),
+            Some(nonce.to_vec()),
+        )
+        .map_err(|_| anyhow::anyhow!("Failed to init KEK cipher"))?;
+
+        aes.set_aad(vec![])
+            .map_err(|_| anyhow::anyhow!("Failed to set AAD"))?;
+        aes.set_tag(tag.to_vec())
+            .map_err(|_| anyhow::anyhow!("Failed to set tag"))?;
+
+        let decrypted = aes
+            .decrypt(&ciphertext.to_vec())
+            .map_err(|_| anyhow::anyhow!("Failed to decrypt DEK"))?;
+
+        decrypted
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid DEK length"))
+    }
+
+    /// Helper to seal data directly
+    pub fn seal(data: &[u8]) -> Result<Self, anyhow::Error> {
+        use rand::Rng;
+        let mut key_bytes = [0u8; 32];
+        rand::thread_rng().fill(&mut key_bytes);
+
+        let sb = SealBox::new_with_key(data.to_vec(), key_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to seal data: {}", e))?;
+
+        Ok(Self::new(sb, key_bytes))
+    }
+}
+
 /// A secure container that encrypts data and distributes the decryption key using Shamir's Secret Sharing.
 ///
 /// SealBox provides a secure way to store sensitive data by encrypting it with AES-256-GCM
@@ -147,6 +251,7 @@ pub struct SealBox<T> {
     /// This field is skipped during serialization for security reasons.
     /// Shares are only stored in memory and not persisted.
     #[serde(skip)]
+    #[zeroize(skip)]
     shares: Option<Vec<Vec<u8>>>,
     /// The reconstructed encryption key (32 bytes for AES-256)
     ///
@@ -246,6 +351,63 @@ where
             tag,
             threshold,
             total_shares,
+            shares: None,
+            key: Some(key),
+            value: Some(data),
+            deprecated_shares: BHashSet::default(),
+        })
+    }
+
+    /// Creates a new SealBox with a specific key.
+    pub fn new_with_key(data: T, key: [u8; 32]) -> Result<Self, SealBoxError> {
+        let serialized = serde_json::to_vec(&data).unwrap();
+
+        let now_ms = Utc::now()
+            .timestamp_millis()
+            .to_string()
+            .as_bytes()
+            .to_vec();
+
+        use rand::Rng;
+        let mut iv = [0u8; 16];
+        rand::thread_rng().fill(&mut iv);
+
+        let mut aes_encrypter = AES::new(
+            false,
+            Some(AESKeySize::AES256),
+            Some(CipherMode::GCM),
+            Some(key.to_vec()),
+            Some(iv.to_vec()),
+        )
+        .map_err(|_| SealBoxError::EncryptionFailed)?;
+
+        aes_encrypter
+            .set_aad(now_ms.clone())
+            .map_err(|_| SealBoxError::EncryptionFailed)?;
+        let encrypted = aes_encrypter
+            .encrypt(&serialized)
+            .map_err(|_| SealBoxError::EncryptionFailed)?;
+
+        let mut tag: [u8; 16] = [0; 16];
+        tag[..16].copy_from_slice(
+            &aes_encrypter
+                .get_tag()
+                .map_err(|_| SealBoxError::EncryptionFailed)?,
+        );
+
+        let mut nonce: [u8; 16] = [0; 16];
+        nonce[..16].copy_from_slice(&aes_encrypter.get_key_iv().1);
+
+        let mut aad: [u8; 13] = [0; 13];
+        aad[..13].copy_from_slice(&now_ms);
+
+        Ok(Self {
+            sealed_data: encrypted,
+            nonce,
+            aad,
+            tag,
+            threshold: 1,
+            total_shares: 1,
             shares: None,
             key: Some(key),
             value: Some(data),
@@ -411,6 +573,42 @@ where
             _ => self.shares = None,
         }
         ret
+    }
+
+    /// Unseals the box using a specific key (not a share).
+    pub fn unseal_with_key(&mut self, key: &[u8]) -> Result<(), SealBoxError> {
+        if self.is_unsealed() {
+            return Err(SealBoxError::NotSealed);
+        }
+
+        let mut aes_decrypter = AES::new(
+            false,
+            Some(AESKeySize::AES256),
+            Some(CipherMode::GCM),
+            Some(key.to_vec()),
+            Some(self.nonce.to_vec()),
+        )
+        .map_err(|_| SealBoxError::DecryptionFailed)?;
+
+        aes_decrypter
+            .set_aad(self.aad.to_vec())
+            .map_err(|_| SealBoxError::DecryptionFailed)?;
+        aes_decrypter
+            .set_tag(self.tag.to_vec())
+            .map_err(|_| SealBoxError::DecryptionFailed)?;
+
+        let decrypted = aes_decrypter
+            .decrypt(&self.sealed_data)
+            .map_err(|_| SealBoxError::DecryptionFailed)?;
+
+        let value: T =
+            serde_json::from_slice(&decrypted).map_err(|_| SealBoxError::DecryptionFailed)?;
+
+        let key_arr: [u8; 32] = key.try_into().map_err(|_| SealBoxError::DecryptionFailed)?;
+
+        self.key = Some(key_arr);
+        self.value = Some(value);
+        Ok(())
     }
 
     /// Unseals the box once and marks all used shares as deprecated.

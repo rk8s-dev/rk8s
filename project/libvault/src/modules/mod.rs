@@ -16,8 +16,11 @@ pub mod auth;
 pub mod credential;
 pub mod crypto;
 pub mod kv;
+pub mod openpgp;
 pub mod pki;
 pub mod policy;
+#[cfg(feature = "ssh-key")]
+pub mod ssh;
 pub mod system;
 
 pub trait RequestExt {

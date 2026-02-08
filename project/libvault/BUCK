@@ -96,6 +96,8 @@ rust_library(
         "//third-party/rust/crates/webpki-roots/0.26.11:webpki-roots",
         "//third-party/rust/crates/x509-parser/0.18.0:x509-parser",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
+        "//third-party/rust/crates/ssh-key/0.6.7:ssh-key",
+        "//third-party/rust/crates/pgp/0.17.0:pgp",
     ],
 )
 
