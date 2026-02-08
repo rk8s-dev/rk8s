@@ -50,9 +50,9 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
                 .expect("failed to set global STATUS_MANAGER");
 
             let probe_manager = Arc::new(ProbeManager::new());
-            if PROBE_MANAGER.set(probe_manager.clone()).is_err() {
-                panic!("[daemon] failed to set global PROBE_MANAGER");
-            }
+            PROBE_MANAGER
+                .set(probe_manager.clone())
+                .expect("[daemon] failed to set global PROBE_MANAGER");
 
             tokio::spawn(async move {
                 let mut pleg = PLEG::new(

@@ -112,6 +112,21 @@ impl Default for ProbeResultManager {
     }
 }
 
+impl std::fmt::Debug for ProbeResultManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProbeResultManager")
+            .field(
+                "result_cache",
+                &self
+                    .result_cache
+                    .iter()
+                    .map(|v| (v.key().clone(), v.value().result.clone()))
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
 impl ProbeResultManager {
     /// Creates a new empty result manager.
     pub fn new() -> Self {
@@ -155,6 +170,31 @@ pub struct ProbeManager {
 impl Default for ProbeManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for ProbeManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProbeManager")
+            .field("liveness_results", &self.liveness_results)
+            .field("readiness_results", &self.readiness_results)
+            .field("startup_results", &self.startup_results)
+            .field(
+                "probe_workers",
+                &self
+                    .probe_workers
+                    .iter()
+                    .map(|entry| {
+                        let workers = entry
+                            .value()
+                            .iter()
+                            .map(|worker| format!("{worker:?}"))
+                            .collect::<Vec<_>>();
+                        (entry.key().clone(), workers)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
     }
 }
 
@@ -327,6 +367,15 @@ pub struct ProbeWorker {
     container_id: String,
     handle: Option<tokio::task::JoinHandle<()>>,
     stop_signal_tx: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl std::fmt::Debug for ProbeWorker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProbeWorker")
+            .field("pod_id", &self.pod_id)
+            .field("container_id", &self.container_id)
+            .finish()
+    }
 }
 
 impl ProbeWorker {
