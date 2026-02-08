@@ -81,6 +81,8 @@ pub struct CoreState {
     kek: Vec<u8>,
 }
 
+use std::fmt;
+
 pub struct Core {
     pub self_ptr: Weak<Core>,
     pub physical: Arc<dyn PhysicalBackend>,
@@ -94,6 +96,15 @@ pub struct Core {
     pub mounts_monitor: ArcSwapOption<MountsMonitor>,
     pub mounts_monitor_interval: u64,
     pub state: ArcSwap<CoreState>,
+}
+
+impl fmt::Debug for Core {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Core")
+            .field("mount_entry_hmac_level", &self.mount_entry_hmac_level)
+            .field("mounts_monitor_interval", &self.mounts_monitor_interval)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for CoreState {

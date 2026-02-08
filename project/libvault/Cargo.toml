@@ -17,7 +17,7 @@ serde_json = { workspace = true }
 serde_bytes = { workspace = true }
 serde_yaml = { workspace = true }
 go-defer = { workspace = true }
-rand = { workspace = true }
+rand = "0.8"
 derivative = { workspace = true }
 enum-map = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
@@ -56,7 +56,7 @@ lockfile = { workspace = true }
 arc-swap = { workspace = true }
 blake3 = { workspace = true }
 itertools = { workspace = true }
-etcd-client = { workspace = true, features = ["tls"] }
+etcd-client = { workspace = true, features = ["tls"], optional = true }
 tracing = { workspace = true }
 builder-pattern = { workspace = true }
 x509-parser = { workspace = true }
@@ -64,6 +64,9 @@ rustls-webpki = { workspace = true }
 tonic = { workspace = true }
 openssl = { workspace = true, optional = true }
 openssl-sys = { workspace = true, optional = true }
+ssh-key = { workspace = true, optional = true }
+pgp = { workspace = true }
+tempfile = { workspace = true }
 
 [build-dependencies]
 toml = { workspace = true }
@@ -72,12 +75,13 @@ toml = { workspace = true }
 default = ["crypto_adaptor_openssl"]
 crypto_adaptor_openssl = ["dep:openssl", "dep:openssl-sys"]
 crypto_adaptor_tongsuo = ["dep:openssl", "dep:openssl-sys"]
+etcd-client = ["dep:etcd-client"]
 
 [target.'cfg(unix)'.dependencies]
 daemonize = { workspace = true }
 
 [dependencies.foreign-types]
-version = "0.3.1"
+version = "0.3.2"
 
 [dependencies.libc]
 version = "0.2"
@@ -95,3 +99,12 @@ unnecessary_unwrap = "allow"
 collapsible_match = "allow"
 large_enum_variant = "allow"
 unnecessary_map_or = "allow"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+qlean = { workspace = true }

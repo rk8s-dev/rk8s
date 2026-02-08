@@ -174,6 +174,8 @@ pub enum RvError {
     ErrPkiDataInvalid,
     #[error("PKI internal error.")]
     ErrPkiInternal,
+    #[error("PKI certificate is revoked.")]
+    ErrPkiCertRevoked,
     #[error("Credentail is invalid.")]
     ErrCredentailInvalid,
     #[error("Credentail is not config.")]
@@ -314,12 +316,24 @@ pub enum RvError {
     #[error("Database connection info invalid")]
     ErrDatabaseConnectionInfoInvalid,
 
+    #[cfg(feature = "etcd-client")]
     #[error("Some etcd client error happened, {:?}", .source)]
     EtcdClientError {
         #[from]
         source: etcd_client::Error,
     },
 
+    #[cfg(feature = "ssh-key")]
+    #[error("Some ssh_key error happened, {:?}", .source)]
+    SshKeyError {
+        #[from]
+        source: ssh_key::Error,
+    },
+    #[error("Some pgp error happened, {:?}", .source)]
+    PgpError {
+        #[from]
+        source: pgp::errors::Error,
+    },
     #[error(transparent)]
     ErrOther(#[from] anyhow::Error),
     #[error("Some error happend, response text: {0}")]
