@@ -148,9 +148,7 @@ impl ComposeManager {
 
     fn clean_up(&self) -> Result<()> {
         // delete container
-        // have some question
         for container in &self.containers {
-            remove_container(&self.root_path, container)?;
             let pid = container.pid.expect("container no pid");
             let id = container.id.clone();
             let netns_path = format!("/proc/{pid}/ns/net");
@@ -161,6 +159,7 @@ impl ComposeManager {
                 ));
             }
             self.teardown_network(netns_path, id)?;
+            remove_container(&self.root_path, container)?;
         }
 
         fs::remove_dir_all(&self.root_path)
@@ -309,15 +308,24 @@ impl ComposeManager {
                     })?;
                 let configs_mounts = self.config_manager.get_mounts_by_service(&srv_name);
 
-                let mut runner =
-                    ContainerRunner::from_spec(container_spec.clone(), Some(self.root_path.clone()))?;
+                let mut runner = ContainerRunner::from_spec(
+                    container_spec.clone(),
+                    Some(self.root_path.clone()),
+                )?;
 
                 // Allocate IP from subnet for this container on this network (instead of 127.0.0.1)
                 let container_id = container_spec.name.clone();
                 let allocated_ip = self
                     .network_manager
                     .allocate_container_ip(&network_name, &container_id)
-                    .map_err(|e| anyhow!("allocate IP for {} on {}: {}", container_id, network_name, e))?;
+                    .map_err(|e| {
+                        anyhow!(
+                            "allocate IP for {} on {}: {}",
+                            container_id,
+                            network_name,
+                            e
+                        )
+                    })?;
                 runner.set_compose_assigned_ip(std::net::IpAddr::V4(allocated_ip));
 
                 runner.add_mounts(mounts);

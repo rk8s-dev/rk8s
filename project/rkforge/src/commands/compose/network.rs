@@ -278,7 +278,7 @@ fn next_container_ip_in_subnet(
     }
     Some(Ipv4Addr::from(next.to_be_bytes()))
 }
-
+#[derive(Debug)]
 pub struct NetworkManager {
     map: HashMap<String, NetworkSpec>,
     /// key: network_name; value: bridge interface
