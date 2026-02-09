@@ -150,7 +150,7 @@ pub fn get_image_config(manifest_path: impl AsRef<Path>) -> Result<ImageConfigur
 /// Paths starting with `/`, `./` or `../` are always treated as bundle paths:
 /// - if the path exists → Bundle (use local dir)
 /// - if not (e.g. when running under sudo with a user home path) → error, do not try to pull
-/// This avoids mis-treating a path like `/home/user/bundle` as an image name and pulling from default registry.
+///   This avoids mis-treating a path like `/home/user/bundle` as an image name and pulling from default registry.
 pub fn determine_image(target: impl AsRef<str>) -> Result<ImageType> {
     let s = target.as_ref();
     let is_path_like = s.starts_with('/') || s.starts_with("./") || s.starts_with("../");

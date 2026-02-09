@@ -494,7 +494,11 @@ impl NetworkManager {
 
     pub(crate) fn after_container_started(&self, runner: ContainerRunner) -> Result<()> {
         let container_id = runner.id();
-        if let IpAddr::V4(_) = runner.ip().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)) {
+        if runner
+            .ip()
+            .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+            .is_ipv4()
+        {
             let alias = vec![runner.id()];
             let mut networks = HashMap::new();
             let mut network_info = HashMap::new();
@@ -524,11 +528,8 @@ impl NetworkManager {
                             .map(|s| {
                                 (
                                     s.gateway,
-                                    IpNet::new(
-                                        IpAddr::V4(s.subnet.network()),
-                                        s.subnet.prefix() as u8,
-                                    )
-                                    .unwrap(),
+                                    IpNet::new(IpAddr::V4(s.subnet.network()), s.subnet.prefix())
+                                        .unwrap(),
                                 )
                             })
                             .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
@@ -659,7 +660,7 @@ pub fn add_resolv_conf(runner: &mut ContainerRunner) {
     host_path.push("rkl-netavark");
     host_path.push("resolv.conf");
     let host_path = host_path.into_os_string().into_string().unwrap();
-    let container_path = format!("/etc/resolv.conf");
+    let container_path = "/etc/resolv.conf".to_string();
 
     runner.add_mounts(vec![Mount {
         host_path,
