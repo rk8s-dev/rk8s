@@ -34,7 +34,7 @@ rust_library(
     deps = [
         "//third-party/rust/crates/bitflags/2.10.0:bitflags",
         "//third-party/rust/crates/kvm-bindings/0.14.0:kvm-bindings",
-        "//third-party/rust/crates/libc/0.2.178:libc",
+        "//third-party/rust/crates/libc/0.2.180:libc",
         "//third-party/rust/crates/vmm-sys-util/0.15.0:vmm-sys-util",
     ],
 )
