@@ -149,7 +149,12 @@ impl ComposeManager {
     fn clean_up(&self) -> Result<()> {
         // delete container
         for container in &self.containers {
-            let pid = container.pid.expect("container no pid");
+            let pid = container.pid.ok_or_else(|| {
+                anyhow!(
+                    "[container {}] PID not available for network teardown",
+                    container.id
+                )
+            })?;
             let id = container.id.clone();
             let netns_path = format!("/proc/{pid}/ns/net");
             if !Path::new(&netns_path).exists() {

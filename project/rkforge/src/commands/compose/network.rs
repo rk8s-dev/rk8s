@@ -39,7 +39,8 @@ pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
 
 pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
 pub const BRIDGE_CONF: &str = "rkl-standalone-bridge.conf";
-
+/// Subnet size for each compose network (256 IPs per network)
+/// Follows Podman's default subnet allocation strategy
 const DEFAULT_SUBNET_POOL_PREFIX: u8 = 24;
 
 /// Single pool: 172.17.0.0/16, each compose network allocates a /24 (e.g. 172.17.0.0/24, 172.17.1.0/24, ...).
@@ -608,6 +609,7 @@ impl NetworkManager {
                     false,
                 )
                 .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", runner.id()))?;
+            clean_tmp_netavark_json(&runner.id())?;
         } else {
             return Err(anyhow!("Unsupported ipv6 type"));
         }
@@ -638,6 +640,7 @@ impl NetworkManager {
 /// create resolv.conf file
 /// save base resolv.conf file
 pub fn create_resolv_conf() -> Result<()> {
+    // todo perfect future
     let contect = "search rkl.internal\nnameserver 172.17.0.1\n";
     let mut resolv_path = std::env::temp_dir();
     resolv_path.push("rkl-netavark");
@@ -650,8 +653,7 @@ pub fn create_resolv_conf() -> Result<()> {
     Ok(())
 }
 
-// add resolv.conf to container
-// todo !
+/// add resolv.conf to container
 pub fn add_resolv_conf(runner: &mut ContainerRunner) {
     let mut host_path = std::env::temp_dir();
     host_path.push("rkl-netavark");
@@ -696,4 +698,15 @@ fn create_tmp_netavark_json(opts: &NetworkOptions, id: &str) -> Result<OsString>
     let mut json_file = std::fs::File::create(&json_path)?;
     json_file.write_all(json_str.as_bytes())?;
     Ok(json_path.into_os_string())
+}
+fn clean_tmp_netavark_json(id: &str) -> Result<()> {
+    let mut json_path = std::env::temp_dir();
+    json_path.push("rkl-netavark");
+    json_path.push(format!("{}.network.json", id));
+    if let Some(parent) = json_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    std::fs::remove_file(&json_path)?;
+
+    Ok(())
 }
