@@ -1,6 +1,7 @@
 #![allow(unused)]
 use crate::api::xlinestore::XlineStore;
 use anyhow::Result;
+use chrono::Utc;
 use clap::builder::Str;
 use common::quic::SendStreamExt;
 use common::{PodTask, RksMessage};
@@ -46,6 +47,9 @@ pub async fn user_create(
         }
         return Ok(());
     }
+
+    let mut pod_task = pod_task;
+    pod_task.metadata.creation_timestamp = Some(Utc::now());
 
     // Serialize pod to YAML
     let pod_yaml = match serde_yaml::to_string(&pod_task) {

@@ -75,16 +75,18 @@ pub async fn get_pods(server_addr: &str, tls_cfg: &TLSConnectionArgs) -> anyhow:
     // convert to local Pod structs
     let mut pods = Vec::new();
     for server_pod in server_pods {
-        let pod_info = PodInfo::load(&root_path, &server_pod.metadata.name).ok();
-        if pod_info.is_none() {
-            debug!(
-                pod = %server_pod.metadata.name,
-                namespace = %server_pod.metadata.namespace,
-                "[status::pod] Pod not found in local runtime, skipping"
-            );
-            continue;
-        }
-        let pod_info = pod_info.unwrap();
+        let pod_info = match PodInfo::load(&root_path, &server_pod.metadata.name) {
+            Ok(info) => info,
+            Err(err) => {
+                debug!(
+                    pod = %server_pod.metadata.name,
+                    namespace = %server_pod.metadata.namespace,
+                    error = %err,
+                    "[status::pod] Failed to load pod info in local runtime, skipping"
+                );
+                continue;
+            }
+        };
         let containers = pod_info.get_pod_containers(&root_path)?;
         let sandbox = pod_info.get_pod_sandbox(&root_path)?;
 

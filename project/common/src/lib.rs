@@ -619,15 +619,6 @@ pub struct ContainerStatus {
 
     #[serde(default)]
     pub restart_count: u32,
-
-    #[serde(rename = "readinessProbe", default)]
-    pub readiness_probe: Option<ContainerProbeStatus>,
-
-    #[serde(rename = "livenessProbe", default)]
-    pub liveness_probe: Option<ContainerProbeStatus>,
-
-    #[serde(rename = "startupProbe", default)]
-    pub startup_probe: Option<ContainerProbeStatus>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
