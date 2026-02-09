@@ -1,7 +1,7 @@
 [workspace]
 members = [
-    "distribution", 
-    "libbridge", 
+    "distribution",
+    "libbridge",
     "libcni",
     "libnetwork",
     "libfuse-fs", 
@@ -11,12 +11,13 @@ members = [
     "rkl",
     "rks",
     "libruntime",
-    "libscheduler", 
+    "libscheduler",
     "common",
     "slayerfs",
     "libvault",
     "dagrs-derive",
-    "dagrs"
+    "dagrs",
+    "aardvark-dns"
 ]
 
 default-members = ["distribution", "rkl", "libbridge", "libipam", "rkforge", "libnetwork", "rks"]

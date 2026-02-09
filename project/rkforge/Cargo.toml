@@ -73,3 +73,5 @@ hickory-server = { version = "0.25.2", features=["resolver"] }
 hickory-proto = { workspace = true }
 hickory-resolver = { workspace = true }
 hickory-client = { workspace = true }
+ipnet = "2.11.0"
+netavark = "1.17.1"

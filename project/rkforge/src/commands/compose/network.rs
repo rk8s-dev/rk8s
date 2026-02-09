@@ -1,43 +1,37 @@
+use ipnet::IpNet;
+use libruntime::cri::cri_api::Mount;
+use netavark::commands::setup::Setup;
+use netavark::commands::teardown::Teardown;
+use netavark::network::types::Network;
+use netavark::network::types::NetworkOptions;
+use netavark::network::types::PerNetworkOptions;
+use netavark::network::types::Subnet;
 use std::collections::HashMap;
-use std::env;
+use std::ffi::OsString;
 use std::fs;
+use std::fs::File;
 use std::io::Write;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
-use std::process::Stdio;
-use std::str::FromStr;
-use std::thread;
-use std::time::Duration;
-use sysinfo::Pid;
-use sysinfo::System;
 
 use crate::commands::compose::spec::NetworkDriver::Bridge;
 use crate::commands::compose::spec::NetworkDriver::Host;
 use crate::commands::compose::spec::NetworkDriver::Overlay;
-use libruntime::dns;
-use libruntime::dns::PID_FILE_PATH;
+use crate::commands::compose::spec::NetworkSpec;
 
 use cni_plugin::ip_range::IpRange;
-use hickory_proto::rr::LowerName;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
 use libipam::config::IPAMConfig;
 use libipam::range_set::RangeSet;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::AsyncWriteExt;
-use tokio::io::BufReader;
-use tokio::net::UnixStream;
 
 use crate::commands::compose::spec::ComposeSpec;
-use crate::commands::compose::spec::NetworkSpec;
 use crate::commands::compose::spec::ServiceSpec;
 use crate::commands::container::ContainerRunner;
 use anyhow::Result;
 use anyhow::anyhow;
-use libruntime::dns::DNS_SOCKET_PATH;
 use serde::{Deserialize, Serialize};
 
 pub const CNI_VERSION: &str = "1.0.0";
@@ -45,6 +39,32 @@ pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
 
 pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
 pub const BRIDGE_CONF: &str = "rkl-standalone-bridge.conf";
+
+fn default_netavark_config_dir() -> OsString {
+    if let Some(v) = std::env::var_os("NETAVARK_CONFIG") {
+        return v;
+    }
+
+    OsString::from("/run/containers/networks")
+}
+
+fn default_aardvark_bin() -> Result<OsString> {
+    if let Some(v) = std::env::var_os("AARDVARK_DNS_BIN") {
+        return Ok(v);
+    }
+    if let Some(v) = std::env::var_os("AARDVARK_BIN") {
+        return Ok(v);
+    }
+
+    let candidates = ["/usr/libexec/podman/aardvark-dns", "/usr/bin/aardvark-dns"];
+    for c in candidates {
+        if Path::new(c).exists() {
+            return Ok(OsString::from(c));
+        }
+    }
+
+    Err(anyhow!("aardvark-dns not found"))
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -247,14 +267,9 @@ impl NetworkManager {
             // there is no definition of networks
             self.is_default = true
         }
-
         self.validate(spec)?;
-
         // allocate the bridge interface
         self.allocate_interface()?;
-
-        self.startup_dns_server()?;
-
         Ok(())
     }
 
@@ -334,50 +349,102 @@ impl NetworkManager {
         Ok(())
     }
 
-    async fn add_dns_record(&self, srv_name: &str, ip: Ipv4Addr) -> Result<()> {
-        let mut stream = connect_dns_socket_with_retry(5, 200).await?;
-
-        let domain = dns::parse_service_to_domain(srv_name, None);
-
-        let msg = dns::DNSUpdateMessage {
-            action: dns::UpdateAction::Add,
-            name: LowerName::from_str(&domain).unwrap(),
-            ip,
-        };
-
-        let msg_byte = serde_json::to_vec(&msg).unwrap();
-
-        stream.write_all(&msg_byte).await?;
-        stream.write_all(b"\n").await?;
-
-        let mut buf = String::new();
-        let mut reader = BufReader::new(&mut stream);
-        reader.read_line(&mut buf).await?;
-        let buf = buf.trim(); // get rid of the "\n" in  "ok\n" 
-
-        if buf != "ok" {
-            return Err(anyhow!(
-                "fail to add {srv_name}'s dns record, got DNS Server response: {buf}"
-            ));
-        }
-        Ok(())
-    }
-
-    /// This function act as a hook func, doese network-related stuff after container started
-    /// Currently, it will do the following things:
-    ///
-    /// 1. Put the Container's IP to Local daemon dns server(use sock)
-    ///
-    pub(crate) fn after_container_started(
-        &self,
-        srv_name: &str,
-        runner: ContainerRunner,
-    ) -> Result<()> {
+    pub(crate) fn after_container_started(&self, runner: ContainerRunner) -> Result<()> {
         let container_ip = runner
             .ip()
             .ok_or_else(|| anyhow!("[container {}]Empty IP address", runner.id()))?;
-        if let IpAddr::V4(ip) = container_ip {
-            block_on(async move { self.add_dns_record(srv_name, ip).await })?;
+        if let IpAddr::V4(_ip) = container_ip {
+            let alias = vec![runner.id()];
+            let mut networks = HashMap::new();
+            let mut network_info = HashMap::new();
+            for (network_name, _) in self.map.clone() {
+                let network_se = match self.network_service.get(&network_name) {
+                    Some(network) => network,
+                    None => continue,
+                };
+                for (_container, container_spec) in network_se {
+                    let Some(container_name) = container_spec.container_name.as_ref() else {
+                        continue;
+                    };
+                    if *container_name == runner.id() {
+                        let network_opts = PerNetworkOptions {
+                            aliases: Some(alias.clone()),
+                            interface_name: self
+                                .network_interface
+                                .get(&network_name)
+                                .unwrap_or(&"vethcni0".to_string())
+                                .clone(),
+                            static_ips: Some(vec![container_ip]),
+                            static_mac: None,
+                            options: None,
+                        };
+                        let network_interface = Some(
+                            self.network_interface
+                                .get(&network_name)
+                                .unwrap_or(&"vethcni0".to_string())
+                                .clone(),
+                        );
+                        let network = Network {
+                            dns_enabled: true,
+                            driver: "bridge".to_string(),
+                            id: network_name.clone(),
+                            internal: false,
+                            ipv6_enabled: false,
+                            name: network_name.clone(),
+                            network_interface,
+                            options: None,
+                            ipam_options: None,
+                            subnets: Some(vec![Subnet {
+                                gateway: Some(IpAddr::V4(Ipv4Addr::new(172, 17, 0, 1))),
+                                lease_range: None,
+                                subnet: IpNet::new(IpAddr::V4(Ipv4Addr::new(172, 17, 0, 0)), 16)
+                                    .unwrap(),
+                            }]),
+                            routes: None,
+                            network_dns_servers: Some(vec![]),
+                        };
+
+                        networks.insert(network_name.clone(), network_opts);
+                        network_info.insert(network_name, network);
+                        break;
+                    }
+                }
+            }
+            let opts = NetworkOptions {
+                container_id: runner.id(),
+                container_name: runner.id(),
+                container_hostname: None,
+                networks,
+                network_info,
+                port_mappings: None,
+                dns_servers: None,
+            };
+
+            let pid = runner
+                .get_container_state()?
+                .pid
+                .ok_or_else(|| anyhow!("[container {}] PID not found", runner.id()))?;
+            let netns_path = format!("/proc/{pid}/ns/net");
+            if !Path::new(&netns_path).exists() {
+                return Err(anyhow!(
+                    "[container {}] netns path not found: {netns_path}",
+                    runner.id()
+                ));
+            }
+            let setup = Setup::new(netns_path);
+            let json_path = create_tmp_netavark_json(&opts, &runner.id())?;
+            let config_dir = default_netavark_config_dir();
+            fs::create_dir_all(PathBuf::from(&config_dir))?;
+            setup
+                .exec(
+                    Some(json_path),
+                    Some(config_dir),
+                    None,
+                    default_aardvark_bin()?,
+                    None,
+                    false,
+                )
+                .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", runner.id()))?;
         } else {
             return Err(anyhow!("Unsupported ipv6 type"));
         }
@@ -385,66 +452,56 @@ impl NetworkManager {
         Ok(())
     }
 
-    pub fn startup_dns_server(&self) -> Result<()> {
-        // TODO: Due to current test method(Directly run test_runner ./target/debug/deps/... )
-        // We CAN NOT USE #[cfg(test)] to distinct test or product environment
-        // So here introduce RKL_TEST_MODE env TEMPORARILY.
-
-        let is_test_mode = env::var("RKL_TEST_MODE").is_ok();
-        let current_exe: PathBuf;
-
-        if is_test_mode {
-            current_exe = env::current_dir()
-                .map_err(|e| anyhow!("failed to get current executable path: {e}"))?
-                .join("target/debug/rkl");
-            println!("{current_exe:?}");
-        } else {
-            // ========== PRODUCTION LOGIC (#[cfg(not(test)])) ==========
-            current_exe = env::current_exe()
-                .map_err(|e| anyhow!("failed to get current executable path: {e}"))?;
-        }
-
-        let child_process = Command::new(&current_exe) // Use the path to the current executable
-            .arg("compose") // First argument: 'compose'
-            .arg("server") // Second argument: 'server'
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| anyhow!("failed to spawn DNS server child process: {e}"))?;
-
-        // thread::sleep(time::Duration::from_secs(1000));
-
-        let child_pid = child_process.id();
-        println!("Spawned DNS server in child PID: {}", child_pid);
-
-        let mut file = fs::File::create(PID_FILE_PATH)
-            .map_err(|e| anyhow!("failed to create rkl's dns pid file: {e}"))?;
-        writeln!(file, "{}", child_pid)
-            .map_err(|e| anyhow!("failed to write pid {child_pid} to rkl's dns pid file: {e}"))?;
-
+    pub fn clean_up(network_name_space: String, id: String) -> Result<()> {
+        let teardown = Teardown::new(network_name_space);
+        let config_dir = default_netavark_config_dir();
+        let mut json_path = std::env::temp_dir();
+        json_path.push("rkl-netavark");
+        json_path.push(format!("{}.network.json", id));
+        teardown
+            .exec(
+                Some(json_path.into_os_string()),
+                Some(config_dir),
+                None,
+                default_aardvark_bin()?,
+                None,
+                false,
+            )
+            .map_err(|e| anyhow!("[container {}] netavark teardown failed: {e}", id))?;
         Ok(())
     }
-
-    pub fn clean_up() -> Result<()> {
-        let pid_file = PID_FILE_PATH;
-        if Path::new(pid_file).exists() {
-            if let Ok(pid_str) = fs::read_to_string(pid_file)
-                && let Ok(pid) = pid_str.trim().parse::<u32>()
-            {
-                let mut sys = System::new_all();
-                sys.refresh_processes();
-                if let Some(proc) = sys.process(Pid::from_u32(pid)) {
-                    println!("KILL PID: {}", pid);
-                    let _ = proc.kill();
-                    thread::sleep(Duration::from_secs(3));
-                }
-            }
-            let _ = fs::remove_file(pid_file);
-        }
-
-        Ok(())
+}
+// in the future , add dns server
+/// create resolv.conf file
+/// save base resolv.conf file
+pub fn create_resolv_conf() -> Result<()> {
+    let contect = "search rkl.internal\nnameserver 172.17.0.1\n";
+    let mut resolv_path = std::env::temp_dir();
+    resolv_path.push("rkl-netavark");
+    resolv_path.push("resolv.conf");
+    if let Some(parent) = resolv_path.parent() {
+        fs::create_dir_all(parent)?;
     }
+    let mut file = File::create(resolv_path)?;
+    file.write_all(contect.as_bytes())?;
+    Ok(())
+}
+
+// add resolv.conf to container
+// todo !
+pub fn add_resolv_conf(runner: &mut ContainerRunner) {
+    let mut host_path = std::env::temp_dir();
+    host_path.push("rkl-netavark");
+    host_path.push("resolv.conf");
+    let host_path = host_path.into_os_string().into_string().unwrap();
+    let container_path = format!("/etc/resolv.conf");
+
+    runner.add_mounts(vec![Mount {
+        host_path,
+        container_path,
+        readonly: true,
+        ..Default::default()
+    }]);
 }
 
 use lazy_static::lazy_static;
@@ -456,13 +513,6 @@ lazy_static! {
         .expect("Failed to create tokio runtime for network manager.");
 }
 
-fn block_on<F, T>(f: F) -> T
-where
-    F: Future<Output = T>,
-{
-    RUNTIME.block_on(f)
-}
-
 #[allow(unused)]
 fn spawn<F, T>(f: F) -> tokio::task::JoinHandle<T>
 where
@@ -472,26 +522,15 @@ where
     RUNTIME.spawn(f)
 }
 
-pub async fn connect_dns_socket_with_retry(retries: usize, delay_ms: u64) -> Result<UnixStream> {
-    for attempt in 1..=retries {
-        match UnixStream::connect(DNS_SOCKET_PATH).await {
-            Ok(stream) => return Ok(stream),
-            Err(e) => {
-                if attempt == retries {
-                    return Err(anyhow!(
-                        "Fatal error: failed to connect local DNS SOCKET after {} attempts: {e}",
-                        retries
-                    ));
-                } else {
-                    eprintln!(
-                        "Attempt {}/{} failed to connect DNS socket: {}. Retrying in {} ms...",
-                        attempt, retries, e, delay_ms
-                    );
-                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                }
-            }
-        }
+fn create_tmp_netavark_json(opts: &NetworkOptions, id: &str) -> Result<OsString> {
+    let mut json_path = std::env::temp_dir();
+    json_path.push("rkl-netavark");
+    json_path.push(format!("{}.network.json", id));
+    if let Some(parent) = json_path.parent() {
+        fs::create_dir_all(parent)?;
     }
-
-    unreachable!()
+    let json_str = serde_json::to_string(&opts)?;
+    let mut json_file = std::fs::File::create(&json_path)?;
+    json_file.write_all(json_str.as_bytes())?;
+    Ok(json_path.into_os_string())
 }
