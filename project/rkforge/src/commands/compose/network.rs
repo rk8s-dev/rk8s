@@ -40,6 +40,63 @@ pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
 pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
 pub const BRIDGE_CONF: &str = "rkl-standalone-bridge.conf";
 
+const DEFAULT_SUBNET_POOL_PREFIX: u8 = 24;
+
+/// Single pool: 172.17.0.0/16, each compose network allocates a /24 (e.g. 172.17.0.0/24, 172.17.1.0/24, ...).
+fn default_subnet_pools() -> Vec<(Ipv4Network, u8)> {
+    vec![(
+        Ipv4Network::new(Ipv4Addr::new(172, 17, 0, 0), 16).unwrap(),
+        DEFAULT_SUBNET_POOL_PREFIX,
+    )]
+}
+
+fn network_intersects(a: &Ipv4Network, b: &Ipv4Network) -> bool {
+    b.contains(a.network()) || a.contains(b.network())
+}
+
+fn next_subnet(subnet: &Ipv4Network) -> Option<Ipv4Network> {
+    let prefix = subnet.prefix();
+    if prefix == 0 {
+        return None;
+    }
+    let base = subnet.network();
+    let base_u32 = u32::from(base);
+    let inc = 1u32.checked_shl((32 - prefix) as u32)?;
+    let next_u32 = base_u32.checked_add(inc)?;
+    let next_addr = Ipv4Addr::from(next_u32.to_be_bytes());
+    Ipv4Network::new(next_addr, prefix).ok()
+}
+
+/// Get first free IPv4 subnet from pools that does not intersect with used. Returns (subnet, gateway).
+/// Gateway is first host in subnet (Podman convention). Same algorithm as GetFreeIPv4NetworkSubnet in podman
+fn get_free_ipv4_subnet(
+    used_networks: &[Ipv4Network],
+    pools: &[(Ipv4Network, u8)],
+) -> Option<(Ipv4Network, Ipv4Addr)> {
+    for (base_pool, size) in pools {
+        let net_ip = base_pool.network();
+        let mut network = Ipv4Network::new(net_ip, *size).ok()?;
+        while base_pool.contains(network.network()) {
+            let intersects = used_networks
+                .iter()
+                .any(|used| network_intersects(&network, used));
+            if !intersects {
+                let gateway = first_host_in_subnet(&network);
+                return Some((network, gateway));
+            }
+            network = next_subnet(&network)?;
+        }
+    }
+    None
+}
+
+fn first_host_in_subnet(subnet: &Ipv4Network) -> Ipv4Addr {
+    let base = subnet.network();
+    let n = u32::from(base);
+    let first_host = n.checked_add(1).unwrap_or(n);
+    Ipv4Addr::from(first_host.to_be_bytes())
+}
+
 fn default_netavark_config_dir() -> OsString {
     if let Some(v) = std::env::var_os("NETAVARK_CONFIG") {
         return v;
@@ -121,18 +178,19 @@ impl CliNetworkConfig {
     /// - subnet_addr
     /// - gateway_addr
     ///
-    /// by default the subnet prefix is 16
+    /// Compose networks use Podman-style /24 from subnet pool. prefix is typically 24.
     pub fn from_subnet_gateway(
         network_name: &str,
         bridge: &str,
         subnet_addr: Ipv4Addr,
-        getway_addr: Ipv4Addr,
+        gateway_addr: Ipv4Addr,
+        prefix: u8,
     ) -> Self {
         let ip_range = IpRange {
-            subnet: IpNetwork::V4(Ipv4Network::new(subnet_addr, 16).unwrap()),
+            subnet: IpNetwork::V4(Ipv4Network::new(subnet_addr, prefix).unwrap()),
             range_start: None,
             range_end: None,
-            gateway: Some(IpAddr::V4(getway_addr)),
+            gateway: Some(IpAddr::V4(gateway_addr)),
         };
 
         let set: RangeSet = vec![ip_range];
@@ -196,10 +254,41 @@ impl Default for CliNetworkConfig {
 }
 
 #[derive(Debug)]
+struct NetworkSubnet {
+    subnet: Ipv4Network,
+    gateway: Ipv4Addr,
+}
+
+/// Next IPv4 to assign in a subnet
+fn next_container_ip_in_subnet(
+    subnet: &Ipv4Network,
+    gateway: Ipv4Addr,
+    last_used: Option<Ipv4Addr>,
+) -> Option<Ipv4Addr> {
+    let gw_u32 = u32::from(gateway);
+    let start = gw_u32 + 1;
+    let next: u32 = last_used
+        .and_then(|u| u32::from(u).checked_add(1))
+        .unwrap_or(start);
+    let (base, prefix) = (subnet.network(), subnet.prefix());
+    let host_bits = 32 - prefix;
+    let last_usable = u32::from(base) + (1u32 << host_bits) - 2; // last host before broadcast
+    if next > last_usable {
+        return None;
+    }
+    Some(Ipv4Addr::from(next.to_be_bytes()))
+}
+
 pub struct NetworkManager {
     map: HashMap<String, NetworkSpec>,
     /// key: network_name; value: bridge interface
     network_interface: HashMap<String, String>,
+    /// key: network_name; value: allocated subnet and gateway (Podman-style from subnet pool)
+    network_subnets: HashMap<String, NetworkSubnet>,
+    /// key: (container_id, network_name) -> allocated container IP (from subnet, not 127.0.0.1)
+    container_ips: HashMap<(String, String), Ipv4Addr>,
+    /// key: network_name; value: last assigned container IP in that subnet
+    network_next_ip: HashMap<String, Ipv4Addr>,
     /// key: service_name value: networks
     service_mapping: HashMap<String, Vec<String>>,
     /// key: network_name value: (srv_name, service_spec)
@@ -218,7 +307,37 @@ impl NetworkManager {
             network_service: HashMap::new(),
             project_name,
             network_interface: HashMap::new(),
+            network_subnets: HashMap::new(),
+            container_ips: HashMap::new(),
+            network_next_ip: HashMap::new(),
         }
+    }
+
+    /// Must be called before the container is started.
+    pub fn allocate_container_ip(
+        &mut self,
+        network_name: &str,
+        container_id: &str,
+    ) -> Result<Ipv4Addr> {
+        let (subnet, gateway) = self
+            .network_subnets
+            .get(network_name)
+            .map(|s| (s.subnet, s.gateway))
+            .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
+        let last = self.network_next_ip.get(network_name).copied();
+        let ip = next_container_ip_in_subnet(&subnet, gateway, last)
+            .ok_or_else(|| anyhow!("No free IP in subnet for network {}", network_name))?;
+        self.network_next_ip.insert(network_name.to_string(), ip);
+        self.container_ips
+            .insert((container_id.to_string(), network_name.to_string()), ip);
+        Ok(ip)
+    }
+
+    /// Get the allocated IP for a container on a network (for use in netavark static_ips).
+    pub fn get_container_ip(&self, container_id: &str, network_name: &str) -> Option<Ipv4Addr> {
+        self.container_ips
+            .get(&(container_id.to_string(), network_name.to_string()))
+            .copied()
     }
 
     pub fn network_service_mapping(&self) -> HashMap<String, Vec<(String, ServiceSpec)>> {
@@ -234,14 +353,18 @@ impl NetworkManager {
             )
         })?;
 
-        let subnet_addr = Ipv4Addr::new(172, 17, 0, 0);
-        let gateway_addr = Ipv4Addr::new(172, 17, 0, 1);
+        let (subnet_addr, gateway_addr, prefix) = self
+            .network_subnets
+            .get(network_name)
+            .map(|s| (s.subnet.network(), s.gateway, s.subnet.prefix()))
+            .ok_or_else(|| anyhow!("No subnet allocated for network {}", network_name))?;
 
         let conf = CliNetworkConfig::from_subnet_gateway(
             network_name,
             interface,
             subnet_addr,
             gateway_addr,
+            prefix,
         );
 
         let conf_value = serde_json::to_value(conf).expect("Failed to parse network config");
@@ -270,6 +393,8 @@ impl NetworkManager {
         self.validate(spec)?;
         // allocate the bridge interface
         self.allocate_interface()?;
+        // allocate subnet per network (Podman-compose style: first free /24 from subnet pools)
+        self.allocate_subnets()?;
         Ok(())
     }
 
@@ -349,11 +474,26 @@ impl NetworkManager {
         Ok(())
     }
 
+    fn allocate_subnets(&mut self) -> Result<()> {
+        let pools = default_subnet_pools();
+        let mut used: Vec<Ipv4Network> = Vec::new();
+        for (network_name, spec) in &self.map.clone() {
+            if matches!(spec.driver, Some(Bridge)) {
+                let (subnet, gateway) = get_free_ipv4_subnet(&used, &pools)
+                    .ok_or_else(|| anyhow!("could not find free subnet from subnet pools"))?;
+                used.push(subnet);
+                self.network_subnets
+                    .insert(network_name.clone(), NetworkSubnet { subnet, gateway });
+            } else {
+                todo!()
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn after_container_started(&self, runner: ContainerRunner) -> Result<()> {
-        let container_ip = runner
-            .ip()
-            .ok_or_else(|| anyhow!("[container {}]Empty IP address", runner.id()))?;
-        if let IpAddr::V4(_ip) = container_ip {
+        let container_id = runner.id();
+        if let IpAddr::V4(_) = runner.ip().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)) {
             let alias = vec![runner.id()];
             let mut networks = HashMap::new();
             let mut network_info = HashMap::new();
@@ -366,7 +506,31 @@ impl NetworkManager {
                     let Some(container_name) = container_spec.container_name.as_ref() else {
                         continue;
                     };
-                    if *container_name == runner.id() {
+                    if *container_name == container_id {
+                        let container_ip = self
+                            .get_container_ip(&container_id, &network_name)
+                            .map(IpAddr::V4)
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "[container {}] No allocated IP for network {}",
+                                    container_id,
+                                    network_name
+                                )
+                            })?;
+                        let (gateway, subnet_net) = self
+                            .network_subnets
+                            .get(&network_name)
+                            .map(|s| {
+                                (
+                                    s.gateway,
+                                    IpNet::new(
+                                        IpAddr::V4(s.subnet.network()),
+                                        s.subnet.prefix() as u8,
+                                    )
+                                    .unwrap(),
+                                )
+                            })
+                            .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
                         let network_opts = PerNetworkOptions {
                             aliases: Some(alias.clone()),
                             interface_name: self
@@ -395,10 +559,9 @@ impl NetworkManager {
                             options: None,
                             ipam_options: None,
                             subnets: Some(vec![Subnet {
-                                gateway: Some(IpAddr::V4(Ipv4Addr::new(172, 17, 0, 1))),
+                                gateway: Some(IpAddr::V4(gateway)),
                                 lease_range: None,
-                                subnet: IpNet::new(IpAddr::V4(Ipv4Addr::new(172, 17, 0, 0)), 16)
-                                    .unwrap(),
+                                subnet: subnet_net,
                             }]),
                             routes: None,
                             network_dns_servers: Some(vec![]),

@@ -310,7 +310,15 @@ impl ComposeManager {
                 let configs_mounts = self.config_manager.get_mounts_by_service(&srv_name);
 
                 let mut runner =
-                    ContainerRunner::from_spec(container_spec, Some(self.root_path.clone()))?;
+                    ContainerRunner::from_spec(container_spec.clone(), Some(self.root_path.clone()))?;
+
+                // Allocate IP from subnet for this container on this network (instead of 127.0.0.1)
+                let container_id = container_spec.name.clone();
+                let allocated_ip = self
+                    .network_manager
+                    .allocate_container_ip(&network_name, &container_id)
+                    .map_err(|e| anyhow!("allocate IP for {} on {}: {}", container_id, network_name, e))?;
+                runner.set_compose_assigned_ip(std::net::IpAddr::V4(allocated_ip));
 
                 runner.add_mounts(mounts);
                 runner.add_mounts(configs_mounts);

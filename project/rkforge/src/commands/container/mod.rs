@@ -113,6 +113,8 @@ pub struct ContainerRunner {
     container_id: String,
     volumes: Option<Vec<String>>,
     ip: Option<IpAddr>,
+
+    compose_assigned_ip: Option<IpAddr>,
 }
 
 impl ContainerRunner {
@@ -121,6 +123,10 @@ impl ContainerRunner {
     }
     pub fn id(&self) -> String {
         self.container_id.clone()
+    }
+
+    pub fn set_compose_assigned_ip(&mut self, ip: IpAddr) {
+        self.compose_assigned_ip = Some(ip);
     }
 
     // for now just for compose
@@ -144,6 +150,7 @@ impl ContainerRunner {
             },
             volumes: None,
             ip: None,
+            compose_assigned_ip: None,
         })
     }
 
@@ -173,6 +180,7 @@ impl ContainerRunner {
             container_id,
             volumes,
             ip: None,
+            compose_assigned_ip: None,
         })
     }
 
@@ -202,6 +210,7 @@ impl ContainerRunner {
             },
             volumes: None,
             ip: None,
+            compose_assigned_ip: None,
         })
     }
 
@@ -415,11 +424,16 @@ impl ContainerRunner {
             setup_network_conf()?;
         }
 
-        // TODO: Implement network setup without get_cni
+        // Compose: use allocated IP from subnet pool instead of 127.0.0.1
+        let address = self
+            .compose_assigned_ip
+            .map(|ip| format!("{}/24", ip))
+            .unwrap_or_else(|| "127.0.0.1/24".to_string());
+
         Ok(json::object! {
             "ips": json::array! [
                 json::object! {
-                    "address": "127.0.0.1/24"
+                    "address": address.clone()
                 }
             ]
         })
