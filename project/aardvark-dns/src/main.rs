@@ -36,59 +36,59 @@
 //     Version(version::Version),
 // }
 
-// fn main() {
-//     let formatter = Formatter3164 {
-//         facility: Facility::LOG_USER,
-//         hostname: None,
-//         process: "aardvark-dns".into(),
-//         pid: 0,
-//     };
+fn main() {
+    // let formatter = Formatter3164 {
+    //     facility: Facility::LOG_USER,
+    //     hostname: None,
+    //     process: "aardvark-dns".into(),
+    //     pid: 0,
+    // };
 
-//     let log_level = match env::var("RUST_LOG") {
-//         Ok(val) => match Level::from_str(&val) {
-//             Ok(level) => level,
-//             Err(e) => {
-//                 eprintln!("failed to parse RUST_LOG level: {e}");
-//                 Level::Info
-//             }
-//         },
-//         // if env is not set default to info
-//         Err(_) => Level::Info,
-//     };
+    // let log_level = match env::var("RUST_LOG") {
+    //     Ok(val) => match Level::from_str(&val) {
+    //         Ok(level) => level,
+    //         Err(e) => {
+    //             eprintln!("failed to parse RUST_LOG level: {e}");
+    //             Level::Info
+    //         }
+    //     },
+    //     // if env is not set default to info
+    //     Err(_) => Level::Info,
+    // };
 
-//     // On error do nothing, running on system without syslog is fine and we should not clutter
-//     // logs with meaningless errors, https://github.com/containers/podman/issues/19809.
-//     if let Ok(logger) = syslog::unix(formatter) {
-//         if let Err(e) = log::set_boxed_logger(Box::new(BasicLogger::new(logger)))
-//             .map(|()| log::set_max_level(log_level.to_level_filter()))
-//         {
-//             eprintln!("failed to initialize syslog logger: {e}")
-//         };
-//     }
+    // // On error do nothing, running on system without syslog is fine and we should not clutter
+    // // logs with meaningless errors, https://github.com/containers/podman/issues/19809.
+    // if let Ok(logger) = syslog::unix(formatter) {
+    //     if let Err(e) = log::set_boxed_logger(Box::new(BasicLogger::new(logger)))
+    //         .map(|()| log::set_max_level(log_level.to_level_filter()))
+    //     {
+    //         eprintln!("failed to initialize syslog logger: {e}")
+    //     };
+    // }
 
-//     let opts = Opts::parse();
+    // let opts = Opts::parse();
 
-//     let dir = opts.config.unwrap_or_else(|| String::from("/dev/stdin"));
-//     let port = opts.port.unwrap_or(5533_u16);
-//     let filter_search_domain = opts
-//         .filter_search_domain
-//         .unwrap_or_else(|| String::from(".dns.podman"));
-//     let result = match opts.subcmd {
-//         SubCommand::Run(run) => run.exec(dir, port, filter_search_domain),
-//         SubCommand::Version(version) => {
-//             version.exec();
-//             Ok(())
-//         }
-//     };
+    // let dir = opts.config.unwrap_or_else(|| String::from("/dev/stdin"));
+    // let port = opts.port.unwrap_or(5533_u16);
+    // let filter_search_domain = opts
+    //     .filter_search_domain
+    //     .unwrap_or_else(|| String::from(".dns.podman"));
+    // let result = match opts.subcmd {
+    //     SubCommand::Run(run) => run.exec(dir, port, filter_search_domain),
+    //     SubCommand::Version(version) => {
+    //         version.exec();
+    //         Ok(())
+    //     }
+    // };
 
-//     match result {
-//         Ok(_) => {}
-//         Err(err) => {
-//             eprintln!("{err}");
-//             std::process::exit(1);
-//         }
-//     }
-// }
+    // match result {
+    //     Ok(_) => {}
+    //     Err(err) => {
+    //         eprintln!("{err}");
+    //         std::process::exit(1);
+    //     }
+    // }
+}
 
 // #[cfg(test)]
 mod test;
