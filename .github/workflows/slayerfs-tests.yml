@@ -18,7 +18,7 @@ on:
 
 jobs:
   unit-and-integration:
-    name: cargo test -p slayerfs
+    name: Run Slayerfs Test
     runs-on: [self-hosted]
     env:
       CARGO_TERM_COLOR: always

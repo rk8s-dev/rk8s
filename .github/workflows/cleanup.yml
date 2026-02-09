@@ -1,0 +1,34 @@
+name: Self-hosted runner cleanup
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: [self-hosted]
+    steps:
+      - name: Clean /tmp
+        run: |
+          sudo rm -rf /tmp/* /tmp/.* 2>/dev/null || true
+          sudo mkdir -p -m 1777 /tmp
+
+      - name: Clean cargo build artifacts
+        run: |
+          cargo clean --manifest-path "${{ github.workspace }}/project/Cargo.toml" 2>/dev/null || true
+
+      - name: Unmount stale FUSE mounts
+        run: |
+          mount | grep -E 'fuse\.(slayerfs|testoverlay|passthrough)' | awk '{print $3}' | while read mnt; do
+            fusermount3 -u "$mnt" 2>/dev/null || sudo umount -l "$mnt" 2>/dev/null || true
+          done
+
+      - name: Report disk usage
+        run: |
+          echo "=== /tmp ==="
+          du -sh /tmp 2>/dev/null || true
+          echo "=== workspace ==="
+          du -sh "${{ github.workspace }}" 2>/dev/null || true
+          echo "=== disk ==="
+          df -h /
