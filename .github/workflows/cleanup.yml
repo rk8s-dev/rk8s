@@ -18,12 +18,6 @@ jobs:
         run: |
           cargo clean --manifest-path "${{ github.workspace }}/project/Cargo.toml" 2>/dev/null || true
 
-      - name: Unmount stale FUSE mounts
-        run: |
-          mount | grep -E 'fuse\.(slayerfs|testoverlay|passthrough)' | awk '{print $3}' | while read mnt; do
-            fusermount3 -u "$mnt" 2>/dev/null || sudo umount -l "$mnt" 2>/dev/null || true
-          done
-
       - name: Report disk usage
         run: |
           echo "=== /tmp ==="
