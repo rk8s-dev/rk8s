@@ -7016,6 +7016,7 @@ dependencies = [
  "oci-client",
  "oci-spec",
  "once_cell",
+ "qlean",
  "qrcode",
  "rand 0.9.2",
  "rayon",
