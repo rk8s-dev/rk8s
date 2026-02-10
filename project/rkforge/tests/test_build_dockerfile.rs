@@ -124,15 +124,15 @@ fn get_nginx_docker_dir() -> Result<PathBuf> {
     );
 }
 
-/// Get the path to the memcached-dockerr test directory
+/// Get the path to the memcached-docker test directory
 fn get_memcached_docker_dir() -> Result<PathBuf> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").context("CARGO_MANIFEST_DIR not set")?;
-    let dir = PathBuf::from(&manifest_dir).join("tests/dockers/memcached-dockerr");
+    let dir = PathBuf::from(&manifest_dir).join("tests/dockers/memcached-docker");
     if dir.exists() {
         return Ok(dir);
     }
     anyhow::bail!(
-        "memcached-dockerr test directory not found at {:?}. Make sure the test resources exist.",
+        "memcached-docker test directory not found at {:?}. Make sure the test resources exist.",
         dir
     );
 }
@@ -330,7 +330,7 @@ async fn test_build_dockerfile_memcached() -> Result<()> {
     let docker_dir = get_memcached_docker_dir()?;
 
     tracing::info!("Using rkforge binary at {:?}", rkforge_bin);
-    tracing::info!("Using memcached-dockerr dir at {:?}", docker_dir);
+    tracing::info!("Using memcached-docker dir at {:?}", docker_dir);
 
     // ===== Create VM =====
     let image = create_image(Distro::Debian, "debian-13-generic-amd64").await?;
@@ -360,7 +360,7 @@ async fn test_build_dockerfile_memcached() -> Result<()> {
             exec_show(vm, "Verify rkforge binary", "file /usr/local/bin/rkforge").await?;
 
             // ===== Step 3: Upload test Dockerfile directory =====
-            tracing::info!("Uploading memcached-dockerr test directory...");
+            tracing::info!("Uploading memcached-docker test directory...");
             vm.create_dir_all(Path::new("/test")).await?;
             vm.upload(&docker_dir, Path::new("/test")).await?;
 
@@ -379,11 +379,11 @@ async fn test_build_dockerfile_memcached() -> Result<()> {
             exec_show(
                 vm,
                 "Build memcached image with rkforge",
-                "cd /test/memcached-dockerr && sudo /usr/local/bin/rkforge build \
-                    -f /test/memcached-dockerr/Dockerfile \
+                "cd /test/memcached-docker && sudo /usr/local/bin/rkforge build \
+                    -f /test/memcached-docker/Dockerfile \
                     -t memcached-test \
                     -o /test/output \
-                    /test/memcached-dockerr",
+                    /test/memcached-docker",
             )
             .await?;
 
