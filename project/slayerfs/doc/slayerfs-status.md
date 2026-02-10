@@ -22,12 +22,12 @@
 | 功能项 | JuiceFS | SlayerFS                                          |
 |---|---|---------------------------------------------------|
 | 细粒度权限管理（ACL） | 提供 POSIX ACL 管理（`setfacl/getfacl`）与权限行为说明 | 仅有 mode/uid/gid + ACL 数据结构；ACL 语义在 `MetaStore` 侧仍是预留接口 |
-| 目录配额 / 用户配额 / 组配额 | 提供 `quota` 能力与配额告警/校验工具 | `MetaStore` 的 quota 相关接口大多仍为 `NotImplemented`，缺少统一策略 |
+| 目录配额 / 用户配额 / 组配额 | 提供 `quota` 能力与配额告警/校验工具 | `MetaStore` 的 quota 相关接口大多仍为 `NotImplemented` |
 | xattr 扩展属性一致性 | 支持用户态 xattr（含容量限制与用法说明） | 仅部分后端（Database）实现 xattr；多后端行为未对齐                  |
 | 维护命令工具链（status/gc/fsck/warmup） | 提供完整运维命令用于巡检、回收、修复、预热 | 当前缺少统一 CLI 工具链                                    |
 | 备份恢复（metadata dump/load） | 官方提供元数据导出/导入流程 | 暂无等价的一体化命令与标准流程                                   |
 | K8s CSI 生产集成 | 提供成熟 CSI 文档与生产实践（StorageClass、动态供给等） | 暂无CSI                                    |
-| 生产化元数据选型手册 | 官方明确 Redis/MySQL/PostgreSQL/TiKV 等选型建议与容量规划 | 支持多后端，但文档与实践仍偏研发态                        |
+| 生产化元数据选型手册 | 官方明确 Redis/MySQL/PostgreSQL/TiKV 等选型建议与容量规划 | 支持多后端，但文档与实践仍不足                        |
 | 跨客户端缓存一致性策略 | 对一致性边界与缓存行为有明确文档与实践经验 | 已有本地缓存失效机制，但跨客户端一致性仍缺强保证        |
 
 ## 3. 不同维度对比
@@ -131,6 +131,7 @@ SlayerFS 在数据路径机制上可用，但是在复杂场景和稳定性上�
 1. 完整性和可用性
     - 明确SlayerFS提供的跨客户端一致性语义，并根据这个语义进行测试保证SlayerFS的数据一致性、完整性和可用性（高优先级）。
     - 保证所有可选的元数据存储可以稳定通过 pjdfstests 和 xfstests 等 POSIX 兼容性测试套件，进一步完善 SlayerFS 的 POSIX 兼容性（高优先级）。
+    - 实现 Slice Compaction 功能，保证 SlayerFS 可以长期运行。
 2. 功能增强
     - 遵循 POSIX 标准实现 ACL 权限管理机制和 xattr 支持（中优先级）。
     - 提供一套完整的命令行工具对SlayerFS进行监控和管理（中优先级）。
