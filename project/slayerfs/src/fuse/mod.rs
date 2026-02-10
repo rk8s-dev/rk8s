@@ -31,7 +31,6 @@ use rfuse3::raw::reply::{
     ReplyXAttr,
 };
 use std::ffi::{OsStr, OsString};
-use std::num::NonZeroU32;
 use std::time::Duration;
 
 use futures_util::stream::{self, BoxStream};
@@ -181,9 +180,7 @@ where
     M: MetaLayer + Send + Sync + 'static,
 {
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
-        // Default to 4 MiB for higher throughput while keeping memory usage reasonable.
-        let max_write = NonZeroU32::new(4 * 1024 * 1024).unwrap();
-        Ok(ReplyInit { max_write })
+        Ok(ReplyInit::default())
     }
 
     async fn destroy(&self, _req: Request) {}

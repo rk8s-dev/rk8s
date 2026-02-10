@@ -161,11 +161,9 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             init_containers: vec![],
             tolerations: vec![],
             affinity: None,
+            ..Default::default()
         },
-        status: PodStatus {
-            pod_ip: None,
-            container_statuses: vec![],
-        },
+        status: PodStatus::default(),
     }
 }
 

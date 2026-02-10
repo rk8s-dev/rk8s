@@ -13,7 +13,7 @@ rk8s
 ├── project             # Cargo workspace containing core components
 │   ├── Cargo.lock      # Locks exact dependency versions for reproducible builds
 │   ├── Cargo.toml      # Workspace manifest
-│   ├── rkb             # Image builder and registry management tool
+│   ├── rkforge             # Image builder and registry management tool
 │   ├── rkl             # Container runtime interface
 │   ├── rks             # Control plane server
 │   ├── test            # Integration tests
@@ -104,7 +104,7 @@ Each project in the monorepo is developed as a crate within the `project/` works
 
 2. Add a Dependency
 
-   Inside your project directory (e.g., `project/rkb`), use the familiar Cargo-like syntax to add a dependency:
+   Inside your project directory (e.g., `project/rkforge`), use the familiar Cargo-like syntax to add a dependency:
 
    ```bash
    cargo buckal add <DEP>[@<VERSION>] [--features <FEATURES>]

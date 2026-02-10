@@ -34,6 +34,7 @@ rust_library(
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/bincode/1.3.3:bincode",
         "//third-party/rust/crates/bytes/1.11.0:bytes",
+        "//third-party/rust/crates/dashmap/6.1.0:dashmap",
         "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",
         "//third-party/rust/crates/futures-util/0.3.31:futures-util",
         "//third-party/rust/crates/libc/0.2.178:libc",

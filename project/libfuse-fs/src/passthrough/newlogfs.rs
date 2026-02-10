@@ -712,6 +712,41 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn getlk(
+        &self,
+        req: Request,
+        inode: rfuse3::Inode,
+        fh: u64,
+        lock_owner: u64,
+        start: u64,
+        end: u64,
+        r#type: u32,
+        pid: u32,
+    ) -> Result<ReplyLock> {
+        self.inner
+            .getlk(req, inode, fh, lock_owner, start, end, r#type, pid)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn setlk(
+        &self,
+        req: Request,
+        inode: rfuse3::Inode,
+        fh: u64,
+        lock_owner: u64,
+        start: u64,
+        end: u64,
+        r#type: u32,
+        pid: u32,
+        block: bool,
+    ) -> Result<()> {
+        self.inner
+            .setlk(req, inode, fh, lock_owner, start, end, r#type, pid, block)
+            .await
+    }
+
     // async  fn interrupt(&self, req: Request, unique: u64) -> Result<()> {
     //     let uuid = Uuid::new_v4();
     //     let method = "interrupt";

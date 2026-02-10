@@ -3,17 +3,17 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::{collections::HashSet, path::Path, sync::Arc, time::Duration};
 use tokio::fs::{File, read_dir};
 use tokio::io::AsyncReadExt;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use futures::FutureExt;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::commands::pod;
+use crate::daemon::status::probe::probe_manager::PROBE_MANAGER;
 use crate::task::TaskRunner;
 use common::PodTask;
 
-use crate::daemon::probe::{build_probe_registrations, deregister_pod_probes, register_pod_probes};
 use crate::daemon::sync_loop::{Event, State, WithEvent};
 
 /// Check and ensure that the pod status is consistent with the requirements every five seconds.
@@ -72,37 +72,35 @@ async fn run_new_pods(state: Arc<State>, pods: Vec<PodTask>) {
         let hs = calculate_hash(p);
         pods_set.insert(hs);
     }
-    pods.into_iter()
+    for p in pods
+        .into_iter()
         .filter(|p| !pods_set.contains(&calculate_hash(p)))
-        .for_each(|p| {
-            let runner = TaskRunner::from_task(p.clone()).unwrap();
-            let name = runner.task.metadata.name.clone();
-            match pod::sync_run_pod_from_taskrunner(runner) {
-                Ok(result) => {
-                    match build_probe_registrations(&result.pod_task, &result.pod_ip) {
-                        Ok(registrations) => {
-                            if let Err(err) =
-                                register_pod_probes(&result.pod_task.metadata.name, registrations)
-                            {
-                                warn!(
-                                    "Failed to register probes for static pod {}: {err:?}",
-                                    result.pod_task.metadata.name
-                                );
-                            }
-                        }
-                        Err(err) => warn!(
-                            "Failed to build probes for static pod {}: {err:?}",
-                            result.pod_task.metadata.name
-                        ),
+    {
+        let runner = TaskRunner::from_task(p.clone()).unwrap();
+        let name = runner.task.metadata.name.clone();
+        match pod::sync_run_pod_from_taskrunner(runner) {
+            Ok(result) => {
+                if let Some(pm) = PROBE_MANAGER.get() {
+                    let pod_name = result.pod_task.metadata.name.clone();
+                    if let Err(e) = pm.add_pod(&result.pod_task, &result.pod_ip).await {
+                        error!(
+                            error = e.to_string(),
+                            "[worker] failed to add probes for pod"
+                        );
+                    } else {
+                        info!("[worker] probes added for pod {}", pod_name);
                     }
+                } else {
+                    error!("[worker] PROBE_MANAGER not initialized");
+                }
 
-                    (*current_pods).push(p);
-                }
-                Err(e) => {
-                    error!("Failed to run pod {}: {e}", name);
-                }
+                (*current_pods).push(p);
             }
-        });
+            Err(e) => {
+                error!("Failed to run pod {}: {e}", name);
+            }
+        }
+    }
 }
 
 /// Try to remove pods that not in static pods config directory but created.
@@ -132,8 +130,11 @@ async fn stop_removed_pods(state: Arc<State>, pods: &Vec<PodTask>) -> Result<(),
                 // spawn deregistration but keep the JoinHandle so we can observe failures
                 let pod_name = pod.metadata.name.clone();
                 let handle = tokio::spawn(async move {
-                    // ensure panics inside deregister are captured by the task runtime
-                    deregister_pod_probes(&pod_name).await;
+                    if let Some(pm) = PROBE_MANAGER.get() {
+                        pm.remove_pod(&pod_name).await;
+                    } else {
+                        error!("[worker] PROBE_MANAGER not initialized");
+                    }
                 });
                 deregister_handles.push(handle);
             }
