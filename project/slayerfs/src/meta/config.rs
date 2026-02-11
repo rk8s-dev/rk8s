@@ -20,6 +20,9 @@ pub struct Config {
     /// Client behaviour configuration (session heartbeat, read-only, etc.)
     #[serde(default)]
     pub client: ClientOptions,
+
+    #[serde(default)]
+    pub compact: CompactConfig,
 }
 
 /// Database configuration
@@ -373,6 +376,36 @@ impl DatabaseType {
             DatabaseType::Postgres { .. } => "postgres",
             DatabaseType::Etcd { .. } => "etcd",
             DatabaseType::Redis { .. } => "redis",
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompactConfig {
+    /// Minimum slice count to trigger compaction (JuiceFS: 5)
+    pub min_slice_count: usize,
+    /// Minimum fragmentation ratio to trigger compaction
+    pub min_fragment_ratio: f64,
+    /// Slice count threshold for async compaction (JuiceFS: 100)
+    pub async_threshold: usize,
+    /// Slice count threshold for sync compaction (JuiceFS: 350)
+    pub sync_threshold: usize,
+    /// Compaction check interval
+    pub interval: Duration,
+    /// Maximum chunks to process per run
+    pub max_chunks_per_run: usize,
+}
+
+impl Default for CompactConfig {
+    fn default() -> Self {
+        Self {
+            min_slice_count: 5,
+            min_fragment_ratio: 0.1,
+            async_threshold: 100,
+            sync_threshold: 350,
+            interval: Duration::from_secs(3600),
+            max_chunks_per_run: 1000,
         }
     }
 }

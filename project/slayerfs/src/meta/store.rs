@@ -11,6 +11,7 @@ use std::fmt;
 use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+use sea_orm::DatabaseConnection;
 
 /// File type enumeration
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -584,13 +585,53 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
-    async fn cleanup_delayed_slices(&self, edge_ts: i64) -> Result<i32, MetaError> {
-        let _ = edge_ts;
+    /// cleanup delayed slices immediately during compaction instead of being triggered by time
+    async fn cleanup_delayed_slices(&self, chunk_id: u64, delayed: &[u8]) -> Result<(), MetaError> {
+        let _ = (chunk_id, delayed);
+        Err(MetaError::NotImplemented)
+    }
+
+    /// process delayed slices: delete old slices after verification
+    /// this should be called by GC worker periodically
+    /// returns the number of slices actually deleted
+    async fn process_delayed_slices(&self, batch_size: usize) -> Result<usize, MetaError> {
+        let _ = batch_size;
         Err(MetaError::NotImplemented)
     }
 
     async fn delete_slice(&self, slice_id: u64, size: u32) -> Result<(), MetaError> {
         let _ = (slice_id, size);
+        Err(MetaError::NotImplemented)
+    }
+    async fn merge_slices(&self, slices: &[SliceDesc]) -> Result<Vec<SliceDesc>, MetaError> {
+        let _ = slices;
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn merge_overlapping_slices(&self, chunk_id: u64) -> Result<(), MetaError> {
+        let _ = chunk_id;
+        Err(MetaError::NotImplemented)
+    }
+
+    // ---------- Compact trigger logic ----------
+
+    /// check if a chunk needs compaction based on configured thresholds
+    /// returns (should_compact, is_sync) - is_sync indicates if sync compaction is needed
+    async fn should_compact_chunk(&self, chunk_id: u64) -> Result<(bool, bool), MetaError> {
+        let _ = chunk_id;
+        Err(MetaError::NotImplemented)
+    }
+
+    /// get compaction statistics for a chunk
+    /// returns (slice_count, total_size, fragmentation_ratio)
+    async fn get_chunk_compact_stats(&self, chunk_id: u64) -> Result<(usize, u64, f64), MetaError> {
+        let _ = chunk_id;
+        Err(MetaError::NotImplemented)
+    }
+
+    /// run compaction on chunks that meet the threshold criteria
+    /// returns the number of chunks compacted
+    async fn run_compact_by_threshold(&self) -> Result<usize, MetaError> {
         Err(MetaError::NotImplemented)
     }
 
@@ -788,6 +829,7 @@ pub trait MetaStore: Send + Sync {
         );
         Err(MetaError::NotImplemented)
     }
+
 
     async fn truncate_file(
         &self,
