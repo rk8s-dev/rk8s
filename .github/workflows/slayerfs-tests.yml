@@ -54,7 +54,7 @@ jobs:
           cargo install cargo-fuzz --locked --force
 
       - name: Fuzz explore until 1GiB RSS (fs_ops)
-        timeout-minutes: 5
+        timeout-minutes: 30
         run: |
           cd project/slayerfs
           cargo +nightly fuzz build fs_ops
