@@ -76,3 +76,10 @@ jobs:
           fi
 
           exit "${status}"
+
+      - name: Cleanup slayerfs fuzz outputs (always)
+        if: always()
+        run: |
+          cd project/slayerfs
+          rm -rf fuzz/artifacts/fs_ops/*
+          rm -rf fuzz/.tmp*
