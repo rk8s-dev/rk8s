@@ -769,13 +769,19 @@ impl ModelFd {
 struct FdTables {
     slayer: Vec<Option<SlayerFd>>,
     model: Vec<Option<ModelFd>>,
+    slot_owner: Vec<Option<usize>>,
 }
 
 impl FdTables {
     fn new() -> Self {
         let slayer = std::iter::repeat_with(|| None).take(MAX_FDS).collect();
         let model = std::iter::repeat_with(|| None).take(MAX_FDS).collect();
-        Self { slayer, model }
+        let slot_owner = std::iter::repeat_with(|| None).take(MAX_FDS).collect();
+        Self {
+            slayer,
+            model,
+            slot_owner,
+        }
     }
 
     fn has_file_fd(&self) -> bool {
@@ -792,10 +798,16 @@ impl FdTables {
 
     fn assert_shape(&self, op: &str) {
         for idx in 0..MAX_FDS {
+            let slayer_has = self.slayer[idx].is_some();
+            let model_has = self.model[idx].is_some();
+            let owner_has = self.slot_owner[idx].is_some();
             assert_eq!(
-                self.slayer[idx].is_some(),
-                self.model[idx].is_some(),
+                slayer_has, model_has,
                 "{op}: fd table shape mismatch at slot {idx}"
+            );
+            assert_eq!(
+                slayer_has, owner_has,
+                "{op}: fd owner mismatch at slot {idx}"
             );
         }
     }
@@ -814,6 +826,10 @@ fn close_model_slot(slot: &mut Option<ModelFd>) -> io::Result<()> {
         Some(_) => Ok(()),
         None => Err(bad_fd()),
     }
+}
+
+fn slot_owner_or(fds: &FdTables, slot: usize, fallback: usize) -> usize {
+    fds.slot_owner[slot].unwrap_or(fallback)
 }
 
 fn slayer_path_open_offset_hint(fds: &FdTables, path: &str) -> Option<u64> {
@@ -1104,14 +1120,14 @@ fn model_utimens(
     }
 }
 
-async fn new_local_vfs(root: &Path) -> io::Result<SlayerVfs> {
+async fn new_local_vfs(root: &Path, meta_url: &str) -> io::Result<SlayerVfs> {
     let backend = ObjectClient::new(LocalFsBackend::new(root));
     let store = ObjectBlockStore::new(backend);
 
     let cfg = Config {
         database: DatabaseConfig {
             db_config: DatabaseType::Sqlite {
-                url: "sqlite::memory:".to_string(),
+                url: meta_url.to_string(),
             },
         },
         cache: CacheConfig::default(),
@@ -1127,7 +1143,87 @@ async fn new_local_vfs(root: &Path) -> io::Result<SlayerVfs> {
     VFS::new(LAYOUT, store, meta).await.map_err(io::Error::from)
 }
 
+
+fn fuzz_clients_from_env() -> usize {
+    std::env::var("SLAYERFS_FUZZ_CLIENTS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|v| v.clamp(1, 32))
+        .unwrap_or(1)
+}
+
+fn fuzz_meta_url_from_env() -> String {
+    std::env::var("SLAYERFS_FUZZ_META_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "sqlite::memory:".to_string())
+}
+
+async fn run_multiple_clients_case(data: &[u8], clients: usize, meta_url: &str) {
+    run_clients_case(data, clients.max(1), meta_url).await;
+}
+
 async fn run_case(data: &[u8]) {
+    let clients = fuzz_clients_from_env();
+    let meta_url = fuzz_meta_url_from_env();
+    run_multiple_clients_case(data, clients, &meta_url).await;
+}
+
+fn meta_url_for_clients(meta_url: &str, clients: usize, root: &Path) -> String {
+    if clients > 1 && meta_url.trim() == "sqlite::memory:" {
+        let name = root
+            .file_name()
+            .and_then(|v| v.to_str())
+            .unwrap_or("slayerfs-fuzz");
+        format!("sqlite://file:{name}?mode=memory&cache=shared")
+    } else {
+        meta_url.to_string()
+    }
+}
+
+fn op_slot(op: &Op) -> Option<usize> {
+    match op {
+        Op::Open { slot, .. }
+        | Op::Close { slot }
+        | Op::Lseek { slot, .. }
+        | Op::ReadFd { slot, .. }
+        | Op::WriteFd { slot, .. }
+        | Op::PRead { slot, .. }
+        | Op::PWrite { slot, .. }
+        | Op::Readdir { slot }
+        | Op::Fstat { slot }
+        | Op::Ftruncate { slot, .. }
+        | Op::Fsync { slot }
+        | Op::Fdatasync { slot }
+        | Op::Fchmod { slot, .. } => Some(*slot),
+        _ => None,
+    }
+}
+
+async fn verify_all_clients(vfs_clients: &[SlayerVfs], model_root: &Path) {
+    if let Some(vfs) = vfs_clients.first() {
+        verify_all(vfs, model_root).await;
+    }
+}
+
+async fn close_all_slots(vfs_clients: &[SlayerVfs], fds: &mut FdTables, op: &str) {
+    for slot in 0..MAX_FDS {
+        if fds.slayer[slot].is_none() && fds.model[slot].is_none() {
+            continue;
+        }
+
+        fds.assert_shape(op);
+
+        let owner = slot_owner_or(fds, slot, 0);
+        let slayer_res = close_slayer_slot(&vfs_clients[owner], &mut fds.slayer[slot]).await;
+        let model_res = close_model_slot(&mut fds.model[slot]);
+
+        let _ = compare_outcome(op, slayer_res, model_res);
+        fds.slot_owner[slot] = None;
+    }
+}
+
+async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
     let mut cur = ByteCursor::new(data);
     let op_count = match cur.next_u8() {
         Some(v) => 8 + (v as usize % 160),
@@ -1143,12 +1239,19 @@ async fn run_case(data: &[u8]) {
         Err(_) => return,
     };
 
-    let vfs = match new_local_vfs(slayer_store.path()).await {
-        Ok(v) => v,
-        Err(_) => return,
-    };
+    let clients = clients.max(1);
+    let resolved_meta_url = meta_url_for_clients(meta_url, clients, slayer_store.path());
+    let mut vfs_clients = Vec::with_capacity(clients);
+    for _ in 0..clients {
+        let vfs = match new_local_vfs(slayer_store.path(), &resolved_meta_url).await {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        vfs_clients.push(vfs);
+    }
+    let primary_vfs = &vfs_clients[0];
 
-    if vfs.mkdir_p("/fuzz").await.is_err() {
+    if primary_vfs.mkdir_p("/fuzz").await.is_err() {
         return;
     }
     if fs::create_dir_all(model_root.path().join("fuzz")).is_err() {
@@ -1158,7 +1261,7 @@ async fn run_case(data: &[u8]) {
     for dir in DIR_NAMES {
         let sp = fs_path(dir);
         let mp = model_path(model_root.path(), dir);
-        if vfs.mkdir_p(&sp).await.is_err() {
+        if primary_vfs.mkdir_p(&sp).await.is_err() {
             return;
         }
         if fs::create_dir_all(mp).is_err() {
@@ -1167,7 +1270,7 @@ async fn run_case(data: &[u8]) {
     }
 
     let mut fds = FdTables::new();
-    verify_all(&vfs, model_root.path()).await;
+    verify_all_clients(&vfs_clients, model_root.path()).await;
 
     for i in 0..op_count {
         fds.assert_shape("loop-start");
@@ -1176,6 +1279,21 @@ async fn run_case(data: &[u8]) {
             Some(v) => v,
             None => break,
         };
+
+        let sampled_client = if clients > 1 {
+            cur.next_u8().map(|v| v as usize % clients).unwrap_or(0)
+        } else {
+            0
+        };
+
+        let mut client_idx = sampled_client;
+        if !matches!(op, Op::Open { .. })
+            && let Some(slot) = op_slot(&op)
+            && fds.slayer[slot].is_some()
+        {
+            client_idx = slot_owner_or(&fds, slot, sampled_client);
+        }
+        let vfs = &vfs_clients[client_idx];
 
         match op {
             Op::Open {
@@ -1217,19 +1335,25 @@ async fn run_case(data: &[u8]) {
 
                     if fds.slayer[slot].is_some() || fds.model[slot].is_some() {
                         fds.assert_shape("open-replace");
-                        let old_slayer = close_slayer_slot(&vfs, &mut fds.slayer[slot]).await;
+                        let owner = slot_owner_or(&fds, slot, client_idx);
+                        let old_slayer =
+                            close_slayer_slot(&vfs_clients[owner], &mut fds.slayer[slot]).await;
                         let old_model = close_model_slot(&mut fds.model[slot]);
                         let _ = compare_outcome("open-replace-close", old_slayer, old_model);
+                        fds.slot_owner[slot] = None;
                     }
 
                     fds.slayer[slot] = Some(new_slayer);
                     fds.model[slot] = Some(new_model);
+                    fds.slot_owner[slot] = Some(client_idx);
                 }
             }
             Op::Close { slot } => {
-                let slayer_res = close_slayer_slot(&vfs, &mut fds.slayer[slot]).await;
+                let owner = slot_owner_or(&fds, slot, client_idx);
+                let slayer_res = close_slayer_slot(&vfs_clients[owner], &mut fds.slayer[slot]).await;
                 let model_res = close_model_slot(&mut fds.model[slot]);
                 let _ = compare_outcome("close", slayer_res, model_res);
+                fds.slot_owner[slot] = None;
             }
             Op::Lseek {
                 slot,
@@ -1816,9 +1940,11 @@ async fn run_case(data: &[u8]) {
                     }
 
                     fds.assert_shape("purge-close");
-                    let slayer_res = close_slayer_slot(&vfs, &mut fds.slayer[slot]).await;
+                    let owner = slot_owner_or(&fds, slot, client_idx);
+                    let slayer_res = close_slayer_slot(&vfs_clients[owner], &mut fds.slayer[slot]).await;
                     let model_res = close_model_slot(&mut fds.model[slot]);
                     let _ = compare_outcome("purge-close", slayer_res, model_res);
+                    fds.slot_owner[slot] = None;
                 }
 
                 for rel in subtree_unlink_targets(&dir) {
@@ -1849,21 +1975,20 @@ async fn run_case(data: &[u8]) {
             }
         }
 
-        if i % 8 == 0 && !fds.has_file_fd() && !fds.has_dir_fd() {
-            verify_all(&vfs, model_root.path()).await;
+        if clients > 1 && i % 16 == 15 {
+            close_all_slots(&vfs_clients, &mut fds, "barrier-close").await;
+        } else if i % 8 == 0 && !fds.has_file_fd() && !fds.has_dir_fd() {
+            verify_all_clients(&vfs_clients, model_root.path()).await;
         }
     }
 
-    for slot in 0..MAX_FDS {
-        if fds.slayer[slot].is_some() || fds.model[slot].is_some() {
-            fds.assert_shape("final-close");
-            let slayer_res = close_slayer_slot(&vfs, &mut fds.slayer[slot]).await;
-            let model_res = close_model_slot(&mut fds.model[slot]);
-            let _ = compare_outcome("final-close", slayer_res, model_res);
-        }
-    }
+    close_all_slots(&vfs_clients, &mut fds, "final-close").await;
 
-    verify_all(&vfs, model_root.path()).await;
+    if clients > 1 && let Ok(observer) = new_local_vfs(slayer_store.path(), &resolved_meta_url).await {
+        verify_all(&observer, model_root.path()).await;
+    } else {
+        verify_all_clients(&vfs_clients, model_root.path()).await;
+    }
 }
 
 fuzz_target!(|data: &[u8]| {
