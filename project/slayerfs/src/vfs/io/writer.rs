@@ -886,10 +886,10 @@ where
                 // The blocks to fetch should be relative to slice itself. Otherwise, a block may be overwritten.
                 let offset = uploaded;
 
-                let uploader = DataUploader::new(shared.config.layout, chunk_id, &shared.backend);
+                let uploader = DataUploader::new(shared.config.layout, &shared.backend);
                 let result = backoff(UPLOAD_MAX_RETRIES, || async {
                     match uploader
-                        .write_at_vectored(slice_id, offset, &all_chunks)
+                        .write_at_vectored(slice_id, offset.into(), &all_chunks)
                         .await
                     {
                         Ok(_) => Ok(()),
@@ -1453,7 +1453,7 @@ mod tests {
 
         let mut reader = DataFetcher::new(layout, cid, backend.as_ref());
         reader.prepare_slices().await.unwrap();
-        let out = reader.read_at(0, len).await.unwrap();
+        let out = reader.read_at(0u64.into(), len).await.unwrap();
         assert_eq!(out, data);
     }
 
@@ -1497,7 +1497,7 @@ mod tests {
 
         let mut reader = DataFetcher::new(layout, cid, backend.as_ref());
         reader.prepare_slices().await.unwrap();
-        let out = reader.read_at(0, len).await.unwrap();
+        let out = reader.read_at(0u64.into(), len).await.unwrap();
         assert_eq!(out, second);
     }
 

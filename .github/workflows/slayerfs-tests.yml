@@ -47,3 +47,14 @@ jobs:
         run: |
           cd project
           cargo test -p slayerfs
+
+      - name: Install nightly toolchain and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --locked --force
+
+      - name: Run fuzz smoke test (fs_ops)
+        timeout-minutes: 10
+        run: |
+          cd project/slayerfs
+          cargo +nightly fuzz run --sanitizer=none fs_ops fuzz/corpus/fs_ops -- -max_total_time=120 -max_len=1024 -rss_limit_mb=4096 -print_final_stats=1
