@@ -11,7 +11,7 @@ log_file=/tmp/slayerfs.log
 persistence_bin="$workspace_dir/target/release/examples/persistence_demo"
 xfstests_repo=https://git.kernel.org/pub/scm/fs/xfs/xfstests-dev.git
 xfstests_branch="${XFSTESTS_BRANCH:-v2023.12.10}"
-slayerfs_rust_log="${slayerfs_rust_log:-slayerfs=info,slayerfs::fuse::logfs=debug}"
+slayerfs_rust_log="${slayerfs_rust_log:-slayerfs=info,rfuse3::raw::logfs=debug}"
 slayerfs_fuse_op_log="${slayerfs_fuse_op_log:-1}"
 
 if [[ ! -f "$persistence_bin" ]]; then

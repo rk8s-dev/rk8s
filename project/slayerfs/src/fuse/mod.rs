@@ -13,7 +13,6 @@
 //! The module also includes platform-specific tests for mounting and basic operations,
 //! and provides utilities for mapping VFS metadata to FUSE attributes.
 pub(crate) mod adapter;
-pub(crate) mod logfs;
 pub mod mount;
 use crate::chuck::store::BlockStore;
 use crate::meta::MetaLayer;

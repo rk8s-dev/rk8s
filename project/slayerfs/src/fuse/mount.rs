@@ -7,9 +7,9 @@
 use std::num::NonZeroU32;
 use std::path::Path;
 
-#[cfg(target_os = "linux")]
-use crate::fuse::logfs::LoggingFileSystem;
 use rfuse3::MountOptions;
+#[cfg(target_os = "linux")]
+use rfuse3::raw::logfs::LoggingFileSystem;
 #[cfg(target_os = "linux")]
 use tracing::info;
 

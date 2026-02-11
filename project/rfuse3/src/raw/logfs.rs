@@ -1,9 +1,9 @@
-use super::Inode;
+use super::reply::*;
+use super::{reply::ReplyInit, Filesystem, Request};
+use crate::notify::Notify;
+use crate::Inode;
+use crate::{Result, SetAttr};
 use bytes::Bytes;
-use rfuse3::notify::Notify;
-use rfuse3::raw::reply::*;
-use rfuse3::raw::{Filesystem, Request, reply::ReplyInit};
-use rfuse3::{Result, SetAttr};
 use std::any::type_name_of_val;
 use std::ffi::OsStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,7 +43,7 @@ impl<FS: Filesystem> LoggingFileSystem<FS> {
     }
 }
 
-impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFileSystem<FS> {
+impl<FS: Filesystem + std::marker::Sync> Filesystem for LoggingFileSystem<FS> {
     async fn init(&self, req: Request) -> Result<ReplyInit> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "init";
@@ -346,7 +346,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn mkdir(
         &self,
         req: Request,
-        parent: rfuse3::Inode,
+        parent: Inode,
         name: &OsStr,
         mode: u32,
         umask: u32,
@@ -365,7 +365,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn access(&self, req: Request, inode: rfuse3::Inode, mask: u32) -> Result<()> {
+    async fn access(&self, req: Request, inode: Inode, mask: u32) -> Result<()> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "access";
         let args = vec![("inode", inode.to_string()), ("mask", mask.to_string())];
@@ -378,7 +378,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn getxattr(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         name: &OsStr,
         size: u32,
     ) -> Result<ReplyXAttr> {
@@ -398,7 +398,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn create(
         &self,
         req: Request,
-        parent: rfuse3::Inode,
+        parent: Inode,
         name: &OsStr,
         mode: u32,
         flags: u32,
@@ -420,7 +420,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn lseek(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         fh: u64,
         offset: u64,
         whence: u32,
@@ -442,7 +442,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn mknod(
         &self,
         req: Request,
-        parent: rfuse3::Inode,
+        parent: Inode,
         name: &OsStr,
         mode: u32,
         rdev: u32,
@@ -464,9 +464,9 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn rename(
         &self,
         req: Request,
-        parent: rfuse3::Inode,
+        parent: Inode,
         name: &OsStr,
-        new_parent: rfuse3::Inode,
+        new_parent: Inode,
         new_name: &OsStr,
     ) -> Result<()> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
@@ -485,7 +485,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         self.log_result(id, method, &result);
         result
     }
-    async fn listxattr(&self, req: Request, inode: rfuse3::Inode, size: u32) -> Result<ReplyXAttr> {
+    async fn listxattr(&self, req: Request, inode: Inode, size: u32) -> Result<ReplyXAttr> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "listxattr";
         let args = vec![("inode", inode.to_string()), ("size", size.to_string())];
@@ -495,7 +495,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn open(&self, req: Request, inode: rfuse3::Inode, flags: u32) -> Result<ReplyOpen> {
+    async fn open(&self, req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "open";
         let args = vec![("inode", inode.to_string()), ("flags", flags.to_string())];
@@ -511,7 +511,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn rmdir(&self, req: Request, parent: rfuse3::Inode, name: &OsStr) -> Result<()> {
+    async fn rmdir(&self, req: Request, parent: Inode, name: &OsStr) -> Result<()> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "rmdir";
         let args = vec![
@@ -524,7 +524,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn statfs(&self, req: Request, inode: rfuse3::Inode) -> Result<ReplyStatFs> {
+    async fn statfs(&self, req: Request, inode: Inode) -> Result<ReplyStatFs> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "statfs";
         let args = vec![("inode", inode.to_string())];
@@ -537,8 +537,8 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn link(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
-        new_parent: rfuse3::Inode,
+        inode: Inode,
+        new_parent: Inode,
         new_name: &OsStr,
     ) -> Result<ReplyEntry> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
@@ -557,7 +557,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn symlink(
         &self,
         req: Request,
-        parent: rfuse3::Inode,
+        parent: Inode,
         name: &OsStr,
         link: &OsStr,
     ) -> Result<ReplyEntry> {
@@ -593,7 +593,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn bmap(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         blocksize: u32,
         idx: u64,
     ) -> Result<ReplyBmap> {
@@ -613,10 +613,10 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn copy_file_range(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         fh_in: u64,
         off_in: u64,
-        inode_out: rfuse3::Inode,
+        inode_out: Inode,
         fh_out: u64,
         off_out: u64,
         length: u64,
@@ -648,7 +648,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn fallocate(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         fh: u64,
         offset: u64,
         length: u64,
@@ -672,13 +672,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn flush(
-        &self,
-        req: Request,
-        inode: rfuse3::Inode,
-        fh: u64,
-        lock_owner: u64,
-    ) -> Result<()> {
+    async fn flush(&self, req: Request, inode: Inode, fh: u64, lock_owner: u64) -> Result<()> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "flush";
         let args = vec![
@@ -692,13 +686,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn fsyncdir(
-        &self,
-        req: Request,
-        inode: rfuse3::Inode,
-        fh: u64,
-        datasync: bool,
-    ) -> Result<()> {
+    async fn fsyncdir(&self, req: Request, inode: Inode, fh: u64, datasync: bool) -> Result<()> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "fsyncdir";
         let args = vec![
@@ -712,11 +700,10 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn getlk(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         fh: u64,
         lock_owner: u64,
         start: u64,
@@ -724,16 +711,30 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         r#type: u32,
         pid: u32,
     ) -> Result<ReplyLock> {
-        self.inner
+        let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
+        let method = "getlk";
+        let args = vec![
+            ("inode", inode.to_string()),
+            ("fh", fh.to_string()),
+            ("lock_owner", lock_owner.to_string()),
+            ("start", start.to_string()),
+            ("end", end.to_string()),
+            ("type", r#type.to_string()),
+            ("pid", pid.to_string()),
+        ];
+        self.log_start(&req, id, method, &args);
+        let result = self
+            .inner
             .getlk(req, inode, fh, lock_owner, start, end, r#type, pid)
-            .await
+            .await;
+        self.log_result(id, method, &result);
+        result
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn setlk(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         fh: u64,
         lock_owner: u64,
         start: u64,
@@ -742,9 +743,25 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         pid: u32,
         block: bool,
     ) -> Result<()> {
-        self.inner
+        let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
+        let method = "setlk";
+        let args = vec![
+            ("inode", inode.to_string()),
+            ("fh", fh.to_string()),
+            ("lock_owner", lock_owner.to_string()),
+            ("start", start.to_string()),
+            ("end", end.to_string()),
+            ("type", r#type.to_string()),
+            ("pid", pid.to_string()),
+            ("block", block.to_string()),
+        ];
+        self.log_start(&req, id, method, &args);
+        let result = self
+            .inner
             .setlk(req, inode, fh, lock_owner, start, end, r#type, pid, block)
-            .await
+            .await;
+        self.log_result(id, method, &result);
+        result
     }
 
     // async  fn interrupt(&self, req: Request, unique: u64) -> Result<()> {
@@ -762,7 +779,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn notify_reply(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         offset: u64,
         data: Bytes,
     ) -> Result<()> {
@@ -778,7 +795,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn poll(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         fh: u64,
         kh: Option<u64>,
         flags: u32,
@@ -802,7 +819,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn readlink(&self, req: Request, inode: rfuse3::Inode) -> Result<ReplyData> {
+    async fn readlink(&self, req: Request, inode: Inode) -> Result<ReplyData> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "readlink";
         let args = vec![("inode", inode.to_string())];
@@ -815,7 +832,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
     async fn release(
         &self,
         req: Request,
-        inode: rfuse3::Inode,
+        inode: Inode,
         fh: u64,
         flags: u32,
         lock_owner: u64,
@@ -839,13 +856,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn releasedir(
-        &self,
-        req: Request,
-        inode: rfuse3::Inode,
-        fh: u64,
-        flags: u32,
-    ) -> Result<()> {
+    async fn releasedir(&self, req: Request, inode: Inode, fh: u64, flags: u32) -> Result<()> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "releasedir";
         let args = vec![
@@ -859,7 +870,7 @@ impl<FS: rfuse3::raw::Filesystem + std::marker::Sync> Filesystem for LoggingFile
         result
     }
 
-    async fn removexattr(&self, req: Request, inode: rfuse3::Inode, name: &OsStr) -> Result<()> {
+    async fn removexattr(&self, req: Request, inode: Inode, name: &OsStr) -> Result<()> {
         let id = self.next_log_id.fetch_add(1, Ordering::Relaxed);
         let method = "removexattr";
         let args = vec![
