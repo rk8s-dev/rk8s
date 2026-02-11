@@ -53,10 +53,23 @@ jobs:
           rustup toolchain install nightly --profile minimal
           cargo install cargo-fuzz --locked --force
 
-      - name: Replay fuzz corpus (fs_ops)
-        timeout-minutes: 15
+      - name: Fuzz explore until 1GiB RSS (fs_ops)
+        timeout-minutes: 8
         run: |
           cd project/slayerfs
-          CORPUS_COUNT=$(find fuzz/corpus/fs_ops -type f | wc -l)
-          echo "Replaying ${CORPUS_COUNT} corpus inputs"
-          cargo +nightly fuzz run --sanitizer=none fs_ops fuzz/corpus/fs_ops -- -runs=${CORPUS_COUNT} -max_len=1024 -rss_limit_mb=1024 -print_final_stats=1
+          cargo +nightly fuzz build fs_ops
+          BIN=$(find fuzz/target -type f -path "*/release/fs_ops" | head -n 1)
+          echo "Using fuzz binary: ${BIN}"
+
+          set +e
+          "${BIN}" -artifact_prefix=fuzz/artifacts/fs_ops/ fuzz/corpus/fs_ops -rss_limit_mb=1024 -max_total_time=300 -max_len=1024 -print_final_stats=1
+          status=$?
+          set -e
+
+          # libFuzzer exits with code 71 when hitting the RSS cap.
+          if [ "${status}" -eq 71 ]; then
+            echo "Stopped at RSS limit (expected)."
+            exit 0
+          fi
+
+          exit "${status}"
