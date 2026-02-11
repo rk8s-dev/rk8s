@@ -31,6 +31,6 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/rustls/0.21.12:rustls",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
     ],
 )

@@ -61,7 +61,7 @@ rust_library(
         "//third-party/rust/crates/sqlx-postgres/0.8.6:sqlx-postgres",
         "//third-party/rust/crates/sqlx-sqlite/0.8.6:sqlx-sqlite",
         "//third-party/rust/crates/syn/2.0.111:syn",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/url/2.5.7:url",
     ],
 )

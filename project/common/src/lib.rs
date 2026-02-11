@@ -296,7 +296,7 @@ pub enum NodeSelectorOperator {
     Lt,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
     #[serde(default)]
@@ -309,6 +309,16 @@ pub struct PodSpec {
     pub tolerations: Vec<Toleration>,
     #[serde(default)]
     pub affinity: Option<Affinity>,
+    #[serde(default)]
+    pub restart_policy: RestartPolicy,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub enum RestartPolicy {
+    Always,
+    OnFailure,
+    #[default]
+    Never,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -544,20 +554,98 @@ pub struct PodStatus {
 
     #[serde(rename = "containerStatuses", default)]
     pub container_statuses: Vec<ContainerStatus>,
+    /// Phase indicates the high-level summary of the pod's status.
+    #[serde(default)]
+    pub phase: PodPhase,
+    /// Detailed conditions of the pod's status.
+    #[serde(default)]
+    pub conditions: Option<Vec<PodCondition>>,
+    /// A message indicating details about why the pod is in this state
+    #[serde(default)]
+    pub message: Option<String>,
+    /// A brief reason message about why the pod is in this state
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub start_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PodPhase {
+    #[default]
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Unknown,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+pub struct PodCondition {
+    #[serde(rename = "type")]
+    pub condition_type: PodConditionType,
+    pub status: ConditionStatus,
+    #[serde(rename = "lastProbeTime", default)]
+    pub last_probe_time: Option<DateTime<Utc>>,
+    #[serde(rename = "lastTransitionTime", default)]
+    pub last_transition_time: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PodConditionType {
+    #[default]
+    PodScheduled,
+    PodReady,
+    ContainersReady,
+    PodInitialized,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct ContainerStatus {
     pub name: String,
 
-    #[serde(rename = "readinessProbe", default)]
-    pub readiness_probe: Option<ContainerProbeStatus>,
+    #[serde(default)]
+    pub state: Option<ContainerState>,
 
-    #[serde(rename = "livenessProbe", default)]
-    pub liveness_probe: Option<ContainerProbeStatus>,
+    #[serde(default)]
+    pub last_termination_state: Option<ContainerState>,
 
-    #[serde(rename = "startupProbe", default)]
-    pub startup_probe: Option<ContainerProbeStatus>,
+    #[serde(default)]
+    pub ready: bool,
+
+    #[serde(default)]
+    pub restart_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum ContainerState {
+    Waiting {
+        #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
+        message: Option<String>,
+    },
+    Running {
+        #[serde(default)]
+        started_at: Option<DateTime<Utc>>,
+    },
+    Terminated {
+        exit_code: i32,
+        #[serde(default)]
+        signal: Option<i32>,
+        #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
+        message: Option<String>,
+        #[serde(default)]
+        started_at: Option<DateTime<Utc>>,
+        #[serde(default)]
+        finished_at: Option<DateTime<Utc>>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -655,6 +743,8 @@ pub enum RksMessage {
     //request
     CreatePod(Box<PodTask>),
     DeletePod(String),
+    GetPodByUid(Uuid),
+    GetPod(String),
     ListPod,
 
     CreateReplicaSet(Box<ReplicaSet>),
@@ -675,6 +765,13 @@ pub enum RksMessage {
     },
     GetDeploymentHistory(String),
 
+    // Service operations
+    CreateService(Box<ServiceTask>),
+    UpdateService(Box<ServiceTask>),
+    DeleteService(String),
+    GetService(String),
+    ListService,
+
     GetNodeCount,
     RegisterNode(Box<Node>),
     UserRequest(String),
@@ -690,18 +787,33 @@ pub enum RksMessage {
         token: String,
         req: IssueCertificateRequest,
     },
+    /// Set nftables rules payload (serialized nft commands) - Full Sync
+    SetNftablesRules(String),
+    /// Update nftables rules payload (serialized nft commands) - Incremental
+    UpdateNftablesRules(String),
+
+    UpdatePodStatus {
+        pod_name: String,
+        pod_namespace: String,
+        status: PodStatus,
+    },
 
     //response
     Ack,
     Error(String),
     NodeCount(usize),
-    ListPodRes(Vec<String>),
+    GetPodByUidRes(Box<PodTask>),
+    GetPodRes(Box<PodTask>),
+    ListPodRes(Vec<PodTask>),
     GetReplicaSetRes(Box<ReplicaSet>),
     ListReplicaSetRes(Vec<ReplicaSet>),
     // Deployment responses
     GetDeploymentRes(Box<Deployment>),
     ListDeploymentRes(Vec<Deployment>),
     DeploymentHistoryRes(Vec<DeploymentRevisionInfo>),
+    // Service responses
+    GetServiceRes(Box<ServiceTask>),
+    ListServiceRes(Vec<ServiceTask>),
     // (Podname, Podip)
     SetPodip((String, String)),
     Certificate(IssueCertificateResponse),
@@ -715,6 +827,8 @@ impl std::fmt::Debug for RksMessage {
             Self::DeletePod(pod_name) => {
                 write!(f, "RksMessage::DeletePod {{ pod_name: {} }}", pod_name)
             }
+            Self::GetPodByUid(uid) => write!(f, "RksMessage::GetPodByUid({})", uid),
+            Self::GetPod(name) => write!(f, "RksMessage::GetPod({})", name),
             Self::ListPod => f.write_str("RksMessage::ListPod"),
             Self::CreateReplicaSet(_) => f.write_str("RksMessage::CreateReplicaSet { .. }"),
             Self::UpdateReplicaSet(_) => f.write_str("RksMessage::UpdateReplicaSet { .. }"),
@@ -744,6 +858,13 @@ impl std::fmt::Debug for RksMessage {
             Self::GetDeploymentHistory(name) => {
                 write!(f, "RksMessage::GetDeploymentHistory {{ name: {} }}", name)
             }
+            Self::CreateService(_) => f.write_str("RksMessage::CreateService { .. }"),
+            Self::UpdateService(_) => f.write_str("RksMessage::UpdateService { .. }"),
+            Self::DeleteService(name) => {
+                write!(f, "RksMessage::DeleteService {{ name: {} }}", name)
+            }
+            Self::GetService(name) => write!(f, "RksMessage::GetService {{ name: {} }}", name),
+            Self::ListService => f.write_str("RksMessage::ListService"),
             Self::GetNodeCount => f.write_str("RksMessage::GetNodeCount"),
             Self::RegisterNode(_) => f.write_str("RksMessage::RegisterNode { .. }"),
             Self::UserRequest(_) => f.write_str("RksMessage::UserRequest { .. }"),
@@ -764,11 +885,27 @@ impl std::fmt::Debug for RksMessage {
                 )
             }
             Self::CertificateSign { .. } => f.write_str("RksMessage::CertificateSign { .. }"),
-
+            Self::UpdatePodStatus {
+                pod_name,
+                pod_namespace,
+                status: _,
+            } => write!(
+                f,
+                "RksMessage::UpdatePodStatus {{ pod_name: {}, pod_namespace: {} }}",
+                pod_name, pod_namespace
+            ),
+            Self::SetNftablesRules(rules) => {
+                write!(f, "RksMessage::SetNftablesRules (len={})", rules.len())
+            }
+            Self::UpdateNftablesRules(rules) => {
+                write!(f, "RksMessage::UpdateNftablesRules (len={})", rules.len())
+            }
             // response
             Self::Ack => f.write_str("RksMessage::Ack"),
             Self::Error(err_msg) => write!(f, "RksMessage::Error({})", err_msg),
             Self::NodeCount(count) => write!(f, "RksMessage::NodeCount({})", count),
+            Self::GetPodByUidRes(_) => f.write_str("RksMessage::GetPodByUidRes { .. }"),
+            Self::GetPodRes(_) => f.write_str("RksMessage::GetPodRes { .. }"),
             Self::ListPodRes(pods) => {
                 write!(f, "RksMessage::ListPodRes {{ count: {} }}", pods.len())
             }
@@ -793,6 +930,14 @@ impl std::fmt::Debug for RksMessage {
                     f,
                     "RksMessage::DeploymentHistoryRes {{ count: {} }}",
                     history.len()
+                )
+            }
+            Self::GetServiceRes(_) => f.write_str("RksMessage::GetServiceRes { .. }"),
+            Self::ListServiceRes(services) => {
+                write!(
+                    f,
+                    "RksMessage::ListServiceRes {{ count: {} }}",
+                    services.len()
                 )
             }
             Self::SetPodip((pod_name, pod_ip)) => {
@@ -822,6 +967,8 @@ impl Display for RksMessage {
                 pod.metadata.name, pod.metadata.namespace
             ),
             Self::DeletePod(pod_name) => write!(f, "Delete pod '{}'", pod_name),
+            Self::GetPodByUid(uid) => write!(f, "Get pod by UID '{}'", uid),
+            Self::GetPod(name) => write!(f, "Get pod '{}'", name),
             Self::ListPod => f.write_str("List pods"),
             Self::CreateReplicaSet(rs) => write!(f, "Create replicaset '{}'", rs.metadata.name),
             Self::UpdateReplicaSet(rs) => write!(f, "Update replicaset '{}'", rs.metadata.name),
@@ -843,9 +990,18 @@ impl Display for RksMessage {
             Self::GetDeploymentHistory(name) => {
                 write!(f, "Get deployment '{}' revision history", name)
             }
+            Self::CreateService(svc) => write!(f, "Create service '{}'", svc.metadata.name),
+            Self::UpdateService(svc) => write!(f, "Update service '{}'", svc.metadata.name),
+            Self::DeleteService(name) => write!(f, "Delete service '{}'", name),
+            Self::GetService(name) => write!(f, "Get service '{}'", name),
+            Self::ListService => f.write_str("List services"),
             Self::GetNodeCount => f.write_str("Get node count"),
             Self::RegisterNode(node) => write!(f, "Register node '{}'", node.metadata.name),
             Self::UserRequest(payload) => write!(f, "User request: {}", payload),
+            Self::SetNftablesRules(rules) => write!(f, "SetNftablesRules (len={})", rules.len()),
+            Self::UpdateNftablesRules(rules) => {
+                write!(f, "UpdateNftablesRules (len={})", rules.len())
+            }
             Self::Heartbeat { node_name, status } => {
                 let ready_state = status
                     .conditions
@@ -879,11 +1035,26 @@ impl Display for RksMessage {
             Self::CertificateSign { token, .. } => {
                 write!(f, "Submit certificate signing request (token: {})", token)
             }
+            Self::UpdatePodStatus {
+                pod_name,
+                pod_namespace,
+                status: _,
+            } => write!(
+                f,
+                "Update status for pod '{}' in namespace '{}'",
+                pod_name, pod_namespace
+            ),
 
             // response
             Self::Ack => f.write_str("Acknowledge message receipt"),
             Self::Error(err_msg) => write!(f, "Error: {}", err_msg),
             Self::NodeCount(count) => write!(f, "Reported node count: {}", count),
+            Self::GetPodByUidRes(pod) => {
+                write!(f, "Get pod by UID response: '{}'", pod.metadata.name)
+            }
+            Self::GetPodRes(pod) => {
+                write!(f, "Get pod response: '{}'", pod.metadata.name)
+            }
             Self::ListPodRes(pods) => {
                 if pods.is_empty() {
                     return f.write_str("List pods response: no pods found");
@@ -892,7 +1063,7 @@ impl Display for RksMessage {
                 let preview = pods
                     .iter()
                     .take(3)
-                    .map(|name| name.as_str())
+                    .map(|pod| pod.metadata.name.as_str())
                     .collect::<Vec<_>>();
 
                 if pods.len() > preview.len() {
@@ -957,6 +1128,28 @@ impl Display for RksMessage {
                     "Deployment history response: {} revision(s)",
                     history.len()
                 )
+            }
+            Self::GetServiceRes(svc) => {
+                write!(f, "Get service '{}' response", svc.metadata.name)
+            }
+            Self::ListServiceRes(services) => {
+                if services.is_empty() {
+                    return f.write_str("List services response: no services found");
+                }
+                let preview = services
+                    .iter()
+                    .take(3)
+                    .map(|svc| svc.metadata.name.as_str())
+                    .collect::<Vec<_>>();
+                if services.len() > preview.len() {
+                    return write!(
+                        f,
+                        "List services response: {} (+{} more)",
+                        preview.join(", "),
+                        services.len() - preview.len()
+                    );
+                }
+                write!(f, "List services response: {}", preview.join(", "))
             }
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
@@ -1098,11 +1291,12 @@ pub enum NodeConditionType {
     NetworkUnavailable,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub enum ConditionStatus {
     True,
     False,
+    #[default]
     Unknown,
 }
 
@@ -1203,7 +1397,7 @@ pub struct ExternalInterface {
     pub ext_v6_addr: Option<Ipv6Addr>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ServiceSpec {
     #[serde(rename = "type", default = "default_service_type")]
     pub service_type: String, // ClusterIP, NodePort, LoadBalancer
@@ -1223,7 +1417,7 @@ fn default_service_type() -> String {
     "ClusterIP".to_string()
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ServicePort {
     #[serde(rename = "port")]
     pub port: i32,

@@ -44,15 +44,15 @@ use std::{
 use tabwriter::TabWriter;
 use tracing::{debug, info, warn};
 
-struct RkbImagePuller {}
+struct RkforgeImagePuller {}
 
 #[async_trait::async_trait]
-impl ImagePuller for RkbImagePuller {
+impl ImagePuller for RkforgeImagePuller {
     async fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
-        rkb::pull::pull_or_get_image(image_ref, None::<&str>).await
+        rkforge::pull::pull_or_get_image(image_ref, None::<&str>).await
     }
     fn sync_pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
-        rkb::pull::sync_pull_or_get_image(image_ref, None::<&str>)
+        rkforge::pull::sync_pull_or_get_image(image_ref, None::<&str>)
     }
 }
 
@@ -748,7 +748,7 @@ pub fn setup_network_conf() -> Result<()> {
 pub fn handle_image_typ(
     container_spec: &ContainerSpec,
 ) -> Result<(Option<ContainerConfigBuilder>, String)> {
-    let puller = RkbImagePuller {};
+    let puller = RkforgeImagePuller {};
     if let ImageType::OCIImage = determine_image(&container_spec.image)? {
         let (image_config, bundle_path) =
             sync_handle_oci_image(&puller, &container_spec.image, container_spec.name.clone())?;

@@ -1,0 +1,26 @@
+/validate:
+    tag: [ no-rpm, validate ]
+    summary: Validate test
+    test: make -C ../.. validate
+    require:
+        - clippy
+        - rustfmt
+
+/unit:
+    tag: [ no-rpm, unit ]
+    summary: Unit tests
+    test: make -C ../.. unit
+    require:
+        - cargo
+
+/integration:
+    tag: [ rpm, integration ]
+    summary: Integration tests
+    test: bash test_integration.sh
+    environment:
+        AARDVARK: /usr/libexec/podman/aardvark-dns
+    require:
+        - aardvark-dns-tests
+    adjust:
+        duration: 10m
+        when: arch == aarch64

@@ -31,8 +31,8 @@ rust_library(
         "@$(location :parking_lot_core-manifest[env_flags])",
     ],
     os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
+        "linux": ["//third-party/rust/crates/libc/0.2.180:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.180:libc"],
         "windows": ["//third-party/rust/crates/windows-link/0.2.1:windows-link"],
     },
     visibility = ["PUBLIC"],

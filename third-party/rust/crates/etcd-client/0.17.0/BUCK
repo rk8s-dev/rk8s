@@ -36,7 +36,7 @@ rust_library(
         "//third-party/rust/crates/http/1.4.0:http",
         "//third-party/rust/crates/prost/0.14.1:prost",
         "//third-party/rust/crates/tokio-stream/0.1.17:tokio-stream",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tonic-prost/0.14.2:tonic-prost",
         "//third-party/rust/crates/tonic/0.14.2:tonic",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",

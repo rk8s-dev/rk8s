@@ -65,12 +65,41 @@ pub async fn dispatch_user(
         RksMessage::DeletePod(pod_name) => {
             delete::user_delete(pod_name, xline_store, conn).await?;
         }
-
+        RksMessage::GetPodByUid(pod_uid) => {
+            let pods = xline_store.list_pods().await?;
+            if let Some(pod) = pods.into_iter().find(|p| p.metadata.uid == pod_uid) {
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved Pod with UID {pod_uid}"
+                );
+                conn.send_msg(&RksMessage::GetPodByUidRes(Box::new(pod)))
+                    .await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!(
+                    "Pod with UID {} not found",
+                    pod_uid
+                )))
+                .await?;
+            }
+        }
+        RksMessage::GetPod(name) => {
+            if let Some(pod) = xline_store.get_pod(&name).await? {
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved Pod {name}"
+                );
+                conn.send_msg(&RksMessage::GetPodRes(Box::new(pod))).await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!("Pod {} not found", name)))
+                    .await?;
+            }
+        }
         RksMessage::ListPod => {
-            let pods = xline_store.list_pod_names().await?;
+            let pods = xline_store.list_pods().await?;
             info!(
                 target: "rks::node::user_dispatch",
-                "list current pod: {pods:?}"
+                "list current pods: {} items",
+                pods.len()
             );
             conn.send_msg(&RksMessage::ListPodRes(pods)).await?;
         }
@@ -301,11 +330,134 @@ pub async fn dispatch_user(
             }
         }
 
+        // Service operations
+        RksMessage::CreateService(mut svc) => {
+            if xline_store
+                .get_service_yaml(&svc.metadata.name)
+                .await?
+                .is_some()
+            {
+                let err_msg = format!("service \"{}\" already exists", svc.metadata.name);
+                conn.send_msg(&RksMessage::Error(err_msg)).await?;
+                return Ok(());
+            }
+            let name = svc.metadata.name.clone();
+            if svc.metadata.creation_timestamp.is_none() {
+                svc.metadata.creation_timestamp = Some(Utc::now());
+            }
+            let yaml = serde_yaml::to_string(&*svc)?;
+            xline_store.insert_service_yaml(&name, &yaml).await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "created Service {name}"
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::UpdateService(incoming_svc) => {
+            let name = incoming_svc.metadata.name.clone();
+            if let Some(existing_yaml) = xline_store.get_service_yaml(&name).await? {
+                let mut final_svc: ServiceTask = serde_yaml::from_str(&existing_yaml)?;
+                if final_svc.spec != incoming_svc.spec {
+                    let current_gen = final_svc.metadata.generation.unwrap_or(0);
+                    final_svc.metadata.generation = Some(current_gen + 1);
+                    final_svc.spec = incoming_svc.spec.clone();
+                    info!(
+                        target: "rks::node::user_dispatch",
+                        "Service {} spec updated, add generation",
+                        name
+                    );
+                }
+                let yaml = serde_yaml::to_string(&final_svc)?;
+                xline_store.insert_service_yaml(&name, &yaml).await?;
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "updated Service {name} (preserved state)"
+                );
+            } else {
+                let yaml = serde_yaml::to_string(&*incoming_svc)?;
+                xline_store.insert_service_yaml(&name, &yaml).await?;
+            }
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::DeleteService(name) => {
+            xline_store
+                .delete_object(
+                    common::ResourceKind::Service,
+                    &name,
+                    common::DeletePropagationPolicy::Background,
+                )
+                .await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "marked Service {} for deletion (background policy)",
+                name
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::GetService(name) => {
+            if let Some(svc) = xline_store.get_service(&name).await? {
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved Service {name}"
+                );
+                conn.send_msg(&RksMessage::GetServiceRes(Box::new(svc)))
+                    .await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!("Service {} not found", name)))
+                    .await?;
+            }
+        }
+
+        RksMessage::ListService => {
+            let services = xline_store.list_services().await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "list current services: {} items",
+                services.len()
+            );
+            conn.send_msg(&RksMessage::ListServiceRes(services)).await?;
+        }
+
         RksMessage::GetNodeCount => {
             info!(
                 target: "rks::node::user_dispatch",
                 "GetNodeCount received"
             );
+        }
+        RksMessage::UpdatePodStatus {
+            pod_name,
+            pod_namespace,
+            status,
+        } => {
+            info!(
+                target: "rks::node::user_dispatch",
+                "UpdatePodStatus received for Pod {}/{}", pod_namespace, pod_name
+            );
+            // Update the pod status in xline store
+            if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await? {
+                let mut pod_task: PodTask = serde_yaml::from_str(&pod_yaml)?;
+                pod_task.status = status;
+                let new_yaml = serde_yaml::to_string(&pod_task)?;
+                xline_store.insert_pod_yaml(&pod_name, &new_yaml).await?;
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "updated PodTask {}/{} status", pod_namespace, pod_name
+                );
+                conn.send_msg(&RksMessage::Ack).await?;
+            } else {
+                warn!(
+                    target: "rks::node::user_dispatch",
+                    "PodTask {}/{} not found when updating status", pod_namespace, pod_name
+                );
+                conn.send_msg(&RksMessage::Error(format!(
+                    "PodTask {}/{} not found",
+                    pod_namespace, pod_name
+                )))
+                .await?;
+            }
         }
         _ => warn!(
             target: "rks::node::user_dispatch",

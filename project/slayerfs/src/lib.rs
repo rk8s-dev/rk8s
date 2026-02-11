@@ -9,6 +9,7 @@ pub mod daemon;
 pub(crate) mod fs;
 pub mod fuse;
 pub(crate) mod meta;
+pub(crate) mod posix;
 pub mod sdk_fs;
 pub(crate) mod vfs;
 

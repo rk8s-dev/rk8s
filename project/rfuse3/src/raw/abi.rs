@@ -202,6 +202,11 @@ pub const FUSE_WRITE_LOCKOWNER: u32 = 1 << 1;
 // Read flags
 pub const FUSE_READ_LOCKOWNER: u32 = 1 << 1;
 
+// Open flags (fuse_open_out.open_flags)
+pub const FOPEN_DIRECT_IO: u32 = 1 << 0;
+pub const FOPEN_KEEP_CACHE: u32 = 1 << 1;
+pub const FOPEN_NONSEEKABLE: u32 = 1 << 2;
+
 // IOCTL flags
 #[allow(dead_code)]
 /// 32bit compat ioctl on 64bit machine

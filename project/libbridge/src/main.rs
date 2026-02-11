@@ -760,12 +760,12 @@ pub async fn setup_bridge_nftable(br_name: String) -> anyhow::Result<()> {
 
     let comment = "libbridge-forward-accept".to_string();
 
-    let build_accept_rule = |iif: String, oif: String| {
+    let build_accept_rule = |iif: String, oif: String, rule_comment: String| {
         let r = Rule {
             family: NfFamily::IP,
             table: Cow::Owned("filter".to_string()),
             chain: Cow::Owned("FORWARD".to_string()),
-            comment: Some(Cow::Owned(comment.clone())),
+            comment: Some(Cow::Owned(rule_comment)),
             expr: Cow::Owned(vec![
                 Statement::Match(StmtMatch {
                     left: Expression::Named(NamedExpression::Meta(ExprMeta {
@@ -833,11 +833,19 @@ pub async fn setup_bridge_nftable(br_name: String) -> anyhow::Result<()> {
     objects.push(build_accept_rule(
         ext_iface.iface.name.clone(),
         br_name.clone(),
+        comment.clone(),
     ));
     // br -> ext_iface (recreate)
     objects.push(build_accept_rule(
         br_name.clone(),
         ext_iface.iface.name.clone(),
+        comment.clone(),
+    ));
+    // br -> br (pod-to-pod on same node)
+    objects.push(build_accept_rule(
+        br_name.clone(),
+        br_name.clone(),
+        "Pod-to-pod on same node".to_string(),
     ));
 
     if objects.is_empty() {
@@ -872,7 +880,7 @@ pub async fn cleanup_bridge_nftable() -> anyhow::Result<()> {
         if let NfObject::ListObject(listobj) = obj
             && let NfListObject::Rule(r) = listobj
             && let Some(comment) = &r.comment
-            && comment == "libbridge-forward-accept"
+            && (comment == "libbridge-forward-accept" || comment == "Pod-to-pod on same node")
         {
             let del_rule = Rule {
                 family: r.family,

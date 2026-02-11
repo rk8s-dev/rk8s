@@ -1,21 +1,20 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: test-pod1
+  name: test-pod2
   labels:
-    app: my-app 
-    bundle: ./project/rk8s/project/test/bundles/pause
+    app: my-app
 spec:
-  node_name: node1
+  node_name: node2
   containers:
     - name: container1    
-      image: ./project/rk8s/project/test/bundles/busybox
+      image: busybox:latest         
+      ports:
+        - containerPort: 80
       args:             
         - "dd"                   
         - "if=/dev/zero"  
-        - "of=/dev/null"          
-      ports:
-        - containerPort: 80
+        - "of=/dev/null"
       resources:
         limits:
           cpu: "500m"

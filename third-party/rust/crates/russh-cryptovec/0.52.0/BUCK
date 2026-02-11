@@ -29,7 +29,7 @@ rust_library(
         "linux": ["//third-party/rust/crates/nix/0.29.0:nix"],
         "macos": ["//third-party/rust/crates/nix/0.29.0:nix"],
         "windows": [
-            "//third-party/rust/crates/libc/0.2.178:libc",
+            "//third-party/rust/crates/libc/0.2.180:libc",
             "//third-party/rust/crates/winapi/0.3.9:winapi",
         ],
     },

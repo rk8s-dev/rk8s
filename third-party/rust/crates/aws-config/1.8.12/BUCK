@@ -51,7 +51,7 @@ rust_library(
         "//third-party/rust/crates/http/1.4.0:http",
         "//third-party/rust/crates/ring/0.17.14:ring",
         "//third-party/rust/crates/time/0.3.44:time",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tracing/0.1.43:tracing",
         "//third-party/rust/crates/url/2.5.7:url",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",

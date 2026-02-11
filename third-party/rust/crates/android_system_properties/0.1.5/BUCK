@@ -26,5 +26,5 @@ rust_library(
     compatible_with = ["prelude//os/constraints:linux"],
     rustc_flags = ["@$(location :android_system_properties-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.178:libc"],
+    deps = ["//third-party/rust/crates/libc/0.2.180:libc"],
 )

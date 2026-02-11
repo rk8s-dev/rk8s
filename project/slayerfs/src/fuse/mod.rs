@@ -19,6 +19,7 @@ use crate::chuck::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
+use crate::posix::NAME_MAX;
 use crate::vfs::error::VfsError;
 use crate::vfs::fs::{FileAttr as VfsFileAttr, FileType as VfsFileType, VFS};
 use bytes::Bytes;
@@ -31,7 +32,6 @@ use rfuse3::raw::reply::{
     ReplyXAttr,
 };
 use std::ffi::{OsStr, OsString};
-use std::num::NonZeroU32;
 use std::time::Duration;
 
 use futures_util::stream::{self, BoxStream};
@@ -181,10 +181,7 @@ where
     M: MetaLayer + Send + Sync + 'static,
 {
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
-        debug!("fuse.init");
-        // Default to 4 MiB for higher throughput while keeping memory usage reasonable.
-        let max_write = NonZeroU32::new(4 * 1024 * 1024).unwrap();
-        Ok(ReplyInit { max_write })
+        Ok(ReplyInit::default())
     }
 
     async fn destroy(&self, _req: Request) {}
@@ -599,7 +596,7 @@ where
             files,
             ffree,
             bsize,
-            namelen: 255,
+            namelen: NAME_MAX as u32,
             frsize,
         })
     }

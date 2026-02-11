@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use tabwriter::TabWriter;
 
+use crate::commands::format_duration;
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Cli, QUICClient};
 
@@ -247,21 +248,4 @@ fn list_print(rs_list: Vec<ReplicaSet>) -> Result<()> {
 
     tab_writer.flush()?;
     Ok(())
-}
-
-fn format_duration(duration: chrono::Duration) -> String {
-    let days = duration.num_days();
-    let hours = duration.num_hours() % 24;
-    let minutes = duration.num_minutes() % 60;
-    let seconds = duration.num_seconds() % 60;
-
-    if days > 0 {
-        format!("{}d{}h", days, hours)
-    } else if hours > 0 {
-        format!("{}h{}m", hours, minutes)
-    } else if minutes > 0 {
-        format!("{}m{}s", minutes, seconds)
-    } else {
-        format!("{}s", seconds)
-    }
 }

@@ -31,7 +31,7 @@ rust_library(
     rustc_flags = ["@$(location :objc2-io-kit-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.178:libc",
+        "//third-party/rust/crates/libc/0.2.180:libc",
         "//third-party/rust/crates/objc2-core-foundation/0.3.2:objc2-core-foundation",
     ],
 )

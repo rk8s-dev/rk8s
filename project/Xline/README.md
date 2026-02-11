@@ -2,25 +2,19 @@
 
 ![Xline-logo](doc/img/xline-horizontal-black.png)
 
+English | [简体中文](README_CN.md)
+
+This directory is the Xline codebase brought into the `rk8s` monorepo for secondary development.
+
+- Current location: https://github.com/rk8s-dev/rk8s/tree/main/project/Xline
+- Upstream project: https://github.com/xline-kv/Xline
+
 [![Discord Shield][discord-badge]][discord-url]
 [![Apache 2.0 licensed][apache-badge]][apache-url]
-[![FOSSA Status][fossa-shield]][fossa-badge]
-[![Build Status][actions-badge]][actions-url]
-[![codecov][cov-badge]][cov-url]
-[![OpenSSF Best Practices][openssf-badge]](openssf-url)
-
-[fossa-badge]: https://app.fossa.com/projects/git%2Bgithub.com%2Fxline-kv%2FXline?ref=badge_shield
-[fossa-shield]: https://app.fossa.com/api/projects/git%2Bgithub.com%2Fxline-kv%2FXline.svg?type=shield
 [discord-badge]: https://discordapp.com/api/guilds/1110584535248281760/widget.png?style=shield
 [discord-url]: https://discord.gg/hqDRtYkWzm
 [apache-badge]: https://img.shields.io/badge/license-Apache--2.0-brightgreen
-[apache-url]: https://github.com/xline-kv/Xline/blob/master/LICENSE
-[actions-badge]: https://github.com/xline-kv/xline/actions/workflows/pull_request.yml/badge.svg?branch=master
-[actions-url]: https://github.com/xline-kv/xline/actions
-[cov-badge]: https://codecov.io/gh/xline-kv/xline/branch/master/graph/badge.svg
-[cov-url]: https://codecov.io/gh/xline-kv/xline
-[openssf-badge]: https://bestpractices.coreinfrastructure.org/projects/7571/badge
-[openssf-url]: https://bestpractices.coreinfrastructure.org/projects/7571
+[apache-url]: https://github.com/rk8s-dev/rk8s/blob/main/project/Xline/LICENSE
 
 Welcome to the Xline Project!
 
@@ -67,7 +61,7 @@ We adopt a new consensus protocol named
 issue. Please refer to the paper for a detailed description. The main benefit of
 the protocol is reducing 1 RTT when contention is not too high. As far as we
 know, Xline is the first product to use CURP. For more protocol comparison, please
-refer to the [blog](https://datenlord.github.io/xline-home/#/blog/2023-01-07-Curp:-Revisit-the-Consensus-Protocol)
+refer to the [blog](https://zhuanlan.zhihu.com/p/643655556)
 
 ## Performance Comparison
 
@@ -98,7 +92,7 @@ To get started, check out the document [QUICK_START.md](doc/QUICK_START.md) for 
 
 ## Contribute Guide
 
-Our project welcomes contributions from any member of our community. To get started contributing, please see our [CONTRIBUTING.md](./CONTRIBUTING.md).
+Our project welcomes contributions from any member of our community. To get started contributing, please see our [CONTRIBUTING.md](./CONTRIBUTING.md) and R2CN.dev .
 
 ## Code of Conduct
 
@@ -128,4 +122,4 @@ The Xline project adheres to [the CNCF Community Code of Conduct](./CODE_OF_COND
 
 
 ## License
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fxline-kv%2FXline.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fxline-kv%2FXline?ref=badge_large)
+See [LICENSE](./LICENSE).
