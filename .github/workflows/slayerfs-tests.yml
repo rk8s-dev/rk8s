@@ -53,7 +53,7 @@ jobs:
           rustup toolchain install nightly --profile minimal
           cargo install cargo-fuzz --locked --force
 
-      - name: Fuzz explore until 1GiB RSS (fs_ops)
+      - name: Fuzz explore (fs_ops)
         timeout-minutes: 30
         run: |
           cd project/slayerfs
