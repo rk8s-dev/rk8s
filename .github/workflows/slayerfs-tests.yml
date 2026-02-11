@@ -54,12 +54,15 @@ jobs:
           cargo install cargo-fuzz --locked --force
 
       - name: Fuzz explore until 1GiB RSS (fs_ops)
-        timeout-minutes: 8
+        timeout-minutes: 5
         run: |
           cd project/slayerfs
           cargo +nightly fuzz build fs_ops
           BIN=$(find fuzz/target -type f -path "*/release/fs_ops" | head -n 1)
           echo "Using fuzz binary: ${BIN}"
+
+          # CI clone may not contain local/untracked corpus dirs; create them defensively.
+          mkdir -p fuzz/corpus/fs_ops fuzz/artifacts/fs_ops
 
           set +e
           "${BIN}" -artifact_prefix=fuzz/artifacts/fs_ops/ fuzz/corpus/fs_ops -rss_limit_mb=1024 -max_total_time=300 -max_len=1024 -print_final_stats=1
