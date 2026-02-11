@@ -995,9 +995,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::ChunkLayout;
     use crate::chuck::store::InMemoryBlockStore;
     use crate::chuck::writer::DataUploader;
+    use crate::chuck::{ChunkLayout, SliceDesc};
     use crate::meta::MetaLayer;
     use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;
@@ -1035,27 +1035,39 @@ mod tests {
 
         let slice_id1 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, chunk_id_for(ino, 0).unwrap(), backend.as_ref());
-        let desc1 = uploader
-            .write_at_vectored(
-                slice_id1 as u64,
-                offset,
-                &[bytes::Bytes::copy_from_slice(head)],
-            )
+        uploader
+            .write_at_vectored(slice_id1 as u64, 0, &[bytes::Bytes::copy_from_slice(head)])
             .await
             .unwrap();
         meta_store
-            .append_slice(chunk_id_for(ino, 0).unwrap(), desc1)
+            .append_slice(
+                chunk_id_for(ino, 0).unwrap(),
+                SliceDesc {
+                    slice_id: slice_id1 as u64,
+                    chunk_id: chunk_id_for(ino, 0).unwrap(),
+                    offset,
+                    length: head.len() as u64,
+                },
+            )
             .await
             .unwrap();
 
         let slice_id2 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, chunk_id_for(ino, 1).unwrap(), backend.as_ref());
-        let desc2 = uploader
+        uploader
             .write_at_vectored(slice_id2 as u64, 0, &[Bytes::copy_from_slice(tail)])
             .await
             .unwrap();
         meta_store
-            .append_slice(chunk_id_for(ino, 1).unwrap(), desc2)
+            .append_slice(
+                chunk_id_for(ino, 1).unwrap(),
+                SliceDesc {
+                    slice_id: slice_id2 as u64,
+                    chunk_id: chunk_id_for(ino, 1).unwrap(),
+                    offset: 0,
+                    length: tail.len() as u64,
+                },
+            )
             .await
             .unwrap();
 

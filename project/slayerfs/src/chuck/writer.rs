@@ -151,11 +151,21 @@ mod tests {
         let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
 
         let uploader = DataUploader::new(layout, 1, backend.as_ref());
-        let desc = uploader
-            .write_at_vectored(slice_id as u64, offset, &[Bytes::copy_from_slice(&data)])
+        uploader
+            .write_at_vectored(slice_id as u64, 0, &[Bytes::copy_from_slice(&data)])
             .await
             .unwrap();
-        meta.append_slice(1, desc).await.unwrap();
+        meta.append_slice(
+            1,
+            SliceDesc {
+                slice_id: slice_id as u64,
+                chunk_id: 1,
+                offset,
+                length: data.len() as u64,
+            },
+        )
+        .await
+        .unwrap();
 
         let mut fetcher = DataFetcher::new(layout, 1, backend.as_ref());
         fetcher.prepare_slices().await.unwrap();
@@ -186,11 +196,21 @@ mod tests {
 
         let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
         let uploader = DataUploader::new(layout, 8, backend.as_ref());
-        let desc = uploader
-            .write_at_vectored(slice_id as u64, offset, &chunks)
+        uploader
+            .write_at_vectored(slice_id as u64, 0, &chunks)
             .await
             .unwrap();
-        meta.append_slice(8, desc).await.unwrap();
+        meta.append_slice(
+            8,
+            SliceDesc {
+                slice_id: slice_id as u64,
+                chunk_id: 8,
+                offset,
+                length: data.len() as u64,
+            },
+        )
+        .await
+        .unwrap();
 
         let mut fetcher = DataFetcher::new(layout, 8, backend.as_ref());
         fetcher.prepare_slices().await.unwrap();
