@@ -883,7 +883,8 @@ where
                     },
                 };
 
-                // The blocks to fetch should be relative to slice itself. Otherwise, a block may be overwritten.
+                // The blocks to upload/write should be relative to the slice itself.
+                // Otherwise, a previously uploaded block may be overwritten.
                 let offset = uploaded;
 
                 let uploader = DataUploader::new(shared.config.layout, &shared.backend);

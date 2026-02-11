@@ -13,6 +13,7 @@ libc = "0.2"
 slayerfs = { path = ".." }
 tempfile = "3"
 tokio = { version = "1", features = ["rt"] }
+etcd-client = "0.17"
 
 # Use independent workspace for fuzzers
 [workspace]

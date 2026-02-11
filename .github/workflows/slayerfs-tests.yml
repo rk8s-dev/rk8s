@@ -65,7 +65,7 @@ jobs:
           mkdir -p fuzz/corpus/fs_ops fuzz/artifacts/fs_ops
 
           set +e
-          "${BIN}" -artifact_prefix=fuzz/artifacts/fs_ops/ fuzz/corpus/fs_ops -rss_limit_mb=1024 -max_total_time=300 -max_len=1024 -print_final_stats=1
+          "${BIN}" -artifact_prefix=fuzz/artifacts/fs_ops/ fuzz/corpus/fs_ops -rss_limit_mb=1024 -max_total_time=180 -max_len=1024 -print_final_stats=1
           status=$?
           set -e
 

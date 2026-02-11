@@ -3648,6 +3648,7 @@ dependencies = [
 name = "slayerfs-fuzz"
 version = "0.0.0"
 dependencies = [
+ "etcd-client",
  "libc",
  "libfuzzer-sys",
  "slayerfs",

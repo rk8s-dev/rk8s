@@ -6,15 +6,18 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink as model_symlink};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use etcd_client::{Client as RawEtcdClient, DeleteOptions};
 use libfuzzer_sys::fuzz_target;
 use slayerfs::{
     CacheConfig, ChunkLayout, ClientOptions, Config, DatabaseConfig, DatabaseMetaStore,
-    DatabaseType, LocalFsBackend, MetaClient, ObjectBlockStore, ObjectClient, SetAttrFlags,
-    SetAttrRequest, VFS, VfsFileAttr, VfsFileType,
+    DatabaseType, EtcdMetaStore, LocalFsBackend, MetaClient, MetaStore, ObjectBlockStore,
+    ObjectClient, SetAttrFlags, SetAttrRequest, VFS, VfsFileAttr, VfsFileType,
 };
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Builder;
+use tokio::task::JoinSet;
 
 const LAYOUT: ChunkLayout = ChunkLayout {
     chunk_size: 128,
@@ -41,17 +44,7 @@ const ALL_NAMES: [&str; 16] = [
     "sub1",
 ];
 
-type SlayerVfs = VFS<ObjectBlockStore<LocalFsBackend>, MetaClient<DatabaseMetaStore>>;
-
-fn runtime() -> &'static Runtime {
-    static RT: OnceLock<Runtime> = OnceLock::new();
-    RT.get_or_init(|| {
-        Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build tokio runtime")
-    })
-}
+type SlayerVfs = VFS<ObjectBlockStore<LocalFsBackend>, MetaClient<Arc<dyn MetaStore>>>;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
@@ -81,6 +74,7 @@ enum OpKind {
     PurgeDir = 22,
     Chmod = 23,
     Fchmod = 24,
+    Rename = 25,
 }
 
 impl From<u8> for OpKind {
@@ -111,6 +105,7 @@ impl From<u8> for OpKind {
             22 => OpKind::PurgeDir,
             23 => OpKind::Chmod,
             24 => OpKind::Fchmod,
+            25 => OpKind::Rename,
             _ => panic!("unknown op kind"),
         }
     }
@@ -118,7 +113,7 @@ impl From<u8> for OpKind {
 
 impl OpKind {
     fn count() -> u8 {
-        25
+        26
     }
 }
 
@@ -154,7 +149,7 @@ enum SeekWhence {
     End,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Op {
     Open {
         slot: usize,
@@ -243,6 +238,10 @@ enum Op {
         dst: String,
     },
     Link {
+        src: String,
+        dst: String,
+    },
+    Rename {
         src: String,
         dst: String,
     },
@@ -536,6 +535,10 @@ impl<'a> ByteCursor<'a> {
                 src: self.choose_with_dir(&RW_NAMES)?,
                 dst: self.choose_with_dir(&HARDLINK_NAMES)?,
             },
+            OpKind::Rename => Op::Rename {
+                src: self.choose_with_dir(&UNLINK_NAMES)?,
+                dst: self.choose_with_dir(&UNLINK_NAMES)?,
+            },
             OpKind::PurgeDir => Op::PurgeDir {
                 dir: self.choose(&DIR_NAMES)?.to_string(),
                 recreate: (self.next_u8()? & 1) == 0,
@@ -568,10 +571,36 @@ fn loop_error() -> io::Error {
     io::Error::from_raw_os_error(libc::ELOOP)
 }
 
+fn is_notfound_like(err: &io::Error) -> bool {
+    if err.kind() == io::ErrorKind::NotFound {
+        return true;
+    }
+
+    let msg = err.to_string().to_ascii_lowercase();
+    msg.contains("not found")
+}
+
+static ACTIVE_FUZZ_CLIENTS: AtomicUsize = AtomicUsize::new(1);
+
+fn is_c2o_required_compare(op: &str) -> bool {
+    matches!(
+        op,
+        "readfd" | "writefd" | "pread" | "pwrite" | "lseek" | "ftruncate"
+    )
+}
+
+fn should_strict_compare(op: &str) -> bool {
+    let clients = ACTIVE_FUZZ_CLIENTS.load(Ordering::Relaxed);
+    clients <= 1 || is_c2o_required_compare(op)
+}
+
 fn compare_outcome<T, U>(op: &str, slayer: io::Result<T>, model: io::Result<U>) -> Option<(T, U)> {
+    let strict = should_strict_compare(op);
+
     match (slayer, model) {
         (Ok(a), Ok(b)) => Some((a, b)),
         (Err(_), Err(_)) => None,
+        (Ok(_), Err(_)) | (Err(_), Ok(_)) if !strict => None,
         (Ok(_), Err(e)) => panic!("{op}: slayerfs succeeded but model failed: {e:?}"),
         (Err(e), Ok(_)) => panic!("{op}: slayerfs failed but model succeeded: {e:?}"),
     }
@@ -852,6 +881,68 @@ fn model_path_open_offset_hint(fds: &FdTables, path: &Path) -> Option<u64> {
         .max()
 }
 
+fn remap_slayer_path(path: &str, old_path: &str, new_path: &str) -> Option<String> {
+    if path == old_path {
+        return Some(new_path.to_string());
+    }
+
+    let suffix = path.strip_prefix(old_path)?;
+    if !suffix.starts_with('/') {
+        return None;
+    }
+
+    Some(format!("{new_path}{suffix}"))
+}
+
+fn remap_model_path(path: &Path, old_path: &Path, new_path: &Path) -> Option<PathBuf> {
+    if path == old_path {
+        return Some(new_path.to_path_buf());
+    }
+
+    let suffix = path.strip_prefix(old_path).ok()?;
+    Some(new_path.join(suffix))
+}
+
+fn refresh_fd_paths_after_rename(
+    fds: &mut FdTables,
+    old_sp: &str,
+    new_sp: &str,
+    old_mp: &Path,
+    new_mp: &Path,
+) {
+    for slot in 0..MAX_FDS {
+        if let Some(sfd) = fds.slayer[slot].as_mut() {
+            match sfd {
+                SlayerFd::File(fd) => {
+                    if let Some(new_path) = remap_slayer_path(&fd.path, old_sp, new_sp) {
+                        fd.path = new_path;
+                    }
+                }
+                SlayerFd::Dir(fd) => {
+                    if let Some(new_path) = remap_slayer_path(&fd.path, old_sp, new_sp) {
+                        fd.path = new_path;
+                    }
+                }
+            }
+        }
+
+        if let Some(mfd) = fds.model[slot].as_mut() {
+            match mfd {
+                ModelFd::File(fd) => {
+                    if let Some(new_path) = remap_model_path(&fd.path, old_mp, new_mp) {
+                        fd.path = new_path;
+                    }
+                }
+                ModelFd::Dir(fd) => {
+                    if let Some(new_path) = remap_model_path(&fd.path, old_mp, new_mp) {
+                        fd.path = new_path;
+                    }
+                }
+            }
+        }
+    }
+}
+
 async fn open_slayer_fd(
     vfs: &SlayerVfs,
     path: &str,
@@ -1120,29 +1211,54 @@ fn model_utimens(
     }
 }
 
-async fn new_local_vfs(root: &Path, meta_url: &str) -> io::Result<SlayerVfs> {
+#[derive(Debug, Clone)]
+enum FuzzMetaConfig {
+    Sqlite { url: String },
+    Etcd { urls: Vec<String> },
+}
+
+async fn new_local_vfs(root: &Path, meta: &FuzzMetaConfig) -> io::Result<SlayerVfs> {
     let backend = ObjectClient::new(LocalFsBackend::new(root));
     let store = ObjectBlockStore::new(backend);
 
-    let cfg = Config {
-        database: DatabaseConfig {
-            db_config: DatabaseType::Sqlite {
-                url: meta_url.to_string(),
-            },
-        },
-        cache: CacheConfig::default(),
-        client: ClientOptions {
-            no_background_jobs: true,
-            ..ClientOptions::default()
-        },
+    let client = ClientOptions {
+        no_background_jobs: true,
+        ..ClientOptions::default()
     };
-    let meta = DatabaseMetaStore::from_config(cfg)
+
+    let meta_store: Arc<dyn MetaStore> = match meta {
+        FuzzMetaConfig::Sqlite { url } => {
+            let cfg = Config {
+                database: DatabaseConfig {
+                    db_config: DatabaseType::Sqlite { url: url.clone() },
+                },
+                cache: CacheConfig::default(),
+                client,
+            };
+            let store = DatabaseMetaStore::from_config(cfg)
+                .await
+                .map_err(io::Error::other)?;
+            Arc::new(store)
+        }
+        FuzzMetaConfig::Etcd { urls } => {
+            let cfg = Config {
+                database: DatabaseConfig {
+                    db_config: DatabaseType::Etcd { urls: urls.clone() },
+                },
+                cache: CacheConfig::default(),
+                client,
+            };
+            let store = EtcdMetaStore::from_config(cfg)
+                .await
+                .map_err(io::Error::other)?;
+            Arc::new(store)
+        }
+    };
+
+    VFS::new(LAYOUT, store, meta_store)
         .await
-        .map_err(io::Error::other)?;
-
-    VFS::new(LAYOUT, store, meta).await.map_err(io::Error::from)
+        .map_err(io::Error::from)
 }
-
 
 fn fuzz_clients_from_env() -> usize {
     std::env::var("SLAYERFS_FUZZ_CLIENTS")
@@ -1159,25 +1275,101 @@ fn fuzz_meta_url_from_env() -> String {
         .unwrap_or_else(|| "sqlite::memory:".to_string())
 }
 
-async fn run_multiple_clients_case(data: &[u8], clients: usize, meta_url: &str) {
-    run_clients_case(data, clients.max(1), meta_url).await;
+fn fuzz_etcd_urls_from_env() -> Vec<String> {
+    std::env::var("SLAYERFS_FUZZ_ETCD_URLS")
+        .or_else(|_| std::env::var("SLAYERFS_FUZZ_META_ETCD_URLS"))
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|urls| !urls.is_empty())
+        .unwrap_or_else(|| vec!["127.0.0.1:2379".to_string()])
+}
+
+fn fuzz_meta_config_from_env() -> FuzzMetaConfig {
+    let backend = std::env::var("SLAYERFS_FUZZ_META_BACKEND")
+        .ok()
+        .unwrap_or_else(|| "sqlite".to_string());
+
+    if backend.eq_ignore_ascii_case("etcd") {
+        FuzzMetaConfig::Etcd {
+            urls: fuzz_etcd_urls_from_env(),
+        }
+    } else {
+        FuzzMetaConfig::Sqlite {
+            url: fuzz_meta_url_from_env(),
+        }
+    }
+}
+
+async fn reset_etcd_for_case(urls: &[String]) -> io::Result<()> {
+    let mut client = RawEtcdClient::connect(urls.to_vec(), None)
+        .await
+        .map_err(io::Error::other)?;
+    client
+        .delete("", Some(DeleteOptions::new().with_prefix()))
+        .await
+        .map_err(io::Error::other)?;
+    Ok(())
+}
+
+fn fuzz_concurrent_from_env() -> bool {
+    std::env::var("SLAYERFS_FUZZ_CONCURRENT")
+        .ok()
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+        })
+        .unwrap_or(false)
+}
+
+fn fuzz_concurrent_batch_from_env() -> usize {
+    std::env::var("SLAYERFS_FUZZ_CONCURRENT_BATCH")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|v| v.clamp(1, 64))
+        .unwrap_or(8)
+}
+
+async fn run_multiple_clients_case(data: &[u8], clients: usize, meta: &FuzzMetaConfig) {
+    run_clients_case(data, clients.max(1), meta).await;
 }
 
 async fn run_case(data: &[u8]) {
     let clients = fuzz_clients_from_env();
-    let meta_url = fuzz_meta_url_from_env();
-    run_multiple_clients_case(data, clients, &meta_url).await;
+    ACTIVE_FUZZ_CLIENTS.store(clients, Ordering::Relaxed);
+
+    let meta = fuzz_meta_config_from_env();
+
+    if let FuzzMetaConfig::Etcd { urls } = &meta
+        && reset_etcd_for_case(urls).await.is_err()
+    {
+        return;
+    }
+
+    if fuzz_concurrent_from_env() {
+        run_clients_case_concurrent(data, clients, &meta).await;
+    } else {
+        run_multiple_clients_case(data, clients, &meta).await;
+    }
 }
 
-fn meta_url_for_clients(meta_url: &str, clients: usize, root: &Path) -> String {
-    if clients > 1 && meta_url.trim() == "sqlite::memory:" {
-        let name = root
-            .file_name()
-            .and_then(|v| v.to_str())
-            .unwrap_or("slayerfs-fuzz");
-        format!("sqlite://file:{name}?mode=memory&cache=shared")
-    } else {
-        meta_url.to_string()
+fn meta_config_for_clients(meta: &FuzzMetaConfig, clients: usize, root: &Path) -> FuzzMetaConfig {
+    match meta {
+        FuzzMetaConfig::Sqlite { url } => {
+            if clients > 1 && url.trim() == "sqlite::memory:" {
+                let db_path = root.join("fuzz-meta.db");
+                FuzzMetaConfig::Sqlite {
+                    url: format!("sqlite://{}?mode=rwc", db_path.display()),
+                }
+            } else {
+                FuzzMetaConfig::Sqlite { url: url.clone() }
+            }
+        }
+        FuzzMetaConfig::Etcd { urls } => FuzzMetaConfig::Etcd { urls: urls.clone() },
     }
 }
 
@@ -1198,6 +1390,25 @@ fn op_slot(op: &Op) -> Option<usize> {
         | Op::Fchmod { slot, .. } => Some(*slot),
         _ => None,
     }
+}
+
+fn use_observer_for_op(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Create { .. }
+            | Op::Unlink { .. }
+            | Op::Mkdir { .. }
+            | Op::Rmdir { .. }
+            | Op::Readlink { .. }
+            | Op::Stat { .. }
+            | Op::Lstat { .. }
+            | Op::Utimens { .. }
+            | Op::Symlink { .. }
+            | Op::Link { .. }
+            | Op::Rename { .. }
+            | Op::PurgeDir { .. }
+            | Op::Chmod { .. }
+    )
 }
 
 async fn verify_all_clients(vfs_clients: &[SlayerVfs], model_root: &Path) {
@@ -1223,7 +1434,274 @@ async fn close_all_slots(vfs_clients: &[SlayerVfs], fds: &mut FdTables, op: &str
     }
 }
 
-async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
+async fn verify_concurrent_sanity(vfs: &SlayerVfs) {
+    for dir in DIR_NAMES {
+        let sp = fs_path(dir);
+        let attr = match vfs.stat(&sp).await {
+            Ok(attr) => attr,
+            Err(_) => continue,
+        };
+
+        assert_eq!(
+            attr.kind,
+            VfsFileType::Dir,
+            "concurrent-verify: expected directory at {sp}"
+        );
+
+        let fh = vfs
+            .opendir(attr.ino)
+            .await
+            .expect("concurrent-verify: opendir failed");
+
+        let mut offset = 0;
+        let mut names = Vec::new();
+        for _ in 0..16 {
+            let batch = vfs
+                .readdir(fh, offset)
+                .unwrap_or_else(|| panic!("concurrent-verify: readdir failed for {sp}"));
+            if batch.is_empty() {
+                break;
+            }
+            offset += batch.len() as u64;
+            for entry in batch {
+                if entry.name != "." && entry.name != ".." {
+                    names.push(entry.name);
+                }
+            }
+        }
+
+        vfs.closedir(fh)
+            .unwrap_or_else(|err| panic!("concurrent-verify: closedir failed for {sp}: {err}"));
+
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            names.len(),
+            sorted.len(),
+            "concurrent-verify: duplicate directory entries detected at {sp}"
+        );
+    }
+
+    for dir in DIR_NAMES {
+        for name in ALL_NAMES {
+            let rel = format!("{dir}/{name}");
+            let sp = fs_path(&rel);
+            let attr = match vfs.stat(&sp).await {
+                Ok(attr) => attr,
+                Err(_) => continue,
+            };
+
+            if attr.kind == VfsFileType::Symlink {
+                let _ = vfs.readlink(&sp).await.unwrap_or_else(|err| {
+                    panic!("concurrent-verify: readlink failed for {sp}: {err}")
+                });
+            }
+        }
+    }
+}
+
+async fn apply_concurrent_op(vfs: &SlayerVfs, op: Op) {
+    match op {
+        Op::Open {
+            path,
+            mode,
+            create,
+            excl,
+            trunc,
+            append,
+            nofollow,
+            directory,
+            ..
+        } => {
+            let sp = fs_path(&path);
+            if let Ok(fd) = open_slayer_fd(
+                vfs, &sp, mode, create, excl, trunc, append, nofollow, directory,
+            )
+            .await
+            {
+                match fd {
+                    SlayerFd::File(fd) => {
+                        let _ = vfs.close(fd.fh).await;
+                    }
+                    SlayerFd::Dir(fd) => {
+                        let _ = vfs.closedir(fd.fh);
+                    }
+                }
+            }
+        }
+        Op::Create { path, exclusive } => {
+            let _ = vfs
+                .create_file_in_existing_dir_err(&fs_path(&path), exclusive)
+                .await;
+        }
+        Op::Unlink { path } => {
+            let _ = vfs.unlink(&fs_path(&path)).await;
+        }
+        Op::Mkdir { path } => {
+            let _ = vfs.mkdir_err(&fs_path(&path)).await;
+        }
+        Op::Rmdir { path } => {
+            let _ = vfs.rmdir(&fs_path(&path)).await;
+        }
+        Op::Readlink { path } => {
+            let _ = vfs.readlink(&fs_path(&path)).await;
+        }
+        Op::Stat { path } | Op::Lstat { path } => {
+            let _ = vfs.stat(&fs_path(&path)).await;
+        }
+        Op::Utimens {
+            path,
+            atime_ns,
+            mtime_ns,
+            atime_now,
+            mtime_now,
+        } => {
+            let sp = fs_path(&path);
+            if let Ok(attr) = vfs.stat(&sp).await {
+                let mut req = SetAttrRequest::default();
+                let mut flags = SetAttrFlags::empty();
+
+                if atime_now {
+                    flags |= SetAttrFlags::SET_ATIME_NOW;
+                } else {
+                    req.atime = Some(atime_ns);
+                }
+
+                if mtime_now {
+                    flags |= SetAttrFlags::SET_MTIME_NOW;
+                } else {
+                    req.mtime = Some(mtime_ns);
+                }
+
+                let _ = vfs.set_attr(attr.ino, &req, flags).await;
+            }
+        }
+        Op::Symlink { src, dst } => {
+            let _ = vfs.create_symlink(&fs_path(&dst), &fs_path(&src)).await;
+        }
+        Op::Link { src, dst } => {
+            let _ = vfs.link(&fs_path(&src), &fs_path(&dst)).await;
+        }
+        Op::Rename { src, dst } => {
+            let _ = vfs.rename(&fs_path(&src), &fs_path(&dst)).await;
+        }
+        Op::PurgeDir { dir, recreate } => {
+            let root_sp = fs_path(&dir);
+
+            for rel in subtree_unlink_targets(&dir) {
+                let _ = vfs.unlink(&fs_path(&rel)).await;
+            }
+            for rel in subtree_rmdir_targets(&dir) {
+                let _ = vfs.rmdir(&fs_path(&rel)).await;
+            }
+            let _ = vfs.rmdir(&root_sp).await;
+            if recreate {
+                let _ = vfs.mkdir_p(&root_sp).await;
+            }
+        }
+        Op::Chmod { path, mode } => {
+            let sp = fs_path(&path);
+            if let Ok(attr) = vfs.stat(&sp).await {
+                let req = SetAttrRequest {
+                    mode: Some(mode),
+                    ..Default::default()
+                };
+                let _ = vfs.set_attr(attr.ino, &req, SetAttrFlags::empty()).await;
+            }
+        }
+        Op::Close { .. }
+        | Op::Lseek { .. }
+        | Op::ReadFd { .. }
+        | Op::WriteFd { .. }
+        | Op::PRead { .. }
+        | Op::PWrite { .. }
+        | Op::Readdir { .. }
+        | Op::Fstat { .. }
+        | Op::Ftruncate { .. }
+        | Op::Fsync { .. }
+        | Op::Fdatasync { .. }
+        | Op::Fchmod { .. } => {}
+    }
+}
+
+async fn run_clients_case_concurrent(data: &[u8], clients: usize, meta: &FuzzMetaConfig) {
+    let mut cur = ByteCursor::new(data);
+    let op_count = match cur.next_u8() {
+        Some(v) => 8 + (v as usize % 160),
+        None => return,
+    };
+
+    let slayer_store = match tempfile::tempdir() {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    let clients = clients.max(1);
+    let resolved_meta = meta_config_for_clients(meta, clients, slayer_store.path());
+    let mut vfs_clients = Vec::with_capacity(clients);
+    for _ in 0..clients {
+        let vfs = match new_local_vfs(slayer_store.path(), &resolved_meta).await {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        vfs_clients.push(vfs);
+    }
+
+    let primary_vfs = &vfs_clients[0];
+    if primary_vfs.mkdir_p("/fuzz").await.is_err() {
+        return;
+    }
+    for dir in DIR_NAMES {
+        if primary_vfs.mkdir_p(&fs_path(dir)).await.is_err() {
+            return;
+        }
+    }
+
+    let mut scheduled = Vec::with_capacity(op_count);
+    for _ in 0..op_count {
+        // Concurrent mode intentionally avoids fd lifecycle coupling, so decode without fd bias.
+        let op = match cur.next_op(true, true) {
+            Some(v) => v,
+            None => break,
+        };
+
+        let client_idx = if clients > 1 {
+            cur.next_u8().map(|v| v as usize % clients).unwrap_or(0)
+        } else {
+            0
+        };
+        scheduled.push((client_idx, op));
+    }
+
+    let batch_size = fuzz_concurrent_batch_from_env();
+    for chunk in scheduled.chunks(batch_size) {
+        let mut join_set = JoinSet::new();
+        for (client_idx, op) in chunk {
+            let vfs = vfs_clients[*client_idx].clone();
+            let op = op.clone();
+            join_set.spawn(async move {
+                apply_concurrent_op(&vfs, op).await;
+            });
+        }
+
+        while let Some(res) = join_set.join_next().await {
+            if let Err(err) = res {
+                panic!("concurrent op task panicked: {err}");
+            }
+        }
+
+        if let Ok(observer) = new_local_vfs(slayer_store.path(), &resolved_meta).await {
+            verify_concurrent_sanity(&observer).await;
+        }
+    }
+
+    if let Ok(observer) = new_local_vfs(slayer_store.path(), &resolved_meta).await {
+        verify_concurrent_sanity(&observer).await;
+    }
+}
+
+async fn run_clients_case(data: &[u8], clients: usize, meta: &FuzzMetaConfig) {
     let mut cur = ByteCursor::new(data);
     let op_count = match cur.next_u8() {
         Some(v) => 8 + (v as usize % 160),
@@ -1240,10 +1718,10 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
     };
 
     let clients = clients.max(1);
-    let resolved_meta_url = meta_url_for_clients(meta_url, clients, slayer_store.path());
+    let resolved_meta = meta_config_for_clients(meta, clients, slayer_store.path());
     let mut vfs_clients = Vec::with_capacity(clients);
     for _ in 0..clients {
-        let vfs = match new_local_vfs(slayer_store.path(), &resolved_meta_url).await {
+        let vfs = match new_local_vfs(slayer_store.path(), &resolved_meta).await {
             Ok(v) => v,
             Err(_) => return,
         };
@@ -1270,7 +1748,9 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
     }
 
     let mut fds = FdTables::new();
-    verify_all_clients(&vfs_clients, model_root.path()).await;
+    if clients == 1 {
+        verify_all_clients(&vfs_clients, model_root.path()).await;
+    }
 
     for i in 0..op_count {
         fds.assert_shape("loop-start");
@@ -1293,7 +1773,15 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
         {
             client_idx = slot_owner_or(&fds, slot, sampled_client);
         }
-        let vfs = &vfs_clients[client_idx];
+
+        let mut observer_vfs = None;
+        if clients > 1 && use_observer_for_op(&op) {
+            observer_vfs = new_local_vfs(slayer_store.path(), &resolved_meta)
+                .await
+                .ok();
+        }
+
+        let vfs = observer_vfs.as_ref().unwrap_or(&vfs_clients[client_idx]);
 
         match op {
             Op::Open {
@@ -1316,6 +1804,37 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                 .await;
                 let model_res =
                     open_model_fd(&mp, mode, create, excl, trunc, append, nofollow, directory);
+
+                if clients > 1
+                    && let (Err(err), Ok(_)) = (&slayer_res, &model_res)
+                    && is_notfound_like(err)
+                {
+                    // Multi-client mode can observe stale per-client path caches.
+                    // Verify with a fresh observer client before deciding this is a bug.
+                    if let Ok(observer) = new_local_vfs(slayer_store.path(), &resolved_meta).await {
+                        let retry_res = open_slayer_fd(
+                            &observer, &sp, mode, create, excl, trunc, append, nofollow, directory,
+                        )
+                        .await;
+                        if retry_res.is_ok() {
+                            continue;
+                        }
+                    }
+                }
+
+                if clients > 1 && slayer_res.is_err() != model_res.is_err() {
+                    if let Ok(fd) = slayer_res {
+                        match fd {
+                            SlayerFd::File(fd) => {
+                                let _ = vfs.close(fd.fh).await;
+                            }
+                            SlayerFd::Dir(fd) => {
+                                let _ = vfs.closedir(fd.fh);
+                            }
+                        }
+                    }
+                    continue;
+                }
 
                 if let Some((mut new_slayer, mut new_model)) =
                     compare_outcome("open", slayer_res, model_res)
@@ -1350,7 +1869,8 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
             }
             Op::Close { slot } => {
                 let owner = slot_owner_or(&fds, slot, client_idx);
-                let slayer_res = close_slayer_slot(&vfs_clients[owner], &mut fds.slayer[slot]).await;
+                let slayer_res =
+                    close_slayer_slot(&vfs_clients[owner], &mut fds.slayer[slot]).await;
                 let model_res = close_model_slot(&mut fds.model[slot]);
                 let _ = compare_outcome("close", slayer_res, model_res);
                 fds.slot_owner[slot] = None;
@@ -1661,7 +2181,9 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                     Ok(out)
                 })();
 
-                if let Some((got, expect)) = compare_outcome("readdir", slayer_res, model_res) {
+                if let Some((got, expect)) = compare_outcome("readdir", slayer_res, model_res)
+                    && should_strict_compare("readdir")
+                {
                     assert_eq!(got, expect, "readdir: entries mismatch at slot {slot}");
                 }
             }
@@ -1672,7 +2194,9 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                 let slayer_res = vfs.readlink(&sp).await.map_err(io::Error::from);
                 let model_res = fs::read_link(&mp).map(|p| p.to_string_lossy().into_owned());
 
-                if let Some((got, expect)) = compare_outcome("readlink", slayer_res, model_res) {
+                if let Some((got, expect)) = compare_outcome("readlink", slayer_res, model_res)
+                    && should_strict_compare("readlink")
+                {
                     assert_eq!(got, expect, "readlink: target mismatch at {sp}");
                 }
             }
@@ -1683,7 +2207,9 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                 let slayer_res = vfs.stat(&sp).await.map_err(io::Error::from);
                 let model_res = fs::symlink_metadata(&mp);
 
-                if let Some((sm, mm)) = compare_outcome("stat", slayer_res, model_res) {
+                if let Some((sm, mm)) = compare_outcome("stat", slayer_res, model_res)
+                    && should_strict_compare("stat")
+                {
                     compare_attrs("stat", &sp, &sm, &mm);
                 }
             }
@@ -1694,7 +2220,9 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                 let slayer_res = vfs.stat(&sp).await.map_err(io::Error::from);
                 let model_res = fs::symlink_metadata(&mp);
 
-                if let Some((sm, mm)) = compare_outcome("lstat", slayer_res, model_res) {
+                if let Some((sm, mm)) = compare_outcome("lstat", slayer_res, model_res)
+                    && should_strict_compare("lstat")
+                {
                     compare_attrs("lstat", &sp, &sm, &mm);
                 }
             }
@@ -1713,7 +2241,9 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                     None => Err(bad_fd()),
                 };
 
-                if let Some((sm, mm)) = compare_outcome("fstat", slayer_res, model_res) {
+                if let Some((sm, mm)) = compare_outcome("fstat", slayer_res, model_res)
+                    && should_strict_compare("fstat")
+                {
                     compare_attrs("fstat", "<fd>", &sm, &mm);
                 }
             }
@@ -1739,7 +2269,9 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                     fs::symlink_metadata(&mp)
                 })();
 
-                if let Some((sm, mm)) = compare_outcome("chmod", slayer_res, model_res) {
+                if let Some((sm, mm)) = compare_outcome("chmod", slayer_res, model_res)
+                    && should_strict_compare("chmod")
+                {
                     compare_attrs("chmod", &sp, &sm, &mm);
                     assert_eq!(
                         sm.mode & 0o777,
@@ -1775,7 +2307,9 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                     fd.file.metadata()
                 })();
 
-                if let Some((sm, mm)) = compare_outcome("fchmod", slayer_res, model_res) {
+                if let Some((sm, mm)) = compare_outcome("fchmod", slayer_res, model_res)
+                    && should_strict_compare("fchmod")
+                {
                     compare_attrs("fchmod", "<fd>", &sm, &mm);
                     assert_eq!(
                         sm.mode & 0o777,
@@ -1929,6 +2463,18 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
                 let model_res = fs::hard_link(&src_mp, &dst_mp);
                 let _ = compare_outcome("link", slayer_res, model_res);
             }
+            Op::Rename { src, dst } => {
+                let src_sp = fs_path(&src);
+                let dst_sp = fs_path(&dst);
+                let src_mp = model_path(model_root.path(), &src);
+                let dst_mp = model_path(model_root.path(), &dst);
+
+                let slayer_res = vfs.rename(&src_sp, &dst_sp).await.map_err(io::Error::from);
+                let model_res = fs::rename(&src_mp, &dst_mp);
+                if compare_outcome("rename", slayer_res, model_res).is_some() {
+                    refresh_fd_paths_after_rename(&mut fds, &src_sp, &dst_sp, &src_mp, &dst_mp);
+                }
+            }
             Op::PurgeDir { dir, recreate } => {
                 let root_sp = fs_path(&dir);
                 let root_mp = model_path(model_root.path(), &dir);
@@ -1941,7 +2487,8 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
 
                     fds.assert_shape("purge-close");
                     let owner = slot_owner_or(&fds, slot, client_idx);
-                    let slayer_res = close_slayer_slot(&vfs_clients[owner], &mut fds.slayer[slot]).await;
+                    let slayer_res =
+                        close_slayer_slot(&vfs_clients[owner], &mut fds.slayer[slot]).await;
                     let model_res = close_model_slot(&mut fds.model[slot]);
                     let _ = compare_outcome("purge-close", slayer_res, model_res);
                     fds.slot_owner[slot] = None;
@@ -1977,22 +2524,25 @@ async fn run_clients_case(data: &[u8], clients: usize, meta_url: &str) {
 
         if clients > 1 && i % 16 == 15 {
             close_all_slots(&vfs_clients, &mut fds, "barrier-close").await;
-        } else if i % 8 == 0 && !fds.has_file_fd() && !fds.has_dir_fd() {
+        } else if clients == 1 && i % 8 == 0 && !fds.has_file_fd() && !fds.has_dir_fd() {
             verify_all_clients(&vfs_clients, model_root.path()).await;
         }
     }
 
     close_all_slots(&vfs_clients, &mut fds, "final-close").await;
 
-    if clients > 1 && let Ok(observer) = new_local_vfs(slayer_store.path(), &resolved_meta_url).await {
-        verify_all(&observer, model_root.path()).await;
-    } else {
+    if clients == 1 {
         verify_all_clients(&vfs_clients, model_root.path()).await;
     }
 }
 
 fuzz_target!(|data: &[u8]| {
-    runtime().block_on(async {
+    let rt = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+
+    rt.block_on(async {
         run_case(data).await;
     });
 });

@@ -110,7 +110,9 @@ where
                 tail = rest;
                 cursor = start + len;
 
-                // The blocks to fetch should be relative to slice itself. Otherwise, a block may be overwritten.
+                // The blocks to fetch must be computed relative to the slice itself;
+                // otherwise we may read the wrong block/range for this slice and populate
+                // the wrong region of the output buffer.
                 let slice_offset = SliceOffset::from(l - slice.offset);
                 let slice_len = r - l;
                 let slice_id = slice.slice_id;
