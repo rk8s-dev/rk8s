@@ -75,3 +75,6 @@ hickory-resolver = { workspace = true }
 hickory-client = { workspace = true }
 ipnet = "2.11.0"
 netavark = "1.17.1"
+
+[dev-dependencies]
+qlean = { workspace = true }

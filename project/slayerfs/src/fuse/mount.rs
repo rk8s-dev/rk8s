@@ -4,6 +4,7 @@
 //! - Only supported on Unix-like systems. On Linux we support unprivileged mount via fusermount3.
 //! - These helpers are thin wrappers over rfuse3 raw Session APIs.
 
+use std::num::NonZeroU32;
 use std::path::Path;
 
 use rfuse3::MountOptions;
@@ -22,6 +23,8 @@ fn default_mount_options() -> MountOptions {
     // Allow other users to access the filesystem (required for multi-user scenarios and xfstests)
     // Note: Requires 'user_allow_other' in /etc/fuse.conf for non-root mounts
     mo.allow_other(true);
+    // Default to 4 MiB for higher throughput while keeping memory usage reasonable.
+    mo.max_write(NonZeroU32::new(4 * 1024 * 1024).unwrap());
     mo
 }
 

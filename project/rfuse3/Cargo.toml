@@ -25,6 +25,7 @@ async-io-runtime = [
 ]
 file-lock = []
 unprivileged = ["nix/socket", "dep:which"]
+buffer-pool = []
 
 [dependencies]
 async-fs = { workspace = true, optional = true }
@@ -35,6 +36,7 @@ async-io = { workspace = true, optional = true }
 async-process = { workspace = true, optional = true }
 bincode = { workspace = true }
 bytes = { workspace = true }
+dashmap = { workspace = true }
 futures-channel = { workspace = true, features = ["sink"] }
 futures-util = { workspace = true, features = ["sink"] }
 libc = { workspace = true }

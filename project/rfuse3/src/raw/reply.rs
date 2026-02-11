@@ -7,6 +7,7 @@ use bytes::Bytes;
 use futures_util::stream::Stream;
 
 use crate::helper::mode_from_kind_and_perm;
+use crate::mount_options::DEFAULT_MAX_WRITE;
 use crate::raw::abi::{
     fuse_attr, fuse_attr_out, fuse_bmap_out, fuse_entry_out, fuse_kstatfs, fuse_lseek_out,
     fuse_open_out, fuse_poll_out, fuse_statfs_out, fuse_write_out,
@@ -84,10 +85,18 @@ impl From<FileAttr> for fuse_attr {
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-/// init reply
+/// init reply.
 pub struct ReplyInit {
-    /// the max write size
+    /// Maximum size of write requests.
     pub max_write: NonZeroU32,
+}
+
+impl Default for ReplyInit {
+    fn default() -> Self {
+        Self {
+            max_write: NonZeroU32::new(DEFAULT_MAX_WRITE).expect("default max_write is non-zero"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]

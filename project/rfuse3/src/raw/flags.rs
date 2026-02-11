@@ -1,5 +1,8 @@
 //! request flags.
 
+pub use crate::raw::abi::FOPEN_DIRECT_IO;
+pub use crate::raw::abi::FOPEN_KEEP_CACHE;
+pub use crate::raw::abi::FOPEN_NONSEEKABLE;
 pub use crate::raw::abi::FUSE_IOCTL_32BIT;
 pub use crate::raw::abi::FUSE_IOCTL_COMPAT;
 pub use crate::raw::abi::FUSE_IOCTL_DIR;

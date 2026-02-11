@@ -96,6 +96,7 @@ fn list_print(pod_list: Vec<PodTask>) -> Result<()> {
         let age = pod
             .metadata
             .creation_timestamp
+            .or(pod.status.start_time)
             .map(|ts| {
                 let duration = Utc::now().signed_duration_since(ts);
                 format_duration(duration)
