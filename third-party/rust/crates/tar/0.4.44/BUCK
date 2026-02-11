@@ -30,11 +30,11 @@ rust_library(
     rustc_flags = ["@$(location :tar-manifest[env_flags])"],
     os_deps = {
         "linux": [
-            "//third-party/rust/crates/libc/0.2.178:libc",
+            "//third-party/rust/crates/libc/0.2.180:libc",
             "//third-party/rust/crates/xattr/1.6.1:xattr",
         ],
         "macos": [
-            "//third-party/rust/crates/libc/0.2.178:libc",
+            "//third-party/rust/crates/libc/0.2.180:libc",
             "//third-party/rust/crates/xattr/1.6.1:xattr",
         ],
     },

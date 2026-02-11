@@ -34,8 +34,8 @@ rust_library(
     deps = [
         "//third-party/rust/crates/bytes/1.11.0:bytes",
         "//third-party/rust/crates/futures/0.3.31:futures",
-        "//third-party/rust/crates/libc/0.2.178:libc",
+        "//third-party/rust/crates/libc/0.2.180:libc",
         "//third-party/rust/crates/log/0.4.29:log",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
     ],
 )

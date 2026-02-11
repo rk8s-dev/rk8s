@@ -31,13 +31,13 @@ rust_library(
     os_deps = {
         "linux": [
             "//third-party/rust/crates/addr2line/0.25.1:addr2line",
-            "//third-party/rust/crates/libc/0.2.178:libc",
+            "//third-party/rust/crates/libc/0.2.180:libc",
             "//third-party/rust/crates/miniz_oxide/0.8.9:miniz_oxide",
             "//third-party/rust/crates/object/0.37.3:object",
         ],
         "macos": [
             "//third-party/rust/crates/addr2line/0.25.1:addr2line",
-            "//third-party/rust/crates/libc/0.2.178:libc",
+            "//third-party/rust/crates/libc/0.2.180:libc",
             "//third-party/rust/crates/miniz_oxide/0.8.9:miniz_oxide",
             "//third-party/rust/crates/object/0.37.3:object",
         ],

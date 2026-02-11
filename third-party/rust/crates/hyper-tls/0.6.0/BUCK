@@ -32,7 +32,7 @@ rust_library(
         "//third-party/rust/crates/hyper/1.8.1:hyper",
         "//third-party/rust/crates/native-tls/0.2.14:native-tls",
         "//third-party/rust/crates/tokio-native-tls/0.3.1:tokio-native-tls",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
     ],
 )

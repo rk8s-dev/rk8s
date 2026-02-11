@@ -53,7 +53,7 @@ rust_library(
         "//third-party/rust/crates/rustls-pki-types/1.13.1:rustls-pki-types",
         "//third-party/rust/crates/rustls/0.23.35:rustls",
         "//third-party/rust/crates/tokio-rustls/0.26.4:tokio-rustls",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tower/0.5.2:tower",
         "//third-party/rust/crates/tracing/0.1.43:tracing",
     ],

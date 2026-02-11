@@ -46,7 +46,7 @@ rust_library(
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/pin-utils/0.1.0:pin-utils",
         "//third-party/rust/crates/smallvec/1.15.1:smallvec",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/want/0.3.1:want",
     ],
 )

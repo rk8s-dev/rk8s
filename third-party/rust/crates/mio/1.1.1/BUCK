@@ -30,8 +30,8 @@ rust_library(
     ],
     rustc_flags = ["@$(location :mio-manifest[env_flags])"],
     os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
+        "linux": ["//third-party/rust/crates/libc/0.2.180:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.180:libc"],
         "windows": ["//third-party/rust/crates/windows-sys/0.61.2:windows-sys"],
     },
     visibility = ["PUBLIC"],

@@ -27,6 +27,7 @@ rust_library(
         "alloc",
         "default",
         "formatting",
+        "local-offset",
         "macros",
         "parsing",
         "serde",
@@ -34,6 +35,16 @@ rust_library(
         "std",
     ],
     rustc_flags = ["@$(location :time-manifest[env_flags])"],
+    os_deps = {
+        "linux": [
+            "//third-party/rust/crates/libc/0.2.180:libc",
+            "//third-party/rust/crates/num_threads/0.1.7:num_threads",
+        ],
+        "macos": [
+            "//third-party/rust/crates/libc/0.2.180:libc",
+            "//third-party/rust/crates/num_threads/0.1.7:num_threads",
+        ],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/deranged/0.5.5:deranged",

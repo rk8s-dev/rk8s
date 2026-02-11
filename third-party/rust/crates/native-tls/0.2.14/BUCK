@@ -38,7 +38,7 @@ rust_library(
             "//third-party/rust/crates/openssl/0.10.75:openssl",
         ],
         "macos": [
-            "//third-party/rust/crates/libc/0.2.178:libc",
+            "//third-party/rust/crates/libc/0.2.180:libc",
             "//third-party/rust/crates/security-framework-sys/2.15.0:security-framework-sys",
             "//third-party/rust/crates/security-framework/2.11.1:security-framework",
             "//third-party/rust/crates/tempfile/3.23.0:tempfile",

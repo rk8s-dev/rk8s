@@ -28,6 +28,6 @@ rust_library(
     deps = [
         "//third-party/rust/crates/sysinfo/0.35.2:sysinfo",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
     ],
 )

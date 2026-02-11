@@ -49,7 +49,7 @@ rust_library(
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
         "//third-party/rust/crates/tinyvec/1.10.0:tinyvec",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tracing/0.1.43:tracing",
         "//third-party/rust/crates/url/2.5.7:url",
     ],

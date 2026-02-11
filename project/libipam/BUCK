@@ -34,7 +34,7 @@ rust_binary(
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
         "//third-party/rust/crates/tempfile/3.23.0:tempfile",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         ":libipam-lib",
     ],
 )
@@ -59,6 +59,6 @@ rust_library(
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
         "//third-party/rust/crates/tempfile/3.23.0:tempfile",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
     ],
 )

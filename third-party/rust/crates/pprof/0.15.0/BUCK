@@ -45,7 +45,7 @@ rust_library(
         "//third-party/rust/crates/criterion/0.5.1:criterion",
         "//third-party/rust/crates/findshlibs/0.10.2:findshlibs",
         "//third-party/rust/crates/inferno/0.11.21:inferno",
-        "//third-party/rust/crates/libc/0.2.178:libc",
+        "//third-party/rust/crates/libc/0.2.180:libc",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/nix/0.26.4:nix",
         "//third-party/rust/crates/once_cell/1.21.3:once_cell",
