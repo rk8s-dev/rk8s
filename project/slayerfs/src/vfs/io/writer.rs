@@ -48,7 +48,6 @@ const WRITE_MAX_WAIT: Duration = Duration::from_secs(30);
 
 struct UploadPlan {
     chunk_id: u64,
-    offset: u64,
     data: Vec<(usize, Vec<Bytes>)>,
     slice_id: Option<u64>,
     uploaded: u64,
@@ -327,7 +326,6 @@ where
 
             Ok(Some(UploadPlan {
                 chunk_id: s.chunk_id,
-                offset: s.offset,
                 data,
                 slice_id: s.slice_id,
                 uploaded: s.uploaded,
@@ -852,7 +850,6 @@ where
 
                 let UploadPlan {
                     chunk_id,
-                    offset,
                     data,
                     slice_id,
                     uploaded,
@@ -886,7 +883,8 @@ where
                     },
                 };
 
-                let offset = offset + uploaded;
+                // The blocks to fetch should be relative to slice itself. Otherwise, a block may be overwritten.
+                let offset = uploaded;
 
                 let uploader = DataUploader::new(shared.config.layout, chunk_id, &shared.backend);
                 let result = backoff(UPLOAD_MAX_RETRIES, || async {

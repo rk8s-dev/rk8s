@@ -109,8 +109,9 @@ where
                 tail = rest;
                 cursor = start + len;
 
+                // The blocks to fetch should be relative to slice itself. Otherwise, a block may be overwritten.
                 let desc = SliceDesc {
-                    offset: l,
+                    offset: l - slice.offset,
                     length: r - l,
                     ..slice
                 };

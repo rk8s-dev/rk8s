@@ -68,7 +68,6 @@ serial_test = { workspace = true }
 qlean = { workspace = true }
 tracing-chrome = { workspace = true }
 
-
 [[bench]]
 name = "slayerfs_bench"
 harness = false
