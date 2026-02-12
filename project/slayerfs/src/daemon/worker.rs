@@ -129,6 +129,8 @@ pub struct GcConfig {
     pub interval_secs: u64,
     /// GC run batch size
     pub batch_size: usize,
+    /// Minimum age of delayed slices to delete (seconds)
+    pub max_age_secs: i64,
 
     pub layout: ChunkLayout,
 }
@@ -138,6 +140,7 @@ impl Default for GcConfig {
         Self {
             interval_secs: 3600,
             batch_size: 100,
+            max_age_secs: 3600, // 1 hour default
             layout: ChunkLayout::default(),
         }
     }
@@ -217,7 +220,7 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
         info!("Starting GC cycle");
 
         // process delayed slices, soft deleted slices that are now safe to delete
-        let delayed_deleted = self.meta_store.process_delayed_slices(self.config.batch_size).await?;
+        let delayed_deleted = self.meta_store.process_delayed_slices(self.config.batch_size, self.config.max_age_secs).await?;
         if delayed_deleted > 0 {
             info!("Processed {} delayed slices", delayed_deleted);
         }

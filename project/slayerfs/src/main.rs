@@ -37,7 +37,7 @@ use crate::chuck::chunk::{ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
 use crate::chuck::store::ObjectBlockStore;
 use crate::fuse::mount::mount_vfs_unprivileged;
 use crate::meta::MetaStore;
-use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+use crate::meta::config::{CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType};
 use crate::meta::factory::MetaStoreFactory;
 use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore};
 use crate::vfs::fs::VFS;
@@ -254,6 +254,7 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
     match args.meta_backend {
         MetaBackendKind::Sqlx => {
             let client = ClientOptions::default();
+            let compact = CompactConfig::default();
 
             let config = Config {
                 database: DatabaseConfig {
@@ -261,6 +262,7 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact,
             };
             let handle = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)
@@ -270,6 +272,7 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
                 anyhow::bail!("--meta-etcd-urls must be set when --meta-backend etcd");
             }
             let client = ClientOptions::default();
+            let compact = CompactConfig::default();
 
             let config = Config {
                 database: DatabaseConfig {
@@ -279,6 +282,7 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact,
             };
             let handle = MetaStoreFactory::<EtcdMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)
