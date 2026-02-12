@@ -33,6 +33,58 @@ use std::marker::PhantomData;
 /// Portion of a slice that resides inside a single block.
 pub type BlockSpan = Span<BlockTag>;
 
+/// Byte offset relative to the start of a chunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ChunkOffset(pub u64);
+
+impl ChunkOffset {
+    pub const fn new(offset: u64) -> Self {
+        Self(offset)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for ChunkOffset {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl From<ChunkOffset> for u64 {
+    fn from(value: ChunkOffset) -> Self {
+        value.0
+    }
+}
+
+/// Byte offset relative to the start of a slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct SliceOffset(pub u64);
+
+impl SliceOffset {
+    pub const fn new(offset: u64) -> Self {
+        Self(offset)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for SliceOffset {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl From<SliceOffset> for u64 {
+    fn from(value: SliceOffset) -> Self {
+        value.0
+    }
+}
+
 /// Basic slice descriptor for a chunk-local contiguous range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(
@@ -49,9 +101,30 @@ pub struct SliceDesc {
     pub length: u64,
 }
 
-pub fn block_span_iter(desc: SliceDesc, layout: ChunkLayout) -> impl Iterator<Item = BlockSpan> {
-    let chunk_span = Span::<ChunkTag>::new(0, desc.offset, desc.length);
+pub fn block_span_iter_range(
+    offset: u64,
+    length: u64,
+    layout: ChunkLayout,
+) -> impl Iterator<Item = BlockSpan> {
+    let chunk_span = Span::<ChunkTag>::new(0, offset, length);
     chunk_span.split_into::<BlockTag>(layout.chunk_size, layout.block_size as u64, true)
+}
+
+#[allow(dead_code)]
+pub fn block_span_iter_chunk(
+    offset: ChunkOffset,
+    length: u64,
+    layout: ChunkLayout,
+) -> impl Iterator<Item = BlockSpan> {
+    block_span_iter_range(offset.get(), length, layout)
+}
+
+pub fn block_span_iter_slice(
+    offset: SliceOffset,
+    length: u64,
+    layout: ChunkLayout,
+) -> impl Iterator<Item = BlockSpan> {
+    block_span_iter_range(offset.get(), length, layout)
 }
 
 pub fn key_for_slice(chunk_id: u64) -> String {
@@ -77,7 +150,8 @@ mod tests {
             offset: 0,
             length: (DEFAULT_BLOCK_SIZE / 2) as u64,
         };
-        let spans: Vec<BlockSpan> = block_span_iter(s, layout).collect();
+        let spans: Vec<BlockSpan> =
+            block_span_iter_chunk(s.offset.into(), s.length, layout).collect();
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].index, 0);
         assert_eq!(spans[0].offset, 0);
@@ -94,7 +168,8 @@ mod tests {
             offset: half as u64,
             length: layout.block_size as u64,
         };
-        let spans: Vec<BlockSpan> = block_span_iter(s, layout).collect();
+        let spans: Vec<BlockSpan> =
+            block_span_iter_chunk(s.offset.into(), s.length, layout).collect();
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].index, 0);
         assert_eq!(spans[0].offset, (layout.block_size / 2) as u64);

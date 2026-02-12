@@ -42,6 +42,7 @@ pub async fn rename(&self, old: &str, new: &str) -> Result<(), VfsError>
 ```
 
 **算法**：
+
 1. 规范化路径
 2. 检测同目录优化
 3. 验证操作前提条件
@@ -56,6 +57,7 @@ fn rename_same_directory(&self, dir: &str, old_name: &str, new_name: &str)
 ```
 
 **优势**：
+
 - 避免重复解析父目录
 - 减少 ~30-50% 的路径解析开销
 - 保持相同的验证逻辑
@@ -63,6 +65,7 @@ fn rename_same_directory(&self, dir: &str, old_name: &str, new_name: &str)
 #### 扩展 API 方法
 
 **已实现**：
+
 ```rust
 pub async fn rename_with_flags(&self, old: &str, new: &str, flags: RenameFlags)
 pub async fn rename_noreplace(&self, old: &str, new: &str)
@@ -72,6 +75,7 @@ pub async fn rename_batch(&self, operations: Vec<(String, String)>) -> Vec<Resul
 ```
 
 **已移除**（调试功能）：
+
 - `rename_dry_run()` - 仅用于调试，已从生产代码中移除
 - `rename_with_parents()` - 内部优化，已合并到主 rename 逻辑
 
@@ -80,16 +84,19 @@ pub async fn rename_batch(&self, operations: Vec<(String, String)>) -> Vec<Resul
 #### 缓存策略
 
 **预验证**：
+
 ```rust
 async fn validate_rename_operation(&self, old_parent: i64, old_name: &str, new_parent: i64, new_name: &str)
 ```
 
 **缓存更新**：
+
 ```rust
 async fn update_cache_after_rename(&self, old_parent: i64, old_name: &str, new_parent: i64, new_name: &str, src_ino: i64, src_attr: &Option<FileAttr>)
 ```
 
 **缓存失效规则**：
+
 - 使旧目录和新目录路径缓存失效
 - 使父目录状态缓存失效（mtime/ctime 已更改）
 - 为硬链接更新 inode 到父目录的关系
@@ -106,6 +113,7 @@ async fn update_cache_after_rename(&self, old_parent: i64, old_name: &str, new_p
 #### 数据库实现 (`database_store.rs`)
 
 **事务逻辑**：
+
 ```sql
 -- 原子重命名事务
 BEGIN;
@@ -119,6 +127,7 @@ COMMIT;
 ```
 
 **硬链接处理**：
+
 - `nlink = 1`：直接更新 `file_meta.parent`
 - `nlink > 1`：管理 `link_parent_meta` 条目
 
@@ -178,6 +187,7 @@ match vfs_error {
 ### 单元测试
 
 **边界条件**（已实现）：
+
 - 同目录重命名
 - 跨目录移动
 - 不存在的源路径
@@ -188,6 +198,7 @@ match vfs_error {
 - 创建时间保留验证
 
 **错误情况**（已实现）：
+
 - 循环重命名尝试（增强的基于 inode 的检测）
 - 无效路径格式（空名称、包含 '/' 或 '\0'）
 - 缺失条目（源或目标不存在）
@@ -196,6 +207,7 @@ match vfs_error {
 ### 集成测试
 
 **FUSE 层验证**：
+
 - 通过 FUSE 接口的端到端重命名操作
 - 错误代码转换准确性
 - 并发操作处理
@@ -203,6 +215,7 @@ match vfs_error {
 ### 并发测试
 
 **多线程场景**：
+
 - 同目录中的并行重命名
 - 跨目录并发操作
 - 争用下的缓存一致性
@@ -211,6 +224,7 @@ match vfs_error {
 ### 故障注入测试
 
 **错误恢复验证**：
+
 - 重命名期间存储后端失败
 - 缓存更新失败
 - 部分操作回滚
@@ -244,4 +258,3 @@ match vfs_error {
 - **并行批处理**：独立重命名的并发执行
 - **内存映射元数据**：减少大型目录的数据库压力
 - **预测性预取**：基于机器学习的缓存预热
-

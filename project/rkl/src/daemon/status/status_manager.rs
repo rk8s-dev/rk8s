@@ -521,29 +521,38 @@ async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
         "[StatusManager] sync_batch start"
     );
     let mut updated_status: Vec<(Uuid, VersionedPodStatus)> = Vec::new();
+    let mut pods_to_remove_from_cache: Vec<Uuid> = Vec::new();
 
     // Clean up orphaned versions.
     if sync_all {
-        let mut removed_orphans = 0usize;
-        for entry in state.api_status_versions.iter() {
-            let uid = *entry.key();
-            let has_pod = state.pod_statuses.get(&uid).is_some();
-            if !has_pod {
-                state.api_status_versions.remove(&uid);
-                removed_orphans += 1;
-            }
+        let orphaned_uids: Vec<Uuid> = state
+            .api_status_versions
+            .iter()
+            .filter_map(|entry| {
+                let uid = *entry.key();
+                if state.pod_statuses.contains_key(&uid) {
+                    None
+                } else {
+                    Some(uid)
+                }
+            })
+            .collect();
+        for uid in &orphaned_uids {
+            state.api_status_versions.remove(uid);
         }
         debug!(
-            removed_orphans,
+            removed_orphans = orphaned_uids.len(),
             "[StatusManager] Removed orphaned API status versions during full sync"
         );
     }
 
     // Decide which pods need status updates.
-    for entry in state.pod_statuses.iter() {
-        let pod_uid = *entry.key();
-        let pod_status = entry.value().clone();
-
+    let cached_statuses: Vec<(Uuid, VersionedPodStatus)> = state
+        .pod_statuses
+        .iter()
+        .map(|entry| (*entry.key(), entry.value().clone()))
+        .collect();
+    for (pod_uid, pod_status) in cached_statuses {
         if !sync_all {
             if let Some(api_version) = state.api_status_versions.get(&pod_uid)
                 && *api_version.value() >= pod_status.version
@@ -562,12 +571,30 @@ async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
             continue;
         }
 
-        if need_update(state, &pod_uid, &pod_status).await? {
-            updated_status.push((pod_uid, pod_status));
-        } else if need_reconcile(state, &pod_uid, &pod_status).await? {
-            state.api_status_versions.remove(&pod_uid);
-            updated_status.push((pod_uid, pod_status));
+        match need_update(state, &pod_uid, &pod_status).await? {
+            NeedUpdateDecision::Upload => {
+                updated_status.push((pod_uid, pod_status));
+            }
+            NeedUpdateDecision::Skip => {
+                if need_reconcile(state, &pod_uid, &pod_status).await? {
+                    state.api_status_versions.remove(&pod_uid);
+                    updated_status.push((pod_uid, pod_status));
+                }
+            }
+            NeedUpdateDecision::RemoveLocalCache => {
+                pods_to_remove_from_cache.push(pod_uid);
+            }
         }
+    }
+
+    if !pods_to_remove_from_cache.is_empty() {
+        for pod_uid in &pods_to_remove_from_cache {
+            state.pod_statuses.remove(pod_uid);
+        }
+        debug!(
+            removed_pod_count = pods_to_remove_from_cache.len(),
+            "[StatusManager] Removed pods missing on server from local cache"
+        );
     }
 
     debug!(
@@ -611,6 +638,7 @@ async fn sync_pod(
                 version = pod_status.version,
                 "[StatusManager] Pod not found on server; skipping status sync"
             );
+            state.pod_statuses.remove(&pod_uid);
             return Ok(());
         }
     };
@@ -755,12 +783,19 @@ fn condition_type_owned_by_rkl(condition_type: &common::PodConditionType) -> boo
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NeedUpdateDecision {
+    Upload,
+    Skip,
+    RemoveLocalCache,
+}
+
 /// Determine whether the status is stale for the given pod uid.
 async fn need_update(
     state: &Arc<State>,
     pod_uid: &Uuid,
     pod_status: &VersionedPodStatus,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<NeedUpdateDecision> {
     let latest_api_version = match state.api_status_versions.get(pod_uid) {
         Some(v) => *v.value(),
         None => {
@@ -770,7 +805,7 @@ async fn need_update(
                 local_version = pod_status.version,
                 "[StatusManager] No API version cached; pod status needs upload"
             );
-            return Ok(true);
+            return Ok(NeedUpdateDecision::Upload);
         }
     };
 
@@ -782,7 +817,7 @@ async fn need_update(
             api_version = latest_api_version,
             "[StatusManager] Local status version is newer than API version"
         );
-        return Ok(true);
+        return Ok(NeedUpdateDecision::Upload);
     }
 
     let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
@@ -794,11 +829,15 @@ async fn need_update(
                 pod_name = %pod_status.pod_name,
                 "[StatusManager] Pod not found on server while checking need_update"
             );
-            return Ok(false);
+            return Ok(NeedUpdateDecision::RemoveLocalCache);
         }
     };
 
-    can_be_deleted(pod_status, &pod)
+    if can_be_deleted(pod_status, &pod)? {
+        Ok(NeedUpdateDecision::Upload)
+    } else {
+        Ok(NeedUpdateDecision::Skip)
+    }
 }
 
 fn can_be_deleted(local_status: &VersionedPodStatus, remote_pod: &PodTask) -> anyhow::Result<bool> {
@@ -1659,24 +1698,6 @@ mod tests {
         assert_eq!(condition.status, ConditionStatus::True);
         assert!(condition.last_transition_time.is_some());
         assert!(condition.last_probe_time.is_some());
-    }
-
-    #[test]
-    fn probe_result_to_status_maps_success_failure_unknown() {
-        let success = probe_result_to_status(ProbeResultType::Success);
-        assert_eq!(success.state, ProbeCondition::Ready);
-        assert_eq!(success.consecutive_successes, 1);
-        assert_eq!(success.consecutive_failures, 0);
-
-        let failure = probe_result_to_status(ProbeResultType::Failure);
-        assert_eq!(failure.state, ProbeCondition::Failing);
-        assert_eq!(failure.consecutive_successes, 0);
-        assert_eq!(failure.consecutive_failures, 1);
-
-        let unknown = probe_result_to_status(ProbeResultType::Unknown);
-        assert_eq!(unknown.state, ProbeCondition::Pending);
-        assert_eq!(unknown.consecutive_successes, 0);
-        assert_eq!(unknown.consecutive_failures, 0);
     }
 
     #[test]

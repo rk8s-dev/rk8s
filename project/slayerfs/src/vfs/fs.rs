@@ -353,6 +353,7 @@ where
         if let Some(size) = self.inode_size_cached(ino) {
             return Ok(size);
         }
+
         let attr = self
             .core
             .meta_layer
@@ -397,7 +398,14 @@ where
 
     #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     pub(crate) async fn stat_ino(&self, ino: i64) -> Option<FileAttr> {
-        self.core.meta_layer.stat(ino).await.ok().flatten()
+        let mut attr = self.core.meta_layer.stat(ino).await.ok().flatten()?;
+
+        // close-to-open semantics: if there is a local state, it should be considered as the newest state.
+        if let Some(size) = self.inode_size_cached(ino) {
+            attr.size = size;
+        }
+
+        Some(attr)
     }
 
     /// Update atime (access time) for an inode to current time
@@ -933,7 +941,7 @@ where
                 path: PathHint::some(path.clone()),
             })?;
 
-        let meta_attr = self
+        let mut meta_attr = self
             .core
             .meta_layer
             .stat(ino)
@@ -942,6 +950,12 @@ where
             .ok_or_else(|| VfsError::NotFound {
                 path: PathHint::some(path.clone()),
             })?;
+
+        // close-to-open semantics: if there is a local state, it should be considered as the newest state.
+        if let Some(size) = self.inode_size_cached(ino) {
+            meta_attr.size = size;
+        }
+
         Ok(meta_attr)
     }
 
