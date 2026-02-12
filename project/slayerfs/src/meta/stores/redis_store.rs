@@ -2305,8 +2305,8 @@ fn redis_err(err: redis::RedisError) -> MetaError {
 #[cfg(test)]
 mod tests {
     use crate::meta::MetaStore;
-    use crate::meta::config::{CompactConfig, Config};
     use crate::meta::config::{CacheConfig, ClientOptions, DatabaseConfig, DatabaseType};
+    use crate::meta::config::{CompactConfig, Config};
     use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
     use crate::meta::store::MetaError;
     use crate::meta::stores::RedisMetaStore;

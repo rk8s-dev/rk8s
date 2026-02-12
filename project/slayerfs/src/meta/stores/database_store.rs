@@ -41,7 +41,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, error, warn, debug};
+use tracing::{Instrument, debug, error, warn};
 
 #[derive(Eq, Hash, PartialEq)]
 struct PlockHashMapKey {
@@ -1019,7 +1019,11 @@ impl DatabaseMetaStore {
     }
 
     /// 删除指定chunk的所有切片（内部方法，接受事务参数）
-    async fn delete_all_slices(&self, txn: &impl ConnectionTrait, chunk_id: u64) -> Result<(), MetaError> {
+    async fn delete_all_slices(
+        &self,
+        txn: &impl ConnectionTrait,
+        chunk_id: u64,
+    ) -> Result<(), MetaError> {
         SliceMeta::delete_many()
             .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
             .exec(txn)
@@ -1029,7 +1033,12 @@ impl DatabaseMetaStore {
     }
 
     /// 替换指定chunk的所有切片（内部方法，接受事务参数）
-    async fn replace_slices(&self, txn: &impl ConnectionTrait, chunk_id: u64, slices: &[SliceDesc]) -> Result<(), MetaError> {
+    async fn replace_slices(
+        &self,
+        txn: &impl ConnectionTrait,
+        chunk_id: u64,
+        slices: &[SliceDesc],
+    ) -> Result<(), MetaError> {
         self.delete_all_slices(txn, chunk_id).await?;
         for slice in slices {
             let model = slice_meta::ActiveModel {
@@ -1059,7 +1068,7 @@ impl DatabaseMetaStore {
                 "cleanup_delayed_slices: invalid delayed data length"
             );
             return Err(MetaError::Internal(
-                "Invalid delayed data length".to_string()
+                "Invalid delayed data length".to_string(),
             ));
         }
 
@@ -1068,8 +1077,9 @@ impl DatabaseMetaStore {
 
         // process each delayed slice, 12 bytes each
         for chunk in delayed.chunks(12) {
-            let slice_id = u64::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3],
-                                               chunk[4], chunk[5], chunk[6], chunk[7]]);
+            let slice_id = u64::from_le_bytes([
+                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
+            ]);
             let size = u32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
 
             // Insert into delayed_slice table for soft deletion
@@ -1124,9 +1134,7 @@ impl DatabaseMetaStore {
 
         for delayed in &delayed_slices {
             // Delete the actual slice from slice_meta table
-            let result = SliceMeta::delete_by_id(delayed.slice_id)
-                .exec(&txn)
-                .await;
+            let result = SliceMeta::delete_by_id(delayed.slice_id).exec(&txn).await;
 
             match result {
                 Ok(deleted) => {
@@ -1150,10 +1158,7 @@ impl DatabaseMetaStore {
             }
 
             // remove from delayed_slice table
-            if let Err(e) = DelayedSlice::delete_by_id(delayed.id)
-                .exec(&txn)
-                .await
-            {
+            if let Err(e) = DelayedSlice::delete_by_id(delayed.id).exec(&txn).await {
                 warn!(
                     delayed_id = delayed.id,
                     error = ?e,
@@ -1200,7 +1205,8 @@ impl DatabaseMetaStore {
         let config = &self._config.compact;
 
         // get chunk statistics
-        let (slice_count, _total_size, fragment_ratio) = self.get_chunk_compact_stats(chunk_id).await?;
+        let (slice_count, _total_size, fragment_ratio) =
+            self.get_chunk_compact_stats(chunk_id).await?;
 
         // check minimum slice count threshold (JuiceFS: 5)
         if slice_count < config.min_slice_count {
@@ -1254,7 +1260,7 @@ impl DatabaseMetaStore {
             .all(&self.db)
             .await
             .map_err(MetaError::Database)?;
-        
+
         // extract unique chunk ids
         let mut chunk_ids: Vec<i64> = slice_metas
             .into_iter()
@@ -1299,7 +1305,10 @@ impl DatabaseMetaStore {
             }
         }
 
-        info!("Compaction run completed, compacted {} chunks", compacted_count);
+        info!(
+            "Compaction run completed, compacted {} chunks",
+            compacted_count
+        );
 
         Ok(compacted_count)
     }
@@ -2805,11 +2814,7 @@ impl MetaStore for DatabaseMetaStore {
         skip(self, slice),
         fields(chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length)
     )]
-    async fn append_slice(
-        &self,
-        chunk_id: u64,
-        slice: SliceDesc
-    ) -> Result<(), MetaError> {
+    async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
         let model = slice_meta::ActiveModel {
             chunk_id: Set(chunk_id as i64),
@@ -2822,7 +2827,6 @@ impl MetaStore for DatabaseMetaStore {
         txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
     }
-
 
     #[tracing::instrument(
         level = "trace",
@@ -3140,18 +3144,17 @@ impl MetaStore for DatabaseMetaStore {
         for slice in slices {
             if slice.chunk_id != chunk_id {
                 return Err(MetaError::Internal(
-                    "All slices must belong to the same chunk".to_string()
+                    "All slices must belong to the same chunk".to_string(),
                 ));
             }
         }
         let mut merged = Vec::new();
         let mut current = slices[0];
         for &slice in slices.iter().skip(1) {
-            if slice.offset <= current.offset + current.length{
-                current.length = std::cmp::max(
-                    current.offset + current.length,
-                    slice.offset + slice.length
-                ) - current.offset;
+            if slice.offset <= current.offset + current.length {
+                current.length =
+                    std::cmp::max(current.offset + current.length, slice.offset + slice.length)
+                        - current.offset;
             } else {
                 merged.push(current);
                 current = slice;
@@ -3163,7 +3166,7 @@ impl MetaStore for DatabaseMetaStore {
 
     async fn merge_overlapping_slices(&self, chunk_id: u64) -> Result<(), MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
-        
+
         // Get all slices for the chunk using the transaction
         let rows = SliceMeta::find()
             .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
@@ -3171,12 +3174,12 @@ impl MetaStore for DatabaseMetaStore {
             .all(&txn)
             .await
             .map_err(MetaError::Database)?;
-        
+
         let mut slices: Vec<SliceDesc> = rows.into_iter().map(Into::into).collect();
         slices.sort_by_key(|s| s.offset);
-        
+
         let merged_slices = self.merge_slices(&slices).await?;
-        
+
         self.replace_slices(&txn, chunk_id, &merged_slices).await?;
 
         txn.commit().await.map_err(MetaError::Database)?;
@@ -3197,7 +3200,11 @@ impl MetaStore for DatabaseMetaStore {
     ) -> Result<(), MetaError> {
         // basic parameter validation
         if id == 0 {
-            warn!(inode = inode, slice_id = id, "compact_chunk failed: new slice id is 0 (invalid)");
+            warn!(
+                inode = inode,
+                slice_id = id,
+                "compact_chunk failed: new slice id is 0 (invalid)"
+            );
             return Err(MetaError::Internal("Invalid silce id: 0".to_string()));
         }
 
@@ -3209,53 +3216,78 @@ impl MetaStore for DatabaseMetaStore {
 
         // size must be greater than 0, otherwise compaction is meaningless
         if size == 0 {
-            warn!(inode = inode, chunk_id = id, "compact_chunk failed: size is 0");
+            warn!(
+                inode = inode,
+                chunk_id = id,
+                "compact_chunk failed: size is 0"
+            );
             return Err(MetaError::Internal("Compact size is 0".to_string()));
         }
 
         // ensure pos + size does not exceed u32::MAX
         if pos as u64 + size as u64 > u32::MAX as u64 {
-            warn!(inode = inode, chunk_id = id, pos = pos, size = size, "compact_chunk failed: chunk offset + size out of range");
+            warn!(
+                inode = inode,
+                chunk_id = id,
+                pos = pos,
+                size = size,
+                "compact_chunk failed: chunk offset + size out of range"
+            );
             return Err(MetaError::Internal("Invalid chunk range".to_string()));
         }
 
         // skipped should be non-negative and less than the number of slices
         if skipped < 0 || skipped as usize >= slices.len() {
-            warn!(inode = inode, skipped = skipped, "compact_chunk failed: skipped parameter is invalid");
+            warn!(
+                inode = inode,
+                skipped = skipped,
+                "compact_chunk failed: skipped parameter is invalid"
+            );
             return Err(MetaError::Internal("Invalid skipped count".to_string()));
         }
 
         // origin can be empty, but if not empty, it should contain valid slice data
         if origin.is_empty() {
-            debug!(inode = inode, chunk_id = id, "compact_chunk: origin is empty");
+            debug!(
+                inode = inode,
+                chunk_id = id,
+                "compact_chunk: origin is empty"
+            );
         }
 
         // delayed slice encoding: 8 bytes id + 4 bytes size = 12 bytes per slice
         if !delayed.is_empty() && delayed.len() % 12 != 0 {
-            warn!(inode = inode, delayed_len = delayed.len(), "compact_chunk failed: delayed data length is invalid");
-            return Err(MetaError::Internal("Invalid delayed data length".to_string()));
+            warn!(
+                inode = inode,
+                delayed_len = delayed.len(),
+                "compact_chunk failed: delayed data length is invalid"
+            );
+            return Err(MetaError::Internal(
+                "Invalid delayed data length".to_string(),
+            ));
         }
 
         let valid_slices: Vec<SliceDesc> = slices
             .iter()
-            .filter(|s|{
+            .filter(|s| {
                 let slice_end = s.offset + s.length;
                 let chunk_end = pos as u64 + size as u64;
                 slice_end <= chunk_end
-            }).cloned().collect();
-        if valid_slices.is_empty(){
+            })
+            .cloned()
+            .collect();
+        if valid_slices.is_empty() {
             self.cleanup_delayed_slices(id, delayed).await?;
-            return Ok(())
+            return Ok(());
         }
-        let merged_slices=self.merge_slices(&valid_slices).await?;
-        let merged_length:u64 = merged_slices
-            .iter()
-            .map(|s| s.length)
-            .sum();
-        if merged_length>size as u64 {
-            return Err(MetaError::Internal("Invailid merged length over chunk size".to_string()))
+        let merged_slices = self.merge_slices(&valid_slices).await?;
+        let merged_length: u64 = merged_slices.iter().map(|s| s.length).sum();
+        if merged_length > size as u64 {
+            return Err(MetaError::Internal(
+                "Invailid merged length over chunk size".to_string(),
+            ));
         }
-        let txn=self.db.begin().await.map_err(MetaError::Database)?;
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
         self.replace_slices(&txn, id, &merged_slices).await?;
         txn.commit().await.map_err(MetaError::Database)?;
         self.cleanup_delayed_slices(id, delayed).await?;
@@ -4345,15 +4377,15 @@ mod tests {
         // call compact_chunk
         let result = store
             .compact_chunk(
-                1,               // inode
-                0,               // index
-                &[],             // origin
-                &slices,         // slices to compact
-                0,               // skipped
-                0,               // pos
-                100,             // id (new slice id)
-                150,             // size
-                &[],             // delayed
+                1,       // inode
+                0,       // index
+                &[],     // origin
+                &slices, // slices to compact
+                0,       // skipped
+                0,       // pos
+                100,     // id (new slice id)
+                150,     // size
+                &[],     // delayed
             )
             .await;
 
@@ -4363,15 +4395,22 @@ mod tests {
         // verify final state - slices should be replaced by merged ones
         let final_slices = store.get_slices(chunk_id).await.unwrap();
         info!("after compact: {} slices", final_slices.len());
-        
+
         // the compact replaces old slices with merged ones
         // total length may vary based on merge logic, just verify it's reasonable
         let total_length: u64 = final_slices.iter().map(|s| s.length).sum();
         assert!(total_length > 0, "total length should be greater than 0");
-        assert!(total_length <= 200, "total length should not exceed original range");
+        assert!(
+            total_length <= 200,
+            "total length should not exceed original range"
+        );
 
-        info!("compact basic test passed: {} slices -> {} slices, total length: {}", 
-              initial_slices.len(), final_slices.len(), total_length);
+        info!(
+            "compact basic test passed: {} slices -> {} slices, total length: {}",
+            initial_slices.len(),
+            final_slices.len(),
+            total_length
+        );
     }
 
     #[tokio::test]
@@ -4395,9 +4434,12 @@ mod tests {
         // simulate compact process, mark old slice as delayed
         // delayed data format: 12 bytes per slice (8 bytes slice_id + 4 bytes size)
         let mut delayed_data = Vec::new();
-        delayed_data.extend_from_slice(&old_slice_id.to_le_bytes());  // 8 bytes slice_id
-        delayed_data.extend_from_slice(&(100u32).to_le_bytes());       // 4 bytes size
-        store.cleanup_delayed_slices(chunk_id, &delayed_data).await.unwrap();
+        delayed_data.extend_from_slice(&old_slice_id.to_le_bytes()); // 8 bytes slice_id
+        delayed_data.extend_from_slice(&(100u32).to_le_bytes()); // 4 bytes size
+        store
+            .cleanup_delayed_slices(chunk_id, &delayed_data)
+            .await
+            .unwrap();
 
         // verify: old slice is in delayed_slice table (soft delete)
         let delayed_records: Vec<delayed_slice::Model> = DelayedSlice::find()
@@ -4405,14 +4447,21 @@ mod tests {
             .all(&store.db)
             .await
             .unwrap();
-        assert_eq!(delayed_records.len(), 1, "old slice should be in delayed_slice table");
+        assert_eq!(
+            delayed_records.len(),
+            1,
+            "old slice should be in delayed_slice table"
+        );
 
         // verify: old slice is still in slice_meta table (not actually deleted)
         let old_slice_in_meta = SliceMeta::find_by_id(old_slice_id as i64)
             .one(&store.db)
             .await
             .unwrap();
-        assert!(old_slice_in_meta.is_some(), "old slice should still be in slice_meta table");
+        assert!(
+            old_slice_in_meta.is_some(),
+            "old slice should still be in slice_meta table"
+        );
 
         // call process_delayed_slices (set age to -1 to ensure immediate processing)
         let deleted_count = store.process_delayed_slices(100, -1).await.unwrap();
@@ -4423,7 +4472,10 @@ mod tests {
             .one(&store.db)
             .await
             .unwrap();
-        assert!(old_slice_after_gc.is_none(), "old slice should be deleted from slice_meta table after gc");
+        assert!(
+            old_slice_after_gc.is_none(),
+            "old slice should be deleted from slice_meta table after gc"
+        );
 
         // verify: delayed_slice table record is also cleaned up
         let delayed_after_gc: Vec<delayed_slice::Model> = DelayedSlice::find()
@@ -4431,7 +4483,11 @@ mod tests {
             .all(&store.db)
             .await
             .unwrap();
-        assert_eq!(delayed_after_gc.len(), 0, "delayed record should be cleaned up");
+        assert_eq!(
+            delayed_after_gc.len(),
+            0,
+            "delayed record should be cleaned up"
+        );
 
         info!("soft delete and gc test passed");
     }
@@ -4446,9 +4502,24 @@ mod tests {
         // slice 2: offset 0, length 80 (newer data, covers slice 1)
         // slice 3: offset 30, length 70 (latest data, covers part of slice 2)
         let slices = vec![
-            SliceDesc { slice_id: 1, chunk_id, offset: 0, length: 50 },
-            SliceDesc { slice_id: 2, chunk_id, offset: 0, length: 80 },
-            SliceDesc { slice_id: 3, chunk_id, offset: 30, length: 70 },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id,
+                offset: 0,
+                length: 80,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id,
+                offset: 30,
+                length: 70,
+            },
         ];
 
         // insert slices
@@ -4467,7 +4538,11 @@ mod tests {
 
         // read slices before compact
         let slices_before = store.get_slices(chunk_id).await.unwrap();
-        assert_eq!(slices_before.len(), 3, "should have 3 slices before compact");
+        assert_eq!(
+            slices_before.len(),
+            3,
+            "should have 3 slices before compact"
+        );
 
         // trigger compact
         let result = store
@@ -4493,10 +4568,13 @@ mod tests {
         // note: actual slice count depends on merge_slices implementation
         let total_length_before: u64 = slices_before.iter().map(|s| s.length).sum();
         let total_length_after: u64 = slices_after.iter().map(|s| s.length).sum();
-        
+
         // total length should be in reasonable range
         assert!(total_length_after > 0, "total length after should be > 0");
-        assert!(total_length_after <= total_length_before * 2, "total length should be reasonable");
+        assert!(
+            total_length_after <= total_length_before * 2,
+            "total length should be reasonable"
+        );
 
         info!(
             "read correctness test passed: {} slices (len={}) -> {} slices (len={})",
@@ -4556,7 +4634,8 @@ mod tests {
         );
 
         // verify: can get statistics
-        let (slice_count, total_size, fragment_ratio) = store.get_chunk_compact_stats(chunk_id).await.unwrap();
+        let (slice_count, total_size, fragment_ratio) =
+            store.get_chunk_compact_stats(chunk_id).await.unwrap();
         assert_eq!(slice_count, 6, "should have 6 slices");
         assert_eq!(total_size, 600, "total size should be 600");
         info!(
@@ -4573,11 +4652,25 @@ mod tests {
 
         // test case 1: non-overlapping slices should not be merged
         let slices = vec![
-            SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: 100 },
-            SliceDesc { slice_id: 2, chunk_id: 1, offset: 200, length: 100 },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 200,
+                length: 100,
+            },
         ];
         let merged = store.merge_slices(&slices).await.unwrap();
-        assert_eq!(merged.len(), 2, "non-overlapping slices should not be merged");
+        assert_eq!(
+            merged.len(),
+            2,
+            "non-overlapping slices should not be merged"
+        );
         assert_eq!(merged[0].offset, 0);
         assert_eq!(merged[0].length, 100);
         assert_eq!(merged[1].offset, 200);
@@ -4585,18 +4678,45 @@ mod tests {
 
         // test case 2: overlapping slices should be merged
         let slices = vec![
-            SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: 100 },
-            SliceDesc { slice_id: 2, chunk_id: 1, offset: 50, length: 100 },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 50,
+                length: 100,
+            },
         ];
         let merged = store.merge_slices(&slices).await.unwrap();
-        assert_eq!(merged.len(), 1, "overlapping slices should be merged into one");
+        assert_eq!(
+            merged.len(),
+            1,
+            "overlapping slices should be merged into one"
+        );
         assert_eq!(merged[0].offset, 0);
-        assert_eq!(merged[0].length, 150, "merged length should cover both slices (0-150)");
+        assert_eq!(
+            merged[0].length, 150,
+            "merged length should cover both slices (0-150)"
+        );
 
         // test case 3: adjacent slices should be merged
         let slices = vec![
-            SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: 100 },
-            SliceDesc { slice_id: 2, chunk_id: 1, offset: 100, length: 100 },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 100,
+                length: 100,
+            },
         ];
         let merged = store.merge_slices(&slices).await.unwrap();
         assert_eq!(merged.len(), 1, "adjacent slices should be merged");
@@ -4606,12 +4726,31 @@ mod tests {
         // test case 4: multiple overlapping slices
         // slice 1: 0-50, slice 2: 40-90 (overlaps with 1), slice 3: 100-150 (separate)
         let slices = vec![
-            SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: 50 },
-            SliceDesc { slice_id: 2, chunk_id: 1, offset: 40, length: 50 },
-            SliceDesc { slice_id: 3, chunk_id: 1, offset: 100, length: 50 },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 40,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 100,
+                length: 50,
+            },
         ];
         let merged = store.merge_slices(&slices).await.unwrap();
-        assert_eq!(merged.len(), 2, "first two should merge, third stays separate");
+        assert_eq!(
+            merged.len(),
+            2,
+            "first two should merge, third stays separate"
+        );
         assert_eq!(merged[0].offset, 0);
         assert_eq!(merged[0].length, 90, "first merged slice covers 0-90");
         assert_eq!(merged[1].offset, 100);
@@ -4623,9 +4762,12 @@ mod tests {
         assert!(merged.is_empty(), "empty input should return empty");
 
         // test case 6: single slice
-        let slices = vec![
-            SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: 100 },
-        ];
+        let slices = vec![SliceDesc {
+            slice_id: 1,
+            chunk_id: 1,
+            offset: 0,
+            length: 100,
+        }];
         let merged = store.merge_slices(&slices).await.unwrap();
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].offset, 0);
