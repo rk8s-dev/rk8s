@@ -2,8 +2,9 @@
 #![allow(dead_code)]
 #![allow(clippy::upper_case_acronyms)]
 
-pub mod cadapter;
-pub mod chuck;
+#[allow(unused_imports)]
+pub(crate) mod cadapter;
+pub(crate) mod chuck;
 pub mod daemon;
 pub(crate) mod fs;
 pub mod fuse;

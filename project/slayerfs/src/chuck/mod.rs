@@ -17,7 +17,6 @@
 pub mod cache;
 pub mod chunk;
 pub mod reader;
-pub mod singleflight;
 pub mod slice;
 pub mod span;
 pub mod store;
@@ -27,7 +26,6 @@ pub mod writer;
 pub use chunk::{
     ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE, chunk_index_of, within_chunk_offset,
 };
-pub use singleflight::SingleFlight;
 pub use slice::{BlockSpan, ChunkOffset, SliceDesc, SliceOffset};
 pub use span::{BlockTag, ChunkTag, PageTag, Span, SpanTag};
 pub use store::{BlockStore, InMemoryBlockStore, ObjectBlockStore, S3BlockStore};
