@@ -1,13 +1,69 @@
 use crate::commands::pod::PodInfo;
 use crate::commands::{Exec, ExecPod};
-use crate::commands::{delete, exec, load_container, start, state};
+use crate::commands::{delete, exec, kill, load_container, start, state};
 use crate::task::{self, TaskRunner};
 use anyhow::{Result, anyhow};
-use liboci_cli::{Delete, Start, State};
+use libcontainer::container::ContainerStatus;
+use liboci_cli::{Delete, Kill, Start, State};
 use libruntime::rootpath;
-use tracing::{error, info};
+use std::thread;
+use std::time::Duration;
+use tracing::{debug, error, info, warn};
 
 use libcontainer::syscall::syscall::create_syscall;
+
+/// Kills a container and waits for it to stop.
+/// Returns Ok(()) if the container is stopped (either was already stopped or successfully killed).
+fn kill_and_wait_container(root_path: &std::path::Path, container_name: &str) -> Result<()> {
+    let container = match load_container(root_path.to_path_buf(), container_name) {
+        Ok(c) => c,
+        Err(e) => {
+            debug!(
+                "Container {} not found, skipping kill: {}",
+                container_name, e
+            );
+            return Ok(());
+        }
+    };
+
+    // If already stopped, no need to kill
+    if container.status() == ContainerStatus::Stopped {
+        debug!("Container {} already stopped", container_name);
+        return Ok(());
+    }
+
+    // Send SIGKILL to ensure the container stops
+    let kill_args = Kill {
+        container_id: container_name.to_string(),
+        signal: "SIGKILL".to_string(),
+        all: true,
+    };
+
+    if let Err(e) = kill(kill_args, root_path.to_path_buf()) {
+        warn!("Failed to kill container {}: {}", container_name, e);
+        // Continue anyway, the container might already be stopping
+    }
+
+    // Wait for container to stop (up to 10 seconds)
+    for i in 0..20 {
+        thread::sleep(Duration::from_millis(500));
+        let container = match load_container(root_path.to_path_buf(), container_name) {
+            Ok(c) => c,
+            Err(_) => return Ok(()), // Container no longer exists
+        };
+        if container.status() == ContainerStatus::Stopped {
+            debug!(
+                "Container {} stopped after {}ms",
+                container_name,
+                (i + 1) * 500
+            );
+            return Ok(());
+        }
+    }
+
+    warn!("Container {} did not stop within timeout", container_name);
+    Ok(())
+}
 
 pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None, &*create_syscall())?;
@@ -19,7 +75,23 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
         .pid
         .ok_or_else(|| anyhow!("PID not found for container {}", pod_name))?;
     remove_pod_network(pid_i32)?;
-    // delete all container
+
+    // First, kill all containers and wait for them to stop
+    for container_name in &pod_info.container_names {
+        if let Err(e) = kill_and_wait_container(&root_path, container_name) {
+            warn!("Failed to kill container {}: {}", container_name, e);
+        }
+    }
+
+    // Kill the pause container
+    if let Err(e) = kill_and_wait_container(&root_path, &pod_info.pod_sandbox_id) {
+        warn!(
+            "Failed to kill pause container {}: {}",
+            pod_info.pod_sandbox_id, e
+        );
+    }
+
+    // Now delete all containers
     for container_name in &pod_info.container_names {
         let delete_args = Delete {
             container_id: container_name.clone(),

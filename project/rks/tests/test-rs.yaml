@@ -16,14 +16,15 @@ spec:
       labels:
         app: nginx
         tier: frontend
-        bundle: ./rk8s/project/test/bundles/pause
     spec:
       containers:
         - name: nginx
-          image: ./rk8s/project/test/bundles/busybox
+          image: nginx:latest
           args:
-            - "sleep"
-            - "3600"
+            - /docker-entrypoint.sh
+            - nginx
+            - -g
+            - 'daemon off;'
           ports:
             - containerPort: 80
           resources:

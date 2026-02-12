@@ -5,16 +5,16 @@ metadata:
   labels:
     app: my-app
 spec:
-  node_name: node2
+  node_name: 
   containers:
     - name: container1    
       image: busybox:latest         
       ports:
         - containerPort: 80
       args:             
-        - "dd"                   
-        - "if=/dev/zero"  
-        - "of=/dev/null"
+          - "sh"
+          - "-c"
+          - "while true; do sleep 3600; done"
       resources:
         limits:
           cpu: "500m"

@@ -226,6 +226,94 @@ sudo project/target/debug/rkl rs delete nginx-rs --cluster 10.20.173.26:50051
 ```
 
 **Note:** Deleting a ReplicaSet will also delete all Pods managed by it (cascading deletion with Background policy).
+### 8.Manage Deployments
+
+RKS supports `Deployment` resources to provide declarative, rolling updates and history management for ReplicaSets.
+
+#### 8.1 Create a Deployment
+
+Here is an example of `deployment.yaml` (example taken from `project/rks/tests/test-deployment.yaml`):
+
+```yaml
+apiVersion: v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: default
+  labels:
+    app: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+      tier: frontend
+  strategy:
+    type: RollingUpdate
+    maxSurge: 0
+    maxUnavailable: 1
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  template:
+    metadata:
+      labels:
+        app: nginx
+        tier: frontend
+    spec:
+      containers:
+        - name: 
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+          args:
+            - /docker-entrypoint.sh
+            - nginx
+            - -g
+            - 'daemon off;'
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+```
+
+Create the Deployment:
+
+```bash
+sudo project/target/debug/rkl deployment create deployment.yaml --cluster 10.20.173.26:50051
+```
+
+#### 8.2 List / Get / Delete Deployments
+
+```bash
+sudo project/target/debug/rkl deployment list --cluster 10.20.173.26:50051
+sudo project/target/debug/rkl deployment get nginx-deployment --cluster 10.20.173.26:50051
+sudo project/target/debug/rkl deployment delete nginx-deployment --cluster 10.20.173.26:50051
+```
+
+#### 8.3 Update / Rollback
+
+To update, change the YAML (for example update the pod template) and apply it:
+
+```bash
+sudo project/target/debug/rkl deployment apply deployment.yaml --cluster 10.20.173.26:50051
+```
+
+To rollback to a specific revision (or previous revision if not specified):
+
+```bash
+sudo project/target/debug/rkl deployment rollback nginx-deployment --to-revision 3 --cluster 10.20.173.26:50051
+```
+
+#### 8.4 Strategy and readiness notes
+
+- Default `RollingUpdate` settings (e.g. `maxSurge`/`maxUnavailable` = `25%`) are chosen to allow progress without blocking. The example above uses `maxSurge=0` / `maxUnavailable=1` per your sample.
+
+- `DeploymentController` aggregates `ready`/`available` counts from owned ReplicaSets. ReplicaSet readiness is computed from PodStatus conditions (`PodReady`).
+
+- If you set both `maxSurge=0` and `maxUnavailable=0`, and new Pods are not yet reporting `PodReady`, rollout can stall until Pods become ready or `progressDeadlineSeconds` expires. Use non-zero `maxSurge` or `maxUnavailable`, or ensure RKL reports PodReady promptly.
+
+- `revisionHistoryLimit` controls how many old ReplicaSets are kept for rollback/history.
+
 ## Notes
 After restarting Xline, you need to clean up the existing CNI network bridge to avoid conflicts.  
 Run the following commands on the host:

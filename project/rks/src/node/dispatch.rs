@@ -430,7 +430,7 @@ pub async fn dispatch_user(
         RksMessage::UpdatePodStatus {
             pod_name,
             pod_namespace,
-            status,
+            mut status,
         } => {
             info!(
                 target: "rks::node::user_dispatch",
@@ -439,6 +439,11 @@ pub async fn dispatch_user(
             // Update the pod status in xline store
             if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await? {
                 let mut pod_task: PodTask = serde_yaml::from_str(&pod_yaml)?;
+                // Preserve existing pod_ip if the incoming status does not carry it.
+                // This avoids wiping pod_ip set by SetPodip.
+                if status.pod_ip.is_none() {
+                    status.pod_ip = pod_task.status.pod_ip.clone();
+                }
                 pod_task.status = status;
                 let new_yaml = serde_yaml::to_string(&pod_task)?;
                 xline_store.insert_pod_yaml(&pod_name, &new_yaml).await?;

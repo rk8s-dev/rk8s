@@ -5,6 +5,7 @@ use libcni::rust_cni::cni::Libcni;
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Create, Delete, Kill, Start};
 use libruntime::cri::config::ContainerConfigBuilder;
+use thiserror::Error;
 // use libruntime::cri::config::get_linux_container_config;
 use libruntime::cri::cri_api::{
     ContainerConfig, CreateContainerRequest, CreateContainerResponse, PodSandboxConfig,
@@ -21,6 +22,44 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
+
+/// Error indicating pause container is dead, Pod needs to be rebuilt
+#[derive(Debug, Error)]
+#[error("Pause container (PID {pid}) is dead or zombie, Pod needs rebuild")]
+pub struct PauseDeadError {
+    pub pid: i32,
+}
+
+/// Check if the pause container process is alive and not a zombie
+fn check_pause_alive(pid: i32) -> Result<(), PauseDeadError> {
+    let status_path = format!("/proc/{pid}/status");
+
+    // Check if process exists
+    let status_content = match std::fs::read_to_string(&status_path) {
+        Ok(content) => content,
+        Err(_) => {
+            return Err(PauseDeadError { pid });
+        }
+    };
+
+    // Check if process is zombie
+    for line in status_content.lines() {
+        if line.starts_with("State:") {
+            if line.contains("Z") || line.contains("zombie") {
+                return Err(PauseDeadError { pid });
+            }
+            break;
+        }
+    }
+
+    // Also verify namespace files are accessible
+    let ns_path = format!("/proc/{pid}/ns/net");
+    if std::fs::read_link(&ns_path).is_err() {
+        return Err(PauseDeadError { pid });
+    }
+
+    Ok(())
+}
 
 struct RkforgeImagePuller {}
 
@@ -465,6 +504,16 @@ impl TaskRunner {
             .pause_pid
             .ok_or_else(|| anyhow!("Pause container PID is not set"))?;
 
+        // Check if pause container is alive before creating work container
+        check_pause_alive(pause_pid).map_err(|e| {
+            error!(
+                pause_pid,
+                container_id = %container_id,
+                "Pause container is dead, cannot create work container"
+            );
+            anyhow::Error::from(e)
+        })?;
+
         let generator = OCISpecGenerator::new(config, container_spec, Some(pause_pid));
         let spec = generator.generate().map_err(|e| {
             anyhow!("failed to build OCI Specification for container {container_id}: {e}")
@@ -697,7 +746,7 @@ impl TaskRunner {
                             pod_sandbox_id, stop_err
                         );
                     } else {
-                        info!("PodSandbox stopped during rollback: {}", pod_sandbox_id);
+                        info!(": {}", pod_sandbox_id);
                     }
 
                     let remove_request = RemovePodSandboxRequest {
