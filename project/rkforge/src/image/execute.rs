@@ -5,6 +5,7 @@ use dockerfile_parser::{
     RunInstruction, ShellOrExecExpr,
 };
 use serde_json;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::{
@@ -26,6 +27,92 @@ fn extract_misc_argument(args: &BreakableString) -> String {
         }
     }
     result.trim().to_string()
+}
+
+fn expand_env_value(value: &str, envp: &HashMap<String, String>) -> String {
+    fn is_var_start(ch: char) -> bool {
+        ch == '_' || ch.is_ascii_alphabetic()
+    }
+
+    fn is_var_char(ch: char) -> bool {
+        ch == '_' || ch.is_ascii_alphanumeric()
+    }
+
+    let mut out = String::with_capacity(value.len());
+    let chars: Vec<char> = value.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+
+        if ch == '\\' && i + 1 < chars.len() && chars[i + 1] == '$' {
+            out.push('$');
+            i += 2;
+            continue;
+        }
+
+        if ch != '$' {
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if i + 1 >= chars.len() {
+            out.push('$');
+            i += 1;
+            continue;
+        }
+
+        if chars[i + 1] == '{' {
+            let start = i + 2;
+            let mut end = start;
+            while end < chars.len() && chars[end] != '}' {
+                end += 1;
+            }
+            if end >= chars.len() {
+                out.push('$');
+                i += 1;
+                continue;
+            }
+
+            let var_name: String = chars[start..end].iter().collect();
+            if !var_name.is_empty()
+                && is_var_start(var_name.chars().next().unwrap_or_default())
+                && var_name.chars().all(is_var_char)
+            {
+                if let Some(val) = envp.get(&var_name) {
+                    out.push_str(val);
+                }
+                i = end + 1;
+                continue;
+            }
+
+            out.push_str("${");
+            out.push_str(&var_name);
+            out.push('}');
+            i = end + 1;
+            continue;
+        }
+
+        let next = chars[i + 1];
+        if !is_var_start(next) {
+            out.push('$');
+            i += 1;
+            continue;
+        }
+
+        let start = i + 1;
+        let mut end = start + 1;
+        while end < chars.len() && is_var_char(chars[end]) {
+            end += 1;
+        }
+        let var_name: String = chars[start..end].iter().collect();
+        if let Some(val) = envp.get(&var_name) {
+            out.push_str(val);
+        }
+        i = end;
+    }
+
+    out
 }
 
 /// An extension trait to execute dockerfile instructions.
@@ -376,9 +463,42 @@ impl<P: AsRef<Path>> InstructionExt<P> for EnvInstruction {
                     }
                 }
             }
+            let raw_val = val.join(" ");
+            let expanded_val = expand_env_value(&raw_val, &ctx.image_config.envp);
             ctx.image_config
-                .add_envp(var.key.content.clone(), val.join(" "));
+                .add_envp(var.key.content.clone(), expanded_val);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::image::config::DEFAULT_ENV;
+
+    use super::expand_env_value;
+
+    #[test]
+    fn test_expand_env_value_path_and_braced_vars() {
+        let mut envp = HashMap::new();
+        envp.insert("PATH".to_string(), DEFAULT_ENV.to_string());
+        envp.insert("PG_MAJOR".to_string(), "18".to_string());
+
+        let expanded = expand_env_value("$PATH:/usr/lib/postgresql/${PG_MAJOR}/bin", &envp);
+        assert_eq!(
+            expanded,
+            format!("{DEFAULT_ENV}:/usr/lib/postgresql/18/bin")
+        );
+    }
+
+    #[test]
+    fn test_expand_env_value_unknown_and_escaped_vars() {
+        let mut envp = HashMap::new();
+        envp.insert("FOO".to_string(), "bar".to_string());
+
+        let expanded = expand_env_value(r"\$FOO:$FOO:$UNKNOWN", &envp);
+        assert_eq!(expanded, "$FOO:bar:");
     }
 }
