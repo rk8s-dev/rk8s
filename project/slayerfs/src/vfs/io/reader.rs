@@ -343,7 +343,9 @@ impl SliceState {
                 let mut fetcher = DataFetcher::new(layout, chunk_id, &backend);
                 fetcher.prepare_slices().await?;
 
-                let out = fetcher.read_at(start, (end - start).as_usize()).await?;
+                let out = fetcher
+                    .read_at(start.into(), (end - start).as_usize())
+                    .await?;
                 Ok::<_, anyhow::Error>(out)
             };
 
@@ -995,9 +997,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::ChunkLayout;
     use crate::chuck::store::InMemoryBlockStore;
     use crate::chuck::writer::DataUploader;
+    use crate::chuck::{ChunkLayout, SliceDesc};
     use crate::meta::MetaLayer;
     use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;
@@ -1034,28 +1036,48 @@ mod tests {
         let tail = &data[512..];
 
         let slice_id1 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
-        let uploader = DataUploader::new(layout, chunk_id_for(ino, 0).unwrap(), backend.as_ref());
-        let desc1 = uploader
+        let uploader = DataUploader::new(layout, backend.as_ref());
+        uploader
             .write_at_vectored(
                 slice_id1 as u64,
-                offset,
+                0u64.into(),
                 &[bytes::Bytes::copy_from_slice(head)],
             )
             .await
             .unwrap();
         meta_store
-            .append_slice(chunk_id_for(ino, 0).unwrap(), desc1)
+            .append_slice(
+                chunk_id_for(ino, 0).unwrap(),
+                SliceDesc {
+                    slice_id: slice_id1 as u64,
+                    chunk_id: chunk_id_for(ino, 0).unwrap(),
+                    offset,
+                    length: head.len() as u64,
+                },
+            )
             .await
             .unwrap();
 
         let slice_id2 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
-        let uploader = DataUploader::new(layout, chunk_id_for(ino, 1).unwrap(), backend.as_ref());
-        let desc2 = uploader
-            .write_at_vectored(slice_id2 as u64, 0, &[Bytes::copy_from_slice(tail)])
+        let uploader = DataUploader::new(layout, backend.as_ref());
+        uploader
+            .write_at_vectored(
+                slice_id2 as u64,
+                0u64.into(),
+                &[Bytes::copy_from_slice(tail)],
+            )
             .await
             .unwrap();
         meta_store
-            .append_slice(chunk_id_for(ino, 1).unwrap(), desc2)
+            .append_slice(
+                chunk_id_for(ino, 1).unwrap(),
+                SliceDesc {
+                    slice_id: slice_id2 as u64,
+                    chunk_id: chunk_id_for(ino, 1).unwrap(),
+                    offset: 0,
+                    length: tail.len() as u64,
+                },
+            )
             .await
             .unwrap();
 
@@ -1083,13 +1105,25 @@ mod tests {
         let data2 = vec![2u8; 2048];
 
         let slice_id1 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
-        let uploader = DataUploader::new(layout, chunk_id_for(ino, 0).unwrap(), backend.as_ref());
-        let desc1 = uploader
-            .write_at_vectored(slice_id1 as u64, 0, &[Bytes::copy_from_slice(&data1)])
+        let uploader = DataUploader::new(layout, backend.as_ref());
+        uploader
+            .write_at_vectored(
+                slice_id1 as u64,
+                0u64.into(),
+                &[Bytes::copy_from_slice(&data1)],
+            )
             .await
             .unwrap();
         meta_store
-            .append_slice(chunk_id_for(ino, 0).unwrap(), desc1)
+            .append_slice(
+                chunk_id_for(ino, 0).unwrap(),
+                SliceDesc {
+                    slice_id: slice_id1 as u64,
+                    chunk_id: chunk_id_for(ino, 0).unwrap(),
+                    offset: 0,
+                    length: data1.len() as u64,
+                },
+            )
             .await
             .unwrap();
 
@@ -1100,12 +1134,24 @@ mod tests {
         assert_eq!(out1, data1);
 
         let slice_id2 = meta_store.next_id(SLICE_ID_KEY).await.unwrap();
-        let desc2 = uploader
-            .write_at_vectored(slice_id2 as u64, 0, &[Bytes::copy_from_slice(&data2)])
+        uploader
+            .write_at_vectored(
+                slice_id2 as u64,
+                0u64.into(),
+                &[Bytes::copy_from_slice(&data2)],
+            )
             .await
             .unwrap();
         meta_store
-            .append_slice(chunk_id_for(ino, 0).unwrap(), desc2)
+            .append_slice(
+                chunk_id_for(ino, 0).unwrap(),
+                SliceDesc {
+                    slice_id: slice_id2 as u64,
+                    chunk_id: chunk_id_for(ino, 0).unwrap(),
+                    offset: 0,
+                    length: data2.len() as u64,
+                },
+            )
             .await
             .unwrap();
 

@@ -1115,9 +1115,10 @@ mod tests {
 
     use crate::unionfs::BoxedLayer;
     use crate::{
-        passthrough::{PassthroughArgs, new_passthroughfs_layer, newlogfs::LoggingFileSystem},
+        passthrough::{PassthroughArgs, new_passthroughfs_layer},
         unionfs::{OverlayFs, config::Config},
     };
+    use rfuse3::raw::logfs::LoggingFileSystem;
 
     #[tokio::test]
     #[ignore]

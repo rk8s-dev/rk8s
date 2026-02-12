@@ -26,7 +26,7 @@ rust_library(
     rustc_flags = ["@$(location :tokio-fd-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.178:libc",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/libc/0.2.180:libc",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
     ],
 )

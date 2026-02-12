@@ -38,7 +38,7 @@ rust_library(
             "//third-party/rust/crates/log/0.4.29:log",
             "//third-party/rust/crates/rand/0.8.5:rand",
             "//third-party/rust/crates/sha2/0.10.9:sha2",
-            "//third-party/rust/crates/tokio/1.48.0:tokio",
+            "//third-party/rust/crates/tokio/1.49.0:tokio",
             "//third-party/rust/crates/windows-strings/0.5.1:windows-strings",
             "//third-party/rust/crates/windows/0.62.2:windows",
         ],

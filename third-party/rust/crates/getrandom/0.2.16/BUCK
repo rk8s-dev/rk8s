@@ -26,13 +26,14 @@ rust_library(
     features = [
         "js",
         "js-sys",
+        "rdrand",
         "std",
         "wasm-bindgen",
     ],
     rustc_flags = ["@$(location :getrandom-manifest[env_flags])"],
     os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
+        "linux": ["//third-party/rust/crates/libc/0.2.180:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.180:libc"],
     },
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/cfg-if/1.0.4:cfg-if"],

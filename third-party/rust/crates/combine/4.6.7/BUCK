@@ -37,7 +37,7 @@ rust_library(
     rustc_flags = ["@$(location :combine-manifest[env_flags])"],
     named_deps = {
         "futures_core_03": "//third-party/rust/crates/futures-core/0.3.31:futures-core",
-        "tokio_dep": "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "tokio_dep": "//third-party/rust/crates/tokio/1.49.0:tokio",
     },
     visibility = ["PUBLIC"],
     deps = [

@@ -91,7 +91,7 @@ rust_library(
         "//third-party/rust/crates/ssh-encoding/0.2.0:ssh-encoding",
         "//third-party/rust/crates/subtle/2.6.1:subtle",
         "//third-party/rust/crates/thiserror/1.0.69:thiserror",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/typenum/1.19.0:typenum",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],

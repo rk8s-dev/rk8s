@@ -26,8 +26,8 @@ rust_library(
     features = ["parallel"],
     rustc_flags = ["@$(location :cc-manifest[env_flags])"],
     os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
+        "linux": ["//third-party/rust/crates/libc/0.2.180:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.180:libc"],
     },
     visibility = ["PUBLIC"],
     deps = [

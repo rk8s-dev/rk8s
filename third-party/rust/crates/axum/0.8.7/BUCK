@@ -58,7 +58,7 @@ rust_library(
         "//third-party/rust/crates/serde_path_to_error/0.1.20:serde_path_to_error",
         "//third-party/rust/crates/serde_urlencoded/0.7.1:serde_urlencoded",
         "//third-party/rust/crates/sync_wrapper/1.0.2:sync_wrapper",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tower-layer/0.3.3:tower-layer",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
         "//third-party/rust/crates/tower/0.5.2:tower",

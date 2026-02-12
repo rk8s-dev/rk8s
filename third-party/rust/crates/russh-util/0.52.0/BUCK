@@ -25,5 +25,5 @@ rust_library(
     edition = "2021",
     rustc_flags = ["@$(location :russh-util-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/tokio/1.48.0:tokio"],
+    deps = ["//third-party/rust/crates/tokio/1.49.0:tokio"],
 )

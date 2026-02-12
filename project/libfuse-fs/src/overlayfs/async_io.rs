@@ -1119,8 +1119,9 @@ mod tests {
 
     use crate::{
         overlayfs::{OverlayFs, config::Config},
-        passthrough::{PassthroughArgs, new_passthroughfs_layer, newlogfs::LoggingFileSystem},
+        passthrough::{PassthroughArgs, new_passthroughfs_layer},
     };
+    use rfuse3::raw::logfs::LoggingFileSystem;
 
     #[tokio::test]
     #[ignore]

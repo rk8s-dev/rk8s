@@ -28,6 +28,6 @@ rust_library(
     deps = [
         "//third-party/rust/crates/pin-project/1.1.10:pin-project",
         "//third-party/rust/crates/rand/0.8.5:rand",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
     ],
 )

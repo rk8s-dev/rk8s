@@ -36,7 +36,7 @@ rust_library(
         "//third-party/rust/crates/caps/0.5.6:caps",
         "//third-party/rust/crates/chrono/0.4.42:chrono",
         "//third-party/rust/crates/fastrand/2.3.0:fastrand",
-        "//third-party/rust/crates/libc/0.2.178:libc",
+        "//third-party/rust/crates/libc/0.2.180:libc",
         "//third-party/rust/crates/libcgroups/0.5.7:libcgroups",
         "//third-party/rust/crates/libseccomp/0.4.0:libseccomp",
         "//third-party/rust/crates/nc/0.9.7:nc",

@@ -20,24 +20,7 @@ rust_binary(
     crate = "rkl",
     crate_root = "vendor/src/main.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rkl-manifest[env_flags])"] + select({
-        "prelude//os/constraints:windows": select({
-            "prelude//abi/constraints:gnu": [
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:winapi-x86_64-pc-windows-gnu-build-script-run[rustc_flags])",
-            ],
-            "DEFAULT": [
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:windows_x86_64_msvc-build-script-run[rustc_flags])",
-            ],
-        }),
-        "DEFAULT": [],
-    }),
+    rustc_flags = ["@$(location :rkl-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
@@ -99,7 +82,7 @@ rust_binary(
         "//third-party/rust/crates/tabwriter/1.4.1:tabwriter",
         "//third-party/rust/crates/tar/0.4.44:tar",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tonic-build/0.13.1:tonic-build",
         "//third-party/rust/crates/tonic/0.13.1:tonic",
         "//third-party/rust/crates/tracing-appender/0.2.4:tracing-appender",
@@ -179,7 +162,7 @@ rust_library(
         "//third-party/rust/crates/tabwriter/1.4.1:tabwriter",
         "//third-party/rust/crates/tar/0.4.44:tar",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tonic-build/0.13.1:tonic-build",
         "//third-party/rust/crates/tonic/0.13.1:tonic",
         "//third-party/rust/crates/tracing-appender/0.2.4:tracing-appender",

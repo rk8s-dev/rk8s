@@ -34,6 +34,6 @@ rust_library(
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/thiserror/2.0.17:thiserror",
         "//third-party/rust/crates/tokio-util/0.7.18:tokio-util",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
     ],
 )

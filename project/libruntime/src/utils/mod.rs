@@ -146,10 +146,30 @@ pub fn get_image_config(manifest_path: impl AsRef<Path>) -> Result<ImageConfigur
     ImageConfiguration::from_file(dir).map_err(|e| anyhow!("failed to get image config: {e}"))
 }
 
+/// Classify image spec as either a local bundle path or a registry image reference.
+/// Paths starting with `/`, `./` or `../` are always treated as bundle paths:
+/// - if the path exists → Bundle (use local dir)
+/// - if not (e.g. when running under sudo with a user home path) → error, do not try to pull
+///   This avoids mis-treating a path like `/home/user/bundle` as an image name and pulling from default registry.
 pub fn determine_image(target: impl AsRef<str>) -> Result<ImageType> {
-    match PathBuf::from(target.as_ref()).exists() {
-        true => Ok(ImageType::Bundle),
-        false => Ok(ImageType::OCIImage),
+    let s = target.as_ref();
+    let is_path_like = s.starts_with('/') || s.starts_with("./") || s.starts_with("../");
+    let path_exists = PathBuf::from(s).exists();
+
+    if is_path_like {
+        if path_exists {
+            Ok(ImageType::Bundle)
+        } else {
+            bail!(
+                "Bundle path does not exist or is not accessible (e.g. under sudo): {}",
+                s
+            )
+        }
+    } else {
+        match path_exists {
+            true => Ok(ImageType::Bundle),
+            false => Ok(ImageType::OCIImage),
+        }
     }
 }
 

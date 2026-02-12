@@ -62,7 +62,7 @@ rust_library(
         "//third-party/rust/crates/socket2/0.5.10:socket2",
         "//third-party/rust/crates/tokio-retry/0.3.0:tokio-retry",
         "//third-party/rust/crates/tokio-util/0.7.18:tokio-util",
-        "//third-party/rust/crates/tokio/1.48.0:tokio",
+        "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/url/2.5.7:url",
     ],
 )
