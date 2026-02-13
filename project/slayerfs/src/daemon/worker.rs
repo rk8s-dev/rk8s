@@ -35,14 +35,8 @@ pub(crate) struct CompactWorker {
 
 #[allow(dead_code)]
 impl CompactWorker {
-    pub(crate) fn new(
-        meta_store: Arc<dyn MetaStore>,
-        config: CompactWorkerConfig,
-    ) -> Self {
-        Self {
-            meta_store,
-            config,
-        }
+    pub(crate) fn new(meta_store: Arc<dyn MetaStore>, config: CompactWorkerConfig) -> Self {
+        Self { meta_store, config }
     }
 
     /// start the compact worker with graceful shutdown support
@@ -92,9 +86,7 @@ impl CompactWorker {
     }
 
     /// execute a full compact cycle
-    async fn run_compact_cycle(
-        &self,
-    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    async fn run_compact_cycle(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         debug!("Starting compact cycle");
 
         // run compaction on chunks that meet the threshold criteria
@@ -220,7 +212,10 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
         info!("Starting GC cycle");
 
         // process delayed slices, soft deleted slices that are now safe to delete
-        let delayed_deleted = self.meta_store.process_delayed_slices(self.config.batch_size, self.config.max_age_secs).await?;
+        let delayed_deleted = self
+            .meta_store
+            .process_delayed_slices(self.config.batch_size, self.config.max_age_secs)
+            .await?;
         if delayed_deleted > 0 {
             info!("Processed {} delayed slices", delayed_deleted);
         }

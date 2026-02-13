@@ -14,11 +14,8 @@ pub(crate) mod xattr_meta;
 
 pub(crate) use access_meta::{Entity as AccessMeta, Model as AccessMetaModel};
 pub(crate) use content_meta::{Entity as ContentMeta, EntryType, Model as ContentMetaModel};
-<<<<<<< HEAD
 pub(crate) use counter_meta::Entity as CounterMeta;
-=======
 pub(crate) use delayed_slice::{Entity as DelayedSlice, Model as DelayedSliceModel};
->>>>>>> 86f50eacb (feat(slayerfs) : finished slices compact and gc)
 pub(crate) use file_meta::{Entity as FileMeta, Model as FileMetaModel};
 pub(crate) use link_parent_meta::Entity as LinkParentMeta;
 pub(crate) use locks_meta::Entity as LocksMeta;

@@ -1949,7 +1949,9 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meta::config::{CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType};
+    use crate::meta::config::{
+        CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
+    };
     use crate::meta::stores::database_store::DatabaseMetaStore;
     use crate::vfs::chunk_id_for;
     use std::time::Duration;

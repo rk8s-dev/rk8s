@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::meta::client::{MetaClient, MetaClientOptions};
 use crate::meta::config::{
-    CacheConfig, CacheTtl, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType
+    CacheConfig, CacheTtl, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
 };
 use crate::meta::layer::MetaLayer;
 use crate::meta::store::{MetaError, MetaStore};

@@ -6,12 +6,12 @@ use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::entities::content_meta::EntryType;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use async_trait::async_trait;
+use sea_orm::DatabaseConnection;
 use std::collections::HashMap;
 use std::fmt;
 use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-use sea_orm::DatabaseConnection;
 
 /// File type enumeration
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -834,7 +834,6 @@ pub trait MetaStore: Send + Sync {
         );
         Err(MetaError::NotImplemented)
     }
-
 
     async fn truncate_file(
         &self,

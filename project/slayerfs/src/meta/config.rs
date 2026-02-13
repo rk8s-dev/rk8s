@@ -380,7 +380,6 @@ impl DatabaseType {
     }
 }
 
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CompactConfig {
     /// Minimum slice count to trigger compaction (JuiceFS: 5)

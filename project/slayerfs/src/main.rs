@@ -37,7 +37,9 @@ use crate::chuck::chunk::{ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
 use crate::chuck::store::ObjectBlockStore;
 use crate::fuse::mount::mount_vfs_unprivileged;
 use crate::meta::MetaStore;
-use crate::meta::config::{CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType};
+use crate::meta::config::{
+    CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
+};
 use crate::meta::factory::MetaStoreFactory;
 use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore};
 use crate::vfs::fs::VFS;
