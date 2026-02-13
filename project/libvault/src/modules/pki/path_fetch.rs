@@ -1,4 +1,5 @@
 use openssl::x509::X509;
+use serde_json;
 
 use super::{PkiBackend, PkiBackendInner, types};
 use crate::{
@@ -78,6 +79,28 @@ This allows certificates to be fetched. If using the fetch/ prefix any non-revok
 Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
                 "#,
             )
+            .build()
+    }
+
+    pub fn ssh_fetch_cert_path(&self) -> Path {
+        let backend = self.inner.clone();
+
+        Path::builder()
+            .pattern(r"ssh/cert/(?P<serial>[0-9A-Fa-f]+)")
+            .field(
+                "serial",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("SSH certificate serial number in hex"),
+            )
+            .operation(Operation::Read, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.read_path_fetch_ssh_cert(backend, req).await })
+                }
+            })
+            .help("Fetch an SSH certificate by its serial number.")
             .build()
     }
 
@@ -173,6 +196,31 @@ impl PkiBackendInner {
             ca_chain: ca_chain_pem,
             certificate: String::from_utf8_lossy(&cert.to_pem()?).to_string(),
             serial_number: serial_number.to_string(),
+        };
+
+        Ok(Some(Response::data_response(response.to_map()?)))
+    }
+
+    pub async fn read_path_fetch_ssh_cert(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let serial_value = req.get_data("serial")?;
+        let serial = serial_value
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+
+        let entry = req.storage_get(&format!("ssh/certs/{serial}")).await?;
+        let entry = entry.ok_or(RvError::ErrPkiCertNotFound)?;
+
+        let signed_key: String =
+            serde_json::from_slice(&entry.value).map_err(|_| RvError::ErrPkiCertNotFound)?;
+
+        let response = types::SshSignKeyResponse {
+            signed_key,
+            serial_number: serial.to_string(),
+            expiration: 0,
         };
 
         Ok(Some(Response::data_response(response.to_map()?)))

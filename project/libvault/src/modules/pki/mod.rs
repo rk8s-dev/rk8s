@@ -29,9 +29,17 @@ pub mod path_config_crl;
 pub mod path_fetch;
 pub mod path_issue;
 pub mod path_keys;
+pub mod path_pgp_generate;
+pub mod path_pgp_sign;
+pub mod path_pgp_verify;
 pub mod path_revoke;
 pub mod path_roles;
 pub mod path_root;
+pub mod path_ssh_config_ca;
+pub mod path_ssh_issue;
+pub mod path_ssh_roles;
+pub mod path_ssh_sign;
+pub mod ssh_util;
 pub mod types;
 pub mod util;
 
@@ -74,8 +82,22 @@ impl PkiBackend {
     pub fn new_backend(&self) -> LogicalBackend {
         let builder = LogicalBackend::builder()
             .help(PKI_BACKEND_HELP)
-            .root_paths(["config/*", "revoke/*", "crl/rotate"])
-            .unauth_paths(["cert/*", "ca/pem", "ca", "crl", "crl/pem"])
+            .root_paths([
+                "config/*",
+                "revoke/*",
+                "crl/rotate",
+                "ssh/config/*",
+                "pgp/*",
+            ])
+            .unauth_paths([
+                "cert/*",
+                "ca/pem",
+                "ca",
+                "crl",
+                "crl/pem",
+                "ssh/config/ca",
+                "ssh/cert/*",
+            ])
             .path(self.roles_path())
             .path(self.config_ca_path())
             .path(self.root_generate_path())
@@ -92,7 +114,15 @@ impl PkiBackend {
             .path(self.keys_sign_path())
             .path(self.keys_verify_path())
             .path(self.keys_encrypt_path())
-            .path(self.keys_decrypt_path());
+            .path(self.keys_decrypt_path())
+            .path(self.ssh_fetch_cert_path())
+            .path(self.ssh_config_ca_path())
+            .path(self.ssh_roles_path())
+            .path(self.ssh_issue_path())
+            .path(self.ssh_sign_path())
+            .path(self.pgp_generate_path())
+            .path(self.pgp_sign_path())
+            .path(self.pgp_verify_path());
 
         let secret = SecretBuilder::new()
             .secret_type("pki")
