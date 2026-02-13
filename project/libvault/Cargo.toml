@@ -56,7 +56,7 @@ lockfile = { workspace = true }
 arc-swap = { workspace = true }
 blake3 = { workspace = true }
 itertools = { workspace = true }
-etcd-client = { workspace = true, features = ["tls"] }
+etcd-client = { workspace = true, features = ["tls"], optional = true }
 tracing = { workspace = true }
 builder-pattern = { workspace = true }
 x509-parser = { workspace = true }
@@ -64,12 +64,17 @@ rustls-webpki = { workspace = true }
 tonic = { workspace = true }
 openssl = { workspace = true, optional = true }
 openssl-sys = { workspace = true, optional = true }
+sqlx = { version = "0.8.6", optional = true}
+sea-orm = { workspace = true, optional = true}
 
 [build-dependencies]
 toml = { workspace = true }
 
 [features]
 default = ["crypto_adaptor_openssl"]
+xline = ["etcd-client"]
+sqlite = ["sea-orm/sqlx-sqlite", "sqlx/sqlite"]
+pg = ["sea-orm/sqlx-postgres", "sqlx/postgres"]
 crypto_adaptor_openssl = ["dep:openssl", "dep:openssl-sys"]
 crypto_adaptor_tongsuo = ["dep:openssl", "dep:openssl-sys"]
 

@@ -20,7 +20,12 @@ pub mod pki;
 pub mod policy;
 pub mod system;
 
+/// Utilities and helper traits consumed by modules.
+///
+/// `RequestExt` and `ResponseExt` provide convenience methods for modules
+/// to parse request payloads and convert response types into generic maps.
 pub trait RequestExt {
+    /// Parse the request's JSON body or data field into type `T`.
     fn parse_json<T>(&self) -> Result<T, RvError>
     where
         T: DeserializeOwned;
@@ -61,7 +66,10 @@ where
 
 #[async_trait]
 pub trait Module: Any + Send + Sync {
-    //! Description for a trait itself.
+    //! Trait that every RustyVault runtime module must implement.
+    //!
+    //! Implementers provide a stable `name()` and lifecycle hooks used by
+    //! `ModuleManager` to setup/init/cleanup modules.
     fn name(&self) -> String;
 
     fn as_any_arc(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;

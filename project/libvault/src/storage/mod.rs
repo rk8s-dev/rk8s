@@ -26,8 +26,9 @@ pub mod barrier;
 pub mod barrier_aes_gcm;
 pub mod barrier_view;
 pub mod physical;
+pub mod sql;
+#[cfg(feature = "xline")]
 pub mod xline;
-
 /// A trait that abstracts core methods for all storage barrier types.
 #[async_trait]
 pub trait Storage: Send + Sync {
@@ -79,14 +80,23 @@ pub struct BackendEntry {
 }
 
 /// this is a generic function that instantiates different storage backends.
-pub fn new_backend(t: &str, conf: &HashMap<String, Value>) -> Result<Arc<dyn Backend>, RvError> {
+pub async fn new_backend(
+    t: &str,
+    conf: &HashMap<String, Value>,
+) -> Result<Arc<dyn Backend>, RvError> {
     match t {
         "file" => {
             let backend = physical::file::FileBackend::new(conf)?;
             Ok(Arc::new(backend))
         }
+        #[cfg(feature = "xline")]
         "xline" => {
             let backend = xline::XlineBackend::new(conf)?;
+            Ok(Arc::new(backend))
+        }
+        #[cfg(feature = "sqlite")]
+        "sqlite" => {
+            let backend = sql::sqlite::SqliteBackend::new(conf).await?;
             Ok(Arc::new(backend))
         }
         "mock" => Ok(Arc::new(physical::mock::MockBackend::new())),

@@ -12,6 +12,15 @@ use crate::{
     storage::{Storage, StorageEntry},
 };
 
+/// Represents a logical API request being processed by a backend.
+///
+/// `Request` carries all runtime information needed to handle an
+/// operation: the operation type, path, parsed input (`body`/`data`),
+/// storage view, client token and optional bound `Handler`.
+///
+/// Backends and modules mutate fields on `Request` during processing
+/// (for example `path` and `client_token`) and may attach `auth` or
+/// `secret` information as needed.
 #[derive(Default, Clone)]
 pub struct Request {
     pub id: String,
@@ -42,6 +51,8 @@ impl Request {
             ..Default::default()
         }
     }
+
+    /// Convenience constructor for read requests.
 
     pub fn new_read_request<S: Into<String>>(path: S) -> Self {
         Self {
@@ -164,6 +175,11 @@ impl Request {
         Err(RvError::ErrRequestFieldNotFound)
     }
 
+    /// Get a required field value from request data or body.
+    ///
+    /// Returns an error if the request is not yet bound to a matched path
+    /// or if the field is missing/invalid.
+
     pub fn get_data(&self, key: &str) -> Result<Value, RvError> {
         if self.match_path.is_none() {
             return Err(RvError::ErrRequestNotReady);
@@ -187,6 +203,10 @@ impl Request {
 
         self.get_data_raw(key, true)
     }
+
+    /// Attempts to retrieve the first available value for a list of keys.
+    ///
+    /// Useful when a backend accepts multiple alternative field names.
 
     pub fn get_data_or_next(&self, keys: &[&str]) -> Result<Value, RvError> {
         if self.match_path.is_none() {

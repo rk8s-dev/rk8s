@@ -10,6 +10,12 @@ use std::{
 
 use thiserror::Error;
 
+/// Centralized error enumeration for `libvault`.
+///
+/// `RvError` enumerates the common error conditions surfaced by the
+/// library and the server. It implements `std::error::Error` via
+/// `thiserror` and includes helpers such as `response_status()` to map
+/// library errors to HTTP response codes.
 #[derive(Error, Debug)]
 pub enum RvError {
     #[error("Cipher operation update failed.")]
@@ -314,10 +320,18 @@ pub enum RvError {
     #[error("Database connection info invalid")]
     ErrDatabaseConnectionInfoInvalid,
 
+    #[cfg(feature = "xline")]
     #[error("Some etcd client error happened, {:?}", .source)]
     EtcdClientError {
         #[from]
         source: etcd_client::Error,
+    },
+
+    #[cfg(feature = "sqlite")]
+    #[error("Some sqlite client error happened, {:?}", .source)]
+    SqliteClientError {
+        #[from]
+        source: sqlx::Error,
     },
 
     #[error(transparent)]
@@ -353,6 +367,9 @@ impl RvError {
         }
     }
 }
+
+/// PartialEq is implemented to allow simple equality checks between
+/// `RvError` variants (useful in tests and conditional error handling).
 
 impl PartialEq for RvError {
     fn eq(&self, other: &Self) -> bool {

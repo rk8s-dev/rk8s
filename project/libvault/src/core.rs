@@ -62,6 +62,9 @@ impl SealConfig {
     }
 }
 
+/// Result returned by a successful `init` operation.
+///
+/// Contains zeroizing secret shares and the generated root token.
 #[derive(Debug, Clone, PartialEq, Zeroize)]
 #[zeroize(drop)]
 pub struct InitResult {
@@ -72,6 +75,9 @@ pub struct InitResult {
 #[allow(unused_assignments)]
 #[derive(Clone, Zeroize)]
 #[zeroize(drop)]
+/// Internal, serializable state for `Core`.
+///
+/// Fields containing secret material will be zeroized on drop.
 pub struct CoreState {
     #[zeroize(skip)]
     pub system_view: Option<Arc<BarrierView>>,
@@ -95,6 +101,10 @@ pub struct Core {
     pub mounts_monitor_interval: u64,
     pub state: ArcSwap<CoreState>,
 }
+
+/// High-level methods on `Core` provide initialization, migration and
+/// handler/module registration. Public methods are documented inline where
+/// their behavior requires clarification.
 
 impl Default for CoreState {
     fn default() -> Self {

@@ -18,7 +18,13 @@ use crate::{
     modules::{Module, system::SystemModule},
 };
 
+/// Manages RustyVault modules' lifecycle and registry.
+///
+/// `ModuleManager` holds a thread-safe, atomically-updatable list of
+/// loaded modules and provides helper methods to add, remove, initialize
+/// and query modules by name or type.
 pub struct ModuleManager {
+    /// Atomically-updated list of modules.
     pub modules: ArcSwap<Vec<Arc<dyn Module>>>,
 }
 
@@ -34,6 +40,11 @@ impl ModuleManager {
         self.modules.store(Arc::new(modules));
         Ok(())
     }
+
+    /// Return a typed module handle by its registered `name`.
+    ///
+    /// This performs a downcast on the stored `Arc<dyn Module>` and returns
+    /// `Some(Arc<T>)` on success.
 
     #[inline]
     pub fn get_module<T: Any + Send + Sync>(&self, name: &str) -> Option<Arc<T>> {
