@@ -6,7 +6,6 @@ use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::entities::content_meta::EntryType;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use async_trait::async_trait;
-use sea_orm::DatabaseConnection;
 use std::collections::HashMap;
 use std::fmt;
 use std::time::SystemTime;
@@ -861,6 +860,18 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
+    /// compact slices within a chunk
+    ///
+    /// # arguments
+    /// * `inode` - file inode
+    /// * `index` - chunk index (reserved for future use)
+    /// * `origin` - original slice data (reserved for future use)
+    /// * `slices` - slices to compact
+    /// * `skipped` - number of skipped slices (reserved for future use)
+    /// * `pos` - chunk offset position
+    /// * `chunk_id` - chunk identifier
+    /// * `size` - chunk size
+    /// * `delayed` - delayed slice data for soft deletion
     async fn compact_chunk(
         &self,
         inode: i64,
@@ -869,12 +880,12 @@ pub trait MetaStore: Send + Sync {
         slices: &[SliceDesc],
         skipped: i32,
         pos: u32,
-        id: u64,
+        chunk_id: u64,
         size: u32,
         delayed: &[u8],
     ) -> Result<(), MetaError> {
         let _ = (
-            inode, index, origin, slices, skipped, pos, id, size, delayed,
+            inode, index, origin, slices, skipped, pos, chunk_id, size, delayed,
         );
         Err(MetaError::NotImplemented)
     }

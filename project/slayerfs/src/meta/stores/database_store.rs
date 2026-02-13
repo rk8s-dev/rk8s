@@ -1133,8 +1133,12 @@ impl DatabaseMetaStore {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
         for delayed in &delayed_slices {
-            // Delete the actual slice from slice_meta table
-            let result = SliceMeta::delete_by_id(delayed.slice_id).exec(&txn).await;
+            // delete from slice_meta table by slice_id column (not primary key)
+            // note: slice_meta primary key is 'id', but we need to delete by 'slice_id' column
+            let result = SliceMeta::delete_many()
+                .filter(slice_meta::Column::SliceId.eq(delayed.slice_id))
+                .exec(&txn)
+                .await;
 
             match result {
                 Ok(deleted) => {
@@ -1145,6 +1149,12 @@ impl DatabaseMetaStore {
                             "Deleted old slice after verification"
                         );
                         deleted_count += 1;
+                    } else {
+                        // slice already deleted, this is ok
+                        debug!(
+                            slice_id = delayed.slice_id,
+                            "Slice already deleted, cleaning up delayed record"
+                        );
                     }
                 }
                 Err(e) => {
@@ -3136,10 +3146,28 @@ impl MetaStore for DatabaseMetaStore {
         }
         Ok(())
     }
+    /// compact slices by removing fully-covered ones (latest-wins strategy)
+    ///
+    /// for slayerfs's "latest wins" design, we don't merge slices into new ones.
+    /// instead, we identify slices that are fully covered by newer slices and
+    /// mark them for deletion. this avoids data loss from merging slice ranges.
+    ///
+    /// note: slices are sorted by slice_id (larger id = newer) to determine time order.
+    ///
+    /// example:
+    /// - slice A: slice_id=1, offset=0, length=100 (old)
+    /// - slice B: slice_id=2, offset=50, length=100 (newer, covers 50-150)
+    /// - slice A's [50-100] is covered by B, but [0-50] is still needed
+    /// - result: keep both A and B (no fully covered slices)
+    ///
+    /// - slice A: slice_id=1, offset=0, length=100 (old)
+    /// - slice B: slice_id=2, offset=0, length=150 (newer, fully covers A)
+    /// - result: remove A, keep B
     async fn merge_slices(&self, slices: &[SliceDesc]) -> Result<Vec<SliceDesc>, MetaError> {
         if slices.is_empty() {
             return Ok(vec![]);
         }
+
         let chunk_id = slices[0].chunk_id;
         for slice in slices {
             if slice.chunk_id != chunk_id {
@@ -3148,26 +3176,66 @@ impl MetaStore for DatabaseMetaStore {
                 ));
             }
         }
-        let mut merged = Vec::new();
-        let mut current = slices[0];
-        for &slice in slices.iter().skip(1) {
-            if slice.offset <= current.offset + current.length {
-                current.length =
-                    std::cmp::max(current.offset + current.length, slice.offset + slice.length)
-                        - current.offset;
-            } else {
-                merged.push(current);
-                current = slice;
+
+        // sort by slice_id descending (newest first) for "latest wins" processing
+        // slice_id is used as time proxy: larger id = newer
+        let mut slices_sorted: Vec<SliceDesc> = slices.to_vec();
+        slices_sorted.sort_by_key(|s| std::cmp::Reverse(s.slice_id));
+
+        // track which ranges are covered by newer slices
+        // each entry is (start, end) of a covered range
+        let mut covered_ranges: Vec<(u64, u64)> = Vec::new();
+        let mut result_slices: Vec<SliceDesc> = Vec::new();
+
+        for slice in slices_sorted {
+            let slice_start = slice.offset;
+            let slice_end = slice.offset + slice.length;
+
+            // calculate uncovered portions of this slice
+            let mut remaining = vec![(slice_start, slice_end)];
+
+            for &(covered_start, covered_end) in &covered_ranges {
+                let mut new_remaining = Vec::new();
+                for (start, end) in remaining {
+                    if covered_end <= start || covered_start >= end {
+                        // no overlap
+                        new_remaining.push((start, end));
+                    } else {
+                        // there is overlap, split the range
+                        if start < covered_start {
+                            new_remaining.push((start, covered_start));
+                        }
+                        if end > covered_end {
+                            new_remaining.push((covered_end, end));
+                        }
+                    }
+                }
+                remaining = new_remaining;
             }
+
+            // if this slice has uncovered portions, it's still needed
+            if !remaining.is_empty() {
+                // for simplicity, we keep the original slice if any portion is uncovered
+                // a more aggressive approach would split the slice, but that requires
+                // creating new slice objects in storage
+                result_slices.push(slice);
+
+                // mark this slice's range as covered for older slices
+                covered_ranges.push((slice_start, slice_end));
+            }
+            // if remaining is empty, the slice is fully covered and will be dropped
         }
-        merged.push(current);
-        Ok(merged)
+
+        // sort result by offset for consistent ordering
+        result_slices.sort_by_key(|s| s.offset);
+        Ok(result_slices)
     }
 
     async fn merge_overlapping_slices(&self, chunk_id: u64) -> Result<(), MetaError> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
         // Get all slices for the chunk using the transaction
+        // ordered by id (time order: smaller id = older)
         let rows = SliceMeta::find()
             .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
             .order_by_asc(slice_meta::Column::Id)
@@ -3175,8 +3243,7 @@ impl MetaStore for DatabaseMetaStore {
             .await
             .map_err(MetaError::Database)?;
 
-        let mut slices: Vec<SliceDesc> = rows.into_iter().map(Into::into).collect();
-        slices.sort_by_key(|s| s.offset);
+        let slices: Vec<SliceDesc> = rows.into_iter().map(Into::into).collect();
 
         let merged_slices = self.merge_slices(&slices).await?;
 
@@ -3189,23 +3256,23 @@ impl MetaStore for DatabaseMetaStore {
     async fn compact_chunk(
         &self,
         inode: i64,
-        index: u32,
-        origin: &[u8],
+        _index: u32,
+        _origin: &[u8],
         slices: &[SliceDesc],
-        skipped: i32,
+        _skipped: i32,
         pos: u32,
-        id: u64,
+        chunk_id: u64,
         size: u32,
         delayed: &[u8],
     ) -> Result<(), MetaError> {
         // basic parameter validation
-        if id == 0 {
+        if chunk_id == 0 {
             warn!(
                 inode = inode,
-                slice_id = id,
-                "compact_chunk failed: new slice id is 0 (invalid)"
+                chunk_id = chunk_id,
+                "compact_chunk failed: chunk_id is 0 (invalid)"
             );
-            return Err(MetaError::Internal("Invalid silce id: 0".to_string()));
+            return Err(MetaError::Internal("Invalid chunk_id: 0".to_string()));
         }
 
         // need at least 2 slices to perform compaction
@@ -3218,7 +3285,7 @@ impl MetaStore for DatabaseMetaStore {
         if size == 0 {
             warn!(
                 inode = inode,
-                chunk_id = id,
+                chunk_id = chunk_id,
                 "compact_chunk failed: size is 0"
             );
             return Err(MetaError::Internal("Compact size is 0".to_string()));
@@ -3228,7 +3295,7 @@ impl MetaStore for DatabaseMetaStore {
         if pos as u64 + size as u64 > u32::MAX as u64 {
             warn!(
                 inode = inode,
-                chunk_id = id,
+                chunk_id = chunk_id,
                 pos = pos,
                 size = size,
                 "compact_chunk failed: chunk offset + size out of range"
@@ -3236,24 +3303,13 @@ impl MetaStore for DatabaseMetaStore {
             return Err(MetaError::Internal("Invalid chunk range".to_string()));
         }
 
-        // skipped should be non-negative and less than the number of slices
-        if skipped < 0 || skipped as usize >= slices.len() {
-            warn!(
-                inode = inode,
-                skipped = skipped,
-                "compact_chunk failed: skipped parameter is invalid"
-            );
-            return Err(MetaError::Internal("Invalid skipped count".to_string()));
-        }
-
         // origin can be empty, but if not empty, it should contain valid slice data
-        if origin.is_empty() {
-            debug!(
-                inode = inode,
-                chunk_id = id,
-                "compact_chunk: origin is empty"
-            );
-        }
+        debug!(
+            inode = inode,
+            chunk_id = chunk_id,
+            "compact_chunk: starting with {} slices",
+            slices.len()
+        );
 
         // delayed slice encoding: 8 bytes id + 4 bytes size = 12 bytes per slice
         if !delayed.is_empty() && delayed.len() % 12 != 0 {
@@ -3277,20 +3333,35 @@ impl MetaStore for DatabaseMetaStore {
             .cloned()
             .collect();
         if valid_slices.is_empty() {
-            self.cleanup_delayed_slices(id, delayed).await?;
+            self.cleanup_delayed_slices(chunk_id, delayed).await?;
             return Ok(());
         }
-        let merged_slices = self.merge_slices(&valid_slices).await?;
-        let merged_length: u64 = merged_slices.iter().map(|s| s.length).sum();
-        if merged_length > size as u64 {
-            return Err(MetaError::Internal(
-                "Invailid merged length over chunk size".to_string(),
-            ));
+        let compacted_slices = self.merge_slices(&valid_slices).await?;
+
+        // check if any slices were removed by compaction
+        if compacted_slices.len() >= valid_slices.len() {
+            debug!(
+                "compact_chunk: no fully-covered slices found, chunk_id={}, slice_count={}",
+                chunk_id,
+                valid_slices.len()
+            );
+            // no slices were removed, nothing to do
+            return Ok(());
         }
+
+        info!(
+            "compact_chunk: removed fully-covered slices, chunk_id={}, before={}, after={}, removed={}",
+            chunk_id,
+            valid_slices.len(),
+            compacted_slices.len(),
+            valid_slices.len() - compacted_slices.len()
+        );
+
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
-        self.replace_slices(&txn, id, &merged_slices).await?;
+        self.replace_slices(&txn, chunk_id, &compacted_slices)
+            .await?;
         txn.commit().await.map_err(MetaError::Database)?;
-        self.cleanup_delayed_slices(id, delayed).await?;
+        self.cleanup_delayed_slices(chunk_id, delayed).await?;
         Ok(())
     }
 
@@ -3344,6 +3415,7 @@ mod tests {
             },
             cache: CacheConfig::default(),
             client: ClientOptions::default(),
+            compact: CompactConfig::default(),
         }
     }
 
@@ -4650,7 +4722,7 @@ mod tests {
     async fn test_merge_slices_functionality() {
         let store = new_test_store().await;
 
-        // test case 1: non-overlapping slices should not be merged
+        // test case 1: non-overlapping slices should all be kept
         let slices = vec![
             SliceDesc {
                 slice_id: 1,
@@ -4665,18 +4737,16 @@ mod tests {
                 length: 100,
             },
         ];
-        let merged = store.merge_slices(&slices).await.unwrap();
-        assert_eq!(
-            merged.len(),
-            2,
-            "non-overlapping slices should not be merged"
-        );
-        assert_eq!(merged[0].offset, 0);
-        assert_eq!(merged[0].length, 100);
-        assert_eq!(merged[1].offset, 200);
-        assert_eq!(merged[1].length, 100);
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 2, "non-overlapping slices should all be kept");
+        assert_eq!(result[0].offset, 0);
+        assert_eq!(result[0].length, 100);
+        assert_eq!(result[1].offset, 200);
+        assert_eq!(result[1].length, 100);
 
-        // test case 2: overlapping slices should be merged
+        // test case 2: partially overlapping slices should both be kept
+        // slice 1 (older): 0-100, slice 2 (newer): 50-150
+        // slice 1's [0-50] is not covered, so both are kept
         let slices = vec![
             SliceDesc {
                 slice_id: 1,
@@ -4691,19 +4761,15 @@ mod tests {
                 length: 100,
             },
         ];
-        let merged = store.merge_slices(&slices).await.unwrap();
+        let result = store.merge_slices(&slices).await.unwrap();
         assert_eq!(
-            merged.len(),
-            1,
-            "overlapping slices should be merged into one"
-        );
-        assert_eq!(merged[0].offset, 0);
-        assert_eq!(
-            merged[0].length, 150,
-            "merged length should cover both slices (0-150)"
+            result.len(),
+            2,
+            "partially overlapping slices should both be kept (latest-wins)"
         );
 
-        // test case 3: adjacent slices should be merged
+        // test case 3: fully covered slice should be removed
+        // slice 1 (older): 0-100, slice 2 (newer): 0-150 (fully covers slice 1)
         let slices = vec![
             SliceDesc {
                 slice_id: 1,
@@ -4714,17 +4780,18 @@ mod tests {
             SliceDesc {
                 slice_id: 2,
                 chunk_id: 1,
-                offset: 100,
-                length: 100,
+                offset: 0,
+                length: 150,
             },
         ];
-        let merged = store.merge_slices(&slices).await.unwrap();
-        assert_eq!(merged.len(), 1, "adjacent slices should be merged");
-        assert_eq!(merged[0].offset, 0);
-        assert_eq!(merged[0].length, 200);
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 1, "fully covered slice should be removed");
+        assert_eq!(result[0].slice_id, 2, "newer slice should be kept");
+        assert_eq!(result[0].offset, 0);
+        assert_eq!(result[0].length, 150);
 
-        // test case 4: multiple overlapping slices
-        // slice 1: 0-50, slice 2: 40-90 (overlaps with 1), slice 3: 100-150 (separate)
+        // test case 4: multiple slices with some fully covered
+        // slice 1: 0-50, slice 2: 0-100 (fully covers 1), slice 3: 150-200 (separate)
         let slices = vec![
             SliceDesc {
                 slice_id: 1,
@@ -4735,31 +4802,29 @@ mod tests {
             SliceDesc {
                 slice_id: 2,
                 chunk_id: 1,
-                offset: 40,
-                length: 50,
+                offset: 0,
+                length: 100,
             },
             SliceDesc {
                 slice_id: 3,
                 chunk_id: 1,
-                offset: 100,
+                offset: 150,
                 length: 50,
             },
         ];
-        let merged = store.merge_slices(&slices).await.unwrap();
+        let result = store.merge_slices(&slices).await.unwrap();
         assert_eq!(
-            merged.len(),
+            result.len(),
             2,
-            "first two should merge, third stays separate"
+            "slice 1 fully covered by 2, slices 2 and 3 kept"
         );
-        assert_eq!(merged[0].offset, 0);
-        assert_eq!(merged[0].length, 90, "first merged slice covers 0-90");
-        assert_eq!(merged[1].offset, 100);
-        assert_eq!(merged[1].length, 50);
+        assert_eq!(result[0].slice_id, 2);
+        assert_eq!(result[1].slice_id, 3);
 
         // test case 5: empty input
         let slices: Vec<SliceDesc> = vec![];
-        let merged = store.merge_slices(&slices).await.unwrap();
-        assert!(merged.is_empty(), "empty input should return empty");
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert!(result.is_empty(), "empty input should return empty");
 
         // test case 6: single slice
         let slices = vec![SliceDesc {
@@ -4768,10 +4833,10 @@ mod tests {
             offset: 0,
             length: 100,
         }];
-        let merged = store.merge_slices(&slices).await.unwrap();
-        assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].offset, 0);
-        assert_eq!(merged[0].length, 100);
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].offset, 0);
+        assert_eq!(result[0].length, 100);
 
         info!("merge slices functionality test passed");
     }

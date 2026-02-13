@@ -93,8 +93,9 @@ gc worker periodically processes delayed slices:
 1. query delayed slices older than max_age_secs (default 1 hour)
 2. verify new slices are active and readable
 3. delete old slices from `slice_meta` table
-4. delete old slice objects from object storage
-5. remove entries from `delayed_slice` table
+4. remove entries from `delayed_slice` table
+
+note: object storage data cleanup is handled separately by the object gc worker, which scans for orphaned objects not referenced by any slice metadata.
 
 ### gc worker configuration
 
@@ -106,15 +107,15 @@ gc worker periodically processes delayed slices:
 
 ## configuration
 
-compact and gc parameters are configured via `compactconfig`:
+compact and gc parameters are configured via `CompactConfig`:
 
 ```rust
-pub struct compactconfig {
+pub struct CompactConfig {
     pub min_slice_count: usize,      // default: 5
     pub min_fragment_ratio: f64,     // default: 0.1
     pub async_threshold: usize,      // default: 100
     pub sync_threshold: usize,       // default: 350
-    pub interval: duration,          // default: 1 hour
+    pub interval: Duration,          // default: 1 hour
     pub max_chunks_per_run: usize,   // default: 1000
 }
 ```
