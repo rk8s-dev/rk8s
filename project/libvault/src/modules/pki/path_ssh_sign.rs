@@ -4,8 +4,6 @@ use base64::Engine;
 use humantime::parse_duration;
 use openssl::pkey::PKey;
 use rand::Rng;
-use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::SeedableRng;
 use tracing::info;
 
 use super::{PkiBackend, PkiBackendInner, ssh_util, types};
@@ -88,7 +86,7 @@ impl PkiBackendInner {
         };
 
         // Parse the user's OpenSSH public key
-        let parts: Vec<&str> = payload.public_key.trim().split_whitespace().collect();
+        let parts: Vec<&str> = payload.public_key.split_whitespace().collect();
         if parts.len() < 2 {
             return Err(RvError::ErrPkiSshPublicKeyInvalid);
         }
@@ -147,10 +145,7 @@ impl PkiBackendInner {
         let valid_after = now - 10;
         let valid_before = now + ttl.as_secs();
 
-        let serial: u64 = {
-            let mut rng = ChaCha20Rng::from_entropy();
-            rng.random()
-        };
+        let serial: u64 = rand::rng().random();
 
         let mut extensions = payload.extensions.unwrap_or_default();
         if extensions.is_empty() && cert_type == ssh_util::SSH_CERT_TYPE_USER {

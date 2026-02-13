@@ -3,8 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use humantime::parse_duration;
 use openssl::pkey::PKey;
 use rand::Rng;
-use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::SeedableRng;
 use tracing::info;
 
 use super::{PkiBackend, PkiBackendInner, ssh_util, types};
@@ -110,10 +108,7 @@ impl PkiBackendInner {
         let valid_after = now - 10;
         let valid_before = now + ttl.as_secs();
 
-        let serial: u64 = {
-            let mut rng = ChaCha20Rng::from_entropy();
-            rng.random()
-        };
+        let serial: u64 = rand::rng().random();
 
         let mut extensions = payload.extensions.unwrap_or_default();
         if extensions.is_empty() && cert_type == ssh_util::SSH_CERT_TYPE_USER {

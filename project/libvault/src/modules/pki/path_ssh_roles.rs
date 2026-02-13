@@ -146,7 +146,7 @@ impl PkiBackendInner {
         // Validate key_bits for the given key_type
         match key_type.as_str() {
             "rsa" => {
-                if key_bits != 0 && (key_bits < 2048 || key_bits > 8192) {
+                if key_bits != 0 && !(2048..=8192).contains(&key_bits) {
                     return Err(RvError::ErrPkiKeyBitsInvalid);
                 }
             }
@@ -167,12 +167,11 @@ impl PkiBackendInner {
         let ttl = parse_duration(&ttl_str)?;
 
         let mut allowed_users = Vec::new();
-        if let Ok(users_val) = req.get_data("allowed_users") {
-            if let Some(users_str) = users_val.as_str() {
-                if !users_str.is_empty() {
-                    allowed_users = users_str.split(',').map(|s| s.trim().to_string()).collect();
-                }
-            }
+        if let Ok(users_val) = req.get_data("allowed_users")
+            && let Some(users_str) = users_val.as_str()
+            && !users_str.is_empty()
+        {
+            allowed_users = users_str.split(',').map(|s| s.trim().to_string()).collect();
         }
 
         let role = types::SshRoleEntry {
@@ -189,8 +188,8 @@ impl PkiBackendInner {
 
         info!(
             role = %name,
-            cert_type = %cert_type,
-            key_type = %key_type,
+            cert_type = %role.cert_type,
+            key_type = %role.key_type,
             key_bits = key_bits,
             "SSH role created"
         );

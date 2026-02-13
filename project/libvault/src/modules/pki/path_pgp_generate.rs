@@ -104,10 +104,10 @@ impl PkiBackendInner {
         let key_type_str = payload.key_type.unwrap_or_else(|| "rsa".to_string());
         let key_bits = payload.key_bits.unwrap_or(2048);
         let ttl_str = payload.ttl.unwrap_or_else(|| "365d".to_string());
-        let ttl = parse_duration(&ttl_str)?;
+        let _ttl = parse_duration(&ttl_str)?;
 
         // Validate RSA key strength
-        if key_type_str == "rsa" && (key_bits < 2048 || key_bits > 8192) {
+        if key_type_str == "rsa" && !(2048..=8192).contains(&key_bits) {
             return Err(RvError::ErrPkiKeyBitsInvalid);
         }
 
@@ -152,7 +152,6 @@ impl PkiBackendInner {
                 CompressionAlgorithm::ZLIB,
                 CompressionAlgorithm::ZIP,
             ])
-            .expiration(Some(ttl))
             .subkeys(vec![subkey])
             .build()
             .map_err(|_| RvError::ErrPkiPgpKeyGenerationFailed)?;

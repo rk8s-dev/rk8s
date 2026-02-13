@@ -9,8 +9,6 @@ use openssl::{
     sign::Signer,
 };
 use rand::Rng;
-use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::SeedableRng;
 
 use crate::errors::RvError;
 
@@ -183,8 +181,7 @@ pub fn build_ssh_certificate(
     ca_key: &PKey<Private>,
     ca_nid: Option<Nid>,
 ) -> Result<Vec<u8>, RvError> {
-    let mut rng = ChaCha20Rng::from_entropy();
-    let nonce: [u8; 32] = rng.random();
+    let nonce: [u8; 32] = rand::rng().random();
 
     let mut cert = Vec::new();
     // cert type string
