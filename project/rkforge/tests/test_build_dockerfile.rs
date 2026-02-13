@@ -21,6 +21,7 @@
 //! RUST_LOG=info cargo test --test test_build_dockerfile test_build_dockerfile_memcached -- --nocapture 2>&1 | tee run.log
 //! RUST_LOG=info cargo test --test test_build_dockerfile test_build_dockerfile_mysql -- --nocapture 2>&1 | tee run.log
 //! RUST_LOG=info cargo test --test test_build_dockerfile test_build_dockerfile_redis -- --nocapture 2>&1 | tee run.log
+//! RUST_LOG=info cargo test --test test_build_dockerfile test_build_dockerfile_postgres -- --nocapture 2>&1 | tee run.log
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -159,6 +160,19 @@ fn get_redis_docker_dir() -> Result<PathBuf> {
     }
     anyhow::bail!(
         "redis-docker test directory not found at {:?}. Make sure the test resources exist.",
+        dir
+    );
+}
+
+/// Get the path to the postgres-docker test directory
+fn get_postgres_docker_dir() -> Result<PathBuf> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").context("CARGO_MANIFEST_DIR not set")?;
+    let dir = PathBuf::from(&manifest_dir).join("tests/dockers/postgres-docker");
+    if dir.exists() {
+        return Ok(dir);
+    }
+    anyhow::bail!(
+        "postgres-docker test directory not found at {:?}. Make sure the test resources exist.",
         dir
     );
 }
@@ -775,6 +789,163 @@ async fn test_build_dockerfile_redis() -> Result<()> {
                 "podman rmi localhost/redis-test || true",
             )
             .await?;
+            exec_show(vm, "Clean up test files", "rm -rf /test || true").await?;
+
+            tracing::info!("=================================================");
+            tracing::info!("[SUCCESS] All integration test steps passed!");
+            tracing::info!("=================================================");
+
+            Ok(())
+        })
+    })
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_build_dockerfile_postgres() -> Result<()> {
+    tracing_subscriber_init();
+
+    // ===== Resolve local paths =====
+    let rkforge_bin = get_rkforge_binary_path()?;
+    let docker_dir = get_postgres_docker_dir()?;
+
+    tracing::info!("Using rkforge binary at {:?}", rkforge_bin);
+    tracing::info!("Using postgres-docker dir at {:?}", docker_dir);
+
+    // ===== Create VM =====
+    let image = create_image(Distro::Debian, "debian-13-generic-amd64").await?;
+    let config = MachineConfig {
+        core: 4,
+        mem: 4096,
+        disk: Some(20),
+        clear: true,
+    };
+
+    with_machine(&image, &config, |vm| {
+        Box::pin(async move {
+            tracing::info!("VM started successfully");
+
+            // ===== Step 1: Install dependencies =====
+            install_deps(vm).await?;
+
+            // ===== Step 2: Upload rkforge binary =====
+            tracing::info!("Uploading rkforge binary...");
+            vm.upload(&rkforge_bin, Path::new("/usr/local/bin")).await?;
+            exec_show(
+                vm,
+                "Make rkforge executable",
+                "chmod +x /usr/local/bin/rkforge",
+            )
+            .await?;
+            exec_show(vm, "Verify rkforge binary", "file /usr/local/bin/rkforge").await?;
+
+            // ===== Step 3: Upload test Dockerfile directory =====
+            tracing::info!("Uploading postgres-docker test directory...");
+            vm.create_dir_all(Path::new("/test")).await?;
+            vm.upload(&docker_dir, Path::new("/test")).await?;
+
+            // ===== Step 3.5: Make all .sh files executable =====
+            exec_show(
+                vm,
+                "Make shell scripts executable",
+                "find /test -name '*.sh' -exec chmod +x {} +",
+            )
+            .await?;
+
+            // ===== Step 4: List uploaded files for verification =====
+            exec_show(vm, "List test files", "ls -laR /test/").await?;
+
+            // ===== Step 5: Run rkforge build =====
+            exec_show(
+                vm,
+                "Build postgres image with rkforge",
+                "cd /test/postgres-docker && sudo /usr/local/bin/rkforge build \
+                    -f /test/postgres-docker/Dockerfile \
+                    -t postgres-test \
+                    -o /test/output \
+                    /test/postgres-docker",
+            )
+            .await?;
+
+            // ===== Step 6: Verify build output =====
+            exec_show(vm, "List build output", "ls -laR /test/output/").await?;
+
+            // ===== Step 7: Load OCI layout into podman using skopeo =====
+            exec_show(
+                vm,
+                "Load OCI layout into podman",
+                "skopeo copy oci:/test/output/postgres-test containers-storage:localhost/postgres-test",
+            )
+            .await?;
+
+            // ===== Step 8: List and verify images =====
+            exec_show(vm, "List podman images", "podman images").await?;
+
+            // ===== Step 9: Run postgres container =====
+            exec_show(
+                vm,
+                "Run postgres container",
+                "podman run -d --name postgres-test -p 5432:5432 -e POSTGRES_PASSWORD=test123 localhost/postgres-test",
+            )
+            .await?;
+
+            // Wait for postgres to start up
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+            // ===== Step 10: Check container status =====
+            exec_show(vm, "Check container status", "podman ps -a").await?;
+            exec_show(
+                vm,
+                "Check container logs",
+                "podman logs postgres-test 2>&1",
+            )
+            .await?;
+
+            // ===== Step 11: Verify postgres is running =====
+            let logs_output = exec_show(
+                vm,
+                "Verify postgres logs",
+                "podman logs postgres-test 2>&1",
+            )
+            .await?;
+
+            // Verify the logs contain postgres startup indicators
+            if logs_output.to_lowercase().contains("postgresql")
+                || logs_output.contains("database system is ready to accept connections")
+                || logs_output.contains("PostgreSQL init process complete")
+            {
+                println!("\n========================================");
+                println!("[SUCCESS] PostgreSQL container is running correctly!");
+                println!("========================================");
+                tracing::info!("[SUCCESS] PostgreSQL container is running correctly!");
+            } else {
+                // Check if container is running even if logs don't contain expected strings
+                let ps_output = exec_show(
+                    vm,
+                    "Double check container is running",
+                    "podman inspect postgres-test --format='{{.State.Status}}'",
+                )
+                .await?;
+
+                if ps_output.trim().contains("running") {
+                    println!("\n========================================");
+                    println!("[SUCCESS] PostgreSQL container is running!");
+                    println!("========================================");
+                    tracing::info!("[SUCCESS] PostgreSQL container is running!");
+                } else {
+                    anyhow::bail!(
+                        "PostgreSQL container is not running properly. Logs:\n{}",
+                        logs_output
+                    );
+                }
+            }
+
+            // ===== Step 12: Cleanup =====
+            exec_show(vm, "Stop container", "podman stop postgres-test || true").await?;
+            exec_show(vm, "Remove container", "podman rm postgres-test || true").await?;
+            exec_show(vm, "Remove image", "podman rmi localhost/postgres-test || true").await?;
             exec_show(vm, "Clean up test files", "rm -rf /test || true").await?;
 
             tracing::info!("=================================================");

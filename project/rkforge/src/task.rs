@@ -106,11 +106,10 @@ impl TaskExec for RunTask {
 impl TaskExec for CopyTask {
     fn run(&self, session: &mut MountSession) -> Result<()> {
         let mut command = session.create_command("copy")?;
-        command
-            .arg("--dest")
-            .arg(&self.dest)
-            .arg("--src")
-            .args(&self.src);
+        command.arg("--dest").arg(&self.dest);
+        for src in &self.src {
+            command.arg("--src").arg(src);
+        }
         trace!("Running command: {:?}", command);
 
         let status = command.status().context("Failed to run copy command")?;
