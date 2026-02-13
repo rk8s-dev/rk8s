@@ -144,7 +144,6 @@ impl RustyVault {
     /// This forwards to the `Core::init` implementation which performs the
     /// necessary cryptographic initialization (generating KEK, master keys,
     /// and initial state). Returns an `InitResult` describing the outcome.
-
     pub async fn inited(&self) -> Result<bool, RvError> {
         self.core.load().inited().await
     }
@@ -152,7 +151,6 @@ impl RustyVault {
     /// Returns whether the vault has already been initialized.
     ///
     /// This is a lightweight query that checks the stored state in `Core`.
-
     pub async fn unseal(&self, keys: &[&[u8]]) -> Result<bool, RvError> {
         for key in keys.iter() {
             if self.core.load().unseal(key).await? {
@@ -167,7 +165,7 @@ impl RustyVault {
     ///
     /// Tries each supplied key in order and returns `Ok(true)` as soon as one
     /// key successfully unseals the vault. If none succeed, returns `Ok(false)`.
-
+    ///
     /// Unseals the vault once and immediately generates new unseal keys.
     ///
     /// This is a high-level wrapper around the core's unseal_once method that provides
@@ -215,14 +213,12 @@ impl RustyVault {
     ///
     /// This instructs `Core` to transition into a sealed state where secret
     /// material is protected until a successful unseal operation.
-
     pub fn set_token<S: Into<String>>(&self, token: S) {
         self.token.store(Arc::new(token.into()));
     }
 
     /// Set the cached client token used for subsequent requests when an
     /// explicit token is not provided to the API methods.
-
     pub async fn mount<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -246,7 +242,6 @@ impl RustyVault {
     /// Mount a new secrets engine at `path` of the given `mount_type`.
     ///
     /// If `token` is `None`, the cached token from `set_token` will be used.
-
     pub async fn unmount<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -261,7 +256,6 @@ impl RustyVault {
     }
 
     /// Unmount a previously mounted secrets engine at `path`.
-
     pub async fn remount<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -280,7 +274,6 @@ impl RustyVault {
     }
 
     /// Remount a secrets engine from one path to another.
-
     pub async fn enable_auth<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -302,7 +295,6 @@ impl RustyVault {
     }
 
     /// Enable an authentication method at `path` with the given `auth_type`.
-
     pub async fn disable_auth<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -317,7 +309,6 @@ impl RustyVault {
     }
 
     /// Disable an authentication method at `path`.
-
     pub async fn login<S: Into<String>>(
         &self,
         path: S,
@@ -341,7 +332,6 @@ impl RustyVault {
     /// On success the returned tuple contains the full `Response` and a
     /// boolean indicating whether login succeeded; when credentials include
     /// a client token it will also be cached in `RustyVault`.
-
     pub async fn request(&self, req: &mut Request) -> Result<Option<Response>, RvError> {
         self.core.load().handle_request(req).await
     }
@@ -350,7 +340,6 @@ impl RustyVault {
     ///
     /// This is the low-level API for executing read/write/delete/list
     /// operations when callers prefer to construct `Request` themselves.
-
     pub async fn read<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -364,7 +353,6 @@ impl RustyVault {
     }
 
     /// Read a secret at `path` using the provided or cached token.
-
     pub async fn write<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -379,7 +367,6 @@ impl RustyVault {
     }
 
     /// Write `data` to `path` using provided or cached token.
-
     pub async fn delete<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -394,7 +381,6 @@ impl RustyVault {
     }
 
     /// Delete data at `path` with optional request body.
-
     pub async fn list<S: Into<String>>(
         &self,
         token: Option<S>,

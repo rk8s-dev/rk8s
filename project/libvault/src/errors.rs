@@ -370,7 +370,6 @@ impl RvError {
 
 /// PartialEq is implemented to allow simple equality checks between
 /// `RvError` variants (useful in tests and conditional error handling).
-
 impl PartialEq for RvError {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {

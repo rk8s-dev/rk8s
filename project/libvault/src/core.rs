@@ -72,12 +72,11 @@ pub struct InitResult {
     pub root_token: String,
 }
 
+/// Internal, serializable state for `Core`.
+/// Fields containing secret material will be zeroized on drop.
 #[allow(unused_assignments)]
 #[derive(Clone, Zeroize)]
 #[zeroize(drop)]
-/// Internal, serializable state for `Core`.
-///
-/// Fields containing secret material will be zeroized on drop.
 pub struct CoreState {
     #[zeroize(skip)]
     pub system_view: Option<Arc<BarrierView>>,
@@ -105,7 +104,6 @@ pub struct Core {
 /// High-level methods on `Core` provide initialization, migration and
 /// handler/module registration. Public methods are documented inline where
 /// their behavior requires clarification.
-
 impl Default for CoreState {
     fn default() -> Self {
         Self {

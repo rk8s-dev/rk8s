@@ -71,7 +71,7 @@ impl<'de> Deserialize<'de> for SqliteBackendConfig {
                 })
                 .unwrap_or(default_cfg.table),
             timeout: match std::env::var("VAULT_SQLITE_TIMEOUT")
-                .map(|timeout| Value::String(timeout))
+                .map(Value::String)
                 .ok()
                 .or(deserializer_map.get("timeout").cloned())
             {
@@ -191,7 +191,10 @@ impl Backend for SqliteBackend {
 
     async fn delete(&self, key: &str) -> Result<(), RvError> {
         let sql = format!("DELETE FROM {} WHERE vault_key = ?", &self.table);
-        sqlx::query(&sql).bind(key.as_bytes()).execute(&self.pool).await?;
+        sqlx::query(&sql)
+            .bind(key.as_bytes())
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

@@ -45,7 +45,6 @@ impl ModuleManager {
     ///
     /// This performs a downcast on the stored `Arc<dyn Module>` and returns
     /// `Some(Arc<T>)` on success.
-
     #[inline]
     pub fn get_module<T: Any + Send + Sync>(&self, name: &str) -> Option<Arc<T>> {
         let modules = self.modules.load();

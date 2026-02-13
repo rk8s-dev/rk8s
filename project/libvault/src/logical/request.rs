@@ -53,7 +53,6 @@ impl Request {
     }
 
     /// Convenience constructor for read requests.
-
     pub fn new_read_request<S: Into<String>>(path: S) -> Self {
         Self {
             operation: Operation::Read,
@@ -179,7 +178,6 @@ impl Request {
     ///
     /// Returns an error if the request is not yet bound to a matched path
     /// or if the field is missing/invalid.
-
     pub fn get_data(&self, key: &str) -> Result<Value, RvError> {
         if self.match_path.is_none() {
             return Err(RvError::ErrRequestNotReady);
@@ -207,7 +205,6 @@ impl Request {
     /// Attempts to retrieve the first available value for a list of keys.
     ///
     /// Useful when a backend accepts multiple alternative field names.
-
     pub fn get_data_or_next(&self, keys: &[&str]) -> Result<Value, RvError> {
         if self.match_path.is_none() {
             return Err(RvError::ErrRequestNotReady);
