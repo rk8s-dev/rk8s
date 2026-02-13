@@ -260,7 +260,10 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     // Add rkl-rkforge's customize's layer for target container like: hosts file, probe
     prepare_runtime_customize_layer(&runtime_layer)
         .map_err(|e| anyhow!("failed to prepare the customize layer: {e}"))?;
-    lower_dirs.insert(0, runtime_layer.canonicalize()?.display().to_string());
+
+    if runtime_layer.exists() {
+        lower_dirs.insert(0, runtime_layer.canonicalize()?.display().to_string());
+    }
 
     if merged_dir.exists() {
         debug!("{} directory exists deleting...", merged_dir.display());
@@ -340,9 +343,12 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     fs::remove_dir_all(&merged_dir)
         .await
         .with_context(|| format!("Failed to remove merged directory: {merged_dir:?}"))?;
-    fs::remove_dir_all(&runtime_layer)
-        .await
-        .with_context(|| format!("Failed to remove runtime directory: {runtime_layer:?}"))?;
+
+    if runtime_layer.exists() {
+        fs::remove_dir_all(&runtime_layer)
+            .await
+            .with_context(|| format!("Failed to remove runtime directory: {runtime_layer:?}"))?;
+    }
 
     // for layer in layers {
     //     fs::remove_dir_all(layer)
