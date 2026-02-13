@@ -1,10 +1,12 @@
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use humantime::parse_duration;
 use openssl::pkey::PKey;
 use rand::Rng;
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::SeedableRng;
+use tracing::info;
 
 use super::{PkiBackend, PkiBackendInner, ssh_util, types};
 use crate::{
@@ -58,7 +60,6 @@ impl PkiBackend {
             .build()
     }
 }
-// PLACEHOLDER_SSH_SIGN_IMPL
 
 impl PkiBackendInner {
     pub async fn ssh_sign_key(
@@ -96,13 +97,26 @@ impl PkiBackendInner {
             .decode(parts[1])
             .map_err(|_| RvError::ErrPkiSshPublicKeyInvalid)?;
 
+        // Validate key type early
+        match key_type_str {
+            "ssh-rsa" | "ecdsa-sha2-nistp256" | "ecdsa-sha2-nistp384"
+            | "ecdsa-sha2-nistp521" | "ssh-ed25519" => {}
+            _ => return Err(RvError::ErrPkiSshPublicKeyInvalid),
+        }
+
         // Extract the public key data (skip the key type string prefix in wire format)
         // Wire format: [u32 len][key_type_bytes][...pubkey_data...]
+        if key_data.len() < 4 {
+            return Err(RvError::ErrPkiSshPublicKeyInvalid);
+        }
         let type_len = u32::from_be_bytes(
             key_data[0..4]
                 .try_into()
                 .map_err(|_| RvError::ErrPkiSshPublicKeyInvalid)?,
         ) as usize;
+        if 4 + type_len > key_data.len() {
+            return Err(RvError::ErrPkiSshPublicKeyInvalid);
+        }
         let pubkey_data = &key_data[4 + type_len..];
 
         let cert_type = match role.cert_type.as_str() {
@@ -110,6 +124,18 @@ impl PkiBackendInner {
             "host" => ssh_util::SSH_CERT_TYPE_HOST,
             _ => return Err(RvError::ErrPkiSshCertTypeInvalid),
         };
+
+        // Validate principals against role's allowed_users
+        if payload.valid_principals.is_empty() {
+            return Err(RvError::ErrPkiSshPrincipalNotAllowed);
+        }
+        if !role.allowed_users.is_empty() {
+            for principal in &payload.valid_principals {
+                if !role.allowed_users.contains(principal) {
+                    return Err(RvError::ErrPkiSshPrincipalNotAllowed);
+                }
+            }
+        }
 
         let ttl = if let Some(ref ttl_str) = payload.ttl {
             parse_duration(ttl_str)?
@@ -122,7 +148,7 @@ impl PkiBackendInner {
         let valid_before = now + ttl.as_secs();
 
         let serial: u64 = {
-            let mut rng = rand::rng();
+            let mut rng = ChaCha20Rng::from_entropy();
             rng.random()
         };
 
@@ -162,6 +188,16 @@ impl PkiBackendInner {
         let cert_entry =
             StorageEntry::new(format!("ssh/certs/{serial_hex}").as_str(), &signed_key)?;
         req.storage_put(&cert_entry).await?;
+
+        info!(
+            role = %role_name,
+            key_id = %payload.key_id,
+            serial = %serial_hex,
+            principals = ?payload.valid_principals,
+            cert_type = %role.cert_type,
+            valid_before = valid_before,
+            "SSH certificate signed"
+        );
 
         let response = types::SshSignKeyResponse {
             signed_key,

@@ -1,6 +1,6 @@
-use base64::Engine;
-use openssl::pkey::{PKey, Private};
+use openssl::pkey::PKey;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use super::{PkiBackend, PkiBackendInner, ssh_util, types};
 use crate::{
@@ -43,7 +43,6 @@ impl PkiBackend {
                     .default_value(0)
                     .description("Key bits (0 for default)"),
             )
-            // PLACEHOLDER_SSH_CA_CONTINUE
             .field(
                 "private_key",
                 Field::builder()
@@ -117,6 +116,13 @@ impl PkiBackendInner {
 
         let entry = StorageEntry::new(SSH_CA_BUNDLE_KEY, &bundle)?;
         req.storage_put(&entry).await?;
+
+        info!(
+            key_type = %key_type,
+            key_bits = key_bits,
+            imported = payload.private_key.is_some(),
+            "SSH CA key configured"
+        );
 
         let response = types::SshConfigCaResponse {
             public_key: public_key_openssh,

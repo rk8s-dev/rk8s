@@ -182,6 +182,8 @@ pub enum RvError {
     ErrPkiSshCertTypeInvalid,
     #[error("PKI SSH public key is invalid.")]
     ErrPkiSshPublicKeyInvalid,
+    #[error("PKI SSH principal is not allowed by role.")]
+    ErrPkiSshPrincipalNotAllowed,
     #[error("PKI PGP key is not found.")]
     ErrPkiPgpKeyNotFound,
     #[error("PKI PGP key_name already exists.")]

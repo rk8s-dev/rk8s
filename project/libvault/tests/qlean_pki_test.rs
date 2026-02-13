@@ -21,7 +21,7 @@ use std::sync::Arc;
 // ============================================================
 async fn setup_core() -> Result<(Arc<Core>, String)> {
     let temp_dir = tempfile::tempdir().context("Failed to create temp dir")?;
-    let path = temp_dir.into_path();
+    let path = temp_dir.keep();
 
     let backend: Arc<dyn PhysicalBackend> =
         Arc::new(FileBackend::with_folder(&path).context("Failed to create FileBackend")?);
@@ -512,7 +512,7 @@ SERVER_PID=$!
 
 echo "Waiting for port 4433..."
 for i in $(seq 1 40); do
-    if nc -z localhost 4433 2>/dev/null; then
+    if ss -tln | grep -q ':4433 '; then
         echo "Port ready"
         break
     fi

@@ -1,12 +1,10 @@
-use std::time::Duration;
-
 use humantime::parse_duration;
+use tracing::info;
 
 use super::{PkiBackend, PkiBackendInner, types};
 use crate::{
     errors::RvError,
     logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
-    modules::{RequestExt, ResponseExt},
     storage::StorageEntry,
 };
 
@@ -39,7 +37,6 @@ impl PkiBackend {
                     .default_value("rsa")
                     .description("Key type: rsa, ec, or ed25519"),
             )
-            // PLACEHOLDER_SSH_ROLES_CONTINUE
             .field(
                 "key_bits",
                 Field::builder()
@@ -137,11 +134,30 @@ impl PkiBackendInner {
             .as_str()
             .ok_or(RvError::ErrRequestFieldInvalid)?
             .to_string();
+        match key_type.as_str() {
+            "rsa" | "ec" | "ed25519" => {}
+            _ => return Err(RvError::ErrPkiKeyTypeInvalid),
+        }
 
         let key_bits = req
             .get_data_or_default("key_bits")?
             .as_u64()
             .ok_or(RvError::ErrRequestFieldInvalid)? as u32;
+        // Validate key_bits for the given key_type
+        match key_type.as_str() {
+            "rsa" => {
+                if key_bits != 0 && (key_bits < 2048 || key_bits > 8192) {
+                    return Err(RvError::ErrPkiKeyBitsInvalid);
+                }
+            }
+            "ec" => {
+                if !matches!(key_bits, 0 | 256 | 384 | 521) {
+                    return Err(RvError::ErrPkiKeyBitsInvalid);
+                }
+            }
+            "ed25519" => {} // key_bits is ignored for ed25519
+            _ => {}
+        }
 
         let ttl_str = req
             .get_data_or_default("ttl")?
@@ -170,6 +186,14 @@ impl PkiBackendInner {
 
         let entry = StorageEntry::new(format!("ssh/role/{name}").as_str(), &role)?;
         req.storage_put(&entry).await?;
+
+        info!(
+            role = %name,
+            cert_type = %cert_type,
+            key_type = %key_type,
+            key_bits = key_bits,
+            "SSH role created"
+        );
 
         Ok(None)
     }

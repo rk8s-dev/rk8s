@@ -1,6 +1,6 @@
 use base64::Engine;
 use openssl::{
-    bn::{BigNum, BigNumRef},
+    bn::BigNumRef,
     ec::{EcGroup, EcKey},
     hash::MessageDigest,
     nid::Nid,
@@ -9,6 +9,8 @@ use openssl::{
     sign::Signer,
 };
 use rand::Rng;
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::SeedableRng;
 
 use crate::errors::RvError;
 
@@ -18,8 +20,12 @@ pub const SSH_CERT_TYPE_HOST: u32 = 2;
 
 /// Encode a byte slice as an SSH string (u32 length prefix + data).
 pub fn encode_string(data: &[u8]) -> Vec<u8> {
+    let len: u32 = data
+        .len()
+        .try_into()
+        .expect("SSH wire format: data length exceeds u32::MAX");
     let mut buf = Vec::with_capacity(4 + data.len());
-    buf.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    buf.extend_from_slice(&len.to_be_bytes());
     buf.extend_from_slice(data);
     buf
 }
@@ -48,7 +54,6 @@ pub fn encode_mpint(bn: &BigNumRef) -> Vec<u8> {
         encode_string(&bytes)
     }
 }
-// PLACEHOLDER_SSH_UTIL_CONTINUE
 
 /// Encode an RSA public key in OpenSSH wire format.
 pub fn encode_rsa_pubkey(pkey: &PKey<Private>) -> Result<Vec<u8>, RvError> {
@@ -123,7 +128,6 @@ pub fn ssh_cert_type_str(pkey: &PKey<Private>, nid: Option<Nid>) -> Result<&'sta
         _ => Err(RvError::ErrPkiKeyTypeInvalid),
     }
 }
-// PLACEHOLDER_SSH_UTIL_PART2
 
 /// Encode the public key portion of a PKey for embedding in a certificate.
 pub fn encode_pubkey_for_cert(pkey: &PKey<Private>, nid: Option<Nid>) -> Result<Vec<u8>, RvError> {
@@ -179,7 +183,7 @@ pub fn build_ssh_certificate(
     ca_key: &PKey<Private>,
     ca_nid: Option<Nid>,
 ) -> Result<Vec<u8>, RvError> {
-    let mut rng = rand::rng();
+    let mut rng = ChaCha20Rng::from_entropy();
     let nonce: [u8; 32] = rng.random();
 
     let mut cert = Vec::new();
@@ -228,7 +232,6 @@ pub fn build_ssh_certificate(
 
     Ok(cert)
 }
-// PLACEHOLDER_SSH_UTIL_PART3
 
 /// Encode the CA public key in SSH wire format (with key type prefix).
 fn encode_ca_pubkey(pkey: &PKey<Private>, nid: Option<Nid>) -> Result<Vec<u8>, RvError> {

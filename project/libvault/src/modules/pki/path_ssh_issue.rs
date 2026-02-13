@@ -1,9 +1,11 @@
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use humantime::parse_duration;
 use openssl::pkey::PKey;
 use rand::Rng;
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::SeedableRng;
+use tracing::info;
 
 use super::{PkiBackend, PkiBackendInner, ssh_util, types};
 use crate::{
@@ -33,7 +35,6 @@ impl PkiBackend {
                     .required(true)
                     .description("Key identifier for the certificate"),
             )
-            // PLACEHOLDER_SSH_ISSUE_CONTINUE
             .field(
                 "ttl",
                 Field::builder()
@@ -87,6 +88,18 @@ impl PkiBackendInner {
             _ => return Err(RvError::ErrPkiSshCertTypeInvalid),
         };
 
+        // Validate principals against role's allowed_users
+        if payload.valid_principals.is_empty() {
+            return Err(RvError::ErrPkiSshPrincipalNotAllowed);
+        }
+        if !role.allowed_users.is_empty() {
+            for principal in &payload.valid_principals {
+                if !role.allowed_users.contains(principal) {
+                    return Err(RvError::ErrPkiSshPrincipalNotAllowed);
+                }
+            }
+        }
+
         let ttl = if let Some(ref ttl_str) = payload.ttl {
             parse_duration(ttl_str)?
         } else {
@@ -98,7 +111,7 @@ impl PkiBackendInner {
         let valid_before = now + ttl.as_secs();
 
         let serial: u64 = {
-            let mut rng = rand::rng();
+            let mut rng = ChaCha20Rng::from_entropy();
             rng.random()
         };
 
@@ -137,6 +150,17 @@ impl PkiBackendInner {
             value: signed_key.clone().into_bytes(),
         };
         req.storage_put(&cert_entry).await?;
+
+        info!(
+            role = %role_name,
+            key_id = %payload.key_id,
+            serial = %serial_hex,
+            principals = ?payload.valid_principals,
+            cert_type = %role.cert_type,
+            key_type = %role.key_type,
+            valid_before = valid_before,
+            "SSH certificate issued"
+        );
 
         let response = types::SshIssueCertificateResponse {
             signed_key,

@@ -8,6 +8,7 @@ use pgp::crypto::sym::SymmetricKeyAlgorithm;
 use pgp::types::{CompressionAlgorithm, KeyDetails};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
+use tracing::info;
 
 use super::{PkiBackend, PkiBackendInner, types};
 use crate::{
@@ -46,7 +47,6 @@ impl PkiBackend {
                     .required(true)
                     .description("Storage key name"),
             )
-            // PLACEHOLDER_PGP_GEN_FIELDS
             .field(
                 "key_type",
                 Field::builder()
@@ -104,7 +104,12 @@ impl PkiBackendInner {
         let key_type_str = payload.key_type.unwrap_or_else(|| "rsa".to_string());
         let key_bits = payload.key_bits.unwrap_or(2048);
         let ttl_str = payload.ttl.unwrap_or_else(|| "365d".to_string());
-        let _ttl = parse_duration(&ttl_str)?;
+        let ttl = parse_duration(&ttl_str)?;
+
+        // Validate RSA key strength
+        if key_type_str == "rsa" && (key_bits < 2048 || key_bits > 8192) {
+            return Err(RvError::ErrPkiKeyBitsInvalid);
+        }
 
         let primary_key_type = match key_type_str.as_str() {
             "rsa" => PgpKeyType::Rsa(key_bits),
@@ -147,7 +152,7 @@ impl PkiBackendInner {
                 CompressionAlgorithm::ZLIB,
                 CompressionAlgorithm::ZIP,
             ])
-            // .expiration(Some(ttl))
+            .expiration(Some(ttl))
             .subkeys(vec![subkey])
             .build()
             .map_err(|_| RvError::ErrPkiPgpKeyGenerationFailed)?;
@@ -188,6 +193,15 @@ impl PkiBackendInner {
             &bundle,
         )?;
         req.storage_put(&entry).await?;
+
+        info!(
+            key_name = %payload.key_name,
+            key_type = %key_type_str,
+            fingerprint = %fingerprint,
+            key_id = %key_id_hex,
+            exported = export_private,
+            "PGP key generated"
+        );
 
         let response = types::PgpGenerateResponse {
             public_key: armored_public,
