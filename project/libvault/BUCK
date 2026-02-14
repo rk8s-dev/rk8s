@@ -96,9 +96,9 @@ rust_library(
         "//third-party/rust/crates/webpki-roots/0.26.11:webpki-roots",
         "//third-party/rust/crates/x509-parser/0.18.0:x509-parser",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
-        "//third-party/rust/crates/pgp:pgp",
-        "//third-party/rust/crates/rand_chacha:rand_chacha",
-        "//third-party/rust/crates/rand_core:rand_core", 
+        "//third-party/rust/crates/pgp/0.19.0:pgp",
+        "//third-party/rust/crates/rand_chacha/0.10.0:rand_chacha",
+        "//third-party/rust/crates/rand_core/0.10.0:rand_core", 
     ]
 )
 
