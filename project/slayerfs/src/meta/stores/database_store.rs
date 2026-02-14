@@ -1032,7 +1032,7 @@ impl DatabaseMetaStore {
         Ok(())
     }
 
-    /// 替换指定chunk的所有切片（内部方法，接受事务参数）
+    /// Replace all slices of the specified chunk (internal method, accepting transaction parameters)
     async fn replace_slices(
         &self,
         txn: &impl ConnectionTrait,
@@ -3146,23 +3146,26 @@ impl MetaStore for DatabaseMetaStore {
         }
         Ok(())
     }
-    /// compact slices by removing fully-covered ones (latest-wins strategy)
+    /// compact slices by splitting and removing covered portions
+    /// algorithm:
+    /// 1. sort slices by slice_id descending (newest first)
+    /// 2. for each slice, calculate uncovered portions after subtracting ranges
+    ///    covered by newer slices
+    /// 3. create new slice descriptors for each uncovered portion
     ///
-    /// for slayerfs's "latest wins" design, we don't merge slices into new ones.
-    /// instead, we identify slices that are fully covered by newer slices and
-    /// mark them for deletion. this avoids data loss from merging slice ranges.
+    /// note: when we split a slice, the new slice keeps the original slice_id
+    /// but with adjusted offset. the reader handles this correctly by computing
+    /// the internal offset as (read_offset - slice.offset).
     ///
-    /// note: slices are sorted by slice_id (larger id = newer) to determine time order.
-    ///
-    /// example:
+    /// that means：
     /// - slice A: slice_id=1, offset=0, length=100 (old)
-    /// - slice B: slice_id=2, offset=50, length=100 (newer, covers 50-150)
-    /// - slice A's [50-100] is covered by B, but [0-50] is still needed
-    /// - result: keep both A and B (no fully covered slices)
+    /// - slice B: slice_id=2, offset=50, length=100 (newer)
+    /// - A's [50-100] is covered by B, but [0-50] is still needed
+    /// - result: [Slice(1, 0, 50), Slice(2, 50, 100)]
     ///
     /// - slice A: slice_id=1, offset=0, length=100 (old)
     /// - slice B: slice_id=2, offset=0, length=150 (newer, fully covers A)
-    /// - result: remove A, keep B
+    /// - result: [Slice(2, 0, 150)] (A is completely removed)
     async fn merge_slices(&self, slices: &[SliceDesc]) -> Result<Vec<SliceDesc>, MetaError> {
         if slices.is_empty() {
             return Ok(vec![]);
@@ -3182,7 +3185,7 @@ impl MetaStore for DatabaseMetaStore {
         let mut slices_sorted: Vec<SliceDesc> = slices.to_vec();
         slices_sorted.sort_by_key(|s| std::cmp::Reverse(s.slice_id));
 
-        // track which ranges are covered by newer slices
+        // track ranges covered by newer slices
         // each entry is (start, end) of a covered range
         let mut covered_ranges: Vec<(u64, u64)> = Vec::new();
         let mut result_slices: Vec<SliceDesc> = Vec::new();
@@ -3213,17 +3216,19 @@ impl MetaStore for DatabaseMetaStore {
                 remaining = new_remaining;
             }
 
-            // if this slice has uncovered portions, it's still needed
-            if !remaining.is_empty() {
-                // for simplicity, we keep the original slice if any portion is uncovered
-                // a more aggressive approach would split the slice, but that requires
-                // creating new slice objects in storage
-                result_slices.push(slice);
-
-                // mark this slice's range as covered for older slices
-                covered_ranges.push((slice_start, slice_end));
+            // create new slice descriptors for each uncovered portion
+            for (start, end) in remaining {
+                let new_slice = SliceDesc {
+                    slice_id: slice.slice_id,
+                    chunk_id: slice.chunk_id,
+                    offset: start,
+                    length: end - start,
+                };
+                result_slices.push(new_slice);
             }
-            // if remaining is empty, the slice is fully covered and will be dropped
+
+            // mark this slice's full range as covered for older slices
+            covered_ranges.push((slice_start, slice_end));
         }
 
         // sort result by offset for consistent ordering
@@ -4744,9 +4749,10 @@ mod tests {
         assert_eq!(result[1].offset, 200);
         assert_eq!(result[1].length, 100);
 
-        // test case 2: partially overlapping slices should both be kept
+        // test case 2: partially overlapping slices should be split
         // slice 1 (older): 0-100, slice 2 (newer): 50-150
-        // slice 1's [0-50] is not covered, so both are kept
+        // slice 1's [0-50] is not covered, so it becomes [0, 50)
+        // slice 2 is fully kept as [50, 150)
         let slices = vec![
             SliceDesc {
                 slice_id: 1,
@@ -4765,8 +4771,15 @@ mod tests {
         assert_eq!(
             result.len(),
             2,
-            "partially overlapping slices should both be kept (latest-wins)"
+            "partially overlapping slices should be split into minimal set"
         );
+        // result is sorted by offset
+        assert_eq!(result[0].slice_id, 1, "older slice's uncovered part");
+        assert_eq!(result[0].offset, 0);
+        assert_eq!(result[0].length, 50, "slice 1 should be trimmed to [0, 50)");
+        assert_eq!(result[1].slice_id, 2, "newer slice fully kept");
+        assert_eq!(result[1].offset, 50);
+        assert_eq!(result[1].length, 100);
 
         // test case 3: fully covered slice should be removed
         // slice 1 (older): 0-100, slice 2 (newer): 0-150 (fully covers slice 1)
