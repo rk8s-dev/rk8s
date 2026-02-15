@@ -246,7 +246,7 @@ impl ReplicaSetController {
                             .find(|c| matches!(c.condition_type, PodConditionType::PodReady))
                     })
                     .map(|c| matches!(c.status, ConditionStatus::True))
-                    .unwrap_or(false);
+                    .unwrap_or(false)
                 // sort puts false (not ready) before true (ready)
             });
             for pod in matching.into_iter().take(to_delete) {
