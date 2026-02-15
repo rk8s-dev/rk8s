@@ -1,31 +1,19 @@
-FROM rust:1-slim as builder
+FROM rust:1-slim AS builder
 
 ARG PROFILE=debug
 
-WORKDIR /usr/src/app
+WORKDIR /app
 
-# Install necessary packages for building Rust applications with OpenSSL
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN cargo init --bin .
-COPY Cargo.toml ./
-
+COPY . .
 RUN if [ "$PROFILE" = "release" ]; then \
-        cargo build --release; \
+        cargo build -p distribution --release; \
     else \
-        cargo build; \
-    fi
-
-COPY src ./src
-COPY migrations ./migrations
-RUN touch src/main.rs && \
-    if [ "$PROFILE" = "release" ]; then \
-        cargo build --release; \
-    else \
-        cargo build; \
+        cargo build -p distribution; \
     fi
 
 FROM debian:stable-slim
@@ -42,7 +30,7 @@ ARG GID=1001
 RUN groupadd -g $GID $APP_GROUP && \
     useradd -u $UID -g $APP_GROUP -s /bin/sh -m $APP_USER
 
-COPY --from=builder /usr/src/app/target/ /tmp/target/
+COPY --from=builder /app/target/ /tmp/target/
 RUN if [ "$PROFILE" = "release" ]; then \
         cp /tmp/target/release/distribution /usr/local/bin/distribution; \
     else \
