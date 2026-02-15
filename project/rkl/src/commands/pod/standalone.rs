@@ -15,7 +15,7 @@ use libcontainer::syscall::syscall::create_syscall;
 /// Kills a container and waits for it to stop.
 /// Returns Ok(()) if the container is stopped (either was already stopped or successfully killed).
 fn kill_and_wait_container(root_path: &std::path::Path, container_name: &str) -> Result<()> {
-    let container = match load_container(root_path.to_path_buf(), container_name) {
+    let container = match load_container(root_path, container_name) {
         Ok(c) => c,
         Err(e) => {
             debug!(
@@ -26,13 +26,11 @@ fn kill_and_wait_container(root_path: &std::path::Path, container_name: &str) ->
         }
     };
 
-    // If already stopped, no need to kill
     if container.status() == ContainerStatus::Stopped {
         debug!("Container {} already stopped", container_name);
         return Ok(());
     }
 
-    // Send SIGKILL to ensure the container stops
     let kill_args = Kill {
         container_id: container_name.to_string(),
         signal: "SIGKILL".to_string(),
@@ -41,15 +39,13 @@ fn kill_and_wait_container(root_path: &std::path::Path, container_name: &str) ->
 
     if let Err(e) = kill(kill_args, root_path.to_path_buf()) {
         warn!("Failed to kill container {}: {}", container_name, e);
-        // Continue anyway, the container might already be stopping
     }
 
-    // Wait for container to stop (up to 10 seconds)
     for i in 0..20 {
         thread::sleep(Duration::from_millis(500));
-        let container = match load_container(root_path.to_path_buf(), container_name) {
+        let container = match load_container(root_path, container_name) {
             Ok(c) => c,
-            Err(_) => return Ok(()), // Container no longer exists
+            Err(_) => return Ok(()),
         };
         if container.status() == ContainerStatus::Stopped {
             debug!(
