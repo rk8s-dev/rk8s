@@ -13,8 +13,8 @@ cargo build
 ```bash
 sudo mkdir -p /opt/cni/bin
 sudo mv target/debug/libbridge target/debug/libipam target/debug/libnetwork /opt/cni/bin/
-sudo mkdir -p /etc/net.d
-sudo mv test/test.conflist /etc/net.d
+sudo mkdir -p /etc/cni/net.d
+sudo mv test/test.conflist /etc/cni/net.d
 ```
 
 ## Usage examples

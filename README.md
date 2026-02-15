@@ -219,7 +219,7 @@ sudo RKL_ADDRESS=127.0.0.1:50051 project/target/debug/rkl pod daemon # Monitors 
 ```
 
 **RKS:**
-For detail about building a cluster with RKS and RKL, please refer to [RKS–RKL usage](./project/rks/Readme.md).
+For detail about building a cluster with RKS and RKL, please refer to [RKS–RKL usage](./project/rks/README.md).
 
 ## Key Features
 - **CRI Compliance** - Full Container Runtime Interface implementation
