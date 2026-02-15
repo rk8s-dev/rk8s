@@ -135,22 +135,20 @@ impl RustyVault {
         })
     }
 
+    /// Initialize the vault with the provided `SealConfig`. \
+    /// This forwards to the `Core::init` implementation which performs the
+    /// necessary cryptographic initialization (generating KEK, master keys,
+    /// and initial state). Returns an `InitResult` describing the outcome.
     pub async fn init(&self, seal_config: &core::SealConfig) -> Result<core::InitResult, RvError> {
         self.core.load().init(seal_config).await
     }
 
-    /// Initialize the vault with the provided `SealConfig`.
-    ///
-    /// This forwards to the `Core::init` implementation which performs the
-    /// necessary cryptographic initialization (generating KEK, master keys,
-    /// and initial state). Returns an `InitResult` describing the outcome.
+    /// This is a lightweight query that checks the stored state in `Core`. \
+    /// Returns whether the vault has already been initialized.
     pub async fn inited(&self) -> Result<bool, RvError> {
         self.core.load().inited().await
     }
 
-    /// Returns whether the vault has already been initialized.
-    ///
-    /// This is a lightweight query that checks the stored state in `Core`.
     pub async fn unseal(&self, keys: &[&[u8]]) -> Result<bool, RvError> {
         for key in keys.iter() {
             if self.core.load().unseal(key).await? {

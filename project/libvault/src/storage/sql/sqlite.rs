@@ -1,3 +1,4 @@
+use regex::Regex;
 use serde::{Deserialize, Deserializer, de::Error as _};
 use serde_json::{Map, Value};
 use sqlx::SqlitePool;
@@ -19,12 +20,6 @@ const DEFAULT_SQLITE_FILENAME: &str = "vault.db";
 const DEFAULT_SQLITE_TABLE: &str = "vault";
 const DEFAULT_SQLITE_TIMEOUT: u64 = 7200;
 
-#[derive(Debug, sqlx::FromRow)]
-struct SqliteBackendEntry {
-    vault_key: Vec<u8>,
-    vault_value: Vec<u8>,
-}
-
 #[derive(Clone, Debug)]
 pub struct SqliteBackendConfig {
     filename: PathBuf,
@@ -40,8 +35,17 @@ impl<'de> Deserialize<'de> for SqliteBackendConfig {
     {
         let default_cfg = Self::default();
         let deserializer_map: Map<String, Value> = <Map<String, Value>>::deserialize(deserializer)?;
+        let create_if_missing: bool = deserializer_map
+            .get("create_if_missing")
+            .and_then(|key| {
+                serde_json::from_value::<bool>(key.clone())
+                    .map_err(|err| log::warn!("SQLite Backend: table from_value failed: {err:?}"))
+                    .ok()
+            })
+            .unwrap_or(default_cfg.create_if_missing);
         Ok(Self {
-            filename: std::env::var("VAULT_SQLITE_FILENAME")
+            filename: {
+                let path = std::env::var("VAULT_SQLITE_FILENAME")
                 .ok()
                 .map(PathBuf::from)
                 .unwrap_or(
@@ -57,9 +61,20 @@ impl<'de> Deserialize<'de> for SqliteBackendConfig {
                                 .ok()
                         })
                         .unwrap_or(default_cfg.filename),
-                )
-                .canonicalize()
-                .map_err(D::Error::custom)?,
+                );
+                match path.canonicalize() {
+                    Ok(filename) => filename,
+                    Err(_) if create_if_missing && path.is_absolute() => path,
+                    Err(_) if create_if_missing => env::current_dir()
+                        .map_err(|err| {
+                            D::Error::custom(format!(
+                                "SQLite Backend: failed to resolve current directory: {err}"
+                            ))
+                        })?
+                        .join(path),
+                    Err(err) => Err(D::Error::custom(&err))?,
+                }
+            },
             table: deserializer_map
                 .get("table")
                 .and_then(|table| {
@@ -94,16 +109,7 @@ impl<'de> Deserialize<'de> for SqliteBackendConfig {
                 Some(Value::Number(secs)) => Duration::from_secs(secs.as_u64().unwrap_or(5_u64)),
                 _ => default_cfg.timeout,
             },
-            create_if_missing: deserializer_map
-                .get("create_if_missing")
-                .and_then(|key| {
-                    serde_json::from_value::<bool>(key.clone())
-                        .map_err(|err| {
-                            log::warn!("SQLite Backend: table from_value failed: {err:?}")
-                        })
-                        .ok()
-                })
-                .unwrap_or(default_cfg.create_if_missing),
+            create_if_missing,
         })
     }
 }
@@ -127,6 +133,11 @@ pub struct SqliteBackend {
 impl SqliteBackend {
     pub async fn new(conf: &HashMap<String, Value>) -> Result<Self, RvError> {
         let conf: SqliteBackendConfig = serde_json::from_value(serde_json::to_value(conf)?)?;
+        let re = Regex::new(r"^(?-u:\w)+$").expect("SQLite regex init failed");
+        if !re.is_match(&conf.table) {
+            debug!("{:?}: {:?}", RvError::ErrSqliteDisallowedFields, conf.table);
+            Err(RvError::ErrSqliteDisallowedFields)?;
+        }
         let opts = SqliteConnectOptions::new()
             .filename(conf.filename)
             .busy_timeout(conf.timeout)
@@ -156,8 +167,18 @@ impl SqliteBackend {
 #[async_trait::async_trait]
 impl Backend for SqliteBackend {
     async fn get(&self, key: &str) -> Result<Option<BackendEntry>, RvError> {
+        #[derive(Debug, sqlx::FromRow)]
+        struct SqliteBackendEntry {
+            vault_value: Vec<u8>,
+        }
+
+        // This will change.
+        if key.starts_with("/") {
+            return Err(RvError::ErrSqliteBackendNotSupportAbsolute);
+        }
+
         let sql = format!(
-            "SELECT vault_key, vault_value FROM `{}` WHERE vault_key = ?",
+            "SELECT vault_value FROM `{}` WHERE vault_key = ?",
             &self.table
         );
         let ret: Option<SqliteBackendEntry> = sqlx::query_as(&sql)
@@ -176,6 +197,10 @@ impl Backend for SqliteBackend {
     }
 
     async fn put(&self, entry: &BackendEntry) -> Result<(), RvError> {
+        if entry.key.starts_with("/") {
+            Err(RvError::ErrSqliteBackendNotSupportAbsolute)?;
+        }
+
         let sql = format!(
             "INSERT INTO `{}` (vault_key, vault_value) VALUES (?, ?) ON CONFLICT(vault_key) DO UPDATE SET vault_value = excluded.vault_value",
             &self.table
@@ -190,7 +215,11 @@ impl Backend for SqliteBackend {
     }
 
     async fn delete(&self, key: &str) -> Result<(), RvError> {
-        let sql = format!("DELETE FROM {} WHERE vault_key = ?", &self.table);
+        if key.starts_with("/") {
+            Err(RvError::ErrSqliteBackendNotSupportAbsolute)?;
+        }
+
+        let sql = format!("DELETE FROM `{}` WHERE vault_key = ?", &self.table);
         sqlx::query(&sql)
             .bind(key.as_bytes())
             .execute(&self.pool)
@@ -200,19 +229,27 @@ impl Backend for SqliteBackend {
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<String>, RvError> {
+        if prefix.starts_with("/") {
+            Err(RvError::ErrSqliteBackendNotSupportAbsolute)?;
+        }
+
         let sql = format!(
-            "SELECT vault_key, vault_value FROM {} WHERE vault_key LIKE ?",
+            "SELECT vault_key FROM `{}` WHERE vault_key LIKE ? ESCAPE '\\\\'",
             &self.table
         );
-        let items: Vec<SqliteBackendEntry> = sqlx::query_as(&sql)
-            .bind(format!("{}%", prefix).as_bytes())
+        // Escape the LIKE wildcard characters (% and _) and the escape character (\)
+        // so that `prefix` is treated as a literal prefix.
+        let escaped_prefix = prefix
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let keys: Vec<Vec<u8>> = sqlx::query_scalar(&sql)
+            .bind(escaped_prefix.as_bytes())
             .fetch_all(&self.pool)
             .await?;
-
         let mut res = HashSet::new();
-
-        for item in items {
-            let key = String::from_utf8(item.vault_key)?;
+        for key_bytes in keys {
+            let key = String::from_utf8(key_bytes)?;
             let key = key.strip_prefix(prefix).unwrap_or(&key);
 
             match key.find('/') {

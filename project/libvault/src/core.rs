@@ -101,9 +101,6 @@ pub struct Core {
     pub state: ArcSwap<CoreState>,
 }
 
-/// High-level methods on `Core` provide initialization, migration and
-/// handler/module registration. Public methods are documented inline where
-/// their behavior requires clarification.
 impl Default for CoreState {
     fn default() -> Self {
         Self {

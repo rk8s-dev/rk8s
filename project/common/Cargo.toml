@@ -22,7 +22,7 @@ bincode = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 log = { workspace = true }
-libvault = { workspace = true }
+libvault = { workspace = true, features = ["storage_xline"]}
 uuid = { workspace = true, features = ["v4", "serde"] }
 etcd-client = { workspace = true }
 libcontainer = { workspace = true }

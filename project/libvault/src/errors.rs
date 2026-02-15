@@ -190,6 +190,12 @@ pub enum RvError {
     ErrStorageBackendLockFailed,
     #[error("Storage backend unlock failed.")]
     ErrStorageBackendUnlockFailed,
+    #[cfg(feature = "storage_sqlite")]
+    #[error("SQLite backend not support absolute path yet.")]
+    ErrSqliteBackendNotSupportAbsolute,
+    #[cfg(feature = "storage_sqlite")]
+    #[error("Sqlite disallowed fields")]
+    ErrSqliteDisallowedFields,
     #[error("Some IO error happened, {:?}", .source)]
     IO {
         #[from]
@@ -320,14 +326,14 @@ pub enum RvError {
     #[error("Database connection info invalid")]
     ErrDatabaseConnectionInfoInvalid,
 
-    #[cfg(feature = "xline")]
+    #[cfg(feature = "storage_xline")]
     #[error("Some etcd client error happened, {:?}", .source)]
     EtcdClientError {
         #[from]
         source: etcd_client::Error,
     },
 
-    #[cfg(feature = "sqlite")]
+    #[cfg(feature = "storage_sqlite")]
     #[error("Some sqlite client error happened, {:?}", .source)]
     SqliteClientError {
         #[from]

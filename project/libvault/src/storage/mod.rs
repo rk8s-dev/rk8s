@@ -27,7 +27,7 @@ pub mod barrier_aes_gcm;
 pub mod barrier_view;
 pub mod physical;
 pub mod sql;
-#[cfg(feature = "xline")]
+#[cfg(feature = "storage_xline")]
 pub mod xline;
 /// A trait that abstracts core methods for all storage barrier types.
 #[async_trait]
@@ -79,24 +79,42 @@ pub struct BackendEntry {
     pub value: Vec<u8>,
 }
 
+pub fn current_handle<'a, F, T>(fut: F) -> T
+where
+    F: std::future::Future<Output = T> + Send + 'a,
+    T: Send + 'a,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(_) => std::thread::scope(|s| {
+            s.spawn(|| {
+                let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+                rt.block_on(fut)
+            })
+            .join()
+            .expect("Couldn't join on the associated thread")
+        }),
+        Err(_) => {
+            let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+            rt.block_on(fut)
+        }
+    }
+}
+
 /// this is a generic function that instantiates different storage backends.
-pub async fn new_backend(
-    t: &str,
-    conf: &HashMap<String, Value>,
-) -> Result<Arc<dyn Backend>, RvError> {
+pub fn new_backend(t: &str, conf: &HashMap<String, Value>) -> Result<Arc<dyn Backend>, RvError> {
     match t {
         "file" => {
             let backend = physical::file::FileBackend::new(conf)?;
             Ok(Arc::new(backend))
         }
-        #[cfg(feature = "xline")]
+        #[cfg(feature = "storage_xline")]
         "xline" => {
             let backend = xline::XlineBackend::new(conf)?;
             Ok(Arc::new(backend))
         }
-        #[cfg(feature = "sqlite")]
+        #[cfg(feature = "storage_sqlite")]
         "sqlite" => {
-            let backend = sql::sqlite::SqliteBackend::new(conf).await?;
+            let backend = current_handle(sql::sqlite::SqliteBackend::new(conf))?;
             Ok(Arc::new(backend))
         }
         "mock" => Ok(Arc::new(physical::mock::MockBackend::new())),
