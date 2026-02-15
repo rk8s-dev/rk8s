@@ -237,8 +237,7 @@ impl ReplicaSetController {
             let to_delete = (actual - desired) as usize;
             // prefer deleting pods that are not ready (use PodReady condition when available)
             matching.sort_by_key(|p| {
-                let ready = p
-                    .status
+                p.status
                     .conditions
                     .as_ref()
                     .and_then(|conds| {
@@ -249,7 +248,6 @@ impl ReplicaSetController {
                     .map(|c| matches!(c.status, ConditionStatus::True))
                     .unwrap_or(false);
                 // sort puts false (not ready) before true (ready)
-                ready
             });
             for pod in matching.into_iter().take(to_delete) {
                 let pod_name = pod.metadata.name.clone();
