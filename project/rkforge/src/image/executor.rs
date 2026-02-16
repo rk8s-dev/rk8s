@@ -30,6 +30,7 @@ pub struct Executor {
     pub image_config: ImageConfig,
     pub image_aliases: HashMap<String, String>,
     pub image_layers: Vec<LayerCompressionResult>,
+    pub image_ref_names: Vec<String>,
     pub global_args: HashMap<String, Option<String>>,
 
     pub compressor: Arc<dyn LayerCompressor + Send + Sync>,
@@ -40,6 +41,7 @@ impl Executor {
         dockerfile: Dockerfile,
         context: PathBuf,
         image_output_dir: PathBuf,
+        image_ref_names: Vec<String>,
         global_args: HashMap<String, Option<String>>,
         compressor: Arc<dyn LayerCompressor + Send + Sync>,
     ) -> Self {
@@ -53,6 +55,7 @@ impl Executor {
             image_config: ImageConfig::default(),
             image_aliases: HashMap::new(),
             image_layers: Vec::new(),
+            image_ref_names,
             global_args,
             compressor,
         }
@@ -139,7 +142,7 @@ impl Executor {
                 .collect::<Vec<(u64, String)>>(),
         )?;
 
-        let image_index = OciImageIndex::default();
+        let image_index = OciImageIndex::default().reference_names(self.image_ref_names.clone());
         let oci_builder = OciBuilder::default()
             .image_dir(self.image_output_dir.clone())
             .oci_image_config(image_config)
