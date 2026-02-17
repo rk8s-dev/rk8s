@@ -43,14 +43,14 @@ pub struct PushArgs {
 pub fn push(args: PushArgs) -> anyhow::Result<()> {
     let auth_config = AuthConfig::load()?;
     let requested_has_explicit_tag = has_explicit_tag(&args.image_ref);
+    let requested_repo = strip_explicit_tag(&args.image_ref).to_string();
 
-    let requested_ref = args.image_ref.parse::<Reference>().with_context(|| {
+    args.image_ref.parse::<Reference>().with_context(|| {
         format!(
             "invalid image reference for push: {}",
             args.image_ref.as_str()
         )
     })?;
-    let requested_repo = requested_ref.repository().to_string();
 
     let url = auth_config.resolve_url(args.url);
 
@@ -215,9 +215,20 @@ fn has_explicit_tag(raw: &str) -> bool {
     }
 }
 
+fn strip_explicit_tag(raw: &str) -> &str {
+    if has_explicit_tag(raw)
+        && let Some(idx) = raw.rfind(':')
+    {
+        return &raw[..idx];
+    }
+    raw
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{has_explicit_tag, should_include_digest};
+    use crate::storage::parse_image_ref;
+
+    use super::{has_explicit_tag, should_include_digest, strip_explicit_tag};
 
     #[test]
     fn test_should_include_digest_for_explicit_tag() {
@@ -238,5 +249,27 @@ mod tests {
         assert!(!has_explicit_tag("localhost:5000/repo/app"));
         assert!(has_explicit_tag("repo/app:v1"));
         assert!(has_explicit_tag("localhost:5000/repo/app:v1"));
+    }
+
+    #[test]
+    fn test_strip_explicit_tag() {
+        assert_eq!(strip_explicit_tag("repo/app"), "repo/app");
+        assert_eq!(strip_explicit_tag("my.ns/team/app"), "my.ns/team/app");
+        assert_eq!(
+            strip_explicit_tag("localhost:5000/repo/app"),
+            "localhost:5000/repo/app"
+        );
+        assert_eq!(strip_explicit_tag("repo/app:v1"), "repo/app");
+        assert_eq!(
+            strip_explicit_tag("localhost:5000/repo/app:v1"),
+            "localhost:5000/repo/app"
+        );
+    }
+
+    #[test]
+    fn test_implicit_push_repo_path_preserved() {
+        let ref_name = strip_explicit_tag("my.ns/team/app");
+        let target = parse_image_ref("127.0.0.1:8968", ref_name, Some("latest")).unwrap();
+        assert_eq!(target.repository(), "my.ns/team/app");
     }
 }

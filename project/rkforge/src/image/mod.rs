@@ -99,7 +99,7 @@ fn parse_tag(raw: &str) -> Result<ParsedTag> {
     let repository = reference.repository().to_string();
     let has_explicit_tag = has_explicit_tag(raw);
     let explicit_tag = reference.tag().map(|v| v.to_string());
-    let ref_name = explicit_tag.clone().unwrap_or_else(|| "latest".to_string());
+    let ref_name = explicit_tag.unwrap_or_else(|| "latest".to_string());
 
     Ok(ParsedTag {
         repository,
