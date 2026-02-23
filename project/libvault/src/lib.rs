@@ -135,7 +135,8 @@ impl RustyVault {
         })
     }
 
-    /// Initialize the vault with the provided `SealConfig`. \
+    /// Initialize the vault with the provided `SealConfig`.
+    ///
     /// This forwards to the `Core::init` implementation which performs the
     /// necessary cryptographic initialization (generating KEK, master keys,
     /// and initial state). Returns an `InitResult` describing the outcome.

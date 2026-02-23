@@ -65,7 +65,6 @@ tonic = { workspace = true }
 openssl = { workspace = true, optional = true }
 openssl-sys = { workspace = true, optional = true }
 sqlx = { workspace = true, optional = true}
-sea-orm = { workspace = true, optional = true}
 
 [build-dependencies]
 toml = { workspace = true }
@@ -73,8 +72,8 @@ toml = { workspace = true }
 [features]
 default = ["crypto_adaptor_openssl"]
 storage_xline = ["etcd-client"]
-storage_sqlite = ["sea-orm/sqlx-sqlite", "sqlx/sqlite"]
-storage_pg = ["sea-orm/sqlx-postgres", "sqlx/postgres"]
+storage_sqlite = ["sqlx/sqlite"]
+storage_pg = ["sqlx/postgres"]
 crypto_adaptor_openssl = ["dep:openssl", "dep:openssl-sys"]
 crypto_adaptor_tongsuo = ["dep:openssl", "dep:openssl-sys"]
 

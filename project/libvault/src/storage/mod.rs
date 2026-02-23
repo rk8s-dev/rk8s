@@ -79,7 +79,7 @@ pub struct BackendEntry {
     pub value: Vec<u8>,
 }
 
-pub fn current_handle<'a, F, T>(fut: F) -> T
+fn current_handle<'a, F, T>(fut: F) -> T
 where
     F: std::future::Future<Output = T> + Send + 'a,
     T: Send + 'a,

@@ -30,11 +30,21 @@ rust_library(
         "@$(location :ahash-build-script-run[rustc_flags])",
         "@$(location :ahash-manifest[env_flags])",
     ],
+    os_deps = {
+        "linux": [
+            "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+            "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        ],
+        "macos": [
+            "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+            "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        ],
+        "windows": [
+            "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+            "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        ],
+    },
     visibility = ["PUBLIC"],
-    deps = [
-        "//third-party/rust/crates/getrandom/0.2.16:getrandom",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
-    ],
 )
 
 rust_binary(

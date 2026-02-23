@@ -191,11 +191,11 @@ pub enum RvError {
     #[error("Storage backend unlock failed.")]
     ErrStorageBackendUnlockFailed,
     #[cfg(feature = "storage_sqlite")]
-    #[error("SQLite backend not support absolute path yet.")]
+    #[error("SQLite backend does not support absolute paths yet.")]
     ErrSqliteBackendNotSupportAbsolute,
     #[cfg(feature = "storage_sqlite")]
-    #[error("Sqlite disallowed fields")]
-    ErrSqliteDisallowedFields,
+    #[error("Sqlite disallowed fields: {}", .0)]
+    ErrSqliteDisallowedFields(String),
     #[error("Some IO error happened, {:?}", .source)]
     IO {
         #[from]

@@ -9,7 +9,6 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
-use tracing::debug;
 
 use crate::{
     errors::RvError,
@@ -39,29 +38,31 @@ impl<'de> Deserialize<'de> for SqliteBackendConfig {
             .get("create_if_missing")
             .and_then(|key| {
                 serde_json::from_value::<bool>(key.clone())
-                    .map_err(|err| log::warn!("SQLite Backend: table from_value failed: {err:?}"))
+                    .map_err(|err| {
+                        log::warn!("SQLite Backend: `create_if_missing` from value failed: {err:?}")
+                    })
                     .ok()
             })
             .unwrap_or(default_cfg.create_if_missing);
         Ok(Self {
             filename: {
                 let path = std::env::var("VAULT_SQLITE_FILENAME")
-                .ok()
-                .map(PathBuf::from)
-                .unwrap_or(
-                    deserializer_map
-                        .get("filename")
-                        .and_then(|filename| {
-                            serde_json::from_value::<PathBuf>(filename.clone())
-                                .map_err(|err| {
-                                    log::warn!(
-                                        "SQLite Backend: filename from_value failed: {err:?}"
-                                    )
-                                })
-                                .ok()
-                        })
-                        .unwrap_or(default_cfg.filename),
-                );
+                    .ok()
+                    .map(PathBuf::from)
+                    .unwrap_or(
+                        deserializer_map
+                            .get("filename")
+                            .and_then(|filename| {
+                                serde_json::from_value::<PathBuf>(filename.clone())
+                                    .map_err(|err| {
+                                        log::warn!(
+                                            "SQLite Backend: `filename` from value failed: {err:?}"
+                                        )
+                                    })
+                                    .ok()
+                            })
+                            .unwrap_or(default_cfg.filename),
+                    );
                 match path.canonicalize() {
                     Ok(filename) => filename,
                     Err(_) if create_if_missing && path.is_absolute() => path,
@@ -80,34 +81,37 @@ impl<'de> Deserialize<'de> for SqliteBackendConfig {
                 .and_then(|table| {
                     serde_json::from_value::<String>(table.clone())
                         .map_err(|err| {
-                            log::warn!("SQLite Backend: table from_value failed: {err:?}")
+                            log::warn!("SQLite Backend: `table` from value failed: {err:?}")
                         })
                         .ok()
                 })
                 .unwrap_or(default_cfg.table),
-            timeout: match std::env::var("VAULT_SQLITE_TIMEOUT")
-                .map(Value::String)
-                .ok()
-                .or(deserializer_map.get("timeout").cloned())
-            {
-                Some(Value::String(duration)) => match duration.is_empty() {
-                    true => default_cfg.timeout,
-                    false => humantime::parse_duration(duration.trim())
-                        .map(|timeout| {
-                            match timeout.gt(&Duration::ZERO)
-                                && timeout.lt(&Duration::from_secs(DEFAULT_SQLITE_TIMEOUT))
-                            {
-                                true => Ok(timeout),
-                                false => Err(D::Error::custom(format!(
-                                    "SQLite Backend: Timeout must be greater than 0s and less than {}s.",
-                                    DEFAULT_SQLITE_TIMEOUT
-                                ))),
-                            }
-                        })
-                        .map_err(D::Error::custom)??,
-                },
-                Some(Value::Number(secs)) => Duration::from_secs(secs.as_u64().unwrap_or(5_u64)),
-                _ => default_cfg.timeout,
+            timeout: {
+                let timeout = match std::env::var("VAULT_SQLITE_TIMEOUT")
+                    .map(Value::String)
+                    .ok()
+                    .or(deserializer_map.get("timeout").cloned())
+                {
+                    Some(Value::String(duration)) => match duration.is_empty() {
+                        true => default_cfg.timeout,
+                        false => {
+                            humantime::parse_duration(duration.trim()).map_err(D::Error::custom)?
+                        }
+                    },
+                    Some(Value::Number(secs)) => {
+                        Duration::from_secs(secs.as_u64().unwrap_or(5_u64))
+                    }
+                    _ => default_cfg.timeout,
+                };
+                match timeout.gt(&Duration::ZERO)
+                    && timeout.lt(&Duration::from_secs(DEFAULT_SQLITE_TIMEOUT))
+                {
+                    true => timeout,
+                    false => Err(D::Error::custom(format!(
+                        "SQLite Backend: Timeout must be greater than 0s and less than {}s.",
+                        DEFAULT_SQLITE_TIMEOUT
+                    )))?,
+                }
             },
             create_if_missing,
         })
@@ -135,21 +139,22 @@ impl SqliteBackend {
         let conf: SqliteBackendConfig = serde_json::from_value(serde_json::to_value(conf)?)?;
         let re = Regex::new(r"^(?-u:\w)+$").expect("SQLite regex init failed");
         if !re.is_match(&conf.table) {
-            debug!("{:?}: {:?}", RvError::ErrSqliteDisallowedFields, conf.table);
-            Err(RvError::ErrSqliteDisallowedFields)?;
+            let err = RvError::ErrSqliteDisallowedFields(conf.table.clone());
+            log::debug!("{err:?}");
+            Err(err)?;
         }
         let opts = SqliteConnectOptions::new()
             .filename(conf.filename)
             .busy_timeout(conf.timeout)
             .create_if_missing(conf.create_if_missing)
             .read_only(false);
-        debug!("Sqlite connect options: {:?}", opts);
+        log::debug!("Sqlite connect options: {:?}", opts);
 
         let pool = SqlitePool::connect_with(opts).await?;
         sqlx::query(&format!(
             r#"CREATE TABLE IF NOT EXISTS `{}` (
-    `vault_key` BLOB NOT NULL,
-    `vault_value` BLOB,
+    `vault_key` TEXT NOT NULL,
+    `vault_value` BLOB NOT NULL,
     PRIMARY KEY (`vault_key`)
 );"#,
             conf.table
@@ -168,9 +173,7 @@ impl SqliteBackend {
 impl Backend for SqliteBackend {
     async fn get(&self, key: &str) -> Result<Option<BackendEntry>, RvError> {
         #[derive(Debug, sqlx::FromRow)]
-        struct SqliteBackendEntry {
-            vault_value: Vec<u8>,
-        }
+        struct SqliteBackendEntry(Vec<u8>);
 
         // This will change.
         if key.starts_with("/") {
@@ -189,7 +192,7 @@ impl Backend for SqliteBackend {
         if let Some(item) = ret {
             Ok(Some(BackendEntry {
                 key: key.to_string(),
-                value: item.vault_value,
+                value: item.0,
             }))
         } else {
             Ok(None)
@@ -244,7 +247,7 @@ impl Backend for SqliteBackend {
             .replace('%', "\\%")
             .replace('_', "\\_");
         let keys: Vec<Vec<u8>> = sqlx::query_scalar(&sql)
-            .bind(escaped_prefix.as_bytes())
+            .bind(format!("{}%", escaped_prefix).as_bytes())
             .fetch_all(&self.pool)
             .await?;
         let mut res = HashSet::new();

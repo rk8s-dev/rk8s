@@ -27,6 +27,7 @@ rust_library(
         "OUT_DIR": "$(location :winapi-build-script-run[out_dir])",
     },
     features = [
+        "basetsd",
         "cfg",
         "consoleapi",
         "errhandlingapi",
@@ -69,6 +70,7 @@ rust_binary(
     crate_root = "vendor/build.rs",
     edition = "2015",
     features = [
+        "basetsd",
         "cfg",
         "consoleapi",
         "errhandlingapi",
@@ -107,6 +109,7 @@ buildscript_run(
     buildscript_rule = ":winapi-build-script-build",
     env_srcs = [":winapi-manifest[env_dict]"],
     features = [
+        "basetsd",
         "cfg",
         "consoleapi",
         "errhandlingapi",

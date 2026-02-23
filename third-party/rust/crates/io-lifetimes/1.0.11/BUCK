@@ -36,8 +36,12 @@ rust_library(
         "@$(location :io-lifetimes-build-script-run[rustc_flags])",
         "@$(location :io-lifetimes-manifest[env_flags])",
     ],
+    os_deps = {
+        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
+        "windows": ["//third-party/rust/crates/windows-sys/0.48.0:windows-sys"],
+    },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libc/0.2.178:libc"],
 )
 
 rust_binary(
