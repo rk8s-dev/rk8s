@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     image::{config::normalize_path, context::StageContext as Context},
-    pull::sync_pull_or_get_image,
+    pull::sync_pull_or_get_image_with_policy,
     storage::full_image_ref,
     task::{CopyTask, RunTask, TaskExec},
 };
@@ -264,7 +264,8 @@ impl<P: AsRef<Path>> InstructionExt<P> for FromInstruction {
 
         let img_ref = full_image_ref(&image_parsed.image, image_parsed.tag.as_deref());
 
-        let (_, layers) = sync_pull_or_get_image(&img_ref, None::<String>)?;
+        let (_, layers) =
+            sync_pull_or_get_image_with_policy(&img_ref, None::<String>, ctx.no_cache)?;
 
         // add image alias mapping
         if let Some(alias) = &self.alias {
@@ -283,8 +284,15 @@ impl<P: AsRef<Path>> InstructionExt<P> for FromInstruction {
 
 impl<P: AsRef<Path>> InstructionExt<P> for ArgInstruction {
     fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
-        let val = self.value.as_ref().map(|val| val.content.clone());
-        ctx.args.insert(self.name.content.clone(), val);
+        let key = self.name.content.clone();
+        let val = ctx
+            .global_args
+            .get(&key)
+            .cloned()
+            .flatten()
+            .or_else(|| self.value.as_ref().map(|val| val.content.clone()))
+            .or_else(|| ctx.args.get(&key).cloned().flatten());
+        ctx.args.insert(key, val);
         Ok(())
     }
 }
@@ -328,9 +336,16 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
         }
         // println!("Executing RUN command: {:?}", command_args);
 
-        let envp: Vec<String> = ctx
-            .image_config
-            .envp
+        let mut merged_envp = ctx.image_config.envp.clone();
+        for (key, value) in &ctx.args {
+            if merged_envp.contains_key(key) {
+                continue;
+            }
+            if let Some(value) = value {
+                merged_envp.insert(key.clone(), value.clone());
+            }
+        }
+        let envp: Vec<String> = merged_envp
             .iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
@@ -340,6 +355,7 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
             envp,
             working_dir: ctx.image_config.working_dir.clone(),
             user: ctx.image_config.user.clone(),
+            quiet: ctx.quiet,
         };
         task.execute(ctx.mount_config)
     }
@@ -444,13 +460,26 @@ impl<P: AsRef<Path>> InstructionExt<P> for CopyInstruction {
             .map(|s| build_ctx.join(&s.content))
             .collect();
 
-        let task = CopyTask { src, dest };
+        let task = CopyTask {
+            src,
+            dest,
+            quiet: ctx.quiet,
+        };
         task.execute(ctx.mount_config)
     }
 }
 
 impl<P: AsRef<Path>> InstructionExt<P> for EnvInstruction {
     fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        let mut expand_scope = HashMap::new();
+        for (key, value) in &ctx.args {
+            if let Some(value) = value {
+                expand_scope.insert(key.clone(), value.clone());
+            }
+        }
+        // ENV has higher precedence for future expansion.
+        expand_scope.extend(ctx.image_config.envp.clone());
+
         for var in self.vars.iter() {
             let mut val = Vec::new();
             for component in var.value.components.iter() {
@@ -464,7 +493,7 @@ impl<P: AsRef<Path>> InstructionExt<P> for EnvInstruction {
                 }
             }
             let raw_val = val.join(" ");
-            let expanded_val = expand_env_value(&raw_val, &ctx.image_config.envp);
+            let expanded_val = expand_env_value(&raw_val, &expand_scope);
             ctx.image_config
                 .add_envp(var.key.content.clone(), expanded_val);
         }

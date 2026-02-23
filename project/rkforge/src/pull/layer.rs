@@ -16,13 +16,14 @@ pub async fn pull_layers(
     client: &Client,
     image_ref: &Reference,
     manifest: &OciImageManifest,
+    no_cache: bool,
 ) -> anyhow::Result<Vec<PathBuf>> {
     let to_download = manifest
         .layers
         .iter()
         .chain(iter::once(&manifest.config))
         .map(Ok)
-        .try_filter(|layer| Ok(!ultimate_blob_path(&layer.digest)?.exists()))
+        .try_filter(|layer| Ok(no_cache || !ultimate_blob_path(&layer.digest)?.exists()))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
     let tasks = to_download.into_iter().map(|descriptor| {
@@ -30,7 +31,9 @@ pub async fn pull_layers(
         let image_ref = image_ref.clone();
         let descriptor = descriptor.clone();
 
-        tokio::spawn(async move { pull_and_unpack_layer(&client, &image_ref, &descriptor).await })
+        tokio::spawn(async move {
+            pull_and_unpack_layer(&client, &image_ref, &descriptor, no_cache).await
+        })
     });
 
     futures::future::try_join_all(tasks).await?;
@@ -47,6 +50,7 @@ async fn pull_and_unpack_layer(
     client: &Client,
     image_ref: &Reference,
     descriptor: &OciDescriptor,
+    no_cache: bool,
 ) -> anyhow::Result<()> {
     let digest = &descriptor.digest;
 
@@ -56,7 +60,18 @@ async fn pull_and_unpack_layer(
 
     pull_layer(client, image_ref, descriptor, &packed_blob_path).await?;
 
-    if !ultimate_blob_path.exists() {
+    if no_cache && ultimate_blob_path.exists() {
+        tokio::fs::remove_file(&ultimate_blob_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to remove cached blob {}",
+                    ultimate_blob_path.display()
+                )
+            })?;
+    }
+
+    if no_cache || !ultimate_blob_path.exists() {
         unpack_layer(descriptor, &packed_blob_path, &ultimate_blob_path).await?;
     }
 
