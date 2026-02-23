@@ -349,10 +349,6 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
     executor.output_options(build_args.quiet, build_args.progress);
     executor.cli_labels(cli_labels);
 
-    if build_args.no_cache && !build_args.quiet {
-        tracing::info!("--no-cache is enabled");
-    }
-
     executor.build_image()?;
 
     let image_digest = read_primary_image_digest(&image_output_dir, preferred_ref_name.as_deref())?;
@@ -365,15 +361,17 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
 
     use super::{
         BuildArgs, BuildProgressMode, derive_output_name, has_explicit_tag, parse_dockerfile,
-        parse_key_value_options, parse_tags, read_primary_image_digest, unique_ref_names,
+        parse_global_args, parse_key_value_options, parse_tags, read_primary_image_digest,
+        resolve_dockerfile_path, unique_ref_names,
     };
     use clap::Parser;
-    use dockerfile_parser::{BreakableStringComponent, Instruction, ShellOrExecExpr};
+    use dockerfile_parser::{BreakableStringComponent, Dockerfile, Instruction, ShellOrExecExpr};
 
     #[test]
     fn test_dockerfile() {
@@ -525,6 +523,84 @@ mod tests {
     fn test_parse_key_value_options_invalid() {
         assert!(parse_key_value_options(&["INVALID".to_string()], "--build-arg").is_err());
         assert!(parse_key_value_options(&["=bar".to_string()], "--label").is_err());
+    }
+
+    #[test]
+    fn test_resolve_dockerfile_path_prefers_dockerfile() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("Dockerfile"), "FROM scratch\n").unwrap();
+        fs::write(temp_dir.path().join("Containerfile"), "FROM alpine\n").unwrap();
+        let context = temp_dir.path().display().to_string();
+        let build_args = BuildArgs::parse_from(vec!["rkforge", context.as_str()]);
+
+        let resolved = resolve_dockerfile_path(&build_args).unwrap();
+        assert_eq!(resolved, temp_dir.path().join("Dockerfile"));
+    }
+
+    #[test]
+    fn test_resolve_dockerfile_path_fallback_to_containerfile() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("Containerfile"), "FROM alpine\n").unwrap();
+        let context = temp_dir.path().display().to_string();
+        let build_args = BuildArgs::parse_from(vec!["rkforge", context.as_str()]);
+
+        let resolved = resolve_dockerfile_path(&build_args).unwrap();
+        assert_eq!(resolved, temp_dir.path().join("Containerfile"));
+    }
+
+    #[test]
+    fn test_resolve_dockerfile_path_missing_files_returns_error() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let context = temp_dir.path().display().to_string();
+        let build_args = BuildArgs::parse_from(vec!["rkforge", context.as_str()]);
+
+        assert!(resolve_dockerfile_path(&build_args).is_err());
+    }
+
+    #[test]
+    fn test_resolve_dockerfile_path_file_flag_override() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("Dockerfile"), "FROM scratch\n").unwrap();
+        let custom_file = temp_dir.path().join("Custom.Dockerfile");
+        fs::write(&custom_file, "FROM alpine\n").unwrap();
+
+        let context = temp_dir.path().display().to_string();
+        let file = custom_file.display().to_string();
+        let build_args =
+            BuildArgs::parse_from(vec!["rkforge", "-f", file.as_str(), context.as_str()]);
+
+        let resolved = resolve_dockerfile_path(&build_args).unwrap();
+        assert_eq!(resolved, custom_file);
+    }
+
+    #[test]
+    fn test_parse_global_args_cli_overrides_and_passes_unknown() {
+        let dockerfile = Dockerfile::parse(
+            r#"
+ARG BASE=ubuntu
+ARG HTTP_PROXY
+FROM ${BASE}
+"#,
+        )
+        .unwrap();
+
+        let mut cli_build_args = HashMap::new();
+        cli_build_args.insert("BASE".to_string(), "debian".to_string());
+        cli_build_args.insert("NEW_ARG".to_string(), "enabled".to_string());
+
+        let global_args = parse_global_args(&dockerfile, &cli_build_args);
+
+        assert_eq!(
+            global_args.get("BASE").and_then(|value| value.as_deref()),
+            Some("debian")
+        );
+        assert_eq!(global_args.get("HTTP_PROXY"), Some(&None));
+        assert_eq!(
+            global_args
+                .get("NEW_ARG")
+                .and_then(|value| value.as_deref()),
+            Some("enabled")
+        );
     }
 
     #[test]

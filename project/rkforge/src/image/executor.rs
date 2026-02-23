@@ -111,6 +111,7 @@ impl Executor {
 
     pub fn build_image(&mut self) -> Result<()> {
         self.execute_stages()?;
+        // Apply CLI labels last so they override Dockerfile LABEL with the same key.
         self.apply_cli_labels();
         self.compress_layers()?;
         self.generate_oci_metadata()?;

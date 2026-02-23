@@ -38,6 +38,15 @@ pub fn sync_pull_or_get_image_with_policy(
     url: Option<impl AsRef<str>>,
     no_cache: bool,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    sync_pull_or_get_image_with_policy_and_output(image_ref, url, no_cache, false)
+}
+
+pub fn sync_pull_or_get_image_with_policy_and_output(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    no_cache: bool,
+    quiet: bool,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
     let image_ref = image_ref.as_ref();
 
     let auth_config = AuthConfig::load()?;
@@ -64,7 +73,7 @@ pub fn sync_pull_or_get_image_with_policy(
 
         let layers = match &manifest {
             OciManifest::Image(manifest) => {
-                pull_layers(&client, &image_ref, manifest, no_cache).await
+                pull_layers(&client, &image_ref, manifest, no_cache, quiet).await
             }
             OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
         }?;
@@ -124,6 +133,14 @@ pub async fn pull_or_get_image(
     image_ref: impl AsRef<str>,
     url: Option<impl AsRef<str>>,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    pull_or_get_image_with_policy(image_ref, url, false).await
+}
+
+pub async fn pull_or_get_image_with_policy(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    no_cache: bool,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
     let image_ref = image_ref.as_ref();
 
     let auth_config = AuthConfig::load()?;
@@ -148,7 +165,9 @@ pub async fn pull_or_get_image(
         .with_context(|| "Failed to pull manifest")?;
 
     let layers = match &manifest {
-        OciManifest::Image(manifest) => pull_layers(&client, &image_ref, manifest, false).await,
+        OciManifest::Image(manifest) => {
+            pull_layers(&client, &image_ref, manifest, no_cache, false).await
+        }
         OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
     }?;
 
