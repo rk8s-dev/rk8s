@@ -439,22 +439,25 @@ mod tests {
 
     #[test]
     fn test_mount_config() {
-        let tmp_dir = tempdir().unwrap();
-        let tmp_path = tmp_dir.path().to_path_buf();
+        let overlay_tmp = tempdir().unwrap();
+        let lower_tmp = tempdir().unwrap();
+        let tmp_path = overlay_tmp.path().to_path_buf();
 
         let mut cfg = MountConfig::new(tmp_path, false);
+        cfg.lower_dir.push(lower_tmp.path().to_path_buf());
         cfg.init().unwrap();
-        assert_eq!(cfg.lower_dir.len(), 0);
+        assert_eq!(cfg.lower_dir.len(), 1);
 
         cfg.prepare().unwrap();
-        assert_eq!(cfg.lower_dir.len(), 0);
+        assert_eq!(cfg.lower_dir.len(), 1);
         assert!(cfg.upper_dir.exists());
         assert!(cfg.mountpoint.exists());
         assert!(cfg.work_dir.exists());
 
         cfg.finish().unwrap();
-        assert_eq!(cfg.lower_dir.len(), 1);
+        assert_eq!(cfg.lower_dir.len(), 2);
         assert!(cfg.lower_dir[0].exists());
+        assert!(cfg.lower_dir[1].exists());
         assert!(cfg.upper_dir.exists());
         assert!(cfg.mountpoint.exists());
         assert!(cfg.work_dir.exists());

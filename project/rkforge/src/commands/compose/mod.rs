@@ -746,6 +746,11 @@ networks:
     #[tokio::test]
     #[serial]
     async fn test_up() {
+        if !nix::unistd::getuid().is_root() {
+            eprintln!("skip compose::test_up: requires root privileges");
+            return;
+        }
+
         let root_dir = tempdir().unwrap();
         let root_path = root_dir.path();
         let project_name = root_dir
