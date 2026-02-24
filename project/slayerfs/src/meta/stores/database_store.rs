@@ -20,7 +20,7 @@ use crate::meta::store::{
     StatFsSnapshot,
 };
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
-use crate::utils::NumCastExt;
+use crate::utils::{NumCastExt, intervals};
 use crate::vfs::chunk_id_for;
 use crate::vfs::fs::FileType;
 use async_trait::async_trait;
@@ -42,6 +42,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, warn};
+use crate::utils::Intervals;
 
 #[derive(Eq, Hash, PartialEq)]
 struct PlockHashMapKey {
@@ -1018,7 +1019,7 @@ impl DatabaseMetaStore {
         }
     }
 
-    /// 删除指定chunk的所有切片（内部方法，接受事务参数）
+    /// Delete all slices for the specified chunk (internal method that accepts a transaction parameter)
     async fn delete_all_slices(
         &self,
         txn: &impl ConnectionTrait,
@@ -3195,27 +3196,12 @@ impl MetaStore for DatabaseMetaStore {
             let slice_end = slice.offset + slice.length;
 
             // calculate uncovered portions of this slice
-            let mut remaining = vec![(slice_start, slice_end)];
+            let mut intervals = Intervals::new(slice_start, slice_end);
 
             for &(covered_start, covered_end) in &covered_ranges {
-                let mut new_remaining = Vec::new();
-                for (start, end) in remaining {
-                    if covered_end <= start || covered_start >= end {
-                        // no overlap
-                        new_remaining.push((start, end));
-                    } else {
-                        // there is overlap, split the range
-                        if start < covered_start {
-                            new_remaining.push((start, covered_start));
-                        }
-                        if end > covered_end {
-                            new_remaining.push((covered_end, end));
-                        }
-                    }
-                }
-                remaining = new_remaining;
+                let _ = intervals.cut(covered_start, covered_end);
             }
-
+            let remaining = intervals.collect();
             // create new slice descriptors for each uncovered portion
             for (start, end) in remaining {
                 let new_slice = SliceDesc {
@@ -3487,12 +3473,12 @@ mod tests {
     use std::sync::LazyLock;
     use tokio::sync::Mutex;
 
-    // 静态初始化，确保只执行一次
+    // Static initialization to ensure execution happens only once
     static SHARED_DB_INIT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     impl TestSessionManager {
         async fn new(session_count: usize) -> Self {
-            // 获取锁，确保串行初始化
+            // Acquire the lock to ensure serialized initialization
             let _guard = SHARED_DB_INIT.lock().await;
 
             use std::env;
@@ -3500,7 +3486,7 @@ mod tests {
             let temp_dir = env::temp_dir();
             let db_path = temp_dir.join("slayerfs_shared_test.db");
 
-            // 只在第一次初始化时清理
+            // Clean up only during the first initialization
             static FIRST_INIT: std::sync::Once = std::sync::Once::new();
             FIRST_INIT.call_once(|| {
                 let _ = std::fs::remove_file(&db_path);
@@ -3509,7 +3495,7 @@ mod tests {
             let mut stores = Vec::with_capacity(session_count);
             let mut session_ids = Vec::with_capacity(session_count);
 
-            // 创建第一个 store（会初始化数据库）
+            // Create the first store (this will initialize the database)
             let config = shared_db_config();
             let first_store = DatabaseMetaStore::from_config(config.clone())
                 .await
@@ -3523,7 +3509,7 @@ mod tests {
             stores.push(first_store);
             session_ids.push(first_session_id);
 
-            // 后续的 store 复用已初始化的数据库
+            // Subsequent stores reuse the already-initialized database
             for _ in 1..session_count {
                 let store = DatabaseMetaStore::from_config(config.clone())
                     .await
