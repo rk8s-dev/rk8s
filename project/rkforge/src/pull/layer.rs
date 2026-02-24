@@ -63,14 +63,33 @@ async fn pull_and_unpack_layer(
     pull_layer(client, image_ref, descriptor, &packed_blob_path, quiet).await?;
 
     if no_cache && ultimate_blob_path.exists() {
-        tokio::fs::remove_file(&ultimate_blob_path)
+        let metadata = tokio::fs::symlink_metadata(&ultimate_blob_path)
             .await
             .with_context(|| {
                 format!(
-                    "Failed to remove cached blob {}",
+                    "Failed to stat cached blob {}",
                     ultimate_blob_path.display()
                 )
             })?;
+        if metadata.file_type().is_dir() {
+            tokio::fs::remove_dir_all(&ultimate_blob_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to remove cached blob directory {}",
+                        ultimate_blob_path.display()
+                    )
+                })?;
+        } else {
+            tokio::fs::remove_file(&ultimate_blob_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to remove cached blob {}",
+                        ultimate_blob_path.display()
+                    )
+                })?;
+        }
     }
 
     if no_cache || !ultimate_blob_path.exists() {

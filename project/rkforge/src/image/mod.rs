@@ -133,11 +133,8 @@ fn parse_key_value_options(
     Ok(parsed)
 }
 
-fn parse_global_args(
-    dockerfile: &Dockerfile,
-    cli_build_args: &HashMap<String, String>,
-) -> HashMap<String, Option<String>> {
-    let mut global_args: HashMap<String, Option<String>> = dockerfile
+fn parse_global_args(dockerfile: &Dockerfile) -> HashMap<String, Option<String>> {
+    dockerfile
         .global_args
         .iter()
         .map(|arg| {
@@ -145,13 +142,7 @@ fn parse_global_args(
             let value = arg.value.as_ref().map(|v| v.content.clone());
             (key, value)
         })
-        .collect();
-
-    for (key, value) in cli_build_args {
-        global_args.insert(key.clone(), Some(value.clone()));
-    }
-
-    global_args
+        .collect()
 }
 
 fn read_primary_image_digest<P: AsRef<Path>>(
@@ -333,13 +324,14 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
     }
     fs::create_dir_all(&image_output_dir)?;
 
-    let global_args = parse_global_args(&dockerfile, &cli_build_args);
+    let global_args = parse_global_args(&dockerfile);
 
     let mut executor = Executor::new(
         dockerfile,
         context,
         image_output_dir.clone(),
         ref_names,
+        cli_build_args,
         global_args,
         Arc::new(TarGzCompressor),
     );
@@ -361,7 +353,6 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
 
@@ -574,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_global_args_cli_overrides_and_passes_unknown() {
+    fn test_parse_global_args_collects_only_global_defaults() {
         let dockerfile = Dockerfile::parse(
             r#"
 ARG BASE=ubuntu
@@ -584,23 +575,14 @@ FROM ${BASE}
         )
         .unwrap();
 
-        let mut cli_build_args = HashMap::new();
-        cli_build_args.insert("BASE".to_string(), "debian".to_string());
-        cli_build_args.insert("NEW_ARG".to_string(), "enabled".to_string());
-
-        let global_args = parse_global_args(&dockerfile, &cli_build_args);
+        let global_args = parse_global_args(&dockerfile);
 
         assert_eq!(
             global_args.get("BASE").and_then(|value| value.as_deref()),
-            Some("debian")
+            Some("ubuntu")
         );
         assert_eq!(global_args.get("HTTP_PROXY"), Some(&None));
-        assert_eq!(
-            global_args
-                .get("NEW_ARG")
-                .and_then(|value| value.as_deref()),
-            Some("enabled")
-        );
+        assert!(!global_args.contains_key("NEW_ARG"));
     }
 
     #[test]

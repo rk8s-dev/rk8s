@@ -17,6 +17,7 @@ pub struct StageContext<'ctx, P: AsRef<Path>> {
     pub image_config: &'ctx mut ImageConfig,
     pub image_aliases: &'ctx mut HashMap<String, String>,
     pub args: HashMap<String, Option<String>>,
+    pub cli_build_args: &'ctx HashMap<String, String>,
     pub global_args: &'ctx HashMap<String, Option<String>>,
     pub build_context: P,
     pub no_cache: bool,

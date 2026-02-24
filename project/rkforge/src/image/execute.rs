@@ -290,12 +290,12 @@ impl<P: AsRef<Path>> InstructionExt<P> for ArgInstruction {
     fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
         let key = self.name.content.clone();
         let val = ctx
-            .global_args
+            .cli_build_args
             .get(&key)
             .cloned()
-            .flatten()
             .or_else(|| self.value.as_ref().map(|val| val.content.clone()))
-            .or_else(|| ctx.args.get(&key).cloned().flatten());
+            .or_else(|| ctx.args.get(&key).cloned().flatten())
+            .or_else(|| ctx.global_args.get(key.as_str()).cloned().flatten());
         ctx.args.insert(key, val);
         Ok(())
     }
@@ -507,11 +507,20 @@ impl<P: AsRef<Path>> InstructionExt<P> for EnvInstruction {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, path::PathBuf};
 
-    use crate::image::config::DEFAULT_ENV;
+    use dockerfile_parser::{Dockerfile, Instruction};
 
-    use super::expand_env_value;
+    use crate::{
+        image::{
+            BuildProgressMode,
+            config::{DEFAULT_ENV, ImageConfig},
+            context::StageContext,
+        },
+        overlayfs::MountConfig,
+    };
+
+    use super::{InstructionExt, expand_env_value};
 
     #[test]
     fn test_expand_env_value_path_and_braced_vars() {
@@ -533,5 +542,129 @@ mod tests {
 
         let expanded = expand_env_value(r"\$FOO:$FOO:$UNKNOWN", &envp);
         assert_eq!(expanded, "$FOO:bar:");
+    }
+
+    #[test]
+    fn test_arg_instruction_stage_default_overrides_global_default_without_cli() {
+        let dockerfile = Dockerfile::parse(
+            r#"
+FROM scratch
+ARG BASE=alpine
+"#,
+        )
+        .unwrap();
+        let arg_inst = dockerfile
+            .instructions
+            .iter()
+            .find(|inst| matches!(inst, Instruction::Arg(_)))
+            .unwrap();
+
+        let mut mount_config = MountConfig::default();
+        let mut image_config = ImageConfig::default();
+        let mut image_aliases = HashMap::new();
+        let cli_build_args = HashMap::new();
+        let global_args = HashMap::from([("BASE".to_string(), Some("ubuntu".to_string()))]);
+
+        let mut ctx = StageContext {
+            mount_config: &mut mount_config,
+            image_config: &mut image_config,
+            image_aliases: &mut image_aliases,
+            args: HashMap::new(),
+            cli_build_args: &cli_build_args,
+            global_args: &global_args,
+            build_context: PathBuf::from("."),
+            no_cache: false,
+            quiet: true,
+            progress_mode: BuildProgressMode::Plain,
+        };
+
+        arg_inst.execute(&mut ctx).unwrap();
+        assert_eq!(
+            ctx.args.get("BASE").and_then(|value| value.as_deref()),
+            Some("alpine")
+        );
+    }
+
+    #[test]
+    fn test_arg_instruction_cli_overrides_stage_and_global_defaults() {
+        let dockerfile = Dockerfile::parse(
+            r#"
+FROM scratch
+ARG BASE=alpine
+"#,
+        )
+        .unwrap();
+        let arg_inst = dockerfile
+            .instructions
+            .iter()
+            .find(|inst| matches!(inst, Instruction::Arg(_)))
+            .unwrap();
+
+        let mut mount_config = MountConfig::default();
+        let mut image_config = ImageConfig::default();
+        let mut image_aliases = HashMap::new();
+        let cli_build_args = HashMap::from([("BASE".to_string(), "debian".to_string())]);
+        let global_args = HashMap::from([("BASE".to_string(), Some("ubuntu".to_string()))]);
+
+        let mut ctx = StageContext {
+            mount_config: &mut mount_config,
+            image_config: &mut image_config,
+            image_aliases: &mut image_aliases,
+            args: HashMap::new(),
+            cli_build_args: &cli_build_args,
+            global_args: &global_args,
+            build_context: PathBuf::from("."),
+            no_cache: false,
+            quiet: true,
+            progress_mode: BuildProgressMode::Plain,
+        };
+
+        arg_inst.execute(&mut ctx).unwrap();
+        assert_eq!(
+            ctx.args.get("BASE").and_then(|value| value.as_deref()),
+            Some("debian")
+        );
+    }
+
+    #[test]
+    fn test_env_instruction_uses_previous_scope_within_same_instruction() {
+        let dockerfile = Dockerfile::parse(
+            r#"
+FROM scratch
+ENV A=hello
+ENV A=1 B=$A
+"#,
+        )
+        .unwrap();
+
+        let mut mount_config = MountConfig::default();
+        let mut image_config = ImageConfig::default();
+        let mut image_aliases = HashMap::new();
+        let cli_build_args = HashMap::new();
+        let global_args = HashMap::new();
+
+        let mut ctx = StageContext {
+            mount_config: &mut mount_config,
+            image_config: &mut image_config,
+            image_aliases: &mut image_aliases,
+            args: HashMap::new(),
+            cli_build_args: &cli_build_args,
+            global_args: &global_args,
+            build_context: PathBuf::from("."),
+            no_cache: false,
+            quiet: true,
+            progress_mode: BuildProgressMode::Plain,
+        };
+
+        dockerfile
+            .instructions
+            .iter()
+            .filter(|inst| matches!(inst, Instruction::Env(_)))
+            .for_each(|inst| {
+                inst.execute(&mut ctx).unwrap();
+            });
+
+        assert_eq!(ctx.image_config.envp.get("A"), Some(&"1".to_string()));
+        assert_eq!(ctx.image_config.envp.get("B"), Some(&"hello".to_string()));
     }
 }
