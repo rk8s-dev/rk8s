@@ -212,25 +212,46 @@ pub fn remove_image(args: RmiArgs) -> Result<()> {
 }
 
 /// Remove unreferenced blobs for a given manifest digest.
+///
+/// Blobs to remove are collected first and then deleted in a single pass.
+/// If any individual removal fails the remaining blobs are still attempted
+/// so we avoid leaving a half-cleaned state. Errors are accumulated and
+/// returned together — the caller's tag-restore logic only triggers when
+/// this function returns `Err`, at which point either all blobs are gone
+/// (safe) or the failures are reported without a silent partial deletion.
 fn cleanup_image_blobs(digest: &str, repos: &Repositories) -> Result<()> {
-    let manifest = read_manifest(digest)?;
+    let mut to_remove = vec![digest.to_string()];
 
-    if let OciManifest::Image(img) = &manifest {
+    if let OciManifest::Image(img) = &read_manifest(digest)? {
         let referenced_digests = collect_all_referenced_digests(repos)?;
 
         for layer in &img.layers {
             if !referenced_digests.contains(&layer.digest) {
-                remove_blob(&layer.digest)?;
+                to_remove.push(layer.digest.clone());
             }
         }
 
         if !referenced_digests.contains(&img.config.digest) {
-            remove_blob(&img.config.digest)?;
+            to_remove.push(img.config.digest.clone());
         }
     }
 
-    remove_blob(digest)?;
-    Ok(())
+    let mut errors = Vec::new();
+    for blob_digest in &to_remove {
+        if let Err(e) = remove_blob(blob_digest) {
+            errors.push(format!("{blob_digest}: {e}"));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "Failed to remove {} blob(s):\n  {}",
+            errors.len(),
+            errors.join("\n  ")
+        )
+    }
 }
 
 /// Collect all layer and config digests referenced by any remaining manifest.
@@ -631,6 +652,10 @@ fn import_manifest_entry(blobs_dir: &Path, manifest_entry: &Value, image_ref: &s
     let manifest_blob_path = blobs_dir.join(manifest_hash);
     let manifest_content =
         std::fs::read_to_string(&manifest_blob_path).context("Failed to read manifest blob")?;
+    let actual_hash = sha256_of_bytes(manifest_content.as_bytes());
+    if actual_hash != manifest_hash {
+        bail!("Manifest digest mismatch: expected {manifest_hash}, got {actual_hash}");
+    }
     let manifest: OciImageManifest =
         serde_json::from_str(&manifest_content).context("Failed to parse manifest")?;
 
@@ -691,6 +716,9 @@ fn resolve_image_digest(image_ref: &str) -> Result<String> {
 fn normalize_image_ref(image_ref: &str) -> String {
     if image_ref.contains(':') {
         let (repo, tag) = image_ref.rsplit_once(':').unwrap();
+        if tag.chars().all(|c| c.is_ascii_digit()) && !repo.contains('/') {
+            return full_image_ref(image_ref, Some("latest"));
+        }
         full_image_ref(repo, Some(tag))
     } else {
         full_image_ref(image_ref, Some("latest"))
@@ -821,6 +849,22 @@ mod tests {
         assert_eq!(
             normalize_image_ref("library/nginx:1.25"),
             "library/nginx:1.25"
+        );
+    }
+
+    #[test]
+    fn test_normalize_image_ref_host_port() {
+        assert_eq!(
+            normalize_image_ref("localhost:5000"),
+            "library/localhost:5000:latest"
+        );
+        assert_eq!(
+            normalize_image_ref("localhost:5000/myimage"),
+            "localhost:5000/myimage:latest"
+        );
+        assert_eq!(
+            normalize_image_ref("localhost:5000/myimage:v1"),
+            "localhost:5000/myimage:v1"
         );
     }
 
