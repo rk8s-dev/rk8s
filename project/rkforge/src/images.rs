@@ -173,7 +173,15 @@ pub fn tag_image(args: TagArgs) -> Result<()> {
 // rmi
 // ---------------------------------------------------------------------------
 
-/// Remove an image from local storage
+/// Remove an image from local storage.
+///
+/// Ordering: the tag is removed from the in-memory `Repositories` first, then
+/// unreferenced blobs are deleted, and finally the updated metadata is persisted.
+/// If blob cleanup fails and `--force` is not set, the tag is restored and
+/// re-persisted so the state remains consistent. However, if blob cleanup
+/// succeeds but the final `repos.store()` fails, the blobs are already gone
+/// while `repositories.toml` still references them — a known edge case that
+/// would require transactional storage to fully eliminate.
 pub fn remove_image(args: RmiArgs) -> Result<()> {
     let mut repos = Repositories::load()?;
     let image_ref = resolve_remove_target(&args.image_ref, &repos)?;
@@ -372,7 +380,14 @@ pub fn save_image(args: SaveArgs) -> Result<()> {
     )?;
 
     // Pack the layout directory into a tar archive
-    let output_file = std::fs::File::create(&args.output)
+    let output_path = Path::new(&args.output);
+    if output_path.exists() {
+        bail!(
+            "Output file '{}' already exists; remove it first or choose a different path",
+            args.output
+        );
+    }
+    let output_file = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create output file {}", args.output))?;
     let mut tar_builder = tar::Builder::new(output_file);
     tar_builder

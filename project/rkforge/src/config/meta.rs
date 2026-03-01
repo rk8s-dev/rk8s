@@ -52,10 +52,11 @@ impl Repositories {
         }
     }
 
-
-    /// Return all (image_ref, digest) pairs
+    /// Return all (image_ref, digest) pairs, sorted by image reference for stable output.
     pub fn entries(&self) -> Vec<(&String, &String)> {
-        self.repositories.iter().collect()
+        let mut v: Vec<_> = self.repositories.iter().collect();
+        v.sort_by_key(|(k, _)| *k);
+        v
     }
 
     /// Remove an image reference entry, returning its digest if it existed.
