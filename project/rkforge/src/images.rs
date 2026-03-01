@@ -234,11 +234,21 @@ fn cleanup_image_blobs(digest: &str, repos: &Repositories) -> Result<()> {
 }
 
 /// Collect all layer and config digests referenced by any remaining manifest.
+///
+/// Errors are propagated rather than silently ignored: if any manifest cannot
+/// be read the reference set would be incomplete and blob cleanup could
+/// incorrectly remove shared blobs, turning metadata corruption into
+/// irreversible data loss.
 fn collect_all_referenced_digests(repos: &Repositories) -> Result<HashSet<String>> {
     let mut all_digests = HashSet::new();
 
-    for (_ref, manifest_digest) in repos.entries() {
-        if let Ok(OciManifest::Image(img)) = read_manifest(manifest_digest) {
+    for (image_ref, manifest_digest) in repos.entries() {
+        let manifest = read_manifest(manifest_digest).with_context(|| {
+            format!(
+                "Cannot determine full reference set: failed to read manifest for '{image_ref}' ({manifest_digest}); aborting blob cleanup to avoid data loss"
+            )
+        })?;
+        if let OciManifest::Image(img) = &manifest {
             for layer in &img.layers {
                 all_digests.insert(layer.digest.clone());
             }
