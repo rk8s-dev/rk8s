@@ -22,7 +22,7 @@ mod storage;
 mod task;
 mod utils;
 use crate::args::{Cli, Commands};
-use crate::commands::{compose, container, pod, volume};
+use crate::commands::{compose, config_cli, container, pod, volume};
 use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::prelude::*;
@@ -36,6 +36,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Build(args) => image::build_image(&args),
+        Commands::Config(args) => config_cli::config(args),
         Commands::Cleanup(args) => overlayfs::cleanup(args),
         Commands::Compose(cmd) => compose::compose_execute(cmd),
         Commands::Copy(args) => copy::copy(args),

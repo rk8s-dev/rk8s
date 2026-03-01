@@ -356,6 +356,17 @@ curl -u "username:password" "http://your-distribution-server.com/auth/token"
 # [[entries]]
 # pat = "your-token-here"
 # url = "your-distribution-server.com"
+#
+# # Optional: override image storage root
+# [image]
+# storage = "/data/rkforge"
+```
+
+You can also configure the storage path from CLI:
+
+```sh
+rkforge config set image.storage /data/rkforge
+rkforge config get image.storage
 ```
 
 Tokens expire after a configurable period (default: 1 hour). When a token expires, repeat the token retrieval process and update the configuration file.

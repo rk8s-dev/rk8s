@@ -1,4 +1,4 @@
-use crate::commands::{ComposeCommand, PodCommand, VolumeCommand};
+use crate::commands::{ComposeCommand, PodCommand, VolumeCommand, config_cli::ConfigArgs};
 use crate::{copy, image, login, logout, overlayfs, pull, push, repo, run};
 use clap::{Parser, Subcommand};
 
@@ -13,6 +13,8 @@ pub struct Cli {
 pub enum Commands {
     /// Build a container image from Dockerfile
     Build(image::BuildArgs),
+    /// Get or set rkforge configuration
+    Config(ConfigArgs),
     /// Manage container compositions
     #[command(subcommand)]
     Compose(ComposeCommand),
