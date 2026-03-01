@@ -52,6 +52,22 @@ pub fn original_user_name() -> User {
     User::Root
 }
 
+fn home_dir_for_user(user: &User) -> anyhow::Result<PathBuf> {
+    match user {
+        User::Normal(name) => {
+            let user = uzers::get_user_by_name(name)
+                .with_context(|| format!("Failed to find user with name: {name}"))?;
+            Ok(user.home_dir().to_path_buf())
+        }
+        User::Root => dirs::home_dir().with_context(|| "Failed to get home directory"),
+    }
+}
+
+/// Get the original user's home directory.
+pub fn original_user_home_dir() -> anyhow::Result<PathBuf> {
+    home_dir_for_user(&original_user_name())
+}
+
 /// Get the original user config path.
 pub fn original_user_config_path<'a>(
     app_name: impl AsRef<str>,
@@ -63,9 +79,7 @@ pub fn original_user_config_path<'a>(
             let app_name = app_name.as_ref();
             let config_name = config_name.into().unwrap_or("default-config");
 
-            let user = uzers::get_user_by_name(&name)
-                .with_context(|| format!("Failed to find user with name: {name}"))?;
-            let home_dir = user.home_dir();
+            let home_dir = home_dir_for_user(&User::Normal(name))?;
 
             let config_path = if cfg!(target_os = "windows") {
                 home_dir.join("AppData/Roaming")

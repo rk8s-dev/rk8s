@@ -372,6 +372,7 @@ rkforge config get image.storage
 `rkforge config set image.storage` accepts absolute paths and `~` / `~/...`.
 `~username/...` is not supported. `rkforge config get image.storage` prints the
 resolved effective path (for example, `~/data` is shown as `/home/<user>/data`).
+The same path rules apply when you edit `rkforge.toml` manually.
 
 Tokens expire after a configurable period (default: 1 hour). When a token expires, repeat the token retrieval process and update the configuration file.
 

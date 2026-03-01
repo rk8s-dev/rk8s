@@ -1,5 +1,5 @@
 use crate::config::auth::RkforgeConfig;
-use crate::utils::cli::original_user_config_path;
+use crate::utils::cli::{original_user_config_path, original_user_home_dir};
 use anyhow::{Context, Result, bail};
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
@@ -27,9 +27,9 @@ pub(crate) fn default_storage_root(is_root: bool) -> Result<PathBuf> {
 
 fn expand_home(path: &str) -> Result<PathBuf> {
     match path {
-        "~" => dirs::home_dir().context("Failed to get home directory for `~`"),
+        "~" => original_user_home_dir().context("Failed to get home directory for `~`"),
         value => match value.strip_prefix("~/") {
-            Some(suffix) => Ok(dirs::home_dir()
+            Some(suffix) => Ok(original_user_home_dir()
                 .context("Failed to get home directory for `~/`")?
                 .join(suffix)),
             None => Ok(PathBuf::from(value)),
@@ -42,9 +42,16 @@ fn resolve_storage_root_with_source(
     is_root: bool,
 ) -> Result<(PathBuf, bool)> {
     match config.storage_root() {
-        Some(path) => expand_home(path)
-            .with_context(|| format!("Failed to resolve image.storage path `{path}`"))
-            .map(|p| (p, true)),
+        Some(path) => {
+            let expanded = expand_home(path)
+                .with_context(|| format!("Failed to resolve image.storage path `{path}`"))?;
+            if !expanded.is_absolute() {
+                bail!(
+                    "Configured image.storage `{path}` must be an absolute path or start with `~/`"
+                );
+            }
+            Ok((expanded, true))
+        }
         None => default_storage_root(is_root).map(|p| (p, false)),
     }
 }
@@ -89,6 +96,10 @@ where
     }
 }
 
+/// Validates the storage root when the path already exists.
+///
+/// If `root_dir` or its parent does not exist yet, validation is deferred and
+/// creation is handled later in `Config::new`.
 fn validate_storage_root(root_dir: &Path) -> Result<()> {
     if root_dir.exists() {
         let metadata = fs::metadata(root_dir)
@@ -199,6 +210,7 @@ mod tests {
         resolve_storage_root_from_config, resolve_storage_root_with_loader, validate_storage_root,
     };
     use crate::config::auth::RkforgeConfig;
+    use crate::utils::cli::original_user_home_dir;
     use anyhow::anyhow;
     use std::fs;
     use std::path::PathBuf;
@@ -212,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_expand_home_tilde_path() {
-        match dirs::home_dir() {
+        match original_user_home_dir().ok() {
             Some(home) => {
                 let path = expand_home("~/rkforge-storage").unwrap();
                 assert_eq!(path, home.join("rkforge-storage"));
@@ -286,5 +298,17 @@ storage = "/tmp/rkforge-storage-test"
             resolve_storage_root_with_loader(false, || Err(anyhow!("load failed"))).unwrap();
         assert!(!from_config);
         assert_eq!(root, default_storage_root(false).unwrap());
+    }
+
+    #[test]
+    fn test_resolve_storage_root_from_config_rejects_relative_path() {
+        let mut config = RkforgeConfig::default();
+        config.image.storage = Some("relative/path".to_string());
+        let err = resolve_storage_root_from_config(&config, false).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("must be an absolute path"),
+            "unexpected error message: {msg}"
+        );
     }
 }
