@@ -61,15 +61,32 @@ pub(crate) fn resolve_storage_root_for_current_user(config: &RkforgeConfig) -> R
 }
 
 fn resolve_storage_root(is_root: bool) -> Result<(PathBuf, bool)> {
-    let config_path = original_user_config_path("rk8s", Some("rkforge"))
-        .with_context(|| "Failed to resolve rkforge config path")?;
-    let config = RkforgeConfig::load_from(&config_path).with_context(|| {
-        format!(
-            "Failed to load rkforge config from {}",
-            config_path.display()
-        )
-    })?;
-    resolve_storage_root_with_source(&config, is_root)
+    resolve_storage_root_with_loader(is_root, || {
+        let config_path = original_user_config_path("rk8s", Some("rkforge"))
+            .with_context(|| "Failed to resolve rkforge config path")?;
+        RkforgeConfig::load_from(&config_path).with_context(|| {
+            format!(
+                "Failed to load rkforge config from {}",
+                config_path.display()
+            )
+        })
+    })
+}
+
+fn resolve_storage_root_with_loader<F>(is_root: bool, load_config: F) -> Result<(PathBuf, bool)>
+where
+    F: FnOnce() -> Result<RkforgeConfig>,
+{
+    match load_config() {
+        Ok(config) => resolve_storage_root_with_source(&config, is_root),
+        Err(err) => {
+            tracing::warn!(
+                error = ?err,
+                "Failed to read rkforge config for image.storage, falling back to default root"
+            );
+            default_storage_root(is_root).map(|path| (path, false))
+        }
+    }
 }
 
 fn validate_storage_root(root_dir: &Path) -> Result<()> {
@@ -82,16 +99,16 @@ fn validate_storage_root(root_dir: &Path) -> Result<()> {
                 root_dir.display()
             );
         }
-    } else if let Some(parent) = root_dir.parent() {
-        if parent.exists() {
-            let parent_meta = fs::metadata(parent)
-                .with_context(|| format!("Failed to stat parent directory {}", parent.display()))?;
-            if !parent_meta.is_dir() {
-                bail!(
-                    "Parent path of image.storage `{}` is not a directory",
-                    root_dir.display()
-                );
-            }
+    } else if let Some(parent) = root_dir.parent()
+        && parent.exists()
+    {
+        let parent_meta = fs::metadata(parent)
+            .with_context(|| format!("Failed to stat parent directory {}", parent.display()))?;
+        if !parent_meta.is_dir() {
+            bail!(
+                "Parent path of image.storage `{}` is not a directory",
+                root_dir.display()
+            );
         }
     }
     Ok(())
@@ -179,9 +196,10 @@ impl Config {
 mod tests {
     use super::{
         default_storage_root, ensure_storage_root_writable, expand_home,
-        resolve_storage_root_from_config, validate_storage_root,
+        resolve_storage_root_from_config, resolve_storage_root_with_loader, validate_storage_root,
     };
     use crate::config::auth::RkforgeConfig;
+    use anyhow::anyhow;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -253,5 +271,20 @@ storage = "/tmp/rkforge-storage-test"
         let config = RkforgeConfig::load_from(&config_path).unwrap();
         let root = resolve_storage_root_from_config(&config, false).unwrap();
         assert_eq!(root, PathBuf::from("/tmp/rkforge-storage-test"));
+    }
+
+    #[test]
+    fn test_validate_storage_root_allows_nonexistent_path() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("missing").join("storage");
+        assert!(validate_storage_root(&root).is_ok());
+    }
+
+    #[test]
+    fn test_resolve_storage_root_falls_back_when_config_load_fails() {
+        let (root, from_config) =
+            resolve_storage_root_with_loader(false, || Err(anyhow!("load failed"))).unwrap();
+        assert!(!from_config);
+        assert_eq!(root, default_storage_root(false).unwrap());
     }
 }

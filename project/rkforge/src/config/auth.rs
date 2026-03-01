@@ -138,12 +138,6 @@ impl AuthConfig {
         })
     }
 
-    fn store(&self) -> anyhow::Result<()> {
-        let mut config = RkforgeConfig::load()?;
-        config.entries = self.entries.clone();
-        config.store()
-    }
-
     pub fn is_anonymous(&self, url: impl AsRef<str>) -> bool {
         let url = url.as_ref();
         self.entries.iter().all(|entry| entry.url != url)

@@ -2,6 +2,7 @@ use crate::config::auth::RkforgeConfig;
 use crate::config::image::resolve_storage_root_for_current_user;
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
+use std::path::Path;
 
 const IMAGE_STORAGE_KEY: &str = "image.storage";
 
@@ -20,7 +21,7 @@ pub enum ConfigSubCommand {
         /// Config value
         value: String,
     },
-    /// Get current value of a config key
+    /// Get effective value of a config key
     Get {
         /// Config key, currently only supports image.storage
         key: String,
@@ -50,11 +51,29 @@ fn set_value(cfg: &mut RkforgeConfig, key: &str, value: &str) -> Result<()> {
             if value.is_empty() {
                 bail!("config value for `{IMAGE_STORAGE_KEY}` must not be empty");
             }
+            validate_storage_value(value)?;
             cfg.image.storage = Some(value.to_string());
             Ok(())
         }
         _ => bail!("unsupported config key `{key}`. supported keys: {IMAGE_STORAGE_KEY}"),
     }
+}
+
+fn validate_storage_value(value: &str) -> Result<()> {
+    if value == "~" || value.starts_with("~/") {
+        return Ok(());
+    }
+
+    if value.starts_with('~') {
+        bail!(
+            "unsupported home path `{value}`: only `~` and `~/...` are supported for {IMAGE_STORAGE_KEY}"
+        );
+    }
+
+    if !Path::new(value).is_absolute() {
+        bail!("config value for `{IMAGE_STORAGE_KEY}` must be an absolute path or start with `~/`");
+    }
+    Ok(())
 }
 
 fn get_value(cfg: &RkforgeConfig, key: &str) -> Result<String> {
@@ -84,5 +103,42 @@ mod tests {
         cfg.image.storage = Some("/data/rkforge".to_string());
         let value = get_value(&cfg, IMAGE_STORAGE_KEY).unwrap();
         assert_eq!(value, "/data/rkforge");
+    }
+
+    #[test]
+    fn test_get_image_storage_key_fallback_to_default() {
+        let cfg = RkforgeConfig::default();
+        let value = get_value(&cfg, IMAGE_STORAGE_KEY).unwrap();
+        assert!(!value.trim().is_empty());
+    }
+
+    #[test]
+    fn test_set_rejects_empty_value() {
+        let mut cfg = RkforgeConfig::default();
+        assert!(set_value(&mut cfg, IMAGE_STORAGE_KEY, "   ").is_err());
+    }
+
+    #[test]
+    fn test_set_rejects_relative_path() {
+        let mut cfg = RkforgeConfig::default();
+        assert!(set_value(&mut cfg, IMAGE_STORAGE_KEY, "relative/path").is_err());
+    }
+
+    #[test]
+    fn test_set_rejects_tilde_username_path() {
+        let mut cfg = RkforgeConfig::default();
+        assert!(set_value(&mut cfg, IMAGE_STORAGE_KEY, "~foo/data").is_err());
+    }
+
+    #[test]
+    fn test_set_unknown_key_fails() {
+        let mut cfg = RkforgeConfig::default();
+        assert!(set_value(&mut cfg, "unknown.key", "/data/rkforge").is_err());
+    }
+
+    #[test]
+    fn test_get_unknown_key_fails() {
+        let cfg = RkforgeConfig::default();
+        assert!(get_value(&cfg, "unknown.key").is_err());
     }
 }
