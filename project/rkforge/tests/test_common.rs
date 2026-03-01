@@ -1,18 +1,23 @@
 use anyhow::Result;
-use std::{env, fs, path::Path};
+use std::{env, fs, path::Path, path::PathBuf};
+use uuid::Uuid;
 
 /// Get the path to the busybox image for testing
 #[allow(dead_code)]
 pub fn bundles_path(image_name: &str) -> String {
-    // In actual test environment, this should be replaced with real image path
-    format!("test/bundles/{}", image_name)
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("test")
+        .join("bundles")
+        .join(image_name);
+    root.to_string_lossy().to_string()
 }
 
 /// Create temporary compose configuration file
 #[allow(dead_code)]
 pub fn create_temp_compose_file(content: &str) -> Result<String> {
     let temp_dir = env::temp_dir();
-    let compose_path = temp_dir.join("test-compose.yaml");
+    let compose_path = temp_dir.join(format!("test-compose-{}.yaml", Uuid::new_v4()));
     fs::write(&compose_path, content)?;
     Ok(compose_path.to_str().unwrap().to_string())
 }

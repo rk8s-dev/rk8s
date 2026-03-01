@@ -1,10 +1,16 @@
 # 测试指南
 
-测试 rkl 之前请先构建 dev 版本的 libbridge 和 libipam。
-需要将test目录下test.conflist和subnet.env放到 /etc/cni/net.d 目录下
+测试 rkl / rkforge 之前请先构建 dev 版本的 libbridge 和 libipam。
+需要将 test 目录下 test.conflist 和 subnet.env 放到 /etc/cni/net.d 目录下
 ## 自动测试
 
-目前已经为 rkl 的基本功能编写了集成测试，在 `project/rkl` 下运行 `cargo test --test test_cli_commands` 可运行集成测试。测试需要 root 权限才能运行。
+当前单机场景的容器生命周期自动化验证以 rkforge 为入口。可在 `project` 目录下运行：
+
+`RKFORGE_LIFECYCLE_TESTS=1 sudo -E cargo test -p rkforge --test test_container_lifecycle -- --test-threads=1`
+
+如需仅运行 rkl 的单元测试（不包含旧单机容器集成测试入口），可在 `project` 目录下运行：
+
+`cargo test -p rkl`
 
 ## 手动测试
 
@@ -40,11 +46,17 @@ spec:
 
 # Testing Guide
 
-Before testing rkl, please build the dev version of libbridge and libipam first.
+Before testing rkl / rkforge, please build the dev version of libbridge and libipam first.
 
 ## Automated Testing
 
-Integration tests have been written for the basic functions of rkl. You can run the integration tests by executing `cargo test --test test_cli_commands` in the `project/rkl` directory. The tests require root privileges to run.
+For single-node container lifecycle validation, use rkforge as the entry point. Run this under the `project` directory:
+
+`RKFORGE_LIFECYCLE_TESTS=1 sudo -E cargo test -p rkforge --test test_container_lifecycle -- --test-threads=1`
+
+To run rkl unit tests (without legacy single-node container integration test entrypoints), run under the `project` directory:
+
+`cargo test -p rkl`
 
 ## Manual Testing
 

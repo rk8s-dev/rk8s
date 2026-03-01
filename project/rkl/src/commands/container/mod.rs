@@ -795,65 +795,7 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::fs;
     use std::path::PathBuf;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_container_runner_from_spec_and_file() {
-        let spec = ContainerSpec {
-            name: "demo1".to_string(),
-            image: "/tmp/demoimg".to_string(),
-            ports: vec![],
-            args: vec!["/bin/echo".to_string(), "hi".to_string()],
-            resources: None,
-            liveness_probe: None,
-            readiness_probe: None,
-            startup_probe: None,
-            security_context: None,
-            env: None,
-            volume_mounts: None,
-            command: None,
-            working_dir: None,
-        };
-        let runner = ContainerRunner::from_spec(spec.clone(), None).unwrap();
-        assert_eq!(runner.container_id, "demo1");
-        assert_eq!(runner.spec.name, "demo1");
-
-        // test from_file
-        let dir = tempdir().unwrap();
-        let yaml_path = dir.path().join("spec.yaml");
-        let yaml = serde_yaml::to_string(&spec).unwrap();
-        fs::write(&yaml_path, yaml).unwrap();
-        let runner2 = ContainerRunner::from_file(yaml_path.to_str().unwrap(), None).unwrap();
-        assert_eq!(runner2.spec.name, "demo1");
-    }
-
-    #[test]
-    fn test_build_config() {
-        let mut runner = ContainerRunner::from_spec(
-            ContainerSpec {
-                name: "demo2".to_string(),
-                image: "/tmp/demoimg2".to_string(),
-                ports: vec![],
-                args: vec![],
-                resources: None,
-                liveness_probe: None,
-                readiness_probe: None,
-                startup_probe: None,
-                security_context: None,
-                env: None,
-                volume_mounts: None,
-                command: None,
-                working_dir: None,
-            },
-            None,
-        )
-        .unwrap();
-        assert!(runner.build_config().is_ok());
-        assert!(runner.config.is_some());
-        assert_eq!(runner.get_container_id().unwrap(), "demo2");
-    }
 
     #[test]
     fn test_is_container_exist_fail() {
