@@ -3375,6 +3375,83 @@ impl MetaStore for DatabaseMetaStore {
     ) -> Result<usize, MetaError> {
         DatabaseMetaStore::process_delayed_slices(self, batch_size, max_age_secs).await
     }
+
+    async fn replace_slices_for_compact(
+        &self,
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
+    ) -> Result<(), MetaError> {
+        if !old_slices_to_delay.is_empty() && old_slices_to_delay.len() % 12 != 0 {
+            warn!(
+                chunk_id = chunk_id,
+                delayed_len = old_slices_to_delay.len(),
+                "replace_slices_for_compact: invalid delayed data length"
+            );
+            return Err(MetaError::Internal(
+                "Invalid delayed data length".to_string(),
+            ));
+        }
+
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let mut slice_ids_to_delete = Vec::new();
+        if !old_slices_to_delay.is_empty() {
+            for chunk in old_slices_to_delay.chunks(12) {
+                let slice_id = u64::from_le_bytes([
+                    chunk[0], chunk[1], chunk[2], chunk[3],
+                    chunk[4], chunk[5], chunk[6], chunk[7],
+                ]);
+                slice_ids_to_delete.push(slice_id as i64);
+            }
+        }
+
+        if !slice_ids_to_delete.is_empty() {
+            SliceMeta::delete_many()
+                .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
+                .filter(slice_meta::Column::SliceId.is_in(slice_ids_to_delete))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        for slice in new_slices {
+            let model = slice_meta::ActiveModel {
+                chunk_id: Set(chunk_id as i64),
+                slice_id: Set(slice.slice_id as i64),
+                offset: Set(slice.offset.as_i64()),
+                length: Set(slice.length.as_i64()),
+                ..Default::default()
+            };
+            model.insert(&txn).await.map_err(MetaError::Database)?;
+        }
+
+        if !old_slices_to_delay.is_empty() {
+            let now = Utc::now().timestamp();
+
+            for chunk in old_slices_to_delay.chunks(12) {
+                let slice_id = u64::from_le_bytes([
+                    chunk[0], chunk[1], chunk[2], chunk[3],
+                    chunk[4], chunk[5], chunk[6], chunk[7],
+                ]);
+                let size = u32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+
+                let delayed_model = delayed_slice::ActiveModel {
+                    slice_id: Set(slice_id as i64),
+                    chunk_id: Set(chunk_id as i64),
+                    size: Set(size as i64),
+                    created_at: Set(now),
+                    reason: Set("compact".to_string()),
+                    ..Default::default()
+                };
+
+                delayed_model.insert(&txn).await.map_err(MetaError::Database)?;
+            }
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -4551,8 +4628,6 @@ mod tests {
             0,
             "delayed record should be cleaned up"
         );
-
-        info!("soft delete and gc test passed");
     }
 
     #[tokio::test]

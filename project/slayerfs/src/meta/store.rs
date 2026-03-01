@@ -860,6 +860,16 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
+    async fn replace_slices_for_compact(
+        &self,
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
+    ) -> Result<(), MetaError> {
+        let _ = (chunk_id, new_slices, old_slices_to_delay);
+        Err(MetaError::NotImplemented)
+    }
+
     /// compact slices within a chunk
     ///
     /// # arguments

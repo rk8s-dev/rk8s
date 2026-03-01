@@ -3424,6 +3424,109 @@ impl MetaStore for EtcdMetaStore {
         )))
     }
 
+    #[tracing::instrument(level = "trace", skip(self, new_slices, old_slices_to_delay))]
+    async fn replace_slices_for_compact(
+        &self,
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
+    ) -> Result<(), MetaError> {
+        if !old_slices_to_delay.is_empty() && old_slices_to_delay.len() % 12 != 0 {
+            return Err(MetaError::Internal(
+                "Invalid delayed data length".to_string(),
+            ));
+        }
+
+        let slice_key = key_for_slice(chunk_id);
+
+        self.atomic_update(
+            &slice_key,
+            |_old: Vec<SliceDesc>| {
+                Ok((new_slices.to_vec(), ()))
+            },
+            || {
+                Ok((new_slices.to_vec(), ()))
+            },
+            10,
+            &None,
+        )
+        .await?;
+
+        if !old_slices_to_delay.is_empty() {
+            let now = Utc::now().timestamp();
+
+            for chunk in old_slices_to_delay.chunks(12) {
+                let slice_id = u64::from_le_bytes([
+                    chunk[0], chunk[1], chunk[2], chunk[3],
+                    chunk[4], chunk[5], chunk[6], chunk[7],
+                ]);
+                let size = u32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+
+                let delayed_key = format!("delayed_slice/{}/{}", chunk_id, slice_id);
+                let delayed_data = serde_json::json!({
+                    "slice_id": slice_id,
+                    "chunk_id": chunk_id,
+                    "size": size,
+                    "created_at": now,
+                    "reason": "compact",
+                });
+
+                let mut client = self.client.clone();
+                client
+                    .put(
+                        delayed_key.clone(),
+                        delayed_data.to_string(),
+                        None,
+                    )
+                    .await
+                    .map_err(|e| MetaError::Internal(format!("Failed to store delayed slice: {}", e)))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn process_delayed_slices(
+        &self,
+        batch_size: usize,
+        max_age_secs: i64,
+    ) -> Result<usize, MetaError> {
+        let cutoff_time = Utc::now().timestamp() - max_age_secs;
+        let mut deleted_count = 0;
+
+        let prefix = "delayed_slice/";
+        let mut client = self.client.clone();
+
+        let response = client
+            .get(prefix, Some(etcd_client::GetOptions::new().with_prefix()))
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to get delayed slices: {}", e)))?;
+
+        for kv in response.kvs().iter().take(batch_size) {
+            let value_str = String::from_utf8_lossy(kv.value());
+            
+            let delayed_data: serde_json::Value = match serde_json::from_str(&value_str) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let created_at = delayed_data["created_at"].as_i64().unwrap_or(0);
+
+            if created_at < cutoff_time {
+                let key = String::from_utf8_lossy(kv.key()).to_string();
+                client
+                    .delete(key, None)
+                    .await
+                    .map_err(|e| MetaError::Internal(format!("Failed to delete delayed slice: {}", e)))?;
+                
+                deleted_count += 1;
+            }
+        }
+
+        Ok(deleted_count)
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
