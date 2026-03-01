@@ -1,5 +1,5 @@
 use crate::commands::{ComposeCommand, PodCommand, VolumeCommand};
-use crate::{copy, image, login, logout, overlayfs, pull, push, repo, run};
+use crate::{copy, image, images, login, logout, overlayfs, pull, push, repo, run};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -26,6 +26,13 @@ pub enum Commands {
     Delete(DeleteArgs),
     /// Execute a command in a running container
     Exec(Box<ExecArgs>),
+    /// List local images
+    #[command(alias = "ls")]
+    Images(images::ImagesArgs),
+    /// Display detailed information about an image
+    Inspect(images::InspectArgs),
+    /// Load an image from a tar archive
+    Load(images::LoadArgs),
     /// Login to distribution server
     Login(login::LoginArgs),
     /// Logout from distribution server
@@ -43,12 +50,18 @@ pub enum Commands {
     Ps(PsArgs),
     /// List and manage repositories
     Repo(repo::RepoArgs),
+    /// Remove one or more local images
+    Rmi(images::RmiArgs),
     /// Run a command in a new container
     Run(RunArgs),
+    /// Save an image to a tar archive
+    Save(images::SaveArgs),
     /// Start one or more containers
     Start(StartArgs),
     /// Display the status of a container
     State(StateArgs),
+    /// Create a tag for a local image
+    Tag(images::TagArgs),
     /// Manage volumes
     #[command(subcommand)]
     Volume(VolumeCommand),

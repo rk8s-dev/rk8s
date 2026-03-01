@@ -3,6 +3,7 @@ pub mod commands;
 mod compressor;
 mod config;
 mod image;
+mod images;
 mod login;
 mod logout;
 mod oci_spec;

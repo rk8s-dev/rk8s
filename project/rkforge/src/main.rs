@@ -8,6 +8,7 @@ mod compressor;
 mod config;
 mod copy;
 mod image;
+mod images;
 mod login;
 mod logout;
 mod oci_spec;
@@ -72,6 +73,9 @@ fn main() -> Result<()> {
             )?;
             std::process::exit(exit_code)
         }
+        Commands::Images(args) => images::list_images(args),
+        Commands::Inspect(args) => images::inspect_image(args),
+        Commands::Load(args) => images::load_image(args),
         Commands::Login(args) => login::login(args),
         Commands::Logout(args) => logout::logout(args),
         Commands::Mount(args) => overlayfs::do_mount(args),
@@ -80,9 +84,12 @@ fn main() -> Result<()> {
         Commands::Pull(args) => pull::pull(args),
         Commands::Push(args) => push::push(args),
         Commands::Repo(args) => repo::repo(args),
+        Commands::Rmi(args) => images::remove_image(args),
         Commands::Run(args) => container::run_container(&args.container_yaml, args.volumes),
+        Commands::Save(args) => images::save_image(args),
         Commands::Start(args) => container::start_container(&args.container_name),
         Commands::State(args) => container::state_container(&args.container_name),
+        Commands::Tag(args) => images::tag_image(args),
         Commands::Volume(cmd) => volume::volume_execute(cmd),
         Commands::ExecInternal(args) => run::exec_internal(args),
     }
