@@ -16,6 +16,52 @@ pub use database_store::DatabaseMetaStore;
 pub use etcd_store::EtcdMetaStore;
 pub(crate) use etcd_watch::{CacheInvalidationEvent, EtcdWatchWorker, WatchConfig};
 pub use redis_store::RedisMetaStore;
+use std::future::Future;
+
+pub(crate) async fn build_paths_from_names<E, F, FR>(
+    root_ino: i64,
+    names: Vec<(Option<i64>, String)>,
+    mut resolve_parent: F,
+) -> Result<Vec<String>, E>
+where
+    F: FnMut(i64) -> FR,
+    FR: Future<Output = Result<Option<(i64, String)>, E>>,
+{
+    let mut out = Vec::with_capacity(names.len());
+
+    for (parent_opt, name) in names {
+        let Some(parent) = parent_opt else {
+            continue;
+        };
+
+        let mut path_parts = vec![name];
+        let mut current_ino = parent;
+
+        while current_ino != root_ino {
+            let entry = resolve_parent(current_ino).await?;
+
+            let Some((next_parent, entry_name)) = entry else {
+                path_parts.clear();
+                break;
+            };
+
+            path_parts.push(entry_name);
+            current_ino = next_parent;
+        }
+
+        if path_parts.is_empty() {
+            continue;
+        }
+
+        path_parts.reverse();
+        out.push(format!("/{}", path_parts.join("/")));
+    }
+
+    out.sort();
+    out.dedup();
+
+    Ok(out)
+}
 
 struct TruncatePlan {
     cutoff_chunk: u64,

@@ -2,10 +2,9 @@
 //!
 //! Uses Etcd/etcd as the backend for metadata storage
 
-use super::{apply_truncate_plan, trim_slices_in_place};
+use super::{apply_truncate_plan, build_paths_from_names, trim_slices_in_place};
 use crate::chuck::SliceDesc;
 use crate::chuck::slice::key_for_slice;
-use crate::meta::backoff::backoff;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
 use crate::meta::entities::etcd::EtcdLinkParent;
@@ -29,8 +28,10 @@ use etcd_client::{
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::OnceLock;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
@@ -42,255 +43,303 @@ use uuid::Uuid;
 const BATCH_SIZE: i64 = 1000;
 const FIRST_ALLOCATED_ID: i64 = 2;
 
-#[allow(dead_code)]
-enum UpdateAction {
-    Write(Vec<u8>),
-    Delete,
-    Skip,
-}
-
-struct UpdatePlan {
-    key: String,
-    compare: Compare,
-    action: UpdateAction,
-}
-
-impl UpdatePlan {
-    fn new_write(
-        ctx: &TxnContext,
-        key: impl Into<String>,
+enum EtcdTxnWriteOp {
+    Put {
         value: Vec<u8>,
-    ) -> Result<Self, MetaError> {
-        let key = key.into();
-        let compare = ctx.compare_for(&key)?;
-        Ok(Self {
-            key,
-            compare,
-            action: UpdateAction::Write(value),
-        })
-    }
-
-    #[allow(dead_code)]
-    fn new_delete(ctx: &TxnContext, key: impl Into<String>) -> Result<Self, MetaError> {
-        let key = key.into();
-        let compare = ctx.compare_for(&key)?;
-        Ok(Self {
-            key,
-            compare,
-            action: UpdateAction::Delete,
-        })
-    }
+        options: Option<PutOptions>,
+    },
+    Delete,
 }
 
-trait TxnStage: Send + Sync {
-    fn deps(&self) -> &[String];
-
-    fn build(&self, ctx: &TxnContext) -> Result<Vec<UpdatePlan>, MetaError>;
-}
-
-struct TxnStageFn<F> {
-    deps: Vec<String>,
-    f: F,
-}
-
-impl<F> TxnStage for TxnStageFn<F>
-where
-    F: Fn(&TxnContext) -> Result<Vec<UpdatePlan>, MetaError> + Send + Sync,
-{
-    fn deps(&self) -> &[String] {
-        self.deps.as_slice()
-    }
-
-    fn build(&self, ctx: &TxnContext) -> Result<Vec<UpdatePlan>, MetaError> {
-        (self.f)(ctx)
-    }
-}
-
-struct TxnEntry {
+struct EtcdTxnReadSlot {
     value: Option<Vec<u8>>,
     mod_revision: i64,
 }
 
-struct TxnContext {
-    slots: HashMap<String, TxnEntry>,
+pub(crate) struct EtcdTxnCtx<'a> {
+    client: &'a EtcdClient,
+    reads: HashMap<String, EtcdTxnReadSlot>,
+    writes: BTreeMap<String, EtcdTxnWriteOp>,
 }
 
-impl TxnContext {
-    fn compare_for(&self, key: &str) -> Result<Compare, MetaError> {
-        let Some(entry) = self.slots.get(key) else {
-            return Err(MetaError::Internal(format!(
-                "Missing key in transaction context: {key}"
-            )));
-        };
-
-        if entry.mod_revision == 0 {
-            Ok(Compare::version(key, CompareOp::Equal, 0))
-        } else {
-            Ok(Compare::mod_revision(
-                key,
-                CompareOp::Equal,
-                entry.mod_revision,
-            ))
+impl<'a> EtcdTxnCtx<'a> {
+    fn new(client: &'a EtcdClient) -> Self {
+        Self {
+            client,
+            reads: HashMap::new(),
+            writes: BTreeMap::new(),
         }
     }
 
-    fn value(&self, key: &str) -> Option<&[u8]> {
-        self.slots.get(key).and_then(|entry| entry.value.as_deref())
+    async fn fetch_slot(&self, key: &str) -> Result<EtcdTxnReadSlot, MetaError> {
+        let mut client = self.client.clone();
+        let resp = client
+            .get(key, None)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to get key {key}: {e}")))?;
+
+        let slot = resp
+            .kvs()
+            .first()
+            .map(|kv| EtcdTxnReadSlot {
+                value: Some(kv.value().to_vec()),
+                mod_revision: kv.mod_revision(),
+            })
+            .unwrap_or(EtcdTxnReadSlot {
+                value: None,
+                mod_revision: 0,
+            });
+
+        Ok(slot)
     }
 
-    async fn fetch(client: &mut EtcdClient, keys: &[String]) -> Result<Self, MetaError> {
-        if keys.is_empty() {
-            return Ok(Self {
-                slots: HashMap::new(),
+    pub async fn get(&mut self, key: impl AsRef<str>) -> Result<Option<Vec<u8>>, MetaError> {
+        let key = key.as_ref();
+
+        if let Some(op) = self.writes.get(key) {
+            return Ok(match op {
+                EtcdTxnWriteOp::Put { value, .. } => Some(value.clone()),
+                EtcdTxnWriteOp::Delete => None,
             });
         }
 
-        let ops: Vec<TxnOp> = keys
-            .iter()
-            .map(|key| TxnOp::get(key.as_bytes(), None))
+        if let Some(slot) = self.reads.get(key) {
+            return Ok(slot.value.clone());
+        }
+
+        let slot = self.fetch_slot(key).await?;
+        let out = slot.value.clone();
+        self.reads.insert(key.to_string(), slot);
+
+        Ok(out)
+    }
+
+    pub async fn exists(&mut self, key: impl AsRef<str>) -> Result<bool, MetaError> {
+        Ok(self.get(key).await?.is_some())
+    }
+
+    pub fn set(&mut self, key: impl Into<String>, value: Vec<u8>) {
+        self.set_with_options(key, value, None);
+    }
+
+    pub fn set_with_options(
+        &mut self,
+        key: impl Into<String>,
+        value: Vec<u8>,
+        options: Option<PutOptions>,
+    ) {
+        self.writes
+            .insert(key.into(), EtcdTxnWriteOp::Put { value, options });
+    }
+
+    pub fn delete(&mut self, key: impl Into<String>) {
+        self.writes.insert(key.into(), EtcdTxnWriteOp::Delete);
+    }
+
+    #[cfg(feature = "rkyv-serialization")]
+    pub async fn get_typed<T>(&mut self, key: impl AsRef<str>) -> Result<Option<T>, MetaError>
+    where
+        T: rkyv::Archive,
+        T::Archived:
+            rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+        for<'de> T: DeserializeOwned,
+    {
+        let raw = self.get(key).await?;
+
+        raw.map(|raw| crate::meta::serialization::deserialize_meta::<T>(&raw))
+            .transpose()
+    }
+
+    #[cfg(not(feature = "rkyv-serialization"))]
+    pub async fn get_typed<T>(&mut self, key: impl AsRef<str>) -> Result<Option<T>, MetaError>
+    where
+        T: DeserializeOwned,
+    {
+        let raw = self.get(key).await?;
+
+        raw.map(|raw| crate::meta::serialization::deserialize_meta::<T>(&raw))
+            .transpose()
+    }
+
+    #[cfg(feature = "rkyv-serialization")]
+    pub fn set_typed<T>(&mut self, key: impl Into<String>, value: &T) -> Result<(), MetaError>
+    where
+        T: rkyv::Archive,
+        for<'ser> T: rkyv::Serialize<
+                rkyv::rancor::Strategy<
+                    rkyv::ser::Serializer<
+                        rkyv::util::AlignedVec,
+                        rkyv::ser::allocator::ArenaHandle<'ser>,
+                        rkyv::ser::sharing::Share,
+                    >,
+                    rkyv::rancor::Error,
+                >,
+            >,
+        T: serde::Serialize,
+    {
+        let raw = crate::meta::serialization::serialize_meta(value)?;
+        self.set(key, raw);
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "rkyv-serialization"))]
+    pub fn set_typed<T: Serialize>(
+        &mut self,
+        key: impl Into<String>,
+        value: &T,
+    ) -> Result<(), MetaError> {
+        let raw = crate::meta::serialization::serialize_meta(value)?;
+        self.set(key, raw);
+
+        Ok(())
+    }
+
+    pub async fn get_typed_json<T: DeserializeOwned>(
+        &mut self,
+        key: impl AsRef<str>,
+    ) -> Result<Option<T>, MetaError> {
+        let key = key.as_ref();
+        let raw = self.get(key).await?;
+
+        raw.map(|raw| {
+            serde_json::from_slice::<T>(&raw)
+                .map_err(|e| MetaError::Internal(format!("Failed to parse {key}: {e}")))
+        })
+        .transpose()
+    }
+
+    pub fn set_typed_json<T: Serialize>(
+        &mut self,
+        key: impl Into<String>,
+        value: &T,
+    ) -> Result<(), MetaError> {
+        let raw = serde_json::to_vec(value).map_err(|e| MetaError::Internal(e.to_string()))?;
+        self.set(key, raw);
+
+        Ok(())
+    }
+
+    async fn ensure_baselines_for_blind_writes(&mut self) -> Result<(), MetaError> {
+        let missing_keys: Vec<String> = self
+            .writes
+            .keys()
+            .filter(|key| !self.reads.contains_key(*key))
+            .cloned()
             .collect();
 
-        let txn = Txn::new().and_then(ops);
+        for key in missing_keys {
+            let slot = self.fetch_slot(&key).await?;
+            self.reads.insert(key, slot);
+        }
+
+        Ok(())
+    }
+
+    async fn commit(&mut self) -> Result<bool, MetaError> {
+        self.ensure_baselines_for_blind_writes().await?;
+
+        if self.writes.is_empty() {
+            return Ok(true);
+        }
+
+        let mut compares = Vec::with_capacity(self.reads.len());
+        for (key, slot) in &self.reads {
+            if slot.mod_revision == 0 {
+                compares.push(Compare::version(key.as_str(), CompareOp::Equal, 0));
+            } else {
+                compares.push(Compare::mod_revision(
+                    key.as_str(),
+                    CompareOp::Equal,
+                    slot.mod_revision,
+                ));
+            }
+        }
+
+        let mut ops = Vec::with_capacity(self.writes.len());
+        for (key, op) in &self.writes {
+            match op {
+                EtcdTxnWriteOp::Put { value, options } => {
+                    ops.push(TxnOp::put(key.as_str(), value.clone(), options.clone()));
+                }
+                EtcdTxnWriteOp::Delete => {
+                    ops.push(TxnOp::delete(key.as_str(), None));
+                }
+            }
+        }
+
+        let txn = Txn::new().when(compares).and_then(ops);
+        let mut client = self.client.clone();
         let resp = client
             .txn(txn)
             .await
-            .map_err(|e| MetaError::Internal(format!("Etcd txn fetch error: {e}")))?;
+            .map_err(|e| MetaError::Internal(format!("Failed to execute transaction: {e}")))?;
 
-        let mut slots = HashMap::with_capacity(keys.len());
+        Ok(resp.succeeded())
+    }
+}
 
-        // Etcd preserves response order for each request op in the txn success list.
-        let responses = resp.op_responses();
+pub(crate) struct EtcdTxn<'a> {
+    client: &'a EtcdClient,
+    max_retries: u64,
+}
 
-        for (idx, key) in keys.iter().enumerate() {
-            let entry = match responses.get(idx) {
-                Some(TxnOpResponse::Get(range_resp)) => range_resp
-                    .kvs()
-                    .first()
-                    .map(|kv| TxnEntry {
-                        value: Some(kv.value().to_vec()),
-                        mod_revision: kv.mod_revision(),
-                    })
-                    .unwrap_or(TxnEntry {
-                        value: None,
-                        mod_revision: 0,
-                    }),
-                Some(_) => {
-                    return Err(MetaError::Internal(format!(
-                        "Unexpected txn response for key {key}"
-                    )));
-                }
-                None => {
-                    return Err(MetaError::Internal(format!(
-                        "Missing txn response for key {key}"
-                    )));
-                }
-            };
-            slots.insert(key.clone(), entry);
+impl<'a> EtcdTxn<'a> {
+    pub(crate) fn new(client: &'a EtcdClient) -> Self {
+        Self {
+            client,
+            max_retries: 10,
         }
-
-        Ok(Self { slots })
-    }
-}
-
-struct TxnBuilder {
-    stages: Vec<Box<dyn TxnStage>>,
-}
-
-impl TxnBuilder {
-    fn new() -> Self {
-        Self { stages: Vec::new() }
     }
 
-    fn add_stage<F>(&mut self, deps: Vec<String>, stage: F)
+    pub(crate) fn max_retries(mut self, max_retries: u64) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
+    pub(crate) async fn run<R, F>(&self, mut task: F) -> Result<R, MetaError>
     where
-        F: Fn(&TxnContext) -> Result<Vec<UpdatePlan>, MetaError> + Send + Sync + 'static,
+        F: for<'task> FnMut(
+            &'task mut EtcdTxnCtx<'a>,
+        )
+            -> Pin<Box<dyn Future<Output = Result<R, MetaError>> + Send + 'task>>,
     {
-        self.stages.push(Box::new(TxnStageFn { deps, f: stage }));
-    }
+        for attempt in 0..self.max_retries {
+            let mut tx = EtcdTxnCtx::new(self.client);
+            let out = task(&mut tx).await?;
 
-    fn deps(&self) -> Vec<String> {
-        let mut seen = std::collections::HashSet::new();
-        let mut deps = Vec::new();
+            if tx.commit().await? {
+                return Ok(out);
+            }
 
-        for stage in &self.stages {
-            for key in stage.deps() {
-                if seen.insert(key.clone()) {
-                    deps.push(key.clone());
-                }
+            if attempt + 1 < self.max_retries {
+                let backoff_ms = 20 + (1 << attempt.min(16));
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
             }
         }
-        deps
+
+        Err(MetaError::MaxRetriesExceeded)
     }
+}
 
-    async fn execute(&self, client: &EtcdClient, max_retries: u64) -> Result<(), MetaError> {
-        let deps = self.deps();
-        let stages = &self.stages;
-        let client = client.clone();
+#[cfg(test)]
+mod etcd_txn_tests {
+    use super::*;
 
-        let attempt = || {
-            let deps = deps.clone();
-            let mut client = client.clone();
-
-            async move {
-                let ctx = TxnContext::fetch(&mut client, &deps).await?;
-                let mut plans = Vec::new();
-                for stage in stages {
-                    plans.extend(stage.build(&ctx)?);
-                }
-
-                if plans.is_empty() {
-                    return Ok(());
-                }
-
-                let mut compares = Vec::new();
-                let mut ops = Vec::new();
-                let mut seen_keys = std::collections::HashSet::new();
-
-                for plan in plans {
-                    if !ctx.slots.contains_key(&plan.key) {
-                        return Err(MetaError::Internal(format!(
-                            "Stage generated plan for undeclared key: {}",
-                            plan.key
-                        )));
-                    }
-
-                    if !seen_keys.insert(plan.key.clone()) {
-                        return Err(MetaError::Internal(format!(
-                            "Duplicate update plan for key {}",
-                            plan.key
-                        )));
-                    }
-
-                    match plan.action {
-                        UpdateAction::Skip => continue,
-                        UpdateAction::Write(value) => {
-                            compares.push(plan.compare);
-                            ops.push(TxnOp::put(plan.key, value, None));
-                        }
-                        UpdateAction::Delete => {
-                            compares.push(plan.compare);
-                            ops.push(TxnOp::delete(plan.key, None));
-                        }
-                    }
-                }
-
-                if ops.is_empty() {
-                    return Ok(());
-                }
-
-                let txn = Txn::new().when(compares).and_then(ops);
-
-                match client.txn(txn).await {
-                    Ok(resp) if resp.succeeded() => Ok(()),
-                    Ok(_) => Err(MetaError::ContinueRetry),
-                    Err(e) => Err(MetaError::Internal(format!(
-                        "Failed to execute transaction: {e}"
-                    ))),
-                }
-            }
+    #[test]
+    fn typed_json_helpers_roundtrip() {
+        let value = EtcdForwardEntry {
+            parent_inode: 1,
+            name: "file".to_string(),
+            inode: 2,
+            is_file: true,
+            entry_type: Some(EntryType::File),
         };
 
-        backoff(max_retries, attempt).await
+        let encoded = serde_json::to_vec(&value).expect("serialize forward entry");
+        let decoded: EtcdForwardEntry = serde_json::from_slice(&encoded).expect("decode");
+
+        assert_eq!(decoded.inode, 2);
     }
 }
 
@@ -304,8 +353,24 @@ pub struct EtcdMetaStore {
     lease: OnceLock<i64>,
 }
 
-#[allow(dead_code)]
 impl EtcdMetaStore {
+    async fn from_config_inner(config: Config) -> Result<Self, MetaError> {
+        info!("Initializing EtcdMetaStore from config");
+
+        let client = Self::create_client(&config).await?;
+        let store = Self {
+            client,
+            _config: config,
+            id_pools: IdPool::default(),
+            sid: OnceLock::new(),
+            lease: OnceLock::new(),
+        };
+        store.init_root_directory().await?;
+
+        info!("EtcdMetaStore initialized successfully");
+        Ok(store)
+    }
+
     /// Etcd helper method: generate forward index key (parent_inode, name)
     fn etcd_forward_key(parent_inode: i64, name: &str) -> String {
         format!("f:{}:{}", parent_inode, name)
@@ -335,6 +400,7 @@ impl EtcdMetaStore {
         }
     }
 
+    #[allow(dead_code)]
     fn get_session_id_from_session_key(session_key: &str) -> Option<Uuid> {
         session_key
             .strip_prefix("session:")
@@ -351,43 +417,21 @@ impl EtcdMetaStore {
     }
 
     /// Create or open an etcd metadata store
+    #[allow(dead_code)]
     pub async fn new(backend_path: &Path) -> Result<Self, MetaError> {
-        let _config =
+        let config =
             Config::from_path(backend_path).map_err(|e| MetaError::Config(e.to_string()))?;
 
         info!("Initializing EtcdMetaStore");
         info!("Backend path: {}", backend_path.display());
 
-        let client = Self::create_client(&_config).await?;
-        let store = Self {
-            client,
-            _config,
-            id_pools: IdPool::default(),
-            sid: OnceLock::new(),
-            lease: OnceLock::new(),
-        };
-        store.init_root_directory().await?;
-
-        info!("EtcdMetaStore initialized successfully");
-        Ok(store)
+        Self::from_config_inner(config).await
     }
 
     /// Create from existing config
-    pub async fn from_config(_config: Config) -> Result<Self, MetaError> {
-        info!("Initializing EtcdMetaStore from config");
-
-        let client = Self::create_client(&_config).await?;
-        let store = Self {
-            client,
-            _config,
-            id_pools: IdPool::default(),
-            sid: OnceLock::new(),
-            lease: OnceLock::new(),
-        };
-        store.init_root_directory().await?;
-
-        info!("EtcdMetaStore initialized successfully");
-        Ok(store)
+    #[allow(dead_code)]
+    pub async fn from_config(config: Config) -> Result<Self, MetaError> {
+        Self::from_config_inner(config).await
     }
 
     /// Create etcd client
@@ -807,6 +851,7 @@ impl EtcdMetaStore {
     }
 
     /// Get file metadata
+    #[allow(dead_code)]
     async fn get_file_meta(&self, inode: i64) -> Result<Option<FileMetaModel>, MetaError> {
         let reverse_key = Self::etcd_reverse_key(inode);
         if let Ok(Some(entry_info)) = self
@@ -1178,63 +1223,38 @@ impl EtcdMetaStore {
         options: &Option<PutOptions>,
     ) -> Result<R, MetaError>
     where
-        F: Fn(T) -> Result<(T, R), MetaError>,
-        I: Fn() -> Result<(T, R), MetaError>,
+        F: Fn(T) -> Result<(T, R), MetaError> + Sync,
+        I: Fn() -> Result<(T, R), MetaError> + Sync,
         T: Serialize + DeserializeOwned,
     {
-        let client = self.client.clone();
+        let key = key.to_string();
+        let options = options.clone();
 
-        let f = || {
-            // Cloning client is cheap.
-            let mut client = client.clone();
+        EtcdTxn::new(&self.client)
+            .max_retries(max_retries)
+            .run(|tx| {
+                let key = key.clone();
+                let options = options.clone();
+                let f = &f;
+                let init = &init;
 
-            // Capture f by ref to avoid clone.
-            let f = &f;
-            let init = &init;
+                Box::pin(async move {
+                    let current = tx.get(&key).await?;
 
-            async move {
-                let resp = client
-                    .get(key, None)
-                    .await
-                    .map_err(|e| MetaError::Config(format!("Failed to get key: {e}")))?;
+                    let (updated, ret) = if let Some(raw) = current {
+                        let current: T = crate::meta::serialization::deserialize_meta(&raw)?;
+                        f(current)?
+                    } else {
+                        init()?
+                    };
 
-                let (updated, ret, mod_revision) = match resp.kvs().first() {
-                    Some(kv) => {
-                        let current: T = crate::meta::serialization::deserialize_meta(kv.value())?;
-                        let (value, r) = f(current)?;
-                        (value, r, kv.mod_revision())
-                    }
-                    None => {
-                        let (value, r) = init()?;
-                        // When a key doesn't exist, there is no mod_revision. However, the version of a non-existent key
-                        // is 0. So the following `compare` use `Compare::version`.
-                        (value, r, 0)
-                    }
-                };
-                let current = crate::meta::serialization::serialize_meta(&updated)?;
+                    let updated = crate::meta::serialization::serialize_meta(&updated)?;
+                    tx.set_with_options(key, updated, options);
 
-                let compare = if mod_revision == 0 {
-                    Compare::version(key, CompareOp::Equal, 0)
-                } else {
-                    Compare::mod_revision(key, CompareOp::Equal, mod_revision)
-                };
-                let txn = Txn::new().when([compare]).and_then([TxnOp::put(
-                    key,
-                    current,
-                    options.clone(),
-                )]);
-
-                match client.txn(txn).await {
-                    Ok(txn_resp) if txn_resp.succeeded() => Ok(ret),
-                    Ok(_) => Err(MetaError::ContinueRetry),
-                    Err(e) => Err(MetaError::Internal(format!(
-                        "Failed to execute transaction: {e}"
-                    ))),
-                }
-            }
-        };
-
-        backoff(max_retries, f).await
+                    Ok(ret)
+                })
+            })
+            .await
     }
 
     /// Get a clone of the etcd client (for Watch Worker)
@@ -1257,29 +1277,33 @@ impl EtcdMetaStore {
         parent: i64,
         name: &str,
     ) -> Result<(), MetaError> {
-        let mut client = self.client.clone();
-        // Use version instead of create_revision to handle deleted keys correctly
-        // version == 0 means the key is currently not present (never existed or deleted)
-        let mut txn = Txn::new().when([Compare::version(check_key, CompareOp::Equal, 0)]);
-        let mut ops = Vec::new();
-        for (key, value) in entries {
-            ops.push(TxnOp::put(*key, *value, None));
-        }
-        txn = txn.and_then(ops);
+        let check_key = check_key.to_string();
+        let name = name.to_string();
+        let entries: Vec<(String, Vec<u8>)> = entries
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), value.as_bytes().to_vec()))
+            .collect();
 
-        let resp = client
-            .txn(txn)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Create entry transaction failed: {}", e)))?;
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let check_key = check_key.clone();
+                let entries = entries.clone();
+                let name = name.clone();
 
-        if resp.succeeded() {
-            Ok(())
-        } else {
-            Err(MetaError::AlreadyExists {
-                parent,
-                name: name.to_string(),
+                Box::pin(async move {
+                    if tx.exists(&check_key).await? {
+                        return Err(MetaError::AlreadyExists { parent, name });
+                    }
+
+                    for (key, value) in entries {
+                        tx.set(key, value);
+                    }
+
+                    Ok(())
+                })
             })
-        }
+            .await
     }
 
     /// Delete entry with existence check
@@ -1294,25 +1318,28 @@ impl EtcdMetaStore {
         keys: &[&str],
         ino: i64,
     ) -> Result<(), MetaError> {
-        let mut client = self.client.clone();
-        // Use version > 0 to check if key currently exists
-        let mut txn = Txn::new().when([Compare::version(check_key, CompareOp::Greater, 0)]);
-        let mut ops = Vec::new();
-        for key in keys {
-            ops.push(TxnOp::delete(*key, None));
-        }
-        txn = txn.and_then(ops);
+        let check_key = check_key.to_string();
+        let keys: Vec<String> = keys.iter().map(|key| (*key).to_string()).collect();
 
-        let resp = client
-            .txn(txn)
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let check_key = check_key.clone();
+                let keys = keys.clone();
+
+                Box::pin(async move {
+                    if !tx.exists(&check_key).await? {
+                        return Err(MetaError::NotFound(ino));
+                    }
+
+                    for key in keys {
+                        tx.delete(key);
+                    }
+
+                    Ok(())
+                })
+            })
             .await
-            .map_err(|e| MetaError::Internal(format!("Delete entry transaction failed: {}", e)))?;
-
-        if resp.succeeded() {
-            Ok(())
-        } else {
-            Err(MetaError::NotFound(ino))
-        }
     }
 
     /// Update parent directory children
@@ -1348,6 +1375,7 @@ impl EtcdMetaStore {
     }
 
     /// Check file is existing
+    #[allow(dead_code)]
     async fn file_is_existing(&self, inode: i64) -> Result<bool, MetaError> {
         let key = Self::etcd_reverse_key(inode);
 
@@ -1503,87 +1531,34 @@ impl EtcdMetaStore {
     async fn update_directory_timestamps(&self, ino: i64, now: i64) -> Result<(), MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
 
-        // Retry loop for optimistic locking using etcd's mod_revision
-        let max_retries = 10;
-        for retry in 0..max_retries {
-            let mut client = self.client.clone();
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let reverse_key = reverse_key.clone();
 
-            // Get current directory info with revision for CAS
-            let get_resp = client.get(reverse_key.as_str(), None).await.map_err(|e| {
-                MetaError::Internal(format!(
-                    "Failed to get directory key {}: {}",
-                    reverse_key, e
-                ))
-            })?;
+                Box::pin(async move {
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&reverse_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(ino))?;
 
-            let kv = get_resp.kvs().first().ok_or(MetaError::NotFound(ino))?;
-            let mod_revision = kv.mod_revision();
-
-            let mut entry_info: EtcdEntryInfo =
-                serde_json::from_slice(kv.value()).map_err(|e| {
-                    MetaError::Internal(format!(
-                        "Failed to deserialize directory entry info: {}",
-                        e
-                    ))
-                })?;
-
-            // Ensure this is a directory
-            if entry_info.is_file {
-                return Err(MetaError::Internal(format!(
-                    "Cannot update directory timestamps for file {}",
-                    ino
-                )));
-            }
-
-            // Update timestamps
-            entry_info.modify_time = now;
-            entry_info.create_time = now; // ctime should also be updated
-
-            // Attempt atomic update using mod_revision for precise CAS
-            let txn = Txn::new()
-                .when(vec![Compare::mod_revision(
-                    reverse_key.as_bytes(),
-                    CompareOp::Equal,
-                    mod_revision,
-                )])
-                .and_then(vec![TxnOp::put(
-                    reverse_key.as_bytes(),
-                    serde_json::to_vec(&entry_info).map_err(|e| {
-                        MetaError::Internal(format!(
-                            "Failed to serialize directory entry info: {}",
-                            e
-                        ))
-                    })?,
-                    None,
-                )]);
-
-            match client.txn(txn).await {
-                Ok(resp) if resp.succeeded() => {
-                    return Ok(());
-                }
-                Ok(_resp) => {
-                    // Transaction failed due to CAS conflict
-                    if retry >= max_retries - 1 {
+                    if entry_info.is_file {
                         return Err(MetaError::Internal(format!(
-                            "Failed to update directory timestamps for {} after {} retries",
-                            ino, max_retries
+                            "Cannot update directory timestamps for file {ino}"
                         )));
                     }
-                    // Continue to next retry
-                    tokio::time::sleep(std::time::Duration::from_millis(10 * (retry + 1) as u64))
-                        .await;
-                }
-                Err(e) => {
-                    return Err(MetaError::Internal(format!(
-                        "Failed to update directory timestamps for {}: {}",
-                        ino, e
-                    )));
-                }
-            }
-        }
 
-        Ok(())
+                    entry_info.modify_time = now;
+                    entry_info.create_time = now;
+
+                    tx.set_typed_json(reverse_key, &entry_info)?;
+
+                    Ok(())
+                })
+            })
+            .await
     }
+    #[allow(dead_code)]
     async fn shutdown_session_by_id(&self, session_id: Uuid) -> Result<(), MetaError> {
         let session_key = Self::etcd_session_key(Some(session_id));
         let session_info_key = Self::etcd_session_info_key(Some(session_id));
@@ -1604,11 +1579,13 @@ impl EtcdMetaStore {
             .map_err(|_| MetaError::Internal("sid has been set".to_string()))?;
         Ok(())
     }
+    #[allow(dead_code)]
     fn get_sid(&self) -> Result<&Uuid, MetaError> {
         self.sid
             .get()
             .ok_or_else(|| MetaError::Internal("sid has not been set".to_string()))
     }
+    #[allow(dead_code)]
     fn get_lease(&self) -> Result<&i64, MetaError> {
         self.lease
             .get()
@@ -1641,6 +1618,10 @@ impl EtcdMetaStore {
 impl MetaStore for EtcdMetaStore {
     fn name(&self) -> &'static str {
         "etcd"
+    }
+
+    async fn from_config(config: Config) -> Result<Self, MetaError> {
+        Self::from_config_inner(config).await
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(ino))]
@@ -1951,188 +1932,119 @@ impl MetaStore for EtcdMetaStore {
             });
         }
 
+        let name = name.to_string();
         let reverse_key = Self::etcd_reverse_key(ino);
-        let mut entry_info = self
-            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
-            .await?
-            .ok_or(MetaError::NotFound(ino))?;
-
-        if !entry_info.is_file {
-            return Err(MetaError::NotSupported(
-                "cannot create hard links to directories".into(),
-            ));
-        }
-
-        if entry_info.symlink_target.is_some() {
-            return Err(MetaError::NotSupported(
-                "cannot create hard links to symbolic links".into(),
-            ));
-        }
-        if entry_info.deleted || entry_info.nlink == 0 {
-            return Err(MetaError::NotFound(ino));
-        }
-
-        let old_nlink = entry_info.nlink;
-        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        entry_info.nlink = entry_info.nlink.saturating_add(1);
-        entry_info.modify_time = now;
-        entry_info.create_time = now; // Update ctime when creating hard link
-        entry_info.deleted = false;
-
+        let forward_key = Self::etcd_forward_key(parent, &name);
         let link_parent_key = Self::etcd_link_parent_key(ino);
-        let link_parent_json = if old_nlink == 1 {
-            // First hardlink: transition to LinkParent mode
-            let old_parent = entry_info.parent_inode;
-            let old_entry_name = entry_info.entry_name.clone();
-
-            // Use link_parent instead of parent
-            entry_info.parent_inode = 0;
-            entry_info.entry_name = String::new();
-
-            let link_parents = vec![
-                EtcdLinkParent {
-                    parent_inode: old_parent,
-                    entry_name: old_entry_name,
-                },
-                EtcdLinkParent {
-                    parent_inode: parent,
-                    entry_name: name.to_string(),
-                },
-            ];
-
-            Some(serde_json::to_string(&link_parents).map_err(|e| {
-                MetaError::Internal(format!(
-                    "Failed to serialize LinkParent entries during link operation: {e}"
-                ))
-            })?)
-        } else {
-            None
-        };
-
-        let forward_key = Self::etcd_forward_key(parent, name);
-        let entry_type = if entry_info.symlink_target.is_some() {
-            EntryType::Symlink
-        } else {
-            EntryType::File
-        };
-        let forward_entry = EtcdForwardEntry {
-            parent_inode: parent,
-            name: name.to_string(),
-            inode: ino,
-            is_file: true,
-            entry_type: Some(entry_type),
-        };
-
-        let updated_json = serde_json::to_string(&entry_info).map_err(|e| {
-            MetaError::Internal(format!(
-                "Failed to serialize entry info during link operation: {e}"
-            ))
-        })?;
-        let forward_json = serde_json::to_string(&forward_entry).map_err(|e| {
-            MetaError::Internal(format!(
-                "Failed to serialize forward entry during link operation: {e}"
-            ))
-        })?;
-
-        let (link_parent_compare, link_parent_update) = if old_nlink > 1 {
-            let mut client = self.client.clone();
-            let resp = client
-                .get(link_parent_key.clone(), None)
-                .await
-                .map_err(|e| MetaError::Internal(format!("Failed to get LinkParent: {e}")))?;
-
-            let kv = resp.kvs().first().ok_or_else(|| {
-                MetaError::Internal(format!(
-                    "LinkParent key {} not found for inode {}",
-                    link_parent_key, ino
-                ))
-            })?;
-
-            let mut link_parents = serde_json::from_slice::<Vec<EtcdLinkParent>>(kv.value())
-                .map_err(|e| {
-                    MetaError::Internal(format!("Failed to deserialize LinkParent: {e}"))
-                })?;
-
-            link_parents.push(EtcdLinkParent {
-                parent_inode: parent,
-                entry_name: name.to_string(),
-            });
-
-            let compare =
-                Compare::mod_revision(link_parent_key.clone(), CompareOp::Equal, kv.mod_revision());
-            let value = serde_json::to_string(&link_parents)
-                .map_err(|e| MetaError::Internal(format!("Failed to serialize LinkParent: {e}")))?;
-
-            (Some(compare), Some(value))
-        } else {
-            (None, None)
-        };
 
         info!(
             "Creating hard link with atomic transaction: src_inode={}, parent={}, name={} ",
             ino, parent, name
         );
 
-        let mut client = self.client.clone();
+        let attr = EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let reverse_key = reverse_key.clone();
+                let forward_key = forward_key.clone();
+                let link_parent_key = link_parent_key.clone();
+                let name = name.clone();
 
-        let mut conditions = vec![
-            Compare::version(forward_key.clone(), CompareOp::Equal, 0),
-            Compare::version(reverse_key.clone(), CompareOp::Greater, 0),
-        ];
+                Box::pin(async move {
+                    if tx.exists(&forward_key).await? {
+                        return Err(MetaError::AlreadyExists {
+                            parent,
+                            name: name.clone(),
+                        });
+                    }
 
-        if old_nlink == 1 {
-            conditions.push(Compare::version(
-                link_parent_key.clone(),
-                CompareOp::Equal,
-                0,
-            ));
-        }
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&reverse_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(ino))?;
 
-        if let Some(compare) = link_parent_compare {
-            conditions.push(compare);
-        }
+                    if !entry_info.is_file {
+                        return Err(MetaError::NotSupported(
+                            "cannot create hard links to directories".into(),
+                        ));
+                    }
 
-        let mut ops = vec![
-            TxnOp::put(forward_key.clone(), forward_json, None),
-            TxnOp::put(reverse_key.clone(), updated_json, None),
-        ];
+                    if entry_info.symlink_target.is_some() {
+                        return Err(MetaError::NotSupported(
+                            "cannot create hard links to symbolic links".into(),
+                        ));
+                    }
 
-        if let Some(link_parent_json) = link_parent_json {
-            ops.push(TxnOp::put(link_parent_key.clone(), link_parent_json, None));
-        }
+                    if entry_info.deleted || entry_info.nlink == 0 {
+                        return Err(MetaError::NotFound(ino));
+                    }
 
-        if let Some(link_parent_update) = link_parent_update {
-            ops.push(TxnOp::put(
-                link_parent_key.clone(),
-                link_parent_update,
-                None,
-            ));
-        }
+                    let old_nlink = entry_info.nlink;
+                    let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
-        let txn = Txn::new().when(conditions).and_then(ops);
+                    entry_info.nlink = entry_info.nlink.saturating_add(1);
+                    entry_info.modify_time = now;
+                    entry_info.create_time = now;
+                    entry_info.deleted = false;
 
-        let resp = client
-            .txn(txn)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Atomic link transaction failed: {e}")))?;
+                    if old_nlink == 1 {
+                        if tx.exists(&link_parent_key).await? {
+                            return Err(MetaError::Internal(format!(
+                                "LinkParent key {} unexpectedly exists for inode {}",
+                                link_parent_key, ino
+                            )));
+                        }
 
-        if !resp.succeeded() {
-            if self.lookup(parent, name).await?.is_some() {
-                return Err(MetaError::AlreadyExists {
-                    parent,
-                    name: name.to_string(),
-                });
-            }
-            if self
-                .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
-                .await?
-                .is_none()
-            {
-                return Err(MetaError::NotFound(ino));
-            }
+                        let old_parent = entry_info.parent_inode;
+                        let old_entry_name = entry_info.entry_name.clone();
 
-            return Err(MetaError::ContinueRetry);
-        }
+                        entry_info.parent_inode = 0;
+                        entry_info.entry_name = String::new();
+
+                        let link_parents = vec![
+                            EtcdLinkParent {
+                                parent_inode: old_parent,
+                                entry_name: old_entry_name,
+                            },
+                            EtcdLinkParent {
+                                parent_inode: parent,
+                                entry_name: name.clone(),
+                            },
+                        ];
+
+                        tx.set_typed_json(&link_parent_key, &link_parents)?;
+                    } else {
+                        let mut link_parents: Vec<EtcdLinkParent> =
+                            tx.get_typed_json(&link_parent_key).await?.ok_or_else(|| {
+                                MetaError::Internal(format!(
+                                    "LinkParent key {} not found for inode {}",
+                                    link_parent_key, ino
+                                ))
+                            })?;
+
+                        link_parents.push(EtcdLinkParent {
+                            parent_inode: parent,
+                            entry_name: name.clone(),
+                        });
+
+                        tx.set_typed_json(&link_parent_key, &link_parents)?;
+                    }
+
+                    let forward_entry = EtcdForwardEntry {
+                        parent_inode: parent,
+                        name: name.clone(),
+                        inode: ino,
+                        is_file: true,
+                        entry_type: Some(EntryType::File),
+                    };
+
+                    tx.set_typed_json(&forward_key, &forward_entry)?;
+                    tx.set_typed_json(&reverse_key, &entry_info)?;
+
+                    Ok(entry_info.to_file_attr(ino))
+                })
+            })
+            .await?;
 
         let name_for_closure = name.to_string();
         let ino_for_closure = ino;
@@ -2152,7 +2064,7 @@ impl MetaStore for EtcdMetaStore {
             );
         }
 
-        self.stat(ino).await?.ok_or(MetaError::NotFound(ino))
+        Ok(attr)
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name, target))]
@@ -2282,185 +2194,123 @@ impl MetaStore for EtcdMetaStore {
 
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
-        let mut client = self.client.clone();
+        let name = name.to_string();
+        let forward_key = Self::etcd_forward_key(parent, &name);
 
-        let forward_key = Self::etcd_forward_key(parent, name);
-        let forward_entry: EtcdForwardEntry =
-            match self.etcd_get_json::<EtcdForwardEntry>(&forward_key).await? {
-                Some(fe) => fe,
-                None => return Err(MetaError::NotFound(parent)),
-            };
+        let file_ino = EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let forward_key = forward_key.clone();
+                let name = name.clone();
 
-        let file_ino = forward_entry.inode;
+                Box::pin(async move {
+                    let forward_entry: EtcdForwardEntry = tx
+                        .get_typed_json(&forward_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(parent))?;
 
-        if !forward_entry.is_file {
-            return Err(MetaError::Internal("Is a directory".to_string()));
-        }
+                    if !forward_entry.is_file {
+                        return Err(MetaError::Internal("Is a directory".to_string()));
+                    }
 
-        // Get current file metadata
-        let reverse_key = Self::etcd_reverse_key(file_ino);
-        let mut entry_info: EtcdEntryInfo = match self
-            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
-            .await?
-        {
-            Some(info) => info,
-            None => return Err(MetaError::NotFound(file_ino)),
-        };
+                    let file_ino = forward_entry.inode;
+                    let reverse_key = Self::etcd_reverse_key(file_ino);
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&reverse_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(file_ino))?;
 
-        let current_nlink = entry_info.nlink;
-        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                    let current_nlink = entry_info.nlink;
+                    let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
-        if current_nlink > 1 {
-            let link_parent_key = Self::etcd_link_parent_key(file_ino);
+                    if current_nlink > 1 {
+                        let link_parent_key = Self::etcd_link_parent_key(file_ino);
+                        let mut link_parents: Vec<EtcdLinkParent> = tx
+                            .get_typed_json(&link_parent_key)
+                            .await?
+                            .ok_or_else(|| {
+                                MetaError::Internal(format!(
+                                    "LinkParent key {} not found for inode {}",
+                                    link_parent_key, file_ino
+                                ))
+                            })?;
 
-            // 2->1 transition: Need to restore parent before deleting LinkParent
-            if current_nlink == 2 {
-                // Get LinkParent entries
-                let link_parents: Vec<EtcdLinkParent> = self
-                    .etcd_get_json(&link_parent_key)
-                    .await?
-                    .ok_or_else(|| {
-                        MetaError::Internal(format!(
-                            "LinkParent key not found for inode {} with nlink=2. Data inconsistency detected!",
-                            file_ino
-                        ))
-                    })?;
+                        let original_len = link_parents.len();
+                        link_parents
+                            .retain(|lp| lp.parent_inode != parent || lp.entry_name != name);
 
-                // Find the remaining entry
-                let remaining = link_parents
-                    .iter()
-                    .find(|lp| lp.parent_inode != parent || lp.entry_name != name)
-                    .ok_or_else(|| {
-                        MetaError::Internal(format!(
-                            "No remaining LinkParent found for inode {} during 2->1 transition",
-                            file_ino
-                        ))
-                    })?;
+                        if link_parents.len() == original_len {
+                            return Err(MetaError::Internal(format!(
+                                "No LinkParent entry found for parent {} name {} inode {}",
+                                parent, name, file_ino
+                            )));
+                        }
 
-                // Restore parent and entry_name from remaining entry
-                entry_info.parent_inode = remaining.parent_inode;
-                entry_info.entry_name = remaining.entry_name.clone();
+                        if current_nlink == 2 {
+                            let remaining = link_parents.first().ok_or_else(|| {
+                                MetaError::Internal(format!(
+                                    "No remaining LinkParent found for inode {} during 2->1 transition",
+                                    file_ino
+                                ))
+                            })?;
 
-                entry_info.nlink = 1;
-                entry_info.deleted = false;
-            } else {
-                // n->n-1 transition (n > 2): Just remove the specific LinkParent entry
-                self.atomic_update(
-                    &link_parent_key,
-                    |link_parents: Vec<EtcdLinkParent>| {
-                        let updated_parents: Vec<EtcdLinkParent> = link_parents
-                            .into_iter()
-                            .filter(|lp| lp.parent_inode != parent || lp.entry_name != name)
-                            .collect();
-                        Ok((updated_parents, ()))
-                    },
-                    || {
-                        Err(MetaError::Internal(format!(
-                            "LinkParent key {} not found for inode {}",
-                            link_parent_key, file_ino
-                        )))
-                    },
-                    10,
-                    &None,
-                )
-                .await?;
+                            entry_info.parent_inode = remaining.parent_inode;
+                            entry_info.entry_name = remaining.entry_name.clone();
+                            entry_info.nlink = 1;
+                            entry_info.deleted = false;
 
-                entry_info.nlink = current_nlink - 1;
-                entry_info.deleted = false;
-            }
-        } else {
-            // 1->0 transition: Mark as deleted
-            entry_info.deleted = true;
-            entry_info.nlink = 0;
-            entry_info.parent_inode = 0;
-        }
+                            tx.delete(link_parent_key);
+                        } else {
+                            entry_info.nlink = current_nlink - 1;
+                            entry_info.deleted = false;
 
-        entry_info.modify_time = now;
+                            tx.set_typed_json(link_parent_key, &link_parents)?;
+                        }
+                    } else {
+                        entry_info.deleted = true;
+                        entry_info.nlink = 0;
+                        entry_info.parent_inode = 0;
+                    }
 
-        let updated_json = serde_json::to_string(&entry_info)
-            .map_err(|e| MetaError::Internal(format!("Failed to serialize entry info: {}", e)))?;
+                    entry_info.modify_time = now;
+
+                    tx.delete(forward_key);
+                    tx.set_typed_json(reverse_key, &entry_info)?;
+
+                    Ok(file_ino)
+                })
+            })
+            .await?;
 
         info!(
-            "Unlinking file with atomic transaction: parent={}, name={}, inode={}",
+            "File unlink transaction succeeded: parent={}, name={}, inode={}",
             parent, name, file_ino
         );
 
-        // Step 1: Perform atomic transaction first (delete forward key, update metadata)
-        // This ensures the file is properly marked as deleted before updating parent
-        let mut compares = vec![Compare::version(forward_key.clone(), CompareOp::Greater, 0)];
-        let mut ops = vec![
-            TxnOp::delete(forward_key.clone(), None),
-            TxnOp::put(reverse_key.clone(), updated_json.clone(), None),
-        ];
-
-        if current_nlink == 2 {
-            let link_parent_key = Self::etcd_link_parent_key(file_ino);
-            compares.push(Compare::version(
-                link_parent_key.clone(),
-                CompareOp::Greater,
-                0,
-            ));
-            ops.push(TxnOp::delete(link_parent_key.clone(), None));
-        }
-
-        let txn = Txn::new().when(compares).and_then(ops);
-
-        match client.txn(txn).await {
-            Ok(resp) if resp.succeeded() => {
-                // Step 2: Atomic transaction succeeded, now update parent children map
-                // If this fails, forward key is deleted but parent still references it
-                // This is acceptable: lookup will fail (forward key gone), no dangling data
-                let name_for_closure = name.to_string();
-
-                match self
-                    .update_parent_children(
-                        parent,
-                        move |children| {
-                            children.remove(&name_for_closure);
-                        },
-                        10,
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        info!(
-                            "File unlinked successfully: parent={}, name={}, inode={}",
-                            parent, name, file_ino
-                        );
-                        Ok(())
-                    }
-                    Err(e) => {
-                        // Parent update failed, but atomic transaction succeeded
-                        // Forward key is deleted, so lookup will fail correctly
-                        // Log warning but don't fail the operation
-                        warn!(
-                            "Unlink succeeded but failed to update parent children map: parent={}, name={}, inode={}, error={}. Forward key deleted, lookup will fail correctly.",
-                            parent, name, file_ino, e
-                        );
-                        // Return success since the file is effectively unlinked
-                        // (forward key deleted = file is unreachable)
-                        Ok(())
-                    }
-                }
-            }
+        let name_for_closure = name.clone();
+        match self
+            .update_parent_children(
+                parent,
+                move |children| {
+                    children.remove(&name_for_closure);
+                },
+                10,
+            )
+            .await
+        {
             Ok(_) => {
-                // Transaction failed (forward key not found)
-                error!(
-                    "Atomic unlink transaction failed (file not found): parent={}, name={}, inode={}",
+                info!(
+                    "File unlinked successfully: parent={}, name={}, inode={}",
                     parent, name, file_ino
                 );
-                Err(MetaError::NotFound(file_ino))
+                Ok(())
             }
             Err(e) => {
-                // Transaction error
-                error!(
-                    "Atomic unlink transaction error: parent={}, name={}, inode={}, error={}",
+                warn!(
+                    "Unlink succeeded but failed to update parent children map: parent={}, name={}, inode={}, error={}. Forward key deleted, lookup will fail correctly.",
                     parent, name, file_ino, e
                 );
-                Err(MetaError::Internal(format!(
-                    "Atomic unlink transaction failed: {}",
-                    e
-                )))
+                Ok(())
             }
         }
     }
@@ -2478,114 +2328,87 @@ impl MetaStore for EtcdMetaStore {
         new_name: String,
     ) -> Result<(), MetaError> {
         let old_forward_key = Self::etcd_forward_key(old_parent, old_name);
-        let forward_entry = self
-            .etcd_get_json::<EtcdForwardEntry>(&old_forward_key)
-            .await?
-            .ok_or(MetaError::NotFound(old_parent))?;
-
-        let entry_ino = forward_entry.inode;
-        let is_file = forward_entry.is_file;
-        let entry_type = forward_entry.entry_type.clone();
-
-        let reverse_key = Self::etcd_reverse_key(entry_ino);
-        let mut entry_info = self
-            .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
-            .await?
-            .ok_or(MetaError::NotFound(entry_ino))?;
-
-        let mut updated_link_parents: Option<Vec<EtcdLinkParent>> = None;
-
-        // Prepare updated entry info
-        if entry_info.nlink <= 1 {
-            entry_info.parent_inode = new_parent;
-            entry_info.entry_name = new_name.clone();
-        } else {
-            let link_parent_key = Self::etcd_link_parent_key(entry_ino);
-            let mut link_parents = self
-                .etcd_get_json::<Vec<EtcdLinkParent>>(&link_parent_key)
-                .await?
-                .unwrap_or_default();
-
-            let mut updated = false;
-            for lp in &mut link_parents {
-                if lp.parent_inode == old_parent && lp.entry_name == old_name {
-                    lp.parent_inode = new_parent;
-                    lp.entry_name = new_name.clone();
-                    updated = true;
-                    break;
-                }
-            }
-
-            if !updated {
-                return Err(MetaError::NotFound(entry_ino));
-            }
-
-            updated_link_parents = Some(link_parents);
-        }
-
-        entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let updated_reverse_json =
-            serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
-
         let new_forward_key = Self::etcd_forward_key(new_parent, &new_name);
-        let new_forward_entry = EtcdForwardEntry {
-            parent_inode: new_parent,
-            name: new_name.clone(),
-            inode: entry_ino,
-            is_file,
-            entry_type,
-        };
-        let new_forward_json = serde_json::to_string(&new_forward_entry)
-            .map_err(|e| MetaError::Internal(e.to_string()))?;
-
         info!(
-            "Renaming with atomic transaction: {} (parent={}) -> {} (parent={}), inode={}",
-            old_name, old_parent, new_name, new_parent, entry_ino
+            "Renaming with transaction: {} (parent={}) -> {} (parent={})",
+            old_name, old_parent, new_name, new_parent
         );
 
-        // Atomic transaction: rename forward index AND update reverse index
-        let mut client = self.client.clone();
-        let mut ops = vec![
-            TxnOp::put(new_forward_key.clone(), new_forward_json, None),
-            TxnOp::delete(old_forward_key.clone(), None),
-            TxnOp::put(reverse_key.clone(), updated_reverse_json, None),
-        ];
+        let entry_ino = EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let old_forward_key = old_forward_key.clone();
+                let new_forward_key = new_forward_key.clone();
+                let old_name = old_name.to_string();
+                let new_name = new_name.clone();
 
-        if let Some(link_parents) = &updated_link_parents {
-            let link_parent_key = Self::etcd_link_parent_key(entry_ino);
-            let json = serde_json::to_string(link_parents)
-                .map_err(|e| MetaError::Internal(e.to_string()))?;
-            ops.push(TxnOp::put(link_parent_key, json, None));
-        }
+                Box::pin(async move {
+                    let old_forward_entry: EtcdForwardEntry = tx
+                        .get_typed_json(&old_forward_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(old_parent))?;
 
-        let txn = Txn::new()
-            .when([
-                Compare::create_revision(old_forward_key.clone(), CompareOp::NotEqual, 0),
-                Compare::create_revision(new_forward_key.clone(), CompareOp::Equal, 0),
-            ])
-            .and_then(ops);
+                    if tx.exists(&new_forward_key).await? {
+                        return Err(MetaError::AlreadyExists {
+                            parent: new_parent,
+                            name: new_name.clone(),
+                        });
+                    }
 
-        let resp = client
-            .txn(txn)
-            .await
-            .map_err(|e| MetaError::Internal(format!("Atomic rename transaction failed: {}", e)))?;
+                    let entry_ino = old_forward_entry.inode;
+                    let reverse_key = Self::etcd_reverse_key(entry_ino);
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&reverse_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(entry_ino))?;
 
-        if !resp.succeeded() {
-            // Check which condition failed
-            let source_resp = client
-                .get(old_forward_key, None)
-                .await
-                .map_err(|e| MetaError::Internal(format!("Failed to check source: {}", e)))?;
+                    if entry_info.nlink <= 1 {
+                        entry_info.parent_inode = new_parent;
+                        entry_info.entry_name = new_name.clone();
+                    } else {
+                        let link_parent_key = Self::etcd_link_parent_key(entry_ino);
+                        let mut link_parents: Vec<EtcdLinkParent> = tx
+                            .get_typed_json(&link_parent_key)
+                            .await?
+                            .unwrap_or_default();
 
-            if source_resp.kvs().is_empty() {
-                return Err(MetaError::NotFound(entry_ino));
-            } else {
-                return Err(MetaError::AlreadyExists {
-                    parent: new_parent,
-                    name: new_name,
-                });
-            }
-        }
+                        let mut updated = false;
+                        for link_parent in &mut link_parents {
+                            if link_parent.parent_inode == old_parent
+                                && link_parent.entry_name == old_name
+                            {
+                                link_parent.parent_inode = new_parent;
+                                link_parent.entry_name = new_name.clone();
+                                updated = true;
+                                break;
+                            }
+                        }
+
+                        if !updated {
+                            return Err(MetaError::NotFound(entry_ino));
+                        }
+
+                        tx.set_typed_json(link_parent_key, &link_parents)?;
+                    }
+
+                    entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+                    let new_forward_entry = EtcdForwardEntry {
+                        parent_inode: new_parent,
+                        name: new_name.clone(),
+                        inode: entry_ino,
+                        is_file: old_forward_entry.is_file,
+                        entry_type: old_forward_entry.entry_type.clone(),
+                    };
+
+                    tx.set_typed_json(&new_forward_key, &new_forward_entry)?;
+                    tx.delete(&old_forward_key);
+                    tx.set_typed_json(&reverse_key, &entry_info)?;
+
+                    Ok(entry_ino)
+                })
+            })
+            .await?;
 
         // Atomic transaction succeeded, now update parent children maps
         // If parent updates fail, forward/reverse keys already reflect the new state
@@ -2703,84 +2526,57 @@ impl MetaStore for EtcdMetaStore {
         new_parent: i64,
         new_name: &str,
     ) -> Result<(), MetaError> {
-        // For distributed stores like etcd, we need to implement exchange using transactions
-        // Get both entries
         let old_forward_key = Self::etcd_forward_key(old_parent, old_name);
         let new_forward_key = Self::etcd_forward_key(new_parent, new_name);
 
-        let old_forward_entry = self
-            .etcd_get_json::<EtcdForwardEntry>(&old_forward_key)
-            .await?
-            .ok_or_else(|| {
-                MetaError::Internal(format!(
-                    "Entry '{}' not found in parent {} for exchange",
-                    old_name, old_parent
-                ))
-            })?;
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let old_forward_key = old_forward_key.clone();
+                let new_forward_key = new_forward_key.clone();
+                let old_name = old_name.to_string();
+                let new_name = new_name.to_string();
 
-        let new_forward_entry = self
-            .etcd_get_json::<EtcdForwardEntry>(&new_forward_key)
-            .await?
-            .ok_or_else(|| {
-                MetaError::Internal(format!(
-                    "Entry '{}' not found in parent {} for exchange",
-                    new_name, new_parent
-                ))
-            })?;
+                Box::pin(async move {
+                    let old_forward_entry: EtcdForwardEntry =
+                        tx.get_typed_json(&old_forward_key).await?.ok_or_else(|| {
+                            MetaError::Internal(format!(
+                                "Entry '{}' not found in parent {} for exchange",
+                                old_name, old_parent
+                            ))
+                        })?;
 
-        let old_ino = old_forward_entry.inode;
-        let new_ino = new_forward_entry.inode;
+                    let new_forward_entry: EtcdForwardEntry =
+                        tx.get_typed_json(&new_forward_key).await?.ok_or_else(|| {
+                            MetaError::Internal(format!(
+                                "Entry '{}' not found in parent {} for exchange",
+                                new_name, new_parent
+                            ))
+                        })?;
 
-        // Create swapped forward entries
-        let swapped_old_forward = EtcdForwardEntry {
-            parent_inode: old_parent,
-            name: old_name.to_string(),
-            inode: new_ino,
-            is_file: new_forward_entry.is_file,
-            entry_type: new_forward_entry.entry_type,
-        };
+                    let swapped_old_forward = EtcdForwardEntry {
+                        parent_inode: old_parent,
+                        name: old_name.clone(),
+                        inode: new_forward_entry.inode,
+                        is_file: new_forward_entry.is_file,
+                        entry_type: new_forward_entry.entry_type.clone(),
+                    };
 
-        let swapped_new_forward = EtcdForwardEntry {
-            parent_inode: new_parent,
-            name: new_name.to_string(),
-            inode: old_ino,
-            is_file: old_forward_entry.is_file,
-            entry_type: old_forward_entry.entry_type,
-        };
+                    let swapped_new_forward = EtcdForwardEntry {
+                        parent_inode: new_parent,
+                        name: new_name.clone(),
+                        inode: old_forward_entry.inode,
+                        is_file: old_forward_entry.is_file,
+                        entry_type: old_forward_entry.entry_type.clone(),
+                    };
 
-        // Atomic transaction to exchange forward keys
-        let mut client = self.client.clone();
-        let ops = vec![
-            TxnOp::put(
-                old_forward_key.clone(),
-                serde_json::to_string(&swapped_old_forward)
-                    .map_err(|e| MetaError::Internal(e.to_string()))?,
-                None,
-            ),
-            TxnOp::put(
-                new_forward_key.clone(),
-                serde_json::to_string(&swapped_new_forward)
-                    .map_err(|e| MetaError::Internal(e.to_string()))?,
-                None,
-            ),
-        ];
+                    tx.set_typed_json(&old_forward_key, &swapped_old_forward)?;
+                    tx.set_typed_json(&new_forward_key, &swapped_new_forward)?;
 
-        let txn = Txn::new()
-            .when([
-                Compare::create_revision(old_forward_key.clone(), CompareOp::NotEqual, 0),
-                Compare::create_revision(new_forward_key.clone(), CompareOp::NotEqual, 0),
-            ])
-            .and_then(ops);
-
-        let resp = client.txn(txn).await.map_err(|e| {
-            MetaError::Internal(format!("Atomic rename_exchange transaction failed: {}", e))
-        })?;
-
-        if !resp.succeeded() {
-            return Err(MetaError::Internal(
-                "rename_exchange failed: one or both entries do not exist".to_string(),
-            ));
-        }
+                    Ok(())
+                })
+            })
+            .await?;
 
         info!(
             "Exchange completed successfully: ({}, '{}') <-> ({}, '{}')",
@@ -2914,44 +2710,16 @@ impl MetaStore for EtcdMetaStore {
         }
 
         let names = self.get_names(ino).await?;
-        let mut out = Vec::with_capacity(names.len());
 
-        for (parent_opt, name) in names {
-            let Some(parent) = parent_opt else {
-                continue;
-            };
+        build_paths_from_names(1, names, |current_ino| async move {
+            let reverse_key = Self::etcd_reverse_key(current_ino);
+            let entry_info = self
+                .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
+                .await?;
 
-            let mut path_parts = vec![name];
-            let mut current_ino = parent;
-
-            while current_ino != 1 {
-                let reverse_key = Self::etcd_reverse_key(current_ino);
-                let entry_info = match self
-                    .etcd_get_json_serde_only::<EtcdEntryInfo>(&reverse_key)
-                    .await?
-                {
-                    Some(info) => info,
-                    None => {
-                        path_parts.clear();
-                        break;
-                    }
-                };
-
-                path_parts.push(entry_info.entry_name);
-                current_ino = entry_info.parent_inode;
-            }
-
-            if path_parts.is_empty() {
-                continue;
-            }
-
-            path_parts.reverse();
-            out.push(format!("/{}", path_parts.join("/")));
-        }
-
-        out.sort();
-        out.dedup();
-        Ok(out)
+            Ok(entry_info.map(|entry_info| (entry_info.parent_inode, entry_info.entry_name)))
+        })
+        .await
     }
 
     fn root_ino(&self) -> i64 {
@@ -3080,65 +2848,46 @@ impl MetaStore for EtcdMetaStore {
     ) -> Result<(), MetaError> {
         let slice_key = key_for_slice(chunk_id);
         let inode_key = Self::etcd_reverse_key(ino);
-        let slice_for_update = slice;
-        let slice_key_for_stage = slice_key.clone();
-        let inode_key_for_stage = inode_key.clone();
 
-        let mut builder = TxnBuilder::new();
-        builder.add_stage(vec![slice_key, inode_key], move |ctx| {
-            let mut plans = Vec::new();
-            let mut slices: Vec<SliceDesc> = match ctx.value(&slice_key_for_stage) {
-                Some(raw) => crate::meta::serialization::deserialize_meta(raw)?,
-                None => Vec::new(),
-            };
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let slice_key = slice_key.clone();
+                let inode_key = inode_key.clone();
 
-            slices.push(slice_for_update);
+                Box::pin(async move {
+                    let mut slices: Vec<SliceDesc> =
+                        tx.get_typed(&slice_key).await?.unwrap_or_default();
+                    slices.push(slice);
 
-            let slices_payload = crate::meta::serialization::serialize_meta(&slices)?;
-            plans.push(UpdatePlan::new_write(
-                ctx,
-                slice_key_for_stage.clone(),
-                slices_payload,
-            )?);
+                    tx.set_typed(slice_key, &slices)?;
 
-            let entry_raw = ctx
-                .value(&inode_key_for_stage)
-                .ok_or(MetaError::NotFound(ino))?;
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&inode_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(ino))?;
 
-            let mut entry_info: EtcdEntryInfo = serde_json::from_slice(entry_raw).map_err(|e| {
-                MetaError::Serialization(format!(
-                    "failed to deserialize EtcdEntryInfo for inode {ino}: {e}"
-                ))
-            })?;
+                    if !entry_info.is_file {
+                        return Err(MetaError::Internal(
+                            "Cannot set size for directory".to_string(),
+                        ));
+                    }
 
-            if !entry_info.is_file {
-                return Err(MetaError::Internal(
-                    "Cannot set size for directory".to_string(),
-                ));
-            }
+                    let current = entry_info.size.unwrap_or(0).max(0) as u64;
+                    if new_size > current {
+                        entry_info.size = Some(new_size as i64);
+                        entry_info.modify_time =
+                            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                        // POSIX: clear setuid/setgid bits on write (security: prevent privilege escalation)
+                        entry_info.permission.mode &= !0o6000;
 
-            let current = entry_info.size.unwrap_or(0).max(0) as u64;
-            if new_size > current {
-                entry_info.size = Some(new_size as i64);
-                entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-                // POSIX: clear setuid/setgid bits on write (security: prevent privilege escalation)
-                entry_info.permission.mode &= !0o6000;
-                let entry_payload = serde_json::to_vec(&entry_info).map_err(|e| {
-                    MetaError::Serialization(format!(
-                        "failed to serialize EtcdEntryInfo for inode {ino}: {e}"
-                    ))
-                })?;
-                plans.push(UpdatePlan::new_write(
-                    ctx,
-                    inode_key_for_stage.clone(),
-                    entry_payload,
-                )?);
-            }
+                        tx.set_typed_json(inode_key, &entry_info)?;
+                    }
 
-            Ok(plans)
-        });
-
-        builder.execute(&self.client, 10).await
+                    Ok(())
+                })
+            })
+            .await
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(key))]
@@ -3245,109 +2994,86 @@ impl MetaStore for EtcdMetaStore {
     ) -> Result<FileAttr, MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let req = *req;
+        let flag_bits = flags.bits();
 
-        // Retry loop for optimistic locking using etcd's mod_revision
-        let max_retries = 10;
-        for retry in 0..max_retries {
-            let mut client = self.client.clone();
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let reverse_key = reverse_key.clone();
+                let flags = SetAttrFlags::from_bits_retain(flag_bits);
 
-            // Get current entry info with revision for CAS
-            let get_resp = client.get(reverse_key.as_str(), None).await.map_err(|e| {
-                MetaError::Internal(format!("Failed to get key {}: {}", reverse_key, e))
-            })?;
+                Box::pin(async move {
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&reverse_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(ino))?;
 
-            let kv = get_resp.kvs().first().ok_or(MetaError::NotFound(ino))?;
-            let mod_revision = kv.mod_revision();
+                    let mut ctime_update = false;
 
-            let mut entry_info: EtcdEntryInfo =
-                serde_json::from_slice(kv.value()).map_err(|e| {
-                    MetaError::Internal(format!("Failed to deserialize entry info: {}", e))
-                })?;
+                    if let Some(mode) = req.mode {
+                        entry_info.permission.chmod(mode);
+                        ctime_update = true;
+                    }
 
-            let mut ctime_update = false;
+                    if let Some(uid) = req.uid {
+                        let gid = req.gid.unwrap_or(entry_info.permission.gid);
+                        entry_info.permission.chown(uid, gid);
+                        ctime_update = true;
+                    }
 
-            // Apply permission changes
-            if let Some(mode) = req.mode {
-                entry_info.permission.chmod(mode);
-                ctime_update = true;
-            }
+                    if req.uid.is_none()
+                        && let Some(gid) = req.gid
+                    {
+                        entry_info.permission.chown(entry_info.permission.uid, gid);
+                        ctime_update = true;
+                    }
 
-            if let Some(uid) = req.uid {
-                let gid = req.gid.unwrap_or(entry_info.permission.gid);
-                entry_info.permission.chown(uid, gid);
-                ctime_update = true;
-            }
+                    if flags.contains(SetAttrFlags::CLEAR_SUID) {
+                        entry_info.permission.mode &= !0o4000;
+                        ctime_update = true;
+                    }
 
-            if req.uid.is_none()
-                && let Some(gid) = req.gid
-            {
-                entry_info.permission.chown(entry_info.permission.uid, gid);
-                ctime_update = true;
-            }
+                    if flags.contains(SetAttrFlags::CLEAR_SGID) {
+                        entry_info.permission.mode &= !0o2000;
+                        ctime_update = true;
+                    }
 
-            // Clear suid/sgid flags
-            if flags.contains(SetAttrFlags::CLEAR_SUID) {
-                entry_info.permission.mode &= !0o4000;
-                ctime_update = true;
-            }
-            if flags.contains(SetAttrFlags::CLEAR_SGID) {
-                entry_info.permission.mode &= !0o2000;
-                ctime_update = true;
-            }
+                    if entry_info.is_file
+                        && let Some(size_req) = req.size
+                    {
+                        let new_size = size_req as i64;
+                        if entry_info.size != Some(new_size) {
+                            entry_info.size = Some(new_size);
+                            entry_info.modify_time = now;
+                        }
+                        ctime_update = true;
+                    }
 
-            // Apply size changes (files only)
-            if entry_info.is_file
-                && let Some(size_req) = req.size
-            {
-                let new_size = size_req as i64;
-                if entry_info.size != Some(new_size) {
-                    entry_info.size = Some(new_size);
-                    entry_info.modify_time = now;
-                }
-                ctime_update = true;
-            }
+                    if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
+                        entry_info.access_time = now;
+                        ctime_update = true;
+                    } else if let Some(atime) = req.atime {
+                        entry_info.access_time = atime;
+                        ctime_update = true;
+                    }
 
-            // Apply time changes
-            if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
-                entry_info.access_time = now;
-                ctime_update = true;
-            } else if let Some(atime) = req.atime {
-                entry_info.access_time = atime;
-                ctime_update = true;
-            }
+                    if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
+                        entry_info.modify_time = now;
+                        ctime_update = true;
+                    } else if let Some(mtime) = req.mtime {
+                        entry_info.modify_time = mtime;
+                        ctime_update = true;
+                    }
 
-            if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
-                entry_info.modify_time = now;
-                ctime_update = true;
-            } else if let Some(mtime) = req.mtime {
-                entry_info.modify_time = mtime;
-                ctime_update = true;
-            }
+                    if let Some(ctime) = req.ctime {
+                        entry_info.create_time = ctime;
+                    } else if ctime_update {
+                        entry_info.create_time = now;
+                    }
 
-            if let Some(ctime) = req.ctime {
-                entry_info.create_time = ctime;
-            } else if ctime_update {
-                entry_info.create_time = now;
-            }
+                    tx.set_typed_json(reverse_key, &entry_info)?;
 
-            // Attempt atomic update using mod_revision for precise CAS
-            let txn = Txn::new()
-                .when(vec![Compare::mod_revision(
-                    reverse_key.as_bytes(),
-                    CompareOp::Equal,
-                    mod_revision,
-                )])
-                .and_then(vec![TxnOp::put(
-                    reverse_key.as_bytes(),
-                    serde_json::to_vec(&entry_info).map_err(|e| {
-                        MetaError::Internal(format!("Failed to serialize entry info: {}", e))
-                    })?,
-                    None,
-                )]);
-
-            match client.txn(txn).await {
-                Ok(resp) if resp.succeeded() => {
-                    // Success - convert to FileAttr and return
                     let kind = if entry_info.symlink_target.is_some() {
                         FileType::Symlink
                     } else if entry_info.is_file {
@@ -3364,7 +3090,7 @@ impl MetaStore for EtcdMetaStore {
                         4096
                     };
 
-                    return Ok(FileAttr {
+                    Ok(FileAttr {
                         ino,
                         size,
                         kind,
@@ -3375,53 +3101,10 @@ impl MetaStore for EtcdMetaStore {
                         mtime: entry_info.modify_time,
                         ctime: entry_info.create_time,
                         nlink: entry_info.nlink,
-                    });
-                }
-                Ok(_) => {
-                    // Transaction failed (CAS conflict), retry
-                    if retry < max_retries - 1 {
-                        warn!(
-                            "CAS conflict updating attributes for inode {} (retry {}/{})",
-                            ino,
-                            retry + 1,
-                            max_retries
-                        );
-                        // Exponential backoff
-                        tokio::time::sleep(tokio::time::Duration::from_millis(5 * (1 << retry)))
-                            .await;
-                        continue;
-                    }
-                }
-                Err(e) => {
-                    if retry < max_retries - 1 {
-                        warn!(
-                            "Failed to update attributes for inode {} (retry {}/{}): {}",
-                            ino,
-                            retry + 1,
-                            max_retries,
-                            e
-                        );
-                        tokio::time::sleep(tokio::time::Duration::from_millis(5 * (1 << retry)))
-                            .await;
-                        continue;
-                    } else {
-                        error!(
-                            "Failed to update attributes for inode {} after {} retries: {}",
-                            ino, max_retries, e
-                        );
-                        return Err(MetaError::Internal(format!(
-                            "Failed to update attributes: {}",
-                            e
-                        )));
-                    }
-                }
-            }
-        }
-
-        Err(MetaError::Internal(format!(
-            "Failed to update attributes for inode {} after {} retries (CAS conflicts)",
-            ino, max_retries
-        )))
+                    })
+                })
+            })
+            .await
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

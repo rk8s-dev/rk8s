@@ -1,6 +1,5 @@
 mod cache;
 mod path_trie;
-#[allow(dead_code)]
 pub mod session;
 
 use crate::chuck::SliceDesc;
@@ -42,7 +41,6 @@ const ROOT_INODE: i64 = 1;
 /// fields is supported for now; additional knobs can be added as the Rust
 /// client gains feature parity.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct MetaClientOptions {
     /// Optional mount point string used for diagnostics and session payloads.
     pub mount_point: Option<String>,
@@ -146,7 +144,6 @@ pub struct MetaClient<T: MetaStore> {
     store: Arc<T>,
     options: MetaClientOptions,
     root: AtomicI64,
-    #[allow(dead_code)]
     umounting: AtomicBool,
     inode_cache: Arc<InodeCache>,
     /// it's absolute path.
@@ -161,7 +158,6 @@ pub struct MetaClient<T: MetaStore> {
     inode_to_paths: Arc<DashMap<i64, Vec<String>>>,
 
     /// Manages background session heartbeats when enabled by callers.
-    #[allow(dead_code)]
     session_manager: Arc<SessionManager<T>>,
 
     /// Watch Worker for etcd cache invalidation (for now only used for etcd).
@@ -301,6 +297,26 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
     }
 
+    fn validate_entry_name(name: &str) -> Result<(), MetaError> {
+        if name.is_empty() || name.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+
+        if name.contains('/') || name.contains('\0') {
+            return Err(MetaError::InvalidFilename);
+        }
+
+        Ok(())
+    }
+
+    fn validate_symlink_target(target: &str) -> Result<(), MetaError> {
+        if target.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+
+        Ok(())
+    }
+
     fn ensure_writable(&self) -> Result<(), MetaError> {
         if self.options.read_only {
             Err(MetaError::NotSupported(
@@ -321,6 +337,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
     }
 
+    #[allow(dead_code)]
     fn mark_umounting(&self) {
         self.umounting.store(true, Ordering::SeqCst);
     }
@@ -336,7 +353,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// Callers provide a `SessionInfo` struct containing session parameters understood by the backend;
     /// the client will register or update the session and then begin periodic heartbeats.
-    #[allow(dead_code)]
     pub async fn start_session(&self, session_info: SessionInfo) -> Result<(), MetaError> {
         if self.options.read_only {
             info!("MetaClient: read-only mode, skipping session start");
@@ -349,7 +365,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     }
 
     /// Builds a default session payload and starts the heartbeat task.
-    #[allow(dead_code)]
     pub async fn start_default_session(&self) -> Result<(), MetaError> {
         let payload = self.build_session_payload()?;
         self.start_session(payload).await
@@ -378,7 +393,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// Returns the number of sessions successfully cleaned. Failures are
     /// logged and skipped to keep the maintenance loop best-effort.
-    #[allow(dead_code)]
     fn build_session_payload(&self) -> Result<SessionInfo, MetaError> {
         let host_name = get_hostname()
             .map_err(MetaError::from)?
@@ -397,7 +411,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         })
     }
 
-    #[allow(dead_code)]
     fn collect_local_ip_addrs() -> Result<Vec<String>, MetaError> {
         let interfaces = get_if_addrs().map_err(MetaError::from)?;
         let mut addrs = HashSet::new();
@@ -619,7 +632,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// This method is similar to [`resolve_path`], but follows all symlinks
     /// including the final path component.
-    #[allow(dead_code)]
     #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn resolve_path_follow(&self, path: &str) -> Result<i64, MetaError> {
         self.resolve_path_impl(path, true).await
@@ -841,6 +853,27 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
     }
 
+    async fn cached_lookup_required(&self, parent: i64, name: &str) -> Result<i64, MetaError> {
+        let parent = self.check_root(parent);
+
+        self.cached_lookup(parent, name)
+            .await?
+            .ok_or(MetaError::NotFound(parent))
+    }
+
+    async fn ensure_directory_exists(&self, ino: i64) -> Result<(), MetaError> {
+        let ino = self.check_root(ino);
+        let Some(parent_attr) = self.cached_stat(ino).await? else {
+            return Err(MetaError::NotFound(ino));
+        };
+
+        if parent_attr.kind != FileType::Dir {
+            return Err(MetaError::NotDirectory(ino));
+        }
+
+        Ok(())
+    }
+
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn resolve_case(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         let entries = self.store.readdir(parent).await?;
@@ -974,7 +1007,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
 }
 
 #[async_trait]
-#[allow(dead_code)]
 impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
     fn name(&self) -> &'static str {
         self.store.name()
@@ -1119,12 +1151,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
 
-        if name.is_empty() || name.len() > NAME_MAX {
-            return Err(MetaError::InvalidFilename);
-        }
-        if name.contains('/') || name.contains('\0') {
-            return Err(MetaError::InvalidFilename);
-        }
+        Self::validate_entry_name(&name)?;
 
         info!("MetaClient: mkdir operation for ({}, '{}')", parent, name);
 
@@ -1202,12 +1229,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         let inode = self.check_root(ino);
         let parent = self.check_root(parent);
 
-        if name.is_empty() || name.len() > NAME_MAX {
-            return Err(MetaError::InvalidFilename);
-        }
-        if name.contains('/') || name.contains('\0') {
-            return Err(MetaError::InvalidFilename);
-        }
+        Self::validate_entry_name(name)?;
 
         info!(
             "MetaClient: link operation for inode {} into ({}, '{}')",
@@ -1242,17 +1264,10 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
 
-        if name.is_empty() || name.len() > NAME_MAX {
-            return Err(MetaError::InvalidFilename);
-        }
-        if name.contains('/') || name.contains('\0') {
-            return Err(MetaError::InvalidFilename);
-        }
+        Self::validate_entry_name(name)?;
 
         // POSIX: symlink target path component must also respect NAME_MAX
-        if target.len() > NAME_MAX {
-            return Err(MetaError::InvalidFilename);
-        }
+        Self::validate_symlink_target(target)?;
 
         info!(
             "MetaClient: symlink operation for ({}, '{}') -> '{}'",
@@ -1285,12 +1300,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.ensure_writable()?;
 
         // Validate filename length BEFORE lookup to return ENAMETOOLONG instead of ENOENT
-        if name.is_empty() || name.len() > NAME_MAX {
-            return Err(MetaError::InvalidFilename);
-        }
-        if name.contains('/') || name.contains('\0') {
-            return Err(MetaError::InvalidFilename);
-        }
+        Self::validate_entry_name(name)?;
 
         let parent = self.check_root(parent);
         info!("MetaClient: unlink operation for ({}, '{}')", parent, name);
@@ -1333,30 +1343,15 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         );
 
         // Comprehensive pre-validation
-        let src_ino = self
-            .cached_lookup(old_parent, old_name)
-            .await?
-            .ok_or_else(|| MetaError::NotFound(old_parent))?;
+        let src_ino = self.cached_lookup_required(old_parent, old_name).await?;
 
         let src_attr = self.cached_stat(src_ino).await?;
 
         // Validate new parent exists and is a directory
-        if let Some(parent_attr) = self.cached_stat(new_parent).await? {
-            if parent_attr.kind != FileType::Dir {
-                return Err(MetaError::NotDirectory(new_parent));
-            }
-        } else {
-            return Err(MetaError::NotFound(new_parent));
-        }
+        self.ensure_directory_exists(new_parent).await?;
 
         // Validate name constraints
-        if new_name.is_empty() || new_name.len() > NAME_MAX {
-            return Err(MetaError::InvalidFilename);
-        }
-
-        if new_name.contains('/') || new_name.contains('\0') {
-            return Err(MetaError::InvalidFilename);
-        }
+        Self::validate_entry_name(&new_name)?;
 
         // Execute the store-level rename with atomic cache updates
         self.store
@@ -1464,15 +1459,8 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         );
 
         // Both entries must exist
-        let old_ino = self
-            .cached_lookup(old_parent, old_name)
-            .await?
-            .ok_or_else(|| MetaError::NotFound(old_parent))?;
-
-        let new_ino = self
-            .cached_lookup(new_parent, new_name)
-            .await?
-            .ok_or_else(|| MetaError::NotFound(new_parent))?;
+        let old_ino = self.cached_lookup_required(old_parent, old_name).await?;
+        let new_ino = self.cached_lookup_required(new_parent, new_name).await?;
 
         // Execute the store-level exchange
         self.store
@@ -1541,30 +1529,15 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.ensure_writable()?;
 
         // Basic validation
-        let src_ino = self
-            .cached_lookup(old_parent, old_name)
-            .await?
-            .ok_or(MetaError::NotFound(old_parent))?;
+        let src_ino = self.cached_lookup_required(old_parent, old_name).await?;
 
         let src_attr = self.cached_stat(src_ino).await?;
 
         // Validate new parent exists and is a directory
-        if let Some(parent_attr) = self.cached_stat(new_parent).await? {
-            if parent_attr.kind != FileType::Dir {
-                return Err(MetaError::NotDirectory(new_parent));
-            }
-        } else {
-            return Err(MetaError::NotFound(new_parent));
-        }
+        self.ensure_directory_exists(new_parent).await?;
 
         // Validate name constraints
-        if new_name.is_empty() || new_name.len() > NAME_MAX {
-            return Err(MetaError::InvalidFilename);
-        }
-
-        if new_name.contains('/') || new_name.contains('\0') {
-            return Err(MetaError::InvalidFilename);
-        }
+        Self::validate_entry_name(new_name)?;
 
         // Check destination constraints
         if let Some(dest_ino) = self.cached_lookup(new_parent, new_name).await? {
@@ -1611,14 +1584,8 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         if flags.exchange {
             // Exchange operation - both must exist
-            let _src_ino = self
-                .cached_lookup(old_parent, old_name)
-                .await?
-                .ok_or(MetaError::NotFound(old_parent))?;
-            let _dest_ino = self
-                .cached_lookup(new_parent, &new_name)
-                .await?
-                .ok_or(MetaError::NotFound(new_parent))?;
+            let _src_ino = self.cached_lookup_required(old_parent, old_name).await?;
+            let _dest_ino = self.cached_lookup_required(new_parent, &new_name).await?;
 
             // Perform exchange (simplified - not truly atomic)
             let temp_name = format!("{}.exchange_temp_{}", old_name, std::process::id());

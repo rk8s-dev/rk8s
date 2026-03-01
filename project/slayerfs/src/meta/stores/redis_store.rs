@@ -6,7 +6,7 @@
 //! serialization for file attributes. Advanced features (sessions, quota, etc.)
 //! can be layered on later by extending the schema.
 
-use super::{apply_truncate_plan, trim_slices_in_place};
+use super::{apply_truncate_plan, build_paths_from_names, trim_slices_in_place};
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
@@ -32,23 +32,38 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, error};
 use uuid::Uuid;
 
+#[allow(dead_code)]
 const ROOT_INODE: i64 = 1;
+#[allow(dead_code)]
 const COUNTER_INODE_KEY: &str = "nextinode";
+#[allow(dead_code)]
 const COUNTER_SLICE_KEY: &str = "nextchunk";
+#[allow(dead_code)]
 const NODE_KEY_PREFIX: &str = "i";
+#[allow(dead_code)]
 const DIR_KEY_PREFIX: &str = "d";
+#[allow(dead_code)]
 const CHUNK_KEY_PREFIX: &str = "c";
+#[allow(dead_code)]
 const DELETED_SET_KEY: &str = "delslices";
+#[allow(dead_code)]
 const ALL_SESSIONS_KEY: &str = "allsessions";
+#[allow(dead_code)]
 const SESSION_INFOS_KEY: &str = "sessioninfos";
+#[allow(dead_code)]
 const PLOCK_PREFIX: &str = "plock";
+#[allow(dead_code)]
 const LOCKS_KEY: &str = "locks";
+#[allow(dead_code)]
 const LOCKED_KEY: &str = "locked";
+#[allow(dead_code)]
 const LINK_PARENT_KEY_PREFIX: &str = "lp:";
 
+#[allow(dead_code)]
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
 
 // Lua script for atomically extending file size
+#[allow(dead_code)]
 const EXTEND_FILE_SIZE_LUA: &str = r#"
     local node_json = redis.call('GET', KEYS[1])
     if not node_json then
@@ -75,6 +90,7 @@ const EXTEND_FILE_SIZE_LUA: &str = r#"
 "#;
 
 // Lua script for atomically incrementing nlink and updating link_parents
+#[allow(dead_code)]
 const LINK_LUA: &str = r#"
     local node_key = KEYS[1]
     local lp_key = KEYS[2]
@@ -125,6 +141,7 @@ const LINK_LUA: &str = r#"
 "#;
 
 // Lua script for atomically decrementing nlink and updating link_parents
+#[allow(dead_code)]
 const UNLINK_LUA: &str = r#"
     local node_key = KEYS[1]
     local lp_key = KEYS[2]
@@ -181,6 +198,7 @@ const UNLINK_LUA: &str = r#"
 "#;
 
 // Lua script for atomically removing directory entry and updating parent nlink
+#[allow(dead_code)]
 const RMDIR_LUA: &str = r#"
     local cjson = cjson
 
@@ -243,6 +261,7 @@ const RMDIR_LUA: &str = r#"
 "#;
 
 // Lua script for atomically creating directory entry with inode allocation
+#[allow(dead_code)]
 const CREATE_ENTRY_LUA: &str = r#"
     local cjson = cjson
 
@@ -340,6 +359,7 @@ const CREATE_ENTRY_LUA: &str = r#"
 "#;
 
 // Lua script for atomically renaming file or directory (no overwrite)
+#[allow(dead_code)]
 const RENAME_LUA: &str = r#"
     local cjson = cjson
 
@@ -463,6 +483,7 @@ const RENAME_LUA: &str = r#"
     return cjson.encode({ok=true})
 "#;
 
+#[allow(dead_code)]
 const RENAME_EXCHANGE_LUA: &str = r#"
     local cjson = cjson
 
@@ -640,24 +661,16 @@ struct LuaResponse {
 }
 
 /// Minimal Redis-backed meta store.
+#[allow(dead_code)]
 pub struct RedisMetaStore {
     conn: ConnectionManager,
     _config: Config,
     sid: std::sync::OnceLock<Uuid>,
 }
 
+#[allow(dead_code)]
 impl RedisMetaStore {
-    /// Create or open the store from a backend path. The path is expected to
-    /// contain a `slayerfs.yml` that specifies the Redis URL.
-    #[allow(dead_code)]
-    pub async fn new(backend_path: &Path) -> Result<Self, MetaError> {
-        let config =
-            Config::from_path(backend_path).map_err(|e| MetaError::Config(e.to_string()))?;
-        Self::from_config(config).await
-    }
-
-    /// Build a store from the given configuration.
-    pub async fn from_config(config: Config) -> Result<Self, MetaError> {
+    async fn from_config_inner(config: Config) -> Result<Self, MetaError> {
         let conn = Self::create_connection(&config).await?;
         let store = Self {
             conn,
@@ -666,6 +679,19 @@ impl RedisMetaStore {
         };
         store.init_root_directory().await?;
         Ok(store)
+    }
+
+    /// Create or open the store from a backend path. The path is expected to
+    /// contain a `slayerfs.yml` that specifies the Redis URL.
+    pub async fn new(backend_path: &Path) -> Result<Self, MetaError> {
+        let config =
+            Config::from_path(backend_path).map_err(|e| MetaError::Config(e.to_string()))?;
+        Self::from_config_inner(config).await
+    }
+
+    /// Build a store from the given configuration.
+    pub async fn from_config(config: Config) -> Result<Self, MetaError> {
+        Self::from_config_inner(config).await
     }
 
     async fn create_connection(config: &Config) -> Result<ConnectionManager, MetaError> {
@@ -1254,6 +1280,10 @@ impl MetaStore for RedisMetaStore {
         "redis-meta-store"
     }
 
+    async fn from_config(config: Config) -> Result<Self, MetaError> {
+        Self::from_config_inner(config).await
+    }
+
     #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         Ok(self.get_node(ino).await?.map(|n| n.as_file_attr()))
@@ -1826,40 +1856,13 @@ impl MetaStore for RedisMetaStore {
         }
 
         let names = self.get_names(ino).await?;
-        let mut out = Vec::with_capacity(names.len());
 
-        for (parent_opt, name) in names {
-            let Some(parent) = parent_opt else {
-                continue;
-            };
+        build_paths_from_names(ROOT_INODE, names, |current_ino| async move {
+            let node = self.get_node(current_ino).await?;
 
-            let mut segments = vec![name];
-            let mut current = self.get_node(parent).await?;
-            while let Some(node) = current {
-                if node.ino == ROOT_INODE {
-                    segments.push(String::new());
-                    break;
-                }
-                segments.push(node.name.clone());
-                current = self.get_node(node.parent).await?;
-            }
-
-            if segments.is_empty() {
-                continue;
-            }
-
-            segments.reverse();
-            let path = if segments.len() == 1 {
-                "/".to_string()
-            } else {
-                segments.join("/")
-            };
-            out.push(path);
-        }
-
-        out.sort();
-        out.dedup();
-        Ok(out)
+            Ok(node.map(|node| (node.parent, node.name)))
+        })
+        .await
     }
 
     fn root_ino(&self) -> i64 {
@@ -2175,6 +2178,7 @@ impl MetaStore for RedisMetaStore {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct StoredNode {
     ino: i64,
     parent: i64,
@@ -2185,6 +2189,7 @@ struct StoredNode {
 }
 
 impl StoredNode {
+    #[allow(dead_code)]
     fn as_file_attr(&self) -> FileAttr {
         self.attr.to_file_attr(self.ino, self.kind.into())
     }
@@ -2193,6 +2198,7 @@ impl StoredNode {
 /// Deserializer that accepts both integer and floating-point numbers.
 /// Redis cjson encodes large integers (like epoch millis) as scientific notation
 /// floats (e.g., 1.7698324007242e+18), which serde_json rejects for i64 fields.
+#[allow(dead_code)]
 fn deserialize_i64_from_number<'de, D>(deserializer: D) -> Result<i64, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -2236,6 +2242,7 @@ where
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct StoredAttr {
     size: u64,
     mode: u32,
@@ -2251,6 +2258,7 @@ struct StoredAttr {
 }
 
 impl StoredAttr {
+    #[allow(dead_code)]
     fn to_file_attr(&self, ino: i64, kind: FileType) -> FileAttr {
         FileAttr {
             ino,
@@ -2294,10 +2302,12 @@ impl From<NodeKind> for FileType {
     }
 }
 
+#[allow(dead_code)]
 fn current_time() -> i64 {
     Utc::now().timestamp_nanos_opt().unwrap_or(0)
 }
 
+#[allow(dead_code)]
 fn redis_err(err: redis::RedisError) -> MetaError {
     MetaError::Internal(format!("Redis error: {err}"))
 }

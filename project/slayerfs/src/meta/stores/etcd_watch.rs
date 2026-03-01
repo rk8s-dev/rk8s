@@ -197,7 +197,6 @@ impl EtcdWatchWorker {
     }
 
     /// Stop watch worker
-    #[allow(dead_code)]
     pub fn stop(&mut self) {
         let count = self.worker_handles.len();
         for handle in self.worker_handles.drain(..) {

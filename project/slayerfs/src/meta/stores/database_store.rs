@@ -2,7 +2,7 @@
 //!
 //! Supports SQLite and PostgreSQL backends via SeaORM
 
-use super::{TrimAction, apply_truncate_plan, trim_action};
+use super::{TrimAction, apply_truncate_plan, build_paths_from_names, trim_action};
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
@@ -57,23 +57,17 @@ pub struct DatabaseMetaStore {
 }
 
 impl DatabaseMetaStore {
-    /// Create or open a database metadata store
-    #[allow(dead_code)]
-    pub async fn new(backend_path: &Path) -> Result<Self, MetaError> {
-        let _config =
-            Config::from_path(backend_path).map_err(|e| MetaError::Config(e.to_string()))?;
+    async fn from_config_inner(config: Config) -> Result<Self, MetaError> {
+        info!("Initializing DatabaseMetaStore from config");
+        info!("Database type: {}", config.database.db_type_str());
 
-        info!("Initializing DatabaseMetaStore");
-        info!("Backend path: {}", backend_path.display());
-        info!("Database type: {}", _config.database.db_type_str());
-
-        let db = Self::create_connection(&_config).await?;
+        let db = Self::create_connection(&config).await?;
         Self::init_schema(&db).await?;
 
         let store = Self {
             db,
             sid: OnceLock::new(),
-            _config,
+            _config: config,
         };
         store.init_counters().await?;
         store.init_root_directory().await?;
@@ -82,24 +76,20 @@ impl DatabaseMetaStore {
         Ok(store)
     }
 
+    /// Create or open a database metadata store
+    #[allow(dead_code)]
+    pub async fn new(backend_path: &Path) -> Result<Self, MetaError> {
+        let config =
+            Config::from_path(backend_path).map_err(|e| MetaError::Config(e.to_string()))?;
+        info!("Backend path: {}", backend_path.display());
+
+        Self::from_config_inner(config).await
+    }
+
     /// Create from existing config
-    pub async fn from_config(_config: Config) -> Result<Self, MetaError> {
-        info!("Initializing DatabaseMetaStore from config");
-        info!("Database type: {}", _config.database.db_type_str());
-
-        let db = Self::create_connection(&_config).await?;
-        Self::init_schema(&db).await?;
-
-        let store = Self {
-            db,
-            sid: OnceLock::new(),
-            _config,
-        };
-        store.init_counters().await?;
-        store.init_root_directory().await?;
-
-        info!("DatabaseMetaStore initialized successfully");
-        Ok(store)
+    #[allow(dead_code)]
+    pub async fn from_config(config: Config) -> Result<Self, MetaError> {
+        Self::from_config_inner(config).await
     }
 
     /// Initialize next inode counter from database
@@ -970,6 +960,7 @@ impl DatabaseMetaStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn get_sid(&self) -> Result<&Uuid, MetaError> {
         self.sid
             .get()
@@ -1019,6 +1010,10 @@ impl DatabaseMetaStore {
 impl MetaStore for DatabaseMetaStore {
     fn name(&self) -> &'static str {
         "database"
+    }
+
+    async fn from_config(config: Config) -> Result<Self, MetaError> {
+        Self::from_config_inner(config).await
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(ino))]
@@ -2372,45 +2367,21 @@ impl MetaStore for DatabaseMetaStore {
         }
 
         let names = self.get_names(ino).await?;
-        let mut out = Vec::with_capacity(names.len());
 
-        for (parent_opt, name) in names {
-            let Some(parent) = parent_opt else {
-                continue;
-            };
+        let db = &self.db;
 
-            let mut path_parts = vec![name];
-            let mut current_ino = parent;
+        build_paths_from_names(1, names, |current_ino| async move {
+            let entry = ContentMeta::find()
+                .filter(content_meta::Column::Inode.eq(current_ino))
+                .order_by_asc(content_meta::Column::ParentInode)
+                .order_by_asc(content_meta::Column::EntryName)
+                .one(db)
+                .await
+                .map_err(MetaError::Database)?;
 
-            while current_ino != 1 {
-                let entry = ContentMeta::find()
-                    .filter(content_meta::Column::Inode.eq(current_ino))
-                    .order_by_asc(content_meta::Column::ParentInode)
-                    .order_by_asc(content_meta::Column::EntryName)
-                    .one(&self.db)
-                    .await
-                    .map_err(MetaError::Database)?;
-
-                let Some(entry) = entry else {
-                    path_parts.clear();
-                    break;
-                };
-
-                path_parts.push(entry.entry_name);
-                current_ino = entry.parent_inode;
-            }
-
-            if path_parts.is_empty() {
-                continue;
-            }
-
-            path_parts.reverse();
-            out.push(format!("/{}", path_parts.join("/")));
-        }
-
-        out.sort();
-        out.dedup();
-        Ok(out)
+            Ok(entry.map(|entry| (entry.parent_inode, entry.entry_name)))
+        })
+        .await
     }
 
     fn root_ino(&self) -> i64 {

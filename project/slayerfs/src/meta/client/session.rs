@@ -17,6 +17,7 @@ pub struct Session {
 }
 
 impl Session {
+    #[allow(dead_code)]
     pub fn new(session_id: Uuid, expire: i64, session_info: SessionInfo) -> Self {
         Session {
             session_id,
@@ -77,6 +78,7 @@ impl<M: MetaStore + 'static> SessionManager<M> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn shutdown(&self) {
         self.shutdown_token.cancel();
         // Attempt to read the session_id, handling poisoned lock and missing session
