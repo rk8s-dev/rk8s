@@ -4978,12 +4978,12 @@ dependencies = [
  "nix 0.29.0",
  "quinn",
  "rcgen",
- "rustls 0.23.35",
+ "rustls 0.23.36",
  "serde",
  "serde_json",
  "slayerfs",
  "tempfile",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
@@ -4991,7 +4991,7 @@ dependencies = [
 
 [[package]]
 name = "libfuse-fs"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7597,7 +7597,7 @@ dependencies = [
 
 [[package]]
 name = "rfuse3"
-version = "0.0.5"
+version = "0.0.7"
 dependencies = [
  "aligned_box",
  "async-fs",
