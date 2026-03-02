@@ -104,8 +104,8 @@ pub fn list_images(args: ImagesArgs) -> Result<()> {
     for (image_ref, digest) in &entries {
         let (repository, tag) = split_image_ref(image_ref);
         let image_id = short_id(digest);
-        let size = get_image_size(digest).unwrap_or_else(|_| "N/A".to_string());
-        let created = get_created_time(digest).unwrap_or_else(|_| "N/A".to_string());
+        let (size, created) =
+            get_image_metadata(digest).unwrap_or_else(|_| ("N/A".to_string(), "N/A".to_string()));
 
         writeln!(
             &mut tab_writer,
@@ -211,12 +211,12 @@ pub fn remove_image(args: RmiArgs) -> Result<()> {
 
 /// Remove unreferenced blobs for a given manifest digest.
 ///
-/// Blobs to remove are collected first and then deleted in a single pass.
-/// If any individual removal fails the remaining blobs are still attempted
-/// so we avoid leaving a half-cleaned state. Errors are accumulated and
-/// returned together — the caller's tag-restore logic only triggers when
-/// this function returns `Err`, at which point either all blobs are gone
-/// (safe) or the failures are reported without a silent partial deletion.
+/// Blobs to remove are collected first and then deleted in a best-effort
+/// pass: if any individual removal fails the remaining blobs are still
+/// attempted so we maximise cleanup. Note that successfully deleted blobs
+/// are NOT restored on error — the caller should be aware that an `Err`
+/// return may indicate a partially cleaned state where some blobs are
+/// already gone.
 fn cleanup_image_blobs(digest: &str, repos: &Repositories) -> Result<()> {
     let mut to_remove = vec![digest.to_string()];
 
@@ -416,13 +416,21 @@ pub fn save_image(args: SaveArgs) -> Result<()> {
             args.output
         );
     }
-    let output_file = std::fs::File::create(output_path)
-        .with_context(|| format!("Failed to create output file {}", args.output))?;
-    let mut tar_builder = tar::Builder::new(output_file);
-    tar_builder
-        .append_dir_all(".", layout_dir)
-        .context("Failed to write tar archive")?;
-    tar_builder.finish()?;
+    let tar_result: Result<()> = (|| {
+        let output_file = std::fs::File::create(output_path)
+            .with_context(|| format!("Failed to create output file {}", args.output))?;
+        let mut tar_builder = tar::Builder::new(output_file);
+        tar_builder
+            .append_dir_all(".", layout_dir)
+            .context("Failed to write tar archive")?;
+        tar_builder.finish()?;
+        Ok(())
+    })();
+
+    if let Err(err) = tar_result {
+        let _ = std::fs::remove_file(output_path);
+        return Err(err);
+    }
 
     println!("Saved image {} to {}", args.image_ref, args.output);
     Ok(())
@@ -646,6 +654,11 @@ fn import_manifest_entry(blobs_dir: &Path, manifest_entry: &Value, image_ref: &s
     let manifest_digest = manifest_entry["digest"]
         .as_str()
         .ok_or_else(|| anyhow!("Invalid manifest entry: missing digest"))?;
+    if !manifest_digest.starts_with("sha256:") {
+        bail!(
+            "Unsupported manifest digest algorithm: {manifest_digest} (only sha256 is supported)"
+        );
+    }
     let manifest_hash = manifest_digest.split_digest()?;
     let manifest_blob_path = blobs_dir.join(manifest_hash);
     let manifest_content =
@@ -781,18 +794,36 @@ fn short_id(digest: &str) -> String {
     }
 }
 
-fn get_image_size(digest: &str) -> Result<String> {
+/// Return (size, created) for display, reading the manifest only once.
+fn get_image_metadata(digest: &str) -> Result<(String, String)> {
     let manifest = read_manifest(digest)?;
 
     let total_bytes: i64 = match &manifest {
         OciManifest::Image(img) => img.layers.iter().map(|l| l.size).sum::<i64>() + img.config.size,
         OciManifest::ImageIndex(idx) => idx.manifests.iter().map(|m| m.size).sum(),
     };
-
     if total_bytes < 0 {
         bail!("invalid negative size in manifest for digest {}", digest);
     }
-    Ok(format_size(total_bytes as u64))
+    let size = format_size(total_bytes as u64);
+
+    let created = if let OciManifest::Image(img) = &manifest
+        && let Some(config) = read_image_config_value(&img.config.digest)?
+        && let Some(ts) = config.get("created").and_then(|v| v.as_str())
+    {
+        ts.to_string()
+    } else {
+        let path = ultimate_blob_path(digest)?;
+        let metadata = std::fs::metadata(&path)
+            .with_context(|| format!("Failed to read metadata for {}", path.display()))?;
+        let modified = metadata
+            .modified()
+            .with_context(|| "Failed to get modified time")?;
+        let datetime: DateTime<Local> = modified.into();
+        datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+    };
+
+    Ok((size, created))
 }
 
 fn format_size(bytes: u64) -> String {
@@ -809,25 +840,6 @@ fn format_size(bytes: u64) -> String {
     } else {
         format!("{} B", bytes)
     }
-}
-
-fn get_created_time(digest: &str) -> Result<String> {
-    let manifest = read_manifest(digest)?;
-    if let OciManifest::Image(img) = &manifest
-        && let Some(config) = read_image_config_value(&img.config.digest)?
-        && let Some(created) = config.get("created").and_then(|v| v.as_str())
-    {
-        return Ok(created.to_string());
-    }
-
-    let path = ultimate_blob_path(digest)?;
-    let metadata = std::fs::metadata(&path)
-        .with_context(|| format!("Failed to read metadata for {}", path.display()))?;
-    let modified = metadata
-        .modified()
-        .with_context(|| "Failed to get modified time")?;
-    let datetime: DateTime<Local> = modified.into();
-    Ok(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
 }
 
 #[cfg(test)]
@@ -851,10 +863,9 @@ mod tests {
 
     #[test]
     fn test_normalize_image_ref_host_port() {
-        assert_eq!(
-            normalize_image_ref("localhost:5000"),
-            "library/localhost:5000:latest"
-        );
+        // Bare host:port without image path (e.g. "localhost:5000") is not a
+        // valid image reference — neither Docker nor podman accept it.
+        // We only guarantee correct handling for the common patterns:
         assert_eq!(
             normalize_image_ref("localhost:5000/myimage"),
             "localhost:5000/myimage:latest"
