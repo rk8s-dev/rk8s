@@ -371,7 +371,7 @@ impl Debug for LockClient {
 // These methods primarily originate from xline lock server,
 // see also: `xline/src/server/lock_server.rs`
 impl LockClient {
-    /// Creates a new `LockClient`
+    /// Creates a new `LockClient`.
     #[inline]
     pub fn new(
         curp_client: Arc<CurpClient>,
@@ -381,7 +381,12 @@ impl LockClient {
     ) -> Self {
         Self {
             curp_client: Arc::clone(&curp_client),
-            lease_client: LeaseClient::new(curp_client, channel.clone(), token.clone(), id_gen),
+            lease_client: LeaseClient::new(
+                curp_client,
+                channel.clone(),
+                token.clone(),
+                id_gen,
+            ),
             watch_client: WatchClient::new(channel, token.clone()),
             token,
         }

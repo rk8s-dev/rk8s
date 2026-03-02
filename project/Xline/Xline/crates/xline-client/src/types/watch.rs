@@ -1,10 +1,10 @@
-use std::{
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
+use std::fmt::Debug;
 
 use super::range_end::RangeOption;
-use crate::error::{Result, XlineClientError};
+use crate::{
+    error::{Result, XlineClientError},
+    types::stream::MessageStream,
+};
 use futures::channel::mpsc::Sender;
 pub use xlineapi::{Event, EventType, KeyValue, WatchResponse};
 use xlineapi::{RequestUnion, WatchCancelRequest, WatchProgressRequest};
@@ -230,21 +230,24 @@ impl From<WatchFilterType> for i32 {
     }
 }
 
-/// Watch response stream
+/// Watch response stream.
+///
+/// Wraps a transport-agnostic [`MessageStream`] while keeping the request sender
+/// alive so the server-side bidirectional stream stays open.
 #[derive(Debug)]
 pub struct WatchStreaming {
-    /// Inner tonic stream
-    inner: tonic::Streaming<WatchResponse>,
-    /// A sender of `WatchResponse`, used to keep response stream alive
+    /// Transport-agnostic inner stream.
+    inner: MessageStream<WatchResponse>,
+    /// Kept alive so the bidirectional watch RPC stream is not closed.
     _sender: Sender<xlineapi::WatchRequest>,
 }
 
 impl WatchStreaming {
-    /// Create a new watch streaming
+    /// Create a new watch streaming.
     #[inline]
     #[must_use]
     pub fn new(
-        inner: tonic::Streaming<WatchResponse>,
+        inner: MessageStream<WatchResponse>,
         sender: Sender<xlineapi::WatchRequest>,
     ) -> Self {
         Self {
@@ -252,21 +255,15 @@ impl WatchStreaming {
             _sender: sender,
         }
     }
-}
 
-impl Deref for WatchStreaming {
-    type Target = tonic::Streaming<WatchResponse>;
-
+    /// Receive the next watch event from the stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the underlying transport stream fails.
     #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for WatchStreaming {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+    pub async fn message(&mut self) -> Result<Option<WatchResponse>> {
+        self.inner.message().await
     }
 }
 

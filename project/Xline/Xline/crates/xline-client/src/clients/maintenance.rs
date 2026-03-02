@@ -1,34 +1,35 @@
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
 
-use tonic::{Streaming, transport::Channel};
+use tonic::transport::Channel;
 use xlineapi::{
-    AlarmAction, AlarmRequest, AlarmResponse, AlarmType, SnapshotRequest, SnapshotResponse,
-    StatusRequest, StatusResponse,
+    AlarmAction, AlarmRequest, AlarmResponse, AlarmType, SnapshotRequest, StatusRequest,
+    StatusResponse,
 };
 
-use crate::{AuthService, error::Result};
+use crate::{
+    error::Result,
+    transport::{RpcTransport, new_rpc_transport},
+    types::stream::SnapshotStream,
+};
 
 /// Client for Maintenance operations.
 #[derive(Clone, Debug)]
 pub struct MaintenanceClient {
-    /// The maintenance RPC client, only communicate with one server at a time
-    inner: xlineapi::MaintenanceClient<AuthService<Channel>>,
+    /// The maintenance RPC client, only communicate with one server at a time.
+    inner: xlineapi::MaintenanceClient<RpcTransport>,
 }
 
 impl MaintenanceClient {
-    /// Creates a new maintenance client
+    /// Creates a new `MaintenanceClient`.
     #[inline]
     #[must_use]
     pub fn new(channel: Channel, token: Option<String>) -> Self {
         Self {
-            inner: xlineapi::MaintenanceClient::new(AuthService::new(
-                channel,
-                token.and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
+            inner: xlineapi::MaintenanceClient::new(new_rpc_transport(channel, token.as_deref())),
         }
     }
 
-    /// Gets a snapshot over a stream
+    /// Gets a snapshot over a stream.
     ///
     /// # Errors
     ///
@@ -66,8 +67,10 @@ impl MaintenanceClient {
     /// }
     /// ```
     #[inline]
-    pub async fn snapshot(&mut self) -> Result<Streaming<SnapshotResponse>> {
-        Ok(self.inner.snapshot(SnapshotRequest {}).await?.into_inner())
+    pub async fn snapshot(&mut self) -> Result<SnapshotStream> {
+        Ok(SnapshotStream::from(
+            self.inner.snapshot(SnapshotRequest {}).await?.into_inner(),
+        ))
     }
 
     /// Sends a alarm request

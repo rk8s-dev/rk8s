@@ -7,8 +7,9 @@ use xlineapi::{
 };
 
 use crate::{
-    AuthService, CurpClient,
+    CurpClient,
     error::Result,
+    transport::{RpcTransport, new_rpc_transport},
     types::kv::{DeleteRangeOptions, PutOptions, RangeOptions, TxnRequest},
 };
 
@@ -17,10 +18,10 @@ use crate::{
 pub struct KvClient {
     /// The client running the CURP protocol, communicate with all servers.
     curp_client: Arc<CurpClient>,
-    /// The lease RPC client, only communicate with one server at a time
+    /// The KV RPC client, only communicate with one server at a time.
     #[allow(clippy::struct_field_names)]
-    kv_client: xlineapi::KvClient<AuthService<Channel>>,
-    /// The auth token
+    kv_client: xlineapi::KvClient<RpcTransport>,
+    /// The auth token (used for CURP propose calls).
     token: Option<String>,
 }
 
@@ -35,7 +36,7 @@ impl Debug for KvClient {
 }
 
 impl KvClient {
-    /// New `KvClient`
+    /// New `KvClient`.
     #[inline]
     pub(crate) fn new(
         curp_client: Arc<CurpClient>,
@@ -44,10 +45,7 @@ impl KvClient {
     ) -> Self {
         Self {
             curp_client,
-            kv_client: xlineapi::KvClient::new(AuthService::new(
-                channel,
-                token.as_ref().and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
+            kv_client: xlineapi::KvClient::new(new_rpc_transport(channel, token.as_deref())),
             token,
         }
     }

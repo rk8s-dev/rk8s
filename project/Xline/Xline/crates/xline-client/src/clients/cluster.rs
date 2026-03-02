@@ -1,8 +1,9 @@
-use std::sync::Arc;
-
 use tonic::transport::Channel;
 
-use crate::{AuthService, error::Result};
+use crate::{
+    error::Result,
+    transport::{RpcTransport, new_rpc_transport},
+};
 use xlineapi::{
     MemberAddResponse, MemberListResponse, MemberPromoteResponse, MemberRemoveResponse,
     MemberUpdateResponse,
@@ -12,20 +13,17 @@ use xlineapi::{
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct ClusterClient {
-    /// Inner client
-    inner: xlineapi::ClusterClient<AuthService<Channel>>,
+    /// Inner cluster RPC client.
+    inner: xlineapi::ClusterClient<RpcTransport>,
 }
 
 impl ClusterClient {
-    /// Create a new cluster client
+    /// Create a new `ClusterClient`.
     #[inline]
     #[must_use]
     pub fn new(channel: Channel, token: Option<String>) -> Self {
         Self {
-            inner: xlineapi::ClusterClient::new(AuthService::new(
-                channel,
-                token.and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
+            inner: xlineapi::ClusterClient::new(new_rpc_transport(channel, token.as_deref())),
         }
     }
 

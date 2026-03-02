@@ -13,8 +13,9 @@ use xlineapi::{
 };
 
 use crate::{
-    AuthService, CurpClient,
+    CurpClient,
     error::{Result, XlineClientError},
+    transport::{RpcTransport, new_rpc_transport},
     types::{auth::Permission, range_end::RangeOption},
 };
 
@@ -23,10 +24,10 @@ use crate::{
 pub struct AuthClient {
     /// The client running the CURP protocol, communicate with all servers.
     curp_client: Arc<CurpClient>,
-    /// The auth RPC client, only communicate with one server at a time
+    /// The auth RPC client, only communicate with one server at a time.
     #[allow(clippy::struct_field_names)]
-    auth_client: xlineapi::AuthClient<AuthService<Channel>>,
-    /// The auth token
+    auth_client: xlineapi::AuthClient<RpcTransport>,
+    /// The auth token (used for CURP propose calls).
     token: Option<String>,
 }
 
@@ -41,14 +42,14 @@ impl Debug for AuthClient {
 }
 
 impl AuthClient {
-    /// Creates a new `AuthClient`
+    /// Creates a new `AuthClient`.
     #[inline]
     pub fn new(curp_client: Arc<CurpClient>, channel: Channel, token: Option<String>) -> Self {
         Self {
             curp_client,
-            auth_client: xlineapi::AuthClient::new(AuthService::new(
+            auth_client: xlineapi::AuthClient::new(new_rpc_transport(
                 channel,
-                token.as_ref().and_then(|t| t.parse().ok().map(Arc::new)),
+                token.as_deref(),
             )),
             token,
         }
