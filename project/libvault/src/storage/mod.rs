@@ -79,6 +79,7 @@ pub struct BackendEntry {
     pub value: Vec<u8>,
 }
 
+#[cfg(feature = "storage_sqlite")]
 fn current_handle<'a, F, T>(fut: F) -> T
 where
     F: std::future::Future<Output = T> + Send + 'a,
