@@ -13,8 +13,9 @@ use xlineapi::{
 };
 
 use crate::{
-    AuthService, CurpClient,
+    CurpClient,
     error::{Result, XlineClientError},
+    transport::{RpcTransport, new_rpc_transport},
     types::{auth::Permission, range_end::RangeOption},
 };
 
@@ -23,11 +24,16 @@ use crate::{
 pub struct AuthClient {
     /// The client running the CURP protocol, communicate with all servers.
     curp_client: Arc<CurpClient>,
-    /// The auth RPC client, only communicate with one server at a time
+    /// The auth RPC client, only communicate with one server at a time.
     #[allow(clippy::struct_field_names)]
-    auth_client: xlineapi::AuthClient<AuthService<Channel>>,
-    /// The auth token
+    auth_client: xlineapi::AuthClient<RpcTransport>,
+    /// The auth token (used for CURP propose calls).
     token: Option<String>,
+    /// Optional QUIC transport for direct RPCs (authenticate).
+    /// When present, `authenticate()` uses QUIC frame-header metadata
+    /// instead of HTTP `Authorization` headers.
+    #[cfg(feature = "quic")]
+    quic: Option<Arc<crate::transport::QuicXlineTransport>>,
 }
 
 impl Debug for AuthClient {
@@ -41,17 +47,31 @@ impl Debug for AuthClient {
 }
 
 impl AuthClient {
-    /// Creates a new `AuthClient`
+    /// Creates a new `AuthClient`.
     #[inline]
     pub fn new(curp_client: Arc<CurpClient>, channel: Channel, token: Option<String>) -> Self {
         Self {
             curp_client,
-            auth_client: xlineapi::AuthClient::new(AuthService::new(
+            auth_client: xlineapi::AuthClient::new(new_rpc_transport(
                 channel,
-                token.as_ref().and_then(|t| t.parse().ok().map(Arc::new)),
+                token.as_deref(),
             )),
             token,
+            #[cfg(feature = "quic")]
+            quic: None,
         }
+    }
+
+    /// Attach a `QuicXlineTransport` so that `authenticate()` uses QUIC.
+    ///
+    /// Call this after [`AuthClient::new`] when a QUIC channel is available.
+    /// If not called, all direct RPCs fall back to the tonic/HTTP-2 path.
+    #[cfg(feature = "quic")]
+    #[inline]
+    #[must_use]
+    pub(crate) fn with_quic(mut self, quic: Arc<crate::transport::QuicXlineTransport>) -> Self {
+        self.quic = Some(quic);
+        self
     }
 
     /// Enables authentication.
@@ -189,6 +209,10 @@ impl AuthClient {
         name: N,
         password: P,
     ) -> Result<AuthenticateResponse> {
+        #[cfg(feature = "quic")]
+        if let Some(ref quic) = self.quic {
+            return quic.authenticate(name.into(), password.into()).await;
+        }
         Ok(self
             .auth_client
             .authenticate(xlineapi::AuthenticateRequest {
@@ -401,7 +425,7 @@ impl AuthClient {
         let password: &str = password.as_ref();
         if password.is_empty() {
             return Err(XlineClientError::InvalidArgs(String::from(
-                "role name is empty",
+                "password is empty",
             )));
         }
         let hashed_password = hash_password(password.as_bytes()).map_err(|err| {

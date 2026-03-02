@@ -1,35 +1,35 @@
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
 
 use futures::channel::mpsc::channel;
 use tonic::transport::Channel;
 use xlineapi::{self, RequestUnion};
 
 use crate::{
-    AuthService,
     error::{Result, XlineClientError},
-    types::watch::{WatchOptions, WatchStreaming, Watcher},
+    transport::{RpcTransport, new_rpc_transport},
+    types::{
+        stream::MessageStream,
+        watch::{WatchOptions, WatchStreaming, Watcher},
+    },
 };
 
-/// Channel size for watch request stream
+/// Channel size for watch request stream.
 const CHANNEL_SIZE: usize = 128;
 
 /// Client for Watch operations.
 #[derive(Clone, Debug)]
 pub struct WatchClient {
-    /// The watch RPC client, only communicate with one server at a time
-    inner: xlineapi::WatchClient<AuthService<Channel>>,
+    /// The watch RPC client, only communicate with one server at a time.
+    inner: xlineapi::WatchClient<RpcTransport>,
 }
 
 impl WatchClient {
-    /// Creates a new maintenance client
+    /// Creates a new `WatchClient`.
     #[inline]
     #[must_use]
     pub fn new(channel: Channel, token: Option<String>) -> Self {
         Self {
-            inner: xlineapi::WatchClient::new(AuthService::new(
-                channel,
-                token.and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
+            inner: xlineapi::WatchClient::new(new_rpc_transport(channel, token.as_deref())),
         }
     }
 
@@ -113,7 +113,7 @@ impl WatchClient {
 
         Ok((
             Watcher::new(watch_id, request_sender.clone()),
-            WatchStreaming::new(response_stream, request_sender),
+            WatchStreaming::new(MessageStream::from(response_stream), request_sender),
         ))
     }
 }

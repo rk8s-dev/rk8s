@@ -158,17 +158,10 @@
         clippy::arithmetic_side_effects
     )
 )]
-use std::{
-    fmt::Debug,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::sync::Arc;
 
 use curp::client::ClientBuilder as CurpClientBuilder;
-use http::{HeaderValue, Request, header::AUTHORIZATION};
-use tonic::transport::Channel;
-use tonic::transport::ClientTlsConfig;
-use tower::Service;
+use tonic::transport::{Channel, ClientTlsConfig};
 use utils::{build_endpoint, config::ClientConfig};
 use xlineapi::command::{Command, CurpClient};
 
@@ -189,6 +182,9 @@ pub mod types;
 
 /// Error definitions for `xline-client`.
 pub mod error;
+
+/// Transport layer: metadata-aware channel wrapping `xlinerpc::MetaData`.
+mod transport;
 
 /// Xline client
 #[derive(Clone, Debug)]
@@ -361,7 +357,7 @@ impl Client {
     }
 }
 
-/// Options for a client connection
+/// Options for a client connection.
 #[derive(Clone, Debug, Default)]
 pub struct ClientOptions {
     /// User is a pair values of name and password
@@ -440,44 +436,3 @@ impl ClientOptions {
     }
 }
 
-/// Authentication service.
-#[derive(Debug, Clone)]
-struct AuthService<S> {
-    /// A `Service` trait object
-    inner: S,
-    /// Auth token
-    token: Option<Arc<HeaderValue>>,
-}
-
-impl<S> AuthService<S> {
-    /// Create a new `AuthService`
-    #[inline]
-    fn new(inner: S, token: Option<Arc<HeaderValue>>) -> Self {
-        Self { inner, token }
-    }
-}
-
-impl<S, Body, Response> Service<Request<Body>> for AuthService<S>
-where
-    S: Service<Request<Body>, Response = Response>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    #[inline]
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    #[inline]
-    fn call(&mut self, mut request: Request<Body>) -> Self::Future {
-        if let Some(token) = self.token.as_ref() {
-            let _: Option<HeaderValue> = request
-                .headers_mut()
-                .insert(AUTHORIZATION, token.as_ref().clone());
-        }
-
-        self.inner.call(request)
-    }
-}

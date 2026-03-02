@@ -188,6 +188,37 @@ where
                 return Self::handle_install_snapshot(recv, send, &inner_service).await;
             }
 
+            // --- Xline direct-RPC methods: not yet implemented server-side over QUIC ---
+            //
+            // TODO(quic-xline-server): Implement server-side QUIC handlers for each
+            // xline API method below.  Until then, we return an explicit error to the
+            // client rather than panicking, so the guard comment above still holds.
+            MethodId::XlineAuthenticate
+            | MethodId::XlineLeaseTtl
+            | MethodId::XlineLeaseLeases
+            | MethodId::XlineSnapshot
+            | MethodId::XlineAlarm
+            | MethodId::XlineMaintStatus
+            | MethodId::XlineMemberAdd
+            | MethodId::XlineMemberRemove
+            | MethodId::XlineMemberPromote
+            | MethodId::XlineMemberUpdate
+            | MethodId::XlineMemberList => {
+                let e = CurpError::internal(format!(
+                    "xline API method '{}' is not yet implemented over QUIC",
+                    method.name()
+                ));
+                let wrapper = CurpErrorWrapper { err: Some(e) };
+                let mut writer = FrameWriter::new(send);
+                writer
+                    .write_frame(&Frame::Status {
+                        code: status_error(),
+                        details: wrapper.encode_to_vec(),
+                    })
+                    .await?;
+                writer.flush().await?;
+            }
+
             // --- Unary RPCs: explicitly listed ---
             MethodId::FetchCluster
             | MethodId::FetchReadState
@@ -269,6 +300,24 @@ where
                     method.name()
                 )))
             }
+
+            // Xline direct-RPC methods are intercepted in `handle_stream` before
+            // reaching this function.  This arm exists solely to satisfy the
+            // exhaustiveness requirement; it is unreachable in practice.
+            MethodId::XlineAuthenticate
+            | MethodId::XlineLeaseTtl
+            | MethodId::XlineLeaseLeases
+            | MethodId::XlineSnapshot
+            | MethodId::XlineAlarm
+            | MethodId::XlineMaintStatus
+            | MethodId::XlineMemberAdd
+            | MethodId::XlineMemberRemove
+            | MethodId::XlineMemberPromote
+            | MethodId::XlineMemberUpdate
+            | MethodId::XlineMemberList => Err(CurpError::internal(format!(
+                "xline API method '{}' reached CURP dispatch — this is a bug",
+                method.name()
+            ))),
         }
     }
 

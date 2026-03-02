@@ -115,6 +115,36 @@ define_method_ids! {
     TriggerShutdown    = 0x0104, "TriggerShutdown";
     /// Try to become leader immediately
     TryBecomeLeaderNow = 0x0105, "TryBecomeLeaderNow";
+
+    // xline Auth direct-RPC service (0x02xx)
+    /// Authenticate with username and password (direct RPC, not CURP propose)
+    XlineAuthenticate  = 0x0201, "XlineAuthenticate";
+
+    // xline Lease direct-RPC service (0x03xx)
+    /// Query lease time-to-live (direct RPC)
+    XlineLeaseTtl      = 0x0301, "XlineLeaseTtl";
+    /// List all leases (direct RPC)
+    XlineLeaseLeases   = 0x0302, "XlineLeaseLeases";
+
+    // xline Maintenance direct-RPC service (0x04xx)
+    /// Get a snapshot from the server (server-streaming, direct RPC)
+    XlineSnapshot      = 0x0401, "XlineSnapshot";
+    /// Send an alarm request (direct RPC)
+    XlineAlarm         = 0x0402, "XlineAlarm";
+    /// Get server maintenance status (direct RPC)
+    XlineMaintStatus   = 0x0403, "XlineMaintStatus";
+
+    // xline Cluster direct-RPC service (0x05xx)
+    /// Add a new cluster member (direct RPC)
+    XlineMemberAdd     = 0x0501, "XlineMemberAdd";
+    /// Remove a cluster member (direct RPC)
+    XlineMemberRemove  = 0x0502, "XlineMemberRemove";
+    /// Promote a learner to a voting member (direct RPC)
+    XlineMemberPromote = 0x0503, "XlineMemberPromote";
+    /// Update peer URLs of a cluster member (direct RPC)
+    XlineMemberUpdate  = 0x0504, "XlineMemberUpdate";
+    /// List all cluster members (direct RPC)
+    XlineMemberList    = 0x0505, "XlineMemberList";
 }
 
 /// Frame type constants
@@ -459,14 +489,27 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     }
 
     /// Write a frame
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the payload exceeds [`MAX_FRAME_LEN`] (16 MiB),
+    /// preventing a silent truncation when casting `usize` to `u32` on
+    /// 64-bit platforms.
     pub(crate) async fn write_frame(&mut self, frame: &Frame) -> Result<(), CurpError> {
         match *frame {
             Frame::Data(ref data) => {
+                if data.len() > MAX_FRAME_LEN as usize {
+                    return Err(CurpError::internal(format!(
+                        "frame too large: DATA payload is {} bytes (max {})",
+                        data.len(),
+                        MAX_FRAME_LEN,
+                    )));
+                }
                 self.writer
                     .write_u8(FRAME_TYPE_DATA)
                     .await
                     .map_err(|e| CurpError::internal(format!("write DATA type error: {e}")))?;
-                #[allow(clippy::cast_possible_truncation)]
+                #[allow(clippy::cast_possible_truncation)] // guarded by bounds check above
                 let len = data.len() as u32;
                 self.writer
                     .write_u32(len)
@@ -484,6 +527,13 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
                     .map_err(|e| CurpError::internal(format!("write END error: {e}")))?;
             }
             Frame::Status { code, ref details } => {
+                if details.len() > MAX_FRAME_LEN as usize {
+                    return Err(CurpError::internal(format!(
+                        "frame too large: STATUS details is {} bytes (max {})",
+                        details.len(),
+                        MAX_FRAME_LEN,
+                    )));
+                }
                 self.writer
                     .write_u8(FRAME_TYPE_STATUS)
                     .await
@@ -492,7 +542,7 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
                     .write_u8(code)
                     .await
                     .map_err(|e| CurpError::internal(format!("write STATUS code error: {e}")))?;
-                #[allow(clippy::cast_possible_truncation)]
+                #[allow(clippy::cast_possible_truncation)] // guarded by bounds check above
                 let details_len = details.len() as u32;
                 self.writer.write_u32(details_len).await.map_err(|e| {
                     CurpError::internal(format!("write STATUS details length error: {e}"))
@@ -839,7 +889,26 @@ mod tests {
         assert_eq!(MethodId::TriggerShutdown.as_u16(), 0x0104);
         assert_eq!(MethodId::TryBecomeLeaderNow.as_u16(), 0x0105);
 
+        // xline Auth direct-RPC service (0x02xx)
+        assert_eq!(MethodId::XlineAuthenticate.as_u16(), 0x0201);
+
+        // xline Lease direct-RPC service (0x03xx)
+        assert_eq!(MethodId::XlineLeaseTtl.as_u16(), 0x0301);
+        assert_eq!(MethodId::XlineLeaseLeases.as_u16(), 0x0302);
+
+        // xline Maintenance direct-RPC service (0x04xx)
+        assert_eq!(MethodId::XlineSnapshot.as_u16(), 0x0401);
+        assert_eq!(MethodId::XlineAlarm.as_u16(), 0x0402);
+        assert_eq!(MethodId::XlineMaintStatus.as_u16(), 0x0403);
+
+        // xline Cluster direct-RPC service (0x05xx)
+        assert_eq!(MethodId::XlineMemberAdd.as_u16(), 0x0501);
+        assert_eq!(MethodId::XlineMemberRemove.as_u16(), 0x0502);
+        assert_eq!(MethodId::XlineMemberPromote.as_u16(), 0x0503);
+        assert_eq!(MethodId::XlineMemberUpdate.as_u16(), 0x0504);
+        assert_eq!(MethodId::XlineMemberList.as_u16(), 0x0505);
+
         // Total count guard: if you add a new method, update this assertion.
-        assert_eq!(ALL_METHOD_IDS.len(), 15);
+        assert_eq!(ALL_METHOD_IDS.len(), 26);
     }
 }

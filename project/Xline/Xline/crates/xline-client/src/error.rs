@@ -109,3 +109,10 @@ impl From<ExecuteError> for XlineClientError<Command> {
         Self::ExecuteError(e)
     }
 }
+
+impl From<xlinerpc::Status> for XlineClientError<Command> {
+    #[inline]
+    fn from(s: xlinerpc::Status) -> Self {
+        Self::RpcError(format!("{}: {}", s.code(), s.message()))
+    }
+}

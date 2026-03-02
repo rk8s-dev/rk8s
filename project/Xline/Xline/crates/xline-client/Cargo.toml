@@ -23,10 +23,16 @@ prost = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
+tracing = { workspace = true }
 tower = { version = "0.4", features = ["discover"] }
 utils = { path = "../utils" }
 xlineapi = { path = "../xlineapi" }
 xlinerpc = { path = "../xlinerpc"}
+
+[features]
+## Enable QUIC transport for xline API direct RPCs.
+## Requires the `quic` feature of the `curp` dependency.
+quic = ["curp/quic"]
 
 [dev-dependencies]
 rand = "0.8.5"

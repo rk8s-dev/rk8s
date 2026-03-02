@@ -1,17 +1,18 @@
 use std::{fmt::Debug, sync::Arc};
 
 use futures::channel::mpsc::channel;
-use tonic::{Streaming, transport::Channel};
+use tonic::transport::Channel;
 use xlineapi::{
-    LeaseGrantResponse, LeaseKeepAliveResponse, LeaseLeasesResponse, LeaseRevokeResponse,
-    LeaseTimeToLiveResponse, RequestWrapper, command::Command,
+    LeaseGrantResponse, LeaseLeasesResponse, LeaseRevokeResponse, LeaseTimeToLiveResponse,
+    RequestWrapper, command::Command,
 };
 
 use crate::{
-    AuthService, CurpClient,
+    CurpClient,
     error::{Result, XlineClientError},
     lease_gen::LeaseIdGenerator,
-    types::lease::LeaseKeeper,
+    transport::{RpcTransport, new_rpc_transport},
+    types::{lease::LeaseKeeper, stream::LeaseKeepAliveStream},
 };
 
 /// Client for Lease operations.
@@ -19,13 +20,18 @@ use crate::{
 pub struct LeaseClient {
     /// The client running the CURP protocol, communicate with all servers.
     curp_client: Arc<CurpClient>,
-    /// The lease RPC client, only communicate with one server at a time
+    /// The lease RPC client, only communicate with one server at a time.
     #[allow(clippy::struct_field_names)]
-    lease_client: xlineapi::LeaseClient<AuthService<Channel>>,
-    /// Auth token
+    lease_client: xlineapi::LeaseClient<RpcTransport>,
+    /// Auth token (used for CURP propose calls).
     token: Option<String>,
-    /// Lease Id generator
+    /// Lease Id generator.
     id_gen: Arc<LeaseIdGenerator>,
+    /// Optional QUIC transport for direct RPCs (time_to_live).
+    /// When present, `time_to_live()` uses QUIC frame-header metadata
+    /// instead of HTTP `Authorization` headers.
+    #[cfg(feature = "quic")]
+    quic: Option<Arc<crate::transport::QuicXlineTransport>>,
 }
 
 impl Debug for LeaseClient {
@@ -40,7 +46,7 @@ impl Debug for LeaseClient {
 }
 
 impl LeaseClient {
-    /// Creates a new `LeaseClient`
+    /// Creates a new `LeaseClient`.
     #[inline]
     pub fn new(
         curp_client: Arc<CurpClient>,
@@ -50,13 +56,32 @@ impl LeaseClient {
     ) -> Self {
         Self {
             curp_client,
-            lease_client: xlineapi::LeaseClient::new(AuthService::new(
+            lease_client: xlineapi::LeaseClient::new(new_rpc_transport(
                 channel,
-                token.as_ref().and_then(|t| t.parse().ok().map(Arc::new)),
+                token.as_deref(),
             )),
             token,
             id_gen,
+            #[cfg(feature = "quic")]
+            quic: None,
         }
+    }
+
+    /// Attach a `QuicXlineTransport` so that direct RPCs use QUIC.
+    ///
+    /// Currently covers `time_to_live()`.
+    ///
+    /// Note: `leases()` intentionally continues to use the CURP propose path
+    /// (via `curp_client`) even when a QUIC transport is attached.  Listing
+    /// leases requires strong consistency, which is guaranteed by CURP but
+    /// not by a plain direct RPC.  `QuicXlineTransport::lease_leases()` is
+    /// provided for future use when the server implements read-index over QUIC.
+    #[cfg(feature = "quic")]
+    #[inline]
+    #[must_use]
+    pub(crate) fn with_quic(mut self, quic: Arc<crate::transport::QuicXlineTransport>) -> Self {
+        self.quic = Some(quic);
+        self
     }
 
     /// Creates a lease which expires if the server does not receive a keepAlive
@@ -185,7 +210,7 @@ impl LeaseClient {
     pub async fn keep_alive(
         &mut self,
         id: i64,
-    ) -> Result<(LeaseKeeper, Streaming<LeaseKeepAliveResponse>)> {
+    ) -> Result<(LeaseKeeper, LeaseKeepAliveStream)> {
         let (mut sender, receiver) = channel::<xlineapi::LeaseKeepAliveRequest>(100);
 
         sender
@@ -207,7 +232,7 @@ impl LeaseClient {
             }
         };
 
-        Ok((LeaseKeeper::new(resp_id, sender), stream))
+        Ok((LeaseKeeper::new(resp_id, sender), LeaseKeepAliveStream::from(stream)))
     }
 
     /// Retrieves lease information.
@@ -244,6 +269,10 @@ impl LeaseClient {
     /// ```
     #[inline]
     pub async fn time_to_live(&mut self, id: i64, keys: bool) -> Result<LeaseTimeToLiveResponse> {
+        #[cfg(feature = "quic")]
+        if let Some(ref quic) = self.quic {
+            return quic.lease_time_to_live(id, keys).await;
+        }
         Ok(self
             .lease_client
             .lease_time_to_live(xlineapi::LeaseTimeToLiveRequest { id, keys })
