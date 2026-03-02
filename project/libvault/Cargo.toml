@@ -1,6 +1,6 @@
 [package]
 name = "libvault"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["rk8s-dev team"]
 description = "the libvault is modified from RustyVault"
