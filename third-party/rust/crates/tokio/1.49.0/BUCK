@@ -42,12 +42,27 @@ rust_library(
         "signal-hook-registry",
         "socket2",
         "sync",
+        "test-util",
         "time",
         "tokio-macros",
         "tracing",
         "windows-sys",
     ],
     rustc_flags = ["@$(location :tokio-manifest[env_flags])"],
+    os_deps = {
+        "linux": [
+            "//third-party/rust/crates/signal-hook-registry/1.4.8:signal-hook-registry",
+            "//third-party/rust/crates/socket2/0.6.2:socket2",
+        ],
+        "macos": [
+            "//third-party/rust/crates/signal-hook-registry/1.4.8:signal-hook-registry",
+            "//third-party/rust/crates/socket2/0.6.2:socket2",
+        ],
+        "windows": [
+            "//third-party/rust/crates/socket2/0.6.2:socket2",
+            "//third-party/rust/crates/windows-sys/0.61.2:windows-sys",
+        ],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.11.1:bytes",

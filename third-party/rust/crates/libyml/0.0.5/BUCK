@@ -26,5 +26,5 @@ rust_library(
     features = ["default"],
     rustc_flags = ["@$(location :libyml-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/anyhow/1.0.100:anyhow"],
+    deps = ["//third-party/rust/crates/anyhow/1.0.101:anyhow"],
 )

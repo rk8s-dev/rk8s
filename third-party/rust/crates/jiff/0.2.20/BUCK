@@ -31,6 +31,8 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/log/0.4.29:log",
+        "//third-party/rust/crates/portable-atomic-util/0.2.5:portable-atomic-util",
+        "//third-party/rust/crates/portable-atomic/1.13.1:portable-atomic",
         "//third-party/rust/crates/serde_core/1.0.228:serde_core",
     ],
 )

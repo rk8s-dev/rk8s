@@ -40,7 +40,8 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/aws-lc-sys/0.34.0:aws-lc-sys",
+        "//third-party/rust/crates/aws-lc-sys/0.37.1:aws-lc-sys",
+        "//third-party/rust/crates/untrusted/0.7.1:untrusted",
         "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],
 )

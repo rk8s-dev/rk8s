@@ -39,5 +39,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :objc2-core-foundation-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/bitflags/2.10.0:bitflags"],
+    deps = ["//third-party/rust/crates/bitflags/2.11.0:bitflags"],
 )

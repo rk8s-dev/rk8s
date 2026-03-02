@@ -37,6 +37,10 @@ rust_library(
         "tokio",
     ],
     rustc_flags = ["@$(location :hyper-util-manifest[env_flags])"],
+    os_deps = {
+        "macos": ["//third-party/rust/crates/system-configuration/0.7.0:system-configuration"],
+        "windows": ["//third-party/rust/crates/windows-registry/0.6.1:windows-registry"],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/base64/0.22.1:base64",

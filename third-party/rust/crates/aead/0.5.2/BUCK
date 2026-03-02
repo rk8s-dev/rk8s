@@ -23,9 +23,17 @@ rust_library(
     crate = "aead",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
+    features = [
+        "alloc",
+        "bytes",
+        "default",
+        "getrandom",
+        "rand_core",
+    ],
     rustc_flags = ["@$(location :aead-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
+        "//third-party/rust/crates/bytes/1.11.1:bytes",
         "//third-party/rust/crates/crypto-common/0.1.7:crypto-common",
         "//third-party/rust/crates/generic-array/0.14.7:generic-array",
     ],

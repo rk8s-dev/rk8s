@@ -25,7 +25,11 @@ rust_library(
     edition = "2021",
     features = [
         "alloc",
+        "default",
         "password-hash",
+        "rand",
+        "std",
+        "zeroize",
     ],
     rustc_flags = ["@$(location :argon2-manifest[env_flags])"],
     os_deps = {
@@ -34,8 +38,9 @@ rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64ct/1.8.1:base64ct",
+        "//third-party/rust/crates/base64ct/1.8.3:base64ct",
         "//third-party/rust/crates/blake2/0.10.6:blake2",
         "//third-party/rust/crates/password-hash/0.5.0:password-hash",
+        "//third-party/rust/crates/zeroize/1.8.2:zeroize",
     ],
 )

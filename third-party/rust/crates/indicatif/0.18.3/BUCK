@@ -30,8 +30,8 @@ rust_library(
     rustc_flags = ["@$(location :indicatif-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/console/0.16.1:console",
-        "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic",
+        "//third-party/rust/crates/console/0.16.2:console",
+        "//third-party/rust/crates/portable-atomic/1.13.1:portable-atomic",
         "//third-party/rust/crates/unicode-width/0.2.2:unicode-width",
         "//third-party/rust/crates/unit-prefix/0.5.2:unit-prefix",
     ],

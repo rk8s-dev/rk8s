@@ -40,11 +40,6 @@ rust_library(
         "macos": ["//third-party/rust/crates/parking/2.2.1:parking"],
         "windows": ["//third-party/rust/crates/parking/2.2.1:parking"],
     },
-    os_deps = {
-        "linux": ["//third-party/rust/crates/parking/2.2.1:parking"],
-        "macos": ["//third-party/rust/crates/parking/2.2.1:parking"],
-        "windows": ["//third-party/rust/crates/parking/2.2.1:parking"],
-    },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue",

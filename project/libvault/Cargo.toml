@@ -68,6 +68,7 @@ rand_chacha = { workspace = true }
 tonic = { workspace = true }
 openssl = { workspace = true, optional = true }
 openssl-sys = { workspace = true, optional = true }
+sqlx = { workspace = true, optional = true}
 
 [build-dependencies]
 toml = { workspace = true }

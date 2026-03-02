@@ -28,5 +28,10 @@ rust_library(
         "std",
     ],
     rustc_flags = ["@$(location :nu-ansi-term-manifest[env_flags])"],
+    os_named_deps = {
+        "windows": {
+            "windows": "//third-party/rust/crates/windows-sys/0.59.0:windows-sys",
+        },
+    },
     visibility = ["PUBLIC"],
 )
